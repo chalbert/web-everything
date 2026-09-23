@@ -196,6 +196,61 @@ export function isStatuteTierPath(filePath) {
 }
 
 /**
+ * WIDE-BLAST-RADIUS DISPATCH MACHINERY (#3857). Every Claude dispatch's argv passes through
+ * `buildAgentArgv` (`we:scripts/operations/dispatch-lane-io.mjs`), which composes the criteria this
+ * file and `we:scripts/lib/dispatch-contracts.mjs` compute — so a scope that touches any of these five
+ * files or the tick core that drives them is the machinery choosing its own successor's routing, not an
+ * ordinary edit. Frozen and short on purpose: a table to change a row of, not a heuristic to widen.
+ */
+// @test-only-export-ok: Shared library exported for the model-tier table (#3857) and its own test
+export const DISPATCH_MACHINERY_PATHS = Object.freeze([
+  'scripts/operations/dispatch-lane-io.mjs',
+  'scripts/operations/dispatch-task.mjs',
+  'scripts/lib/dispatch-contracts.mjs',
+  'scripts/lib/provider-routing.mjs',
+  'scripts/conveyor/tick-core.mjs',
+]);
+
+/**
+ * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
+ * dispatch fact, replacing both the old size/file-count/testability Opus criteria this function's Step 4
+ * used to compute inline and the standalone `STORY_KIND_RUNGS` table (`dispatch-contracts.mjs`), which
+ * this folds in rather than keeping beside. Sourced verbatim from the operator's 2026-09-22 routing rule
+ * (narrower and later than `docs/agent/backlog-workflow.md#model-routing`, which governs the INTERACTIVE
+ * orchestrating loop's own sub-agent spawns and is untouched by this table — see
+ * [delegation-trial-record-graduation](/docs/agent/platform-decisions.md#delegation-trial-record-graduation),
+ * "Reach": mechanical routing binds the mechanical dispatch path only).
+ *
+ * RAISE-ONLY: every row below can only move a dispatch from `sonnet` up to `opus`, never down — the
+ * function returns as soon as one row matches, and the fallback (no row matches) is always `sonnet`.
+ * `haiku` is never a table output.
+ *
+ * @param {{kind?: string, taskType?: string, scopePaths?: string[], tags?: string[]}} [o]
+ * @returns {{tier: 'sonnet'|'opus', reason: string}}
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch spawn path (#3857) and its own test
+export function workerTierFor({ kind, taskType, scopePaths, tags } = {}) {
+  const k = typeof kind === 'string' ? kind.trim() : '';
+  const t = typeof taskType === 'string' ? taskType.trim() : '';
+  const paths = Array.isArray(scopePaths) ? scopePaths.map(String) : [];
+  const tagList = Array.isArray(tags) ? tags.map(String) : [];
+
+  if (k === 'prepare-decision' || t === 'architectural-decision') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: "preparing a decision's forks is judgment" };
+  }
+  if (paths.some(isStatuteTierPath) || k === 'statute-wording') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'rewording statute or rule text' };
+  }
+  if (k === 'security-fix' || tagList.includes('security')) {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'a security-critical fix' };
+  }
+  if (paths.some((p) => DISPATCH_MACHINERY_PATHS.includes(p)) || k === 'dispatch-machinery') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'wide-blast-radius dispatch machinery' };
+  }
+  return { tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" };
+}
+
+/**
  * Check if a task scope fits within the proven historical envelope for that taskType.
  * Grounded in the real trial observations in `scripts/conveyor/run-scorecards.json`.
  * Unit for estimatedSize: net changed lines of code (LOC).
@@ -436,6 +491,8 @@ export function selectProvider(task, context) {
     : (Array.isArray(rawScorecards?.records) ? rawScorecards.records : []);
   const preferredModel = typeof context?.model === 'string' ? context.model : undefined;
   const acceptanceTestable = context?.acceptanceTestable;
+  const kind = typeof context?.kind === 'string' ? context.kind : '';
+  const tags = Array.isArray(context?.tags) ? context.tags : [];
 
   const auditTrail = [];
   const statuteFiles = filesTouched.filter(isStatuteTierPath);
@@ -565,43 +622,11 @@ export function selectProvider(task, context) {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Step 4: Claude Fallback by Effort Tier
+  // Step 4: Claude Fallback by Effort Tier — the ONE checked-in table (#3857), never inline criteria.
   // ──────────────────────────────────────────────────────────────────────────
-  let claudeTier;
-  let claudeReason;
-
-  // Criteria for Opus:
-  // - Touches a statute-tier path (docs/agent/platform-decisions.md or docs/agent/*)
-  // - OR taskType === 'architectural-decision'
-  // - OR acceptance criteria are NOT concrete/testable (e.g. triage-research or explicit flag)
-  // - OR large blast radius: filesTouched > 8 files OR estimatedSize > 500 LOC
-  if (hasStatuteFile) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = `Touches statute-tier governance files (${statuteFiles.join(', ')}), requiring human-aligned architectural authority.`;
-  } else if (taskType === 'architectural-decision') {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = "Task type 'architectural-decision' requires deep repo-wide judgment and holistic architectural reasoning.";
-  } else if (taskType === 'triage-research') {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = "Task type 'triage-research' is open-ended research without mechanical test criteria, requiring deep qualitative analysis.";
-  } else if (acceptanceTestable === false) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = 'Acceptance criteria are not concrete or testable, requiring open-ended judgment to determine completion.';
-  } else if (filesTouched.length > 8 || estimatedSize > 500) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = `Task scope (${filesTouched.length} files, ${estimatedSize} LOC) exceeds the bounded Sonnet blast radius (> 8 files or > 500 LOC).`;
-  } else if (filesTouched.length <= 1 && estimatedSize <= 50 && taskType === 'doc-fix') {
-    // Criteria for Haiku:
-    // Trivial, mechanical, single-file (<= 1 file, <= 50 LOC), doc-fix with concrete testable criteria
-    claudeTier = CLAUDE_TIERS.HAIKU;
-    claudeReason = `Trivial, mechanical single-file doc-fix (${filesTouched.length} file, ${estimatedSize} LOC) with concrete testable criteria.`;
-  } else {
-    // Criteria for Sonnet:
-    // Default for real work: multi-file but bounded blast radius (<= 8 files, <= 500 LOC),
-    // acceptance criteria mostly concrete, no statute-tier files touched.
-    claudeTier = CLAUDE_TIERS.SONNET;
-    claudeReason = `Default for real bounded work (${filesTouched.length} files, ${estimatedSize} LOC) with concrete acceptance criteria and no statute paths.`;
-  }
+  const tierDecision = workerTierFor({ kind, taskType, scopePaths: filesTouched, tags });
+  const claudeTier = tierDecision.tier;
+  const claudeReason = tierDecision.reason;
 
   auditTrail.push({
     criterion: 'claude-tier',

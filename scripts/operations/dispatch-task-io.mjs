@@ -22,22 +22,52 @@
  * prints the projection of run records as JSON.
  */
 
-import { statSync } from 'node:fs';
+import { statSync, readFileSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 import { DISPATCH_EFFECT, DEFAULT_EXPECTED_WITHIN_MINUTES } from './dispatch-lane.mjs';
 import { DISPATCH_TASK_OP, allowedToolsArgs, projectJobs } from './dispatch-task.mjs';
 import {
   REPO_ROOT, assertNotALaneCheckout, defaultClaudeProvider, defaultListAgents, defaultSpawnAgent, isPreSpawnRefusal,
-  persistLastSeenLive, stampLiveness,
+  persistLastSeenLive, stampLiveness, resolveWorkerModel,
 } from './dispatch-lane-io.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore, resolveRunsDir } from './run-store.mjs';
 import { tryReadCompletion } from './completion-store.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { workerTierFor } from '../lib/provider-routing.mjs';
+import { CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
+import { resolveBacklogFile, readScopeList } from './resolve-io.mjs';
+
+/**
+ * BEST-EFFORT `scope:`/`tags:` for a `--item`-carrying `dispatch-task` brief (#3857 — "the scope of --item when
+ * one is given"). A `dispatch-task` brief has no `scope:` of its own (unlike `dispatch-lane`, which routes an
+ * ITEM), so `workerTierFor`'s statute/security rows only see anything for a brief that names one. NEVER
+ * THROWS, same posture as `readItemDeliveryAgentMarker`: an item that cannot be resolved or read degrades to
+ * `{scopePaths: [], tags: []}` rather than blocking a dispatch that would otherwise proceed.
+ * @param {string|null} item
+ * @param {{root?: string, read?: (path: string) => string}} [io]
+ * @returns {{scopePaths: string[], tags: string[]}}
+ */
+export function readItemRoutingFacts(item, { root = REPO_ROOT, read = (p) => readFileSync(p, 'utf8') } = {}) {
+  const key = String(item ?? '').trim();
+  if (!key) return { scopePaths: [], tags: [] };
+  try {
+    const file = resolveBacklogFile(key, root, (dir) => readdirSync(dir));
+    if (!file) return { scopePaths: [], tags: [] };
+    const content = read(join(root, 'backlog', file));
+    const scope = readScopeList(content) ?? [];
+    const tagsRaw = createRequire(import.meta.url)('gray-matter')(content)?.data?.tags;
+    const tags = Array.isArray(tagsRaw) ? tagsRaw.filter((t) => typeof t === 'string' && t.trim()) : [];
+    return { scopePaths: scope, tags };
+  } catch {
+    return { scopePaths: [], tags: [] };
+  }
+}
 
 /**
  * EVERY RUN LEFT IN FLIGHT UNDER ONE SESSION SLUG, out of the run store. Same fail-closed shape as
@@ -104,8 +134,15 @@ export function createTaskReader({
  *
  * FLAG ORDER: the operator's standing `WE_DISPATCH_AGENT_ARGS` (`extraArgs`) first, then this operation's own
  * `--permission-mode` and optional `--allowedTools=`. The CLI takes the last value of a repeated flag, so an
- * explicit or defaulted `--permissionMode` here wins over a permission mode in the environment; a worker model is
- * only ever set through the environment.
+ * explicit or defaulted `--permissionMode` here wins over a permission mode in the environment.
+ *
+ * THE WORKER MODEL (#3857) is decided by the checked-in model-tier table
+ * ({@link ../lib/provider-routing.mjs#workerTierFor}), keyed on `payload.launchKind` (the brief's `--kind`)
+ * and, when `payload.item` names one, that item's own `scope:`/`tags:` ({@link readItemRoutingFacts}). A
+ * `--model` still set through `WE_DISPATCH_AGENT_ARGS` is honoured only alongside `payload.modelReason`
+ * (`dispatch-task.mjs`'s own `modelReason` input) — {@link resolveWorkerModel} decides, and
+ * {@link defaultClaudeProvider}/`buildAgentArgv` is where it is enforced and applied, the ONE shared spawn
+ * point every Claude dispatch passes through.
  *
  * @param {object} [o]
  * @param {string} [o.root] - the dispatching checkout; also the worker's cwd.
@@ -135,6 +172,11 @@ export function createDispatchTaskSinks({
         '--permission-mode', String(payload.permissionMode),
         ...allowedToolsArgs(payload.allowedTools),
       ];
+      // #3857 — THE MODEL-TIER TABLE'S ANSWER for this brief, computed once and reused for both enforcement
+      // (inside `buildAgentArgv`, via `table` below) and the run record (`workerModel`, after the spawn).
+      const facts = readItemRoutingFacts(payload.item);
+      const tierDecision = workerTierFor({ kind: payload.launchKind, taskType: null, scopePaths: facts.scopePaths, tags: facts.tags });
+      const table = { tier: tierDecision.tier, model: CLAUDE_NATIVE_MODEL_BY_TIER[tierDecision.tier], reason: tierDecision.reason };
       let handle;
       try {
         handle = defaultClaudeProvider({
@@ -146,6 +188,8 @@ export function createDispatchTaskSinks({
           launchKind: payload.launchKind,
           extraArgs: args,
           systemPromptFile: null,
+          table,
+          modelReason: payload.modelReason ?? null,
         }, { spawnAgent });
       } catch (e) {
         if (e && e.notApplied) throw e;
@@ -154,9 +198,16 @@ export function createDispatchTaskSinks({
         // handle, the replay guard refuses it, and a person closes it out.
         throw new Error(`claude --bg failed and whether an agent started is UNKNOWN: ${String((e && e.message) || e).split('\n')[0]}`);
       }
+      // Recomputed (not carried from the try block above): `buildAgentArgv` already proved this decision
+      // refusal-free by the time a handle exists, and pure + cheap means re-deriving it for the record is
+      // simpler than threading a second return value through `defaultClaudeProvider`'s handle-only contract.
+      const modelDecision = resolveWorkerModel({ extraArgs: args, table, modelReason: payload.modelReason ?? null });
       const minutes = Number(payload.expectedWithinMinutes) > 0 ? Number(payload.expectedWithinMinutes) : DEFAULT_EXPECTED_WITHIN_MINUTES;
       return inFlight({
-        dispatch: { launchKind: payload.launchKind, route: 'claude-bg', permissionMode: payload.permissionMode, executor: null },
+        dispatch: {
+          launchKind: payload.launchKind, route: 'claude-bg', permissionMode: payload.permissionMode, executor: null,
+          workerModel: { name: modelDecision.model, tier: modelDecision.tier, source: modelDecision.source, tableTier: modelDecision.tableTier, reason: modelDecision.reason },
+        },
         handle: String(handle),
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
       });

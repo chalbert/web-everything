@@ -33,7 +33,7 @@ import { applyPendingEffects } from '../effect-executor.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
 import { createRegistry } from '../registry.mjs';
 import { DISPATCH_LANE_OP, DISPATCH_EFFECT, dispatchLaneOperation, shapeDispatchRead } from '../dispatch-lane.mjs';
-import { createDispatchSinks } from '../dispatch-lane-io.mjs';
+import { createDispatchSinks, buildAgentArgv } from '../dispatch-lane-io.mjs';
 import {
   DELIVERY_VENDOR_PROVIDERS, decideDispatchRoute, estimatedLocForSize, supervisionEnforcementFrom,
   supervisionHold, SUPERVISION_ENFORCEMENT_ENV,
@@ -415,5 +415,48 @@ describe('the estimated-LOC read overstates rather than understates an unsized c
     expect(unsized.outcome).toBe('routed');
     expect(unsized.sized).toBe(false);
     expect(unsized.auditTrail.find((a) => a.criterion === 'estimated-loc').reasoning).toContain('largest band');
+  });
+});
+
+// #3857 — the model-tier table's answer reaches the ACTUAL spawn argv, and a hand-set --model with no
+// recorded reason is refused at the one shared argv builder every Claude dispatch passes through.
+describe('the model-tier table reaches the spawn (#3857)', () => {
+  it("a fix spawn's argv carries the table's model, and the run record carries workerModel beside routedProvider", async () => {
+    const { run } = runTo(tickRead({ launchKind: 'fix', routing: route({ kind: 'fix' }) }));
+    const calls = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      modes: { build: 'agent', prepare: 'agent', fix: 'agent', 'ci-heal': 'agent', 'prepare-decision': 'agent' },
+      spawnAgent: (argv) => { calls.push(argv); return BG_STDOUT; },
+      now: () => new Date(NOW),
+    });
+    const payload = run.effects[0].payload;
+    const result = await sinks[DISPATCH_EFFECT](payload);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('--model');
+    expect(calls[0][calls[0].indexOf('--model') + 1]).toBe('claude-sonnet-5');
+    expect(result.dispatch.workerModel).toMatchObject({ name: 'claude-sonnet-5', tier: 'sonnet', source: 'table' });
+    expect(result.dispatch.routedProvider).toBe('claude');
+  });
+
+  it('buildAgentArgv refuses an unreasoned --model, -m and --model= left in extraArgs', () => {
+    const table = { tier: 'sonnet', model: 'claude-sonnet-5', reason: "the standard's default" };
+    for (const flags of [['--model', 'opus'], ['-m', 'opus'], ['--model=opus']]) {
+      expect(() => buildAgentArgv({
+        sessionId: 's1', payload: { prompt: '# brief', sessionSlug: 'slug' }, extraArgs: flags, table,
+      }), JSON.stringify(flags)).toThrow(/model-tier table|modelReason/);
+    }
+    // With no `table` (a caller #3857 does not touch), the SAME extraArgs pass through untouched — old
+    // behaviour, byte-identical.
+    expect(buildAgentArgv({ sessionId: 's1', payload: { prompt: '# brief', sessionSlug: 'slug' }, extraArgs: ['--model', 'opus'] }))
+      .toEqual(['--bg', '--session-id', 's1', '-n', 'slug', '--model', 'opus', '# brief']);
+  });
+
+  it('with --modelReason the hand-set model is honoured and recorded as an override, beside the table tier', () => {
+    const table = { tier: 'sonnet', model: 'claude-sonnet-5', reason: "the standard's default" };
+    const argv = buildAgentArgv({
+      sessionId: 's1', payload: { prompt: '# brief', sessionSlug: 'slug' }, extraArgs: ['--model', 'opus'], table, modelReason: 'operator pin',
+    });
+    expect(argv[argv.indexOf('--model') + 1]).toBe('opus');
   });
 });

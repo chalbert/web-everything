@@ -301,8 +301,14 @@ export function dispatchTaskOperation({ readTask } = {}) {
       kind: { type: 'string', required: false, default: TASK_LAUNCH_KIND },
       item: { type: 'string', required: false, default: '' },
       // `auto` by default (see DEFAULT_PERMISSION_MODE). NOT named `model`: that is a control flag of the command
-      // line adapter, and a `model` input is refused at registration. A worker model rides `WE_DISPATCH_AGENT_ARGS`.
+      // line adapter, and a `model` input is refused at registration.
       permissionMode: { type: 'string', required: false, default: DEFAULT_PERMISSION_MODE, enum: PERMISSION_MODES },
+      // #3857 — the ONE way a hand-set `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured: the spawn point
+      // (`dispatch-task-io.mjs`, through `dispatch-lane-io.mjs#resolveWorkerModel`) refuses it unless this
+      // reason rides the SAME call. Absent this, the worker's model comes from the checked-in model-tier
+      // table (`../lib/provider-routing.mjs#workerTierFor`), keyed on `--kind` and, when `--item` names one,
+      // that item's own `scope:`/`tags:`.
+      modelReason: { type: 'string', required: false, default: '' },
       // Optional pass-through to `claude --allowedTools`; unset by default. The target end state is that a
       // worker's allowed commands are declared operations only, listed per dispatch kind through this flag.
       allowedTools: { type: 'string', required: false, default: '' },
@@ -326,7 +332,7 @@ export function dispatchTaskOperation({ readTask } = {}) {
     }),
 
     dispatch: effectStep({
-      reads: ['verdict', 'findings.read', 'input.session', 'input.kind', 'input.item', 'input.permissionMode', 'input.allowedTools', 'input.base', 'input.expectedWithinMinutes'],
+      reads: ['verdict', 'findings.read', 'input.session', 'input.kind', 'input.item', 'input.permissionMode', 'input.allowedTools', 'input.base', 'input.expectedWithinMinutes', 'input.modelReason'],
       effects: (view) => {
         const verdict = view.verdict || {};
         if (!verdict.dispatching) return [];
@@ -350,6 +356,8 @@ export function dispatchTaskOperation({ readTask } = {}) {
             allowedTools: view.input.allowedTools || null,
             base: view.input.base,
             expectedWithinMinutes: view.input.expectedWithinMinutes,
+            // #3857 — carried to the spawn point (`dispatch-task-io.mjs`, `dispatch-lane-io.mjs#resolveWorkerModel`).
+            modelReason: view.input.modelReason || null,
           },
         }];
       },

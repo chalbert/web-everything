@@ -27,6 +27,8 @@ import {
   DEFAULT_BACKDOWN_THRESHOLDS,
   PROVEN_TASK_ENVELOPES,
   THIN_TRIAL_THRESHOLD,
+  workerTierFor,
+  DISPATCH_MACHINERY_PATHS,
 } from '../provider-routing.mjs';
 
 // ── Fixture Scorecard Helpers ──────────────────────────────────────────────────
@@ -288,8 +290,9 @@ describe('selectProvider — cascade branches', () => {
     expect(res.reasoning).toContain('too thin');
   });
 
-  // Branch 4: Claude Haiku
-  it('branch 4 (haiku): recommends claude haiku for trivial single-file doc-fix with concrete testable criteria', () => {
+  // Branch 4: #3857 — the model-tier table never outputs Haiku; a trivial single-file doc-fix is Sonnet,
+  // the table's default, not a special Haiku carve-out.
+  it('branch 4 (sonnet): a trivial single-file doc-fix defaults to sonnet, never haiku (#3857)', () => {
     const task = { description: 'Fix typo in documentation comment', taskType: 'doc-fix' };
     const context = {
       filesTouched: ['docs/reference.md'],
@@ -299,8 +302,8 @@ describe('selectProvider — cascade branches', () => {
 
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
-    expect(res.reasoning).toContain('haiku');
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.reasoning).toContain("standard's default");
   });
 
   // Branch 4: Claude Sonnet
@@ -338,8 +341,9 @@ describe('selectProvider — cascade branches', () => {
     expect(res.reasoning).toContain('opus');
   });
 
-  // Branch 4: Claude Opus (Triage Research)
-  it('branch 4 (opus): recommends claude opus for triage-research tasks', () => {
+  // Branch 4: #3857 — triage-research no longer forces Opus by taskType alone (the table has no such
+  // row); it defaults to Sonnet like everything else not on the table's four raise-only rows.
+  it('branch 4 (sonnet): triage-research no longer forces opus by taskType alone (#3857)', () => {
     const task = {
       description: 'Investigate flaky WebWorker state synchronization under load',
       taskType: 'triage-research',
@@ -352,8 +356,8 @@ describe('selectProvider — cascade branches', () => {
 
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
-    expect(res.reasoning).toContain('triage-research');
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.reasoning).toContain("standard's default");
   });
 
   // Statute-tier path override
@@ -372,7 +376,7 @@ describe('selectProvider — cascade branches', () => {
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
-    expect(res.reasoning).toContain('statute-tier');
+    expect(res.reasoning).toContain('rewording statute or rule text');
   });
 
   // Thin history on judgment-requiring task forces Claude, not Both
@@ -439,19 +443,22 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
   });
 
+  // #3857 — file-count, LOC and acceptanceTestable:false no longer force Opus on their own; none of
+  // these three cases matches a table row (no statute path, no prepare-decision/architectural-decision,
+  // no security tag, no dispatch-machinery path), so each stays at the Sonnet default.
   it.each([
     { filesTouched: Array.from({ length: 9 }, (_, i) => `scripts/module-${i}.mjs`), estimatedSize: 180 },
     { filesTouched: ['scripts/module.mjs'], estimatedSize: 501 },
     { filesTouched: ['scripts/module.mjs'], estimatedSize: 180, acceptanceTestable: false },
-  ])('offers Opus by default for effort sizing/caution: %j', (context) => {
+  ])('stays Sonnet for effort sizing/caution that is no longer a table row (#3857): %j', (context) => {
     const res = selectProvider({ taskType: 'bugfix' }, context);
 
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
     expect(res.alternateBackend).toEqual({
       tool: 'scripts/gemini-direct-task.mjs',
-      cliModel: 'claude-opus-4-6-thinking',
-      reason: expect.stringContaining('claude-opus-4-6-thinking'),
+      cliModel: 'claude-sonnet-4-6',
+      reason: expect.stringContaining('claude-sonnet-4-6'),
     });
     expect(res.auditTrail).toHaveLength(5);
     expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'offered' });
@@ -529,16 +536,16 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: false }));
   });
 
-  it.each(['architectural-decision', 'triage-research'])('requires native Opus for %s regardless of Antigravity history', (taskType) => {
+  it('requires native Opus for architectural-decision regardless of Antigravity history', () => {
     for (const trial of [
       { outcome: 'landed', findings: null },
       { outcome: 'reworked', findings: 'Unresolved build failure' },
     ]) {
-      const res = selectProvider({ taskType }, {
+      const res = selectProvider({ taskType: 'architectural-decision' }, {
         filesTouched: ['scripts/module.mjs'],
         estimatedSize: 20,
         quotaStrained: true,
-        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType, ...trial })],
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType: 'architectural-decision', ...trial })],
       });
       expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
       expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
@@ -548,26 +555,26 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     }
   });
 
-  it('returns null and audits why Haiku has no alternate', () => {
-    const task = { description: 'Fix typo in documentation comment', taskType: 'doc-fix' };
-    const context = {
-      filesTouched: ['docs/reference.md'],
-      estimatedSize: 5,
-      scorecards: [],
-    };
-    const res = selectProvider(task, context);
-
-    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
-    expect(res.alternateBackend).toBeNull();
-    expect(res.auditTrail).toHaveLength(5);
-    expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: true }));
-    expect(res.auditTrail.at(-1)).toEqual({
-      criterion: 'agy-alternate-backend',
-      result: 'not-applicable',
-      dataConsulted: "claudeTier='haiku', taskType='doc-fix', statute=false, latestAntigravityTrial=none",
-      reasoning: expect.stringContaining('Haiku has no agy-hosted equivalent'),
-    });
+  // #3857 — triage-research no longer earns Opus from the model-tier table (no row names it), but
+  // `forcedNativeIdentity` is a SEPARATE axis (this Step 3.5 gate, unchanged by #3857) that still forces
+  // native Claude identity/tools for triage-research regardless of tier or Antigravity history.
+  it('requires native identity for triage-research regardless of Antigravity history, though the tier is now Sonnet (#3857)', () => {
+    for (const trial of [
+      { outcome: 'landed', findings: null },
+      { outcome: 'reworked', findings: 'Unresolved build failure' },
+    ]) {
+      const res = selectProvider({ taskType: 'triage-research' }, {
+        filesTouched: ['scripts/module.mjs'],
+        estimatedSize: 20,
+        quotaStrained: true,
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType: 'triage-research', ...trial })],
+      });
+      expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+      expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+      expect(res.alternateBackend).toBeNull();
+      expect(res.auditTrail).toHaveLength(5);
+      expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'forced-native' });
+    }
   });
 
   it('leaves Gemini, Codex and Both return objects untouched by quota strain', () => {
@@ -1189,5 +1196,70 @@ describe('selectSupervisionLevel — architectural separation from model-capabil
     expect(span).toBe(`export ${selectSupervisionLevel.toString()}`);
     expect(span).not.toContain('model-capability-ratings');
     expect(span).not.toMatch(/isUsableForExploration|getExplorationHint|capabilityRatings|capabilityCategory|explorationHint|THIN_TRIAL_THRESHOLD|forcedNativeIdentity|latestAntigravityTrial|agyAlternateResult/);
+  });
+});
+
+// ── #3857 — the model-tier table (workerTierFor) ────────────────────────────────────────────────────────────
+
+describe('workerTierFor — the checked-in model-tier table (#3857)', () => {
+  it('defaults to sonnet when nothing matches a row', () => {
+    expect(workerTierFor({ kind: 'build', taskType: 'build-new-feature', scopePaths: ['scripts/foo.mjs'], tags: [] }))
+      .toEqual({ tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" });
+    expect(workerTierFor({})).toEqual({ tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" });
+  });
+
+  it('kind prepare-decision, or taskType architectural-decision, is opus: preparing a decision\'s forks is judgment', () => {
+    expect(workerTierFor({ kind: 'prepare-decision' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'prepare-decision' }).reason).toBe("preparing a decision's forks is judgment");
+    expect(workerTierFor({ kind: 'build', taskType: 'architectural-decision' }).tier).toBe(CLAUDE_TIERS.OPUS);
+  });
+
+  it('a scope path under docs/agent/, or kind statute-wording, is opus: rewording statute or rule text', () => {
+    expect(workerTierFor({ kind: 'build', scopePaths: ['docs/agent/platform-decisions.md'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'build', scopePaths: ['docs/agent/platform-decisions.md'] }).reason).toBe('rewording statute or rule text');
+    expect(workerTierFor({ kind: 'statute-wording' }).tier).toBe(CLAUDE_TIERS.OPUS);
+  });
+
+  it('kind security-fix, or a security tag, is opus: a security-critical fix', () => {
+    expect(workerTierFor({ kind: 'security-fix' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'security-fix' }).reason).toBe('a security-critical fix');
+    expect(workerTierFor({ kind: 'fix', tags: ['security'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'fix', tags: ['other-tag'] }).tier).toBe(CLAUDE_TIERS.SONNET);
+  });
+
+  it('a scope path in DISPATCH_MACHINERY_PATHS, or kind dispatch-machinery, is opus: wide-blast-radius dispatch machinery', () => {
+    for (const p of DISPATCH_MACHINERY_PATHS) {
+      expect(workerTierFor({ kind: 'build', scopePaths: [p] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    }
+    expect(workerTierFor({ kind: 'build', scopePaths: DISPATCH_MACHINERY_PATHS }).reason).toBe('wide-blast-radius dispatch machinery');
+    expect(workerTierFor({ kind: 'dispatch-machinery' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(DISPATCH_MACHINERY_PATHS).toEqual([
+      'scripts/operations/dispatch-lane-io.mjs',
+      'scripts/operations/dispatch-task.mjs',
+      'scripts/lib/dispatch-contracts.mjs',
+      'scripts/lib/provider-routing.mjs',
+      'scripts/conveyor/tick-core.mjs',
+    ]);
+  });
+
+  it('never outputs haiku, and the output set is exactly sonnet and opus', () => {
+    const cases = [
+      {}, { kind: 'build' }, { kind: 'prepare' }, { kind: 'fix' }, { kind: 'ci-heal' }, { kind: 'investigate' },
+      { kind: 'prepare-decision' }, { kind: 'security-fix' }, { kind: 'statute-wording' }, { kind: 'dispatch-machinery' },
+      { taskType: 'architectural-decision' }, { taskType: 'doc-fix' }, { scopePaths: ['docs/agent/x.md'] },
+      { tags: ['security'] },
+    ];
+    const tiers = new Set(cases.map((c) => workerTierFor(c).tier));
+    for (const t of tiers) expect([CLAUDE_TIERS.SONNET, CLAUDE_TIERS.OPUS]).toContain(t);
+    expect(tiers.has(CLAUDE_TIERS.HAIKU)).toBe(false);
+  });
+
+  it('is raise-only: a matching row can only move sonnet up to opus, and PURE (identical input -> identical output)', () => {
+    const base = { kind: 'build', taskType: 'build-new-feature', scopePaths: ['scripts/foo.mjs'], tags: [] };
+    expect(workerTierFor(base).tier).toBe(CLAUDE_TIERS.SONNET);
+    expect(workerTierFor({ ...base, scopePaths: ['docs/agent/x.md'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    // Never sonnet again once a row matches opus for the same underlying facts plus more.
+    expect(workerTierFor({ ...base, scopePaths: ['docs/agent/x.md', 'scripts/foo.mjs'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor(base)).toEqual(workerTierFor({ ...base }));
   });
 });

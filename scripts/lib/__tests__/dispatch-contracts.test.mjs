@@ -12,7 +12,7 @@ const verdict = (extra = {}) => ({ mode: 'acting', storyTaskType: 'doc-fix', sup
 describe('closed contracts and pure boundary', () => {
   it('freezes every vocabulary and derives task types from router envelopes', () => {
     expect(c.TASK_TYPES).toEqual([...Object.keys(PROVEN_TASK_ENVELOPES), 'triage-research', 'architectural-decision']);
-    for (const key of ['TASK_TYPES', 'RISKS', 'COMPLEXITIES', 'TASK_STATUSES', 'VERDICTS', 'VERIFIED_BY', 'GRADUATION_VERIFIERS', 'PROVIDERS', 'EXECUTORS', 'EXECUTOR_PROVIDERS', 'STORY_KINDS', 'ROUTE_STAGES', 'SIZE_TO_ESTIMATED_LOC', 'TASK_TYPE_BY_CARD_KIND', 'STORY_KIND_RUNGS', 'TASK_LIFECYCLE', 'VERDICT_MODES', 'CLAUDE_NATIVE_MODEL_BY_TIER', 'GROUND_TRUTH_KINDS']) expect(Object.isFrozen(c[key]), key).toBe(true);
+    for (const key of ['TASK_TYPES', 'RISKS', 'COMPLEXITIES', 'TASK_STATUSES', 'VERDICTS', 'VERIFIED_BY', 'GRADUATION_VERIFIERS', 'PROVIDERS', 'EXECUTORS', 'EXECUTOR_PROVIDERS', 'STORY_KINDS', 'ROUTE_STAGES', 'SIZE_TO_ESTIMATED_LOC', 'TASK_TYPE_BY_CARD_KIND', 'RUNG_KINDS', 'TASK_LIFECYCLE', 'VERDICT_MODES', 'CLAUDE_NATIVE_MODEL_BY_TIER', 'GROUND_TRUTH_KINDS']) expect(Object.isFrozen(c[key]), key).toBe(true);
     Object.values(c.EXECUTOR_PROVIDERS).forEach((v) => expect(Object.isFrozen(v)).toBe(true));
     expect(c.RISKS).toEqual(['low', 'medium', 'high']);
     expect(c.COMPLEXITIES).toEqual(['S', 'M', 'L']);

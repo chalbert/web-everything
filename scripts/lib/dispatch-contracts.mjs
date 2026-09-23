@@ -8,6 +8,7 @@
 import {
   PROVEN_TASK_ENVELOPES, isStatuteTierPath, isHighStakesTask, isWithinProvenEnvelope,
   selectProvider, selectSupervisionLevel, RECOMMENDATIONS, CLAUDE_TIERS, SUPERVISION_LEVELS, AGY_CLAUDE_MODEL_BY_TIER,
+  workerTierFor,
 } from './provider-routing.mjs';
 import { scrubPublish } from './secret-scrub.mjs';
 import { thresholdsForRisk, neverSpotCheck, spotCheckSample } from './dispatch-thresholds.mjs';
@@ -89,11 +90,18 @@ export const TASK_TYPE_BY_CARD_KIND = Object.freeze({ story: 'build-new-feature'
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
 export const CARD_KINDS_WITHOUT_TASK_TYPE = Object.freeze(['task', 'epic']);
 /**
- * docs/agent/backlog-workflow.md “Model routing”: Sonnet executes decided specs;
- * Opus handles judgment and ambiguous investigation. No per-kind code table preceded G1.
+ * Role/story kinds with a rung on the model-tier table (#3857's own `workerTierFor`, `provider-routing.mjs`) —
+ * every {@link STORY_KINDS} entry except `build` (which never reaches the rung lookup: `routeDispatch` returns
+ * through `selectSupervisor` before it). `review` is deliberately absent: it has no rung yet (its subject key
+ * and positive control are the sibling slice), so it stays `tier: null` rather than falling to the table's
+ * `sonnet` default.
+ *
+ * REPLACES the old standalone `STORY_KIND_RUNGS` table (#3801 Fork 3, `docs/agent/backlog-workflow.md`
+ * "Model routing"), which this folds into `workerTierFor` rather than keeping beside it (#3857) — a role/story
+ * kind's tier is now the SAME table a code-change dispatch's tier is, not a second one that can drift from it.
  */
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
-export const STORY_KIND_RUNGS = Object.freeze({ prepare: CLAUDE_TIERS.SONNET, 'prepare-decision': CLAUDE_TIERS.OPUS, investigate: CLAUDE_TIERS.OPUS, fix: CLAUDE_TIERS.SONNET, 'ci-heal': CLAUDE_TIERS.SONNET });
+export const RUNG_KINDS = Object.freeze(STORY_KINDS.filter((k) => k !== 'build'));
 
 const object = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
 const nonempty = (x) => typeof x === 'string' && x.trim().length > 0;
@@ -440,7 +448,7 @@ function compare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 export function routeDispatch(profile, options = {}) {
   try {
     const errors = [...validateDispatchProfile(profile).errors];
-    const { stage, kind, scorecards = [], taskKey } = options;
+    const { stage, kind, scorecards = [], taskKey, tags = [] } = options;
     if (!ROUTE_STAGES.includes(stage)) errors.push('stage is invalid');
     if (stage === 'story' && !STORY_KINDS.includes(kind)) errors.push('kind is invalid');
     if (errors.length) return refused(errors);
@@ -451,12 +459,16 @@ export function routeDispatch(profile, options = {}) {
     const out = { mode: 'acting', shadow: null, backend: null, spotCheck: null, role: stage === 'story' ? kind === 'build' ? SUPERVISOR_ROLE : 'lane-agent' : 'task-agent', provider: null, model: null, tier: null, supervision: SUPERVISION_LEVELS.FULL, alternateBackend: null, auditTrail: [] };
     if (stage === 'story') {
       out.provider = RECOMMENDATIONS.CLAUDE;
-      out.tier = high ? CLAUDE_TIERS.OPUS : kind === 'build' ? CLAUDE_TIERS.SONNET : STORY_KIND_RUNGS[kind];
+      // #3857 — the same model-tier table a code-change dispatch uses, RUNG_KINDS-gated (every STORY_KINDS
+      // entry reaching here except `build`, which already returned above) so `review` (no rung yet) never
+      // reaches this call from elsewhere and a kind outside the table's rungs cannot silently fall to `sonnet`.
+      const tableTier = workerTierFor({ kind, taskType: profile.taskType, scopePaths: profile.filesTouched, tags });
+      out.tier = high ? CLAUDE_TIERS.OPUS : tableTier.tier;
       out.model = CLAUDE_NATIVE_MODEL_BY_TIER[out.tier];
-      ownAudit.push(audit(kind === 'build' ? 'build-supervisor-tier' : 'story-kind-tier', out.tier, `kind=${kind}, risk=${profile.risk}, statute=${profile.filesTouched.some(isStatuteTierPath)}`, 'Story rung is raise-only for high-risk or statute work.'));
+      ownAudit.push(audit(kind === 'build' ? 'build-supervisor-tier' : 'story-kind-tier', out.tier, `kind=${kind}, risk=${profile.risk}, statute=${profile.filesTouched.some(isStatuteTierPath)}`, high ? 'Story rung is raise-only for high-risk or statute work.' : tableTier.reason));
     } else {
       const task = { taskType: profile.taskType };
-      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records };
+      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags };
       const selected = selectProvider(task, context);
       routerAudit.push(...selected.auditTrail);
       out.provider = selected.recommendation;
@@ -981,15 +993,17 @@ function executedVendorFor(override) {
  * router `taskType` by nature, so the provider cascade is NEVER consulted for it and the record says `role`
  * with `routed: null`. That is the honest answer, and it is still mechanical — the kind decided it.
  * INTERIM (#3801 Fork 3): `prepare`, `prepare-decision` and `investigate` still keep their Claude spawn and
- * `routed: null`, but `tier` now names the {@link STORY_KIND_RUNGS} rung for the role instead of staying
- * `null` — the authoring role's own trust record, not a routing decision. `review` has no row in
- * `STORY_KIND_RUNGS` yet (its subject key and positive control are the sibling slice, `blockedBy` this one),
- * so it keeps `tier: null` until that slice lands.
+ * `routed: null`, but `tier` now names the model-tier table's ({@link ./provider-routing.mjs#workerTierFor},
+ * #3857) rung for the role instead of staying `null` — the authoring role's own trust record, not a routing
+ * decision. `review` has no {@link RUNG_KINDS} rung yet (its subject key and positive control are the sibling
+ * slice), so it keeps `tier: null` until that slice lands.
  *
  * @param {object} dispatch
  *   - `kind`, `cause`, `scopePaths` — handed to {@link ./dispatch-task-type.mjs#taskTypeFor}.
  *   - `size` the card's `size:` frontmatter (see {@link estimatedLocForSize}); `estimatedLoc` overrides it.
  *   - `acceptanceTestable` (default `true`), `dependsOn` (default `[]`), `risk` (optional raise-only floor).
+ *   - `tags` (default `[]`) — the item's own frontmatter tags, consulted only by {@link workerTierFor}'s
+ *     `security` row (#3857); every other tier row reads `kind`/`taskType`/`scopePaths`.
  *   - `taskKey` `{storyRef, round, taskId}` — spot-check sampling only; omitted means no sample.
  *   - `deliveryAgent` / `deliveryAgentReason` — the item's own frontmatter marker and its required reason: the
  *     ONE provider override (#3840, Fork 5 of #3801; the process-wide environment variables are retired). A
@@ -1016,6 +1030,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
   try {
     const kind = String(dispatch?.kind ?? '').trim();
     const scopePaths = Array.isArray(dispatch?.scopePaths) ? dispatch.scopePaths.map(String) : [];
+    const tags = Array.isArray(dispatch?.tags) ? dispatch.tags.map(String) : [];
     const derivation = taskTypeFor({ kind, cause: dispatch?.cause ?? null, scopePaths });
 
     const override = normalizeOverride(dispatch, kind);
@@ -1032,7 +1047,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
         routed: null,
         executed: null,
         model: null,
-        tier: STORY_KIND_RUNGS[derivation.role] ?? null,
+        tier: RUNG_KINDS.includes(derivation.role) ? workerTierFor({ kind: derivation.role, taskType: null, scopePaths, tags }).tier : null,
         supervision: SUPERVISION_LEVELS.FULL,
         spotCheck: null,
         sized: null,
@@ -1093,7 +1108,7 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       return routeRefused(kind, derivation, `the dispatch profile does not validate: ${built.errors.join('; ')}`);
     }
 
-    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey });
+    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey, kind, tags });
     if (out.role === 'refused') {
       return routeRefused(kind, derivation, `the router refused this dispatch: ${out.auditTrail.map((a) => a.reasoning).join('; ')}`);
     }

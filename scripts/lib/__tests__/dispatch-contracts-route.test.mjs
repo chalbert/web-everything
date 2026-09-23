@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as c from '../dispatch-contracts.mjs';
+import { workerTierFor } from '../provider-routing.mjs';
 
 const profile = (extra = {}) => c.buildDispatchProfile({ taskType: 'doc-fix', estimatedLoc: 30, filesTouched: ['docs/readme.md'], acceptanceTestable: true, dependsOn: [], ...extra }).profile;
 const card = (extra = {}) => ({ kind: 'story', size: 3, scope: ['src/example.js'], preparedDate: '2026-09-20', ...extra });
@@ -14,9 +15,14 @@ describe('story routing', () => {
   it('routes cold builds to the fallback with a cheaper shadow', () => {
     expect(c.routeDispatch(profile(), { stage: 'story', kind: 'build' })).toMatchObject({ role: c.SUPERVISOR_ROLE, provider: 'claude', model: 'claude-opus-5', tier: 'opus', mode: 'acting', backend: 'claude-native', spotCheck: null, shadow: { provider: 'antigravity', mode: 'shadow' } });
   });
-  it('retains existing non-build rungs and raises only for risk', () => {
-    expect(c.STORY_KIND_RUNGS).toEqual({ prepare: 'sonnet', 'prepare-decision': 'opus', investigate: 'opus', fix: 'sonnet', 'ci-heal': 'sonnet' });
-    for (const [kind, tier] of Object.entries(c.STORY_KIND_RUNGS)) {
+  // #3857 — the standalone STORY_KIND_RUNGS table is folded into workerTierFor (provider-routing.mjs); a
+  // non-build story kind's tier is now the SAME table a code-change dispatch's tier is. `investigate` no
+  // longer forces Opus by kind alone (the table has no such row) — only `prepare-decision` does.
+  it('retains RUNG_KINDS as the non-build story kinds and raises only for risk (#3857 model-tier table)', () => {
+    expect(c.RUNG_KINDS).toEqual(['prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal']);
+    const expectedTier = { prepare: 'sonnet', 'prepare-decision': 'opus', investigate: 'sonnet', fix: 'sonnet', 'ci-heal': 'sonnet' };
+    for (const kind of c.RUNG_KINDS) {
+      const tier = expectedTier[kind];
       const out = c.routeDispatch(profile(), { stage: 'story', kind });
       expect(out).toMatchObject({ role: 'lane-agent', provider: 'claude', tier, model: c.CLAUDE_NATIVE_MODEL_BY_TIER[tier], supervision: 'full', alternateBackend: null });
       expect(out.auditTrail[0].criterion).toBe('story-kind-tier');
@@ -28,7 +34,9 @@ describe('story routing', () => {
 
 describe('task routing', () => {
   it('uses Claude fallback, including the router alternate backend', () => {
-    expect(c.routeDispatch(profile(), { stage: 'task' })).toMatchObject({ role: 'task-agent', provider: 'claude', model: c.CLAUDE_NATIVE_MODEL_BY_TIER.haiku, tier: 'haiku', supervision: 'full', alternateBackend: null });
+    // #3857 — the model-tier table never outputs Haiku; a doc-fix with no table row stays at the Sonnet
+    // default, so `alternateBackend` is now offered (Sonnet has an agy equivalent) rather than null.
+    expect(c.routeDispatch(profile(), { stage: 'task' })).toMatchObject({ role: 'task-agent', provider: 'claude', model: c.CLAUDE_NATIVE_MODEL_BY_TIER.sonnet, tier: 'sonnet', supervision: 'full' });
     expect(c.routeDispatch(profile({ estimatedLoc: 80 }), { stage: 'task' }).alternateBackend).toMatchObject({ tool: 'scripts/gemini-direct-task.mjs' });
     expect(c.routeDispatch(profile({ filesTouched: ['docs/agent/rules.md'] }), { stage: 'task', scorecards: history() })).toMatchObject({ provider: 'claude', tier: 'opus', alternateBackend: null });
   });
@@ -86,17 +94,19 @@ describe('task routing', () => {
 });
 
 // #3801 Fork 3 — the role path's interim tier: prepare/prepare-decision/investigate keep `routed: null` and no
-// provider decision, but now record the STORY_KIND_RUNGS tier for their own authoring-role trust record.
-describe('the role path\'s interim tier (#3801 Fork 3)', () => {
+// provider decision, but now record the model-tier table's (#3857 `workerTierFor`) rung for their own
+// authoring-role trust record. `investigate` no longer earns Opus by kind alone (no table row names it).
+describe('the role path\'s interim tier (#3801 Fork 3, #3857 model-tier table)', () => {
   const roleDispatch = (kind) => ({ kind, scopePaths: ['we:backlog/1.md'] });
-  it('records the STORY_KIND_RUNGS tier for prepare, prepare-decision and investigate, with routed still null', () => {
+  it('records the model-tier table rung for prepare, prepare-decision and investigate, with routed still null', () => {
+    const expectedTier = { prepare: 'sonnet', 'prepare-decision': 'opus', investigate: 'sonnet' };
     for (const kind of ['prepare', 'prepare-decision', 'investigate']) {
       const out = c.decideDispatchRoute(roleDispatch(kind));
-      expect(out).toMatchObject({ outcome: 'role', role: kind, taskType: null, routed: null, model: null, tier: c.STORY_KIND_RUNGS[kind], supervision: 'full' });
+      expect(out).toMatchObject({ outcome: 'role', role: kind, taskType: null, routed: null, model: null, tier: expectedTier[kind], supervision: 'full' });
     }
     expect(c.decideDispatchRoute(roleDispatch('prepare')).tier).toBe('sonnet');
     expect(c.decideDispatchRoute(roleDispatch('prepare-decision')).tier).toBe('opus');
-    expect(c.decideDispatchRoute(roleDispatch('investigate')).tier).toBe('opus');
+    expect(c.decideDispatchRoute(roleDispatch('investigate')).tier).toBe('sonnet');
   });
   it('leaves review at tier: null — its subject key and positive control are the sibling slice', () => {
     expect(c.decideDispatchRoute(roleDispatch('review'))).toMatchObject({ outcome: 'role', role: 'review', routed: null, tier: null });
@@ -178,5 +188,47 @@ describe('the size-policy setting', () => {
     expect(sized.outcome).toBe('routed');
     expect(sized.sized).toBe(true);
     expect(sized.sizeSource).toBe('card');
+  });
+});
+
+// #3857 — the model-tier table's rows, exercised through decideDispatchRoute (a size-13 or unsized `build` no
+// longer forces Opus by size; a statute-path or dispatch-machinery-path scope, or a `security` tag, does).
+describe('the model-tier table (#3857)', () => {
+  it('a size-13 build and an unsized build are sonnet (today opus, pre-#3857)', () => {
+    const base = { kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'] };
+    expect(c.decideDispatchRoute({ ...base, size: 13 }).tier).toBe('sonnet');
+    expect(c.decideDispatchRoute({ ...base }).tier).toBe('sonnet'); // unsized, largest band under the default policy
+  });
+
+  it('a scope on docs/agent/platform-decisions.md is opus', () => {
+    const out = c.decideDispatchRoute({ kind: 'build', scopePaths: ['we:docs/agent/platform-decisions.md'], size: 3 });
+    expect(out.tier).toBe('opus');
+  });
+
+  it('a scope on scripts/operations/dispatch-lane-io.mjs is opus', () => {
+    const out = c.decideDispatchRoute({ kind: 'build', scopePaths: ['we:scripts/operations/dispatch-lane-io.mjs'], size: 3 });
+    expect(out.tier).toBe('opus');
+  });
+
+  it('a security-tagged card is opus', () => {
+    const out = c.decideDispatchRoute({ kind: 'fix', scopePaths: ['we:scripts/operations/example.mjs'], size: 3, tags: ['security'] });
+    expect(out.tier).toBe('opus');
+  });
+
+  it('the output tier set is exactly sonnet and opus', () => {
+    const cases = [
+      { kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'], size: 3 },
+      { kind: 'fix', scopePaths: ['we:scripts/operations/example.mjs'], size: 3 },
+      { kind: 'ci-heal', scopePaths: ['we:scripts/operations/example.mjs'], size: 3 },
+      { kind: 'build', scopePaths: ['we:docs/agent/platform-decisions.md'], size: 3 },
+      { kind: 'fix', scopePaths: ['we:scripts/operations/example.mjs'], size: 3, tags: ['security'] },
+    ];
+    for (const dispatch of cases) expect(['sonnet', 'opus']).toContain(c.decideDispatchRoute(dispatch).tier);
+  });
+
+  it("routeDispatch's tier equals workerTierFor's answer for the same dispatch", () => {
+    const p = profile({ taskType: 'bugfix', filesTouched: ['scripts/lib/foo.mjs'] });
+    const out = c.routeDispatch(p, { stage: 'task', kind: 'fix', tags: [] });
+    expect(out.tier).toBe(workerTierFor({ kind: 'fix', taskType: 'bugfix', scopePaths: p.filesTouched, tags: [] }).tier);
   });
 });

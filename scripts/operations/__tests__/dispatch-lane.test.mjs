@@ -208,7 +208,9 @@ describe('the operation is callable at all', () => {
 describe('the lane comes from the tick core or nowhere', () => {
   it('does not declare a `lane` input — a caller cannot ask for one', () => {
     const { declaration } = registryFor();
-    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'num']);
+    // #3857 — `modelReason` added: the ONE way a hand-set `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured
+    // (see `dispatch-lane-io.mjs#resolveWorkerModel`); it does not name a lane, so this clause is unaffected.
+    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'modelReason', 'num']);
     expect(declaration.input.num.type).toBe('string'); // an id may be a `xNNNNNN` hash, never only a number
     expect(declaration.input.expectedWithinMinutes.default).toBe(DEFAULT_EXPECTED_WITHIN_MINUTES);
   });
@@ -1798,10 +1800,13 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // THE ARGV IS THE CONTRACT, and it is pinned whole — the prompt is the delivery brief filled with the
     // item's OWN `scope:` frontmatter, not the one-file prepare scope. `--append-system-prompt-file` (#xqyyoje)
     // is the sink's own standing-identity flag, always present on a real dispatch — see
-    // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`.
+    // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`. #3857 (later than #3165, a deliberate change this pin now
+    // reflects): `--model` is now injected from the model-tier table — a `build` over `scripts/operations/`
+    // with no table row matches, so it lands on the Sonnet default.
     expect(spawned[0].argv).toEqual([
       '--bg', '--session-id', 'sess-3165', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+      '--model', 'claude-sonnet-5',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',

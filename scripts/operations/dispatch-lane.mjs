@@ -1140,6 +1140,11 @@ export function dispatchLaneOperation({ readTick } = {}) {
       // finding reports as `bookkeepingSource: 'none'`.
       bookkeepingFile: { type: 'string', required: false, default: '' },
       expectedWithinMinutes: { type: 'number', required: false, default: DEFAULT_EXPECTED_WITHIN_MINUTES },
+      // #3857 — the ONE way a hand-set `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured: the spawn point
+      // (`dispatch-lane-io.mjs#resolveWorkerModel`) refuses it unless this reason rides the SAME call. Not
+      // named `model`: that is a control flag of the command-line adapter, and a `model` input is refused at
+      // registration (mirrors `dispatch-task.mjs`'s own `permissionMode` comment).
+      modelReason: { type: 'string', required: false, default: '' },
     },
     verdictFrom: 'plan',
 
@@ -1208,7 +1213,7 @@ export function dispatchLaneOperation({ readTick } = {}) {
     // DECLARES the start and performs none of it. One effect or zero — never two, because a lane holds one
     // agent and the whole guard apparatus exists to keep it that way.
     dispatch: effectStep({
-      reads: ['verdict', 'findings.read'],
+      reads: ['verdict', 'findings.read', 'input.modelReason'],
       effects: (view) => {
         const verdict = view.verdict || {};
         // THE NON-DISPATCH EXIT. Zero effects, which the engine resolves in the same `advance` rather than
@@ -1250,6 +1255,9 @@ export function dispatchLaneOperation({ readTick } = {}) {
             // routing decision, its audit trail and the routed/executed pair are read back from.
             routing: read.routing ?? null,
             taskType: read.taskType ?? null,
+            // #3857 — carried to the spawn point (`dispatch-lane-io.mjs#resolveWorkerModel`) so a hand-set
+            // `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured only with a reason on THIS call.
+            modelReason: view.input.modelReason || null,
           },
         }];
       },

@@ -85,7 +85,18 @@ import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, det
 // decision itself is `dispatch-contracts.mjs#decideDispatchRoute`, called from `dispatch-lane.mjs`'s pure
 // `shapeDispatchRead`; this file only supplies the two things that need a filesystem and an environment: the
 // scorecards and this flag.
-import { decideDispatchRoute, supervisionEnforcementFrom } from '../lib/dispatch-contracts.mjs';
+import { decideDispatchRoute, supervisionEnforcementFrom, CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
+
+/**
+ * The three native Claude model ids {@link ../lib/dispatch-contracts.mjs#CLAUDE_NATIVE_MODEL_BY_TIER} maps to
+ * — the only values #3857's `table` wiring below ever trusts as a `--model` for a `claude --bg` spawn. A
+ * `decideDispatchRoute` record's `model` names a GEMINI or CODEX model id when the router recommended an
+ * external provider (`dispatch-contracts.mjs`'s `task-model-recovery` audit step) — `executed` still runs
+ * Claude for any dispatch with no `deliveryAgent:` override, so that id would be the WRONG flag for THIS
+ * spawn. Filtering on membership here, rather than trusting `routed`/`executed`, also naturally excludes a
+ * role dispatch's record (`model: null` always, #3857's own interim choice) with no separate branch.
+ */
+const CLAUDE_NATIVE_MODEL_IDS = new Set(Object.values(CLAUDE_NATIVE_MODEL_BY_TIER));
 import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 import {
   DISPATCH_PROVIDER_REGISTRY,
@@ -921,6 +932,21 @@ export const TICK_TIMEOUT_MS = 5 * 60 * 1000;
 export const AGENT_ARGS_ENV = 'WE_DISPATCH_AGENT_ARGS';
 
 /**
+ * BEST-EFFORT reasoning text for a `decideDispatchRoute` record's tier, read off its own `auditTrail` (#3857)
+ * — the criterion is `claude-tier` for a routed task-type dispatch, `story-kind-tier`/`build-supervisor-tier`
+ * for a story-stage dispatch, or `role-path` for a role dispatch (whose `derivation.reason` names the kind's
+ * rung, not the tier itself, so `role-path` is skipped in favour of `null` there rather than a misleading one).
+ * `null` when no matching entry exists — the run record then just carries the tier and model with no prose.
+ * @param {object} routing
+ * @returns {string|null}
+ */
+function routingTierReason(routing) {
+  const entry = (Array.isArray(routing?.auditTrail) ? routing.auditTrail : [])
+    .find((a) => a?.criterion === 'claude-tier' || a?.criterion === 'story-kind-tier' || a?.criterion === 'build-supervisor-tier');
+  return entry ? String(entry.reasoning ?? '') || null : null;
+}
+
+/**
  * Extra `claude` flags from the environment, or `[]`. REFUSES a malformed value rather than dispatching with
  * flags the operator thinks are set and are not — a silently-ignored `--permission-mode` is exactly the kind of
  * thing nobody notices until an agent stalls on a prompt.
@@ -1255,6 +1281,14 @@ export function createDispatchSinks({
       let resource;
       try { resource = actionResource(payload?.repo ?? repo, { type: payload?.pr ? 'pr' : 'item', id: payload?.pr ?? payload?.num }); }
       catch (e) { throw notApplied(`dispatch has no resource identity, refusing before any spawn: ${e.message}`, { sessionId }); }
+      // #3857 — the model-tier table's answer for this dispatch, read straight off `payload.routing`
+      // (`decideDispatchRoute`'s own record, computed upstream by `dispatch-lane.mjs`'s read step — this file
+      // never recomputes it). `null` when the read carried no routing record (a hand-built fixture, or a
+      // refused/held dispatch that never reaches this effect), which keeps `buildAgentArgv` on its pre-#3857
+      // pass-through behaviour rather than refusing a dispatch this card was never meant to touch.
+      const table = payload?.routing && typeof payload.routing === 'object' && CLAUDE_NATIVE_MODEL_IDS.has(payload.routing.model)
+        ? { tier: payload.routing.tier ?? null, model: payload.routing.model, reason: routingTierReason(payload.routing) }
+        : null;
       try {
         const guarded = await guardedDispatch({
           resource,
@@ -1286,6 +1320,10 @@ export function createDispatchSinks({
             reason: payload?.reason,
             extraArgs,
             systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+            // #3857 — see `table` above; `modelReason` is `dispatch-lane.mjs`'s own new input, riding the
+            // effect payload exactly like `pr`/`reason` do.
+            table,
+            modelReason: payload?.modelReason ?? null,
           }),
         });
         if (guarded.held) return guarded;
@@ -1307,16 +1345,29 @@ export function createDispatchSinks({
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
-      let supervisorModel = null;
-      for (let i = 0; i < extraArgs.length; i++) {
-        const arg = String(extraArgs[i]);
-        if (arg.startsWith('--model=')) supervisorModel = arg.slice(8) || null;
-        else if (arg === '--model' || arg === '-m') supervisorModel = extraArgs[++i] ?? null;
-      }
+      const route = String(handle ?? '').startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg';
+      // #3857 — `supervisorModel` is now READ from the decided model, never re-parsed from `extraArgs`: the
+      // decision (table or a reasoned override) is what `buildAgentArgv` actually applied, above, so this can
+      // never disagree with what was spawned. `table` is `null` for a `detached` route (the build wrapper does
+      // not go through `buildAgentArgv`, so #3857 does not apply to it yet — see `table`'s own comment above).
+      const modelDecision = table && route === 'claude-bg'
+        ? resolveWorkerModel({ extraArgs, table, modelReason: payload?.modelReason ?? null })
+        : null;
+      // A `detached` route (build's own wrapper, which never reaches `buildAgentArgv`) keeps the PRE-#3857
+      // fallback: whatever hand-set `--model`/`-m`/`--model=` rides `extraArgs`, unconditionally, exactly as
+      // `wip-agents-io.mjs`'s display already depends on — #3857 does not extend to that spawn path yet (see
+      // `table`'s own comment above).
+      const supervisorModel = modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value;
       return inFlight({
         dispatch: {
           supervisorModel, launchKind: payload?.launchKind ?? 'build',
-          route: String(handle ?? '').startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg',
+          route,
+          // #3857 — beside `routedProvider`/`executedProvider`: what the model-tier table decided (or the
+          // reasoned override that replaced it), and the table's own tier for an override so a reviewer sees
+          // both what ran and what the table would have chosen. `null` off the `detached` route, same as above.
+          workerModel: modelDecision && !modelDecision.refusal
+            ? { name: modelDecision.model, tier: modelDecision.tier, source: modelDecision.source, tableTier: modelDecision.tableTier, reason: modelDecision.reason }
+            : null,
           // #3717/#3848 — WHAT THE CRITERIA CHOSE vs WHAT ACTUALLY RAN IT, both on the durable record.
           //
           // `routed` is `decideDispatchRoute`'s answer, computed before this spawn from the derived
@@ -1371,6 +1422,11 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },
     extraArgs: request.extraArgs,
     systemPromptFile: request.systemPromptFile,
+    // #3857 — the model-tier table's decision for this dispatch, and the required override reason, when the
+    // caller has one (`request.table` null keeps this call byte-identical to before #3857 for any caller that
+    // does not compute a routing decision).
+    table: request.table ?? null,
+    modelReason: request.modelReason ?? null,
   });
   // #3105 — mark this session as a MECHANICALLY DISPATCHED delivery/fix/ci-heal agent, via env (inherited
   // by the whole `claude --bg` process tree). `scripts/guard-bash.mjs` reads it to deny a dispatched
@@ -1479,21 +1535,103 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  * {@link resumeSucceeded} and falling back to a fresh, full dispatch (this same function, `resumeSessionId`
  * omitted) when it does.
  */
-export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null }) {
+export function buildAgentArgv({
+  sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null,
+  // #3857 — `table` is the checked-in model-tier table's answer for THIS dispatch ({tier, model, reason} —
+  // see `../lib/provider-routing.mjs#workerTierFor`); `null` (every caller this card does not touch: review
+  // and reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical — extraArgs pass through
+  // untouched, no --model is ever injected or refused. Passing `table` is what OPTS a caller into the new
+  // enforcement, exactly once, at the one argv builder every Claude dispatch shares.
+  table = null, modelReason = null,
+} = {}) {
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
     throw notApplied('dispatch-lane: refusing a brief that begins with `-` — an argument parser can read it as a flag');
   }
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
+  let args = extraArgs.map(String);
+  const modelArgs = [];
+  if (table) {
+    const decision = resolveWorkerModel({ extraArgs: args, table, modelReason });
+    if (decision.refusal) throw notApplied(`dispatch-lane: ${decision.refusal}`);
+    args = decision.cleanArgs;
+    if (decision.model) modelArgs.push('--model', String(decision.model));
+  }
   return [
     '--bg',
     '--session-id', String(sessionId),
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
-    ...extraArgs.map(String),
+    ...modelArgs,
+    ...args,
     prompt,
   ];
+}
+
+/**
+ * Extract a hand-set `--model`/`-m`/`--model=` flag from an argv-shaped list. PURE. Returns the flag's value
+ * (the LAST occurrence wins, matching the CLI's own repeated-flag rule) and the list with every occurrence
+ * removed, so a caller never has to re-scan for what it just found.
+ *
+ * @param {string[]} args
+ * @returns {{found: boolean, value: string|null, rest: string[]}}
+ */
+function extractModelFlag(args) {
+  let value = null;
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = String(args[i]);
+    if (a === '--model' || a === '-m') { value = args[i + 1] != null ? String(args[i + 1]) : ''; i += 1; continue; }
+    if (a.startsWith('--model=')) { value = a.slice(8); continue; }
+    rest.push(a);
+  }
+  return { found: value !== null, value, rest };
+}
+
+/** A model name that names Fable — never a worker model, even with a recorded reason (operator rule, #3857). */
+function namesFable(model) {
+  return /fable/i.test(String(model ?? ''));
+}
+
+/**
+ * THE MODEL DECISION for one dispatch's spawn (#3857) — resolves the worker's Claude model from the checked-in
+ * model-tier table ({@link ../lib/provider-routing.mjs#workerTierFor}, reached through
+ * {@link ../lib/dispatch-contracts.mjs#decideDispatchRoute}/`routeDispatch`) UNLESS the caller hand-set one in
+ * `extraArgs` ({@link AGENT_ARGS_ENV}) WITH a recorded `modelReason` — the one sanctioned per-dispatch OVERRIDE
+ * (mirrors #3840 Fork 5's `deliveryAgent:`/`deliveryAgentReason:` shape for the provider axis).
+ *
+ * PURE and NEVER THROWS: a disallowed combination comes back as a named `refusal` string for the caller to
+ * refuse BEFORE any process exists — the same fail-closed shape {@link assertNotALaneCheckout} and every other
+ * pre-spawn guard in this file already uses. `cleanArgs` is `extraArgs` with every `--model`/`-m`/`--model=`
+ * token removed, so a caller that injects the DECIDED model can never also leave the hand-set one riding
+ * alongside it as a silent duplicate flag.
+ *
+ * @param {{extraArgs?: string[], table: {tier: string, model: string, reason?: string|null}, modelReason?: string|null}} o
+ * @returns {{model: string|null, tier: string|null, source: 'table'|'override', tableTier: string|null, reason: string|null, cleanArgs: string[], refusal: string|null}}
+ */
+export function resolveWorkerModel({ extraArgs = [], table, modelReason = null } = {}) {
+  const handSet = extractModelFlag(extraArgs.map(String));
+  const reason = modelReason == null ? '' : String(modelReason).trim();
+  const tableTier = table?.tier ?? null;
+  const asTable = { model: table?.model ?? null, tier: tableTier, source: 'table', tableTier, reason: table?.reason ?? null, cleanArgs: handSet.rest };
+  if (handSet.found && !reason) {
+    return {
+      ...asTable,
+      refusal: `a hand-set --model in ${AGENT_ARGS_ENV} with no --modelReason is refused — #3857's model-tier `
+        + 'table decides the worker\'s tier; give --modelReason=<text> naming why this dispatch departs from it',
+    };
+  }
+  if (!handSet.found && reason) {
+    return { ...asTable, refusal: '--modelReason was given but no --model was set in extraArgs to explain — refusing a reason for nothing' };
+  }
+  if (handSet.found && reason) {
+    if (namesFable(handSet.value)) {
+      return { ...asTable, refusal: `refusing model ${JSON.stringify(handSet.value)} — Fable is never a worker model, even with a reason` };
+    }
+    return { model: handSet.value, tier: tableTier, source: 'override', tableTier, reason, cleanArgs: handSet.rest, refusal: null };
+  }
+  return { ...asTable, refusal: null };
 }
 
 /**

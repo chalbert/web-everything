@@ -298,13 +298,71 @@ describe('dispatch-task — the spawn argv', () => {
     expect(argv.at(-1)).toMatch(/^Your assignment is the task brief/);
   });
 
-  it('the operator\'s WE_DISPATCH_AGENT_ARGS come first, so a model set there reaches the worker', async () => {
-    const brief = writeBrief();
-    const h = harness({ extraArgs: ['--model', 'sonnet'] });
-    await h.call(launchArgv(brief));
-    const { argv } = h.spawn.calls[0];
-    expect(argv[argv.indexOf('--model') + 1]).toBe('sonnet');
-    expect(argv.indexOf('--model')).toBeLessThan(argv.indexOf('--permission-mode'));
+  // #3857 — the model-tier table decides the worker's model at the shared spawn point; a hand-set `--model`
+  // in `WE_DISPATCH_AGENT_ARGS` is honoured ONLY alongside `--modelReason=<text>` on the SAME call. This
+  // rewrites the pre-#3857 case (a model in the env reached the worker unconditionally, no reason needed).
+  describe('dispatch-task — the model-tier table (#3857)', () => {
+    it('an unlisted --kind (the default `task`) spawns with --model equal to the Sonnet id', async () => {
+      const brief = writeBrief();
+      const h = harness();
+      await h.call(launchArgv(brief));
+      const { argv } = h.spawn.calls[0];
+      expect(argv[argv.indexOf('--model') + 1]).toBe('claude-sonnet-5');
+    });
+
+    it('--kind=prepare-decision spawns with the Opus id', async () => {
+      const brief = writeBrief();
+      const h = harness();
+      await h.call(launchArgv(brief, ['--kind=prepare-decision']));
+      const { argv } = h.spawn.calls[0];
+      expect(argv[argv.indexOf('--model') + 1]).toBe('claude-opus-5');
+    });
+
+    it('a --model in WE_DISPATCH_AGENT_ARGS with no --modelReason is refused, exits 1, declares no effect, names the rule', async () => {
+      const brief = writeBrief();
+      const h = harness({ extraArgs: ['--model', 'opus'] });
+      const out = await h.call(launchArgv(brief));
+      expect(out.code).toBe(1);
+      expect(h.spawn.calls).toHaveLength(0);
+      // No agent started (`notApplied`, thrown before any spawn) — the run record exists but declares no
+      // successful dispatch effect; same fail-closed shape as every other pre-spawn refusal in this file.
+      const runId = h.store.list()[0];
+      const run = h.store.read(runId);
+      const effect = run.effects.find((e) => e.type === DISPATCH_EFFECT);
+      expect(effect.status).toBe('failed');
+      expect(out.lines.join('\n')).toMatch(/model-tier table|--modelReason/);
+    });
+
+    it('with --modelReason=<text> the argv carries that model and the run record workerModel is {source: override, reason, tableTier: sonnet}', async () => {
+      const brief = writeBrief();
+      const h = harness({ extraArgs: ['--model', 'opus'] });
+      await h.call(launchArgv(brief, ['--modelReason=operator pin for a tricky regression']));
+      const { argv } = h.spawn.calls[0];
+      expect(argv[argv.indexOf('--model') + 1]).toBe('opus');
+      const runId = h.store.list()[0];
+      const run = h.store.read(runId);
+      const effect = run.effects.find((e) => e.type === DISPATCH_EFFECT);
+      expect(effect.dispatch.workerModel).toMatchObject({
+        name: 'opus', source: 'override', reason: 'operator pin for a tricky regression', tableTier: 'sonnet',
+      });
+    });
+
+    it('--modelReason alone (no --model in the env) is refused', async () => {
+      const brief = writeBrief();
+      const h = harness();
+      const out = await h.call(launchArgv(brief, ['--modelReason=no model to explain']));
+      expect(out.code).toBe(1);
+      expect(h.spawn.calls).toHaveLength(0);
+    });
+
+    it('a model name that resolves to Fable is refused even with a reason', async () => {
+      const brief = writeBrief();
+      const h = harness({ extraArgs: ['--model', 'fable-1'] });
+      const out = await h.call(launchArgv(brief, ['--modelReason=trying something']));
+      expect(out.code).toBe(1);
+      expect(h.spawn.calls).toHaveLength(0);
+      expect(out.lines.join('\n')).toMatch(/[Ff]able/);
+    });
   });
 
   it('a `model` input cannot be declared: it collides with the adapter\'s own control flag', () => {
@@ -510,6 +568,41 @@ describe('dispatch-task — against a real process and real stores (#2949)', () 
   it('a completion record of kind `task` is valid', () => {
     expect(newCompletionRecord({ session: 'my-task', kind: 'task' })).toMatchObject({ kind: 'task', status: 'started' });
   });
+
+  // #3857 Done-when 5 — PROBED LIVE: a real dispatch-task call through the REAL `defaultSpawnAgent`/`claude`
+  // (the fake CLI on PATH, same "proves the plumbing" standard `fake-claude.mjs`'s own header states), with a
+  // trivial brief and no env model, then a second call with an unreasoned env `--model`.
+  it('a trivial dispatch with no env model: the run record shows workerModel {source: table, tier: sonnet} and the session reports the Sonnet model', async () => {
+    const seams = realSeams();
+    const store = createFileRunStore(join(scratch, 'runs'));
+    const declaration = dispatchTaskOperation({ readTask: createTaskReader({ store, listAgents: seams.listAgents, now: () => NOW, cwd: scratch }) });
+    const registry = createRegistry(); registry.register(declaration);
+    const sinks = createDispatchTaskSinks({ root: scratch, spawnAgent: seams.spawnAgent, checkStaleness: FRESH, now: () => NOW });
+
+    const out = await runOperationCli({ declaration, registry, store, sinks, newRunId: () => 'run-real-model-1', argv: launchArgv(writeBrief()) });
+    expect(out.code).toBe(0);
+
+    const argv = fake.lastArgv();
+    expect(argv[argv.indexOf('--model') + 1]).toBe('claude-sonnet-5');
+    const [runId] = store.list();
+    const run = store.read(runId);
+    const effect = run.effects.find((e) => e.type === DISPATCH_EFFECT);
+    expect(effect.dispatch.workerModel).toMatchObject({ name: 'claude-sonnet-5', tier: 'sonnet', source: 'table' });
+  });
+
+  it('a second call with WE_DISPATCH_AGENT_ARGS=[--model,opus] and no reason is refused, and starts nothing', async () => {
+    const seams = realSeams();
+    const store = createFileRunStore(join(scratch, 'runs'));
+    const declaration = dispatchTaskOperation({ readTask: createTaskReader({ store, listAgents: seams.listAgents, now: () => NOW, cwd: scratch }) });
+    const registry = createRegistry(); registry.register(declaration);
+    const sinks = createDispatchTaskSinks({
+      root: scratch, spawnAgent: seams.spawnAgent, checkStaleness: FRESH, now: () => NOW, extraArgs: ['--model', 'opus'],
+    });
+
+    const out = await runOperationCli({ declaration, registry, store, sinks, newRunId: () => 'run-real-model-2', argv: launchArgv(writeBrief()) });
+    expect(out.code).toBe(1);
+    expect(fake.sessions()).toHaveLength(0);
+  });
 });
 
 // ── the projection, pure ───────────────────────────────────────────────────────────────────────────────────
@@ -539,5 +632,21 @@ describe('projectJobs', () => {
   it('lists the newest launch first', () => {
     const a = run(); const b = run({ key: 'r2#2#0', startedAt: '2026-09-21T09:30:00.000Z', payload: { sessionSlug: 's2', brief: '/c.md' } });
     expect(projectJobs({ runs: [a, b] }).map((j) => j.session)).toEqual(['s2', 's1']);
+  });
+});
+
+// #3857 Done-when 4 — one source of truth: the two spawn files never hardcode a tier or model, only read the
+// checked-in table's answer.
+describe('dispatch-task/dispatch-lane spawn files carry no tier/model literal (#3857)', () => {
+  it('neither dispatch-task-io.mjs nor dispatch-lane-io.mjs contains a hardcoded tier or Claude model id', () => {
+    const forbidden = /'sonnet'|"sonnet"|'opus'|"opus"|'haiku'|"haiku"|claude-sonnet-5|claude-opus-5|claude-haiku-4-5/;
+    for (const file of ['dispatch-task-io.mjs', 'dispatch-lane-io.mjs']) {
+      // One pre-#3857 line is exempt: `agentArgsFromEnv`'s TypeError message uses a `'["--model","sonnet"]'`
+      // JSON-array EXAMPLE to show the expected shape of `WE_DISPATCH_AGENT_ARGS` — illustrative text in an
+      // error string, never a tier decision, and it predates this card. Every OTHER line still gets the check.
+      const src = readFileSync(join(import.meta.dirname, '..', file), 'utf8')
+        .replace('e.g. \'["--model","sonnet"]\'', '');
+      expect(src, file).not.toMatch(forbidden);
+    }
   });
 });
