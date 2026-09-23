@@ -5081,3 +5081,51 @@ Backlog card `status`/`resolved` flip for `#3857` itself is DEFERRED to a separa
 same pattern `#3888`/`#3889`/`#3887`/`#3783` used above. `#3857` was claimed (commit on `main`, local only,
 not yet pushed — see the scope-reconciliation commit above for the same local-only-pending-closeout
 reasoning) rather than resolved, per this session's own convention for prototype-branch work.
+
+## Session update (2026-09-23) — #3784 (Rule 6 of #3690 + enforcement flip): promotion record, fail-closed clamp, default-on
+
+**#3784 (Rule 6 of #3690 + enforcement flip), commit `4f357472d` on top of `600acc14f`.**
+
+- **Rule 6 (the promotion record).** New checked-in `we:scripts/lib/dispatch-supervision-promotions.json`,
+  shipped `{"promotions": []}`. `validatePromotions` (`we:scripts/lib/dispatch-contracts.mjs`) checks a row's
+  shape and **fails CLOSED** on a missing/unparseable/invalid candidate (unlike the size-policy precedent,
+  which fails open) — no promotion, not a refused route. `decideDispatchRoute` clamps a computed `spot-check`
+  to `full` unless the `{provider, model, taskType}` triple is named at `spot-check` in the record; a computed
+  `full` is never lifted. `selectSupervisionLevel` (`we:scripts/lib/provider-routing.mjs`) is untouched, as
+  designed. `check:standards` gained a new promotion-record-citation gate: fails on a row whose `anchor`
+  doesn't resolve to a real heading in `we:docs/agent/platform-decisions.md`, or whose `ratifiedBy` card isn't
+  `status: resolved`.
+- **The flip.** `supervisionEnforcementFrom({})` now returns `true` (#3690 is ratified). Reworded the four
+  stale "#3690 is not ratified"/"unratified" strings. Removed #3843's carried `defaultSize < 13` refusal now
+  that this card's fixes have landed.
+
+**Complication found while doing this card's own required check** ("confirm #3850's work actually prevents
+every dispatch from freezing once enforcement is on"): **#3850 was ratified but its code was never built** —
+only the decision card existed (one commit, the card's own authoring). `record.supervisor` was never set
+anywhere, so with enforcement flipped on, `supervisionHold` would have held EVERY `full`-supervision routed
+dispatch — confirmed empirically: `we:scripts/operations/__tests__/dispatch-lane.test.mjs` /
+`we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs`'s ordinary build/fix/ci-heal
+"byte-identical to before" tests failed outright (`dispatching: false`) once the default flipped, before any
+fix.
+
+Implemented the minimal, already-ratified **#3850 Fork 1** piece, within this card's own file scope
+(`we:scripts/lib/dispatch-contracts.mjs`): `decideDispatchRoute` now names a `supervisor` (the land-seam PR
+review) on every routed record, so `supervisionHold` never holds a well-formed dispatch at spawn any more —
+matching Fork 1's own ratified text verbatim ("the dispatch records the supervisor as that PR review … so
+`supervisionHold` no longer holds it").
+
+**#3850 Fork 2 is NOT built** (out of this card's scope — `we:scripts/operations/deliver-item-wrapper.mjs`,
+`we:scripts/operations/fix-dispatch-wrapper.mjs`, `we:scripts/operations/ci-heal-dispatch-wrapper.mjs`,
+`we:scripts/review-set-label.mjs`): forcing `review:pending` / a merge hold specifically
+for a delegated (non-Claude) route's PR. Today a delegated `full` route's PR follows the ordinary escalation
+rubric, same as native work — it is not yet forced into a blocking independent review purely for being
+delegated. This is a **review-policy gap, not a freeze**, and should be tracked as follow-up work under
+#3850/#3383 before #3443 (branch-to-main graduation) — the ratified statute's independent-pass guarantee for
+delegated work is not yet enforced end to end.
+
+**Verification.** Full `npm run test:unit`: 16,503 passed, 2 failed, 11 skipped — both failures confirmed
+pre-existing/unrelated (host-sampler environment tests; identical before/after via git-stash bisection).
+`npm run check:standards`: 2 pre-existing, unrelated stranded-hash errors on `main` (identical before/after
+via git-stash bisection), 0 added by this diff.
+
+Landed as a direct commit to `lane/mechanical-dispatcher`, no PR (family convention).
