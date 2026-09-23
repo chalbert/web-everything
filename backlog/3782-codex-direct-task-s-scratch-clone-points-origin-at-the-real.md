@@ -2,12 +2,14 @@
 bornAs: x9avg7g
 kind: story
 size: 3
-status: active
+status: resolved
 scaffoldedBy: "prepare-3690"
 dateScaffolded: "2026-09-20"
 scope: ["we:scripts/codex-direct-task.mjs", "we:scripts/gemini-direct-task.mjs"]
 dateOpened: "2026-09-20"
 dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: []
 ---
 
