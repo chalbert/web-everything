@@ -289,6 +289,37 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
     const plan = planReconcile({ prs: [pr1563()], agents: [], durableCounts: { 1563: 4 }, now: NOW });
     expect(plan.dispatch.map((d) => d.attempts)).toEqual([4]);
   });
+
+  // xpprcdz — a PR that is `review:human` FROM OPEN (no `review:changes`, no `review:pending`) previously
+  // refused as `owed-elsewhere` and was NEVER dispatched at all, so `we:scripts/operations/review-pr.mjs`'s own
+  // `advise` step — built specifically for this population — never ran. Live-caught 2026-09-23: PR #2486 and
+  // #2492 sat with zero advisory-panel comments and no status label, indistinguishable from "nobody has looked"
+  // versus "an advisory pass already ran and found nothing new". `needs-human` now dispatches `review` too —
+  // `review-pr.mjs`'s `confirm` step still suspends on an operator, so this never clears the human gate; only
+  // `advise` (a comment plus an `advisory:*` label) runs unattended.
+  it('xpprcdz — a PURE review:human PR (no review:changes, no review:pending) with a finding now dispatches `review`, not `owed-elsewhere`', () => {
+    const humanFromOpen = pr1563({ labels: lbl('review:human') });
+    const plan = planReconcile({ prs: [humanFromOpen], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563, phase: 'needs-human' })]);
+    expect(plan.refusals).toHaveLength(0);
+  });
+
+  it('xpprcdz — the SAME round cap that binds a bounced+review:human PR also binds a PURE review:human one — advisory comments alone trip it', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const burned = pr1563({
+      labels: lbl('review:human'),
+      comments: [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, (_, i) => advisoryRound(i + 1))],
+    });
+    const plan = planReconcile({ prs: [burned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('xpprcdz — review:accepted supersedes review:human (classifyPr\'s own rule) — an already-cleared PR is not re-dispatched as needs-human', () => {
+    const cleared = pr1563({ labels: lbl('review:human', 'review:accepted') });
+    const plan = planReconcile({ prs: [cleared], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch.map((d) => d.kind)).not.toContain('review');
+  });
 });
 
 // ── CASE 5 — REFUSAL 4: LIVENESS COMES FROM A LIVE PROCESS ────────────────────────────────────────────────────
@@ -578,8 +609,10 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
 });
 
 describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
-  it('includes an owed-elsewhere refusal (e.g. needs-human) — it is a real conveyor PR, not an unrelated one', () => {
-    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'needs-human' }];
+  it('includes an owed-elsewhere refusal (e.g. ci-red) — it is a real conveyor PR, not an unrelated one', () => {
+    // `needs-human` no longer produces `owed-elsewhere` (xpprcdz dispatches `review` for it instead) — `ci-red`
+    // is the current real example of a phase this pass refuses as someone else's job.
+    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'ci-red' }];
     expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
