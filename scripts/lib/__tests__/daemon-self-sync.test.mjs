@@ -17,6 +17,7 @@ describe('decideSelfSync — pure', () => {
   it('a dirty tree is never touched', () => expect(decideSelfSync({ ...base, dirty: true })).toEqual({ action: 'skip', reason: 'dirty' }));
   it('not on main is never touched', () => expect(decideSelfSync({ ...base, onBase: false })).toEqual({ action: 'skip', reason: 'not-on-main' }));
   it('a failed fetch skips', () => expect(decideSelfSync({ ...base, fetched: false })).toEqual({ action: 'skip', reason: 'fetch-failed' }));
+  it('an unknown tree state (status failed) fails closed — never merges', () => expect(decideSelfSync({ ...base, dirty: null })).toEqual({ action: 'skip', reason: 'status-failed' }));
 });
 
 describe('selfSyncCheckout — injected git', () => {
@@ -85,6 +86,26 @@ describe('selfSyncCheckout — injected git', () => {
     expect(selfSyncCheckout({ root: '/x', run })).toEqual({ merged: false, commits: 0, reason: 'conflict' });
     expect(calls).toContain('merge --abort');
   });
+
+  it('a timed-out git status is NOT read as a clean tree — skips as status-failed, never reaching merge', () => {
+    const { run, calls } = runner({ status: { status: null, stdout: '', stderr: '', signal: 'SIGKILL' } });
+    expect(selfSyncCheckout({ root: '/x', run })).toEqual({ merged: false, commits: 0, reason: 'status-failed' });
+    expect(calls.some((c) => c.startsWith('merge'))).toBe(false);
+  });
+
+  it('a failed git status in gitRun\'s real shape (status 1, empty stdout) also skips as status-failed', () => {
+    const { run } = runner({ status: { status: 1, stdout: '', stderr: 'fatal' } });
+    expect(selfSyncCheckout({ root: '/x', run })).toEqual({ merged: false, commits: 0, reason: 'status-failed' });
+  });
+
+  // Every git call site fed a timed-out (killed) result: none may ever end in `merged: true`.
+  const TIMED_OUT = { status: null, stdout: '', stderr: '', signal: 'SIGKILL' };
+  for (const site of ['fetch', 'rev-list', 'symbolic-ref', 'status', 'merge']) {
+    it(`a timed-out \`${site}\` never leads to merged:true`, () => {
+      const { run } = runner({ [site]: TIMED_OUT });
+      expect(selfSyncCheckout({ root: '/x', run }).merged).toBe(false);
+    });
+  }
 });
 
 describe('withSelfSync — restart INSTEAD of ticking when new code arrived', () => {
@@ -105,6 +126,13 @@ describe('withSelfSync — restart INSTEAD of ticking when new code arrived', ()
     const w = withSelfSync({ tickOnce: () => 'ticked' }, { root: '/x', onRestart: vi.fn(), sync: () => ({ merged: false, commits: 0, reason: 'conflict' }), log });
     await expect(w.tickOnce()).resolves.toBe('ticked');
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('needs a hand merge'));
+  });
+
+  it('a status-failed sync still ticks and is logged, not silent', async () => {
+    const log = { error: vi.fn() };
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, { root: '/x', onRestart: vi.fn(), sync: () => ({ merged: false, commits: 0, reason: 'status-failed' }), log });
+    await expect(w.tickOnce()).resolves.toBe('ticked');
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('status-failed'));
   });
 
   it('an explicit timeoutMs is forwarded to the injected sync', async () => {

@@ -27,13 +27,17 @@ import { gitRun } from './main-staleness.mjs';
 
 /**
  * Pure: what should a daemon's clone do, given where it stands against `origin/main`?
- * @param {{fetched:boolean, behind:number, dirty:boolean, onBase:boolean}} s
+ * `dirty: null` means the tree state is UNKNOWN (the `git status` itself failed or timed out) — that fails
+ * CLOSED (`status-failed`), never as clean: merging a tree we could not inspect could restart the daemon over
+ * uncommitted work.
+ * @param {{fetched:boolean, behind:number, dirty:boolean|null, onBase:boolean}} s
  * @returns {{action:'none'|'merge'|'skip', reason:string}}
  */
 export function decideSelfSync({ fetched, behind, dirty, onBase }) {
   if (!fetched) return { action: 'skip', reason: 'fetch-failed' };
   if (!behind) return { action: 'none', reason: 'up-to-date' };
   if (!onBase) return { action: 'skip', reason: 'not-on-main' };
+  if (dirty === null) return { action: 'skip', reason: 'status-failed' };
   if (dirty) return { action: 'skip', reason: 'dirty' };
   return { action: 'merge', reason: 'behind' };
 }
@@ -47,7 +51,8 @@ export function decideSelfSync({ fetched, behind, dirty, onBase }) {
  * hung `fetch`/`merge` (network stall, credential prompt) can NEVER freeze the caller indefinitely. `gitRun`
  * already treats a null/non-zero `status` as failure, so a timed-out command falls through the existing
  * fetch-failed / merge-abort paths unchanged: a timed-out fetch → `fetch-failed` (never reaches merge); a
- * timed-out merge → aborted (itself under the same timeout) and reported as `conflict`.
+ * timed-out merge → aborted (itself under the same timeout) and reported as `conflict`; a failed/timed-out
+ * `status` → `status-failed` (fail closed — an uninspected tree is never treated as clean).
  * @param {{root:string, base?:string, run?:typeof gitRun, timeoutMs?:number}} o
  * @returns {{merged:boolean, commits:number, reason:string}}
  */
@@ -61,7 +66,8 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs 
   const behind = fetched ? count(`HEAD..origin/${base}`) : 0;
   const head = git(['symbolic-ref', '--short', 'HEAD']);
   const onBase = head.status === 0 && head.stdout.trim() === base;
-  const dirty = !!git(['status', '--porcelain']).stdout.trim();
+  const status = git(['status', '--porcelain']);
+  const dirty = status.status === 0 ? !!String(status.stdout ?? '').trim() : null;
 
   const decision = decideSelfSync({ fetched, behind, dirty, onBase });
   if (decision.action !== 'merge') return { merged: false, commits: 0, reason: decision.reason };
@@ -92,6 +98,8 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
       }
       if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-main') {
         log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
+      } else if (r.reason === 'status-failed') {
+        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (status-failed) — `git status` failed or timed out; retrying next tick');
       }
       return tick();
     },
