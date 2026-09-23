@@ -54,7 +54,7 @@
  * the tick.
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
-import { repoProfile } from '../lib/repo-profile.mjs';
+import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit } from './pr-work-unit.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
@@ -71,7 +71,6 @@ import {
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
 import { BRIEF_REQUIRED_BY_KIND, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
-import { briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
