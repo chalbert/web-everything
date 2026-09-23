@@ -2,11 +2,12 @@
 bornAs: xmtbdgs
 kind: task
 parent: "3963"
-status: active
+status: resolved
 blockedBy: ["3966", "3965"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-23"
 dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
