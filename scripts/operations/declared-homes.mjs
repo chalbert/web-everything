@@ -116,4 +116,11 @@ export const DECLARED_HOMES = Object.freeze({
   // `conveyor/queue.mjs add` to clear it for the conveyor. Both are named here because this operation
   // declares over both ends of that gap, not just the first.
   'file-item': Object.freeze(['we:scripts/backlog.mjs scaffold', 'we:scripts/conveyor/queue.mjs add']),
+
+  // `docket-refresh` (#3723, under epic #3383) — its own header states the relationship outright: the fetch +
+  // stale-checkout refusal + content-hash gate + publish-owed hand-off AROUND the checkout's own
+  // `gen-decision-docket.mjs data`/`render` steps, writing outside every checkout instead of the generator's
+  // own dirty-tree defaults. A skill telling a session to run the generator by hand for a routine refresh is
+  // telling it to skip the hash gate and the hand-off record this operation exists to add.
+  'docket-refresh': Object.freeze(['we:scripts/gen-decision-docket.mjs']),
 });

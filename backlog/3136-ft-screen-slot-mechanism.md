@@ -305,8 +305,7 @@ That leaves a genuine two-way choice for how the delegated listener reaches the 
    (`frontierui:blocks/tabs/TabsElement.ts:74`), a first-class, documented public method that forwards to the
    internal `TabGroupBehavior` kernel's own `activate(name)` (`frontierui:blocks/tabs/TabGroupBehavior.ts:115-119`).
    No reach into the kernel's internals, no dependency on `CustomAttribute`'s attachment bookkeeping.
-2. **Simulate a user click on the matching trigger.** `document.querySelector<HTMLElement>('[tab-trigger="'
-   + tabName + '"]')?.click()` — relies on the trigger's own click handler (installed by `TabGroupBehavior`)
+2. **Simulate a user click on the matching trigger.** `document.querySelector<HTMLElement>('[tab-trigger="' + tabName + '"]')?.click()` — relies on the trigger's own click handler (installed by `TabGroupBehavior`)
    firing as a side effect, rather than calling a documented entry point directly. Achieves the same visible
    result today, but is indirect (depends on an internal listener wiring, not a contract), and a real click
    also carries pointer-event semantics (implicit focus move, potential double-handling if a future revision
