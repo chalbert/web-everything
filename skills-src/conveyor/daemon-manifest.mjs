@@ -133,6 +133,10 @@ export const DAEMON_MANIFEST = {
   ...perRepoEntries('parked-pr-conflict-watch', 'scripts/conveyor/parked-pr-conflict-watch.mjs', ['sweep']),
   ...perRepoEntries('parked-pr-progress-watch', 'scripts/conveyor/parked-pr-progress-watch.mjs', ['sweep']),
   ...perRepoEntries('lane-pool-health-watch', 'scripts/conveyor/lane-pool-health-watch.mjs', []),
+  // #3383's stuck-PR watch — per-repo, matching the shape above: catches an open PR stalled past its stage's
+  // own expected time and dispatches ONE diagnosis-only inspection agent per stuck episode
+  // (`we:scripts/conveyor/stuck-pr-watch.mjs`, `we:scripts/conveyor/stuck-pr-watch-core.mjs`).
+  ...perRepoEntries('stuck-pr-watch', 'scripts/conveyor/stuck-pr-watch.mjs', ['sweep']),
 };
 
 /** A script path may be `undefined` is never intended; it must be a plain repo-relative path with no `..`

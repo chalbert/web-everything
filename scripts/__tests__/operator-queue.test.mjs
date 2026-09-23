@@ -1,8 +1,9 @@
 /** @file Operator readiness gates (label gate, label/comment cross-check, transient mergeability) and the read-only CLI report over inline gh fixtures. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { evaluatePr, main, pollMergeable, standDownRow } from '../operations/operator-queue.mjs';
+import { evaluatePr, main, pollMergeable, standDownRow, stuckInspectedRow } from '../operations/operator-queue.mjs';
 import { STAND_DOWN_MARKER, buildStandDownComment } from '../conveyor/stand-down.mjs';
+import { STUCK_DISPATCH_MARKER, buildStuckDispatchComment } from '../conveyor/stuck-pr-dispatch-marker.mjs';
 
 vi.mock('node:child_process', () => {
   const execFileSync = vi.fn();
@@ -203,6 +204,7 @@ describe('main', () => {
         reasons: ['label/comment disagreement: advisory comment says accept on this head but advisory:accepted is absent'],
       }],
       stoodDown: [],
+      stuck: [],
       errors: ['owner/broken: unavailable'],
       unsupported: [],
     });
@@ -220,7 +222,7 @@ describe('main', () => {
       .mockReturnValueOnce(JSON.stringify({ mergeable: 'MERGEABLE' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], stoodDown: [], errors: [], unsupported: [],
+      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [],
     });
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1000, 2000]);
   });
@@ -232,7 +234,7 @@ describe('main', () => {
     vi.mocked(execFileSync).mockReturnValue(JSON.stringify({ mergeable: 'UNKNOWN' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], stoodDown: [], errors: [], unsupported: [],
+      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [],
     });
     expect(sleep).toHaveBeenCalledTimes(4);
   });
@@ -258,6 +260,7 @@ describe('main', () => {
       'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
       'STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):', '(none)',
+      'STUCK — inspected (epic #3383 dispatched a diagnosis-only agent; read its comment):', '(none)',
     ]);
   });
 
@@ -271,6 +274,7 @@ describe('main', () => {
       'UNSUPPORTED REPO — owed work the conveyor cannot dispatch for this repo:', '(none)',
       'NOT READY — agent work (review:human but gates fail):', '(none)',
       'STOOD DOWN — needs your judgment (a fix agent asked a question; no label changed):', '(none)',
+      'STUCK — inspected (epic #3383 dispatched a diagnosis-only agent; read its comment):', '(none)',
     ]);
     expect(vi.mocked(execFileSync).mock.calls.map(([, args]) => args[3])).toEqual([
       'chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app',
@@ -386,5 +390,59 @@ describe('main — STOOD DOWN section', () => {
     expect(out).toContain('o/n#55  Ready for review');
     expect(out).toContain('stood down 2026-09-21T00:00:00Z');
     expect(out).toContain('gate stayed RED');
+  });
+});
+
+// STUCK — INSPECTED — epic #3383's stuck-PR watch. Reuses the SAME durable marker the watch itself reads
+// (`stuckDispatchEpisodes`) rather than re-deriving a second parse of it, mirroring the STOOD DOWN section above.
+describe('stuckInspectedRow', () => {
+  it('returns null for a PR with no dispatch-marker comment', () => {
+    expect(stuckInspectedRow('o/n', fixture())).toBeNull();
+  });
+
+  it('extracts the episode count and most recent episode from a real marker comment', () => {
+    const body = buildStuckDispatchComment({ stage: 'fix', minutesSince: 50, thresholdMinutes: 45, activityAt: '2026-09-20T10:00:00Z', sessionSlug: 'inspect-42' });
+    const pr = fixture({ number: 42, labels: [], comments: [{ body, createdAt: '2026-09-20T10:05:00Z' }] });
+    expect(stuckInspectedRow('o/n', pr)).toEqual({
+      repo: 'o/n', number: 42, title: 'Ready for review', episodes: 1, lastEpisode: '2026-09-20T10:00:00Z',
+    });
+  });
+
+  it('ignores a marker that is only quoted, not the leading line', () => {
+    const pr = fixture({ labels: [], comments: [{ body: `> ${STUCK_DISPATCH_MARKER}\n\nepisode: 2026-09-20T10:00:00Z`, createdAt: 't' }] });
+    expect(stuckInspectedRow('o/n', pr)).toBeNull();
+  });
+});
+
+describe('main — STUCK section', () => {
+  const list = (...prs) => vi.mocked(execFileSync).mockReset().mockReturnValueOnce(JSON.stringify(prs));
+
+  it('lists an open PR carrying a stuck-watch dispatch marker, with its episode count', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStuckDispatchComment({ stage: 'conflict', minutesSince: 390, thresholdMinutes: 45, activityAt: '2026-09-23T12:27:00Z', sessionSlug: 'inspect-2505' });
+    list(fixture({ number: 2505, labels: [{ name: 'review:accepted' }], comments: [{ body, createdAt: 't' }] }));
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    expect(JSON.parse(log.mock.calls[0][0]).stuck).toEqual([{
+      repo: 'o/n', number: 2505, title: 'Ready for review', episodes: 1, lastEpisode: '2026-09-23T12:27:00Z',
+    }]);
+  });
+
+  it('never duplicates a PR already listed in NEEDS YOU', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const body = buildStuckDispatchComment({ stage: 'review', minutesSince: 50, thresholdMinutes: 45, activityAt: 'T1', sessionSlug: 'inspect-42' });
+    list(fixture({ comments: [advisory(), { body, createdAt: 't' }] })); // fixture() is fully ready by default
+    main(['--repo=o/n', '--json'], { unsupportedPath: NO_UNSUPPORTED });
+    const report = JSON.parse(log.mock.calls[0][0]);
+    expect(report.ready).toEqual([{ repo: 'o/n', number: 42, title: 'Ready for review' }]);
+    expect(report.stuck).toEqual([]);
+  });
+
+  it('renders the text section, empty state included', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    list();
+    main(['--repo=o/n'], { unsupportedPath: NO_UNSUPPORTED });
+    const out = log.mock.calls.map(([line]) => line).join('\n');
+    expect(out).toContain('STUCK — inspected (epic #3383 dispatched a diagnosis-only agent; read its comment):');
+    expect(out.trim().endsWith('(none)')).toBe(true);
   });
 });

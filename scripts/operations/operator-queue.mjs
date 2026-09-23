@@ -35,6 +35,11 @@ import {
 
 import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { readUnsupported } from '../conveyor/unsupported-repo.mjs';
+// Imports the LIGHTWEIGHT marker module directly, never `stuck-pr-watch-core.mjs` itself — that file pulls in
+// `reconcile-core.mjs`'s much heavier transitive graph (`rearm-review.mjs` → `review-set-label.mjs` →
+// `merge-ai-prs.mjs`), which broke this file's own mocked `node:child_process` test setup. See
+// `we:scripts/conveyor/stuck-pr-dispatch-marker.mjs`'s own header for the full story.
+import { stuckDispatchEpisodes } from '../conveyor/stuck-pr-dispatch-marker.mjs';
 import { countStandDownComments, standDownComments, standDownReason } from '../conveyor/stand-down.mjs';
 const hasLabel = (pr, name) => (pr.labels ?? []).some((label) => label.name === name);
 
@@ -100,6 +105,22 @@ export function evaluatePr(pr) {
 }
 
 /**
+ * Build the STUCK — INSPECTED row for a PR the stuck-PR watch (epic #3383) has already dispatched at least one
+ * diagnosis-only inspection agent for, or `null` for a PR carrying no such marker. Pure — reuses
+ * {@link stuckDispatchEpisodes} (`we:scripts/conveyor/stuck-pr-watch-core.mjs`) rather than re-deriving the
+ * marker match, mirroring {@link standDownRow}'s own "read the same durable marker the watch itself reads"
+ * shape. The MOST RECENT episode is what's surfaced when a PR has been inspected more than once.
+ * @param {string} repo
+ * @param {{number:number, title:string, comments?: unknown}} pr
+ * @returns {{repo:string, number:number, title:string, episodes:number, lastEpisode:string}|null}
+ */
+export function stuckInspectedRow(repo, pr) {
+  const episodes = stuckDispatchEpisodes(pr.comments);
+  if (!episodes.length) return null;
+  return { repo, number: pr.number, title: pr.title, episodes: episodes.length, lastEpisode: episodes[episodes.length - 1] };
+}
+
+/**
  * Build the STOOD DOWN row for a PR that carries at least one stand-down comment, or `null` for a PR that carries
  * none. Pure — reuses {@link countStandDownComments}/{@link standDownComments}/{@link standDownReason} rather than
  * re-deriving the leading-line marker match; this function only shapes the ones that already matched.
@@ -158,7 +179,7 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
   const unsupported = readUnsupported({ path: unsupportedPath }).filter(
     (row) => !requested.length || requested.some((repo) => repoKeyForSlug(repo) === row.repo),
   );
-  const report = { ready: [], pending: [], notReady: [], stoodDown: [], errors: [], unsupported };
+  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported };
   for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
@@ -191,6 +212,14 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
         if (countStandDownComments(pr.comments) === 0) continue;
         report.stoodDown.push(standDownRow(repo, pr));
       }
+      // STUCK — INSPECTED (epic #3383's stuck-PR watch): every open PR the watch has already dispatched a
+      // diagnosis-only inspection agent for — this costs no extra `gh` call, since `comments` already rode the
+      // ONE listing fetched above. Same "minus anything already in NEEDS YOU" narrowing as STOOD DOWN.
+      for (const pr of prs) {
+        if (readyNumbersThisRepo.has(pr.number)) continue;
+        const row = stuckInspectedRow(repo, pr);
+        if (row) report.stuck.push(row);
+      }
     } catch (error) {
       const detail = String(error.stderr || error.message).trim().replace(/\s+/g, ' ');
       report.errors.push(`${repo}: ${detail}`);
@@ -212,6 +241,9 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     console.log(report.stoodDown.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}  `
       + `[stood down ${pr.standDownAt || 'time unknown'}] ${pr.reason || '(no reason recorded)'}`
       + (pr.alsoReviewHuman ? '  [also review:human]' : '')).join('\n') || '(none)');
+    console.log('STUCK — inspected (epic #3383 dispatched a diagnosis-only agent; read its comment):');
+    console.log(report.stuck.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}  `
+      + `[${pr.episodes} episode${pr.episodes === 1 ? '' : 's'}, last ${pr.lastEpisode}]`).join('\n') || '(none)');
   }
 }
 

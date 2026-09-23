@@ -1,0 +1,132 @@
+/**
+ * @file scripts/conveyor/__tests__/stuck-pr-inspect-dispatch.test.mjs
+ * @description Pins the diagnosis-only inspection dispatch (epic #3383): brief-fill refusals, the `inspect-*`
+ *   session-slug grammar across repos, the disallowedTools argv shape (single `=`-joined element, never two),
+ *   and the plan→fill→spawn composition with every IO point injected.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import {
+  fillInspectBrief, INSPECT_BRIEF_PLACEHOLDERS, canonicalInspectPlaceholder, inspectSessionSlug,
+  planInspectDispatch, INSPECT_DISPATCH_DISALLOWED_TOOLS, inspectDispatchDisallowedToolsArgs, dispatchInspection,
+} from '../stuck-pr-inspect-dispatch.mjs';
+
+describe('inspectSessionSlug', () => {
+  it('mints inspect-<pr> for WE and inspect-<tag>-<pr> for a sibling repo', () => {
+    expect(inspectSessionSlug(2505, 'we')).toBe('inspect-2505');
+    expect(inspectSessionSlug(176, 'plateau-app')).toBe('inspect-pa-176');
+    expect(inspectSessionSlug(9, 'frontierui')).toBe('inspect-fui-9');
+  });
+  it('refuses no PR number', () => {
+    expect(() => inspectSessionSlug('', 'we')).toThrow(/needs a PR number/);
+  });
+});
+
+describe('planInspectDispatch', () => {
+  it('resolves the gh slug and session slug for a valid PR/repo', () => {
+    expect(planInspectDispatch({ pr: '2505', repo: 'chalbert/web-everything' })).toEqual({
+      pr: 2505, repo: 'chalbert/web-everything', repoKey: 'we', sessionSlug: 'inspect-2505',
+    });
+  });
+  it('refuses a non-positive-integer PR', () => {
+    expect(() => planInspectDispatch({ pr: 'abc', repo: 'chalbert/web-everything' })).toThrow(/positive integer/);
+    expect(() => planInspectDispatch({ pr: -1, repo: 'chalbert/web-everything' })).toThrow(/positive integer/);
+  });
+  it('refuses a non-constellation repo', () => {
+    expect(() => planInspectDispatch({ pr: 1, repo: 'someone/else' })).toThrow(/is not a constellation repo/);
+  });
+});
+
+describe('fillInspectBrief', () => {
+  const template = 'PR {{PR}} in {{REPO}} as {{SESSION_SLUG}} — stage {{STAGE}}, {{MINUTES_SINCE}}m over {{THRESHOLD_MINUTES}}m.';
+  const values = { PR: 2505, REPO: 'chalbert/web-everything', SESSION_SLUG: 'inspect-2505', STAGE: 'conflict', MINUTES_SINCE: 390, THRESHOLD_MINUTES: 45 };
+
+  it('substitutes every declared placeholder', () => {
+    const { prompt, unknownTokens } = fillInspectBrief(template, values);
+    expect(prompt).toBe('PR 2505 in chalbert/web-everything as inspect-2505 — stage conflict, 390m over 45m.');
+    expect(unknownTokens).toEqual([]);
+  });
+
+  it('refuses an empty template', () => {
+    expect(() => fillInspectBrief('', values)).toThrow(/template is empty/);
+    expect(() => fillInspectBrief('   ', values)).toThrow(/template is empty/);
+  });
+
+  it('refuses a missing/blank value for a declared placeholder', () => {
+    expect(() => fillInspectBrief(template, { ...values, STAGE: '' })).toThrow(/no value for the brief placeholder \{\{STAGE\}\}/);
+    expect(() => fillInspectBrief(template, { ...values, STAGE: undefined })).toThrow(/no value for the brief placeholder \{\{STAGE\}\}/);
+  });
+
+  it('refuses a value with characters unsafe for an unquoted shell paste', () => {
+    expect(() => fillInspectBrief(template, { ...values, STAGE: 'conflict; rm -rf /' })).toThrow(/has characters the brief cannot carry safely/);
+  });
+
+  it('refuses a MISSPELLED placeholder rather than silently leaving it unfilled', () => {
+    expect(() => fillInspectBrief('{{Pr}}', values)).toThrow(/MISSPELLED placeholder/);
+  });
+
+  it('reports (never throws on) a genuinely unknown token', () => {
+    const { unknownTokens } = fillInspectBrief(`${template} {{SOME_EXAMPLE}}`, values);
+    expect(unknownTokens).toEqual(['{{SOME_EXAMPLE}}']);
+  });
+
+  it('canonicalInspectPlaceholder recognizes case/separator variants of every declared name', () => {
+    for (const name of INSPECT_BRIEF_PLACEHOLDERS) {
+      expect(canonicalInspectPlaceholder(name.toLowerCase())).toBe(name);
+    }
+    // A multi-word name typo'd with a different separator (space/hyphen) still canonicalizes.
+    expect(canonicalInspectPlaceholder('session-slug')).toBe('SESSION_SLUG');
+    expect(canonicalInspectPlaceholder('session slug')).toBe('SESSION_SLUG');
+    expect(canonicalInspectPlaceholder('minutes since')).toBe('MINUTES_SINCE');
+    expect(canonicalInspectPlaceholder('totally-unknown')).toBeNull();
+  });
+});
+
+describe('inspectDispatchDisallowedToolsArgs', () => {
+  it('is ONE =-joined argv element, never two separate ones (the variadic-swallowing hazard)', () => {
+    const args = inspectDispatchDisallowedToolsArgs();
+    expect(args).toHaveLength(1);
+    expect(args[0]).toBe(`--disallowedTools=${INSPECT_DISPATCH_DISALLOWED_TOOLS.join(',')}`);
+  });
+  it('denies gh pr comment NOTHING — the brief\'s own required last step must still be reachable', () => {
+    expect(INSPECT_DISPATCH_DISALLOWED_TOOLS.some((p) => p.includes('gh pr comment'))).toBe(false);
+  });
+  it('denies every label/edit/merge mutation and every write-side script', () => {
+    for (const must of [
+      'Bash(gh pr edit:*)', 'Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh label:*)',
+      'Bash(git push:*)', 'Bash(git commit:*)', 'Bash(node scripts/backlog.mjs:*)', 'Bash(node scripts/lane-pool.mjs:*)',
+    ]) expect(INSPECT_DISPATCH_DISALLOWED_TOOLS).toContain(must);
+  });
+});
+
+describe('dispatchInspection — plan → fill → mint → spawn, every IO point injected', () => {
+  it('builds the expected argv and returns the parsed agent id', () => {
+    const spawnAgent = vi.fn(() => 'backgrounded · abcd1234 · inspect-2505\n');
+    const readBrief = () => 'Inspecting {{PR}} on {{REPO}} as {{SESSION_SLUG}} — {{STAGE}}/{{MINUTES_SINCE}}/{{THRESHOLD_MINUTES}}';
+    const result = dispatchInspection({
+      pr: 2505, repo: 'chalbert/web-everything', stage: 'conflict', minutesSince: 390.2, thresholdMinutes: 45,
+      root: '/repo', readBrief, mintSessionId: () => 'uuid-1', spawnAgent,
+    });
+    expect(result.agentId).toBe('abcd1234');
+    expect(result.sessionSlug).toBe('inspect-2505');
+    expect(result.repo).toBe('chalbert/web-everything');
+    expect(result.prompt).toContain('inspect-2505');
+    expect(result.prompt).toContain('conflict/390/45');
+
+    expect(spawnAgent).toHaveBeenCalledTimes(1);
+    const [argv, opts] = spawnAgent.mock.calls[0];
+    expect(argv).toContain('--bg');
+    expect(argv).toContain('-n');
+    expect(argv).toContain('inspect-2505');
+    expect(argv.some((a) => typeof a === 'string' && a.startsWith('--disallowedTools='))).toBe(true);
+    expect(opts).toEqual(expect.objectContaining({ cwd: '/repo' }));
+  });
+
+  it('refuses to run from a lane checkout (assertNotALaneCheckout)', () => {
+    expect(() => dispatchInspection({
+      pr: 1, repo: 'chalbert/web-everything', stage: 'fix', minutesSince: 50, thresholdMinutes: 45,
+      root: '/some/path/.lanes/web-everything/lane-9',
+      readBrief: () => '{{PR}}{{REPO}}{{SESSION_SLUG}}{{STAGE}}{{MINUTES_SINCE}}{{THRESHOLD_MINUTES}}',
+      spawnAgent: vi.fn(),
+    })).toThrow();
+  });
+});

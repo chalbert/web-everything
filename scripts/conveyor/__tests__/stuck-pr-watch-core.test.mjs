@@ -1,0 +1,250 @@
+/**
+ * @file scripts/conveyor/__tests__/stuck-pr-watch-core.test.mjs
+ * @description Pins the stuck-PR watch's pure core (epic #3383): the four per-stage thresholds (and their env
+ *   overrides), the three never-stuck exclusions, the live-agent reuse (never re-derived), the per-episode
+ *   dispatch idempotency, and the concurrency cap.
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  STUCK_STAGES, DEFAULT_STUCK_THRESHOLD_MINUTES, STUCK_THRESHOLD_ENV, stuckThresholdMinutes,
+  isDraftPr, isNeverStuckPr, classifyStuckStage, PROGRESS_TIMELINE_EVENTS, latestActivityAt,
+  minutesSinceActivity, evaluateStuckPr, STUCK_DISPATCH_MARKER, buildStuckDispatchComment,
+  stuckDispatchEpisodes, alreadyDispatchedForEpisode, DEFAULT_MAX_CONCURRENT_INSPECTIONS,
+  MAX_CONCURRENT_INSPECTIONS_ENV, maxConcurrentInspections, planStuckDispatches,
+} from '../stuck-pr-watch-core.mjs';
+import { buildStandDownComment } from '../stand-down.mjs';
+
+const HUMAN = { name: 'review:human' };
+const PENDING = { name: 'review:pending' };
+const CHANGES = { name: 'review:changes' };
+const ACCEPTED = { name: 'review:accepted' };
+const READY = { name: 'ready-to-merge' };
+const REVIEWING = { name: 'review-status:reviewing' };
+
+describe('stuckThresholdMinutes', () => {
+  it('defaults to the operator-agreed thresholds (45/45/30/45)', () => {
+    expect(stuckThresholdMinutes({})).toEqual(DEFAULT_STUCK_THRESHOLD_MINUTES);
+    expect(DEFAULT_STUCK_THRESHOLD_MINUTES).toEqual({
+      [STUCK_STAGES.REVIEW]: 45, [STUCK_STAGES.FIX]: 45, [STUCK_STAGES.APPROVED]: 30, [STUCK_STAGES.CONFLICT]: 45,
+    });
+  });
+
+  it('each stage is overridable by its own env var', () => {
+    const env = {
+      [STUCK_THRESHOLD_ENV[STUCK_STAGES.REVIEW]]: '10',
+      [STUCK_THRESHOLD_ENV[STUCK_STAGES.APPROVED]]: '5',
+    };
+    const t = stuckThresholdMinutes(env);
+    expect(t[STUCK_STAGES.REVIEW]).toBe(10);
+    expect(t[STUCK_STAGES.APPROVED]).toBe(5);
+    expect(t[STUCK_STAGES.FIX]).toBe(45); // unset stages keep the default
+    expect(t[STUCK_STAGES.CONFLICT]).toBe(45);
+  });
+
+  it('a bad override fails LOUD, never silently falls back', () => {
+    expect(() => stuckThresholdMinutes({ [STUCK_THRESHOLD_ENV[STUCK_STAGES.FIX]]: '0' })).toThrow(/positive number of minutes/);
+    expect(() => stuckThresholdMinutes({ [STUCK_THRESHOLD_ENV[STUCK_STAGES.FIX]]: '-5' })).toThrow(/positive number of minutes/);
+    expect(() => stuckThresholdMinutes({ [STUCK_THRESHOLD_ENV[STUCK_STAGES.FIX]]: 'soon' })).toThrow(/positive number of minutes/);
+  });
+});
+
+describe('isNeverStuckPr — the three exclusions', () => {
+  it('review:human is never stuck', () => {
+    expect(isNeverStuckPr({ labels: [HUMAN, PENDING] })).toBe(true);
+  });
+  it('a draft is never stuck', () => {
+    expect(isDraftPr({ isDraft: true })).toBe(true);
+    expect(isNeverStuckPr({ labels: [PENDING], isDraft: true })).toBe(true);
+  });
+  it('a stood-down PR is never stuck', () => {
+    const comments = [{ body: buildStandDownComment({ reason: 'gate-red' }) }];
+    expect(isNeverStuckPr({ labels: [CHANGES], comments })).toBe(true);
+  });
+  it('an ordinary PR is not excluded', () => {
+    expect(isNeverStuckPr({ labels: [PENDING], isDraft: false, comments: [] })).toBe(false);
+  });
+});
+
+describe('classifyStuckStage', () => {
+  it('conflict wins even over an approved label — WE #2505\'s own shape', () => {
+    expect(classifyStuckStage({ labels: [ACCEPTED], mergeable: 'CONFLICTING' })).toBe(STUCK_STAGES.CONFLICT);
+  });
+  it('review:changes → fix', () => {
+    expect(classifyStuckStage({ labels: [CHANGES], mergeable: 'MERGEABLE' })).toBe(STUCK_STAGES.FIX);
+  });
+  it('review:pending → review', () => {
+    expect(classifyStuckStage({ labels: [PENDING], mergeable: 'MERGEABLE' })).toBe(STUCK_STAGES.REVIEW);
+  });
+  it('review-status:reviewing alone (no review:pending) still → review', () => {
+    expect(classifyStuckStage({ labels: [REVIEWING], mergeable: 'MERGEABLE' })).toBe(STUCK_STAGES.REVIEW);
+  });
+  it('review:accepted + MERGEABLE → approved', () => {
+    expect(classifyStuckStage({ labels: [ACCEPTED], mergeable: 'MERGEABLE' })).toBe(STUCK_STAGES.APPROVED);
+  });
+  it('ready-to-merge + MERGEABLE → approved too (either label)', () => {
+    expect(classifyStuckStage({ labels: [READY], mergeable: 'MERGEABLE' })).toBe(STUCK_STAGES.APPROVED);
+  });
+  it('review:accepted but mergeable UNKNOWN → no tracked stage (never guessed)', () => {
+    expect(classifyStuckStage({ labels: [ACCEPTED], mergeable: 'UNKNOWN' })).toBeNull();
+  });
+  it('no review label at all, not conflicting → no tracked stage', () => {
+    expect(classifyStuckStage({ labels: [], mergeable: 'MERGEABLE' })).toBeNull();
+  });
+});
+
+describe('latestActivityAt', () => {
+  it('picks the most recent of labeled/commented/committed, ignoring other event types', () => {
+    const events = [
+      { createdAt: '2026-09-20T10:00:00Z', event: 'labeled' },
+      { createdAt: '2026-09-22T10:00:00Z', event: 'reviewed' }, // NOT a tracked progress type
+      { createdAt: '2026-09-21T10:00:00Z', event: 'commented' },
+    ];
+    expect(latestActivityAt(events)).toBe('2026-09-21T10:00:00Z');
+  });
+  it('returns null for no events, or none of the tracked types', () => {
+    expect(latestActivityAt([])).toBeNull();
+    expect(latestActivityAt([{ createdAt: '2026-09-20T10:00:00Z', event: 'assigned' }])).toBeNull();
+    expect(latestActivityAt(null)).toBeNull();
+  });
+  it('every declared progress type is exactly the task\'s own three', () => {
+    expect(PROGRESS_TIMELINE_EVENTS).toEqual(['labeled', 'commented', 'committed']);
+  });
+});
+
+describe('minutesSinceActivity', () => {
+  it('computes elapsed minutes', () => {
+    expect(minutesSinceActivity('2026-09-23T18:00:00Z', new Date('2026-09-23T19:00:00Z').getTime())).toBe(60);
+  });
+  it('null for unparseable/absent input, never negative/NaN', () => {
+    expect(minutesSinceActivity(null)).toBeNull();
+    expect(minutesSinceActivity('not-a-date')).toBeNull();
+    expect(minutesSinceActivity('2026-09-23T19:00:00Z', new Date('2026-09-23T18:00:00Z').getTime())).toBeNull();
+  });
+});
+
+describe('evaluateStuckPr — the whole decision', () => {
+  const now = new Date('2026-09-23T19:00:00Z').getTime();
+
+  it('excluded PRs never reach a stage check', () => {
+    expect(evaluateStuckPr({ pr: { labels: [HUMAN, PENDING] }, now })).toEqual({ stuck: false, reason: 'excluded' });
+  });
+
+  it('no tracked stage → not stuck, stage:null', () => {
+    expect(evaluateStuckPr({ pr: { labels: [] }, now })).toEqual({ stuck: false, reason: 'no-tracked-stage', stage: null });
+  });
+
+  it('no activity evidence at all → fails closed, never stuck', () => {
+    const pr = { labels: [PENDING] };
+    expect(evaluateStuckPr({ pr, now, activityAt: null })).toEqual({ stuck: false, reason: 'no-activity-evidence', stage: 'review', activityAt: null });
+  });
+
+  it('within threshold → not stuck', () => {
+    const pr = { labels: [PENDING] };
+    const activityAt = '2026-09-23T18:30:00Z'; // 30 minutes ago, under the 45m review threshold
+    const v = evaluateStuckPr({ pr, now, activityAt });
+    expect(v.stuck).toBe(false);
+    expect(v.reason).toBe('within-threshold');
+    expect(v.minutesSince).toBe(30);
+    expect(v.thresholdMinutes).toBe(45);
+  });
+
+  it('past threshold with a live bound agent → not stuck (reuses assessLiveness/bindAgents, never re-derived)', () => {
+    const pr = { number: 2505, labels: [PENDING], headRefOid: 'deadbeef' };
+    const activityAt = '2026-09-23T18:00:00Z'; // 60 minutes ago, over the 45m threshold
+    const agents = [{ name: 'review-2505', pid: 111, pidAlive: true, cwd: '/lane' }];
+    const v = evaluateStuckPr({ pr, agents, repo: 'we', now, activityAt });
+    expect(v.stuck).toBe(false);
+    expect(v.reason).toBe('live-agent');
+    expect(v.live.kind).toBe('live-process');
+  });
+
+  it('past threshold, nothing live → STUCK', () => {
+    const pr = { number: 2505, labels: [PENDING], headRefOid: 'deadbeef' };
+    const activityAt = '2026-09-23T18:00:00Z'; // 60 minutes ago
+    const v = evaluateStuckPr({ pr, agents: [], repo: 'we', now, activityAt });
+    expect(v).toEqual({
+      stuck: true, reason: 'stuck', stage: 'review', minutesSince: 60, thresholdMinutes: 45, activityAt,
+    });
+  });
+
+  it('the approved stage uses its own tighter 30m threshold', () => {
+    const pr = { labels: [ACCEPTED], mergeable: 'MERGEABLE' };
+    const activityAt = '2026-09-23T18:29:00Z'; // 31 minutes ago — over 30m approved, under 45m review/fix
+    const v = evaluateStuckPr({ pr, now, activityAt });
+    expect(v.stuck).toBe(true);
+    expect(v.stage).toBe('approved');
+    expect(v.thresholdMinutes).toBe(30);
+  });
+
+  it('custom thresholds are honoured', () => {
+    const pr = { labels: [PENDING] };
+    const activityAt = '2026-09-23T18:59:00Z'; // 1 minute ago
+    const v = evaluateStuckPr({ pr, now, activityAt, thresholds: { review: 1, fix: 45, approved: 30, conflict: 45 } });
+    expect(v.stuck).toBe(true);
+  });
+});
+
+describe('dispatch-marker idempotency (episode keyed on the exact activityAt)', () => {
+  it('the marker is its own distinct constant, never confused with the inspecting agent\'s own comment', () => {
+    expect(STUCK_DISPATCH_MARKER).toBe('🔎 stuck-PR inspection dispatched');
+  });
+
+  it('buildStuckDispatchComment embeds the episode verbatim and opens with the marker', () => {
+    const body = buildStuckDispatchComment({
+      stage: 'conflict', minutesSince: 390.4, thresholdMinutes: 45, activityAt: '2026-09-23T12:27:00Z', sessionSlug: 'inspect-2505',
+    });
+    expect(body.startsWith(STUCK_DISPATCH_MARKER)).toBe(true);
+    expect(body).toContain('episode: 2026-09-23T12:27:00Z');
+    expect(body).toContain('inspect-2505');
+  });
+
+  it('stuckDispatchEpisodes recovers every embedded episode, ignoring a quoted (non-leading) marker', () => {
+    const real = buildStuckDispatchComment({ stage: 'fix', minutesSince: 50, thresholdMinutes: 45, activityAt: 'T1', sessionSlug: 'inspect-9' });
+    const quoted = { body: `> ${STUCK_DISPATCH_MARKER}\n\nepisode: T-FAKE` };
+    expect(stuckDispatchEpisodes([{ body: real }, quoted])).toEqual(['T1']);
+  });
+
+  it('alreadyDispatchedForEpisode matches only the EXACT same episode timestamp', () => {
+    const real = buildStuckDispatchComment({ stage: 'fix', minutesSince: 50, thresholdMinutes: 45, activityAt: 'T1', sessionSlug: 'inspect-9' });
+    const comments = [{ body: real }];
+    expect(alreadyDispatchedForEpisode(comments, 'T1')).toBe(true);
+    expect(alreadyDispatchedForEpisode(comments, 'T2')).toBe(false); // fresh activity since → a NEW episode, dispatch again
+    expect(alreadyDispatchedForEpisode(comments, null)).toBe(false);
+    expect(alreadyDispatchedForEpisode([], 'T1')).toBe(false);
+  });
+});
+
+describe('concurrency cap', () => {
+  it('defaults to 2, overridable by env, refuses a bad override', () => {
+    expect(maxConcurrentInspections({})).toBe(DEFAULT_MAX_CONCURRENT_INSPECTIONS);
+    expect(DEFAULT_MAX_CONCURRENT_INSPECTIONS).toBe(2);
+    expect(maxConcurrentInspections({ [MAX_CONCURRENT_INSPECTIONS_ENV]: '5' })).toBe(5);
+    expect(() => maxConcurrentInspections({ [MAX_CONCURRENT_INSPECTIONS_ENV]: '0' })).toThrow(/positive integer/);
+    expect(() => maxConcurrentInspections({ [MAX_CONCURRENT_INSPECTIONS_ENV]: '1.5' })).toThrow(/positive integer/);
+  });
+
+  it('dispatches up to the remaining capacity, longest-overdue first, and defers the rest', () => {
+    const candidates = [
+      { num: 1, minutesSince: 50, thresholdMinutes: 45 },   // 5 over
+      { num: 2, minutesSince: 100, thresholdMinutes: 45 },  // 55 over — most overdue
+      { num: 3, minutesSince: 60, thresholdMinutes: 30 },   // 30 over
+    ];
+    const { toDispatch, deferred } = planStuckDispatches({ candidates, liveInspectCount: 0, maxConcurrent: 2 });
+    expect(toDispatch.map((c) => c.num)).toEqual([2, 3]);
+    expect(deferred.map((c) => c.num)).toEqual([1]);
+    expect(deferred[0].deferredReason).toBe('concurrency-cap');
+  });
+
+  it('live sessions already count against the cap', () => {
+    const candidates = [{ num: 1, minutesSince: 50, thresholdMinutes: 45 }, { num: 2, minutesSince: 60, thresholdMinutes: 45 }];
+    const { toDispatch, deferred } = planStuckDispatches({ candidates, liveInspectCount: 2, maxConcurrent: 2 });
+    expect(toDispatch).toEqual([]);
+    expect(deferred.length).toBe(2);
+  });
+
+  it('a liveInspectCount above the cap never goes negative-capacity', () => {
+    const candidates = [{ num: 1, minutesSince: 50, thresholdMinutes: 45 }];
+    const { toDispatch } = planStuckDispatches({ candidates, liveInspectCount: 99, maxConcurrent: 2 });
+    expect(toDispatch).toEqual([]);
+  });
+});

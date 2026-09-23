@@ -1,0 +1,242 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/conveyor/stuck-pr-watch.mjs
+ * @description THE STUCK-PR WATCH (epic #3383) — a standing, cross-repo mechanical pass that catches an open
+ *   PR sitting with NO progress (no new commit, label event, or comment) for longer than the expected time for
+ *   its review stage, with nothing live already working it, and launches ONE diagnosis-only inspection agent
+ *   per stuck EPISODE. Operator (2026-09-23): "we also should have a health watch that launch and inspection
+ *   if pr are stuck."
+ *
+ *   node scripts/conveyor/stuck-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run]
+ *
+ * PURE-CORE / IO-SHELL SPLIT (mirrors `we:scripts/conveyor/parked-pr-conflict-watch.mjs` /
+ * `we:scripts/conveyor/parked-pr-progress-watch.mjs`):
+ *   • {@link ./stuck-pr-watch-core.mjs} decides stage, threshold, stuck-or-not, dispatch idempotency, and the
+ *     concurrency cap — no fs/git/gh/clock.
+ *   • This file owns every `gh`/`claude` call: the open-PR discovery, the per-candidate timeline fetch (lazy —
+ *     paid only for a PR already narrowed to a tracked stage), the live-agents read (REUSED from
+ *     `we:scripts/conveyor/reconcile-pass.mjs`, never re-derived — the same enrichment `assessLiveness` needs),
+ *     the dispatch itself, and the marker comment.
+ *
+ * ONE INSPECTION PER STUCK EPISODE, NO SEPARATE STORE (#2612). The watch posts its OWN marker comment
+ * ({@link buildStuckDispatchComment}) the instant it dispatches, embedding the exact `activityAt` timestamp
+ * that made this episode stuck — {@link alreadyDispatchedForEpisode} reads it back off the PR's own comment
+ * thread before ever dispatching again. This is why the marker is posted by THIS pass, not left to the
+ * dispatched agent's own (separately-required) diagnostic comment: a fast tick cadence could otherwise dispatch
+ * several inspection agents at the same PR before the first one ever got around to commenting.
+ *
+ * CONCURRENCY CAP, ACROSS EVERY REPO. `we:scripts/conveyor/stuck-pr-watch-core.mjs#planStuckDispatches` is
+ * called with the CURRENT count of live `inspect-*` sessions (any repo tag), so a per-repo invocation of this
+ * CLI still respects one GLOBAL cap rather than N independent ones.
+ */
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readPrsFromFile } from './open-pr-fetch.mjs';
+import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { createGhProvider } from '../lib/review-label-provider.mjs';
+import { defaultReadAgents, enrichAgents } from './reconcile-pass.mjs';
+import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { parseSessionSlug } from './session-slug.mjs';
+import { dispatchInspection } from './stuck-pr-inspect-dispatch.mjs';
+import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import {
+  isNeverStuckPr, classifyStuckStage, latestActivityAt, evaluateStuckPr, stuckThresholdMinutes,
+  buildStuckDispatchComment, alreadyDispatchedForEpisode, planStuckDispatches, maxConcurrentInspections,
+} from './stuck-pr-watch-core.mjs';
+
+/** How many open PRs one `gh pr list` call reads per repo — matches the sibling watches' own limit. */
+export const PR_LIST_LIMIT = 200;
+
+/** The `--json` fields this pass reads about each open PR — every one load-bearing:
+ *  `mergeable` (stage classification + the `conflict` stage itself), `labels` (every other stage),
+ *  `isDraft`/`comments` (the never-stuck exclusions + the dispatch-marker idempotency), `headRefOid`
+ *  (`bindAgents`'s own liveness binding), `headRefName` (report legibility). */
+export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,labels,mergeable,isDraft,comments';
+
+/**
+ * The open-PR discovery query. `exec` is injectable so the argv is assertable with no `gh` on PATH.
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {Array<object>}
+ */
+export function defaultListOpenPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
+  const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
+  if (repo) argv.push('--repo', repo);
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const parsed = JSON.parse(String(out || '[]'));
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+/**
+ * THE LAZY, PER-CANDIDATE timeline fetch (paid only for a PR already narrowed to a tracked stage — see
+ * `isParkedCandidate`'s own docblock in `we:scripts/conveyor/parked-pr-progress-watch.mjs` for the identical
+ * cost-avoidance shape). GitHub's issue-events/timeline endpoint carries every `labeled`/`commented`/`committed`
+ * event (among others) for a PR; `--jq` projects only the three this watch treats as progress. A commit event's
+ * own timestamp rides `committer.date`/`author.date`, not `created_at` (unlike a label or comment event) — the
+ * `//` fallback chain covers all three shapes in one query.
+ * @param {{number:number|string, repo?:string|null, exec?:Function}} o
+ * @returns {Array<{createdAt:string, event:string}>}
+ */
+export function defaultListTimelineEvents({ number, repo, exec = execFileSyncThrottled } = {}) {
+  const path = repo ? `repos/${repo}/issues/${number}/timeline` : `repos/{owner}/{repo}/issues/${number}/timeline`;
+  const argv = ['api', '--paginate', '-X', 'GET', '-F', 'per_page=100', path,
+    '--jq', '.[] | select(.event=="labeled" or .event=="commented" or .event=="committed") | '
+      + '[(.created_at // .committer.date // .author.date // ""), .event] | @tsv'];
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  return String(out || '').split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
+    const [createdAt, event] = line.split('\t');
+    return { createdAt, event };
+  });
+}
+
+/**
+ * How many `inspect-*` sessions (any repo tag) are LIVE right now, for the global concurrency cap. A read
+ * failure degrades to `0` — the SAME fail-soft direction `we:scripts/conveyor/reconcile-pass.mjs` takes for its
+ * own agents read failing (the cap is a courtesy against pool pressure, not a safety gate; under-counting live
+ * sessions can only over-dispatch by a small, self-correcting margin next tick, never under-report a genuinely
+ * stuck PR as fine).
+ * @param {{listAgents?:Function}} [o]
+ * @returns {number}
+ */
+export function defaultCountLiveInspections({ listAgents = () => defaultListAgents({}) } = {}) {
+  let agents;
+  try {
+    agents = listAgents();
+  } catch {
+    return 0;
+  }
+  return (Array.isArray(agents) ? agents : []).filter((a) => parseSessionSlug(a?.name)?.kind === 'inspect').length;
+}
+
+/**
+ * THE IO SHELL. Lists open PRs, narrows to tracked-stage candidates, fetches each candidate's own timeline
+ * lazily, decides stuck-ness (reusing the live-agent binding — never re-derived), applies the per-episode
+ * dispatch idempotency and the concurrency cap, and dispatches + comments on whatever survives. Never throws on
+ * a per-PR read/write failure — mirrors every sibling watch's own best-effort contract.
+ * @param {object} [o]
+ * @returns {{checked:number, stuck:number, dispatchedCount:number, results:Array<object>}}
+ */
+export function watchStuckPrs({
+  repo = null, dryRun = false, now = Date.now(), env = process.env, thresholds, maxConcurrent,
+  listPrs = defaultListOpenPrs, listTimelineEvents = defaultListTimelineEvents,
+  readAgents = defaultReadAgents, enrich = enrichAgents,
+  countLiveInspections = defaultCountLiveInspections,
+  provider = createGhProvider(), dispatch = dispatchInspection,
+} = {}) {
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`stuck-pr-watch: --repo ${repo} is not a constellation repo`);
+  const thresholdsResolved = thresholds ?? stuckThresholdMinutes(env);
+  const cap = maxConcurrent ?? maxConcurrentInspections(env);
+
+  const prs = listPrs({ repo });
+  let agents = [];
+  try {
+    agents = enrich(readAgents({}));
+  } catch (e) {
+    // A failed agents read must fail CLOSED for every candidate this tick — never guess "nothing live" from an
+    // unreadable listing (the same bias `we:scripts/conveyor/parked-pr-progress-watch.mjs` already applies to
+    // its own agents read).
+    writeLineSync(2, `⚠ stuck-pr-watch: could not read agents listing, skipping this sweep: ${String((e && e.message) || e).split('\n')[0]}`);
+    return { checked: Array.isArray(prs) ? prs.length : 0, stuck: 0, dispatchedCount: 0, results: [] };
+  }
+
+  const results = [];
+  const candidates = [];
+  for (const pr of Array.isArray(prs) ? prs : []) {
+    const num = pr?.number;
+    if (isNeverStuckPr(pr)) { results.push({ num, verdict: 'excluded' }); continue; }
+    const stage = classifyStuckStage(pr);
+    if (!stage) { results.push({ num, verdict: 'no-tracked-stage' }); continue; }
+
+    let activityAt = null;
+    try {
+      activityAt = latestActivityAt(listTimelineEvents({ number: num, repo }));
+    } catch (e) {
+      results.push({ num, stage, verdict: 'activity-unknown', error: String((e && e.message) || e).split('\n')[0] });
+      continue;
+    }
+
+    const verdict = evaluateStuckPr({ pr, agents, repo: repoKey, now, thresholds: thresholdsResolved, activityAt });
+    if (!verdict.stuck) { results.push({ num, ...verdict }); continue; }
+    if (alreadyDispatchedForEpisode(pr?.comments, activityAt)) {
+      results.push({ num, ...verdict, verdict: 'already-dispatched-this-episode' });
+      continue;
+    }
+    candidates.push({
+      pr, num, stage: verdict.stage, minutesSince: verdict.minutesSince, thresholdMinutes: verdict.thresholdMinutes,
+      activityAt: verdict.activityAt,
+    });
+  }
+
+  const liveInspectCount = countLiveInspections({});
+  const { toDispatch, deferred } = planStuckDispatches({ candidates, liveInspectCount, maxConcurrent: cap });
+
+  for (const c of deferred) {
+    results.push({
+      num: c.num, stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
+      activityAt: c.activityAt, verdict: 'stuck', deferredReason: c.deferredReason,
+    });
+  }
+
+  const dispatched = [];
+  let resolvedRepo = repo;
+  for (const c of toDispatch) {
+    const base = {
+      num: c.num, stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
+      activityAt: c.activityAt, verdict: 'stuck',
+    };
+    if (dryRun) { results.push({ ...base, wouldDispatch: true }); continue; }
+    try {
+      if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+      const d = dispatch({
+        pr: c.num, repo: resolvedRepo, stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
+      });
+      const comment = buildStuckDispatchComment({
+        stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
+        activityAt: c.activityAt, sessionSlug: d.sessionSlug,
+      });
+      provider.postComment(resolvedRepo, c.num, comment);
+      dispatched.push({ num: c.num, sessionSlug: d.sessionSlug, agentId: d.agentId });
+      results.push({ ...base, dispatched: true, sessionSlug: d.sessionSlug, agentId: d.agentId });
+    } catch (e) {
+      results.push({ ...base, error: String((e && e.message) || e).split('\n')[0] });
+    }
+  }
+
+  return {
+    checked: Array.isArray(prs) ? prs.length : 0,
+    stuck: candidates.length,
+    dispatchedCount: dispatched.length,
+    results,
+  };
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  const argv = process.argv.slice(2);
+  const flag = (name) => (argv.find((a) => a.startsWith(`--${name}=`)) || '').slice(name.length + 3) || undefined;
+  const verb = argv.find((a) => !a.startsWith('--')) || 'sweep';
+  const repo = flag('repo') || null;
+  const dryRun = argv.includes('--dry-run');
+  const prsFile = flag('prs-file');
+  if (verb !== 'sweep') {
+    writeLineSync(2, 'usage: stuck-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]');
+    process.exitCode = 2;
+  } else {
+    try {
+      const result = watchStuckPrs({ repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}) });
+      for (const r of result.results) {
+        if (r.verdict !== 'stuck') continue;
+        const tail = r.wouldDispatch ? 'would dispatch an inspection agent'
+          : r.dispatched ? `dispatched inspection (${r.sessionSlug}${r.agentId ? `, agent ${r.agentId}` : ''})`
+            : r.deferredReason ? `deferred (${r.deferredReason})`
+              : r.error ? `FAILED to dispatch (${r.error})` : 'stuck';
+        writeLineSync(2, `  ⚠ PR #${r.num}: ${tail} — stage=${r.stage}, ~${Math.round(r.minutesSince)}m since last activity (threshold ${r.thresholdMinutes}m, last activity ${r.activityAt})`);
+      }
+      writeAllSync(1, `${JSON.stringify(result)}\n`);
+    } catch (e) {
+      writeLineSync(2, `error: ${String(e?.message ?? e)}`);
+      process.exitCode = 1;
+    }
+  }
+}
