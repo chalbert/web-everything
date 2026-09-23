@@ -40,6 +40,12 @@ threshold a shared branch is worth its own proven cost** — not about designing
 | Fork 4 — overlapping-scope coordination: work committee vs. serial hold | **(c) keep serial hold as the default; add a narrow, explicitly-gated shared-branch escalation only when overlap persists past N held ticks AND touches ≤1 file** | (a) work-committee/shared-branch as a general alternative to serial holds; (b) never build it | medium |
 | Fork 5 — delivery strategy: how a split card is delivered, and the event that counts as "finished" (added 2026-09-21 from #3820; **provisional, research owed**) | **(a) each card declares a delivery strategy; the default is slice-to-`main` as child cards; the drain resolves a card only at its declared strategy's completion event** | (b) one hard-wired strategy (integration branch only); (c) no declared strategy, infer from branch names (today's bug, #3816) | low (not yet researched) |
 
+**Stale premise (found 2026-09-22 by the #3922 prep).** Fork 1 recommends reusing the parallel workflow's
+"one integration worktree, one merge" assembly. That model was dropped on 2026-07-03: the workflow's own header says
+it supersedes it (`we:skills-src/batch-backlog-items/parallel-execute.workflow.js:13-18`), and every item now opens
+its own PR for the drain to land. Re-prepare Forks 1 to 3 against today's model before ruling them. #3922 Fork 2
+proposes the in-lane mechanism: one worktree per parallel step, applied in dependency order.
+
 ## Fork 1 — what is the split unit, and how do the pieces integrate back into one deliverable
 
 *Why this is a fork:* the operator's own framing already assumes splitting is possible for *some* work and

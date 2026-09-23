@@ -1,0 +1,19 @@
+{
+  "id": "planner-build-plan-and-execute",
+  "title": "The planner build (G2): a planner splits a build into typed steps, each run by a script or dispatched to the cheapest capable model — grounded on lane/mechanical-dispatcher and on plan-and-execute prior art",
+  "status": "open",
+  "summary": "Grounds decision #3922, the planner build (G2, #3801 follow-up 1). Checked 2026-09-22 on the prototype tip da085d438. THE LOAD-BEARING FINDINGS: (1) most of the design already exists unwired — the plan JSON schema with dependsOn and a per-task profile (PLAN_OUTPUT_SCHEMA), the supervisor verdict schema (accept/rework/reject with new tasks), the story-stage build-supervisor role picked from a risk ladder, and the task-stage router whose fixed cascade already checks Gemini first; nothing calls the story stage; (2) the build is one blocking agent turn inside deliver-item-wrapper, the single place a plan loop plugs in; (3) no step can name a declared operation, and dispatch-task is a detached Claude-only brief launcher, not a step executor; (4) no Gemini Flash tuple has graduated — main has 5 clean conflict-resolution trials but no informative field and no ratified promotion record; (5) #3575 Fork 1's 'one integration worktree, one merge' premise was dropped on 2026-07-03, so no in-repo mechanism joins parallel edits into one lane. PRIOR ART: Aider's architect/editor split (strong planner plus cheap editor beat a strong model alone, 85.0% vs 80.5%); LLMCompiler's DAG plans with parallel dispatch; Magentic-One's task and progress ledgers that replan on stall; RouteLLM and FrugalGPT on cheap-model routing, with RouteLLM's warning that routers fail out of distribution; Codex, Jules and the Copilot coding agent isolating each task and producing one PR. RESHAPES: the wrapper (code) runs the plan; one worktree per parallel agent step, applied in dependency order; a step is an agent task or an allowlisted declared operation; the task type is derived from the step's files, never declared, with an after-run diff check feeding calibration misses; each step is checked by its routed supervision level with the build-supervisor as the route's supervisor; a deliveryAgent marker keeps its meaning and skips planning.",
+  "dateOpened": "2026-09-22",
+  "lastReviewed": "2026-09-22",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "conveyor",
+    "dispatch",
+    "delegation",
+    "planner",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
