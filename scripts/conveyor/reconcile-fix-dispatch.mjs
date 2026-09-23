@@ -54,6 +54,8 @@
  * the tick.
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoProfile } from '../lib/repo-profile.mjs';
+import { resolvePrWorkUnit } from './pr-work-unit.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -136,9 +138,13 @@ export function defaultConfirmWait(ms) {
  * @param {(pr:number, itemNum:string)=>string[]} [resolveFallbackScope] - injected, defaults to `() => []` (a
  *   caller with nothing better to offer degrades to the pre-#3634 behaviour byte-for-byte); the real binding is
  *   {@link fetchPrDiffScope} via {@link runReconcileFixDispatch}'s own default.
+ * @param {string} [repo] - any vocabulary {@link repoProfile} accepts; defaults to `'we'` (this function's only
+ *   caller, {@link runReconcileFixDispatch}, never reaches it for another repo yet — see that function's own
+ *   `unsupported-repo` early return). Threaded through to {@link resolvePrWorkUnit} so the item lookup below
+ *   is repo-aware from day one, ahead of the repo actually varying (slices 5-6).
  * @returns {{planned:Array<{itemNum:string,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
-export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => []) {
+export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => [], repo = 'we') {
   const planned = [];
   const refusals = [];
   for (const entry of Array.isArray(dispatchEntries) ? dispatchEntries : []) {
@@ -150,8 +156,29 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       refusals.push({ pr, kind: 'no-item-num', why: `PR #${pr}'s head ref (${headRefName ?? '?'}) carries no conveyor item number — nothing to fill {{ITEM_NUM}}/{{SCOPE}} with` });
       continue;
     }
-    const item = findItemFn(itemNum, loadItems);
-    let scope = item && Array.isArray(item.scope) ? item.scope : [];
+    // #xdx3ifb multi-repo slice 3 — resolve the item through the SAME cross-repo resolver every other
+    // PR-to-work-unit consumer uses ({@link resolvePrWorkUnit}), rather than a second, hand-rolled
+    // `findItemFn` call that could drift from it. This also means a WE-half land that JIT-renumbers this
+    // branch's own card (`xHASH → NNNN`, #2288) is now found automatically — `findItemFn` itself matches
+    // the rename's `bornAs` record — with zero extra code here.
+    //
+    // ONLY the resolver's `attribution:'item'` result is trusted for scope. Its `attribution:'pr'` branch
+    // (item not found at all) is DELIBERATELY not used to fall back to the PR's own diff here: an item
+    // number that resolves to nothing real (a ghost/deleted card — never a `bornAs` hit, which `findItemFn`
+    // already recovers) must still refuse `no-scope` outright, exactly as before this slice — using the PR's
+    // diff as fence AND stamping `WE #<n>:` with a number naming no item would be precisely the
+    // "honest-looking but WRONG attribution" this file's own history already ruled unsafe (see this
+    // function's own top-of-file docblock). Turning that population on is slices 5-6's job, not this one's —
+    // hence `fetchDiffPaths: () => []` below: the resolver is asked ONLY "does an item resolve", never for a
+    // diff-based fallback it would otherwise be entitled to compute.
+    const unit = resolvePrWorkUnit({
+      repo,
+      pr: { number: pr, headRefName },
+      findItem: (key) => findItemFn(key, loadItems),
+      fetchDiffPaths: () => [],
+    });
+    const item = unit && unit.attribution === 'item' ? { scope: unit.scope } : null;
+    let scope = item ? item.scope : [];
     let scopeSource = 'item';
     if (item && !scope.length) {
       // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
@@ -217,11 +244,19 @@ export function isSafeFallbackScopeEntry(entry) {
  * `gh` on PATH, the PR vanished, a network hiccup) degrades to `[]` — the caller then reports `no-scope` exactly
  * as it did before this fallback existed, never throws the whole pass over one bad read.
  * @param {number} pr
- * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug) pins the `gh` call
- *   to that repo, the same `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use.
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o] - `repo` (an `owner/name` slug, or any other
+ *   vocabulary {@link repoProfile} accepts) pins the `gh` call to that repo, the same
+ *   `if (repo) argv.push('--repo', repo)` idiom the sibling conveyor readers use, AND selects the prefix this
+ *   function tags each path with — #xdx3ifb multi-repo slice 3: this used to hard-code `we:` regardless of
+ *   `repo`, which was silently wrong the moment a caller ever passed a non-WE repo (dead code today, since
+ *   {@link runReconcileFixDispatch} only reaches this for `repo === 'we'` — see its own `unsupported-repo`
+ *   early return — but a latent bug slices 5-6 would otherwise have inherited unnoticed). `repo == null`
+ *   (today's only reachable case) still resolves to `'we'`, so existing callers see byte-identical output.
  * @returns {string[]}
  */
 export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
+  const profile = repoProfile(repo ?? 'we');
+  const prefix = profile ? profile.canonicalPrefix : 'we';
   try {
     const argv = ['pr', 'diff', String(pr), '--name-only'];
     if (repo) argv.push('--repo', repo);
@@ -232,7 +267,7 @@ export function fetchPrDiffScope(pr, { exec = execFileSyncThrottled, root = REPO
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((p) => `we:${p}`);
+      .map((p) => `${prefix}:${p}`);
   } catch {
     return [];
   }
@@ -592,7 +627,13 @@ export function runReconcileFixDispatch({
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
-  if (repoKey === 'we') assertMainNotStale(root, checkStaleness);
+  // #x1rr9rh (multi-repo slice 2) — this staleness check guards the DISPATCHING checkout (this WE checkout's
+  // own import path), not the target repo: the fix path always runs WE's own code, whatever repo it dispatches
+  // (or, for a foreign repo today, merely records as unsupported) a fix for. Gating it on `repoKey === 'we'`
+  // was therefore the wrong condition — it let a stale WE checkout record foreign-repo unsupported rows (and
+  // will, once a later slice turns on foreign fix dispatch, dispatch fixes) from code that had already been
+  // proven stale. Run it for every repo.
+  assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   if (repoKey !== 'we') {
     // Foreign fixes need their own brief and gate; never consult or lease the WE pool.
@@ -604,7 +645,7 @@ export function runReconcileFixDispatch({
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
     return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
   }
-  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope);
+  const { planned, refusals } = planFixesFromReconcile(reconciled.dispatch, findItemFn, loadItems, resolveFallbackScope, repoKey);
 
   const lanes = [...pickFreeLanes()];
   const dispatched = [];

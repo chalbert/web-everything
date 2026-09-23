@@ -80,13 +80,22 @@ const normalizeScope = (v) => {
 const deriveUnshapedNoScope = (item) =>
   item.tier === 'A' && item.kind !== 'epic' && item.kind !== 'feature' && !normalizeScope(item.scope);
 
-// Infer an item's repo-LOCUS when no explicit `locus:` is authored. Two PRECISE signals only — locus is
-// "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
-// provenance. The big noise source is the `exercise-app` *tag*, which WE standards/blocks carry to mean
-// "surfaced by an exercise app" (a discovery marker), NOT "lives in the exercise app" — so exercise-app
-// locus is detected STRUCTURALLY (a descendant of the flagship-exercise-apps epic #314, immutable NNN),
-// via {@link isExerciseAppDescendant}, never the tag. The remaining tag markers are high-precision build
-// signals. Values stay a subset of check-standards-rules.mjs `LOCI` keys; an explicit `locus:` always wins.
+// Infer an item's repo-LOCUS when no explicit `locus:` is authored. THREE precise signals, tried in order —
+// locus is "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
+// provenance:
+//   1. structural — a descendant of the flagship-exercise-apps epic #314 (immutable NNN) is `exercise-app`,
+//      via {@link isExerciseAppDescendant}. The big noise source here is the `exercise-app` *tag*, which WE
+//      standards/blocks carry to mean "surfaced by an exercise app" (a discovery marker), NOT "lives in the
+//      exercise app" — so this signal is structural, never the tag.
+//   2. scope-prefix (#xdx3ifb multi-repo slice 3) — {@link inferLocusFromScope}: an item's own predicted
+//      `scope:` already names which repo it touches (`we:`/`fui:`/`plateau:`, the SAME prefixes
+//      `scripts/lib/repo-profile.mjs#repoProfile` resolves for every other multi-repo consumer), so a
+//      `plateau:`-scoped item now resolves to `locus: 'plateau-app'` — its real gate — instead of falling
+//      straight through to the `webeverything` default a tag-only inference would have given it. Tried
+//      BEFORE tags: scope is a predicted TOUCH-SET (higher precision than a tag), and an item can easily carry
+//      no cross-repo tag at all while still declaring an unambiguous cross-repo scope.
+//   3. tag markers (unchanged) — the remaining, lower-precision signal for whatever scope doesn't catch.
+// Values stay a subset of check-standards-rules.mjs `LOCI` keys; an explicit `locus:` always wins.
 const EXERCISE_APP_ROOT = '314'; // #314 flagship-exercise-apps — its descendants run via the /exercise-app loop
 const LOCUS_TAG_MARKERS = [
   [/frontier-?ui/i, 'frontierui'],
@@ -96,6 +105,26 @@ function inferLocusFromTags(tags) {
   const joined = (Array.isArray(tags) ? tags : []).join(' ');
   for (const [re, locus] of LOCUS_TAG_MARKERS) if (re.test(joined)) return locus;
   return 'webeverything';
+}
+// #xdx3ifb multi-repo slice 3 — the scope-prefix → locus table. Mirrors `scripts/lib/repo-profile.mjs`'s
+// `SCOPE_PREFIXES`/`CANONICAL_PREFIX` exactly (same prefixes, same repos) — CJS can't import that ESM module
+// (the SAME barrier `ID_TOKEN` above already documents for `scripts/backlog/id.mjs`), so keep the two in sync
+// by hand. `we`'s locus name genuinely differs from its repo key (`'webeverything'`, the LOCI key, vs `'we'`,
+// the repo-profile key) — every other repo's locus name already equals its repo key.
+const SCOPE_PREFIX_LOCUS = {
+  we: 'webeverything', webeverything: 'webeverything',
+  fui: 'frontierui', frontierui: 'frontierui',
+  plateau: 'plateau-app', 'plateau-app': 'plateau-app',
+};
+function inferLocusFromScope(scope) {
+  const list = normalizeScope(scope);
+  if (!list) return null;
+  for (const entry of list) {
+    const m = /^([a-z][a-z0-9-]*):/i.exec(entry);
+    const locus = m && Object.hasOwn(SCOPE_PREFIX_LOCUS, m[1].toLowerCase()) ? SCOPE_PREFIX_LOCUS[m[1].toLowerCase()] : null;
+    if (locus) return locus;
+  }
+  return null;
 }
 // Walk the `parent` chain (via the num→item map) looking for the exercise-app root. Cycle-guarded.
 function isExerciseAppDescendant(item, byNum) {
@@ -579,15 +608,18 @@ module.exports = function backlog() {
     // items of any locus and gates EACH in its own locus (the LOCI registry's `gateCommand`/`repoPath`), so
     // no item is dropped for locus — but the locus must be RIGHT, since it selects which gate runs. The
     // locus is `locus:` frontmatter when AUTHORED (an explicit decision — e.g. a frontier-ui-tagged item
-    // built and gated IN WE declares `locus: webeverything`), else INFERRED from cross-repo tag markers
-    // (biasing toward `webeverything` — a wrongly-inferred cross-repo locus would route close-out to the
-    // wrong repo's gate, so inference only fires on high-precision structural/tag markers), else
-    // `webeverything`. `locusAuthored` lets check:standards nudge unset-but-inferred items to
-    // declare it explicitly. Inferred values are a subset of check-standards-rules.mjs `LOCI` keys.
+    // built and gated IN WE declares `locus: webeverything`), else the structural exercise-app check, else
+    // (#xdx3ifb multi-repo slice 3) INFERRED from the item's own predicted `scope:` prefix — a `plateau:`-
+    // scoped item resolves to `plateau-app`, its real gate, rather than falling through to `webeverything` —
+    // else from cross-repo tag markers (biasing toward `webeverything` — a wrongly-inferred cross-repo locus
+    // would route close-out to the wrong repo's gate, so inference only fires on high-precision
+    // structural/scope/tag markers), else `webeverything`. `locusAuthored` lets check:standards nudge
+    // unset-but-inferred items to declare it explicitly. Inferred values are a subset of
+    // check-standards-rules.mjs `LOCI` keys.
     item.locusAuthored = typeof item.locus === 'string' && item.locus.length > 0;
     item.locus = item.locusAuthored ? item.locus
       : isExerciseAppDescendant(item, byNum) ? 'exercise-app'
-      : inferLocusFromTags(item.tags);
+      : inferLocusFromScope(item.scope) || inferLocusFromTags(item.tags);
 
     // CTA INVARIANT (#1275) — every OPEN item must render at least one pill: a call-to-action telling
     // whoever picks it up what to DO next (build / slice / split / ratify / unblock / graduate the
@@ -943,6 +975,9 @@ module.exports.normalizeScope = normalizeScope;
 // Named export of the pure has-predicted-scope lens predicate (#2618) for direct regression testing — inert
 // to the Eleventy build, which only invokes the default function export.
 module.exports.deriveUnshapedNoScope = deriveUnshapedNoScope;
+// Named export of the pure scope-prefix → locus derivation (#xdx3ifb multi-repo slice 3) for direct
+// regression testing — inert to the Eleventy build, which only invokes the default function export.
+module.exports.inferLocusFromScope = inferLocusFromScope;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.derive = derive;

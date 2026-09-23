@@ -692,7 +692,16 @@ export function defaultLoadItems(root) {
 export function findItem(key, loadItems, pocRegistry = null) {
   let items = [];
   try { items = loadItems() || []; } catch { return null; }
-  const it = (Array.isArray(items) ? items : []).find((x) => normNum(x?.num) === key);
+  const list = Array.isArray(items) ? items : [];
+  // #xdx3ifb multi-repo slice 3 — FALL BACK TO `bornAs` when `num` doesn't match. The drain JIT-numbers a
+  // card (`xHASH → NNNN`, #2288) the moment its WE half lands, but a still-open impl-repo branch keeps the
+  // name it was cut under (`lane/xHASH-…`) — it has no way to learn the new number after the fact. Without
+  // this fallback that branch's PR looks up a `key` (the hash) no item's `num` will ever equal again, and
+  // every consumer of `findItem` (fix dispatch, CI-heal, reconcile) treats a real, still-open item as
+  // unresolvable forever. `bornAs` is the durable link (#2392/#2288: the drain stamps it on the numbered
+  // card at land, and it never changes again), so trying it SECOND — only once the direct `num` match
+  // misses — recovers exactly this population with no change to the (unambiguous) common case.
+  const it = list.find((x) => normNum(x?.num) === key) ?? list.find((x) => normNum(x?.bornAs) === key);
   if (!it || !it.slug) return null;
   const rawTarget = typeof it.deliveryTarget === 'string' && it.deliveryTarget.trim() ? it.deliveryTarget.trim() : null;
   return {

@@ -2,10 +2,12 @@
 bornAs: x1rr9rh
 kind: task
 parent: "3963"
-status: open
+status: resolved
 blockedBy: ["3956"]
 scope: ["we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 

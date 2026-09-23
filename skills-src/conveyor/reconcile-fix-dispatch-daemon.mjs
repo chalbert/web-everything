@@ -37,6 +37,8 @@ import {
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
+import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
+import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 
@@ -90,6 +92,43 @@ export async function runDaemonLoop({
   }
 }
 
+/** The repos this daemon watches each tick — mirrors we:skills-src/conveyor/review-daemon.mjs's own
+ *  `REVIEW_DAEMON_REPOS`. Multi-repo slice 2 (#x1rr9rh, the ratified `#conveyor-multi-repo-model` rule, see
+ *  we:reports/2026-09-23-conveyor-multi-repo-gap-map.md): before this, `tickOnce` called
+ *  `runReconcileFixDispatch({})` with no repo, so a PR owed a fix in frontierui/plateau-app was never even
+ *  recorded as unsupported — the daemon only ever looked at WE. Fix/CI-heal dispatch itself stays WE-only
+ *  today ({@link ../../scripts/lib/repo-profile.mjs}'s `capabilities.fix`/`ciHeal` — turning them on for the
+ *  couple repos is a later slice), but every repo is now actually TICKED, so the existing `unsupported-repo`
+ *  refusal + ledger write run and are recorded for them instead of being skipped silently. */
+export const FIX_DISPATCH_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) => r.slug);
+
+/**
+ * Run {@link runReconcileFixDispatch} once per watched repo via the shared {@link forEachRepo} helper,
+ * isolating one repo's failure from the rest — the same discipline
+ * we:skills-src/conveyor/review-daemon.mjs's own `runReviewTickAllRepos` already applies, extracted into
+ * `forEachRepo` so both daemons share one loop.
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
+ *   `runReconcileFixDispatch`); every other option is forwarded to it for EVERY repo except `repo` itself,
+ *   which this loop supplies per-iteration.
+ * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
+ *   refusals:Array<object>}}
+ */
+export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = runReconcileFixDispatch, ...tickOpts } = {}) {
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
+  const dispatched = [];
+  const refusals = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    for (const d of (result.dispatched ?? [])) dispatched.push({ ...d, repo });
+    for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+  }
+  return { repos: perRepo, dispatched, refusals };
+}
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real dispatch pass) ─────────────────────────────
 
 // #3870 LIVE-CAUGHT BUG: `.unref()`-ing this timer told Node it was fine to exit before it fired — with
@@ -105,12 +144,13 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
 export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
   return {
     intervalMs,
-    tickOnce: () => runReconcileFixDispatch({}),
+    tickOnce: () => runReconcileFixDispatchAllRepos(),
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
-      const { dispatched = [], refusals = [] } = result || {};
-      log.error(`reconcile-fix-dispatch-daemon: tick — dispatched ${dispatched.length}, refused ${refusals.length}`);
+      const { repos = [], dispatched = [], refusals = [] } = result || {};
+      log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
+      for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
     },
     onTickError: (error) => {
       log.error(`reconcile-fix-dispatch-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);

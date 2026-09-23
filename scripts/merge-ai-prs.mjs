@@ -96,7 +96,10 @@
  * required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks the merge.
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
- * (surfaced); 3 = bad input / `gh` unavailable.
+ * (surfaced); 3 = duplicate backlog NNN survives on main — the #2318 tripwire, a globally-red state that needs
+ * a human; 4 = `gh` listing failure (env/auth/rate-limit — bad input or `gh` unavailable, #3383: kept OFF exit 3
+ * so a transient `gh` hiccup is never misread as the duplicate-NNN tripwire); 5 = red-main dispatch-freeze
+ * stop-the-line (#2681).
  */
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -3572,8 +3575,10 @@ async function runCli() {
     if (!AS_JSON) process.stderr.write('  ⚠ --assume-complete-context: FORCING contextComplete=true — the couple gate will treat a carrier ABSENT from this pass\'s (possibly incomplete) open-PR context as LANDED. Operator waiver; use only to unstick a queue you have verified by hand (#xc7p3q9 R2).\n');
   }
   // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
-  // per-repo processing below). A single repo's list failure is a bad-env hard-fail (exit 3), preserved — but
-  // now surfaced after the concurrent batch instead of mid-loop. The rollup + mergeable come from the list;
+  // per-repo processing below). A single repo's list failure is a bad-env hard-fail, preserved — but
+  // now surfaced after the concurrent batch instead of mid-loop. #3383 gh-error — exit 4, distinct from the
+  // dup-id tripwire's exit 3, so a transient/rate-limited `gh` listing is never misread as a duplicate NNN on
+  // main. The rollup + mergeable come from the list;
   // commits (the AI gate) are fetched per-PR below (asking for them in the list overflows GitHub's node cap).
   const listOne = async (repo) => {
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
@@ -3595,7 +3600,7 @@ async function runCli() {
   };
   const [listings] = await Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]);
   const listErr = listings.find((l) => l.err);
-  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 3);
+  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 4);
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
   // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
   // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
