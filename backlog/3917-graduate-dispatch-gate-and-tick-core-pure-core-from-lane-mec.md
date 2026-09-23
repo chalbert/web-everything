@@ -11,7 +11,7 @@ tags: []
 
 # Graduate dispatch gate and tick-core pure core from lane/mechanical-dispatcher to main
 
-Ports we:scripts/readiness/dispatch-pause.mjs, we:scripts/readiness/dispatch-plan.mjs, we:scripts/readiness/queue-report.mjs, we:scripts/conveyor/tick-core.mjs and we:scripts/check-standards-rules.mjs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot ff1618065 of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports we:scripts/readiness/dispatch-pause.mjs, we:scripts/readiness/dispatch-plan.mjs, we:scripts/readiness/queue-report.mjs, we:scripts/conveyor/tick-core.mjs and we:scripts/check-standards-rules.mjs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot 600acc14f of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
 
 ## Done when
 
