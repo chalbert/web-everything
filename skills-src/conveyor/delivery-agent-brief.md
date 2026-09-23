@@ -130,6 +130,16 @@ built (this is the one pre-build stop; see *Escalations*).
 Do the actual work in `$LANE`: implement `{{ITEM_SPEC_PATH}}`, keep `## Progress` synced, capture any
 leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rather than half-doing them.
 
+- **Fixing a bug? Reproduce it before you fix it — a green gate alone is not proof.** When
+  `{{ITEM_SPEC_PATH}}` describes a defect to fix (not a fresh capability to add), the same before/after
+  discipline the conveyor's fix-agent brief owes a bounced PR
+  ([`fix-agent-brief.md`](fix-agent-brief.md) step 2/step 4) applies here too: before changing code, reproduce
+  the bug with a test that FAILS for the stated reason — show it red — and, where the bug is observable on a
+  real surface (a CLI dry-run, a read-only query, a page render), probe that surface and show the same failure
+  there. After the fix, the same test is green and the same probe shows the fixed behavior. Put the trimmed
+  red-then-green evidence in the PR body you write at step 8 — a reviewer must be able to SEE the fix work, not
+  just infer it from `check:standards` passing. If you genuinely cannot reproduce the bug, say so explicitly,
+  with the reason, in that PR body — never claim "fixed" without one.
 - **Any scaffolded item must itself pass build-brief discipline** (statute:
   [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
   #2819): name the edge-cases the new item's build should handle or reject, require an
