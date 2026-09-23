@@ -64,6 +64,7 @@ import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
 import { STALE_STATE_OP } from '../stale-state.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import { GAP_SWEEP_STATUS_OP } from '../gap-sweep-status.mjs';
+import { TELEMETRY_SUMMARY_OP } from '../telemetry-summary.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -380,6 +381,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // act — `fs`, `claude agents`, `ps` and the run-store all live in `clear-stuck-session-io.mjs`, behind the
     // `readStuckFacts` reader and the sink `../run.mjs` wires through.
     [CLEAR_STUCK_SESSION_OP]: 'clear-stuck-session.mjs',
+    // backlog `xaxks4j` — READ-ONLY and genuinely so: its one step is `compute`, the declaring module imports
+    // only `registry.mjs`, `step-kinds.mjs` and the pure `telemetry-summary.mjs`/`telemetry-machine.mjs`
+    // libs, and every fs/`plutil`/clock read lives in `telemetry-summary-io.mjs` behind the injected
+    // `loadFacts` reader.
+    [TELEMETRY_SUMMARY_OP]: 'telemetry-summary.mjs',
     // #3723 (under epic #3383) — `docket-refresh`'s `apply` step is an `effect` (the checkout's own generator
     // + a content-hash-gated render/hand-off), so it is NOT read-only; listed here for map coverage. The
     // declaring module still reaches nothing that can act — every `fs`/`child_process`/`node:crypto` call
@@ -395,7 +401,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, TELEMETRY_SUMMARY_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)

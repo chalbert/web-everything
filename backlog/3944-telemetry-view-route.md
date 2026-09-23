@@ -3,10 +3,13 @@ bornAs: xlt8y1j
 kind: story
 size: 3
 parent: "3943"
-status: open
+status: resolved
 blockedBy: ["3942"]
 scope: ["plateau:src/telemetry/telemetry-view.ts", "plateau:src/telemetry/telemetry-view.css", "plateau:src/telemetry/telemetry-view.test.ts", "plateau:index.html", "plateau:src/main.ts"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: "plateau:src/telemetry/telemetry-view.ts"
 tags: []
 ---
 

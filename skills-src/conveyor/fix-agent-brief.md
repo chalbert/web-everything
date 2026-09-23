@@ -98,7 +98,17 @@ The `/review` changes-verdict posts a durable PR comment (header `🔁 human rev
 gh pr view {{PR_NUM}} --json title,body,comments --repo {{REPO}}
 ```
 
-Take the **latest** changes-requested comment as the authoritative ask. If the finding is ambiguous or needs a
+Take the **latest** changes-requested comment as the authoritative ask.
+
+**Reproduce it before you touch any code.** Run or write a test that FAILS for the exact reason the reviewer
+named, and show it red. Where the finding is observable on a real surface — a CLI dry-run, a read-only query, a
+page render — probe that surface too and show the SAME failure there, not only in the test. Trim both outputs;
+you post them as evidence at step 6, alongside the after-fix run from step 4. **If you genuinely cannot
+reproduce the finding** — it does not repro on this HEAD, or the described behavior is not occurring — say so
+explicitly, with the reason, in that same evidence comment and in your one-line return (step 9). Never claim the
+fix works without having reproduced it, or explicitly recorded why you could not.
+
+If the finding is ambiguous or needs a
 judgment you cannot safely make, do **NOT** guess. **Record the stand-down on the PR first**, then leave the PR
 `review:changes` (do **not** re-arm) and RETURN `#{{ITEM_NUM}} → fix escalated (finding needs human judgment)`:
 
@@ -183,6 +193,11 @@ anything outside `{{REPO}}` — additionally run `npm run check:standards` from 
 (`{{REPO}}` == WE), `{{GATE_COMMAND}}` already **is** `npm run test:unit && npm run check:standards`, so this is a
 no-op today.
 
+A green gate proves the **checks** pass; it does not, by itself, prove the reviewer's finding is actually fixed.
+Re-run the SAME test from step 2 — it must now be green — and, where the finding had a real-surface probe,
+re-run that SAME probe and confirm it now shows the fixed behavior. Keep the trimmed after-output next to the
+before-output from step 2; step 6 posts both as the evidence.
+
 A red gate is a hard stop. Record the stand-down on the PR, leave it `review:changes` (do **not** re-arm), and
 RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
 
@@ -220,6 +235,18 @@ git push origin HEAD:refs/heads/{{LANE_REF}}
 Write the commit message to a file and `commit -F` it — a heredoc runs backticks (e.g. `` `scope:` ``) as a
 subshell (`bad substitution`); a message file has no such footgun. Pushing to `lane/*` is allowed by the
 single-branch guard; pushing to `main` is not.
+
+**Post the before/after proof as a PR comment before re-arming.** A reviewer must be able to SEE that the fix
+works, not just infer it from a green gate: post a comment carrying the trimmed red output (step 2) followed by
+the trimmed green output (step 4) — or, if reproduction was genuinely impossible, the explicit statement of why
+(step 2):
+
+```bash
+gh pr comment {{PR_NUM}} --repo {{REPO}} --body-file <evidence-file>
+```
+
+Do this before step 7's re-arm, so the evidence is already on the PR the moment a human (or the drain's
+AI-review pass) looks at it.
 
 ### 7. Re-arm the review — hand back for re-review (NEVER self-clear the human gate)
 
@@ -303,6 +330,9 @@ re-push, re-arm-never-clear shape is identical — which is the point (#2630).
 - **Reuse the ref, never rebuild** — reconstitute from `{{LANE_REF}}`; if the ref is gone or the item is
   unrecoverable, report it, don't silently redo the item.
 - **Repair only the finding** — do not fold unrelated work in; do not weaken or delete a test to go green.
+- **Prove it, don't just gate it** — reproduce the finding red (step 2), re-confirm it green (step 4), and post
+  the trimmed before/after evidence as a PR comment (step 6) before you re-arm. A genuine non-repro is stated
+  explicitly, with the reason — never silently skipped.
 - **Work only through the normal verbs** — `acquire --base=<ref>` → repair → `git push … lane/*` →
   `rearm-review.mjs` → daemon/human re-review. No parallel state store (#2612 ruling).
 - **If you stop, say so ON THE PR** — every escalation exit runs `stand-down.mjs` before it returns (#3296). A
