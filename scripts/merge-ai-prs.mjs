@@ -135,7 +135,7 @@ import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.
 // #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
 // same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
 import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
-import { ensureFreshGithubAppEnv, startGithubAppTokenAutoRefresh } from './lib/github-app-auth-env.mjs';
+import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -3096,9 +3096,8 @@ async function runCli() {
   // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
   // call this drain run makes draws from the App installation's own rate-limit bucket instead of the
   // operator's personal one. Awaited HERE, before any gh work, so a fresh env var is in place for even the
-  // very first discovery call — a `--watch` run additionally starts the recurring refresher below, once
-  // WATCH is known, so a long-lived monitor keeps drawing a fresh token past the 1-hour installation-token
-  // lifetime. See github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
+  // very first discovery call; a `--watch` run re-checks at the top of every pass (see the watch loop). See
+  // github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
   await ensureFreshGithubAppEnv({ log: console });
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
@@ -3123,9 +3122,6 @@ async function runCli() {
   // (`/drain watch`), re-sweeping on `--interval=N`s and landing each PR the instant it goes green.
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE, untilBatchesIdle: UNTIL_BATCHES_IDLE, batchIdleDebounce: BATCH_DEBOUNCE } =
     parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'], untilBatchesIdle: flags['until-batches-idle'], batchIdleDebounce: flags['batch-idle-debounce'] });
-  // A long-lived --watch monitor outlives a single installation token (1-hour GitHub max) — keep it fresh.
-  // A one-shot sweep already got its token from the awaited call above and needs no recurring refresh.
-  if (WATCH) startGithubAppTokenAutoRefresh({ log: console });
   // #2330 — the active-progress feed the batch-aware exit reads. The feed is a dev-only artifact the website's
   // Active-work tab reads; it lives at <repo>/_site/active-progress.json and is written by
   // `scripts/dev/active-progress-watch.mjs` (which must be running for the signal to exist — a drain-only
@@ -4951,6 +4947,10 @@ async function runCli() {
   let lastDup = [];
   let redMainStopped = false; // #2681 — a freeze raised MID-watch stops the line this pass
   for (let pass = 1; ; pass++) {
+    // #3881 — refresh the App token at the top of EVERY pass (a no-op unless configured, and a plain cache read
+    // until the token nears expiry). Never on a timer: this loop sleeps with `sleepSync`, so the event loop is
+    // never free for a background refresh to run — the top of a pass is the only point it can.
+    if (pass > 1) await ensureFreshGithubAppEnv({ log: console });
     if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope, repoKey: localSlug }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite; #3440 repoKey selects the same per-repo lock dir
     // #2681 — RE-CHECK the red-main dispatch-freeze EVERY pass: a post-land red can be raised DURING a running
     // watch (the resident drain daemon is a long-lived `--watch`), and stop-the-line must catch it, not just a

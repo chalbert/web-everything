@@ -52,7 +52,7 @@ import { tagReviewRound } from '../../scripts/conveyor/review-round-tag.mjs';
 import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
-import { startGithubAppTokenAutoRefresh } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -215,26 +215,20 @@ async function main() {
     console.error(`review-daemon: a live instance already holds the lease (${acquired.heldBy}) — exiting.`);
     return;
   }
-  // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
-  // call this process (and every agent it dispatches) makes from here on draws from the App installation's
-  // own rate-limit bucket instead of the operator's personal one. See github-app-auth-env.mjs's own header.
-  const ghAppAuth = startGithubAppTokenAutoRefresh({ log: console });
   let stopping = false;
   const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
     console.error(`review-daemon: ${signal} — releasing the lease and exiting.`);
-    ghAppAuth.stop();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   console.error(`review-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ owner }));
+  const { stoppedReason } = await runDaemonLoop(withGithubAppAuth(buildCliDaemonEffects({ owner })));
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
-    ghAppAuth.stop();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY });
   }
 }

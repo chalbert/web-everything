@@ -37,7 +37,7 @@ import {
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
-import { startGithubAppTokenAutoRefresh } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 
 /** This daemon's own lease key — distinct from the Dispatcher's default sentinel and from the Verify
  *  daemon's own key (#3878), so none of the three ever contend on the same lock dir (#3877). */
@@ -125,26 +125,20 @@ async function main() {
     console.error(`reconcile-fix-dispatch-daemon: a live instance already holds the lease (${acquired.heldBy}) — exiting.`);
     return;
   }
-  // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
-  // call this process (and every agent it dispatches) makes from here on draws from the App installation's
-  // own rate-limit bucket instead of the operator's personal one. See github-app-auth-env.mjs's own header.
-  const ghAppAuth = startGithubAppTokenAutoRefresh({ log: console });
   let stopping = false;
   const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
     console.error(`reconcile-fix-dispatch-daemon: ${signal} — releasing the lease and exiting.`);
-    ghAppAuth.stop();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
   console.error(`reconcile-fix-dispatch-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ owner }));
+  const { stoppedReason } = await runDaemonLoop(withGithubAppAuth(buildCliDaemonEffects({ owner })));
   if (!stopping) {
     console.error(`reconcile-fix-dispatch-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
-    ghAppAuth.stop();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY });
   }
 }

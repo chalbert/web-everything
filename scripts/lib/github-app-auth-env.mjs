@@ -3,7 +3,7 @@
  * @file scripts/lib/github-app-auth-env.mjs
  * @description Implements ratified #3866 Fork 1(a) (a GitHub App installation token, app-to-server, never
  *   the user-to-server "authorize as me" flow) via the simplest mechanism that actually reaches every
- *   consumer: a shared on-disk token cache, refreshed by each long-running process's own bootstrap, and
+ *   consumer: a shared on-disk token cache, refreshed by each process at the top of each tick/pass, and
  *   exposed to `gh`/git subprocess calls through `process.env.GH_TOKEN` — which `gh` CLI already honors
  *   ahead of its own stored `gh auth login` credential, and which EVERY `execFileSync`/`spawn` call already
  *   inherits by default, whether it goes through `we:scripts/lib/gh-throttle.mjs`'s wrapper or one of the
@@ -15,7 +15,7 @@
  * installation token is an async network call (`we:scripts/lib/github-app-token.mjs#mintInstallationToken`
  * uses `fetch`). Forcing that call to sync would mean shelling `curl` from inside a throttled call, adding
  * real complexity to the one module everything else's rate-limit safety already depends on. Splitting
- * mint/refresh (async, happens in each process's own bootstrap or periodic timer) from CONSUME (sync, a
+ * mint/refresh (async, at the top of each tick or pass, between the blocking sync work) from CONSUME (sync, a
  * plain env var read) sidesteps the problem entirely, and reaches the drain (`we:scripts/merge-ai-prs.mjs`)
  * too — which does not call through gh-throttle.mjs at all, so wiring the swap inside that module alone
  * would never have covered it (live-caught 2026-09-23, following a real rate-limit exhaustion incident).
@@ -95,11 +95,6 @@ async function defaultListInstallationRepos(token, fetchImpl = fetch) {
  *  mid-refresh, or plain clock skew never leaves a consumer holding a token GitHub has already rejected. */
 export const REFRESH_BUFFER_MS = 10 * 60 * 1000;
 
-/** How often a long-running process should re-check the cache — short enough that two independent daemons
- *  sharing one cache file never both go more than one interval past the buffer window without a mint
- *  attempt, long enough that a healthy cache is read, not re-minted, on almost every call. */
-export const AUTO_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
-
 /** One shared cache, not per-daemon — the review daemon, the fix-dispatch daemon and the drain all draw
  *  from the SAME installation, so one fresh token serves all of them; minting three independent tokens for
  *  one installation would just be three times the JWT-signing cost for zero isolation benefit (they already
@@ -123,11 +118,19 @@ export function resolveGithubAppEnvConfig(env = process.env) {
   return { appId, installationId, privateKeyPath };
 }
 
+/**
+ * Stamped on every cache entry this module writes. Only an entry carrying the CURRENT version is trusted —
+ * because a cache hit skips the access check, an entry written by an older, laxer version must never be
+ * reused (live-caught 2026-09-23: a pre-check probe cached an unvalidated token, and both daemons applied it
+ * on restart until it was deleted by hand). Bump this whenever what "validated" means changes.
+ */
+export const CACHE_VERSION = 2;
+
 /** Pure: is a cached token still safe to use `bufferMs` before its own real expiry? No token cached at all
- *  is never "fresh" — that is a mint, not a refresh. @param {{expiresAt?:string}|null} cached
- *  @param {number} nowMs @param {number} [bufferMs] */
+ *  is never "fresh" — that is a mint, not a refresh; nor is one written by a different cache version.
+ *  @param {{expiresAt?:string, v?:number}|null} cached @param {number} nowMs @param {number} [bufferMs] */
 export function isCacheFresh(cached, nowMs, bufferMs = REFRESH_BUFFER_MS) {
-  if (!cached || typeof cached.expiresAt !== 'string') return false;
+  if (!cached || cached.v !== CACHE_VERSION || typeof cached.expiresAt !== 'string') return false;
   const expiresAtMs = Date.parse(cached.expiresAt);
   return Number.isFinite(expiresAtMs) && (expiresAtMs - bufferMs) > nowMs;
 }
@@ -205,7 +208,7 @@ export async function ensureFreshGithubAppEnv({
       );
       return { applied: false, reason: 'insufficient-access', missingPermissions, missingRepos };
     }
-    cached = { token: minted.token, expiresAt: minted.expiresAt };
+    cached = { v: CACHE_VERSION, token: minted.token, expiresAt: minted.expiresAt };
     writeCache(cachePath, cached);
   }
 
@@ -214,16 +217,27 @@ export async function ensureFreshGithubAppEnv({
 }
 
 /**
- * For a LONG-RUNNING process (a daemon, or the drain's own `--watch` loop): call {@link ensureFreshGithubAppEnv}
- * once immediately, then on a REF'd timer every `intervalMs` — ref'd deliberately (the opposite of the
- * `.unref()` bug #3870 hit for a daemon's own tick sleep): an extra ref'd handle never stops a process that
- * already has one from a `setTimeout`/`setInterval` elsewhere keeping it alive, and one on its own is a
- * perfectly normal reason for a long-lived daemon to keep running between refreshes.
- * @param {{intervalMs?:number, setInterval_?:typeof setInterval} & Parameters<typeof ensureFreshGithubAppEnv>[0]} [o]
- * @returns {{stop:()=>void}} call `stop()` on graceful shutdown to clear the timer
+ * For a LONG-RUNNING daemon: wrap its `runDaemonLoop` effects so every tick first awaits
+ * {@link ensureFreshGithubAppEnv}, then runs the real tick. A cache read on almost every tick; a mint only
+ * once the token nears expiry.
+ *
+ * WHY PER-TICK AND NEVER A TIMER (live-caught 2026-09-23). A daemon tick is a long run of synchronous
+ * `execFileSync` calls (`gh`, `claude`) that BLOCKS the event loop. A background `setInterval` refresh
+ * therefore could not progress while a tick ran — and a mint caught mid-connection by a long tick timed out
+ * ("fetch failed"), falling back to personal auth. It also meant a fresh daemon's FIRST tick always started
+ * before its token was in place. The gap between ticks is the one moment the loop is guaranteed free; awaiting
+ * there also means every tick, including the first, starts with the token already set.
+ * @param {{tickOnce:()=>any}} effects - a daemon's `runDaemonLoop` effects object
+ * @param {Parameters<typeof ensureFreshGithubAppEnv>[0]} [opts] - forwarded to every refresh
+ * @returns {typeof effects} the same effects, `tickOnce` wrapped
  */
-export function startGithubAppTokenAutoRefresh({ intervalMs = AUTO_REFRESH_INTERVAL_MS, setInterval_ = setInterval, ...opts } = {}) {
-  ensureFreshGithubAppEnv(opts).catch(() => {}); // the function itself never throws; this guards a future edit
-  const timer = setInterval_(() => { ensureFreshGithubAppEnv(opts).catch(() => {}); }, intervalMs);
-  return { stop: () => clearInterval(timer) };
+export function withGithubAppAuth(effects, opts = { log: console }) {
+  const tick = effects.tickOnce;
+  return {
+    ...effects,
+    tickOnce: async () => {
+      await ensureFreshGithubAppEnv(opts); // never throws — a failure logs and leaves personal auth in place
+      return tick();
+    },
+  };
 }

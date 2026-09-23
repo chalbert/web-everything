@@ -1,13 +1,13 @@
 /**
  * @file scripts/lib/__tests__/github-app-auth-env.test.mjs
  * @description Unit proof of the #3866-ratified GitHub App auth-env wiring. Every effect (the cache
- *   read/write, the mint call, the clock, the `process.env` mutation, the timer) is injected — no real fs,
+ *   read/write, the mint call, the repo listing, the clock, the `process.env` mutation) is injected — no real fs,
  *   no real network, no real GitHub App needed.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
-  resolveGithubAppEnvConfig, isCacheFresh, ensureFreshGithubAppEnv, startGithubAppTokenAutoRefresh,
-  REFRESH_BUFFER_MS, defaultCachePath, findInstallationGaps, REQUIRED_APP_PERMISSIONS, REQUIRED_APP_REPOS,
+  resolveGithubAppEnvConfig, isCacheFresh, ensureFreshGithubAppEnv, withGithubAppAuth,
+  REFRESH_BUFFER_MS, defaultCachePath, findInstallationGaps, CACHE_VERSION, REQUIRED_APP_PERMISSIONS, REQUIRED_APP_REPOS,
 } from '../github-app-auth-env.mjs';
 
 const CONFIGURED_ENV = {
@@ -41,16 +41,16 @@ describe('isCacheFresh — pure freshness classifier', () => {
   const NOW = Date.parse('2026-09-23T12:00:00Z');
 
   it('a token expiring well in the future is fresh', () => {
-    expect(isCacheFresh({ expiresAt: '2026-09-23T13:00:00Z' }, NOW)).toBe(true);
+    expect(isCacheFresh({ v: CACHE_VERSION, expiresAt: '2026-09-23T13:00:00Z' }, NOW)).toBe(true);
   });
 
   it('a token expiring within the refresh buffer is NOT fresh — refresh early, never right at the wire', () => {
     const expiresAt = new Date(NOW + REFRESH_BUFFER_MS - 1000).toISOString();
-    expect(isCacheFresh({ expiresAt }, NOW)).toBe(false);
+    expect(isCacheFresh({ v: CACHE_VERSION, expiresAt }, NOW)).toBe(false);
   });
 
   it('a token already past its own expiry is not fresh', () => {
-    expect(isCacheFresh({ expiresAt: '2026-09-23T11:00:00Z' }, NOW)).toBe(false);
+    expect(isCacheFresh({ v: CACHE_VERSION, expiresAt: '2026-09-23T11:00:00Z' }, NOW)).toBe(false);
   });
 
   it('no cache at all (null) is never fresh — that is a mint, not a refresh', () => {
@@ -59,7 +59,27 @@ describe('isCacheFresh — pure freshness classifier', () => {
 
   it('a corrupt/malformed cache entry (no usable expiresAt) is not fresh', () => {
     expect(isCacheFresh({}, NOW)).toBe(false);
-    expect(isCacheFresh({ expiresAt: 'not-a-date' }, NOW)).toBe(false);
+    expect(isCacheFresh({ v: CACHE_VERSION, expiresAt: 'not-a-date' }, NOW)).toBe(false);
+  });
+
+  it('an entry from another cache version (or none) is never fresh, however far off its expiry', () => {
+    expect(isCacheFresh({ expiresAt: '2026-09-23T13:00:00Z' }, NOW)).toBe(false);
+    expect(isCacheFresh({ v: CACHE_VERSION - 1, expiresAt: '2026-09-23T13:00:00Z' }, NOW)).toBe(false);
+  });
+});
+
+describe('THE DEPLOY INCIDENT (2026-09-23) — an unvalidated token cached by an older version', () => {
+  it('is never applied: it is re-minted and re-checked, and a still-under-configured App is refused', async () => {
+    const oldEntry = { token: 'ghs_unvalidated', expiresAt: '2026-09-23T13:58:13Z' }; // no `v` — the pre-check shape
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_new', expiresAt: '2026-09-23T14:00:00Z', permissions: {} });
+    const setEnv = vi.fn();
+    const result = await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: Date.parse('2026-09-23T13:20:00Z'), readCache: () => oldEntry, writeCache: vi.fn(),
+      mint, listRepos: vi.fn(async () => []), setEnv, log: { error: vi.fn() },
+    });
+    expect(mint).toHaveBeenCalled();
+    expect(result.reason).toBe('insufficient-access');
+    expect(setEnv).not.toHaveBeenCalled(); // neither the old token nor the fresh one
   });
 });
 
@@ -76,7 +96,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
   });
 
   it('cache already fresh — reads it, mints NOTHING, and sets env from the cached token', async () => {
-    const cached = { token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
+    const cached = { v: CACHE_VERSION, token: 'ghs_cached', expiresAt: '2026-09-23T13:00:00Z' };
     const readCache = vi.fn(() => cached);
     const writeCache = vi.fn();
     const mint = vi.fn();
@@ -103,13 +123,13 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
       appId: '5037855', installationId: '163880042',
       privateKeyPath: '/Users/x/.secrets/github-apps/web-everything.pem', now: NOW,
     });
-    expect(writeCache).toHaveBeenCalledWith(expect.any(String), { token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z' });
+    expect(writeCache).toHaveBeenCalledWith(expect.any(String), { v: CACHE_VERSION, token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z' });
     expect(setEnv).toHaveBeenCalledWith('ghs_fresh');
   });
 
   it('cache expiring within the buffer — mints a fresh one rather than trusting the stale entry', async () => {
     const expiresAt = new Date(NOW + REFRESH_BUFFER_MS - 1000).toISOString();
-    const readCache = vi.fn(() => ({ token: 'ghs_stale', expiresAt }));
+    const readCache = vi.fn(() => ({ v: CACHE_VERSION, token: 'ghs_stale', expiresAt }));
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_new', expiresAt: '2026-09-23T14:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
@@ -206,34 +226,47 @@ describe('findInstallationGaps — pure', () => {
   });
 });
 
-describe('startGithubAppTokenAutoRefresh — the long-running-process wrapper, timer injected', () => {
-  it('refreshes immediately, then again on the injected timer — a ref\'d interval, never `.unref()`', () => {
-    vi.useFakeTimers();
-    const readCache = vi.fn(() => null);
-    const writeCache = vi.fn();
-    const mint = vi.fn().mockResolvedValue({ token: 'ghs_x', expiresAt: '2099-01-01T00:00:00Z', permissions: FULL_PERMS });
-    const setEnv = vi.fn();
-    const { stop } = startGithubAppTokenAutoRefresh({
-      env: CONFIGURED_ENV, intervalMs: 1000, readCache, writeCache, mint, listRepos: allRepos, setEnv,
+describe('withGithubAppAuth — refresh at the top of every tick, never on a timer', () => {
+  // Live-caught 2026-09-23: a timer refresh could not run while a daemon tick's blocking execFileSync calls
+  // held the event loop, and a mint caught mid-connection timed out. Per-tick ordering is the fix.
+  it('the token is set BEFORE the real tick runs — including the very first tick', async () => {
+    const order = [];
+    const setEnv = vi.fn(() => order.push('setEnv'));
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_t', expiresAt: '2099-01-01T00:00:00Z', permissions: FULL_PERMS });
+    const effects = { tickOnce: vi.fn(() => { order.push('tick'); return { ok: 1 }; }), sleep: vi.fn(), intervalMs: 5 };
+    const wrapped = withGithubAppAuth(effects, {
+      env: CONFIGURED_ENV, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos, setEnv,
     });
-    expect(mint).toHaveBeenCalledTimes(1); // the immediate call, before any timer fires
-    vi.advanceTimersByTime(1000);
-    expect(mint).toHaveBeenCalledTimes(2);
-    vi.advanceTimersByTime(2000);
-    expect(mint).toHaveBeenCalledTimes(4);
-    stop();
-    vi.advanceTimersByTime(5000);
-    expect(mint).toHaveBeenCalledTimes(4); // stopped — no further calls
-    vi.useRealTimers();
+    const result = await wrapped.tickOnce();
+    expect(order).toEqual(['setEnv', 'tick']);
+    expect(result).toEqual({ ok: 1 }); // the real tick's own result passes through untouched
   });
 
-  it('never throws even if the immediate refresh itself rejects — the timer must still be armed', () => {
-    vi.useFakeTimers();
-    const mint = vi.fn().mockRejectedValue(new Error('network down'));
-    expect(() => startGithubAppTokenAutoRefresh({
-      env: CONFIGURED_ENV, intervalMs: 1000, readCache: () => null, mint, listRepos: allRepos, setEnv: vi.fn(), log: { error: vi.fn() },
-    })).not.toThrow();
-    vi.useRealTimers();
+  it('keeps every other effect as-is (sleep, heartbeat, interval) — only tickOnce is wrapped', () => {
+    const effects = { tickOnce: () => {}, sleep: vi.fn(), heartbeat: vi.fn(), intervalMs: 123 };
+    const wrapped = withGithubAppAuth(effects, { env: {} });
+    expect(wrapped.sleep).toBe(effects.sleep);
+    expect(wrapped.heartbeat).toBe(effects.heartbeat);
+    expect(wrapped.intervalMs).toBe(123);
+    expect(wrapped.tickOnce).not.toBe(effects.tickOnce);
+  });
+
+  it('a failed refresh never blocks the tick — it still runs, on whatever auth was already in effect', async () => {
+    const tick = vi.fn(() => 'ran');
+    const mint = vi.fn().mockRejectedValue(new Error('fetch failed'));
+    const wrapped = withGithubAppAuth({ tickOnce: tick }, {
+      env: CONFIGURED_ENV, readCache: () => null, mint, listRepos: allRepos, setEnv: vi.fn(), log: { error: vi.fn() },
+    });
+    await expect(wrapped.tickOnce()).resolves.toBe('ran');
+    expect(tick).toHaveBeenCalledTimes(1);
+  });
+
+  it('not configured — the tick runs with no refresh attempt at all', async () => {
+    const mint = vi.fn();
+    const tick = vi.fn(() => 'ran');
+    const wrapped = withGithubAppAuth({ tickOnce: tick }, { env: {}, mint });
+    await expect(wrapped.tickOnce()).resolves.toBe('ran');
+    expect(mint).not.toHaveBeenCalled();
   });
 });
 

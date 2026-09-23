@@ -43,10 +43,14 @@ needed to change. The throttle module itself is untouched.
 
 ## Wired into (this card)
 
-- `we:skills-src/conveyor/review-daemon.mjs` — `main()`, recurring refresh.
-- `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs` — `main()`, recurring refresh.
-- `we:scripts/merge-ai-prs.mjs` (the drain) — awaited once before any `gh` work; recurring refresh only under
-  `--watch`.
+- `we:skills-src/conveyor/review-daemon.mjs` — refreshed at the top of every tick (`withGithubAppAuth`).
+- `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs` — same.
+- `we:scripts/merge-ai-prs.mjs` (the drain) — awaited once before any `gh` work, then at the top of every
+  `--watch` pass.
+
+Never on a background timer (the first version did this, live-caught 2026-09-23): a daemon tick's blocking
+`execFileSync` calls starve the event loop, so a timer refresh stalled, and one caught mid-connection timed out
+("fetch failed"). The drain's watch loop even sleeps with `sleepSync`, so a timer there would never fire.
 
 Opt-in only: all three `WE_GITHUB_APP_ID` / `WE_GITHUB_APP_INSTALLATION_ID` / `WE_GITHUB_APP_PRIVATE_KEY_PATH`
 env vars must be set, or nothing changes. A mint failure never throws — it logs and falls back to whatever
@@ -74,6 +78,12 @@ auth was already in effect.
 - So the module now checks every fresh mint against the permissions and repos the fleet needs BEFORE using
   it, and refuses (staying on personal auth, logging exactly what to grant) otherwise — confirmed live against
   the real under-configured App. Switching on can never make the fleet worse off.
+- **Deploy-time incident, same day, fixed.** The first live probe ran BEFORE the access check existed and wrote
+  an unvalidated token to the shared cache. Cache hits skip re-validation by design, so both daemons picked it
+  up on restart; the review daemon then got `HTTP 403 Resource not accessible by integration` on a label write.
+  The bad cache was deleted and the daemons restarted; the old review-daemon process had been force-killed
+  mid-call and left a stale lease, which was moved aside (owner pid confirmed dead). Lesson: a cache written
+  by an older, laxer version of this module must not outlive the upgrade.
 - **Remaining:** the operator's App-settings change (see `humanGate`), then set the three `WE_GITHUB_APP_*`
   env vars on the review daemon, fix-dispatch daemon and drain, then Done-when 3's live confirmation.
 
