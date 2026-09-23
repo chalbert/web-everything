@@ -4,12 +4,25 @@
  *   and the per-tick sequence, both with every effect injected (no real gh/claude, no real lease/timer).
  */
 import { describe, it, expect, vi } from 'vitest';
+
+// Mocked so `defaultReapSessions`'s own describe block below can assert exactly what it passes through
+// WITHOUT ever shelling a real `claude agents`/`claude stop`/`gh` call — this repo's own hard rule (never touch
+// a real process in a test; inject a fake). `session-reaper.mjs`'s OWN test suite
+// (scripts/conveyor/__tests__/session-reaper.test.mjs) already proves `runSessionReaperPass`'s real behavior;
+// this file only needs to prove review-daemon.mjs wires it correctly.
+const runSessionReaperPassMock = vi.fn(() => ({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 }));
+vi.mock('../../../scripts/conveyor/session-reaper.mjs', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, runSessionReaperPass: (...args) => runSessionReaperPassMock(...args) };
+});
+
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
-  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS,
+  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
+import { REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../../scripts/conveyor/session-reaper.mjs';
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {
@@ -227,6 +240,67 @@ describe('buildCliDaemonEffects — the real-effect factory (heartbeat wiring on
     expect(typeof effects.heartbeat).toBe('function');
     expect(typeof effects.onTick).toBe('function');
     expect(typeof effects.onTickError).toBe('function');
+  });
+});
+
+// ── epic #3383: this daemon now ALSO ticks the session reaper (we:scripts/conveyor/session-reaper.mjs), the
+//    pass that used to live only inside the retired runner.mjs dispatcher. See review-daemon.mjs's own file
+//    header ("THE SESSION REAPER LIVES HERE TOO") for the ownership decision and its justification. ──────────
+
+describe('buildCliDaemonEffects.tickOnce — now also runs a session-reap pass each tick (epic #3383)', () => {
+  // `runReview` is injected here too (a fake, never the real `runReviewTickAllRepos`) — this describe block
+  // proves the FOLD of `reapSessions()` onto the tick result, not the review tick itself (that is
+  // `runReviewTickAllRepos`'s own describe block, above), and must never shell a real `gh`/`claude` call.
+  const fakeReview = () => ({ repos: [], reviewsOwed: 1, dispatched: [], failed: [] });
+
+  it('folds the injected reapSessions() result onto the review tick result, under `sessionReap`', async () => {
+    const reapSessions = vi.fn(() => ({ scanned: 3, stopped: 1, alreadyGone: 0, failures: 0, anomalies: 0, kept: 2 }));
+    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview });
+    const result = await effects.tickOnce();
+    expect(reapSessions).toHaveBeenCalledTimes(1);
+    expect(result.sessionReap).toEqual({ scanned: 3, stopped: 1, alreadyGone: 0, failures: 0, anomalies: 0, kept: 2 });
+    // The review tick's own fields are still present — folding sessionReap on never replaces them.
+    expect(result).toHaveProperty('repos');
+    expect(result.reviewsOwed).toBe(1);
+  });
+
+  it('a session-reap failure is swallowed (logged, non-fatal) — never breaks the review tick', async () => {
+    const reapSessions = () => { throw new Error('claude agents unreadable'); };
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview, log });
+    const result = await effects.tickOnce();
+    expect(result.sessionReap).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/session-reap failed \(non-fatal\)/));
+    expect(result).toHaveProperty('repos'); // the review tick itself still ran to completion
+  });
+
+  it('onTick logs the session-reap summary line when one is present, and skips it when `unreadable`', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [], sessionReap: { scanned: 5, stopped: 2, alreadyGone: 1, failures: 0, anomalies: 0, kept: 2 } });
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/session-reap — 5 scanned, 2 stopped, 1 already gone, 2 kept/));
+
+    log.error.mockClear();
+    effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [], sessionReap: { unreadable: true } });
+    expect(log.error.mock.calls.some((c) => /session-reap —/.test(c[0]))).toBe(false);
+
+    log.error.mockClear();
+    effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [], sessionReap: null });
+    expect(log.error.mock.calls.some((c) => /session-reap —/.test(c[0]))).toBe(false);
+  });
+});
+
+describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mjs\'s own CLI default', () => {
+  it('calls runSessionReaperPass with allowedCwd/neverReapWorking/idleThresholdMs set (never a real claude/gh call)', () => {
+    runSessionReaperPassMock.mockClear();
+    const result = defaultReapSessions();
+    expect(runSessionReaperPassMock).toHaveBeenCalledTimes(1);
+    expect(runSessionReaperPassMock).toHaveBeenCalledWith({
+      allowedCwd: SESSION_REAPER_REPO_ROOT,
+      neverReapWorking: true,
+      idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
+    });
+    expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 });
   });
 });
 

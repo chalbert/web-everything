@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EXAMPLE ONLY — NOT INSTALLED, NOT LOADED, INERT.
+
+  This file is a reference for what a launchd LaunchAgent for `skills-src/conveyor/pass-daemon.mjs
+  --pass=merge-orphan-sweep` would look like (epic #3383's daemon split), mirrored from
+  `com.we.conveyor-supervisor.plist.example` in this same directory — see that file's own header for the full
+  explanation of why an `.example` file has zero effect on the machine until a human deliberately installs it.
+
+  WHAT THIS WATCHER DOES. Runs `node scripts/merge-ai-prs.mjs` (bare — no `--label`) on an interval: the
+  "/merge orphan sweep" role, which lists every open PR directly (never through `reconcile-pass.mjs`'s own
+  discovery) and merges the ones that are unambiguously AI-generated, green, and cleanly mergeable. This is
+  the ONE pass that ever picks up a PR carrying only a `checking` label with no `.lane-manifest.json`-derived
+  owner — see `skills-src/conveyor/daemon-manifest.mjs`'s own `merge-orphan-sweep` entry doc for the full
+  reasoning (found live: PR #2504, `lane/wip-socket-card`, CI green, nothing watching it).
+
+  `pass-daemon.mjs` resolves `--pass=merge-orphan-sweep` through `daemon-manifest.mjs`'s closed allowlist — it
+  never takes a raw script path from this plist, so the actual command + args + interval are reviewed IN CODE
+  (that file), not duplicated here. This plist only owns the OS-level residency (RunAtLoad/KeepAlive) and the
+  working directory / log destination, exactly like every other pass-daemon watcher already running under
+  launchd (per `pass-daemon.mjs`'s own header: "Six resident lane-pool-health-watch/parked-pr-conflict-watch
+  launchd jobs run through this exact file").
+
+  WHICH CHECKOUT. Per this epic's own standing rule, a daemon that writes to `main` (this one merges PRs) runs
+  from ITS OWN dedicated clone, never the operator's primary checkout or a lane-pool lane — substitute that
+  clone's real path below, the same way the review/fix daemons each have their own (e.g. `wev-review-daemon`).
+
+  To actually install it (a deliberate, separate human decision — never a side effect of this daemon-manifest
+  entry landing):
+    1. Copy to ~/Library/LaunchAgents/com.we.conveyor-pass-daemon.merge-orphan-sweep.plist
+    2. Fill in the real `node` path (see `which node`) and the dedicated clone's real WorkingDirectory
+    3. `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.we.conveyor-pass-daemon.merge-orphan-sweep.plist`
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.we.conveyor-pass-daemon.merge-orphan-sweep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/YOU/workspace/wev-merge-daemon/skills-src/conveyor/pass-daemon.mjs</string>
+    <string>--pass=merge-orphan-sweep</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/YOU/workspace/wev-merge-daemon</string>
+  <!-- RunAtLoad + KeepAlive: residency survives crash, logout/login, reboot, and sleep by construction — same
+       shape as every other pass-daemon watcher. ThrottleInterval guards against launchd itself relaunching
+       faster than pass-daemon.mjs's own per-pass lease/backoff would. -->
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/YOU/workspace/wev-merge-daemon/.conveyor/pass-daemon.merge-orphan-sweep.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/workspace/wev-merge-daemon/.conveyor/pass-daemon.merge-orphan-sweep.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>
