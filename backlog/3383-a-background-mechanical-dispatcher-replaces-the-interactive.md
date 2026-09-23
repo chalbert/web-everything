@@ -4956,3 +4956,55 @@ path, `we:scripts/lib/__tests__/`).
 Full suite after both commits: 591/593 files, 16435/16448 tests; the 2 remaining failures
 (`we:scripts/operations/__tests__/host-sampler-capacity.test.mjs`, `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs`) are confirmed pre-existing and
 unrelated to this fix.
+
+## Session update (2026-09-22) — #3783 (#3690 Fork 2): concurrent-baseline comparison harness built and pushed to lane/mechanical-dispatcher
+
+`#3783` (`#3690` Fork 2) — the concurrent-baseline comparison harness for delegation trials, built and
+pushed directly to `lane/mechanical-dispatcher` (`103f8c822`), no PR (same doctrine as `#3888`/`#3889`).
+
+`#3690` Fork 2 names a concurrent-baseline comparison — the SAME task run through Claude and through a
+delegated provider, judged on the difference — as the PREFERRED evidence shape for whether a delegation
+trial is clean/informative, better than raising the trial-count threshold N (the 95% upper bound on the
+failure rate at N=5 is 45.07%). Two comparative rows already existed in
+`we:scripts/conveyor/run-scorecards.json`, produced BY HAND (`claude-native` vs
+`antigravity/claude-sonnet-4-6` reviewing the same PR 2223 diff, both `scoredAt` 2026-09-15T14:35). This
+item mechanizes that shape.
+
+**Built:**
+- `we:scripts/conveyor/concurrent-baseline-comparison.mjs` (new) — `compareTrialOutcomes` is a PURE,
+  deterministic comparison of two already-judged trial outcomes (the Kayenta/Argo-Rollouts sense of
+  comparing canary metrics against a concurrent baseline's metrics, not a second LLM call re-litigating
+  which diff reads better). `recordConcurrentBaselineComparison` mints one `comparisonId` and writes both
+  sides through the EXISTING `logDelegationTrial` unchanged, so every validation/scrub rule already on that
+  path applies identically per row. `dispatchDelegatedProvider` reuses the existing
+  `we:codex-direct-task.mjs`/`we:gemini-direct-task.mjs` dispatch machinery for the delegated side only.
+- `we:scripts/conveyor/log-delegation-trial.mjs` — added a nullable `comparisonId` field (scrubbed like
+  `findings`/`rootCause`) so two linked rows read as one trial pair, CLI flag `--comparison-id=`.
+
+**Deliberate scope boundary, documented in the new module's header:** this harness does NOT dispatch
+Claude's own side of a comparison, and does NOT re-implement diff judging. There is no
+`we:claude-direct-task.mjs` — Claude can only be dispatched by a live orchestrating session's own Task/Agent
+tool, never shelled out to from a script. Turning a raw diff into `{outcome, verifiedBy, findings}` is
+already the job of the existing jury/judge machinery (`we:jury-core.mjs`'s `deriveVerdict`, the `we:judge-spawn.mjs`
+family, `we:review-pr.mjs`). Both sides are therefore supplied to `recordConcurrentBaselineComparison`
+ALREADY-JUDGED — exactly how the two hand-written precedent rows were actually produced (a session
+dispatched, a subagent independently reviewed, the verdict was hand-recorded). What this item mechanizes is
+the recording + comparison + linking step; dispatch and judging reuse machinery this session already built
+today, not reinvented here.
+
+**Tests:** 26 new tests in `we:scripts/conveyor/__tests__/concurrent-baseline-comparison.test.mjs` + 5 new
+tests added to the existing `we:log-delegation-trial.test.mjs` (`comparisonId` accept/reject/scrub/CLI), all
+mirroring this repo's existing injectable-IO test style (`memIo`, no real filesystem writes). Full conveyor
+suite: 1732/1732 tests passing. `npm run check:standards -- --scope=3783-concurrent-baseline-harness`:
+0 errors, no warning names either changed/new file.
+
+**A data-divergence residual observed, not fixed here:** `lane/mechanical-dispatcher`'s own copy of
+`we:scripts/conveyor/run-scorecards.json` (5 `antigravity` rows) is currently BEHIND `main`'s copy (12 rows) —
+it is missing the very two hand-produced precedent rows (`item: 3690`, `pr: 2223`) this card cites as its
+shape precedent, along with several later real trials. This did not block building/testing the harness
+(tests use in-memory fixtures in the precedent's shape, not the live store), but it's a real fact for
+whoever eventually reconciles `lane/mechanical-dispatcher` back onto `main` (`#3443`) — the store will need
+a genuine three-way merge, not a fast-forward, when that happens.
+
+Backlog card `status`/`resolved` flip for `#3783` itself is DEFERRED to a separate closeout pass on `main`,
+same pattern `#3888`/`#3889`/`#3887` used (`eff0426ea`, "already built on lane/mechanical-dispatcher").
