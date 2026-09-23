@@ -26,6 +26,15 @@
  *     heartbeat `setInterval` (never inside the loop's own await chain), and owns the real keyed lease
  *     (#3877) — its own distinct key, one per `--pass=<name>`, so two different passes running under this
  *     daemon never contend with each other or with the Dispatcher's own lease.
+ *
+ * GITHUB APP TOKEN, NOT THE OPERATOR'S PERSONAL ONE (xsdm0n7, epic #3383). Every one of these watchers'
+ * pass scripts shells `gh` as a child process, inheriting `process.env` — so setting `GH_TOKEN` here, right
+ * before each spawn via {@link ensureFreshGithubAppEnv}, covers every pass this daemon can run without
+ * touching any pass script itself. Opt-in (the three `WE_GITHUB_APP_*` env vars), never throws, and falls
+ * back to the operator's personal `gh auth login` token unchanged if the App isn't configured or a mint
+ * fails — see that module's own header. Six resident `lane-pool-health-watch`/`parked-pr-conflict-watch`
+ * launchd jobs run through this exact file; their personal-token draw is what exhausted the operator's
+ * 5,000/hr budget ("API rate limit already exceeded for user ID 760299") on 2026-09-23.
  */
 
 import { spawn } from 'node:child_process';
@@ -36,6 +45,7 @@ import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
+import { ensureFreshGithubAppEnv } from '../../scripts/lib/github-app-auth-env.mjs';
 
 /** How often the INDEPENDENT heartbeat timer fires, regardless of whether a pass is mid-run. Deliberately
  *  much shorter than any pass's own `intervalMs` — it exists precisely to keep beating DURING a long single
@@ -55,12 +65,20 @@ export function passDaemonLeaseKey(passName) { return `<conveyor:pass-daemon:${p
  * The daemon's run/sleep control flow — deliberately does NOT own the heartbeat (that runs on its own real
  * timer in the IO shell, see the file header for why); this loop only isolates a failing run and paces the
  * `intervalMs` between them.
+ * `refreshAuth` runs right before EVERY spawn (never on its own background timer — a resident watcher's
+ * personal `gh` token exhausting the operator's own 5,000/hr budget was live-caught 2026-09-23; a timer would
+ * be starved by this same loop's blocking work between spawns, the same reason {@link withGithubAppAuth}
+ * refreshes per-tick rather than on a timer). A failed refresh is isolated exactly like a failed run — logged
+ * via `onRefreshError`, never allowed to skip the spawn: falling back to whatever auth is already in effect
+ * (personal, if the App isn't configured or its mint failed) is always preferable to the watcher not running.
  * @param {{
  *   runPass: () => Promise<{code:number|null}>,
  *   sleep: (ms:number) => Promise<void>,
  *   isAlive?: () => boolean,
  *   onRun?: (result:object, run:number) => void,
  *   onRunError?: (error:Error, run:number) => void,
+ *   refreshAuth?: () => Promise<any>,
+ *   onRefreshError?: (error:Error, run:number) => void,
  *   intervalMs: number,
  *   maxRuns?: number,
  * }} o
@@ -68,12 +86,18 @@ export function passDaemonLeaseKey(passName) { return `<conveyor:pass-daemon:${p
  */
 export async function runPassDaemonLoop({
   runPass, sleep, isAlive = () => true, onRun = () => {}, onRunError = () => {},
+  refreshAuth = async () => {}, onRefreshError = () => {},
   intervalMs, maxRuns = Infinity,
 }) {
   if (typeof runPass !== 'function') throw new TypeError('runPassDaemonLoop requires a runPass effect');
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new TypeError('runPassDaemonLoop requires a positive intervalMs');
   let run = 0;
   for (;;) {
+    try {
+      await refreshAuth();
+    } catch (error) {
+      onRefreshError(error, run);
+    }
     try {
       const result = await runPass();
       onRun(result, run);
@@ -162,7 +186,9 @@ async function main(argv) {
     sleep: realSleep,
     isAlive: () => alive,
     intervalMs,
+    refreshAuth: () => ensureFreshGithubAppEnv({ log: console }),
     onRunError: (e) => console.error(`pass-daemon: "${passName}" run failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`),
+    onRefreshError: (e) => console.error(`pass-daemon: "${passName}" GitHub App token refresh failed (non-fatal, falling back to personal auth): ${String((e && e.message) || e).split('\n')[0]}`),
   });
   if (!stopping) {
     console.error(`pass-daemon: "${passName}" loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
