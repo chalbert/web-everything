@@ -2,8 +2,10 @@
 bornAs: x7l22sz
 kind: decision
 parent: "2676"
-status: open
+status: resolved
 dateOpened: "2026-08-15"
+dateResolved: "2026-09-23"
+codifiedIn: "docs/agent/platform-decisions.md#config-extends-platform-default"
 preparedDate: "2026-08-16"
 relatedReport: reports/2026-08-16-tier-above-feature-rollup-basis.md
 tags: [backlog, taxonomy, hierarchy, rollup, decision-prep]

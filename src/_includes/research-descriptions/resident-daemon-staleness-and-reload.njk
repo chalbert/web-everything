@@ -1,0 +1,80 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/3681-mechanize-long-running-daemon-lifecycle-health-check-stalene/">#3681</a> under the
+  mechanical-dispatcher epic
+  <a href="/backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive/">#3383</a>. Twice on
+  2026-09-14 a resident daemon kept running code from before a fix landed on its own branch, and both times it was
+  caught by luck. The question: how should the system's own long-running daemons notice their loaded code is stale,
+  and pick up new code without losing in-flight work?
+</p>
+
+<h2>What the code does today</h2>
+<ul>
+  <li><strong>Nothing records the commit a daemon booted from</strong>, and nothing compares a running process to
+    HEAD. The lease entry exposes holder and heartbeat only.</li>
+  <li>The existing &ldquo;stale&rdquo; checks are about other things: <code>assertMainNotStale</code> fast-forwards
+    a <em>checkout</em>; the prototype&rsquo;s main-ref-sync pass moves a <em>ref</em>; the driver-watchdog&rsquo;s
+    <code>stale</code> means &ldquo;no progress for 20 minutes&rdquo;.</li>
+  <li>Daemons that import their logic in-process (runner, supervisor, review / fix-dispatch / verify daemons, the
+    drain daemon) freeze that code at boot. The drain daemon had been up 22 days on 2026-09-23. Pass children spawned
+    per run already read fresh code.</li>
+  <li><strong>In-flight state is already out of process:</strong> agents are detached <code>claude --bg</code>
+    sessions, leases are files, the prototype persists runner bookkeeping, and the drain&rsquo;s truth is GitHub.</li>
+</ul>
+
+<h2>Prior art</h2>
+<table>
+  <thead><tr><th>System</th><th>How it picks up new code</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr><td>Erlang/OTP</td><td>True hot code loading: two versions resident, explicit <code>code_change</code>
+      state migration, old code purged by killing processes still in it</td><td>The only mature in-place reload, and it
+      needs a runtime built for it.</td></tr>
+    <tr><td>Node.js ESM</td><td>No module unload; <code>--watch</code> restarts the process</td><td>Cache-busting
+      re-import leaks module graphs and leaves old timers and closures running.</td></tr>
+    <tr><td>nodemon, pm2</td><td>Watch &rarr; restart; pm2 <code>reload</code> starts a new worker before killing the
+      old</td><td>&ldquo;Reload&rdquo; in practice means graceful restart.</td></tr>
+    <tr><td>nginx, Unicorn</td><td>Signal &rarr; re-exec; old workers finish in-flight work, then exit</td><td>Drain,
+      then replace.</td></tr>
+    <tr><td>systemd, launchd</td><td>Clean exit; <code>Restart=always</code> / <code>KeepAlive</code> relaunches</td>
+      <td>The supervisor owns relaunch; the daemon owns a clean exit.</td></tr>
+    <tr><td>Kubernetes</td><td>Rolling update with <code>preStop</code> and a grace period</td><td>Stop taking work,
+      finish, exit; state lives outside the pod.</td></tr>
+    <tr><td>Argo CD, Flux, Prometheus <code>build_info</code></td><td>Publish the running revision; compare with the
+      desired one (&ldquo;OutOfSync&rdquo;)</td><td>Staleness is a revision comparison, made visible.</td></tr>
+    <tr><td>File watchers (FSEvents, watchexec)</td><td>React to file changes, debounced</td><td>Fire mid-checkout;
+      cannot see an origin nobody pulled.</td></tr>
+  </tbody>
+</table>
+
+<h2>Synthesis</h2>
+<p>
+  Every production pattern except Erlang reloads by <strong>stopping at a safe point and letting a supervisor
+  relaunch fresh code</strong>, with state held outside the process. That is exactly what this repo already ratified
+  for one daemon in
+  <a href="/docs/agent/platform-decisions/#drain-daemon-self-hosting-boundary">#drain-daemon-self-hosting-boundary</a>
+  (#2501): a dedicated clone, and a clean exit plus <code>KeepAlive</code> relaunch between passes.
+</p>
+<p>The recommended ruling generalizes the <em>reload</em> to every resident daemon, but not the self-update:</p>
+<ol>
+  <li><strong>Reload</strong> = clean exit at the safe point; the supervisor or launchd relaunches. Hot-reload is
+    excluded by the Node platform limit. A reload exit gets its own clean reason, so the supervisor does not count
+    an early reload as a crash.</li>
+  <li><strong>Stale</strong> = a file the daemon actually loaded changed since boot, not any commit. The loaded set
+    is recorded at runtime by a module-loader hook, per repo, because the runner and the drain daemon load code
+    lazily and across repos. An age backstop catches anything the hook misses.</li>
+  <li><strong>Trigger</strong> = a check at the safe point. A file watcher adds nothing, since nothing can act before
+    the safe point anyway.</li>
+  <li><strong>Fresh code:</strong> drift against origin is detected read-only and reported. A daemon updates its own
+    checkout only as a per-daemon opt-in, under four conditions: its branch is review-gated, operator state lives
+    outside its clone, a watchdog last-known-good pin can block it, and <code>git clean</code> spares state. The
+    skeptic refuted &ldquo;every daemon self-updates its own clone&rdquo;: it would split the runner from the queue
+    the operator edits, undo watchdog rollbacks, and run unreviewed prototype-branch code.</li>
+</ol>
+<p>
+  Lifecycle tooling (the existing daemon manifest extended with lifecycle fields, a status/restart/promote
+  operation, the running revision published in each daemon&rsquo;s heartbeat record) and per-daemon differences fall out as one mechanism with per-daemon parameters, not separate forks.
+  Full grounding: <code>reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md</code>.
+</p>
+{% endraw %}

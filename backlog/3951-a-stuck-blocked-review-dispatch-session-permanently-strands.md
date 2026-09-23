@@ -1,0 +1,20 @@
+---
+bornAs: x6iq7l5
+kind: story
+size: 2
+parent: "3383"
+status: open
+scope: ["we:scripts/operations/clear-stuck-session-io.mjs", "we:scripts/operations/clear-stuck-session.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
+dateOpened: "2026-09-23"
+tags: []
+---
+
+# a stuck blocked review-dispatch session permanently strands its PR from reconcile owed, and clear-stuck-session cannot clear it when its listed pid is a recycled bg-spare
+
+Live-caught 2026-09-23: plateau-app#174/#177 both carried a review-pa-<pr> session stuck in `claude agents --json` state "blocked" (hung inside `we:scripts/lane-pool.mjs acquire --wait-ms=30000` past its own bounded wait, per its own harness job-state detail, "no free lanes in plateau-app pool (14/14 held)"), never reaching its brief's own report --status=done/exit. we:scripts/conveyor/reconcile-core.mjs#bindAgents binds a live session to a PR by NAME alone (`review-<pr>`), with no staleness bound, so we:scripts/conveyor/reconcile-core.mjs#planReconcile refused to ever re-dispatch a review for either PR (live-process/liveness-unknown) for as long as that stuck entry stayed listed -- both PRs sat `review-status:review-stalled` and were silently dropped from every tick's owed count, confirmed by the daemon's own log ("3 owed, dispatched 3, failed 0" while #174/#177 never appeared). The one sanctioned recovery, we:scripts/operations/clear-stuck-session.mjs, also refused to touch them: its assess step requires assessLiveness to report nothing live, but we:scripts/operations/clear-stuck-session-io.mjs#resolvePidAlive trusts a listing row's own `pid` field via a raw kill(pid,0) probe whenever one is present, and here it resolved alive -- not because the original session was still running, but because the OS pid had been silently reassigned to an unrelated recycled bg-spare warm-pool holder (`claude bg-spare --bg-spare <socket>`, confirmed live: no `--resume=<the full session uuid>` process existed anywhere in `ps aux`). This is the SAME pid-recycling hazard we:backlog/3884-*.md already fixed for a `done` state read inside assessLiveness, but that fix never reached we:scripts/operations/clear-stuck-session-io.mjs's own resolvePidAlive, and never covered a `blocked` state at all. In this incident the two PRs were only unstuck by a human running `claude stop <id>` directly, which happened to work -- not a given, per we:backlog/3435-*.md finding 3 (a stop reporting success is not proof of exit). Related but distinct from we:backlog/3624-*.md (detects a session that is idle-at-prompt because it never started any real work) -- these two sessions DID report started and DID begin their brief, then hung mid-arc past their own bounded wait; the gap here is specifically that the sanctioned clear-stuck-session path cannot confirm death when a stuck session's own listed pid has been recycled.
+
+## Done when
+
+1. **Executable** — `we:scripts/operations/clear-stuck-session-io.mjs#resolvePidAlive` no longer trusts a listing row's bare `pid` field as proof of liveness on its own: it cross-checks that pid's own command line (or an equivalent signal) actually still belongs to *this* session before returning `true`, the same recycled-pid guard `we:backlog/3884-*.md` already built for a `done`-state read, extended to reach this call site and to a `blocked` state. A new fixture test (`npx vitest run we:scripts/operations/__tests__/clear-stuck-session-io.test.mjs`) reproduces today's live shape — a `state: "blocked"` row whose listed `pid` resolves alive via a bare `kill(pid, 0)` probe, but whose own full session uuid has no matching `--resume=<uuid>`-style process — and asserts `resolvePidAlive` now returns `false` (or `null`) for it, not `true`.
+2. **Executable** — `npx vitest run we:scripts/operations/__tests__/clear-stuck-session.test.mjs` still passes with the new coverage, proving `assessStuck` now reaches `confirmedStuck: true` for that same reproduced shape instead of refusing with `live-process`.
+3. `npm run check:standards` stays green.

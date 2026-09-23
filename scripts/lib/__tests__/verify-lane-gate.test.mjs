@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, FULL_GATE } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, FULL_GATE } from '../verify-lane-gate.mjs';
 
 /** A synthetic git runner: `status` returns tracked status; `merge-base` resolves to a fixed sha; `diff --name-only` returns the configured
  *  changed-file list. Mirrors test-selection.test.mjs's injectable-runGit convention — no real git process. */
@@ -142,6 +142,63 @@ describe('resolveDefaultGate (#3372) — verify-lane default gate wired to diff-
   });
 });
 
+// #3919 — the gate must only name npm scripts the TARGET checkout has (real package.json script-name sets).
+const WE_SCRIPTS = ['test:unit', 'check:standards', 'test', 'build'];
+const FRONTIERUI_SCRIPTS = ['dev', 'build', 'test', 'test:unit', 'test:e2e', 'test:coverage', 'check:standards'];
+const PLATEAU_APP_SCRIPTS = ['start', 'build', 'preview', 'test', 'check:render-conformance', 'test:e2e', 'explore'];
+
+describe('resolveDefaultGate per-repo scripts (#3919) — only run the npm scripts the checkout actually has', () => {
+  const cases = [
+    { name: 'shrinkable diff', files: ['docs/readme.md'] },
+    { name: 'full + scoped', files: ['src/components/widget.ts'] },
+    { name: 'full + unscoped (backlog)', files: ['backlog/100-example.md'] },
+    { name: 'empty diff', files: [] },
+  ];
+
+  it.each(cases)('a WE checkout ($name) gets the byte-for-byte unchanged command vs. no scripts injected', ({ files }) => {
+    const legacy = resolveDefaultGate({ runGit: fakeGit(files), env: {} });
+    const we = resolveDefaultGate({ runGit: fakeGit(files), env: {}, scripts: WE_SCRIPTS });
+    expect(we.command).toBe(legacy.command);
+    expect(we.gateReasons).toEqual([]);
+  });
+
+  it('a WE checkout with an empty diff still gets exactly FULL_GATE', () => {
+    expect(resolveDefaultGate({ runGit: fakeGit([]), env: {}, scripts: WE_SCRIPTS }).command).toBe(FULL_GATE);
+  });
+
+  it.each(cases)('a frontierui checkout ($name) has test:unit + check:standards, so its gate is unchanged too', ({ files }) => {
+    const legacy = resolveDefaultGate({ runGit: fakeGit(files), env: {} });
+    expect(resolveDefaultGate({ runGit: fakeGit(files), env: {}, scripts: FRONTIERUI_SCRIPTS }).command).toBe(legacy.command);
+  });
+
+  it.each(cases)('a plateau-app checkout ($name) runs `npm test` and skips the missing check:standards', ({ files }) => {
+    const { command, gateReasons } = resolveDefaultGate({ runGit: fakeGit(files), env: {}, scripts: PLATEAU_APP_SCRIPTS });
+    expect(command).toBe('npm test');
+    expect(command).not.toContain('test:unit');
+    expect(command).not.toContain('check:standards');
+    expect(gateReasons.join(' ')).toMatch(/no `test:unit`.*npm test/);
+    expect(gateReasons.join(' ')).toMatch(/no `check:standards`/);
+  });
+
+  it('a plateau-app checkout with a dirty tree also gets `npm test` (the dirty fallback is script-aware too)', () => {
+    const { command } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md'], ' M src/x.ts\n'), env: {}, scripts: PLATEAU_APP_SCRIPTS });
+    expect(command).toBe('npm test');
+  });
+
+  it('a checkout with check:standards but no test:unit keeps the (scoped) health gate after `npm test`', () => {
+    const { command } = resolveDefaultGate({ runGit: fakeGit(['src/a.ts']), env: {}, scripts: ['test', 'check:standards'] });
+    expect(command).toBe("npm test && npm run check:standards -- --local --files='src/a.ts'");
+  });
+
+  it('a checkout with no test/test:unit/check:standards script skips BOTH halves with an explicit reason, never a missing-script failure', () => {
+    const { command, gateReasons } = composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts: ['build'] });
+    expect(command).toMatch(/^echo /);
+    expect(command).not.toMatch(/npm (run|test)/);
+    expect(gateReasons).toHaveLength(2);
+    expect(gateReasons.join(' ')).toMatch(/test half skipped/);
+  });
+});
+
 describe('canScopeCheckStandards (#3395) — the check:standards-scoping predicate in isolation', () => {
   it('is false for null (unreadable/unknown diff)', () => {
     expect(canScopeCheckStandards(null)).toBe(false);
@@ -171,5 +228,11 @@ describe('verify-lane.mjs source wiring — the default gate actually calls reso
     expect(src).toMatch(/resolveDefaultGate\(/);
     // The literal bare default must be GONE — only the fallback constant inside verify-lane-gate.mjs keeps it.
     expect(src).not.toMatch(/const GATE = typeof flags\.gate === 'string' \? flags\.gate : 'npm run test:unit/);
+  });
+
+  it('#3919 — injects the target checkout\'s package.json script names into resolveDefaultGate', () => {
+    const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
+    expect(src).toMatch(/join\(REPO, 'package\.json'\)/);
+    expect(src).toMatch(/resolveDefaultGate\(\{[^}]*scripts: readCheckoutScripts\(\)/);
   });
 });

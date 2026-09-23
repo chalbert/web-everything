@@ -8,6 +8,20 @@
  * A tool that parses a `--repo=<slug>` flag but hard-codes the key (the #2830 review's M3 defect: `--repo=…frontierui`
  * read FrontierUI but emitted `repo: 'we'`, so the ledger subject pointed at an unrelated WE PR) crosses the two
  * silently. This module is the ONE mapping between them, so no consumer keeps its own key literal.
+ *
+ * `repoProfile`/`gateFor` (multi-repo slice 1, we:backlog/xjko7gy-multi-repo-slice-1-a-per-repo-profile.md, see
+ * we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) collapse the FIVE scattered per-repo vocabularies (key,
+ * slug, slugTag, backlog scope prefix, `check-standards` locus marker) this file's own consumers each re-derive
+ * today into ONE frozen profile per repo. They live in the SEPARATE `./repo-profile.mjs`, not here, on purpose:
+ * several read-only-declared operations (`gate-health-io.mjs`, `operator-queue.mjs`'s `dispatch-eligibility.mjs`
+ * chain — both asserted by a STATIC import-graph guard, `scripts/operations/__tests__/{gate-health,http-adapter}
+ * .test.mjs`, to reach zero `node:` built-ins) already import THIS file for the plain data table below. `gateFor`
+ * needs real fs/os/path IO (`verify-lane-gate.mjs#composeGate`, `homedir()`, a checkout's `package.json`) to do
+ * its job — adding that here would hand every one of those read-only consumers a transitive IO capability they
+ * are asserted never to have, tripping that guard for a purely additive change. `repo-profile.mjs` imports
+ * `CONSTELLATION_REPOS`/`repoKeyForSlug` FROM here (still the one source), and everything that actually needs the
+ * profile/gate imports `repo-profile.mjs` directly — this file re-exports neither, since a re-export is itself a
+ * `from`-clause the same static scanner follows, which would defeat the split.
  */
 
 /** The constellation repos, keyed by internal repo KEY. `slug` is the gh `--repo` slug; `path` is the checkout

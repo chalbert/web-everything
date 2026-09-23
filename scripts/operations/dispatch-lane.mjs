@@ -112,6 +112,17 @@ export const BRIEF_PLACEHOLDERS = Object.freeze([
   // `deliveryTarget:` names one. It had to be REGISTERED here, not just typed into the brief: `fillBrief`
   // strictly refuses an unknown placeholder, which is exactly the blocker #3637's survey named (#2 of five).
   'DELIVERY_BASE',
+  // #3960 (multi-repo slice 4) — the FIX/CI-HEAL-ONLY quintet that makes a repair brief repo-aware instead of
+  // hardcoding WE. `REPO` is the gh slug (`--repo=` for `rearm-review.mjs`/`stand-down.mjs`/`ci-heal-mark.mjs`/
+  // `completion-cli.mjs`); `LANE_REPO` is what `lane-pool.mjs --repo=` itself expects (`.` for WE, an absolute
+  // checkout path for a sibling repo — `repoProfile(...).lanePoolRepo`, unchanged from slice 1); `GATE_COMMAND`
+  // is the target repo's own gate (`gateFor(...)`, reused rather than re-derived); `WE_ROOT` is the absolute WE
+  // checkout that owns every one of these tools, so a `node "..."` call resolves regardless of the agent's cwd
+  // (a lane clone of a SIBLING repo has no `scripts/` directory at all); `ATTRIBUTION` is the commit-title
+  // reference (`<REPO-TAG> #<item>` today; `PR #<pr>` once an item-less fix ships, #3960's gap-map "Proposed
+  // design C"). See {@link briefTokensForRepo} (`we:scripts/lib/repo-profile.mjs`) for how the four
+  // repo-derived ones are computed together from ONE profile.
+  'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION',
 ]);
 
 /**
@@ -150,8 +161,11 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   // `investigate` (#3567) fills the SAME five names as the two prepare kinds — it targets an ITEM (not an
   // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
   investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
-  fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE'],
-  'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON'],
+  // #3960 — the five repo-aware tokens (see {@link BRIEF_PLACEHOLDERS}) are required on BOTH repair kinds:
+  // every fix/ci-heal reconstitutes onto an EXISTING PR's ref, which under multi-repo dispatch (slice 5, not
+  // yet turned on) can belong to any constellation repo, so the brief must never hardcode WE for either kind.
+  fix: ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION'],
+  'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON', 'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION'],
 });
 
 /** #3637 — the delivery target this dispatch forks from and lands on, as the brief's `{{DELIVERY_BASE}}`.
@@ -286,6 +300,36 @@ export function canonicalPlaceholder(name) {
  * repo-qualified paths, so letters, digits, `_ . , : / @ # -` covers all five with nothing left over.
  */
 export const BRIEF_VALUE_RE = /^[A-Za-z0-9_.,:/@#-]+$/;
+
+/**
+ * What `{{GATE_COMMAND}}`/`{{ATTRIBUTION}}` (#3960) may contain — WIDER than {@link BRIEF_VALUE_RE} on
+ * purpose, and for a different reason than that regex's own id/path/lane-number shape.
+ *
+ * `GATE_COMMAND` (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) is a real shell command — `npm run
+ * test:unit && npm run check:standards` — so it legitimately carries a space and `&&`; `ATTRIBUTION` is a short
+ * commit-title reference — `WE #3960` or `PR #743` — so it legitimately carries a space too. Neither is
+ * attacker- or frontmatter-controlled the way `SCOPE`/`ITEM_SPEC_PATH` are: both are COMPUTED, from a fixed,
+ * small set of shapes (`composeGate`'s two command halves; a repo tag + a number), never read off a PR body, a
+ * backlog file or any other text a human or a bounced review could shape. The risk `BRIEF_VALUE_RE` guards
+ * against — a value quietly carrying a control character that escapes its intended use — still applies, so this
+ * is an allow-LIST too, just a wider one: anything except a backtick, a `$`, a double quote, a backslash or a
+ * newline (command substitution, string-quote-breaking, and escape characters — the shapes that turn a pasted
+ * value into something OTHER than itself, wherever it lands: a bare shell line for `GATE_COMMAND`, inside a
+ * double-quoted `printf` argument for `ATTRIBUTION`).
+ */
+export const BRIEF_FREE_TEXT_VALUE_RE = /^[^`$"\\\n]+$/;
+
+/**
+ * The two names {@link fillBrief} must check against {@link BRIEF_FREE_TEXT_VALUE_RE} rather than the default
+ * {@link BRIEF_VALUE_RE} — see that regex's own docblock for why. Both `dispatchFix`
+ * (`we:scripts/conveyor/reconcile-fix-dispatch.mjs`) and `dispatchCiHeal`
+ * (`we:scripts/operations/ci-heal-pr-dispatch.mjs`) pass this as `fillBrief`'s `valuePatterns` argument so
+ * neither reimplements the exception.
+ */
+export const REPO_AWARE_VALUE_PATTERNS = Object.freeze({
+  GATE_COMMAND: BRIEF_FREE_TEXT_VALUE_RE,
+  ATTRIBUTION: BRIEF_FREE_TEXT_VALUE_RE,
+});
 
 /**
  * The lane-lease session slug a dispatched agent carries. It MUST agree with `releaseSessionForNum`
@@ -428,9 +472,19 @@ export function attemptTagFor(priorAttempts) {
  * @param {readonly string[]} [optionalNames] - names in `requiredNames` allowed to resolve to `''` (#3110).
  *   Defaults to {@link OPTIONAL_BRIEF_PLACEHOLDERS} so every pre-#3110 caller — anything that never passes a
  *   value for `ATTEMPT_TAG` — is unaffected; only a `build` fill's `ATTEMPT_TAG` entry ever exercises this.
+ * @param {Readonly<Record<string, RegExp>>} [valuePatterns] - per-name override of {@link BRIEF_VALUE_RE}
+ *   (#3960). Defaults to `{}`, so every pre-#3960 caller is unaffected. A `fix`/`ci-heal` caller passes
+ *   {@link REPO_AWARE_VALUE_PATTERNS} so `GATE_COMMAND`/`ATTRIBUTION` are checked against the wider
+ *   {@link BRIEF_FREE_TEXT_VALUE_RE} instead — see that regex's docblock for why those two names need it.
  * @returns {{prompt: string, unknownTokens: string[]}}
  */
-export function fillBrief(template, values = {}, requiredNames = BRIEF_REQUIRED_BY_KIND.build, optionalNames = OPTIONAL_BRIEF_PLACEHOLDERS) {
+export function fillBrief(
+  template,
+  values = {},
+  requiredNames = BRIEF_REQUIRED_BY_KIND.build,
+  optionalNames = OPTIONAL_BRIEF_PLACEHOLDERS,
+  valuePatterns = {},
+) {
   const text = String(template ?? '');
   if (!text.trim()) {
     throw new Error('dispatch-lane: the delivery-agent brief template is empty — refusing to dispatch an agent with no instructions');
@@ -442,7 +496,8 @@ export function fillBrief(template, values = {}, requiredNames = BRIEF_REQUIRED_
     if (blank) {
       throw new Error(`dispatch-lane: no value for the brief placeholder {{${name}}} — refusing to fill it with nothing`);
     }
-    if (!BRIEF_VALUE_RE.test(String(value))) {
+    const pattern = valuePatterns[name] ?? BRIEF_VALUE_RE;
+    if (!pattern.test(String(value))) {
       throw new Error(
         `dispatch-lane: the value for {{${name}}} (${JSON.stringify(String(value))}) has characters the brief cannot carry `
         + 'safely — it is pasted UNQUOTED into a shell command the agent is told to run. Refusing.',
@@ -918,6 +973,12 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       SESSION_SLUG: sessionSlug,
       SCOPE: scope.join(','),
       ...(launchKind === 'ci-heal' ? { REASON: launch.reason } : {}),
+      // #3960 — REPO/LANE_REPO/GATE_COMMAND/WE_ROOT/ATTRIBUTION, computed by the io shell (`raw.repoTokens`,
+      // `we:scripts/operations/dispatch-lane-io.mjs#readTick`) since resolving them needs real IO (a
+      // checkout's `package.json`) this file is asserted never to reach. `null`/missing here is not papered
+      // over: `fillBrief`'s own required-value refusal is what actually stops the dispatch (see `raw.repoTokens`'s
+      // own docblock at the io shell).
+      ...(raw.repoTokens && typeof raw.repoTokens === 'object' ? raw.repoTokens : {}),
     }
     : {
       ITEM_NUM: resolvedNum,
@@ -933,7 +994,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
   // FILLED HERE, not in the sink. The prompt is a pure function of the item and the core's assignment, so it
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what
   // was dispatched, which is what a restart needs and a sink-side fill would not give.
-  const brief = fillBrief(String(raw.briefTemplate ?? ''), values, BRIEF_REQUIRED_BY_KIND[launchKind]);
+  const brief = fillBrief(
+    String(raw.briefTemplate ?? ''),
+    values,
+    BRIEF_REQUIRED_BY_KIND[launchKind],
+    undefined,
+    repairsExistingPr ? REPO_AWARE_VALUE_PATTERNS : undefined,
+  );
   return {
     ...base,
     dispatching: true,

@@ -5,7 +5,11 @@
  *   with fakes exactly like runner.mjs's own `runLoop` is.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS } from '../reconcile-fix-dispatch-daemon.mjs';
+import {
+  runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS,
+  runReconcileFixDispatchAllRepos, FIX_DISPATCH_DAEMON_REPOS,
+} from '../reconcile-fix-dispatch-daemon.mjs';
+import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {
@@ -53,6 +57,53 @@ describe('runDaemonLoop — the pure control flow', () => {
   });
 });
 
+describe('FIX_DISPATCH_DAEMON_REPOS', () => {
+  it('is every constellation repo\'s real slug, not just WE (#x1rr9rh, multi-repo slice 2)', () => {
+    expect(FIX_DISPATCH_DAEMON_REPOS.sort()).toEqual(Object.values(CONSTELLATION_REPOS).map((r) => r.slug).sort());
+    expect(FIX_DISPATCH_DAEMON_REPOS).toContain('chalbert/plateau-app');
+    expect(FIX_DISPATCH_DAEMON_REPOS).toContain('chalbert/frontierui');
+    expect(FIX_DISPATCH_DAEMON_REPOS).toContain('chalbert/web-everything');
+  });
+});
+
+describe('runReconcileFixDispatchAllRepos — one runReconcileFixDispatch call per watched repo (#x1rr9rh)', () => {
+  it('ticks every repo in the list, calling runReconcileFixDispatch with {repo: slug} per repo', () => {
+    const tick = vi.fn(({ repo }) => (repo === 'repo-a'
+      ? { dispatched: [{ pr: 10 }], refusals: [] }
+      : { dispatched: [], refusals: [{ kind: 'unsupported-repo', prNumber: 20 }] }));
+    const out = runReconcileFixDispatchAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-b' });
+    expect(out.dispatched).toEqual([{ pr: 10, repo: 'repo-a' }]);
+    expect(out.refusals).toEqual([{ kind: 'unsupported-repo', prNumber: 20, repo: 'repo-b' }]);
+    expect(out.repos).toEqual([
+      { repo: 'repo-a', result: expect.any(Object) },
+      { repo: 'repo-b', result: expect.any(Object) },
+    ]);
+  });
+
+  it('one repo throwing (a gh outage, a stale-checkout refusal) never stops the others — isolated per repo', () => {
+    const tick = vi.fn(({ repo }) => {
+      if (repo === 'repo-bad') throw new Error('reconcile-fix-dispatch: behind origin/main');
+      return { dispatched: [{ pr: 1 }], refusals: [] };
+    });
+    const out = runReconcileFixDispatchAllRepos({ repos: ['repo-bad', 'repo-good'], tick });
+    expect(out.dispatched).toEqual([{ pr: 1, repo: 'repo-good' }]);
+    expect(out.refusals).toEqual([{ repo: 'repo-bad', prNumber: null, kind: 'tick-failed', why: 'reconcile-fix-dispatch: behind origin/main' }]);
+    expect(out.repos[0]).toEqual({ repo: 'repo-bad', error: 'reconcile-fix-dispatch: behind origin/main' });
+  });
+
+  it('defaults to FIX_DISPATCH_DAEMON_REPOS and to the real runReconcileFixDispatch when nothing is injected', () => {
+    // Only proves the DEFAULTS are wired — this test injects `tick` itself so the real
+    // runReconcileFixDispatch's own IO defaults (gh, lane-pool, git) are never reached.
+    const tick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const out = runReconcileFixDispatchAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(FIX_DISPATCH_DAEMON_REPOS.length);
+    expect(out.repos.map((r) => r.repo)).toEqual(FIX_DISPATCH_DAEMON_REPOS);
+  });
+});
+
 describe('buildCliDaemonEffects — the real-effect factory (heartbeat wiring only; no real dispatch/timer)', () => {
   it('uses its own distinct lease key, never the Dispatcher default sentinel', () => {
     expect(RECONCILE_FIX_DISPATCH_LEASE_KEY).toBe('<conveyor:reconcile-fix-dispatch-daemon-lease>');
@@ -71,6 +122,22 @@ describe('buildCliDaemonEffects — the real-effect factory (heartbeat wiring on
     expect(typeof effects.heartbeat).toBe('function');
     expect(typeof effects.onTick).toBe('function');
     expect(typeof effects.onTickError).toBe('function');
+  });
+
+  it('onTick logs per-repo dispatched/refused counts, mirroring review-daemon\'s own tick log shape (#x1rr9rh)', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    effects.onTick({
+      repos: [{ repo: 'chalbert/web-everything', result: {} }, { repo: 'chalbert/plateau-app', error: 'gh: rate limited' }],
+      dispatched: [{ pr: 1, repo: 'chalbert/web-everything' }],
+      refusals: [{ kind: 'unsupported-repo', prNumber: 2, repo: 'chalbert/plateau-app' }],
+    });
+    expect(log.error).toHaveBeenCalledWith(
+      'reconcile-fix-dispatch-daemon: tick (chalbert/web-everything, chalbert/plateau-app) — dispatched 1, refused 1',
+    );
+    expect(log.error).toHaveBeenCalledWith(
+      'reconcile-fix-dispatch-daemon: chalbert/plateau-app tick failed (non-fatal, other repos unaffected): gh: rate limited',
+    );
   });
 });
 
