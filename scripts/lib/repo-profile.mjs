@@ -48,14 +48,17 @@ const SCOPE_PREFIXES = Object.freeze({
 // `we:` 31513 vs `webeverything:` 5; `fui:` 4147 vs `frontierui:` 281; `plateau:` 1667 vs `plateau-app:` 1436.
 const CANONICAL_PREFIX = Object.freeze({ we: 'we', frontierui: 'fui', 'plateau-app': 'plateau' });
 
-// TODAY'S truth. `review` is true everywhere already; multi-repo slice 5 (`we:backlog/3966-*.md`) turns `fix` on
-// for the couple-repos too — `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` now dispatches a real fix agent
-// for frontierui/plateau-app rather than recording `unsupported-repo`. `ciHeal` stays off for the couple-repos —
-// CI-heal is its own capability/stage (slice 7) and turns on independently of `fix`.
+// TODAY'S truth. `review` is true everywhere already; multi-repo slice 5 (`we:backlog/3966-*.md`) turned `fix`
+// on for the couple-repos — `reconcile-fix-dispatch.mjs#runReconcileFixDispatch` dispatches a real fix agent
+// for frontierui/plateau-app rather than recording `unsupported-repo`. Multi-repo slice 7 (`we:backlog/3967-
+// *.md`) turns `ciHeal` on the same way, independently of `fix` — `reconcile-core.mjs#planReconcile` now plans
+// a durable `kind:'ci-heal'` entry for ANY repo's red CI, capped by `countCiHealComments`, and
+// `we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch` is the capability-gated dispatcher
+// that reads it — mirroring `runReconcileFixDispatch`'s own gate for `fix` exactly.
 const CAPABILITIES = Object.freeze({
   we: Object.freeze({ review: true, fix: true, ciHeal: true, build: 'direct' }),
-  frontierui: Object.freeze({ review: true, fix: true, ciHeal: false, build: 'couple' }),
-  'plateau-app': Object.freeze({ review: true, fix: true, ciHeal: false, build: 'couple' }),
+  frontierui: Object.freeze({ review: true, fix: true, ciHeal: true, build: 'couple' }),
+  'plateau-app': Object.freeze({ review: true, fix: true, ciHeal: true, build: 'couple' }),
 });
 
 // A scope prefix or full name that is not already a key/slug/slugTag (those are covered by `repoKeyForSlug` /
