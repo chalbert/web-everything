@@ -5347,6 +5347,29 @@ reviewing the five forks the `#3717` dispatch-routing build left open, extending
 
 ---
 
+### The conveyor serves every constellation repo through one per-repo profile — refusal is a missing capability, never "not WE" {#conveyor-multi-repo-model}
+
+**Ratified 2026-09-23** (`xx478x6`, operator: "I ratify") — all six forks accepted as the card's recommended
+defaults. Grounded in the 2026-09-23 multi-repo audit (`we:reports/2026-09-23-conveyor-multi-repo-gap-map.md`),
+which found review, verify and the drain already serving all three repos while fix and CI-heal never ran for
+frontierui or plateau-app. Six clauses:
+
+1. **Capability, not repo identity.** A conveyor stage refuses a repo only when that repo's profile
+   (`we:scripts/lib/constellation-repos.mjs`) lacks the capability for the stage. A refusal keyed on "not WE"
+   is the defect this rule removes. This supersedes #3803 Fork 5's acceptance of the fix-path refusal.
+2. **One backlog.** Work for every constellation repo lives in the WE backlog; the repo is carried by the
+   scope prefix (`we:` / `fui:` / `plateau:`), never by a second backlog.
+3. **Item-less PRs are fixable.** A PR that maps to no backlog item is attributed to the PR itself, with scope
+   taken from its own diff under its own repo's prefix.
+4. **A fix runs its own repo's gate.** The gate comes from the target repo's profile; WE's `check:standards`
+   runs additionally only when the change touches a WE half.
+5. **CI-heal covers every repo.** A red required check on any constellation repo's PR is owed a CI-heal,
+   capped by the durable heal-mark count.
+6. **Order.** The profile, resolver and repo-aware-brief slices land before #3908's port; turning on
+   frontierui/plateau fixes lands after it (or inside it if its HOLD lifts first).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
