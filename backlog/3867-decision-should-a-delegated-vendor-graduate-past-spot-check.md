@@ -2,7 +2,7 @@
 bornAs: xohvzus
 kind: decision
 parent: "3383"
-relatedTo: ["3690", "3850", "3313", "xh3e97s"]
+relatedTo: ["3690", "3850", "3313", "3949"]
 status: open
 dateOpened: "2026-09-22"
 preparedDate: "2026-09-23"
@@ -96,7 +96,7 @@ The research questions the card listed, answered:
      "informative" from free-text `findings` (rule 4 forbids it) and `:23` hard-codes `streak >= 5` instead
      of reading `DEFAULT_BACKDOWN_THRESHOLDS` (rule 1). This makes the case for "no" stronger, not weaker:
      the floor's demotion signal must be *restored*, not removed further. Filed as a build:
-     [#xh3e97s](/backlog/xh3e97s-delegation-trial-logging-stops-once-a-triple-graduates-and-n/)
+     [#3949](/backlog/3949-delegation-trial-logging-stops-once-a-triple-graduates-and-n/)
      (independent of this verdict — it is owed under rules 1, 4 and 6 either way).
 4. **Composition with the repo axis?** No clash: a third level would sit on the triple axis, and rule 6's
    "repo-level `none` is never overridden" would still win. One naming hazard: the natural name for "no
@@ -148,7 +148,7 @@ or lineage:** #build-lane-self-review-non-zero-floor (#2828, Layer 1; reached th
 review depth), #agent-convergence-independent-validation clause 1 (#2398 — written for the drain's
 convergence loop).
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT (all folded in). "No" held on every axis. Amendments: (1) added the missed "PR-level review only" reading and batching as a depth dial, both already covered; (2) found the demotion signal is *already* broken at `spot-check` in code (`we:scripts/review-set-label.mjs:1030`, `we:scripts/conveyor/delegation-trial-gate.mjs:15,23`) — named above and filed as #xh3e97s; (3) reworded the codified note so it does not overstate #3313 (the floor binds PRs that trip no escalation reason); (4) downgraded #2828, #3654 cl. 4 and #2398 cl. 1 from authority to supporting; (5) fixed two line refs.
+**Skeptic:** SURVIVES-WITH-AMENDMENT (all folded in). "No" held on every axis. Amendments: (1) added the missed "PR-level review only" reading and batching as a depth dial, both already covered; (2) found the demotion signal is *already* broken at `spot-check` in code (`we:scripts/review-set-label.mjs:1030`, `we:scripts/conveyor/delegation-trial-gate.mjs:15,23`) — named above and filed as #3949; (3) reworded the codified note so it does not overstate #3313 (the floor binds PRs that trip no escalation reason); (4) downgraded #2828, #3654 cl. 4 and #2398 cl. 1 from authority to supporting; (5) fixed two line refs.
 
 **Screen:** clear — the ruling sits on statute (rule 7), with the enum cited only as grounding; the merit question ("a streak cannot justify removing the instrument that produces the streak") survives stripping timing and cost.
 
