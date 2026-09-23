@@ -1,0 +1,20 @@
+{
+  "id": "delegation-below-spot-check",
+  "title": "Can a delegated agent graduate below spot-check? Why a clean record moves review depth but never removes the independent look",
+  "status": "open",
+  "summary": "Grounds decision #3867, which asks whether a delegated vendor with a long clean record at spot-check could go one rung lighter or lose the independent check. FINDING 1: spot-check is already the delegated PR's own review, and that review is never below the #every-pr-gets-a-look-advisory-floor (#3313) floor every PR gets, so a lower level would check a delegated vendor less than Claude's own work. Every reading of 'lighter' is already placed: absent (rejected, #3690 Fork 5 (b)); sampled (rejected, #3313); PR-level review only (that is what spot-check already is); a shallower or batched juror (the floor's own depth dial, changed for every PR, never per producer). FINDING 2: removing the independent look breaks the measurement loop — a streak measures how often the independent pass found nothing, so no streak can justify removing that pass; confirmed misses and positive controls stop arriving, and computed demotion (rule 6) cannot fire. The prep found this breach already exists in code: scripts/review-set-label.mjs stops logging trials once a triple graduates and never records a miss (filed as a build). FINDING 3, prior art: ANSI/ASQ Z1.4 reduced inspection, Google code review and every surveyed AI coding agent keep a per-item check whatever the record; ISO 2859-3 skip-lot removes coverage only as a sampler; Renovate/Dependabot automerge, Chromium Rubber Stamper and SLSA's Trusted Robot exception drop the per-item look by change class or named governance act, never by a producer's streak. Recommended verdict: no — keep rule 7.",
+  "dateOpened": "2026-09-23",
+  "lastReviewed": "2026-09-23",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "delegation",
+    "graduation",
+    "supervision",
+    "review-floor",
+    "model-routing",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
