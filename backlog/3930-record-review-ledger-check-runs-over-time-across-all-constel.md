@@ -1,9 +1,10 @@
 ---
+bornAs: x428kgj
 kind: task
 parent: "2405"
 relatedTo: ["3007"]
 status: open
-blockedBy: ["xvkpykk"]
+blockedBy: ["3929"]
 scope: ["we:scripts/review-ledger-check.mjs", "we:scripts/lib/verdict-ledger.mjs"]
 dateOpened: "2026-09-23"
 tags: []
