@@ -221,8 +221,8 @@ describe('previousWeek comparability', () => {
   });
 });
 
-describe('cacheHitPct = cacheRead / (cacheRead + cacheCreation + input), null when the denominator is 0', () => {
-  it('computes the ratio for today, excluding output from the denominator', () => {
+describe('cacheHitPct = 100 * cacheRead / (cacheRead + cacheCreation + input), 0-100 scale, null when the denominator is 0', () => {
+  it('computes the percentage for today, excluding output from the denominator', () => {
     const iso = NOW_DST.toISOString().slice(0, 10) + 'T15:00:00.000Z';
     const records = [
       tokenRec(iso, 'input', 100),
@@ -231,7 +231,9 @@ describe('cacheHitPct = cacheRead / (cacheRead + cacheCreation + input), null wh
       tokenRec(iso, 'cacheCreation', 100),
     ];
     const out = summarizeTelemetryUsage({ records, now: NOW_DST });
-    expect(out.today.cacheHitPct).toBeCloseTo(300 / (300 + 100 + 100), 10);
+    // 0–100, NOT a 0–1 ratio: the plateau-app mock (`docs/mocks/telemetry-page.html`) hard-codes values like
+    // `98.4` and renders `${cacheHitPct}%` directly, with a `< 40` low-cache threshold — both read a percent.
+    expect(out.today.cacheHitPct).toBeCloseTo(100 * (300 / (300 + 100 + 100)), 10);
     expect(out.today.tokens).toEqual({ input: 100, output: 500, cacheRead: 300, cacheCreation: 100 });
   });
 

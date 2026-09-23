@@ -24,7 +24,7 @@ import {
 import {
   resolveCollectorRoot, resolveHostRoot, neededCollectorDayKeys, parseJsonlLines, dropPartialFirstLine,
   readTailBytes, readCollectorDay, readHostToday, extractSamplesByName, listRollups,
-  extractHourlySamplesFromRollup, readHazardFacts, createTelemetrySummaryReader, utcDayKey,
+  extractHourlySamplesFromRollup, readHazardFacts, createTelemetrySummaryReader, utcDayKey, scanFileForMetric,
 } from '../telemetry-summary-io.mjs';
 import { PLAN_WEEK_RENEWAL } from '../../lib/telemetry-summary.mjs';
 
@@ -72,7 +72,7 @@ describe('parseJsonlLines / dropPartialFirstLine — torn-line tolerance', () =>
   });
 });
 
-describe('readTailBytes — bounded, tail-only (Done when #3)', () => {
+describe('readTailBytes — bounded, tail-only, for `machine.now` (Done when #3)', () => {
   it('reads only the end of a large file, never the whole thing', () => {
     const dir = makeTmpDir();
     const path = join(dir, 'big.jsonl');
@@ -133,6 +133,47 @@ describe('readHostToday / extractSamplesByName', () => {
     const dir = makeTmpDir();
     const out = readHostToday(dir, '2026-09-23', 1024);
     expect(out).toEqual({ records: [], lastAtMs: null, root: join(dir, '2026-09-23.jsonl') });
+  });
+});
+
+describe('scanFileForMetric — bounded MEMORY, whole-file, for `machine.todayHourlyBusyPct` (Done when #3)', () => {
+  it('finds every matching sample across a file far larger than any tail bound', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'big.jsonl');
+    const fd = openSync(path, 'w');
+    // An early sample that a 4 MB tail read would never reach.
+    writeSync(fd, '{"event":"metric","name":"host.cpu.busy_pct","value":11,"timestamp":"2026-09-23T00:00:00Z"}\n');
+    const noise = '{"event":"metric","name":"host.mem.pressure_level","value":1,"timestamp":"2026-09-23T00:00:00Z"}\n';
+    for (let i = 0; i < 80_000; i += 1) writeSync(fd, noise); // ~7 MB of a DIFFERENT metric name
+    writeSync(fd, '{"event":"metric","name":"host.cpu.busy_pct","value":22,"timestamp":"2026-09-23T12:00:00Z"}\n');
+    closeSync(fd);
+
+    const out = scanFileForMetric(path, 'host.cpu.busy_pct', { chunkBytes: 64 * 1024 });
+    expect(out).toEqual([
+      { timestamp: '2026-09-23T00:00:00Z', value: 11 },
+      { timestamp: '2026-09-23T12:00:00Z', value: 22 },
+    ]);
+  });
+
+  it('tolerates a torn last line (the file still being appended) without throwing', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'torn.jsonl');
+    writeFileSync(path, '{"event":"metric","name":"host.cpu.busy_pct","value":5,"timestamp":"2026-09-23T00:00:00Z"}\n'
+      + '{"event":"metric","name":"host.cpu.busy_pct","value":9,"timestamp":"2026-09-23T01:00:00');
+    expect(scanFileForMetric(path, 'host.cpu.busy_pct')).toEqual([
+      { timestamp: '2026-09-23T00:00:00Z', value: 5 },
+    ]);
+  });
+
+  it('a chunk boundary landing mid-line still parses correctly', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'boundary.jsonl');
+    const line1 = '{"event":"metric","name":"host.cpu.busy_pct","value":1,"timestamp":"2026-09-23T00:00:00Z"}\n';
+    const line2 = '{"event":"metric","name":"host.cpu.busy_pct","value":2,"timestamp":"2026-09-23T01:00:00Z"}\n';
+    writeFileSync(path, line1 + line2);
+    // A chunk size that splits `line1` itself, mid-object.
+    const out = scanFileForMetric(path, 'host.cpu.busy_pct', { chunkBytes: 30 });
+    expect(out).toEqual([{ timestamp: '2026-09-23T00:00:00Z', value: 1 }, { timestamp: '2026-09-23T01:00:00Z', value: 2 }]);
   });
 });
 
@@ -243,11 +284,18 @@ describe('real-mechanism fidelity (#2949 fidelity qualifier) — against a real 
         receivedAt: now.toISOString(), name: 'claude_code.cost.usage', unit: 'USD', value: 1.5,
         attributes: { model: 'claude-sonnet-5', query_source: 'main' },
       })}\n`);
-      writeFileSync(join(hostDir, `${todayUtc}.jsonl`), [
-        JSON.stringify({ event: 'metric', name: 'host.cpu.busy_pct', value: 41, timestamp: now.toISOString() }),
-        JSON.stringify({ event: 'metric', name: 'host.sessions.live', value: 3, timestamp: now.toISOString() }),
-        JSON.stringify({ event: 'metric', name: 'host.cpu.count', value: 12, timestamp: now.toISOString() }),
-      ].join('\n') + '\n');
+      // An EARLY sample (hour 0) plus enough padding that a small tail bound cannot reach it — this is the
+      // exact real-data shape that motivated `scanFileForMetric`: a real run against the actual laptop found
+      // only 1 of 8 elapsed ET hours filled before that fix, because the tail read only ever saw the last
+      // hour or so of a much larger file.
+      const earlyIso = `${todayUtc}T00:00:00.000Z`;
+      const hostLines = [JSON.stringify({ event: 'metric', name: 'host.cpu.busy_pct', value: 7, timestamp: earlyIso })];
+      const noise = JSON.stringify({ event: 'metric', name: 'host.mem.pressure_level', value: 1, timestamp: earlyIso });
+      for (let i = 0; i < 2000; i += 1) hostLines.push(noise); // padding a small tail bound will not cross
+      hostLines.push(JSON.stringify({ event: 'metric', name: 'host.cpu.busy_pct', value: 41, timestamp: now.toISOString() }));
+      hostLines.push(JSON.stringify({ event: 'metric', name: 'host.sessions.live', value: 3, timestamp: now.toISOString() }));
+      hostLines.push(JSON.stringify({ event: 'metric', name: 'host.cpu.count', value: 12, timestamp: now.toISOString() }));
+      writeFileSync(join(hostDir, `${todayUtc}.jsonl`), `${hostLines.join('\n')}\n`);
       writeFileSync(join(hostDir, '2026-09-20.rollup.json'), JSON.stringify({
         day: '2026-09-20', cores: 12, load1: { p50: 1, p90: 2, max: 3 },
       }));
@@ -257,8 +305,10 @@ describe('real-mechanism fidelity (#2949 fidelity qualifier) — against a real 
         + `<array><string>/usr/bin/node</string><string>${missingScript}</string></array></dict></plist>`);
 
       // The full assembled reader, with only the ONE root it can be pointed at overridden — the collector
-      // root — driven by real env resolution and a real `existsSync`/`readFileSync`/tail-read against the
-      // files above, not a stub returning canned data.
+      // root — driven by real env resolution and a real `existsSync`/`readFileSync` against the files above,
+      // not a stub returning canned data. (Its host root is not test-overridable — the host/rollup/hazard
+      // mechanics are proven directly below, against the same real `hostDir` fixture, the same way the rest
+      // of this test already does for rollups/hazard.)
       const reader = createTelemetrySummaryReader({ env: { OPERATION_CLAUDE_OTEL_DIR: collectorDir }, now: () => now });
       const facts = reader();
       expect(facts.sources['claude-usage'].root).toBe(collectorDir);
@@ -266,12 +316,20 @@ describe('real-mechanism fidelity (#2949 fidelity qualifier) — against a real 
       expect(() => shapeFacts(facts)).not.toThrow();
 
       // The host/rollup/hazard mechanics `createTelemetrySummaryReader` composes, driven directly against
-      // the same kind of real files (its own host root is not test-overridable) — the real tail-bounded
-      // read, the real rollup parse, and the real `plutil`/regex plist read.
-      const hostOut = readHostToday(hostDir, todayUtc, 64 * 1024);
-      expect(hostOut.records.length).toBe(3);
-      expect(extractSamplesByName(hostOut.records, 'host.cpu.busy_pct')).toEqual([
+      // the same kind of real files — the real tail-bounded read, the real bounded-memory whole-file scan,
+      // the real rollup parse, and the real `plutil`/regex plist read.
+      const hostFilePath = join(hostDir, `${todayUtc}.jsonl`);
+      // A DELIBERATELY tiny tail bound proves the tail read really is bounded: it sees only the samples near
+      // the end of the file, never the early one ~200 KB of padding earlier.
+      const tailOut = readHostToday(hostDir, todayUtc, 4096);
+      expect(extractSamplesByName(tailOut.records, 'host.cpu.busy_pct')).toEqual([
         { timestamp: now.toISOString(), value: 41 },
+      ]);
+      // The bounded-MEMORY full scan is what actually reaches the whole day's history — this is the exact
+      // real-data gap `scanFileForMetric` closes (a real run against the laptop found only 1 of 8 elapsed ET
+      // hours filled before this fix).
+      expect(scanFileForMetric(hostFilePath, 'host.cpu.busy_pct')).toEqual([
+        { timestamp: earlyIso, value: 7 }, { timestamp: now.toISOString(), value: 41 },
       ]);
       expect(listRollups(hostDir).map((r) => r.dayKey)).toEqual(['2026-09-20']);
       expect(readHazardFacts({ plistPath })).toEqual({ plistFound: true, scriptPath: missingScript, scriptExists: false });

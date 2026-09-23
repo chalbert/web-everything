@@ -13,9 +13,17 @@
  *     `workspaceFor()`, `we:scripts/lib/lane-pool-paths.mjs`, so a lane clone resolves the SAME shared root a
  *     primary checkout does, never a nested one under the lane).
  *
- * TODAY'S HOST FILE IS READ FROM ITS TAIL ONLY (bounded bytes) — it grows unbounded over a day (tens of MB)
- * while the collector's day files stay small (single-digit MB even on a busy day), so only the host-sampler
- * store gets the bounded read; {@link readTailBytes} is the one function in this file that does it.
+ * TODAY'S HOST FILE GETS TWO DIFFERENT READS, for two different needs. `machine.now` (busy/sessions/
+ * pressure/cores) only needs the MOST RECENT sample of each, so {@link readHostToday} reads a bounded TAIL
+ * (a few MB) — cheap, and correct for "latest value". `machine.todayHourlyBusyPct` needs the whole day's
+ * `host.cpu.busy_pct` history, and a tail read cannot supply that: the file grows unbounded over a day (past
+ * 90 MB by evening) and a 4 MB tail is only the last hour or so — every earlier ET hour of "today" would read
+ * as a gap that is not actually a gap. {@link scanFileForMetric} answers that need with a BOUNDED-MEMORY
+ * (never bounded-BYTES) scan: fixed-size chunks read synchronously start to end, one metric name matched by
+ * a cheap substring pre-filter before `JSON.parse`, so only a chunk buffer and the small filtered sample
+ * array are ever resident — never the whole file's content at once, and never an async stream (this
+ * operation's engine calls its `compute` step's `fn` synchronously with no `await`, so nothing here may
+ * return a Promise).
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync,
@@ -186,6 +194,63 @@ export function extractSamplesByName(records, name) {
   return out;
 }
 
+/** Default chunk size for {@link scanFileForMetric} — small enough that a chunk plus its carried-over
+ *  partial line never amounts to more than a few MB resident, whatever the file's total size. */
+export const DEFAULT_SCAN_CHUNK_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Every `{timestamp, value}` sample for ONE metric `name`, scanning `path` start to end in fixed-size
+ * chunks — BOUNDED MEMORY, never bounded bytes: unlike {@link readTailBytes}, this reads the whole file, but
+ * only ever holds one chunk buffer, one carried-over partial line, and the (small, pre-filtered) output
+ * array at a time — never the file's full content. Synchronous throughout (`openSync`/`readSync`), because
+ * the declaration's `compute` step calls its reader with no `await` (see this file's header) — an async
+ * `readline` stream is not an option here.
+ *
+ * A cheap substring pre-filter (`"name":"<metricName>"`) skips `JSON.parse` for every line that cannot
+ * possibly match, which is the overwhelming majority on a host-sampler day (dozens of metric names share the
+ * file). A line that matches the substring but still fails to parse — the torn last line of a file still
+ * being appended — is skipped, never thrown, the same tolerance {@link parseJsonlLines} gives every other
+ * reader in this module.
+ *
+ * @param {string} path
+ * @param {string} metricName
+ * @param {{chunkBytes?: number}} [o]
+ * @returns {Array<{timestamp: string, value: number}>}
+ */
+export function scanFileForMetric(path, metricName, { chunkBytes = DEFAULT_SCAN_CHUNK_BYTES } = {}) {
+  const needle = `"name":"${metricName}"`;
+  const out = [];
+  const takeIfMatch = (line) => {
+    if (!line || !line.includes(needle)) return;
+    let rec;
+    try { rec = JSON.parse(line); } catch { return; } // torn line — skip, never throw
+    if (rec && rec.event === 'metric' && rec.name === metricName) out.push({ timestamp: rec.timestamp, value: rec.value });
+  };
+
+  const fd = openSync(path, 'r');
+  try {
+    const { size } = fstatSync(fd);
+    const buf = Buffer.alloc(chunkBytes);
+    let pos = 0;
+    let leftover = '';
+    while (pos < size) {
+      const len = Math.min(chunkBytes, size - pos);
+      const n = readSync(fd, buf, 0, len, pos);
+      if (n <= 0) break; // defensive — a short read here would otherwise spin forever
+      pos += n;
+      const chunkText = leftover + buf.toString('utf8', 0, n);
+      const lastNl = chunkText.lastIndexOf('\n');
+      if (lastNl < 0) { leftover = chunkText; continue; } // no complete line in this chunk yet
+      for (const line of chunkText.slice(0, lastNl).split('\n')) takeIfMatch(line);
+      leftover = chunkText.slice(lastNl + 1);
+    }
+    takeIfMatch(leftover); // the true EOF tail — a torn line here is tolerated by `takeIfMatch` itself
+  } finally {
+    closeSync(fd);
+  }
+  return out;
+}
+
 // ── host-sampler rollups (closed days) ──────────────────────────────────────────────────────────────────
 
 /** Every `<day>.rollup.json` under `root`, parsed, newest day first. Skips a file that fails to parse rather
@@ -327,15 +392,29 @@ export function createTelemetrySummaryReader({
     const rollupsLastAtMs = rollupFiles.length ? rollupFiles[0].mtimeMs : null;
 
     // ── machine samples ──────────────────────────────────────────────────────────────────────────────
+    // "now" — the LATEST value of each, so the cheap tail read is enough (see this file's header).
     const busySamples = extractSamplesByName(hostToday.records, 'host.cpu.busy_pct');
     const sessionSamples = extractSamplesByName(hostToday.records, 'host.sessions.live');
     const pressureSamples = extractSamplesByName(hostToday.records, 'host.mem.pressure_level');
     const coreSamples = extractSamplesByName(hostToday.records, 'host.cpu.count');
-    // Yesterday's rollup (the newest closed day) backfills the ET hours a tail-bounded read of today's own
-    // file cannot reach (see this file's header) — today's raw samples take priority where both exist,
-    // since a rollup's median is a coarser summary of the same ground truth.
+    // `machine.todayHourlyBusyPct` — the WHOLE day's history, which the tail read above cannot supply (past
+    // the first hour or so of a multi-tens-of-MB file). A bounded-memory full scan, not a bounded-bytes one.
+    let todayFullDayBusySamples = [];
+    if (!hostMissing && existsSync(hostToday.root)) {
+      try {
+        todayFullDayBusySamples = scanFileForMetric(hostToday.root, 'host.cpu.busy_pct', { chunkBytes: tailBytes });
+      } catch {
+        // A scan failure degrades the hourly chart to fewer hours, not a hard operation failure — the tail
+        // read above still covers `machine.now`, and `host-sampler`'s source state is unaffected by this.
+        todayFullDayBusySamples = [];
+      }
+    }
+    // Yesterday's rollup (the newest closed day) backfills the ET hours that fall in the PREVIOUS UTC day —
+    // the sliver of "today" (ET) whose wall-clock hours precede today's own UTC day boundary. Today's own
+    // full-day scan takes priority wherever both exist, since a rollup's median is a coarser summary of the
+    // same ground truth.
     const rollupHourlySamples = rollupFiles.length ? extractHourlySamplesFromRollup(rollupFiles[0].data) : [];
-    const hourlySamples = [...rollupHourlySamples, ...busySamples];
+    const hourlySamples = [...rollupHourlySamples, ...todayFullDayBusySamples];
     const fallbackCores = rollupFiles.length ? rollupFiles[0].data?.cores ?? null : null;
 
     const hazard = readHazardFacts();

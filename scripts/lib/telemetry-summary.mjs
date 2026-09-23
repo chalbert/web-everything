@@ -189,7 +189,12 @@ function foldRecordIntoDay(sums, r) {
 function shapeDay(sums) {
   const denom = sums.cacheRead + sums.cacheCreation + sums.input;
   return {
-    cacheHitPct: denom > 0 ? sums.cacheRead / denom : null,
+    // 0–100, one decimal — the plateau-app mock (`docs/mocks/telemetry-page.html`, the reference this wire
+    // shape was built against) hard-codes values like `98.4` and renders them as `${cacheHitPct}%` with no
+    // further scaling, and its low-cache threshold is `cacheHitPct < 40`. A 0–1 ratio here would render as
+    // "0.6%" instead of "60%" and would never trip that threshold. Round rather than truncate so a true 100%
+    // reads as `100`, not `99.9…`.
+    cacheHitPct: denom > 0 ? Math.round((sums.cacheRead / denom) * 1000) / 10 : null,
     tokens: { input: sums.input, output: sums.output, cacheRead: sums.cacheRead, cacheCreation: sums.cacheCreation },
     commits: sums.commits,
     linesChanged: sums.linesChanged,
