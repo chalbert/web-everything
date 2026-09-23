@@ -3,13 +3,16 @@ bornAs: x9fa1uo
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scaffoldedBy: "design-3784-supervision"
 dateScaffolded: "2026-09-22"
 blockedBy: ["3888"]
 scope: ["we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs"]
 relatedTo: ["3690", "3784", "3673"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: [dispatch, delegation, supervision, graduation]
 ---
 
@@ -32,3 +35,13 @@ Rule 5 of we:docs/agent/platform-decisions.md#delegation-trial-record-graduation
 3. **Executable** — `grep -n "minCleanStreak" we:scripts/lib/__tests__/provider-routing.test.mjs` shows a case asserting the cold-start path is untouched: a triple with no miss on record still graduates at exactly `minCleanStreak`.
 4. **Observable** — `DEFAULT_BACKDOWN_THRESHOLDS` (we:scripts/lib/provider-routing.mjs:144) gains a `k` field and its existing fields keep their current values (`minCleanStreak: 5`, `requireInformativeTrial: true`).
 5. **Observable** — the audit trail `selectSupervisionLevel` returns states which bar was applied (cold-start or post-miss) and why, so a reader can tell the two apart without recomputing the streak.
+
+> **Verified done, 2026-09-22.** Built and committed to `lane/mechanical-dispatcher` at `121a48fc6`
+> (tracker note `27e757f21`); `k` set to `3` as a placeholder (real value deferred to a batched
+> finding, per this card's own text). This rule's fix uncovered a real bug (`9a714989c`,
+> `routingRecords()` was stripping `rootCause`/`informative` before they reached
+> `selectSupervisionLevel`) plus 10 collateral test failures in fixtures outside this card's own
+> scope that assumed the old, looser miss-recovery behavior — both fixed in the same pass
+> (`b3a8ac1ea`). All named test files pass; full suite 591/593 files, 16435/16448 tests, remainder
+> confirmed pre-existing and unrelated. Resolved here as `graduatedTo: none` — the code is not yet
+> on `main`; it reaches `main` through #3443.

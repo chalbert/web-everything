@@ -3,12 +3,15 @@ bornAs: xlbgizn
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scaffoldedBy: "design-3784-supervision"
 dateScaffolded: "2026-09-22"
 scope: ["we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/conveyor/run-scorecards.json"]
 relatedTo: ["3690", "3784", "3717"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: [dispatch, delegation, supervision, graduation]
 ---
 
@@ -33,3 +36,11 @@ Rule 4 of we:docs/agent/platform-decisions.md#delegation-trial-record-graduation
 3. **Executable** — on the branch, `grep -n "outcome !== 'rejected'" we:scripts/lib/provider-routing.mjs` prints nothing: the predicate reads the field and nothing else.
 4. **Observable** — every existing `dispatchKind: "session-delegation"` row in we:scripts/conveyor/run-scorecards.json carries an explicit `informative` boolean. Backfill is `false` for every row except one a human names, because rule 4's meaning ("independent review found a real problem that was then fixed") cannot be recovered from the stored text, and guessing it is the inference the rule forbids.
 5. **Observable** — `DEFAULT_BACKDOWN_THRESHOLDS` in we:scripts/lib/provider-routing.mjs is unchanged by this item's diff (`requireInformativeTrial` keeps its value; only what satisfies it moves).
+
+> **Verified done, 2026-09-22.** Built and committed to `lane/mechanical-dispatcher` at `8d986d1c8`
+> (tracker note `f9fed205f`). A later fix at `9a714989c` was needed for this rule to actually take
+> effect through the real dispatch path (`we:scripts/lib/dispatch-contracts.mjs`'s `routingRecords()`
+> was silently stripping the `informative` field before it reached `selectSupervisionLevel`). All named
+> test files pass; zero `session-delegation` rows existed on the branch at build time, so no backfill
+> was needed. Resolved here as `graduatedTo: none` — the code is not yet on `main`; it reaches `main`
+> through #3443.
