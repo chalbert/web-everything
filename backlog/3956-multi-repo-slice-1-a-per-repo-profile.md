@@ -1,6 +1,7 @@
 ---
+bornAs: xjko7gy
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
 scope: ["we:scripts/lib/constellation-repos.mjs"]
 dateOpened: "2026-09-23"

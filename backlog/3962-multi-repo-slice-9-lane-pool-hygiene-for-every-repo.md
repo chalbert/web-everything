@@ -1,8 +1,9 @@
 ---
+bornAs: xr4ygg7
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
-blockedBy: ["xjko7gy"]
+blockedBy: ["3956"]
 scope: ["we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/tick-core.mjs"]
 dateOpened: "2026-09-23"
 tags: []

@@ -1,6 +1,7 @@
 ---
+bornAs: x17s5az
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
 scope: ["we:scripts/conveyor/review-status-tag.mjs", "we:scripts/operations/review-dispatch.mjs"]
 dateOpened: "2026-09-23"

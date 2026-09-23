@@ -1,9 +1,10 @@
 ---
+bornAs: x024vz7
 kind: story
 size: 5
-parent: "xtfrvc3"
+parent: "3963"
 status: open
-blockedBy: ["xjko7gy"]
+blockedBy: ["3956"]
 scope: ["we:scripts/check-standards-rules.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/lib/citation-check.mjs"]
 dateOpened: "2026-09-23"
 tags: []

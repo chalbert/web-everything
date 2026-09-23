@@ -1,9 +1,10 @@
 ---
+bornAs: xn7fg50
 kind: story
 size: 5
-parent: "xtfrvc3"
+parent: "3963"
 status: open
-blockedBy: ["xjko7gy"]
+blockedBy: ["3956"]
 scope: ["we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-23"
 tags: []

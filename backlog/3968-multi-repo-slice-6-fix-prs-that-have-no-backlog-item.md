@@ -1,8 +1,9 @@
 ---
+bornAs: xmtbdgs
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
-blockedBy: ["x33jgwt", "xx478x6", "3908"]
+blockedBy: ["3966", "3965", "3908"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-23"
 tags: []

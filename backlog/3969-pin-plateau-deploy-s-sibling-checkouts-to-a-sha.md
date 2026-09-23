@@ -1,6 +1,7 @@
 ---
+bornAs: xy69r60
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
 scope: ["plateau:.github/workflows/deploy.yml"]
 dateOpened: "2026-09-23"

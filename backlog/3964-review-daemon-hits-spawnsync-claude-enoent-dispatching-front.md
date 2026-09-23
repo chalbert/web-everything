@@ -1,6 +1,7 @@
 ---
+bornAs: xvzwiew
 kind: task
-parent: "xtfrvc3"
+parent: "3963"
 status: open
 scope: ["we:skills-src/conveyor/review-daemon.mjs", "we:scripts/operations/review-dispatch.mjs"]
 dateOpened: "2026-09-23"

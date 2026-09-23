@@ -1,9 +1,10 @@
 ---
+bornAs: xdx3ifb
 kind: story
 size: 5
-parent: "xtfrvc3"
+parent: "3963"
 status: open
-blockedBy: ["xjko7gy"]
+blockedBy: ["3956"]
 scope: ["we:scripts/conveyor/pr-work-unit.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:src/_data/backlog.js"]
 dateOpened: "2026-09-23"
 tags: []
