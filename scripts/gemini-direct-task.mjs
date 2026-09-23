@@ -248,6 +248,18 @@ export const defaultExecFn = (bin, args, opts = {}) =>
  * Make a fresh scratch clone of `repoRoot` and install its deps — the default target when the
  * caller names no existing directory. Injectable `execFn`/`mkTempDir`/`existsFn` for testing without a real
  * git/npm process.
+ *
+ * #3782 — this function used to unconditionally rewrite the clone's `origin` from the local `repoRoot` path
+ * to the REAL push remote. This file's own header is honest that agy has no real read/write confinement (its
+ * native file tools bypass `--sandbox`/`--add-dir`), but that is a DIFFERENT gap from this one: even a
+ * perfectly-confined agent, given a push-capable origin, could push. A live probe on the operator's own
+ * machine found ambient SSH-agent credentials that would authenticate such a push — real, not theoretical —
+ * which is why `we:scripts/codex-direct-task.mjs`'s matching function was fixed the same way under #3782; this
+ * one mirrors that fix rather than leaving an identical gap unpatched here.
+ *
+ * Least-privilege by default: leave `origin` at the local `repoRoot` path (git clone's own default, not
+ * push-capable) and resolve+return the real remote URL as `realOrigin` for the caller to print, rather than
+ * wiring it into the clone's git config. `wireOriginToRemote: true` opts back into the old behavior.
  * @param {object} opts
  * @param {string} opts.repoRoot
  * @param {(prefix: string) => string} [opts.mkTempDir]
@@ -255,7 +267,10 @@ export const defaultExecFn = (bin, args, opts = {}) =>
  * @param {(path: string) => boolean} [opts.existsFn]
  * @param {boolean} [opts.installDeps] - default true; a caller in a hurry for a task that touches no code
  *   dependent on `node_modules` may pass false.
- * @returns {{dest: string, cloned: true, depsInstall: {bin: string, args: string[]}|null}}
+ * @param {boolean} [opts.wireOriginToRemote] - default false (#3782). When true, opts back into the pre-#3782
+ *   behavior: rewrite the clone's `origin` to the real remote so a human can push straight from it.
+ * @returns {{dest: string, cloned: true, depsInstall: {bin: string, args: string[]}|null, realOrigin:
+ *   string|null, originWired: boolean}}
  */
 export function setupScratchClone({
   repoRoot,
@@ -263,23 +278,30 @@ export function setupScratchClone({
   execFn = defaultExecFn,
   existsFn = existsSync,
   installDeps = true,
+  wireOriginToRemote = false,
 } = {}) {
   if (typeof repoRoot !== 'string' || !repoRoot.trim()) {
     throw new TypeError('gemini-direct-task: `repoRoot` must be a non-empty path');
   }
   const dest = mkTempDir(join(tmpdir(), 'we-gemini-direct-'));
   execFn('git', buildScratchCloneArgv({ repoRoot, dest }));
-  // Best-effort: point the clone's `origin` at the REAL remote (not the local repoRoot path) so a human who
-  // likes the diff can push straight from the scratch clone if they choose to. Never fatal — an offline/no-
-  // remote repoRoot (e.g. a test fixture) just leaves the local-path origin in place.
+  // Resolve the real push remote so it can be REPORTED — never silently wired in by default (#3782).
+  let realOrigin = null;
   try {
-    const realOrigin = execFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin']).trim();
-    if (realOrigin) execFn('git', ['-C', dest, 'remote', 'set-url', 'origin', realOrigin]);
-  } catch { /* no origin on repoRoot, or remote command unavailable — harmless, clone still works */ }
+    const url = execFn('git', ['-C', repoRoot, 'remote', 'get-url', 'origin']).trim();
+    if (url) realOrigin = url;
+  } catch { /* no origin on repoRoot, or remote command unavailable */ }
+  let originWired = false;
+  if (wireOriginToRemote && realOrigin) {
+    try {
+      execFn('git', ['-C', dest, 'remote', 'set-url', 'origin', realOrigin]);
+      originWired = true;
+    } catch { /* set-url failed — clone still works with the local-path origin */ }
+  }
 
   const depsInstall = installDeps ? planDepsInstall(dest, existsFn) : null;
   if (depsInstall) execFn(depsInstall.bin, depsInstall.args, { cwd: dest, stdio: 'inherit' });
-  return { dest, cloned: true, depsInstall };
+  return { dest, cloned: true, depsInstall, realOrigin, originWired };
 }
 
 /**
@@ -448,7 +470,7 @@ export async function runAgyDirectExec({
 /** Resolve target, record HEAD, run with at most one resume, capture diff, gate. NEVER commit/push/open a PR. */
 export async function geminiDirectTask({
   task, dir, repoRoot, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  gate = 'none', logFile, stream = true, installDeps = true,
+  gate = 'none', logFile, stream = true, installDeps = true, wireOriginToRemote = false,
   execFn = defaultExecFn, spawnFn = nodeSpawn, mkTempDir = mkdtempSync, existsFn = existsSync,
 } = {}) {
   requireText(task, 'task');
@@ -460,7 +482,9 @@ export async function geminiDirectTask({
   if (dir === undefined) {
     requireText(repoRoot, 'repoRoot (required when dir is omitted)');
     repoRoot = resolve(repoRoot);
-    scratch = setupScratchClone({ repoRoot, execFn, mkTempDir, existsFn, installDeps });
+    scratch = setupScratchClone({
+      repoRoot, execFn, mkTempDir, existsFn, installDeps, wireOriginToRemote,
+    });
     targetDir = resolve(scratch.dest);
   } else {
     requireText(dir, 'dir');
@@ -499,7 +523,15 @@ export async function geminiDirectTask({
   const gateResult = runGate({ dir: targetDir, mode: gate, execFn });
   return {
     dir: targetDir,
-    scratch: scratch ? { created: true, source: repoRoot, depsInstall: scratch.depsInstall } : { created: false },
+    scratch: scratch ? {
+      created: true,
+      source: repoRoot,
+      depsInstall: scratch.depsInstall,
+      // #3782: origin stays at the local repoRoot path by default (not push-capable) — realOrigin is only
+      // ever reported, never silently wired in, unless the caller opted in via wireOriginToRemote.
+      realOrigin: scratch.realOrigin,
+      originWired: scratch.originWired,
+    } : { created: false },
     startSha, argv: run.argv, logFile: resolvedLogFile, exitCode: run.code, timedOut: run.timedOut,
     resumed: resumeConversationId !== null, resumeConversationId,
     events: summary, diff, gate: gateResult,
@@ -510,7 +542,7 @@ export async function geminiDirectTask({
 export function parseFlags(argv) {
   const flags = {};
   const values = ['task', 'task-file', 'dir', 'repo-root', 'model', 'effort', 'add-dir', 'timeout-ms', 'gate', 'log'];
-  const booleans = ['sandbox', 'no-stream', 'no-install', 'json', 'help'];
+  const booleans = ['sandbox', 'no-stream', 'no-install', 'wire-origin-to-remote', 'json', 'help'];
   for (const arg of argv) {
     const eq = arg.indexOf('=');
     const key = arg.slice(2, eq === -1 ? undefined : eq);
@@ -540,6 +572,9 @@ export const HELP = `usage: node scripts/gemini-direct-task.mjs --task=<text>|--
   --no-stream                Still logs JSONL; suppresses live stdout.
   --log=<path>               Default <dir>/.git/gemini-direct-task.jsonl.
   --no-install               Skip scratch clone dependency installation.
+  --wire-origin-to-remote    #3782: opt-in — rewrite a fresh scratch clone's origin to the real remote so a
+                             human can push straight from it. Default: origin stays at the local repoRoot
+                             path (not push-capable); the real remote is only printed. No effect with --dir.
   --json                     Full report only on stdout (implies --no-stream).
 Timeout or nonzero/null exit without a terminal result: resume exactly once via --conversation <ID>,
 only with a captured init conversation ID. No ID means no retry. Each attempt gets a fresh timeout
@@ -551,6 +586,12 @@ No real write/read confinement exists. Review the diff; this script never commit
 export function formatReport(report) {
   const lines = [
     `gemini-direct-task: ${report.scratch.created ? 'scratch clone' : 'target dir'} → ${report.dir}`,
+    ...(report.scratch.created && report.scratch.realOrigin ? [
+      report.scratch.originWired
+        ? `origin wired to the real remote (--wire-origin-to-remote): ${report.scratch.realOrigin}`
+        : `origin left at the local clone source (#3782, not push-capable). Real remote: ${report.scratch.realOrigin}\n`
+          + `  to push from here yourself: git -C ${report.dir} remote set-url origin ${report.scratch.realOrigin}`,
+    ] : []),
     `conversation: ${report.events.conversationId ?? '<none>'}  terminal: ${report.events.terminal ?? '<none>'}  exit: ${report.exitCode}  timedOut: ${report.timedOut}`,
     ...(report.events.toolErrors.length ? [
       `WARNING: TOOL ERRORS DURING RUN (${report.events.toolErrors.length}) — the terminal status above may not reflect real success:`,
@@ -594,6 +635,7 @@ export async function main(argv = process.argv.slice(2), { taskFn = geminiDirect
     sandbox: Boolean(flags.sandbox), timeoutMs: flags['timeout-ms'] ? Number(flags['timeout-ms']) : DEFAULT_TIMEOUT_MS,
     gate: flags.gate ?? 'none', logFile: flags.log ? resolve(flags.log) : undefined,
     stream: !flags['no-stream'] && !flags.json, installDeps: !flags['no-install'],
+    wireOriginToRemote: Boolean(flags['wire-origin-to-remote']),
     // npm install normally inherits stdout. Keep --json machine-readable during scratch setup too.
     execFn: flags.json ? (bin, args, opts = {}) => defaultExecFn(bin, args, {
       ...opts, ...(opts.stdio === 'inherit' ? { stdio: ['ignore', 2, 2] } : {}),
