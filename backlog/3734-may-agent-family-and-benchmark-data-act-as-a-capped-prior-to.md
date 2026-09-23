@@ -2,17 +2,23 @@
 bornAs: x9i9eqp
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/model-capability-ratings.mjs", "we:scripts/conveyor/run-scorecards.json"]
 dateOpened: "2026-09-20"
+dateResolved: "2026-09-23"
 preparedDate: "2026-09-21"
 preparedAgainstSha: "10aafdb030ce0eb124af23142add3b3b96844bec"
+codifiedIn: "docs/agent/platform-decisions.md#delegation-trial-record-graduation"
 relatedTo: ["3654", "3673", "3690"]
 relatedReport: reports/2026-09-21-supervision-prior-grounding.md
 tags: []
 ---
 
 # May agent-family and benchmark data act as a capped prior toward supervision graduation?
+
+> **Ratified 2026-09-23 by the operator, as prepared** — Fork 1 (a), no credit from outside the exact triple;
+> Forks 2 and 3 are moot. See `## Ratified (as prepared) — 2026-09-23` below; the rule is codified at
+> [#delegation-trial-record-graduation](../docs/agent/platform-decisions.md#delegation-trial-record-graduation).
 
 No design for a borrowed-evidence prior exists yet. The three forks below are grounded in a prior-art survey published as [/research/supervision-graduation-borrowed-evidence/](/research/supervision-graduation-borrowed-evidence/) (report linked via `relatedReport`) and a replay over the live scorecard store; each carries a **bold** default. **Prep recommends no prior**, reversing the filing's lean toward a low-risk family prior: the safe credit is at most one trial worth almost nothing, and on today's store a cross-identity family prior is unsafe or inert. The filing's option 2 stays fully specified, so ratifying it is a nod.
 
@@ -119,6 +125,31 @@ Each holds whichever Fork 2–3 answer is ratified.
 **Statute overlap (checked in prep).** Same-turf anchors in `we:docs/agent/platform-decisions.md`: `#model-probation-graduation-criteria` (:4676), `#calibration-veto-clearing` (:4728), `#delegation-trial-record-graduation` (:4780), `#agent-vendor-registry` (a descriptor "never declares its own … trust", so a relation table must not be a descriptor field), `#every-pr-gets-a-look-advisory-floor` (:4169; the after-the-fact spot-check sampler covers in-story supervision only, the every-PR look is a separate floor). Ratifying (b) with Fork 2 (a) amends #3690's "trust never carries across triples" alone; any wider relation or a benchmark also amends #3654 clause 4 and #3383. Ratifying (a) reaffirms all three and amends nothing.
 
 **Citation scope.** The default (a) rests on the ratified operational-design-domain statement (`we:backlog/3690-track-and-consider-graduating-session-initiated-codex-delega.md:141-146`) and on #3690's "trust never carries across triples", which govern this exact turf. It does *not* lean on #3654 clause 4 as authority against a same-model credit: that clause governs identity reputation and benchmark claims, which is why Fork 2 (a) is a distinct, narrower branch rather than ruled out by it.
+
+## Ratified (as prepared) — 2026-09-23
+
+**Ratified 2026-09-23 by the operator (Nicolas Gilbert), as prepared.** The operator's words, typed in the
+orchestrating session: "I ratify 3734". That takes the bold default of Fork 1, with no amendment. Codified at
+[#delegation-trial-record-graduation](../docs/agent/platform-decisions.md#delegation-trial-record-graduation).
+
+- **Fork 1 — (a) no credit from outside the exact `{provider, model, taskType}` triple.** Neither another task
+  type of the same model, another host of the same weights, another release of the same vendor line, nor a
+  benchmark rating counts toward a supervision bar. The risk tier and role authority vary the bar uniformly
+  for every identity, never by identity. This reaffirms #3690's "trust never carries across triples", #3654
+  clause 4 and #3383's release rule; it amends nothing.
+- **Fork 2 — moot** (applied only under Fork 1 (b)).
+- **Fork 3 — moot** (applied only under Fork 1 (b)). A benchmark stays an advisory tiebreak inside
+  `selectProvider`'s `explorationHint`; the ratings module header is unchanged.
+- **Reopen trigger (recorded).** Through an ordinary batched finding, once the store can back-test a declared
+  relation: at least five triples, across at least two models, that graduated on their own data after a
+  same-relation lender had already graduated, and a replay shows lender-derived credit would never have
+  advanced a triple that later recorded a miss. The counts are placeholders for that finding to set.
+- **Red-team at ratify (confirmation).** Every fork carries a prep `Skeptic:` verdict, and no discussion-born
+  branch was introduced, so the ratify-time pass is the inline floor. Strongest case for (b): the operator's
+  own direction asks for faster low-risk graduation. It does not land: the in-flight risk tiers already give
+  that uniformly, and the credit (b) adds is at most one virtual trial crossing a task-type domain on an
+  unmeasured claim. Statute overlap: none new — (a) reaffirms the three anchors it touches.
+- **Build child:** none. Fork 1 (a) carves no child.
 
 ## Done when
 

@@ -4990,6 +4990,14 @@ it.
 **What this ruling does not do.** It sets no threshold value and does not itself switch on any dispatch gate
 that reads the supervision level; turning such a gate on is separately-scoped work tracked on the backlog.
 
+**No borrowed evidence (`#3734`, ratified 2026-09-23).** Nothing from outside the exact triple counts toward a
+supervision bar: not the same model's record on another task type, not the same weights on another host, not
+an adjacent release of the same vendor line, and not a benchmark rating. A risk tier or role authority may vary
+the bar, but uniformly for every identity, never by identity. A benchmark stays an advisory tiebreak for
+`selectProvider` only. Reopen only through a batched finding once the store can back-test a declared lending
+relation (enough triples, across more than one model, graduating on their own data after a same-relation
+lender, with a replay showing the credit would never have advanced a triple that later missed).
+
 **Lineage:** ratified via `#3690` (2026-09-21), filed under the background mechanical dispatcher epic
 `#3383`, grounded in `/research/delegation-graduation-and-supervision-tiers/` and
 `we:reports/2026-09-20-delegation-graduation-model-grounding.md`, extending
