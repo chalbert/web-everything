@@ -29,13 +29,18 @@ import { gitRun } from './main-staleness.mjs';
  * Pure: what should a daemon's clone do, given where it stands against `origin/main`?
  * `dirty: null` means the tree state is UNKNOWN (the `git status` itself failed or timed out) — that fails
  * CLOSED (`status-failed`), never as clean: merging a tree we could not inspect could restart the daemon over
- * uncommitted work.
- * @param {{fetched:boolean, behind:number, dirty:boolean|null, onBase:boolean}} s
+ * uncommitted work. The same fail-closed rule covers every other probe: `behind: null` (the `rev-list --count`
+ * failed, timed out, or printed no number) is `count-failed`, NEVER `up-to-date` — reading an unknown distance
+ * as 0 would let the clone silently fall behind `origin/main` forever with no signal; `onBase: null` (the
+ * `symbolic-ref` failed) is `head-failed`, not a misleading `not-on-main`.
+ * @param {{fetched:boolean, behind:number|null, dirty:boolean|null, onBase:boolean|null}} s
  * @returns {{action:'none'|'merge'|'skip', reason:string}}
  */
 export function decideSelfSync({ fetched, behind, dirty, onBase }) {
   if (!fetched) return { action: 'skip', reason: 'fetch-failed' };
+  if (behind === null) return { action: 'skip', reason: 'count-failed' };
   if (!behind) return { action: 'none', reason: 'up-to-date' };
+  if (onBase === null) return { action: 'skip', reason: 'head-failed' };
   if (!onBase) return { action: 'skip', reason: 'not-on-main' };
   if (dirty === null) return { action: 'skip', reason: 'status-failed' };
   if (dirty) return { action: 'skip', reason: 'dirty' };
@@ -52,7 +57,9 @@ export function decideSelfSync({ fetched, behind, dirty, onBase }) {
  * already treats a null/non-zero `status` as failure, so a timed-out command falls through the existing
  * fetch-failed / merge-abort paths unchanged: a timed-out fetch → `fetch-failed` (never reaches merge); a
  * timed-out merge → aborted (itself under the same timeout) and reported as `conflict`; a failed/timed-out
- * `status` → `status-failed` (fail closed — an uninspected tree is never treated as clean).
+ * `status` → `status-failed` (fail closed — an uninspected tree is never treated as clean); a failed/timed-out
+ * (or non-numeric) `rev-list --count` → `count-failed` (never coerced to 0 / `up-to-date`); a failed/timed-out
+ * `symbolic-ref` → `head-failed`.
  * @param {{root:string, base?:string, run?:typeof gitRun, timeoutMs?:number}} o
  * @returns {{merged:boolean, commits:number, reason:string}}
  */
@@ -61,11 +68,12 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs 
   const fetched = git(['fetch', 'origin', base, '--quiet']).status === 0;
   const count = (range) => {
     const r = git(['rev-list', '--count', range]);
-    return r.status === 0 ? Number(r.stdout.trim()) || 0 : 0;
+    const out = String(r.stdout ?? '').trim();
+    return r.status === 0 && /^\d+$/.test(out) ? Number(out) : null;
   };
   const behind = fetched ? count(`HEAD..origin/${base}`) : 0;
   const head = git(['symbolic-ref', '--short', 'HEAD']);
-  const onBase = head.status === 0 && head.stdout.trim() === base;
+  const onBase = head.status === 0 ? String(head.stdout ?? '').trim() === base : null;
   const status = git(['status', '--porcelain']);
   const dirty = status.status === 0 ? !!String(status.stdout ?? '').trim() : null;
 
@@ -100,6 +108,12 @@ export function withSelfSync(effects, { root, onRestart, sync = selfSyncCheckout
         log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
       } else if (r.reason === 'status-failed') {
         log.error?.('daemon-self-sync: behind origin/main but NOT syncing (status-failed) — `git status` failed or timed out; retrying next tick');
+      } else if (r.reason === 'fetch-failed') {
+        log.error?.('daemon-self-sync: NOT syncing (fetch-failed) — `git fetch origin` failed or timed out; retrying next tick');
+      } else if (r.reason === 'count-failed') {
+        log.error?.('daemon-self-sync: NOT syncing (count-failed) — `git rev-list --count` failed or timed out, so the distance to origin/main is unknown; retrying next tick');
+      } else if (r.reason === 'head-failed') {
+        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (head-failed) — `git symbolic-ref HEAD` failed or timed out; retrying next tick');
       }
       return tick();
     },
