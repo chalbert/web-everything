@@ -1,4 +1,5 @@
 ---
+bornAs: xtrqagm
 kind: task
 parent: "3383"
 status: open
@@ -8,7 +9,7 @@ tags: []
 
 # briefs write agent-scratch files into the lane root instead of a dedicated scratch dir
 
-we:scripts/lib/lane-litter.mjs's allowlist (extended by #3383/xddtgll) is a symptom-side fix: delivery/converge/
+we:scripts/lib/lane-litter.mjs's allowlist (extended by #3383/3986) is a symptom-side fix: delivery/converge/
 open-pr/land-pr briefs (we:skills-src/conveyor/delivery-agent-brief.md, we:skills-src/conveyor/delivery-agent-brief-v2.md,
 we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/converge-cli.mjs) write `.pr-body*`, `.open-pr*`,
 `we:.pr-land-result.json`, and `.converge-*` scratch files straight into the LANE ROOT, so every acquire/release/
