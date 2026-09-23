@@ -135,6 +135,7 @@ import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.
 // #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
 // same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
 import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
+import { ensureFreshGithubAppEnv, startGithubAppTokenAutoRefresh } from './lib/github-app-auth-env.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -3092,6 +3093,13 @@ const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLTo
 if (IS_CLI) runCli().catch((e) => { process.stderr.write(`merge-ai-prs ✗ ${String(e && e.stack || e)}\n`); process.exit(1); });
 
 async function runCli() {
+  // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
+  // call this drain run makes draws from the App installation's own rate-limit bucket instead of the
+  // operator's personal one. Awaited HERE, before any gh work, so a fresh env var is in place for even the
+  // very first discovery call — a `--watch` run additionally starts the recurring refresher below, once
+  // WATCH is known, so a long-lived monitor keeps drawing a fresh token past the 1-hour installation-token
+  // lifetime. See github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
+  await ensureFreshGithubAppEnv({ log: console });
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
@@ -3115,6 +3123,9 @@ async function runCli() {
   // (`/drain watch`), re-sweeping on `--interval=N`s and landing each PR the instant it goes green.
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE, untilBatchesIdle: UNTIL_BATCHES_IDLE, batchIdleDebounce: BATCH_DEBOUNCE } =
     parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'], untilBatchesIdle: flags['until-batches-idle'], batchIdleDebounce: flags['batch-idle-debounce'] });
+  // A long-lived --watch monitor outlives a single installation token (1-hour GitHub max) — keep it fresh.
+  // A one-shot sweep already got its token from the awaited call above and needs no recurring refresh.
+  if (WATCH) startGithubAppTokenAutoRefresh({ log: console });
   // #2330 — the active-progress feed the batch-aware exit reads. The feed is a dev-only artifact the website's
   // Active-work tab reads; it lives at <repo>/_site/active-progress.json and is written by
   // `scripts/dev/active-progress-watch.mjs` (which must be running for the signal to exist — a drain-only
