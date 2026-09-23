@@ -1,9 +1,10 @@
 ---
+bornAs: x3izqob
 kind: story
 size: 3
-parent: "xjtmptc"
+parent: "3943"
 status: open
-blockedBy: ["xlt8y1j"]
+blockedBy: ["3944"]
 scope: ["plateau:wip-relay.js", "plateau:src/wip/wip-agent.ts", "plateau:scripts/wip-publish.ts", "plateau:src/telemetry/telemetry-source.ts", "plateau:src/telemetry/telemetry-source.test.ts", "plateau:src/wip/wip-relay-contract.test.ts", "plateau:docs/telemetry-page.md"]
 dateOpened: "2026-09-22"
 tags: []

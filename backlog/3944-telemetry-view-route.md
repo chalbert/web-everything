@@ -1,9 +1,10 @@
 ---
+bornAs: xlt8y1j
 kind: story
 size: 3
-parent: "xjtmptc"
+parent: "3943"
 status: open
-blockedBy: ["x0lb6js"]
+blockedBy: ["3942"]
 scope: ["plateau:src/telemetry/telemetry-view.ts", "plateau:src/telemetry/telemetry-view.css", "plateau:src/telemetry/telemetry-view.test.ts", "plateau:index.html", "plateau:src/main.ts"]
 dateOpened: "2026-09-22"
 tags: []

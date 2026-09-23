@@ -1,7 +1,8 @@
 ---
+bornAs: x0lb6js
 kind: story
 size: 2
-parent: "xjtmptc"
+parent: "3943"
 status: resolved
 scope: ["plateau:src/telemetry/types.ts", "plateau:src/telemetry/telemetry-validate.ts", "plateau:src/telemetry/telemetry-read.ts", "plateau:src/telemetry/telemetry-validate.test.ts", "plateau:src/telemetry/telemetry-read.test.ts", "plateau:vite.config.mts"]
 dateOpened: "2026-09-22"
