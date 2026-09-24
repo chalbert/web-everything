@@ -258,3 +258,33 @@ How each slice (a child of this item) graduates, per the statute
     - First attempt: an untrusted clone folder made `claude --bg` fail ("Workspace not trusted"). That is the
       #3748 class, not a #3857 defect, and it left one stale in-flight run record, `probe-3857-sonnet`.
     - #3857's own card is claimed by another session, so its status flip is left to that session.
+
+- **2026-09-24 (#3895 telemetry core, first wave-A build): PR #2595 open, pending review+drain.** Ported
+  `we:scripts/operations/command-redact.mjs`, `we:scripts/operations/telemetry.mjs`,
+  `we:scripts/operations/telemetry-store.mjs`, `we:scripts/operations/telemetry-cli.mjs` and
+  `we:scripts/operations/__tests__/command-redact.test.mjs` from snapshot `600acc14f`. None of the 4 files
+  exist on `main`, and none have been touched by `main` since the merge base `ca7e68b71` — a clean
+  byte-identical port, no diff-merge needed. `we:scripts/operations/command-redact.mjs` (argv
+  credential/control-char redaction before telemetry is persisted or printed) got the extra scrutiny the
+  card called for as a security-relevant file: confirmed zero independent `main` commits to it, so there was
+  no merge to get wrong and no risk of a redaction pattern being dropped.
+  - **Scope correction found at land time.** `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` and
+    `we:scripts/operations/__tests__/telemetry.test.mjs` were in #3895's original scope but statically import
+    modules that are true downstream leaves — `we:scripts/operations/minimal-context-provider.mjs` (#3902),
+    `we:scripts/operations/host-process-sample.mjs` (#3915), `we:scripts/operations/review-dispatch-wrapper.mjs`
+    and the prepare wrappers (#3908/#3905) — none of which exist yet, and all of which are themselves
+    `blockedBy: 3895`. The original Done-when ("passes on main's tree") was unsatisfiable within this slice
+    alone. Re-homed `we:scripts/operations/__tests__/telemetry.test.mjs` to #3915 (its one dependency is
+    already that card's scope) and `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` to #3908 (the
+    last-landing of its three dependencies per the critical path `#3897 → #3902 → #3906 → #3903 → #3904 →
+    #3908`), with dated notes on all three cards — the same "moved here" pattern #3908 already used for
+    `we:scripts/operations/__tests__/action-ground-truth.test.mjs` from #3901.
+  - **Full gate:** `npm run test:unit` 574/574 files, 16411 tests, 0 failures; `npm run check:standards
+    --scope=3895-...` 0 errors; lane `verify` green at `914bd921e`. PR #2595's own CI `test` and `smoke`
+    checks are both green (local `npm run test:smoke` fails only because it needs a FrontierUI dev server on
+    `:3001` as a sibling checkout, per `we:.github/workflows/ci.yml` — unrelated to these 4 backend files;
+    CI's own sibling checkout confirms the real gate is green).
+  - PR #2595 is labelled `review:pending` (blast-radius/size, 2672 changed lines — mostly
+    `we:scripts/operations/telemetry.mjs` and `we:scripts/operations/telemetry-store.mjs` themselves) and left
+    for the drain to land, per the epic's own established pattern (see the 2026-09-06/07 entry). #3895 is not
+    yet resolved — that happens once the PR actually merges.
