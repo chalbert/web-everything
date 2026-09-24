@@ -4982,6 +4982,13 @@ threshold is fixed by any clause below.** Seven rules:
    follow-up item, and the floor's cost and yield are measured and reported. Any provider may fill the
    reviewer seat; a different provider from the builder is preferred, never required.
 
+   **A level below `spot-check` — lighter or absent — was proposed and declined (#3867):** `spot-check` is
+   the delegated PR's own review at the
+   [#every-pr-gets-a-look-advisory-floor](#every-pr-gets-a-look-advisory-floor) shape, and a producer's
+   record never exempts a PR from that floor. The spot-check pass runs **asynchronously, off the landing
+   path**: it never holds or delays a merge — it may run after land — and it records its verdict; a finding
+   files a follow-up item (#3867).
+
 **Reach.** Mechanical provider routing binds the mechanical dispatch path only. An interactive orchestrating
 loop keeps its own inline routing verdict under [#model-routing](backlog-workflow.md#model-routing) Inline (3)
 and [#effort-routing](backlog-workflow.md#effort-routing); the router may inform that verdict, never replace
