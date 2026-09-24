@@ -85,7 +85,6 @@ import {
   isReservedLease,
   isLaneAcquirable,
   leaseDisqualifiesAcquire,
-  chooseFreeLane,
   ownLaneNumber,
   leaseBody,
   describeLease,
@@ -1015,7 +1014,7 @@ function laneStatus(repo, n) {
 // #2426 — the lease/dirty snapshot a lease-aware picker (`list --acquirable`, `provision --acquirable`) needs to
 // decide whether a lane is safe to couple an item onto. Shape matches `isLaneAcquirable(info, now, ttl)` in
 // lane-lease.mjs: `exists`, the raw `lease` marker, and `dirtyOrAhead` (someone's un-pushed work).
-// #3383 — applies the SAME two acquire-time relaxations `cmdAcquire`'s own `infoFor` applies
+// #3383 — applies the SAME two acquire-time relaxations `cmdAcquire`'s own auto-pick applies
 // (`effectiveDirtyOrAhead`: litter-only dirt counts as clean, a squash/rebase-merged or ancestor-contained
 // "ahead" commit counts as pushed), via the SAME shared, lazy `remoteShasBox` — so this read-only picker and
 // `acquire`'s actual auto-pick can never diverge (a lane reported acquirable here is exactly one `acquire`
@@ -1419,28 +1418,6 @@ function cmdAcquire(repo) {
   // "looking in the wrong place" (the latter is fixed with `LANE_POOL_ROOT`, but only once it's diagnosable).
   if (lanes.length === 0) fail(`no lanes provisioned for "${repo.name}" under ${repo.poolDir} — run \`provision --count=N\` first (if this pool root looks wrong, see LANE_POOL_ROOT)`);
 
-  // Candidate infos from LOCAL refs (no per-lane fetch): `dirty` is live (working tree), `ahead` is vs the
-  // last-known origin — conservative (over-protects an ahead lane). We fetch+reset only the winner.
-  // #2452 (Gap 1) — the live-remote snapshot backing `aheadIsProvablyPushed`, taken LAZILY: only the first
-  // lane that actually looks ahead pays the single `ls-remote`, so a pool with no ahead lanes still makes
-  // zero network calls (the no-per-lane-fetch property this design is built around).
-  let remoteShas = null;
-  const getRemoteShas = (dir) => (remoteShas === null ? (remoteShas = liveRemoteShas(dir)) : remoteShas);
-  const infoFor = (n, pickNowMs) => {
-    const dir = laneDir(repo, n);
-    if (!existsSync(dir)) return { lane: n, exists: false };
-    // #xn432dz — lease-first, same as `laneAcquirableInfo`: a LIVE lease already makes `chooseFreeLane`'s
-    // `isLaneAcquirable` false, so skip the git probe for it. `pickNowMs` is the same clock `chooseFreeLane`
-    // reads below, so the two staleness reads agree. (The explicit `--lane=N` path never calls this.)
-    const lease = readLease(dir);
-    if (leaseDisqualifiesAcquire(lease, pickNowMs, ttlMs)) return { lane: n, exists: true, dirtyOrAhead: null, lease };
-    // #3383 — `effectiveDirtyOrAhead` applies BOTH acquire-time-only relaxations (ancestor-OR-patch-equivalent
-    // "ahead", litter-only "dirty"); `refreshLane`/`laneStatus` keep reading `laneDirtyOrAhead`'s raw fact.
-    // Fails closed either way: unproven ⇒ stays protected (#2267).
-    const dirtyOrAhead = effectiveDirtyOrAhead(dir, repo.branch, () => getRemoteShas(dir));
-    return { lane: n, exists: true, dirtyOrAhead, lease };
-  };
-
   let chosen = null;
   // #2350 — was the explicitly-targeted lane ALREADY reserved before this acquire? Captured pre-claim so the
   // reset path below can be skipped for an idempotent re-reserve (never `reset --hard` an already-populated
@@ -1491,8 +1468,9 @@ function cmdAcquire(repo) {
       fail(`lane-${n} is ${describeLease(lease) || 'held'} — pick another lane`);
     }
     // #3390 — the explicit-lane path is the ONLY claim route that reaches the destructive reset below with no
-    // #2267 dirty/ahead check at all: auto-pick's `chooseFreeLane` never selects a dirty/ahead candidate to
-    // begin with, and `refreshLane` calls `laneDirtyOrAhead` explicitly, but a TTL-stale reclaim just above
+    // #2267 dirty/ahead check at all: auto-pick's own candidate source (`isLaneAcquirable`, via the cached
+    // scan) never selects a dirty/ahead candidate to begin with, and `refreshLane` calls `laneDirtyOrAhead`
+    // explicitly, but a TTL-stale reclaim just above
     // (`tryClaimLane`'s `isLeaseStale` branch) unlinks the old marker and lets this path fall straight through
     // to `checkout -B --force` + `clean -fd`. A lease going stale (a long session, a slow multi-hour task) is
     // NOT evidence the tree holds abandoned garbage. Real incident: lane-11's lease went TTL-stale mid-epic
@@ -1504,7 +1482,7 @@ function cmdAcquire(repo) {
       const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
       // #3383 — litter-only "dirty" (known-safe agent scratch, `we:scripts/lib/lane-litter.mjs`'s allowlist)
       // must not force an explicit `--lane=N` acquire into `--force` any more than it forces auto-pick to
-      // skip the lane (`infoFor` applies the identical relaxation). `ahead` deliberately stays the RAW fact
+      // skip the lane (auto-pick applies the identical relaxation). `ahead` deliberately stays the RAW fact
       // here — #2452's provably-pushed relaxation is scoped to auto-pick only; an explicit target that is
       // genuinely ahead still needs `--force`.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
@@ -1538,21 +1516,55 @@ function cmdAcquire(repo) {
     // Pool-SCOPED (#1961 finding 3): a lane number only counts as "mine" when the cwd is inside the pool
     // being acquired from. Pure helper so the parsing is under test, not an inline regex nothing exercises.
     const selfLane = ownLaneNumber(resolveReal(process.cwd()), resolveReal(repo.poolDir), sep);
+    // #3383 — CONCURRENCY FIX, live-caught 2026-09-24: with 5 review dispatches acquiring at once, this loop
+    // used to recompute `effectiveDirtyOrAhead` (a `git status` + `rev-list` + patch-equivalence probe
+    // pipeline) for EVERY unleased lane, from scratch, on EVERY `ACQUIRE_POLL_MS` tick, in EACH caller — no
+    // per-iteration time bound at all, so `--wait-ms=30000` bounded only the gaps BETWEEN full-pool rescans,
+    // never a rescan itself. One real `acquire --wait-ms=30000` took ~6 minutes and still failed. Fixed by
+    // reusing `acquirableListCached` — the exact same single-flight, cached, `--scan-timeout-ms`-bounded scan
+    // `list --acquirable` already shares across concurrent callers (#xn432dz) — as the candidate SOURCE here,
+    // instead of each acquirer running its own independent uncached scan. It answers with the SAME
+    // `isLaneAcquirable`/`laneAcquirableInfo` verdict this loop used to compute inline per lane, so this is
+    // not a laxer check, only a shared one. A cached answer can be briefly stale (up to
+    // `--cache-ttl-ms`), but that costs at most a lost race on `tryClaimLane` below (excluded and retried) —
+    // never a clobbered lane: the destructive reset later in this function re-verifies dirty/ahead fresh,
+    // right before it touches the tree (#2924), regardless of how the candidate was found. A lease claim
+    // (ours or a competitor's) changes the pool's lease fingerprint, which invalidates the cache on the very
+    // next read, so a lane just taken is never handed out twice from a stale hit.
     while (chosen === null) {
       const pickNowMs = Date.now();
-      const infos = lanes.filter((n) => !excluded.has(n)).map((n) => infoFor(n, pickNowMs));
-      const pick = chooseFreeLane(infos, pickNowMs, ttlMs, { excludeLane: selfLane });
-      if (pick === null) {
-        if (Date.now() < deadline) {
-          sleepSyncMs(ACQUIRE_POLL_MS);
-          excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
-          continue;
-        }
-        fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
+      const remainingMs = deadline - pickNowMs;
+      // Bound THIS round's scan by whatever's left of `--wait-ms` (never less than one poll tick, so a
+      // near-zero remainder still gets a real attempt) and never more than the configured/default scan
+      // budget — the "wait-ms plus a scan budget" bound the whole command must respect.
+      const scanBudget = Math.min(waitMs > 0 ? Math.max(remainingMs, ACQUIRE_POLL_MS) : listScanTimeoutMs(), listScanTimeoutMs());
+      let candidateDirs;
+      try {
+        candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: scanBudget, cacheTtlMs: listCacheTtlMs() });
+      } catch (e) {
+        // A scan that overran its own budget this round is not a hard failure here (unlike `list --acquirable`
+        // itself) — it just means "no proven candidate yet"; fall through to the same wait/retry/fail-at-
+        // -deadline handling as "found nothing free" below, so a slow tick self-heals on the next one.
+        if (!e || !e.scanTimeout) throw e;
+        candidateDirs = [];
       }
-      const claimed = tryClaimLane(laneDir(repo, pick), session, Date.now(), ttlMs);
-      if (claimed) { chosen = pick; holderSlug = claimed; }
-      else excluded.add(pick); // a concurrent acquire won this one — try the next
+      const pickable = candidateDirs
+        .map((d) => Number(basename(d).slice(5)))
+        .filter((n) => !excluded.has(n) && n !== selfLane)
+        .sort((a, b) => a - b);
+      let pick = null;
+      for (const n of pickable) {
+        const claimed = tryClaimLane(laneDir(repo, n), session, Date.now(), ttlMs);
+        if (claimed) { pick = n; holderSlug = claimed; break; }
+        excluded.add(n); // a concurrent acquire won this one — try the next candidate
+      }
+      if (pick !== null) { chosen = pick; break; }
+      if (Date.now() < deadline) {
+        sleepSyncMs(ACQUIRE_POLL_MS);
+        excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
+        continue;
+      }
+      fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
     }
   }
 
@@ -1587,15 +1599,15 @@ function cmdAcquire(repo) {
   if (!flags['no-reset'] && !targetWasReserved) {
     fetchOriginPruneWithRetry(dir);
     // #2924 — re-verify containment on FRESH post-fetch remote-tracking refs, immediately before the
-    // destructive reset below. Whatever proved this lane safe to reset — auto-pick's `infoFor()` snapshot, or
-    // nothing at all before #3390's own explicit-lane guard — is up to ~30s stale by the time this line runs
+    // destructive reset below. Whatever proved this lane safe to reset — auto-pick's cached-scan candidate
+    // check, or nothing at all before #3390's own explicit-lane guard — is up to ~30s stale by the time this line runs
     // (the merge-base fan-out, the O_EXCL claim, the fetch just above). A `lane/*` ref deleted or force-pushed
     // on origin inside that window means the earlier proof no longer holds. Network-free: the fetch above
     // already refreshed every remote-tracking ref, so `localRemoteShas` answers from local state alone.
     if (!flags.force) {
       const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
-      // #3383 — re-apply the SAME litter relaxation `infoFor`'s earlier auto-pick snapshot already granted
-      // this lane (or that an explicit `--lane=N` acquire's own pre-claim check just granted it, just above):
+      // #3383 — re-apply the SAME litter relaxation auto-pick's earlier cached-scan candidate check already
+      // granted this lane (or that an explicit `--lane=N` acquire's own pre-claim check just granted it, just above):
       // without this, a litter-only-dirty lane picked exactly because it looked acquirable would immediately
       // fail this re-verify, one line later, on the identical litter it was already cleared for.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
@@ -1911,12 +1923,14 @@ function printStatus(repo) {
 // instead of starting its own.
 //
 // CORRECTNESS OF A STALE ANSWER. A cached "acquirable" can be up to TTL old (a lane may since have been leased
-// or dirtied). That is acceptable ONLY because nothing trusts this list to CLAIM a lane: `acquire` re-derives
-// every candidate itself (auto-pick recomputes `infoFor`, never reads this cache), claims with `tryClaimLane`'s
-// atomic O_EXCL create (a live lease held by anyone else ⇒ refused), and re-verifies dirty/ahead on the claimed
-// lane right before its destructive reset — #3390 for an explicit `--lane=N`, #2924 post-fetch for both paths.
-// So a stale entry costs at most a lost race / a retry, never a clobbered lane. `list --acquirable` is a
-// CAPACITY read (an optimistic upper bound — conveyor-state.mjs already documents it as such), not a lock.
+// or dirtied). That is acceptable — including for `cmdAcquire`'s own auto-pick, which reads THIS SAME cache as
+// its candidate source (#3383) — ONLY because nothing trusts this list to CLAIM a lane on its own: every
+// candidate still goes through `tryClaimLane`'s atomic O_EXCL create (a live lease held by anyone else ⇒
+// refused, excluded, next candidate tried), and the winning lane is re-verified dirty/ahead right before its
+// destructive reset — #3390 for an explicit `--lane=N`, #2924 post-fetch for both paths. So a stale entry
+// costs at most a lost race / a retry, never a clobbered lane. `list --acquirable` (read-only) treats it as a
+// CAPACITY read (an optimistic upper bound — conveyor-state.mjs already documents it as such), not a lock;
+// `acquire`'s own auto-pick layers the atomic claim + re-verify above on top of the exact same answer.
 //
 // The cache is also invalidated early by (a) a FINGERPRINT of every lane's lease marker (existence + mtime,
 // stat-only — no git, no FS events) so any acquire/release/adopt/hand-written lease misses immediately, and

@@ -20,12 +20,25 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
 
-  it('has exactly the 5 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep) plus 5 passes × 3 repos = 20 total (epic #3383 stuck-pr-watch added)', () => {
+  it('has exactly the 6 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep + lease-reaper) plus 5 passes × 3 repos = 21 total (epic #3383 stuck-pr-watch added)', () => {
     expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
-      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep',
+      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep', 'lease-reaper',
       ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch']
         .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
     ].sort());
+  });
+
+  // #3383 — live-caught 2026-09-24: `lease-reaper.mjs` had gone the same way `session-reaper.mjs` had before
+  // #3982's fix (its only caller, `runner.mjs`'s mechanical passes, was retired by this epic's daemon split),
+  // and #3873's own "wire the 8 watcher passes" slice never named it. No lease-reaper*.log ever appeared under
+  // a running daemon's own log directory, confirming it never ran live. Registered here, repo-agnostic (no
+  // --repo — it walks the whole shared LANE_POOL_ROOT across every constellation repo in one process).
+  it('epic #3383 lease-reaper runs against the real script, WE-only cadence, no --repo (it is repo-agnostic)', () => {
+    const e = DAEMON_MANIFEST['lease-reaper'];
+    expect(e.script).toBe('scripts/conveyor/lease-reaper.mjs');
+    expect(e.args).toEqual([]);
+    expect(e.intervalMs).toBe(120_000);
+    expect(existsSync(join(REPO_ROOT, e.script))).toBe(true);
   });
 
   it('epic #3383 merge-orphan-sweep runs the BARE (no --label) orphan sweep every 15 min, against a script that exists', () => {
@@ -51,7 +64,7 @@ describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   });
 
   it('the WE-only passes carry no --repo flag at all — genuinely single-repo, not merely unbuilt cross-repo', () => {
-    for (const name of ['branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release']) {
+    for (const name of ['branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'lease-reaper']) {
       expect(DAEMON_MANIFEST[name].args.some((a) => a.startsWith('--repo='))).toBe(false);
     }
   });
