@@ -4997,6 +4997,33 @@ that reads the supervision level; turning such a gate on is separately-scoped wo
 [#calibration-veto-clearing](#calibration-veto-clearing) (`#3673`). Full reasoning:
 [#3690](/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/).
 
+### No borrowed evidence toward a supervision bar — family, sibling task types and benchmarks lend no credit {#supervision-no-borrowed-evidence}
+
+**Ratified 2026-09-24 by the operator (Nicolas Gilbert), Fork 1 (a) approved as prepared; Forks 2–3 moot
+(`#3734`).** Reaffirms [#delegation-trial-record-graduation](#delegation-trial-record-graduation)'s "trust
+never carries across triples" and [#model-probation-graduation-criteria](#model-probation-graduation-criteria)
+clause 4 against a proposed *capped prior*, meaning virtual clean trials credited to a trust tuple from
+evidence outside it. Three rules:
+
+1. **Only the exact tuple's own record counts toward its bar.** No credit flows from the same model on another
+   task type, the same weights on another host, an adjacent release of a vendor line, or a vendor name.
+   Risk tier and role authority vary the bar uniformly for every identity, never by identity. Ground: the task
+   type is the tuple's operational design domain, and a safety case does not carry across domains.
+2. **A benchmark never counts toward a bar.** It stays an advisory `explorationHint` tiebreak in
+   `selectProvider`; the "MUST NEVER INFLUENCE `selectSupervisionLevel`" header of
+   `we:scripts/lib/model-capability-ratings.mjs` stands. A project may still use any signal to *tighten* a bar.
+3. **Reopen only on a back-test, through an ordinary batched finding.** Once the store holds at least five
+   tuples, across at least two models, that graduated on their own data after a same-relation lender had
+   already graduated, and a replay shows lender-derived credit would never have advanced a tuple that later
+   recorded a miss, a capped low-risk credit may be proposed again. The counts are placeholders for that
+   finding to set. Any credit then admitted must be a `selectSupervisionLevel` argument, never a scorecard
+   row, since `evaluateProviderFitness` reads the rows as fitness to be handed work.
+
+**Lineage:** ratified via `#3734` (2026-09-24), under epic `#3383`, grounded in
+`/research/supervision-graduation-borrowed-evidence/` and
+`we:reports/2026-09-21-supervision-prior-grounding.md`. Full reasoning:
+[#3734](/backlog/3734-may-agent-family-and-benchmark-data-act-as-a-capped-prior-to/).
+
 ### An agent vendor registers by one descriptor module in one explicit static index; a descriptor declares mechanics only; a marked vendor that cannot run a kind is refused for `build` and repaired-around for `fix`/`ci-heal`, recorded apart from routing {#agent-vendor-registry}
 
 **Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
