@@ -3,9 +3,11 @@ bornAs: x87gqii
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/__tests__/run-quality-record.test.mjs", "we:scripts/conveyor/__tests__/run-quality-route.test.mjs", "we:scripts/conveyor/__tests__/run-quality-rubric.test.mjs", "we:scripts/conveyor/__tests__/run-quality-scorer.test.mjs", "we:scripts/conveyor/__tests__/run-quality-sink.test.mjs", "we:scripts/conveyor/__tests__/run-quality-subject-class.test.mjs", "we:scripts/conveyor/run-quality-record.mjs", "we:scripts/conveyor/run-quality-route.mjs", "we:scripts/conveyor/run-quality-rubric.mjs", "we:scripts/conveyor/run-quality-scorer.mjs", "we:scripts/conveyor/run-quality-sink.mjs", "we:scripts/conveyor/run-quality-subject-class.mjs", "we:scripts/lib/__tests__/model-probation.test.mjs", "we:scripts/lib/model-probation.json", "we:scripts/lib/model-probation.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
