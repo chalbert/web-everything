@@ -60,7 +60,7 @@ import { prDeliveredItem, readFrontmatterField, idTokenOf } from '../backlog-str
 import { LEASE_FILENAME } from '../lib/lane-lease.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
-import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from '../lib/bounded-child.mjs';
 
 const WE_SLUG = CONSTELLATION_REPOS.we.slug;
 
@@ -339,7 +339,18 @@ function writeEdits(dir, release) {
 }
 
 // #x5n4zn3 — was bare (no timeout): git add/commit + `lane-pool.mjs acquire`/`open-pr` all shell through here.
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+const run = (cmd, args, cwd, { timeoutMs = resolveChildTimeoutMs() } = {}) => execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: 'SIGKILL' });
+
+/**
+ * Acquire the lane this pass writes in. The acquire installs deps (`npm ci` under lane-pool's own
+ * `NPM_INSTALL_TIMEOUT_MS`), so it gets the acquire-sized budget, never the generic 5-minute default: a tighter
+ * outer timeout would SIGKILL a slow-but-healthy install, leak the lease it already wrote, and abort the whole
+ * pass (#x5n4zn3 review). `runFn` is injectable for tests.
+ */
+export function acquireLane(runFn = run) {
+  const args = [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'acquire', '--purpose=orphan-claim-release', '--json'];
+  return JSON.parse(runFn('node', args, REPO_ROOT, { timeoutMs: resolveLaneAcquireTimeoutMs() }));
+}
 
 // #x5n4zn3 — a real full-gate `run.mjs verify` run: generous (matches the established `VERIFY_TIMEOUT_MS`
 // convention `we:scripts/operations/verify-io.mjs`/`we:scripts/conveyor/verify-dispatch.mjs` already use for
@@ -348,7 +359,7 @@ const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Full apply: acquire a lane, write, commit, verify, open ONE parked PR, always release the lane. */
 function applyViaLane(sig, minAgeHours) {
-  const acq = JSON.parse(run('node', [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'acquire', '--purpose=orphan-claim-release', '--json'], REPO_ROOT));
+  const acq = acquireLane();
   const lane = acq.path;
   log(`  acquired lane-${acq.lane} → ${lane}`);
   try {

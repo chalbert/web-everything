@@ -77,6 +77,20 @@ describe('runBounded', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 20_000);
 
+  // #x5n4zn3 review — `maxBytes` must count real UTF-8 BYTES (what `execFileSync`'s `maxBuffer` counted), not JS
+  // string length: 'é' is 1 UTF-16 code unit but 2 bytes, '😀' is 2 code units but 4 bytes.
+  it('maxBytes counts UTF-8 bytes, not string length, on a multi-byte payload', async () => {
+    await expect(
+      runBounded(NODE, ['-e', "process.stdout.write('é'.repeat(100))"], { timeoutMs: 20_000, maxBytes: 150 }),
+    ).rejects.toThrow(/output exceeded 150 bytes/);
+    await expect(
+      runBounded(NODE, ['-e', "process.stdout.write('😀'.repeat(50))"], { timeoutMs: 20_000, maxBytes: 150 }),
+    ).rejects.toThrow(/output exceeded 150 bytes/);
+    // Exactly at the cap is allowed, and the multi-byte payload still decodes intact.
+    const out = await runBounded(NODE, ['-e', "process.stdout.write('é'.repeat(75))"], { timeoutMs: 20_000, maxBytes: 150 });
+    expect(out).toBe('é'.repeat(75));
+  }, 20_000);
+
   it('omitting maxBytes keeps unbounded output (today\'s default, unchanged)', async () => {
     // The big string is built INSIDE the child (never passed as a literal argv value) — a 500KB argv string blew
     // past `ARG_MAX` on a CI runner (`spawn E2BIG`) even though it fit fine locally; `repeat` in-process has no

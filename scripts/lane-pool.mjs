@@ -121,7 +121,9 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 // uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
 // / the `WE_CHILD_TIMEOUT_MS` env knob), NOT its async primitive — see the `git`/`gitQuiet` header comment
 // below for why this file deliberately stays synchronous.
-import { resolveChildTimeoutMs } from './lib/bounded-child.mjs';
+import {
+  resolveChildTimeoutMs, NPM_INSTALL_TIMEOUT_MS, NETWORK_GIT_TIMEOUT_MS as SHARED_NETWORK_GIT_TIMEOUT_MS,
+} from './lib/bounded-child.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -187,7 +189,8 @@ const scanTimeoutOpt = () => (scanDeadlineMs === null ? {} : { timeout: Math.max
 // timeout. Every OUTER caller that shells THIS whole script as a child (`we:scripts/readiness/dispatch-plan.mjs`
 // via `runBounded`, itself `detached: true`) still reaps that residual case at the process-group level, because
 // this script's own `git` children land in the SAME group as the outer `node lane-pool.mjs` process.
-const NETWORK_GIT_TIMEOUT_MS = 10 * 60_000;
+// Shared with `resolveLaneAcquireTimeoutMs`, so an outer wrapper around `acquire` is never tighter than this.
+const NETWORK_GIT_TIMEOUT_MS = SHARED_NETWORK_GIT_TIMEOUT_MS;
 const defaultGitTimeoutOpt = () => ({ timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
 const git = (args, cwd, opts = {}) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...defaultGitTimeoutOpt(), ...readOnlyGitEnv(args), ...scanTimeoutOpt(), ...opts }).trim();
@@ -541,8 +544,9 @@ function registerItemsToLane(repo, n, items) {
 // one realistic way this hangs, and it must not take the whole pool status/list with it).
 const LS_TIMEOUT_MS = 15_000;
 // #x5n4zn3 — a real `npm ci`/`install`, generous like the sibling build above: bounded so a stuck npm registry
-// fails ONE lane's dep install, not the whole acquire/provision/refresh pass.
-const NPM_TIMEOUT_MS = 10 * 60_000;
+// fails ONE lane's dep install, not the whole acquire/provision/refresh pass. Shared with every OUTER wrapper
+// around an `acquire` (`resolveLaneAcquireTimeoutMs`), so the wrapper is never tighter than this.
+const NPM_TIMEOUT_MS = NPM_INSTALL_TIMEOUT_MS;
 function laneIndicesIn(poolDir) {
   if (!existsSync(poolDir)) return [];
   return execFileSync('ls', ['-1', poolDir], { encoding: 'utf8', timeout: LS_TIMEOUT_MS, killSignal: 'SIGKILL' })
@@ -604,7 +608,10 @@ function ensureDeps(dir) {
   if (state === 'n/a' || state === 'ok') return state;
   const useCi = existsSync(join(dir, 'package-lock.json'));
   log(`  deps ${state} → npm ${useCi ? 'ci' : 'install'} in ${dir} …`);
-  execFileSync('npm', [useCi ? 'ci' : 'install'], { cwd: dir, stdio: 'inherit', timeout: NPM_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  // #x5n4zn3 review — npm's stdout goes to OUR stderr (fd 2), never our stdout: `acquire --json` prints its
+  // result on stdout, and a caller that captures it (`orphan-claim-release.mjs`'s `acquireLane`) must parse
+  // pure JSON even on the acquires that actually install. Stays visible on a terminal either way.
+  execFileSync('npm', [useCi ? 'ci' : 'install'], { cwd: dir, stdio: ['inherit', 2, 'inherit'], timeout: NPM_TIMEOUT_MS, killSignal: 'SIGKILL' });
   writeFileSync(DEPS_MARKER(dir), lockHash(dir));
   return 'installed';
 }
