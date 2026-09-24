@@ -2,10 +2,11 @@
 bornAs: x9krtkb
 kind: story
 size: 3
-status: active
+status: resolved
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/lib/review-label-provider.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
