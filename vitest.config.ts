@@ -14,6 +14,15 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    // #3383 — graduated with the coordination/action primitives (#3901): isolates each test from the real
+    // homedir coordination sidecar AND from other tests' durable action holds by handing every test its own
+    // throwaway `WE_COORDINATION_ROOT`. Required by `coordination-cross-clone.test.mjs`, which reads
+    // `process.env.WE_COORDINATION_ROOT` directly, and by `action-cli.test.mjs`/`action-records.test.mjs`,
+    // whose `createActionStore()` calls take no explicit root and so fall through to this env var — without
+    // it they write real attempts to `~/workspace/.operations/coordination` and leak state across tests in
+    // the same file. See `vitest.setup.ts`'s own header for the full story (it also defaults
+    // `WE_TELEMETRY=0`, a later graduation's concern, harmless here since nothing on main reads it yet).
+    setupFiles: ['./vitest.setup.ts'],
     // #x1jcikc: cap this invocation's own worker count (see vitest.shared.ts#maxTestWorkers for the sizing
     // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
     // concurrently-admitted `test:unit` runs oversubscribe a 12-core host.
