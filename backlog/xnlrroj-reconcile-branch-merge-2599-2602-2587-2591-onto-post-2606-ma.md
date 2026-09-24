@@ -1,9 +1,10 @@
 ---
 kind: task
-status: active
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
