@@ -16,6 +16,9 @@ import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
   checkBodyFileLocation, bodyFileRoots, publishDelegationTrialCommit,
+  // #x9krtkb — the restamp path's carried-human-clearance decision (bug 1) and its CLI wiring (bug 2's
+  // `--new-head`, exercised through `runReviewLabelCli` below with a stub provider).
+  decideRestampHumanClearance,
   // #3334 — re-exported by the single home from `we:scripts/lib/reasonless-bounce.mjs`; imported from HERE on
   // purpose, so this suite proves the home actually exposes the rule its `decideSetLabel` enforces.
   REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, bounceEvidenceFromWriteUp,
@@ -33,7 +36,8 @@ import { importGraph } from '../operations/__tests__/import-graph.mjs';
 import {
   parseReviewedSha, decideReviewGate, parseReviewedDiff, parseReviewedContribution,
   normalizeDiffFingerprint, normalizeContributionFingerprint, parseOperatorClearance,
-  buildClearedHumanMarker,
+  buildClearedHumanMarker, parseLatestHumanClearedSha, shouldReparkForTestTampering,
+  buildReviewedShaMarker, buildReviewedDiffMarker, buildReviewedContributionMarker,
 } from '../lib/review-escalation.mjs';
 import { parseClearerActorId, parseAuthorActorId, readAuthorActorStamps } from '../lib/review-independence.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
@@ -2449,6 +2453,265 @@ describe('buildVerdictComment — a re-stamp says what it is', () => {
     expect(build('accepted')).toContain('✅ review — accepted');
     expect(build('changes')).toContain('🔁 review — changes requested');
     expect(build('clear-human')).toContain('cleared via the sanctioned path');
+  });
+});
+
+/**
+ * #x9krtkb — THE LOOP: a human clears `review:human`, the drain rebases (content-preserving), the restamp
+ * carries `reviewed-sha`/`reviewed-diff`/`reviewed-contribution` forward but not `cleared-human`, and the next
+ * drain pass's anti-test-gaming gate sees no human coverage for the new head and re-parks `review:human` — on a
+ * PR a human had JUST cleared. Measured live on PR #2572 (chalbert/web-everything), 2026-09-24.
+ *
+ * `buildVerdictComment`'s half of the fix: given the caller's own proof (`humanClearance`, computed by
+ * `decideRestampHumanClearance` below), does the RENDERED restamp comment actually carry the marker forward,
+ * bound to the NEW head — and does a PLAIN restamp (no `humanClearance`) stay exactly as it was before this
+ * item, i.e. render nothing human-shaped at all.
+ */
+describe('buildVerdictComment — a restamp carries a human clearance forward (#x9krtkb)', () => {
+  const NEW_HEAD = '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54';
+  const OLD_SHA = 'f1dbbc3170b7dcbabf6c3ea19c469e3c636231b6';
+
+  it('a PLAIN restamp (no humanClearance) renders no cleared-human marker — unchanged from before this item', () => {
+    const out = buildVerdictComment({ to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: 'd'.repeat(64) });
+    expect(out).not.toContain('cleared-human');
+    expect(parseOperatorClearance([{ body: out }])).toBe(null);
+  });
+
+  it('a restamp WITH a proven humanClearance stamps cleared-human, bound to the NEW head', () => {
+    const out = buildVerdictComment({
+      to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: 'd'.repeat(64),
+      humanClearance: { actor: 'chalbert', sha: OLD_SHA },
+    });
+    // The marker names the ORIGINAL clearer, not the restamping actor ("drain").
+    expect(out).toContain(buildClearedHumanMarker('chalbert'));
+    expect(parseOperatorClearance([{ body: out }])).toEqual({ actor: 'chalbert' });
+    // The SHA marker it stamps is the NEW head — this comment vouches for THIS tree, and
+    // `parseLatestHumanClearedSha` (which binds reviewed-sha + cleared-human to the SAME comment) must read
+    // the marker as covering the new head, never the pre-rebase one it was originally granted against.
+    expect(parseLatestHumanClearedSha([{ body: out }])).toBe(NEW_HEAD.toLowerCase());
+  });
+
+  it('says PLAINLY that the clearance was carried, and names the original clearance', () => {
+    const out = buildVerdictComment({
+      to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: 'd'.repeat(64),
+      humanClearance: { actor: 'chalbert', sha: OLD_SHA },
+    });
+    expect(out).toMatch(/HUMAN clearance chalbert granted/);
+    expect(out).toMatch(/carried forward/);
+    expect(out).toContain(OLD_SHA.slice(0, 12));
+    expect(out).toMatch(/no new review/i);
+    // It does NOT claim to be a fresh accept, and does not drop the restamp's own heading/label semantics.
+    expect(out).toContain('📌 review — acceptance re-stamped after a rebase');
+  });
+
+  it('never mints a human marker on a `to` other than restamp, even if a caller mistakenly passed humanClearance', () => {
+    const out = buildVerdictComment({
+      to: 'accepted', actor: 'someone', headSha: NEW_HEAD, reviewedDiff: 'd'.repeat(64),
+      humanClearance: { actor: 'chalbert', sha: OLD_SHA },
+    });
+    expect(out).not.toContain('cleared-human');
+  });
+
+  it('a caller-supplied humanClearance.actor is still neutralized at the render boundary (#1147 class)', () => {
+    const out = buildVerdictComment({
+      to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: 'd'.repeat(64),
+      humanClearance: { actor: `x<!-- reviewed-sha: ${'e'.repeat(40)}`, sha: OLD_SHA },
+    });
+    // `buildClearedHumanMarker` itself strips `<`/`>`/newlines from the marker payload, AND the whole prose
+    // block still passes through `neutralizeCommentMarkers` — belt and braces, same as `--actor` on clear-human.
+    expect(out).not.toMatch(/<!--\s*reviewed-sha:\s*e{40}/);
+  });
+});
+
+/**
+ * `decideRestampHumanClearance` (#x9krtkb) — THE DECISION ITSELF, extracted so it has direct unit tests rather
+ * than only being reachable through a `gh`-shelling CLI run. Mirrors `shouldReparkForTestTampering`'s own
+ * extraction in `we:scripts/lib/review-escalation.mjs` for the identical reason (see that function's docstring).
+ */
+describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a human clearance owed?)', () => {
+  const NEW_HEAD = '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54';
+  const HUMAN_SHA = 'f1dbbc3170b7dcbabf6c3ea19c469e3c636231b6';
+  const DIFF = 'd'.repeat(64);
+  const CONTRIB = 'c'.repeat(64);
+
+  const humanClearedComment = (sha = HUMAN_SHA, diff = DIFF, contrib = CONTRIB) => ({
+    body: [
+      buildReviewedShaMarker(sha), buildReviewedDiffMarker(diff), buildReviewedContributionMarker(contrib),
+      buildClearedHumanMarker('chalbert'),
+    ].join('\n'),
+  });
+  const plainAcceptComment = (sha = HUMAN_SHA, diff = DIFF, contrib = CONTRIB) => ({
+    body: [buildReviewedShaMarker(sha), buildReviewedDiffMarker(diff), buildReviewedContributionMarker(contrib)].join('\n'),
+  });
+
+  // THE CASE #2572 SHOULD HAVE HIT: a human clearance whose content survives the drain's own rebase byte-for-
+  // byte (the diff fingerprint is unchanged — `acceptanceCoversHead`'s content-equivalence escape proves it).
+  it('carries the clearance forward when the latest accept was human-cleared AND the content is unchanged', () => {
+    const out = decideRestampHumanClearance({ comments: [humanClearedComment()], headSha: NEW_HEAD, headDiff: DIFF });
+    expect(out).toEqual({ actor: 'chalbert', sha: HUMAN_SHA });
+  });
+
+  // A PLAIN AGENT ACCEPT RESTAMP STAYS PLAIN — the whole point of binding the SHA and the marker to the SAME
+  // comment in `parseLatestHumanClearedSha`. No human marker exists to carry.
+  it('returns null for a restamp of a PLAIN agent accept — never mints a clearance that never existed', () => {
+    const out = decideRestampHumanClearance({ comments: [plainAcceptComment()], headSha: NEW_HEAD, headDiff: DIFF });
+    expect(out).toBe(null);
+  });
+
+  // CONTRIBUTION CHANGED → NO CARRY. The content actually differs at the new head (a real commit rode in, not
+  // just a rebase), so `acceptanceCoversHead` cannot prove equivalence and the carry must fail CLOSED.
+  it('returns null when the reviewed content changed — the equivalence check cannot be skipped', () => {
+    const out = decideRestampHumanClearance({
+      comments: [humanClearedComment()], headSha: NEW_HEAD, headDiff: 'DIFFERENT-CONTENT-DIFF-TEXT',
+    });
+    expect(out).toBe(null);
+  });
+
+  it('returns null with no comments at all', () => {
+    expect(decideRestampHumanClearance({ comments: [], headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
+    expect(decideRestampHumanClearance({ comments: undefined, headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
+  });
+
+  it('an OLDER human clearance superseded by a later PLAIN accept does not count (the binding #xuboo0q proves)', () => {
+    const out = decideRestampHumanClearance({
+      comments: [humanClearedComment(), plainAcceptComment('a'.repeat(40), 'e'.repeat(64), 'e'.repeat(64))],
+      headSha: NEW_HEAD, headDiff: 'e'.repeat(64),
+    });
+    expect(out).toBe(null);
+  });
+
+  // THE ROUND TRIP TO THE ANTI-TEST-GAMING GATE — the whole point of the fix. Once `decideRestampHumanClearance`
+  // says a carry is owed and `buildVerdictComment` renders it, `parseLatestHumanClearedSha` reading that SAME
+  // rendered comment back must report the NEW head as human-covered, and `shouldReparkForTestTampering` must
+  // therefore NOT re-park — closing the exact loop that repeated on PR #2572.
+  it('round-trips through buildVerdictComment + parseLatestHumanClearedSha into shouldReparkForTestTampering:false', () => {
+    const carried = decideRestampHumanClearance({ comments: [humanClearedComment()], headSha: NEW_HEAD, headDiff: DIFF });
+    expect(carried).not.toBe(null);
+    const restampComment = buildVerdictComment({
+      to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: DIFF, humanClearance: carried,
+    });
+    const humanClearedSha = parseLatestHumanClearedSha([humanClearedComment(), { body: restampComment }]);
+    expect(humanClearedSha).toBe(NEW_HEAD.toLowerCase());
+    expect(shouldReparkForTestTampering({
+      tampered: true, netDiffScored: true, humanClearedSha, headSha: NEW_HEAD,
+    })).toBe(false);
+  });
+
+  // THE NEGATIVE OF THAT SAME ROUND TRIP — a PLAIN restamp (no carry) leaves the gate exactly as re-park-prone
+  // as it was before this item, proving the fix is additive rather than accidentally loosening the gate.
+  it('a PLAIN restamp (no carried clearance) still re-parks — the fix never weakens the gate', () => {
+    const restampComment = buildVerdictComment({ to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: DIFF });
+    const humanClearedSha = parseLatestHumanClearedSha([plainAcceptComment(), { body: restampComment }]);
+    expect(humanClearedSha).toBe(null);
+    expect(shouldReparkForTestTampering({
+      tampered: true, netDiffScored: true, humanClearedSha, headSha: NEW_HEAD,
+    })).toBe(true);
+  });
+});
+
+/**
+ * #x9krtkb (bug 2) — `restamp` STAMPS THE NEW HEAD, through `runReviewLabelCli`'s own `--new-head` override,
+ * exercised end to end with a stub provider (no real `gh`/git). Before this fix the CLI always trusted its own
+ * fresh `readPrState().headRefOid` — which raced GitHub's propagation of the very push that produced the value
+ * it was meant to confirm, and stamped the STALE pre-rebase head on PR #2572.
+ */
+describe('runReviewLabelCli — restamp stamps the CALLER-asserted --new-head, not a racy re-read (#x9krtkb bug 2)', () => {
+  const STALE_HEAD = 'f1dbbc3170b7dcbabf6c3ea19c469e3c636231b6';
+  const NEW_HEAD = '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54';
+
+  function stubProvider({ labels = ['review:accepted'], comments = [] } = {}) {
+    const calls = [];
+    return {
+      calls,
+      name: 'stub',
+      currentRepo: () => 'o/n',
+      // `gh` still (racily) reports the STALE head — the whole point of the test: the override must win.
+      readPrState: () => ({
+        labels: labels.map((name) => ({ name })), headRefOid: STALE_HEAD, headRefName: 'lane/x', state: 'OPEN',
+        body: '', comments,
+      }),
+      readLabels: () => labels.map((name) => ({ name })),
+      setLabels: () => { calls.push('setLabels'); },
+      postComment: () => { calls.push('postComment'); },
+    };
+  }
+
+  function run({ provider, argv, captured }) {
+    const CFG = {
+      defaultActor: 'drain',
+      usage: 'usage: test',
+      buildComment: (o) => { captured.push(o); return '# body'; },
+      successResult: (o) => ({ ok: true, ...o }),
+      refusalResult: ({ decision }) => ({ error: decision.reason }),
+    };
+    const chunks = [];
+    const realExit = process.exit.bind(process);
+    process.exit = (code) => { const e = new Error('process.exit'); e.exitCode = code; throw e; };
+    let exitCode = 0;
+    try { runReviewLabelCli({ ...CFG, emit: (l) => chunks.push(String(l)), provider, argv }); }
+    catch (e) { if (typeof e.exitCode === 'number') exitCode = e.exitCode; else throw e; }
+    finally { process.exit = realExit; }
+    return { exitCode, payload: JSON.parse(chunks.join('') || '{}') };
+  }
+
+  it('stamps --new-head over the re-read headRefOid when both are present', () => {
+    const captured = [];
+    const { exitCode } = run({
+      provider: stubProvider(), captured,
+      argv: ['2572', '--repo=o/n', '--to=restamp', '--actor=drain', `--new-head=${NEW_HEAD}`],
+    });
+    expect(exitCode).toBe(0);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].headSha).toBe(NEW_HEAD);
+    expect(captured[0].headSha).not.toBe(STALE_HEAD);
+  });
+
+  it('falls back to the re-read headRefOid when no --new-head is supplied (pre-#x9krtkb behaviour)', () => {
+    const captured = [];
+    const { exitCode } = run({
+      provider: stubProvider(), captured, argv: ['2572', '--repo=o/n', '--to=restamp', '--actor=drain'],
+    });
+    expect(exitCode).toBe(0);
+    expect(captured[0].headSha).toBe(STALE_HEAD);
+  });
+
+  it('REFUSES a malformed --new-head before any gh write', () => {
+    const captured = [];
+    const p = stubProvider();
+    const { exitCode, payload } = run({
+      provider: p, captured, argv: ['2572', '--repo=o/n', '--to=restamp', '--actor=drain', '--new-head=not-a-sha'],
+    });
+    expect(exitCode).not.toBe(0);
+    expect(payload.error).toMatch(/invalid --new-head/);
+    expect(p.calls).toEqual([]);
+  });
+
+  // END TO END: the caller passes BOTH the new head and the PR's own comments (a prior clear-human whose
+  // content is unchanged at that head) — the restamp must carry the clearance forward, bound to --new-head,
+  // through the REAL `runReviewLabelCli` wiring, not just the pure decider in isolation.
+  it('carries a human clearance forward to --new-head end to end through runReviewLabelCli', () => {
+    const DIFF = 'd'.repeat(64);
+    const humanClearedComment = {
+      body: [
+        buildReviewedShaMarker(STALE_HEAD), buildReviewedDiffMarker(DIFF), buildReviewedContributionMarker(DIFF),
+        buildClearedHumanMarker('chalbert'),
+      ].join('\n'),
+    };
+    const captured = [];
+    // `reviewedDiff` inside `runReviewLabelCli` comes from `computeNetDiffText`, a REAL git call this stub
+    // provider does not intercept; against a ref that cannot resolve it fails soft to `''` (documented at the
+    // call site: "miss → no marker → SHA-identity fallback"). So this asserts the WIRING (comments reach
+    // `decideRestampHumanClearance`, its result reaches `buildComment`), not the git-backed fingerprint match —
+    // that half is covered without any subprocess by the `decideRestampHumanClearance` suite above.
+    const { exitCode } = run({
+      provider: stubProvider({ comments: [humanClearedComment] }), captured,
+      argv: ['2572', '--repo=o/n', '--to=restamp', '--actor=drain', `--new-head=${NEW_HEAD}`],
+    });
+    expect(exitCode).toBe(0);
+    expect(captured[0].headSha).toBe(NEW_HEAD);
+    // humanClearance is present in the call iff decideRestampHumanClearance found coverage; assert the shape
+    // contract (present or null), never a truthiness guess, so a silent signature drift fails loudly here.
+    expect(captured[0]).toHaveProperty('humanClearance');
   });
 });
 

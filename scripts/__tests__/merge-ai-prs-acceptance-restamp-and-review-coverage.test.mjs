@@ -122,6 +122,21 @@ describe('restampAcceptance (#3202 — the re-stamp reads the PR\'s OWN tree)', 
     expect(calls[0].argv.some((a) => String(a).startsWith('--body-file='))).toBe(false);
   });
 
+  /**
+   * #x9krtkb (bug 2) — THE NEW HEAD REACHES THE CHILD AS A FLAG, not only inside `--reason`'s free text.
+   *
+   * Before this, `newHead` was interpolated into `--reason` alone, and `review-set-label.mjs` had no flag to
+   * parse it back out of — it re-derived the head from its own fresh `gh pr view`, which can race GitHub's own
+   * propagation of the push THIS process just made. Observed live on PR #2572 (2026-09-24): a restamp six
+   * seconds after the push still stamped the PRE-rebase head. The fix is this exact flag; pin that it is sent,
+   * with the real value, not a stringified reason.
+   */
+  it('passes --new-head=<the new commit>, so the child stamps THIS process\'s own authoritative head', () => {
+    const { calls, spawn } = spy();
+    restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: '1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54', cwd: '/ws/plateau-app', spawn });
+    expect(calls[0].argv).toContain('--new-head=1f27fd19f6841d9df5c9f8ce7b4b4f3b8319bc54');
+  });
+
   it('never throws, and reports a non-zero exit as a failed re-stamp', () => {
     const { spawn } = spy(1);
     expect(restampAcceptance({ pr: 42, repo: 'plateau-app', newHead: 'f5bc7940', cwd: '/ws/plateau-app', spawn }).ok).toBe(false);
