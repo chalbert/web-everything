@@ -8,7 +8,10 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { decideSelfSync, selfSyncCheckout, withSelfSync } from '../daemon-self-sync.mjs';
+import {
+  decideSelfSync, selfSyncCheckout, withSelfSync,
+  DAEMON_SELF_SYNC_BRANCH_ENV, resolvePocSyncBranch, decidePocSelfSync, selfSyncCheckoutPoc,
+} from '../daemon-self-sync.mjs';
 
 describe('decideSelfSync — pure', () => {
   const base = { fetched: true, behind: 3, dirty: false, onBase: true };
@@ -206,6 +209,248 @@ describe('selfSyncCheckout — REAL git (temp repos)', () => {
       catch (e) { return { status: e.status ?? 1, stdout: String(e.stdout ?? ''), stderr: String(e.stderr ?? '') }; }
     } });
     expect(r.reason).toBe('conflict');
+    expect(git(d, 'rev-parse', 'HEAD').trim()).toBe(headBefore);
+    expect(git(d, 'status', '--porcelain').trim()).toBe('');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// POC MODE (#3383 daemon POC) — DAEMON_SELF_SYNC_BRANCH
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('resolvePocSyncBranch — pure', () => {
+  it('unset env, no explicit option → null (default path)', () => expect(resolvePocSyncBranch({ env: {} })).toBeNull());
+  it('blank env → null', () => expect(resolvePocSyncBranch({ env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: '   ' } })).toBeNull());
+  it('env set → that branch', () => expect(resolvePocSyncBranch({ env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' } })).toBe('lane/daemon-poc'));
+  it('an explicit option wins over env', () => expect(resolvePocSyncBranch({ pocBranch: 'lane/x', env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/y' } })).toBe('lane/x'));
+});
+
+describe('decidePocSelfSync — pure', () => {
+  const clean = { dirty: false, onBranch: true };
+  const src = (behind) => ({ fetched: true, behind });
+  it('behind on main only → merge main, not poc', () => {
+    expect(decidePocSelfSync({ ...clean, main: src(2), poc: src(0) })).toEqual({ action: 'merge', reason: 'behind', mergeMain: true, mergePoc: false });
+  });
+  it('behind on poc only → merge poc, not main', () => {
+    expect(decidePocSelfSync({ ...clean, main: src(0), poc: src(3) })).toEqual({ action: 'merge', reason: 'behind', mergeMain: false, mergePoc: true });
+  });
+  it('behind on both → merge both', () => {
+    expect(decidePocSelfSync({ ...clean, main: src(1), poc: src(1) })).toEqual({ action: 'merge', reason: 'behind', mergeMain: true, mergePoc: true });
+  });
+  it('up to date on both → none', () => {
+    expect(decidePocSelfSync({ ...clean, main: src(0), poc: src(0) })).toEqual({ action: 'none', reason: 'up-to-date', mergeMain: false, mergePoc: false });
+  });
+  it('a dirty tree is never touched, whatever either source reports', () => {
+    expect(decidePocSelfSync({ dirty: true, onBranch: true, main: src(5), poc: src(5) })).toEqual({ action: 'skip', reason: 'dirty', mergeMain: false, mergePoc: false });
+  });
+  it('not on the poc branch is never touched', () => {
+    expect(decidePocSelfSync({ dirty: false, onBranch: false, main: src(5), poc: src(5) })).toEqual({ action: 'skip', reason: 'not-on-branch', mergeMain: false, mergePoc: false });
+  });
+  it('both fetches failed → skip fetch-failed', () => {
+    expect(decidePocSelfSync({ ...clean, main: { fetched: false, behind: 0 }, poc: { fetched: false, behind: 0 } })).toEqual({ action: 'skip', reason: 'fetch-failed', mergeMain: false, mergePoc: false });
+  });
+  it('one fetch failed, the other behind → still merges the one that fetched', () => {
+    expect(decidePocSelfSync({ ...clean, main: { fetched: false, behind: 0 }, poc: src(2) })).toEqual({ action: 'merge', reason: 'behind', mergeMain: false, mergePoc: true });
+  });
+  it('an unknown branch (symbolic-ref failed) is head-failed, not not-on-branch', () => {
+    expect(decidePocSelfSync({ dirty: false, onBranch: null, main: src(5), poc: src(5) })).toEqual({ action: 'skip', reason: 'head-failed', mergeMain: false, mergePoc: false });
+  });
+  it('an unknown tree state (status failed) fails closed — never merges', () => {
+    expect(decidePocSelfSync({ dirty: null, onBranch: true, main: src(5), poc: src(5) })).toEqual({ action: 'skip', reason: 'status-failed', mergeMain: false, mergePoc: false });
+  });
+  it('a fetched source with an unknown count (rev-list failed) never merges that source', () => {
+    expect(decidePocSelfSync({ ...clean, main: { fetched: true, behind: null }, poc: src(0) })).toEqual({ action: 'skip', reason: 'count-failed', mergeMain: false, mergePoc: false });
+  });
+  it('an unknown count on one source does not block a real merge on the OTHER', () => {
+    expect(decidePocSelfSync({ ...clean, main: { fetched: true, behind: null }, poc: src(3) })).toEqual({ action: 'merge', reason: 'behind', mergeMain: false, mergePoc: true });
+  });
+});
+
+describe('selfSyncCheckoutPoc — injected git', () => {
+  const runner = (overrides = {}) => {
+    const calls = [];
+    const opts = [];
+    const run = (args, o) => {
+      calls.push(args.join(' '));
+      opts.push(o);
+      const key = args[0] === 'rev-list' ? 'rev-list' : args[0];
+      const r = overrides[key];
+      if (typeof r === 'function') return r(args);
+      return r ?? { status: 0, stdout: key === 'symbolic-ref' ? 'lane/daemon-poc\n' : key === 'rev-list' ? '1\n' : '' };
+    };
+    return { run, calls, opts };
+  };
+
+  it('requires a pocBranch', () => expect(() => selfSyncCheckoutPoc({ root: '/x', run: () => ({ status: 0, stdout: '' }) })).toThrow(/pocBranch/));
+
+  it('behind on both, clean tree → merges both sources', () => {
+    const { run, calls } = runner();
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run })).toEqual({ merged: true, commits: 2, reason: 'merged' });
+    expect(calls.some((c) => c.startsWith('merge origin/main'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('merge origin/lane/daemon-poc'))).toBe(true);
+  });
+
+  it('a conflict on main STOPS the tick — poc is never attempted', () => {
+    const { run, calls } = runner({ merge: (args) => (args[1] === '--abort' ? { status: 0, stdout: '' } : args[1] === 'origin/main' ? { status: 1, stdout: '', stderr: 'CONFLICT' } : { status: 0, stdout: '' }) });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run })).toEqual({ merged: false, commits: 0, reason: 'conflict' });
+    expect(calls).toContain('merge --abort');
+    expect(calls.some((c) => c.startsWith('merge origin/lane/daemon-poc'))).toBe(false);
+  });
+
+  it('main merges clean, poc conflicts → merged-partial (main progress is kept)', () => {
+    const { run } = runner({ merge: (args) => (args[1] === '--abort' ? { status: 0, stdout: '' } : args[1] === 'origin/main' ? { status: 0, stdout: '' } : { status: 1, stdout: '', stderr: 'CONFLICT' }) });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run })).toEqual({ merged: true, commits: 1, reason: 'merged-partial' });
+  });
+
+  it('a dirty tree never reaches merge', () => {
+    const { run, calls } = runner({ status: { status: 0, stdout: ' M file.txt\n' } });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run }).reason).toBe('dirty');
+    expect(calls.some((c) => c.startsWith('merge'))).toBe(false);
+  });
+
+  it('not on the poc branch is never touched', () => {
+    const { run } = runner({ 'symbolic-ref': { status: 0, stdout: 'main\n' } });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run }).reason).toBe('not-on-branch');
+  });
+
+  it('every git command carries a timeout + SIGKILL, defaulting to 60s, overridable via timeoutMs', () => {
+    const { run, opts } = runner();
+    selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run });
+    expect(opts.length).toBeGreaterThan(0);
+    for (const o of opts) expect(o).toMatchObject({ cwd: '/x', timeout: 60_000, killSignal: 'SIGKILL' });
+
+    const { run: run2, opts: opts2 } = runner();
+    selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run: run2, timeoutMs: 5_000 });
+    for (const o of opts2) expect(o).toMatchObject({ timeout: 5_000 });
+  });
+
+  it('a timed-out status is NOT read as clean — status-failed, never reaching merge', () => {
+    const { run, calls } = runner({ status: { status: null, stdout: '', stderr: '', signal: 'SIGKILL' } });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run })).toEqual({ merged: false, commits: 0, reason: 'status-failed' });
+    expect(calls.some((c) => c.startsWith('merge'))).toBe(false);
+  });
+
+  it('a rev-list that "succeeds" with no number on the only behind source is count-failed, not up-to-date', () => {
+    const { run } = runner({
+      'rev-list': (args) => (args.includes(`HEAD..origin/main`) ? { status: 0, stdout: 'garbage\n' } : { status: 0, stdout: '0\n' }),
+    });
+    expect(selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run })).toEqual({ merged: false, commits: 0, reason: 'count-failed' });
+  });
+});
+
+describe('withSelfSync — POC mode dispatch', () => {
+  it('DAEMON_SELF_SYNC_BRANCH set → routes through syncPoc, not sync', async () => {
+    const tick = vi.fn(); const onRestart = vi.fn(() => 'restarted');
+    const syncPoc = vi.fn(() => ({ merged: true, commits: 3, reason: 'merged' }));
+    const sync = vi.fn();
+    const w = withSelfSync({ tickOnce: tick }, {
+      root: '/x', onRestart, sync, syncPoc, log: { error: vi.fn() },
+      env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' },
+    });
+    await expect(w.tickOnce()).resolves.toBe('restarted');
+    expect(syncPoc).toHaveBeenCalledWith({ root: '/x', base: 'main', pocBranch: 'lane/daemon-poc' });
+    expect(sync).not.toHaveBeenCalled();
+    expect(tick).not.toHaveBeenCalled();
+  });
+
+  it('unset env → routes through sync (default), not syncPoc — byte-identical to the pre-POC contract', async () => {
+    const syncPoc = vi.fn();
+    const sync = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, { root: '/x', onRestart: vi.fn(), sync, syncPoc, env: {} });
+    await expect(w.tickOnce()).resolves.toBe('ticked');
+    expect(sync).toHaveBeenCalledWith({ root: '/x' });
+    expect(syncPoc).not.toHaveBeenCalled();
+  });
+
+  it('a merged-partial POC result still restarts, and logs that the other source needs a hand merge', async () => {
+    const log = { error: vi.fn() };
+    const w = withSelfSync({ tickOnce: vi.fn() }, {
+      root: '/x', onRestart: vi.fn(() => 'restarted'), syncPoc: () => ({ merged: true, commits: 1, reason: 'merged-partial' }), log,
+      env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' },
+    });
+    await expect(w.tickOnce()).resolves.toBe('restarted');
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('needs a hand merge'));
+  });
+
+  it('POC conflict still ticks (never worse than the default path)', async () => {
+    const log = { error: vi.fn() };
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, {
+      root: '/x', onRestart: vi.fn(), syncPoc: () => ({ merged: false, commits: 0, reason: 'conflict' }), log,
+      env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' },
+    });
+    await expect(w.tickOnce()).resolves.toBe('ticked');
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('needs a hand merge'));
+  });
+
+  for (const reason of ['fetch-failed', 'count-failed', 'head-failed', 'status-failed']) {
+    it(`POC ${reason} still ticks and is logged, not silent`, async () => {
+      const log = { error: vi.fn() };
+      const w = withSelfSync({ tickOnce: () => 'ticked' }, {
+        root: '/x', onRestart: vi.fn(), syncPoc: () => ({ merged: false, commits: 0, reason }), log,
+        env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' },
+      });
+      await expect(w.tickOnce()).resolves.toBe('ticked');
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining(reason));
+    });
+  }
+
+  it('an explicit timeoutMs is forwarded to the injected syncPoc', async () => {
+    const syncPoc = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, {
+      root: '/x', onRestart: vi.fn(), syncPoc, timeoutMs: 5_000,
+      env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' },
+    });
+    await w.tickOnce();
+    expect(syncPoc).toHaveBeenCalledWith({ root: '/x', base: 'main', pocBranch: 'lane/daemon-poc', timeoutMs: 5_000 });
+  });
+});
+
+describe('selfSyncCheckoutPoc — REAL git (temp repos, two upstreams)', () => {
+  let dir;
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const commit = (cwd, file, text) => { writeFileSync(join(cwd, file), text); git(cwd, 'add', file); git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', `edit ${file}`); };
+  const realRun = (args, opts) => {
+    try { return { status: 0, stdout: execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { ...opts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; }
+    catch (e) { return { status: e.status ?? 1, stdout: String(e.stdout ?? ''), stderr: String(e.stderr ?? '') }; }
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'self-sync-poc-'));
+    git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+    git(dir, 'clone', '-q', 'origin.git', 'upstream');
+    const up = join(dir, 'upstream');
+    git(up, 'checkout', '-q', '-b', 'main');
+    commit(up, 'a.txt', 'one\n');
+    git(up, 'push', '-q', 'origin', 'main');
+    // lane/daemon-poc starts equal to main, then diverges with its own commit.
+    git(up, 'push', '-q', 'origin', 'main:lane/daemon-poc');
+    commit(up, 'poc-only.txt', 'poc side\n');
+    git(up, 'push', '-q', 'origin', 'HEAD:lane/daemon-poc');
+    git(up, 'reset', '-q', '--hard', 'origin/main'); // put upstream back on plain main for later commits
+    git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'daemon');
+    git(join(dir, 'daemon'), 'branch', '-q', 'lane/daemon-poc', 'origin/main');
+    git(join(dir, 'daemon'), 'checkout', '-q', 'lane/daemon-poc');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('merges NEW commits from both origin/main and origin/lane/daemon-poc in one tick', () => {
+    const up = join(dir, 'upstream'); const d = join(dir, 'daemon');
+    commit(up, 'b.txt', 'two\n'); git(up, 'push', '-q', 'origin', 'main'); // main gets a new commit
+    const r = selfSyncCheckoutPoc({ root: d, base: 'main', pocBranch: 'lane/daemon-poc', run: realRun });
+    expect(r).toEqual({ merged: true, commits: 2, reason: 'merged' }); // 1 from main (b.txt) + 1 already on lane/daemon-poc (poc-only.txt)
+    expect(git(d, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('0');
+    expect(git(d, 'rev-list', '--count', 'HEAD..origin/lane/daemon-poc').trim()).toBe('0');
+    expect(git(d, 'ls-files').split('\n')).toEqual(expect.arrayContaining(['a.txt', 'b.txt', 'poc-only.txt']));
+  });
+
+  it('a conflicting origin/lane/daemon-poc change aborts cleanly — tree and HEAD unchanged', () => {
+    const d = join(dir, 'daemon');
+    // Make the daemon clone's own tip conflict with what's already on lane/daemon-poc (poc-only.txt content).
+    commit(d, 'poc-only.txt', 'daemon side, conflicting\n');
+    const headBefore = git(d, 'rev-parse', 'HEAD').trim();
+    const r = selfSyncCheckoutPoc({ root: d, base: 'main', pocBranch: 'lane/daemon-poc', run: realRun });
+    expect(r.reason).toBe('conflict');
+    expect(r.merged).toBe(false);
     expect(git(d, 'rev-parse', 'HEAD').trim()).toBe(headBefore);
     expect(git(d, 'status', '--porcelain').trim()).toBe('');
   });
