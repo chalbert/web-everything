@@ -66,6 +66,7 @@
  */
 
 import { gitRun } from './main-staleness.mjs';
+import { gateMergedCommit } from './daemon-live-smoke.mjs';
 
 /**
  * Pure: what should a daemon's clone do, given where it stands against `origin/main`?
@@ -139,6 +140,21 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs 
  */
 export function readHeadSha({ root, run = gitRun, timeoutMs = 60_000 }) {
   const r = run(['rev-parse', 'HEAD'], { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  const out = String(r.stdout ?? '').trim();
+  return r.status === 0 && out ? out : null;
+}
+
+/** Read a ref's sha (typically `origin/<base>`, right after a fetch already updated it locally) — same
+ *  fail-safe shape as {@link readHeadSha}. Used by {@link withSelfSync}'s live-smoke gate (#3383) as the
+ *  stable IDENTITY of "what origin/main tip did this merge bring in" — deliberately NOT the resulting merge
+ *  commit's own sha, which changes tick to tick (a fresh `--no-edit` merge commit's author/committer dates
+ *  differ even when origin hasn't moved) and would defeat the reject-cache's "don't retry until main moves"
+ *  contract.
+ * @param {{root:string, ref:string, run?:typeof gitRun, timeoutMs?:number}} o
+ * @returns {string|null}
+ */
+export function readOriginRefSha({ root, ref, run = gitRun, timeoutMs = 60_000 }) {
+  const r = run(['rev-parse', ref], { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
   const out = String(r.stdout ?? '').trim();
   return r.status === 0 && out ? out : null;
 }
@@ -308,12 +324,25 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
  * result shows it hit the stale-main refusal mid-tick, re-sync immediately and restart if that finds new
  * commits, instead of waiting out the full `intervalMs` to lose the same race again. A caller that omits
  * `hasStaleRefusal` (every caller that existed before this option) is byte-identical to before.
+ * #3383 LIVE SMOKE GATE (DEFAULT PATH ONLY — same scoping rule as bugs 1/2 above: POC mode stays untouched,
+ * since neither daemon that calls this opts into it today). Operator, 2026-09-24: "didnt I say nothing get
+ * merge on daemon without being tested live and confirmed?" — before this, ANY merge on the default path
+ * restarted the daemon onto it unconditionally, so a broken merged PR went live with zero live check (the
+ * 2026-09-24 lane-pool regression that broke every review-daemon session this way). Now, once
+ * `sync(syncOpts())` reports `merged: true`, `gate(...)` ({@link gateMergedCommit} by default) runs the live
+ * smoke (`we:scripts/lib/daemon-live-smoke.mjs`) from the JUST-MERGED tree before `onRestart` is ever called: a
+ * pass adopts (restarts, exactly as before this fix); a fail rolls the clone back to its pre-merge HEAD and
+ * this tick simply runs `tick(...args)` on the old, still-in-memory code, as if nothing had merged. This is
+ * UNCONDITIONAL on the default path (not behind a new opt-in option) because both real callers
+ * (`review-daemon.mjs`, `reconcile-fix-dispatch-daemon.mjs`) already call `withSelfSync` with no knowledge of
+ * this option and need the fix live without a further code change on their end — {@link SMOKE_KILL_SWITCH_ENV}
+ * (`WE_DAEMON_SMOKE_DISABLE=1`) is the actual escape hatch, an env var, not a code-level opt-out.
  * @param {{tickOnce:(...args:any[])=>any}} effects
- * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc, base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console, timeoutMs?:number, readHead?:typeof readHeadSha, hasStaleRefusal?:(tickResult:any)=>boolean}} o
+ * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc, base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console, timeoutMs?:number, readHead?:typeof readHeadSha, readOriginRef?:typeof readOriginRefSha, hasStaleRefusal?:(tickResult:any)=>boolean, gate?:typeof gateMergedCommit}} o
  */
 export function withSelfSync(effects, {
   root, onRestart, sync = selfSyncCheckout, syncPoc = selfSyncCheckoutPoc, base = 'main', pocBranch, env = process.env,
-  log = console, timeoutMs, readHead = readHeadSha, hasStaleRefusal,
+  log = console, timeoutMs, readHead = readHeadSha, readOriginRef = readOriginRefSha, hasStaleRefusal, gate = gateMergedCommit,
 }) {
   const tick = effects.tickOnce;
   const resolvedPocBranch = resolvePocSyncBranch({ pocBranch, env });
@@ -352,10 +381,23 @@ export function withSelfSync(effects, {
         return tick(...args);
       }
       // ---- DEFAULT (unset) path — matches selfSyncCheckout's own shipped behavior, plus the #3383 fixes ----
+      // Read BEFORE the merge — the live-smoke gate's rollback target if the merge below turns out bad.
+      const preMergeSha = readHead(syncOpts());
       const r = sync(syncOpts());
       if (r.merged) {
-        log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
-        return onRestart(r);
+        // The merge's own fetch already updated the local origin/<base> ref — safe to read it now.
+        const mergedIdentitySha = readOriginRef({ root, ref: `origin/${base}`, ...(timeoutMs != null ? { timeoutMs } : {}) });
+        const verdict = await gate({ root, preMergeSha, mergedIdentitySha, env, log });
+        if (verdict.adopt) {
+          log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
+          return onRestart(r);
+        }
+        log.error?.(
+          `daemon-self-sync: merged ${r.commits} new commit(s) from origin/main but the LIVE SMOKE GATE rejected them `
+          + `(${verdict.reason}) — rolled back, staying on the OLD code (#3383)`,
+        );
+        // Fall through: the tree is back at preMergeSha (matches this process's in-memory code), so the rest
+        // of this tick runs exactly like a tick that found nothing to merge.
       }
       // #3383 bug 2 — HEAD moved since boot even though THIS sync found nothing to merge (someone else,
       // typically a sibling daemon process sharing this same clone, already brought it current first).
