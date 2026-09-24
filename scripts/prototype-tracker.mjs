@@ -21,6 +21,16 @@
  *   node scripts/prototype-tracker.mjs render [--out=<path>] [--json]
  *     Renders the current tracker to an HTML fragment (stdout, or --out). --json prints the parsed struct
  *     instead (debugging / a caller that wants the data without the markup).
+ *
+ *   node scripts/prototype-tracker.mjs check-priority [--ref=origin/main] [--strict] [--strict-why] [--json]
+ *     Checks the tracker's `## Priority order` section against the backlog (`we:scripts/lib/priority-order.mjs`):
+ *     an open card under #3383 with no line, a resolved card still listed, a card listed twice, a listed number
+ *     that is no card, or a blocker ordered below the card it blocks. Cards come from the local `backlog/` and,
+ *     with --ref, also from that git ref (resolved in either source is resolved). It PRINTS the drift and exits 0
+ *     by default, because other workers keep filing #3383 cards and a hard fail would turn every unrelated push
+ *     red; pass --strict (what whoever edits the section runs before pushing) to exit 1 on any drift.
+ *     A line the `priority-sync` operation added carries `why: (unwritten)` until a worker writes its reason:
+ *     that only WARNS (printed, exit unchanged), and --strict-why turns those warnings into exit 1.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -30,6 +40,9 @@ import {
 } from './lib/prototype-tracker-data.mjs';
 import { renderTrackerHtml } from './lib/prototype-tracker-render.mjs';
 import { localToday } from './lib/local-date.mjs';
+import {
+  checkPriorityOrder, readCardsFromDir, readCardsFromRef, mergeCards, defaultGit,
+} from './lib/priority-order.mjs';
 
 function parseArgs(argv) {
   const flags = {};
@@ -93,15 +106,53 @@ function cmdRender(flags, io) {
   return 0;
 }
 
+function cmdCheckPriority(flags, io) {
+  const backlogDir = flags['backlog-dir'];
+  const path = findTrackerPath({ backlogDir });
+  if (!path) {
+    io.err('prototype-tracker: no backlog/3383-*.md found — is this the web-everything repo root?\n');
+    return 1;
+  }
+  let cards;
+  try {
+    const local = (io.cardsFromDir ?? readCardsFromDir)({ backlogDir });
+    cards = typeof flags.ref === 'string' ? mergeCards(local, (io.cardsFromRef ?? readCardsFromRef)(flags.ref, { git: io.git ?? defaultGit })) : local;
+  } catch (e) {
+    io.err(`prototype-tracker: could not read the cards: ${e.message}\n`);
+    return 1;
+  }
+  const result = checkPriorityOrder(io.read(path), cards);
+  const warned = result.warnings.length > 0;
+  if (flags.json) {
+    io.out(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    if (result.ok) {
+      io.out(`prototype-tracker: priority order OK — ${result.stats.live} open cards under #3383, ${result.stats.entries} lines\n`);
+    } else {
+      io.out(`prototype-tracker: priority order DRIFT — ${result.findings.length} finding(s) (${result.stats.live} open cards under #3383, ${result.stats.entries} lines)\n`);
+      for (const f of result.findings) io.out(`  ${f.kind}: ${f.message}\n`);
+      io.out(flags.strict ? '' : '  (warn only: pass --strict to fail on drift; update the section in the same push that changed the card)\n');
+    }
+    if (warned) {
+      io.out(`prototype-tracker: ${result.warnings.length} line(s) still unwritten (${flags['strict-why'] ? 'FAIL: --strict-why' : 'warn only: pass --strict-why to fail'})\n`);
+      for (const w of result.warnings) io.out(`  WARN ${w.kind}: ${w.message}\n`);
+    }
+  }
+  const failed = (!result.ok && flags.strict) || (warned && flags['strict-why']);
+  return failed ? 1 : 0;
+}
+
 export function main(argv, io = defaultIo()) {
   const [cmd, ...rest] = argv;
   const flags = parseArgs(rest);
   if (cmd === 'append-note') return cmdAppendNote(flags, io);
   if (cmd === 'render') return cmdRender(flags, io);
+  if (cmd === 'check-priority') return cmdCheckPriority(flags, io);
   io.err([
     'usage:',
     '  node scripts/prototype-tracker.mjs append-note --summary="<one line>" [--qualifier="continued"] [--body-file=<path>] [--date=YYYY-MM-DD]',
     '  node scripts/prototype-tracker.mjs render [--out=<path>] [--json]',
+    '  node scripts/prototype-tracker.mjs check-priority [--ref=origin/main] [--strict] [--strict-why] [--json]',
     '',
   ].join('\n'));
   return 1;

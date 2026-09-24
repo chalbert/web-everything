@@ -3,9 +3,11 @@ bornAs: x4paeb9
 kind: story
 size: 2
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/__tests__/priority-order.test.mjs", "we:scripts/__tests__/prototype-tracker-render-real.test.mjs", "we:scripts/lib/__tests__/prototype-tracker-compact.test.mjs", "we:scripts/lib/priority-markers.mjs", "we:scripts/lib/priority-order.mjs", "we:scripts/lib/prototype-tracker-compact.mjs", "we:scripts/lib/prototype-tracker-render.mjs", "we:scripts/lib/tracker-page-hash.mjs", "we:scripts/__tests__/fixtures/tracker-compact-fixture.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
