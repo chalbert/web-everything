@@ -3358,6 +3358,10 @@ async function runCli() {
   // reused across `--watch` passes. A failed read stays unresolved (retried next pass) and leaves the
   // non-default-base arm inert for that repo, so the chain degrades to its pre-#3674 behaviour, never to a land.
   const defaultBranchByRepo = new Map();
+  // #3383 — a REAL local binding (not just the `defaultBranchOf:` shorthand-property below, which only names a
+  // VALUE inside the `prepareDrainVerdicts` call's argument object and is invisible everywhere else in this
+  // closure). The stacked-PR retarget call further down needs the SAME lookup by NAME, not re-derived.
+  const defaultBranchOf = (repo) => defaultBranchByRepo.get(repo) ?? null;
   // #2417 review — returns `{ commits, degraded }`. `degraded:true` means the gh read THREW (a swallowed transient
   // failure): the empty `[]` is a fallback, not a confirmed "no commits", so `fetchPrReadsCached` declines to cache
   // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
@@ -3654,7 +3658,7 @@ async function runCli() {
     label,
     isLocalRepo,
     localSlug,
-    defaultBranchOf: (repo) => defaultBranchByRepo.get(repo) ?? null,
+    defaultBranchOf,
   }));
   // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
   // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
