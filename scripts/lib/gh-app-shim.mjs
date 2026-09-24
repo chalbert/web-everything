@@ -10,10 +10,24 @@
  *   inherit the SPAWNER's ambient `process.env` — confirmed live here by direct experiment (a `WE_ENV_PROBE_*`
  *   var set on the spawning shell never reached a `--bg` session's own Bash tool subprocess).
  *
- * WHAT DOES REACH IT, ALSO CONFIRMED LIVE: `claude --bg --settings '{"env":{...}}'` — an EXPLICIT CLI argument,
- * not inherited env — sets exactly those vars in the started session's own Bash-tool subprocess environment,
- * including a `PATH` override (proven by shadowing `gh` with a fake executable and observing the fake, not the
- * real, `gh` respond inside the dispatched session).
+ * WHAT DOES REACH IT, ALSO CONFIRMED LIVE (at the time): `claude --bg --settings '{"env":{...}}'` — an EXPLICIT
+ * CLI argument, not inherited env — sets exactly those vars in the started session's own Bash-tool subprocess
+ * environment, including a `PATH` override (proven by shadowing `gh` with a fake executable and observing the
+ * fake, not the real, `gh` respond inside the dispatched session).
+ *
+ * #x8mpubm FOLLOW-UP (live-caught 2026-09-24, review-2600/2599/2594, after that day's earlier laptop restart):
+ * `--settings` STOPPED BEING THE WHOLE STORY. The CLI now keeps a background daemon (`CLAUDE_BG_BACKEND=daemon`)
+ * with a pool of pre-warmed, generic "spare" processes it hands a `--bg` request to for low latency, INSTEAD OF
+ * spawning fresh, whenever one is available — and `ps eww` on live, task-ASSIGNED review sessions proved the
+ * claim never re-applies `--settings`'s env to that spare: every one carried `GH_TOKEN` baked in from whenever
+ * the spare was forked (traced to ~34 min after that day's 10:21 ET reboot — long since expired by the time it
+ * was used), and the shim dir was simply absent from `PATH`. A `--settings`-only dispatch is thus, empirically,
+ * a COIN FLIP: it lands when the pool happens to be out of spares (a genuinely fresh spawn), and silently does
+ * nothing the rest of the time. Confirmed live, the SAME day: a `.claude/settings.local.json` `env` block in
+ * the checkout the session starts in reaches a dispatched session's `gh` resolution even with NO `--settings`
+ * flag at all — read fresh per task rather than baked at process-fork time, so it cannot go stale the way a
+ * spare's own exec-time env can. {@link buildGhShimSettingsEnv} now writes BOTH: the `--settings` env object AND
+ * (given a `cwd`) this file, so the override reaches a session whichever path served it.
  *
  * WHY A PATH-SHADOWING SHIM, NOT A ONE-TIME `GH_TOKEN` VALUE. Baking the CURRENT cached token into `--settings`
  * at spawn time would suffer the exact expiry problem this item's own evidence names: an installation token
@@ -44,7 +58,7 @@
  * to fold into a `claude --bg --settings` argument, or `null` when nothing should change.
  */
 
-import { existsSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { defaultCachePath, resolveGithubAppEnvConfig } from './github-app-auth-env.mjs';
@@ -215,26 +229,87 @@ export function ghShimPathOverride({ dir = defaultShimDir(), currentPath = proce
 }
 
 /**
+ * THE SECOND, DURABLE DELIVERY PATH (#x8mpubm follow-up — see the module header for why `--settings` alone is
+ * no longer enough). Merges `env` into `<cwd>/.claude/settings.local.json`'s own `env` block, creating the
+ * file (and the `.claude` dir) if neither exists yet. ADDITIVE, never clobbering: an existing file's other
+ * top-level keys and other `env` entries survive untouched; only the keys THIS call names are set/overwritten.
+ *
+ * BEST-EFFORT, NEVER THROWS — same discipline as {@link ensureGhShim}: a read-only checkout, a corrupt
+ * existing settings file (treated as empty rather than fatal), or a full disk all resolve to `{ok:false}`,
+ * never an exception, so a dispatch that would otherwise have gone out fine is never blocked by this.
+ * @param {{cwd:string, env:Record<string,string>, readFile?:Function, writeFile?:Function, mkdir?:Function}} o
+ * @returns {{ok:boolean, path?:string, reason?:string}}
+ */
+export function ensureSettingsFileEnv({
+  cwd, env, readFile = readFileSync, writeFile = writeFileSync, mkdir = mkdirSync,
+}) {
+  if (!cwd) return { ok: false, reason: 'no-cwd' };
+  const dir = join(cwd, '.claude');
+  const path = join(dir, 'settings.local.json');
+  try {
+    mkdir(dir, { recursive: true });
+    let existing;
+    try { existing = JSON.parse(readFile(path, 'utf8')); } catch { existing = null; }
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) existing = {};
+    const merged = { ...existing, env: { ...(existing.env && typeof existing.env === 'object' ? existing.env : {}), ...env } };
+    writeFile(path, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+    return { ok: true, path };
+  } catch (e) {
+    return { ok: false, reason: 'write-failed', error: String((e && e.message) || e) };
+  }
+}
+
+/**
+ * PURE: a shallow copy of `env` with `GH_TOKEN`/`GITHUB_TOKEN` REMOVED (not merely set to `''` — `gh` honors
+ * either name, and a present-but-empty value is not guaranteed to be treated the same as absent).
+ *
+ * #x8mpubm follow-up (live-caught 2026-09-24): `github-app-auth-env.mjs#ensureFreshGithubAppEnv` sets
+ * `process.env.GH_TOKEN` in a LONG-RUNNING daemon's own process so ITS OWN `gh`/git calls authenticate as the
+ * App — necessary and correct for the daemon itself. But that daemon is also what invokes `claude` to start a
+ * dispatched session, and `execFileSync`/`spawn` inherit the CALLER's `process.env` whenever no explicit `env`
+ * is given — so the CLI-front-end invocation (and anything the CLI's own background-daemon infra bootstraps
+ * from it, including a pre-warmed spare pool that then outlives any single dispatch) silently picks up a
+ * snapshot of the daemon's own token. That snapshot never refreshes and eventually expires — the opposite of
+ * what the shim exists to prevent. The spawn call this guards should carry NEITHER token: an App-authenticated
+ * `gh` call only ever belongs behind the shim (which reads the shared cache fresh, every time); everything
+ * else should fall through to the operator's own personal auth, exactly as if App auth were never configured.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function sanitizeSpawnEnv(env = process.env) {
+  const out = { ...env };
+  delete out.GH_TOKEN;
+  delete out.GITHUB_TOKEN;
+  return out;
+}
+
+/**
  * THE ONE THING A DISPATCHER ACTUALLY CALLS: an `env` object to fold into a `claude --bg --settings
  * '{"env":...}'` argument (via `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv`'s `settingsEnv`
  * param), or `null` when nothing should change — the caller then omits `--settings` entirely, a dispatch
- * byte-identical to before this file existed.
+ * byte-identical to before this file existed. When `cwd` is given (the checkout the session will start in),
+ * ALSO best-effort writes the same override into that checkout's `.claude/settings.local.json` via
+ * {@link ensureSettingsFileEnv} — the durable delivery path a `--settings`-ignoring spare-pool claim cannot
+ * skip (see the module header). That second write's own success/failure never changes this function's return
+ * value; it is purely additional insurance.
  *
  * NEVER THROWS. Every real effect below it is wrapped or already non-throwing; this function additionally
  * treats a MISSING real `gh` binary or a failed shim write as "skip it", never as a reason to fail a dispatch
  * that would otherwise have gone out fine on personal auth, exactly as it always has.
- * @param {{env?:NodeJS.ProcessEnv, pathEnv?:string, cachePath?:string, dir?:string,
- *   exists?:Function, writeFile?:Function, chmod?:Function, mkdir?:Function}} [o]
+ * @param {{env?:NodeJS.ProcessEnv, pathEnv?:string, cachePath?:string, dir?:string, cwd?:string,
+ *   exists?:Function, writeFile?:Function, chmod?:Function, mkdir?:Function, readFile?:Function}} [o]
  * @returns {Record<string,string>|null}
  */
 export function buildGhShimSettingsEnv({
   env = process.env, pathEnv = process.env.PATH || '', cachePath = defaultCachePath(), dir = defaultShimDir(),
-  exists, writeFile, chmod, mkdir,
+  cwd, exists, writeFile, chmod, mkdir, readFile,
 } = {}) {
   if (!resolveGithubAppEnvConfig(env)) return null; // opt-in — see the module header
   const realGhPath = resolveRealGhBinary({ pathEnv, shimDir: dir, exists });
   if (!realGhPath) return null;
   const written = ensureGhShim({ dir, realGhPath, cachePath, writeFile, chmod, mkdir });
   if (!written.ok) return null;
-  return { PATH: ghShimPathOverride({ dir, currentPath: pathEnv }) };
+  const settingsEnv = { PATH: ghShimPathOverride({ dir, currentPath: pathEnv }) };
+  if (cwd) ensureSettingsFileEnv({ cwd, env: settingsEnv, readFile, writeFile, mkdir }); // best-effort, see above
+  return settingsEnv;
 }

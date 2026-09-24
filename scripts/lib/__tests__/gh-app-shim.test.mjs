@@ -9,13 +9,13 @@
  *   {@link renderGhShimScript}'s output could not prove.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
-  buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure,
+  buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, sanitizeSpawnEnv,
 } from '../gh-app-shim.mjs';
 
 const CONFIGURED_ENV = {
@@ -254,6 +254,75 @@ describe('ensureGhShim — the one real write, best-effort, never throws', () =>
   });
 });
 
+describe('ensureSettingsFileEnv — the durable, per-checkout delivery path (#x8mpubm follow-up)', () => {
+  it('creates .claude/settings.local.json with the given env, via a real tmpdir', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-file-'));
+    try {
+      const result = ensureSettingsFileEnv({ cwd, env: { PATH: '/shim:/usr/bin' } });
+      const path = join(cwd, '.claude', 'settings.local.json');
+      expect(result).toEqual({ ok: true, path });
+      const written = JSON.parse(readFileSync(path, 'utf8'));
+      expect(written.env.PATH).toBe('/shim:/usr/bin');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('is ADDITIVE — preserves an existing file\'s other top-level keys and other env entries', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-file-'));
+    try {
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      writeFileSync(join(cwd, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: ['Bash(ls:*)'] }, env: { OTHER: 'kept' } }), 'utf8');
+      ensureSettingsFileEnv({ cwd, env: { PATH: '/shim:/usr/bin' } });
+      const written = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
+      expect(written.permissions).toEqual({ allow: ['Bash(ls:*)'] });
+      expect(written.env).toEqual({ OTHER: 'kept', PATH: '/shim:/usr/bin' });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('a corrupt existing file is treated as empty, never thrown on', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-file-'));
+    try {
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{ not json', 'utf8');
+      const result = ensureSettingsFileEnv({ cwd, env: { PATH: '/shim:/usr/bin' } });
+      expect(result.ok).toBe(true);
+      const written = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
+      expect(written.env.PATH).toBe('/shim:/usr/bin');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('returns {ok:false} without throwing when no cwd is given, or when the write fails', () => {
+    expect(ensureSettingsFileEnv({ cwd: null, env: {} })).toEqual({ ok: false, reason: 'no-cwd' });
+    const result = ensureSettingsFileEnv({
+      cwd: '/x', env: { PATH: 'x' }, mkdir: vi.fn(), writeFile: () => { throw new Error('read-only fs'); },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('write-failed');
+  });
+});
+
+describe('sanitizeSpawnEnv — pure, never lets a daemon\'s own App token leak into a spawned claude front-end (#x8mpubm follow-up)', () => {
+  it('removes GH_TOKEN and GITHUB_TOKEN, keeps everything else', () => {
+    const out = sanitizeSpawnEnv({ GH_TOKEN: 'ghs_x', GITHUB_TOKEN: 'y', PATH: '/bin', HOME: '/Users/op' });
+    expect(out).toEqual({ PATH: '/bin', HOME: '/Users/op' });
+  });
+
+  it('is a no-op (aside from copying) when neither var is present', () => {
+    expect(sanitizeSpawnEnv({ PATH: '/bin' })).toEqual({ PATH: '/bin' });
+  });
+
+  it('never mutates the input object', () => {
+    const input = { GH_TOKEN: 'ghs_x', PATH: '/bin' };
+    sanitizeSpawnEnv(input);
+    expect(input.GH_TOKEN).toBe('ghs_x'); // untouched
+  });
+});
+
 describe('buildGhShimSettingsEnv — the composed, OPT-IN-GATED entry point a dispatcher actually calls', () => {
   it('returns null and touches NO fs at all when App auth is not configured — the safe default for every unconfigured host (and every test)', () => {
     const exists = vi.fn();
@@ -291,5 +360,42 @@ describe('buildGhShimSettingsEnv — the composed, OPT-IN-GATED entry point a di
       exists: () => true, writeFile: () => { throw new Error('read-only fs'); }, mkdir: vi.fn(), chmod: vi.fn(),
     });
     expect(result).toBeNull();
+  });
+
+  describe('with `cwd` (#x8mpubm follow-up) — the durable settings.local.json path a spare-pool claim cannot skip', () => {
+    it('ALSO writes the PATH override into <cwd>/.claude/settings.local.json, via a real tmpdir round trip', () => {
+      const shimDir = mkdtempSync(join(tmpdir(), 'we-gh-shim-dir-'));
+      const cwd = mkdtempSync(join(tmpdir(), 'we-gh-shim-cwd-'));
+      try {
+        const result = buildGhShimSettingsEnv({
+          env: CONFIGURED_ENV, pathEnv: '/opt/homebrew/bin:/usr/bin', dir: shimDir, cachePath: join(shimDir, 'cache.json'),
+          exists: (p) => p === '/opt/homebrew/bin/gh', cwd,
+        });
+        expect(result).toEqual({ PATH: `${shimDir}:/opt/homebrew/bin:/usr/bin` });
+        const written = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
+        expect(written.env.PATH).toBe(result.PATH); // the SAME override reaches both delivery paths
+      } finally {
+        rmSync(shimDir, { recursive: true, force: true });
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it('omitting `cwd` (the pre-existing contract) never touches any settings file — back-compat for every caller that does not pass it', () => {
+      const writeFile = vi.fn();
+      buildGhShimSettingsEnv({
+        env: CONFIGURED_ENV, pathEnv: '/opt/homebrew/bin', dir: '/shim',
+        exists: () => true, writeFile, mkdir: vi.fn(), chmod: vi.fn(),
+      });
+      // Only the shim's own single write — never a second call for a settings file nobody asked for.
+      expect(writeFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failed settings-file write never changes the returned PATH override — purely additional insurance', () => {
+      const result = buildGhShimSettingsEnv({
+        env: CONFIGURED_ENV, pathEnv: '/opt/homebrew/bin', dir: '/shim', cwd: '/read-only-checkout',
+        exists: () => true, writeFile: (path) => { if (String(path).includes('settings.local.json')) throw new Error('read-only fs'); }, mkdir: vi.fn(), chmod: vi.fn(),
+      });
+      expect(result).toEqual({ PATH: '/shim:/opt/homebrew/bin' });
+    });
   });
 });
