@@ -155,7 +155,7 @@
       "description": "Tags that exempt a `polyglot-widening`-tagged item from the #2089 evidence-edge requirement — work that consumes existing emit forms and adds no new target/form. Adding a value here widens the carve-out, letting more items skip the evidence-edge gate."
     },
     "strandedHashGraceSeconds": {
-      "value": 180,
+      "value": 1800,
       "impl": "STRANDED_HASH_GRACE_SECONDS",
       "description": "The in-flight grace window (#2288/#2956) a non-numeric backlog-file id on main is given before `strandedHashesOnMain` treats it as a real strand (hard ERROR) rather than the drain's own JIT-numbering commit still in flight (WARNING). Raising it demotes a genuine stranded hash to advisory for longer — a hard failure becomes silently tolerable."
     },

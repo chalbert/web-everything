@@ -5297,3 +5297,13 @@ file in each test file's own `#3850 Fork 2` describe blocks); 289 total pass acr
 `check:standards` reports 0 errors on the full repo scan (the 2 pre-existing #3383-file errors this session's
 brief warned about were not observed in this run's output — 0 errors total, so this diff adds none either
 way). No PR — committed straight to `lane/mechanical-dispatcher` per this epic's own delivery doctrine.
+
+## Session update (2026-09-24, continued) — verify-lane: a terminal record for another sha is archived, not a blocker (#3751, terminal-record half)
+
+The terminal-record half of card #3751. we:scripts/verify-lane.mjs refused to START when the marker held a terminal record for another sha (#2833 finding 4), so every second verify in a lane after a new commit, an amend or a rebase came back `superseded` until a hand `reset`: five times on 2026-09-23/24. It also broke the rebase path of we:scripts/operations/poc-land.mjs outright, because the lander re-verifies after rebasing, and the rebased sha is never the one the first verify recorded. A first version archived only an ANCESTOR's record; the amend and the rebase in this very landing showed that was not enough. Now any terminal record for another sha is kept in `.git/.lane-verify.previous` and the run starts. Finding 4's concern (destroying a sibling's result) is met by keeping the record, and a record for a sha that is not HEAD can never bless a landing of this clone's HEAD. The finish-write compare-and-set (finding 1, the false-green guard) is unchanged. This is #3751's acceptance "a second verify for a new sha starts and keeps the old record"; its environment-dependent-tests half is untouched. Live proof: this landing followed an amend and a rebase, and its gate started with no reset.
+
+**Seen, not fixed:** we:skills-src/conveyor/__tests__/runner-shutdown-live.test.mjs failed once in a full `test:unit` run and passed alone, a timing flake under load.
+
+## Session update (2026-09-24, continued) — stranded-hash grace 180 s -> 1800 s: the drain's numbering lag is now 8-17 minutes, so gates went red after every hash-card merge
+
+The landing of the #3751 fix went red on a check, not on the change: `strandedHashesOnMain` in we:scripts/check-standards-rules.mjs errors on a hash-named card on origin/main once it is older than `STRANDED_HASH_GRACE_SECONDS`, sized at 180 s from a measured 7-73 s drain numbering lag. On 2026-09-24 the real lag across 8 lands was 469-1029 s, so every gate in the ~10 minutes after any hash-card merge was red on a hash the drain was about to number (live: xqzxroq, merged 11:35:46 EDT, still unnumbered at 11:46). The grace is now 1800 s, about 1.75x the slowest measured lag. Main has the same constant; the same change goes to main by PR.

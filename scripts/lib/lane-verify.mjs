@@ -130,6 +130,9 @@ import { join } from 'node:path';
  *  invisible to `git status`, one-per-lane. */
 export const VERIFY_FILENAME = '.lane-verify';
 
+/** #3751 — where a superseded terminal record for an earlier commit of the same lane is kept. */
+export const VERIFY_PREVIOUS_FILENAME = '.lane-verify.previous';
+
 /** Normalize a JSON-parsed marker payload to the shape the gate expects. Pure. A parsed value that is not a
  *  plain object (an array, `null`, a string, a number — all VALID JSON) is NOT a verification record: fold it to
  *  `{ corrupt: true }` so the gate refuses it, never treats it as `absent` and fails OPEN (#2833 finding 2/5). A
