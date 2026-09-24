@@ -33,3 +33,9 @@ sweep cleans the two label strays that predate the fix.
 3. Real read-only proof on the live shared lane pool: `node we:scripts/lane-pool.mjs list --acquirable
    --no-cache --repo=.` goes from 0 acquirable lanes (unfixed `we:scripts/lib/lane-litter.mjs`, matching the
    observed `review-2582` starvation) to 23 acquirable lanes (fixed). **DONE.**
+4. The sweep must actually reach the LIVE PRs, not just exist as an importable module: wired into
+   `we:skills-src/conveyor/review-daemon.mjs`'s per-repo tick (the daemon confirmed running, `ps aux` /
+   `.conveyor/review-daemon.log`), not `we:skills-src/conveyor/runner.mjs`'s own mechanical-pass dispatcher
+   (confirmed NOT running — replaced by this daemon and the Fix-dispatch daemon; wiring there alone would leave
+   #2549/#2578 uncleaned indefinitely). `we:skills-src/conveyor/__tests__/review-daemon.test.mjs` fails before
+   (11/43) and passes after (43/43). **DONE.**
