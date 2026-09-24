@@ -110,10 +110,13 @@ describe('sessionTarget — the dispatcher-minted grammar a session name encodes
     expect(sessionTarget('prepare-3399')).toEqual({ kind: 'item', id: '3399' });
     expect(sessionTarget('prepare-decision-3457')).toEqual({ kind: 'item', id: '3457' });
   });
-  it('PR-kind names (review / fix / ci-heal) — a PR number, never an item number', () => {
+  it('PR-kind names (review / fix / ci-heal / inspect) — a PR number, never an item number', () => {
     expect(sessionTarget('review-1871')).toEqual({ kind: 'pr', id: '1871', repo: 'we' });
     expect(sessionTarget('fix-1852')).toEqual({ kind: 'pr', id: '1852', repo: 'we' });
     expect(sessionTarget('ci-heal-1852c')).toEqual({ kind: 'pr', id: '1852', repo: 'we' });
+    // epic #3383's diagnosis-only stuck-PR inspection dispatch — covered for free by the shared grammar.
+    expect(sessionTarget('inspect-2505')).toEqual({ kind: 'pr', id: '2505', repo: 'we' });
+    expect(sessionTarget('inspect-pa-176')).toEqual({ kind: 'pr', id: '176', repo: 'plateau-app' });
   });
   it('an unrecognized name (a stray operator label, no grammar) yields null — never a guess', () => {
     expect(sessionTarget('test-dontask')).toBeNull();

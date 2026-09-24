@@ -61,7 +61,7 @@ describe('validateCompletionRecord', () => {
     expect(ok).toBe(false);
     expect(errors).toEqual(expect.arrayContaining([
       'unsupported completion record version 2', 'missing or invalid `session`',
-      '`kind` must be one of review/fix', '`pr` must be a string or null',
+      '`kind` must be one of review/fix/inspect', '`pr` must be a string or null',
       '`status` must be one of started/done', 'missing or unparseable `startedAt`', 'missing or unparseable `updatedAt`',
     ]));
   });
