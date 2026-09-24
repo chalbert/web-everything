@@ -2,10 +2,11 @@
 kind: story
 size: 3
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/pr-work-unit.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/__tests__/pr-work-unit.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 

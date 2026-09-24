@@ -86,4 +86,101 @@ describe('resolvePrWorkUnit (#xdx3ifb)', () => {
     expect(unit.attribution).toBe('pr');
     expect(unit.scope).toEqual([]);
   });
+
+  // #xcla4iv — the standard file-item-in-PR workflow: the card and the code that delivers it land in the SAME
+  // PR, so `findItem` (which reads only `main`) misses it, but the PR's own diff carries the card. Live case:
+  // `chalbert/web-everything` PR #2553 (branch `lane/xzi292i-stuck-pr-watch`) — see the file header.
+  describe('#xcla4iv — the item\'s own card is filed IN this PR\'s diff, not yet on `main`', () => {
+    it('attributes to the ITEM and reads the card\'s own committed `scope:` at the PR head, when found', () => {
+      const calls = [];
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 2553, headRefName: 'lane/xzi292i-stuck-pr-watch', headRefOid: 'deadbeef'.repeat(5) },
+        findItem: boundFindItem([]), // nothing on `main` yet
+        fetchDiffPaths: () => ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs'],
+        fetchCardScopeAtRef: (path, ref) => {
+          calls.push({ path, ref });
+          return ['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'];
+        },
+      });
+      expect(calls).toEqual([{
+        path: 'backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md',
+        ref: 'deadbeef'.repeat(5),
+      }]);
+      expect(unit.attribution).toBe('item');
+      expect(unit.itemNum).toBe('xzi292i');
+      expect(unit.scope).toEqual(['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs']);
+      expect(unit.scopeSource).toBe('card');
+    });
+
+    it('falls back to the PR\'s own diff paths, repo-prefixed, when the card itself declares no `scope:`', () => {
+      const unit = resolvePrWorkUnit({
+        repo: 'plateau-app',
+        pr: { number: 90, headRefName: 'lane/xabc123-new-thing', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xabc123-new-thing.md', 'src/Thing.tsx'],
+        fetchCardScopeAtRef: () => [],
+      });
+      expect(unit.attribution).toBe('item');
+      expect(unit.itemNum).toBe('xabc123');
+      expect(unit.scope).toEqual(['plateau:backlog/xabc123-new-thing.md', 'plateau:src/Thing.tsx']);
+      expect(unit.scopeSource).toBe('diff');
+    });
+
+    it('falls back to the diff paths when `fetchCardScopeAtRef` throws — never crashes the resolution', () => {
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 91, headRefName: 'lane/xabc123-new-thing', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xabc123-new-thing.md'],
+        fetchCardScopeAtRef: () => { throw new Error('gh unreachable'); },
+      });
+      expect(unit.attribution).toBe('item');
+      expect(unit.scope).toEqual(['we:backlog/xabc123-new-thing.md']);
+      expect(unit.scopeSource).toBe('diff');
+    });
+
+    it('skips the card read (no `headRefOid`) and falls straight to the diff-paths fallback', () => {
+      const calls = [];
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 92, headRefName: 'lane/xabc123-new-thing' }, // no headRefOid at all
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xabc123-new-thing.md'],
+        fetchCardScopeAtRef: () => { calls.push(1); return ['we:should/not/be/used.mjs']; },
+      });
+      expect(calls).toEqual([]);
+      expect(unit.attribution).toBe('item');
+      expect(unit.scope).toEqual(['we:backlog/xabc123-new-thing.md']);
+      expect(unit.scopeSource).toBe('diff');
+    });
+
+    it('a GENUINE ghost — no matching card anywhere in the diff — still attributes to the PR, unaffected', () => {
+      const calls = [];
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 93, headRefName: 'lane/9999-ghost', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['scripts/unrelated.mjs'], // no `backlog/9999-*.md` in the diff at all
+        fetchCardScopeAtRef: () => { calls.push(1); return ['we:should/not/be/used.mjs']; },
+      });
+      expect(calls).toEqual([]); // never even attempted the card read — no candidate path found
+      expect(unit.attribution).toBe('pr');
+      expect(unit.itemNum).toBeNull();
+      expect(unit.scope).toEqual(['we:scripts/unrelated.mjs']);
+    });
+
+    it('does not false-positive on a card path whose number is merely a PREFIX of another item\'s (boundary check)', () => {
+      // itemNum `338` must not match `backlog/3383-....md` — the hyphen boundary in `cardPrefix` prevents it.
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 94, headRefName: 'lane/338-short-num', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/3383-a-background-mechanical-dispatcher.md'],
+        fetchCardScopeAtRef: () => { throw new Error('must not be called — no matching card for `338`'); },
+      });
+      expect(unit.attribution).toBe('pr');
+      expect(unit.itemNum).toBeNull();
+    });
+  });
 });

@@ -62,6 +62,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import matter from 'gray-matter';
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
@@ -116,14 +117,26 @@ export function defaultConfirmWait(ms) {
  *     and never reaches the fallback — measured live #3634: EVERY currently-open `kind:'fix'` entry
  *     whose item number resolves hits this, epics included, e.g. `#2220` on `lane/3383-host-process-granularity`
  *     resolving epic `#3383`, which — correctly — carries no file-level `scope:` of its own) OR the PR names no
- *     item at all AND its own diff is empty too (slice 6, rare — an item-less PR that changed nothing). Both
- *     have the SAME safe fallback: {@link resolveFallbackScope} (item-carrying) / {@link resolvePrWorkUnit}'s
- *     own diff read (item-less) may return the PR's OWN already-changed files (repo-prefixed) as the fence
- *     instead. This is never a LOOSER fence than a declared `scope:` would have been — a fix agent can only
- *     touch what this PR already touches — so it is safe exactly where a declared scope is unknown. Only when
- *     the fallback ALSO comes back empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN
- *     scope-refusal (`itemScope.length` check) for exactly the same reason: a fix agent with no fence at all is
- *     undispatchable.
+ *     item at all AND its own diff is empty too (slice 6, rare — an item-less PR that changed nothing), OR the
+ *     item names a number `findItem` cannot resolve on `main` AND its card is nowhere in the PR's own diff
+ *     either (a genuine ghost/deleted number — #xcla4iv did NOT touch this case, see below). All three have the
+ *     SAME safe fallback: {@link resolveFallbackScope} (item-carrying, empty declared scope) /
+ *     {@link resolvePrWorkUnit}'s own diff read (item-less, or #xcla4iv's card-in-diff-but-card-itself-scopeless)
+ *     may return the PR's OWN already-changed files (repo-prefixed) as the fence instead. This is never a
+ *     LOOSER fence than a declared `scope:` would have been — a fix agent can only touch what this PR already
+ *     touches — so it is safe exactly where a declared scope is unknown. Only when the fallback ALSO comes back
+ *     empty does this remain `no-scope`, mirroring `dispatch-lane.mjs`'s OWN scope-refusal (`itemScope.length`
+ *     check) for exactly the same reason: a fix agent with no fence at all is undispatchable.
+ *
+ *   #xcla4iv — A FOURTH population that is NO LONGER `no-scope` at all: the item's number resolves to nothing
+ *   on `main` (`findItemFn` misses), but its own card (`backlog/<itemNum>-*.md`) is sitting right there in the
+ *   PR's own diff — the standard file-item-in-PR workflow, where the card and the code that delivers it land in
+ *   the SAME PR. {@link resolvePrWorkUnit} now recognizes this (see its own file header) and returns
+ *   `attribution:'item'` with the card's own committed `scope:` (read at the PR's head), or the PR's raw diff
+ *   paths if the card itself declares none. THIS is the one sub-case where the diff-derived fence IS filtered
+ *   here (`scopeSource:'diff'` — untrusted, PR-author-controlled filenames), unlike a genuinely resolved item's
+ *   own frontmatter scope (`scopeSource` absent/`'card'` — trusted, never filtered). A number with NO matching
+ *   card anywhere in the diff is unaffected — still the ghost case just above, still `no-scope`.
  * @param {Array<{kind:string, prNumber:number, headRefName?:string|null, headRefOid?:string|null, labels?:string[], body?:string|null}>} dispatchEntries -
  *   `reconcile-pass.mjs`'s own `dispatch` array (see `we:scripts/conveyor/reconcile-core.mjs#planReconcile`).
  * @param {(key:string, loadItems:Function)=>({num:string,slug:string,specPath:string,scope:string[]}|null)} findItemFn
@@ -134,13 +147,18 @@ export function defaultConfirmWait(ms) {
  *   `no-scope` fallback (an item resolved but declared no `scope:` of its own).
  * @param {string} [repo] - any vocabulary {@link repoProfile} accepts; defaults to `'we'`. Threaded through to
  *   {@link resolvePrWorkUnit} so both the item lookup and the item-less diff-attribution below are repo-aware.
- * @param {(pr:number)=>string[]} [fetchItemlessDiffPaths] - #xmtbdgs multi-repo slice 6: injected, UN-prefixed
- *   (matches {@link resolvePrWorkUnit}'s own `fetchDiffPaths` contract — it adds the repo prefix itself).
- *   Defaults to `() => []`; the real binding is {@link fetchPrDiffPaths} via {@link runReconcileFixDispatch}'s
- *   own default. Used ONLY when the PR names no backlog item at all.
+ * @param {(pr:number)=>string[]} [fetchItemlessDiffPaths] - #xmtbdgs multi-repo slice 6 (and, since #xcla4iv,
+ *   ALSO the named-item branch — see that block's own comment for why reusing this single binding is now safe):
+ *   injected, UN-prefixed (matches {@link resolvePrWorkUnit}'s own `fetchDiffPaths` contract — it adds the repo
+ *   prefix itself). Defaults to `() => []`; the real binding is {@link fetchPrDiffPaths} via
+ *   {@link runReconcileFixDispatch}'s own default.
+ * @param {(path:string, ref:string)=>string[]} [fetchCardScopeAtRef] - #xcla4iv, injected: reads one backlog
+ *   card's own committed `scope:` at a specific ref. Defaults to `() => []`; the real binding is
+ *   {@link fetchCardScopeAtRef} via {@link runReconcileFixDispatch}'s own default. Passed straight through to
+ *   {@link resolvePrWorkUnit} — see its own docblock for the full contract.
  * @returns {{planned:Array<{itemNum:string|null,pr:number,laneRef:string,scope:string[],scopeSource:('item'|'pr-diff'),isConflict:boolean,body:string|null,headRefOid:string|null}>, refusals:Array<{pr:number,kind:string,why:string}>}}
  */
-export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => [], repo = 'we', fetchItemlessDiffPaths = () => []) {
+export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope = () => [], repo = 'we', fetchItemlessDiffPaths = () => [], resolveCardScopeAtRef = () => []) {
   const planned = [];
   const refusals = [];
   for (const entry of Array.isArray(dispatchEntries) ? dispatchEntries : []) {
@@ -181,23 +199,35 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
     // the rename's `bornAs` record — with zero extra code here.
     //
     // ONLY the resolver's `attribution:'item'` result is trusted for scope. Its `attribution:'pr'` branch
-    // (item not found at all) is DELIBERATELY not used to fall back to the PR's own diff here: an item
-    // number that resolves to nothing real (a ghost/deleted card — never a `bornAs` hit, which `findItemFn`
-    // already recovers) must still refuse `no-scope` outright — using the PR's diff as fence AND stamping
-    // `WE #<n>:` with a number naming no item would be precisely the "honest-looking but WRONG attribution"
-    // this file's own history already ruled unsafe (see this function's own top-of-file docblock). That is a
-    // DIFFERENT population from "no item number at all" (handled above, slice 6): this branch is only ever
-    // reached once `itemNum` is truthy — hence `fetchDiffPaths: () => []` below: the resolver is asked ONLY
-    // "does an item resolve", never for a diff-based fallback it would otherwise be entitled to compute.
+    // (item not found anywhere — not on `main`, not as a card in this PR's own diff either) is DELIBERATELY
+    // not used to fall back to the PR's own diff here: a genuine ghost/deleted item number must still refuse
+    // `no-scope` outright — using the PR's diff as fence AND stamping `WE #<n>:` with a number naming no item
+    // would be precisely the "honest-looking but WRONG attribution" this file's own history already ruled
+    // unsafe (see this function's own top-of-file docblock).
+    //
+    // #xcla4iv — `fetchDiffPaths` is now the REAL `fetchItemlessDiffPaths` binding (it used to be a hard
+    // `() => []` stub here, deliberately, to keep the resolver from ever offering a diff-based fallback for
+    // this branch at all). That is now SAFE to lift: `resolvePrWorkUnit` itself only ever uses the diff to
+    // look for `backlog/<itemNum>-*.md` — the standard file-item-in-PR shape, where the card and the code
+    // that delivers it land in the SAME PR, so the card is real but not yet on `main` — and falls straight
+    // through to the SAME `attribution:'pr'` (ghost) outcome for every other diff shape, changing nothing
+    // for a true ghost. `fetchCardScopeAtRef` lets it read that card's own OWN committed `scope:` at the
+    // PR's head instead of trusting raw diff paths, mirroring the "declared scope wins over diff" preference
+    // this file already applies everywhere else.
     const unit = resolvePrWorkUnit({
       repo,
-      pr: { number: pr, headRefName },
+      pr: { number: pr, headRefName, headRefOid: entry.headRefOid ?? null },
       findItem: (key) => findItemFn(key, loadItems),
-      fetchDiffPaths: () => [],
+      fetchDiffPaths: fetchItemlessDiffPaths,
+      fetchCardScopeAtRef: resolveCardScopeAtRef,
     });
-    const item = unit && unit.attribution === 'item' ? { scope: unit.scope } : null;
-    let scope = item ? item.scope : [];
-    let scopeSource = 'item';
+    const item = unit && unit.attribution === 'item' ? { scope: unit.scope, scopeSource: unit.scopeSource ?? null } : null;
+    // #xcla4iv — the resolver's own `scopeSource` distinguishes a card's TRUSTED committed frontmatter
+    // (`'card'`, or `undefined` for the ordinary on-`main` item branch — neither is filtered, exactly like
+    // the pre-existing "declared item scope: is not filtered" rule) from its UNTRUSTED diff-paths fallback
+    // (`'diff'` — PR-author-controlled filenames, filtered here exactly like the `#3634` fallback below).
+    let scope = item ? (item.scopeSource === 'diff' ? item.scope.filter(isSafeFallbackScopeEntry) : item.scope) : [];
+    let scopeSource = item?.scopeSource === 'diff' ? 'pr-diff' : 'item';
     if (item && !scope.length) {
       // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
       // already-changed files before refusing outright; see this function's own docblock for why that fallback is
@@ -300,6 +330,41 @@ export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO
       timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchCardScopeAtRef — #xcla4iv's real card-scope reader: ONE
+ * `gh api repos/<owner>/<repo>/contents/<path>?ref=<ref>` read (base64-decoded), parsed with the SAME
+ * `gray-matter` reader `we:src/_data/backlog.js`'s own canonical loader uses — never a hand-rolled YAML scan,
+ * so a card's `scope:` frontmatter is read identically here and there. This exists for exactly one population:
+ * a backlog card filed IN the same PR that delivers it, so it is not yet committed to `main` and `findItem`
+ * cannot see it — {@link resolvePrWorkUnit}'s own docblock has the full story. Best-effort, mirroring every
+ * other `gh`-backed reader in this file: ANY failure (no `gh`, the path/ref not found, malformed frontmatter,
+ * a missing/non-array `scope:`) degrades to `[]`, never throws — the caller ({@link resolvePrWorkUnit}) then
+ * falls back to the PR's raw diff paths exactly as it does when the card simply declares no scope.
+ *
+ * `{owner}`/`{repo}` PLACEHOLDERS, not a literal slug: `gh api` (unlike `gh pr diff`) has no `--repo` flag —
+ * these placeholders resolve from the given `repo` (when it names one — `GH_REPO`-style, via the endpoint
+ * template itself) or, when `repo` is `null`, from the checkout's own git remote at `cwd: root` (today's only
+ * reachable case is WE itself, whose checkout IS `chalbert/web-everything`).
+ * @param {string} path - repo-relative, e.g. `backlog/xzi292i-....md`.
+ * @param {string} ref - a commit sha (the PR's own `headRefOid`).
+ * @param {{exec?:Function, root?:string, repo?:string|null}} [o]
+ * @returns {string[]}
+ */
+export function fetchCardScopeAtRef(path, ref, { exec = execFileSyncThrottled, root = REPO_ROOT, repo = null } = {}) {
+  try {
+    const endpoint = `repos/${repo || '{owner}/{repo}'}/contents/${path}?ref=${ref}`;
+    const out = exec('gh', ['api', '--method', 'GET', endpoint, '--jq', '.content'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 * 1024 * 1024, cwd: root,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const decoded = Buffer.from(String(out || '').trim(), 'base64').toString('utf8');
+    const { data } = matter(decoded);
+    return Array.isArray(data?.scope) ? data.scope.map(String) : [];
   } catch {
     return [];
   }
@@ -733,8 +798,12 @@ export function runReconcileFixDispatch({
   reconcile = runReconcilePass,
   resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
   // #xmtbdgs multi-repo slice 6 — the item-less diff read; UN-prefixed (see `planFixesFromReconcile`'s own
-  // docblock for why this is a distinct binding from `resolveFallbackScope` above, which IS prefixed).
+  // docblock for why this is a distinct binding from `resolveFallbackScope` above, which IS prefixed). #xcla4iv
+  // — ALSO now reused for the named-item branch's card-in-diff check (see that call site's own comment).
   fetchItemlessDiffPaths = (pr) => fetchPrDiffPaths(pr, { root, repo }),
+  // #xcla4iv — reads one backlog card's own committed `scope:` at a specific ref, for the file-item-in-PR
+  // population {@link planFixesFromReconcile}'s docblock describes.
+  resolveCardScopeAtRef = (path, ref) => fetchCardScopeAtRef(path, ref, { root, repo }),
   resolveProfile = repoProfile,
   checkStaleness,
   prsFile, unsupportedPath,
@@ -781,7 +850,7 @@ export function runReconcileFixDispatch({
     const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...ciHealRefusals], path: unsupportedPath });
   }
-  const { planned, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths);
+  const { planned, refusals: planRefusals } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths, resolveCardScopeAtRef);
   const refusals = [...ciHealRefusals, ...planRefusals];
 
   // Lanes: THIS repo's own pool (`profile.lanePoolRepo` — `.` for WE, an absolute checkout path for a sibling
