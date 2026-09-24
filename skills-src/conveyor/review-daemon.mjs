@@ -90,6 +90,8 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconcile.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { runSessionReaperPass, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
+import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
+import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
@@ -141,7 +143,16 @@ export async function runDaemonLoop({
  * per-PR step is isolated in its own try/catch, mirroring `makeCliMechanicalPasses`'s own "one bad entry
  * never aborts the rest" discipline — a failed dispatch or a failed tag never stops the tick. `reconcile`
  * itself is now isolated the same way (#xvzwiew) — see the try/catch around it below for why.
- * @returns {{reviewsOwed:number, dispatched:Array<{prNumber:number, agentId:string|null}>, failed:Array<{prNumber:number, error:string}>, refusals:number, reconcileError:string|null, holdReconcile:Array<object>, holdReconcileError:string|null}}
+ *
+ * #3383 bug 3 — live-caught 2026-09-24: every dispatched review session runs its OWN `lane-pool.mjs acquire`
+ * as its first step (`review-dispatch.mjs`'s own brief; this daemon never acquires a lane itself), so a tick
+ * that fires N sessions against a pool with fewer than N lanes actually acquirable right now guarantees at
+ * least N-minus-acquirable of them fail (review-2597/2584/2578/2600/2602, all within 2 minutes, pool
+ * "web-everything" — every one an independent session hitting the SAME starved pool at once). `acquirableLanes`
+ * is a real read (`defaultAcquirableLaneCount`, wired in by `buildCliDaemonEffects` for the actual daemon) that
+ * this tick caps its own dispatch batch by; it defaults to an unbounded `() => Infinity` here so every
+ * pre-existing caller/test of this pure function is unaffected unless it opts in.
+ * @returns {{reviewsOwed:number, dispatched:Array<{prNumber:number, agentId:string|null}>, failed:Array<{prNumber:number, error:string}>, refusals:number, reconcileError:string|null, deferredForLanes:number, holdReconcile:Array<object>, holdReconcileError:string|null}}
  */
 export function runReviewTick({
   reconcile = runReconcilePass,
@@ -150,6 +161,7 @@ export function runReviewTick({
   tagStatus = tagReviewStatus,
   statusCandidates = selectStatusCandidates,
   holdReconcile = sweepReviewHoldLabels,
+  acquirableLanes = () => Infinity,
   repo = WE_SLUG,
 } = {}) {
   // #x01u7az — runs FIRST and INDEPENDENTLY of `reconcile`'s own plan: it is a plain `gh pr list` + label read
@@ -186,7 +198,7 @@ export function runReviewTick({
     plan = reconcile({ repo });
   } catch (e) {
     return {
-      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0,
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, deferredForLanes: 0,
       reconcileError: String((e && e.message) || e).split('\n')[0],
       holdReconcile: holdReconcileResults, holdReconcileError,
     };
@@ -197,9 +209,18 @@ export function runReviewTick({
   // session finished (PR #2472, ~2 hours stale). `selectStatusCandidates` now takes fix-owed entries as a
   // real third source, included below the same unconditional way `reviews` already is.
   const fixes = (plan.dispatch ?? []).filter((d) => d && d.kind === 'fix');
+  // #3383 bug 3 — cap THIS TICK's dispatch batch by how many lanes are actually acquirable right now, never
+  // by `reviews.length` alone. A deferred review is NOT lost: it stays owed (still counted in `reviewsOwed`
+  // and still fed to `statusCandidates` below, unchanged, since no session was ever bound to it), and simply
+  // reappears in the next tick's plan 120s later, by which point growth/reclaim/releases may well have freed
+  // up capacity. `Math.max(0, …)` tolerates a negative/garbage read the same way `Math.min` below tolerates
+  // an oversized one — both fail toward "dispatch nothing this tick", never toward "dispatch more than asked".
+  const acquirable = Math.max(0, Number(acquirableLanes({ repo })) || 0);
+  const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
+  const deferredForLanes = reviews.length - dispatchable.length;
   const dispatched = [];
   const failed = [];
-  for (const d of reviews) {
+  for (const d of dispatchable) {
     try {
       const result = dispatch({ pr: d.prNumber, repo });
       dispatched.push({ prNumber: d.prNumber, agentId: result.agentId ?? null });
@@ -215,7 +236,8 @@ export function runReviewTick({
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {
-    reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length, reconcileError: null,
+    reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length,
+    reconcileError: null, deferredForLanes,
     holdReconcile: holdReconcileResults, holdReconcileError,
   };
 }
@@ -238,7 +260,8 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  *   other option is forwarded to it for EVERY repo except `repo` itself, which this loop supplies per-iteration.
  * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, reviewsOwed:number,
  *   dispatched:Array<object>, failed:Array<object>, refusals:number, reconcileFailed:Array<{repo:string, error:string}>,
- *   holdReconcile:Array<{num:number, remove:string[], repo:string}>, holdReconcileFailed:Array<{repo:string, error:string}>}}
+ *   deferredForLanes:number, holdReconcile:Array<{num:number, remove:string[], repo:string}>,
+ *   holdReconcileFailed:Array<{repo:string, error:string}>}}
  */
 export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
   const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
@@ -259,6 +282,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   const holdReconcileFailed = [];
   let reviewsOwed = 0;
   let refusals = 0;
+  let deferredForLanes = 0;
   for (const entry of perRepo) {
     if (entry.error) {
       failed.push({ prNumber: null, repo: entry.repo, error: entry.error });
@@ -273,11 +297,12 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
     }
     reviewsOwed += result.reviewsOwed;
     refusals += result.refusals;
+    deferredForLanes += result.deferredForLanes ?? 0;
     for (const d of result.dispatched) dispatched.push({ ...d, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
   }
   return {
-    repos: perRepo, reviewsOwed, dispatched, failed, refusals, reconcileFailed,
+    repos: perRepo, reviewsOwed, dispatched, failed, refusals, reconcileFailed, deferredForLanes,
     holdReconcile: holdReconcileRemoved, holdReconcileFailed,
   };
 }
@@ -295,6 +320,22 @@ export function hasStaleMainRefusal(tickResult) {
   const failed = tickResult?.failed ?? [];
   const repos = tickResult?.repos ?? [];
   return failed.some((f) => isStaleMainRefusalMessage(f?.error)) || repos.some((r) => isStaleMainRefusalMessage(r?.error));
+}
+
+/**
+ * #3383 bug 3 — the REAL `acquirableLanes` effect: how many lanes are acquirable RIGHT NOW in `repo`'s own
+ * pool. Reuses `reconcile-fix-dispatch.mjs`'s own `freeLaneNumbers` — the SAME `lane-pool.mjs list
+ * --acquirable --json` read `tick-core.mjs`'s IO shell already uses — rather than re-deriving a second copy;
+ * `repoProfile(repo).lanePoolRepo` is the exact same derivation `review-dispatch.mjs#planReviewDispatch`
+ * already uses to pick which pool a given repo's own review session acquires from. Fail-soft, like
+ * `freeLaneNumbers` itself: any read hiccup (`gh`/git/lane-pool timeout) reads as 0 acquirable, so a starved
+ * or momentarily-unreadable pool defers EVERY review this tick rather than guessing high — self-heals next
+ * tick, 120s later.
+ * @param {{repo:string}} o
+ * @returns {number}
+ */
+export function defaultAcquirableLaneCount({ repo }) {
+  return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo }).length;
 }
 
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
@@ -331,7 +372,11 @@ export function defaultReapSessions() {
 
 export function buildCliDaemonEffects({
   owner, intervalMs = DEFAULT_INTERVAL_MS, log = console,
-  reapSessions = defaultReapSessions, runReview = runReviewTickAllRepos,
+  reapSessions = defaultReapSessions,
+  // #3383 bug 3 — the real daemon wires the real `acquirableLanes` effect through by default, so production
+  // dispatch is bounded by lane reality; `runReviewTick`'s OWN default stays unbounded (`() => Infinity`) so
+  // every pre-existing test of it (which fakes reconcile/dispatch directly, never this) is unaffected.
+  runReview = (opts) => runReviewTickAllRepos({ acquirableLanes: defaultAcquirableLaneCount, ...opts }),
 } = {}) {
   return {
     intervalMs,
@@ -351,7 +396,7 @@ export function buildCliDaemonEffects({
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
-      log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}`);
+      log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}${result.deferredForLanes ? `, deferred ${result.deferredForLanes} (no acquirable lane this tick, #3383)` : ''}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
       // #xvzwiew — a reconcile-phase failure (discovery itself, e.g. a transient `claude agents --json`
       // ENOENT) reports here ONLY, never also folded into the `failed` (dispatch) line above — see

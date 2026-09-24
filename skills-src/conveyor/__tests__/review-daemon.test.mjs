@@ -30,7 +30,7 @@ vi.mock('../../../scripts/conveyor/review-hold-reconcile.mjs', async (importOrig
 
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
-  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal,
+  REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
@@ -114,7 +114,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
     expect(out).toEqual({
       reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], refusals: 0,
-      reconcileError: null, holdReconcile: [], holdReconcileError: null,
+      reconcileError: null, deferredForLanes: 0, holdReconcile: [], holdReconcileError: null,
     });
   });
 
@@ -176,6 +176,92 @@ describe('runReviewTick — the per-tick sequence', () => {
   });
 });
 
+describe('runReviewTick — #3383 bug 3: dispatch is capped by acquirableLanes, never by reviews owed alone', () => {
+  const owedPlan = (entries, refusals = []) => ({ dispatch: entries, refusals });
+  const reviewsPlan = (n) => owedPlan(Array.from({ length: n }, (_, i) => ({ kind: 'review', prNumber: 100 + i, attempts: 0 })));
+
+  it('defaults to unbounded (Infinity) when acquirableLanes is omitted — every pre-existing caller is unaffected', () => {
+    const dispatch = vi.fn(({ pr }) => ({ agentId: `agent-${pr}` }));
+    const out = runReviewTick({ reconcile: () => reviewsPlan(5), dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(dispatch).toHaveBeenCalledTimes(5);
+    expect(out.dispatched).toHaveLength(5);
+    expect(out.deferredForLanes).toBe(0);
+  });
+
+  it('live incident shape (2026-09-24): 5 owed reviews, only 2 lanes acquirable → dispatches exactly 2, defers 3', () => {
+    const dispatch = vi.fn(({ pr }) => ({ agentId: `agent-${pr}` }));
+    const acquirableLanes = vi.fn(() => 2);
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(5), dispatch, tagRound: () => {}, tagStatus: () => {},
+      statusCandidates: () => [], acquirableLanes,
+    });
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledWith({ pr: 100, repo: expect.any(String) });
+    expect(dispatch).toHaveBeenCalledWith({ pr: 101, repo: expect.any(String) });
+    expect(out.reviewsOwed).toBe(5); // still owed — a deferral is not a loss
+    expect(out.dispatched).toHaveLength(2);
+    expect(out.deferredForLanes).toBe(3);
+    expect(acquirableLanes).toHaveBeenCalledWith({ repo: expect.any(String) });
+  });
+
+  it('zero acquirable lanes → dispatches nothing this tick, defers everything, never throws', () => {
+    const dispatch = vi.fn();
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(3), dispatch, tagRound: () => {}, tagStatus: () => {},
+      statusCandidates: () => [], acquirableLanes: () => 0,
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(out.deferredForLanes).toBe(3);
+    expect(out.reviewsOwed).toBe(3);
+  });
+
+  it('more lanes acquirable than reviews owed → dispatches every owed review, defers none', () => {
+    const dispatch = vi.fn(({ pr }) => ({ agentId: `agent-${pr}` }));
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(2), dispatch, tagRound: () => {}, tagStatus: () => {},
+      statusCandidates: () => [], acquirableLanes: () => 10,
+    });
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(out.deferredForLanes).toBe(0);
+  });
+
+  it('a negative/garbage acquirableLanes read fails toward "dispatch nothing", never toward "dispatch more"', () => {
+    const dispatch = vi.fn();
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(3), dispatch, tagRound: () => {}, tagStatus: () => {},
+      statusCandidates: () => [], acquirableLanes: () => -1,
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(out.deferredForLanes).toBe(3);
+  });
+
+  it('deferred reviews still feed statusCandidates (the whole owed list, not just what got dispatched)', () => {
+    const statusCandidates = vi.fn(() => []);
+    runReviewTick({
+      reconcile: () => reviewsPlan(4), dispatch: vi.fn(({ pr }) => ({ agentId: `agent-${pr}` })),
+      tagRound: () => {}, tagStatus: () => {}, statusCandidates, acquirableLanes: () => 1,
+    });
+    expect(statusCandidates).toHaveBeenCalledTimes(1);
+    expect(statusCandidates.mock.calls[0][0]).toHaveLength(4); // all 4 owed reviews, not just the 1 dispatched
+  });
+});
+
+describe('runReviewTickAllRepos — #3383 bug 3: deferredForLanes aggregates across repos', () => {
+  it('sums each repo tick\'s own deferredForLanes into the combined total', () => {
+    const tick = vi.fn()
+      .mockReturnValueOnce({ reviewsOwed: 3, dispatched: [], failed: [], refusals: 0, reconcileError: null, deferredForLanes: 2 })
+      .mockReturnValueOnce({ reviewsOwed: 1, dispatched: [], failed: [], refusals: 0, reconcileError: null, deferredForLanes: 0 });
+    const out = runReviewTickAllRepos({ repos: ['chalbert/web-everything', 'chalbert/frontierui'], tick });
+    expect(out.deferredForLanes).toBe(2);
+  });
+});
+
+describe('defaultAcquirableLaneCount — wiring only (never a real lane-pool/git call in this test)', () => {
+  it('is exported as a function taking {repo}', () => {
+    expect(typeof defaultAcquirableLaneCount).toBe('function');
+  });
+});
+
 describe('runReviewTick — reconcile itself is isolated (regression, #xvzwiew live-caught 2026-09-23)', () => {
   // Live production evidence (`~/workspace/wev-review-daemon/.conveyor/review-daemon.log`):
   //   review-daemon: chalbert/frontierui#? failed (non-fatal): spawnSync claude ENOENT
@@ -196,7 +282,7 @@ describe('runReviewTick — reconcile itself is isolated (regression, #xvzwiew l
       .not.toThrow();
     const out = runReviewTick({ reconcile, dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
     expect(out).toEqual({
-      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT',
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT', deferredForLanes: 0,
       holdReconcile: [], holdReconcileError: null,
     });
     expect(dispatch).not.toHaveBeenCalled(); // reconcile crashed before any PR was identified
