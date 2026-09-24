@@ -161,6 +161,59 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(readFileSync(join(repo, 'backlog/2201-dependent.md'), 'utf8')).toContain('  - xdead00');
   });
 
+  it('#3383 — the unresolved-reference fallback stays O(1) git subprocesses as the ref count grows, never O(refs)', () => {
+    // The live incident this proves against: `resolveReference`'s fallback used to build its visibility
+    // set with ONE `git ls-tree -r -- backlog/` subprocess PER visible ref (refs/heads/ + refs/remotes/) —
+    // fine with a handful of refs, but a 2000+-ref constellation clone turned a single numbering pass into
+    // a 10-14 minute wall-clock stall (measured live, #3383). Spy on the REAL `execFileSync` (still runs
+    // git for real — behavior must stay correct, not just fast) and assert: however many refs exist,
+    // `ls-tree` is called ZERO times (the O(refs) fan-out this item removes) and the replacement
+    // `rev-list --objects` walk is called AT MOST once (memoized per `numberPendingHashes` call).
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xflight-in-flight.md', '---\nkind: story\n---\n# Flight\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', '.'); git('commit', '-qm', 'in-flight branch');
+    git('branch', 'lane/flight');
+    // Simulate a mature constellation clone's ref pile-up: many MORE branches, none of which carry the
+    // referenced hash — only `lane/flight` (created above) does. If the fallback were still O(refs), each
+    // of these would cost its own `ls-tree -r` subprocess; the assertion below proves it no longer does.
+    for (let i = 0; i < 30; i++) git('branch', `lane/decoy-${i}`);
+    git('rm', 'backlog/xflight-in-flight.md');
+    write('backlog/xdep002-dependent.md', '---\nkind: story\nblockedBy:\n  - xflight\n  - xdead00\n---\n# Dependent\n');
+    git('add', '.'); git('commit', '-qm', 'dependent lands');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+
+    // Node's built-in `child_process` module is not spy-able (its exports are non-configurable), so the
+    // subprocess count is observed instead with a real PATH-shadowing `git` shim: every invocation is
+    // logged to a file, then re-executed against the REAL git — behavior stays exactly real, only the
+    // call log is new instrumentation.
+    const shimDir = mkdtempSync(join(tmpdir(), 'git-shim-'));
+    const logFile = join(shimDir, 'calls.log');
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(shimDir, 'git'), `#!/bin/sh\necho "$@" >> "${logFile}"\nexec "${realGit}" "$@"\n`);
+    execFileSync('chmod', ['+x', join(shimDir, 'git')]);
+    const origPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${origPath}`;
+    try {
+      const res = numberPendingHashes(repo, { dryRun: true });
+      // Correctness is unchanged (same fixture shape as the test above): xflight still resolves in-flight
+      // via `lane/flight`, xdead00 still resolves unresolvable — proving the O(1) replacement answers the
+      // SAME question, not a cheaper-but-wrong one.
+      expect(res.unresolvedReferences).toEqual([
+        { hash: 'xflight', name: 'xdep002-dependent', status: 'in-flight' },
+        { hash: 'xdead00', name: 'xdep002-dependent', status: 'unresolvable' },
+      ]);
+      const calls = existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n').filter(Boolean) : [];
+      const lsTreeCalls = calls.filter((l) => l.startsWith('ls-tree'));
+      const revListCalls = calls.filter((l) => l.startsWith('rev-list'));
+      expect(lsTreeCalls.length).toBe(0); // the O(refs) fan-out this item removes
+      expect(revListCalls.length).toBeLessThanOrEqual(1); // the O(1) replacement, memoized per call
+    } finally {
+      process.env.PATH = origPath;
+      rmSync(shimDir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the ledger entry when other couples are still queued (cross-lane repair later)', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');

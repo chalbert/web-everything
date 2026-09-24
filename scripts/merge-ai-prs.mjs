@@ -115,7 +115,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
 import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath } from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
-import { mergePr, hasNonEmptyBody, scanTestTampering } from './lib/pr-merge-gate.mjs';
+import { mergePr, hasNonEmptyBody, scanTestTampering, retargetStackedPrs } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime + (#3440) localRepoSlug keys that lease per-repo
@@ -3358,6 +3358,10 @@ async function runCli() {
   // reused across `--watch` passes. A failed read stays unresolved (retried next pass) and leaves the
   // non-default-base arm inert for that repo, so the chain degrades to its pre-#3674 behaviour, never to a land.
   const defaultBranchByRepo = new Map();
+  // #3383 — a REAL local binding (not just the `defaultBranchOf:` shorthand-property below, which only names a
+  // VALUE inside the `prepareDrainVerdicts` call's argument object and is invisible everywhere else in this
+  // closure). The stacked-PR retarget call further down needs the SAME lookup by NAME, not re-derived.
+  const defaultBranchOf = (repo) => defaultBranchByRepo.get(repo) ?? null;
   // #2417 review — returns `{ commits, degraded }`. `degraded:true` means the gh read THREW (a swallowed transient
   // failure): the empty `[]` is a fallback, not a confirmed "no commits", so `fetchPrReadsCached` declines to cache
   // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
@@ -3654,7 +3658,7 @@ async function runCli() {
     label,
     isLocalRepo,
     localSlug,
-    defaultBranchOf: (repo) => defaultBranchByRepo.get(repo) ?? null,
+    defaultBranchOf,
   }));
   // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
   // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
@@ -4582,6 +4586,21 @@ async function runCli() {
             const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
             const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, traceReason, null, preread.comments);
             if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${traceHeadSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
+          }
+          // #3383 — BEFORE the merge below (which lands with `--delete-branch`, or the repo may auto-delete
+          // the head branch on merge either way), retarget any OPEN PR stacked on THIS branch to the repo's
+          // default branch. Left unguarded, GitHub CLOSES (never retargets) a PR whose base branch just
+          // vanished — the #2578 incident: an approved, unmerged sibling PR was silently killed by a
+          // base-branch delete it had nothing to do with, and by the time it's closed GitHub refuses both
+          // `pr edit --base` and reopen (verified live recovering #2578), so this MUST run before the merge,
+          // not after. `--base <headRef>` scopes the listing to exactly the stacked set — no full-repo PR
+          // fan-out. Best-effort: a `gh` miss here must never block the merge itself.
+          {
+            const defBranch = defaultBranchOf(c.repo) || 'main';
+            retargetStackedPrs({ repo: c.repo, headRef: c.headRef, defaultBranch: defBranch,
+              onRetarget: (num) => { if (!AS_JSON) process.stderr.write(`  ↷ ${repoTag(c.repo)}${num} retargeted ${c.headRef}→${defBranch} before deleting the merged branch (#3383)\n`); },
+              onFailed: (num) => { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${num} could not be retargeted off ${c.headRef} before the merge — it may get closed by the branch delete (#3383)\n`); },
+            });
           }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
