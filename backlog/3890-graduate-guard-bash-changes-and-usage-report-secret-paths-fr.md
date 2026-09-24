@@ -3,9 +3,11 @@ bornAs: x28e3i6
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/__tests__/guard-bash.test.mjs", "we:scripts/guard-bash.mjs", "we:scripts/lib/usage-report-secret-paths.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
