@@ -157,6 +157,19 @@ export function readVerifyMarker(gitDir) {
   }
 }
 
+/**
+ * Should a lane RESET keep the verify marker it finds? Pure. Only a record for the very commit the reset lands on
+ * survives; anything else belongs to the previous holder's tree (#3383, 2026-09-23: a freshly acquired lane kept
+ * a stranger's terminal green for another sha, and `verify-lane.mjs` refused to START (`superseded`) until someone
+ * ran `reset` by hand). A corrupt marker never survives.
+ * @param {object|null} record {@link readVerifyMarker} output
+ * @param {string} headSha the commit the reset left HEAD on
+ */
+export function keepMarkerAfterReset(record, headSha) {
+  if (!record || record.corrupt) return false;
+  return typeof record.sha === 'string' && record.sha === headSha;
+}
+
 /** The tokens that mean "no" in a flag value or an env var. `''` is deliberately NOT one of them: an env var set
  *  to empty is an accident, not a decision, and a fail-closed gate must not read an accident as consent (#3321). */
 const NEGATIVE_TOKENS = new Set(['0', 'false', 'no', 'off']);
