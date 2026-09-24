@@ -5174,3 +5174,51 @@ and its lock dir (`.lane-pool-list-cache-lock`) was empty afterward (released cl
 
 Nothing from the card was left undone. Committed and pushed directly to
 `lane/mechanical-dispatcher` per the epic's prototype doctrine (no PR).
+
+## Session update (2026-09-23) — xhlriy2 + xxna58l: heavy-admission waits out a live holder up to a 120m ceiling (off-escape, still-waiting log); package.json + guard-bash now gate the site build, playwright and raw vitest runs behind the queue
+
+**xhlriy2** (`scripts/readiness/heavy-admission.mjs`) — the old `DEFAULT_TIMEOUT_MS` (20 minutes)
+let a waiter fail open and run unslotted purely on elapsed time, even while a slot holder was
+still alive, which under real load (test runs 25-40 minutes, several lanes waiting) broke the
+admission cap exactly when it mattered. `acquireSlotBlocking` now keeps polling — logging a
+periodic "still waiting" line (`STILL_WAITING_LOG_MS`, 5 min) — for as long as `tryAcquireSlot`
+keeps losing, which (via the existing pid-liveness probe + lease-TTL reclaim in `file-locks.mjs`)
+can only happen while a holder is genuinely alive with an unexpired lease; the instant every
+holder is provably dead or lease-expired, the next attempt reclaims a real slot rather than
+running unslotted. A new hard ceiling (`DEFAULT_ADMISSION_CEILING_MS`, default 120 minutes,
+`WE_HEAVY_ADMISSION_CEILING_MS` override) is the only remaining give-up point, firing with a loud
+`⚠⚠ HARD CEILING` warning. Also added the explicit `WE_HEAVY_ADMISSION=off` escape hatch
+(`isAdmissionOff`), checked first, as a pure pass-through. `DEFAULT_TIMEOUT_MS`/`resolveTimeoutMs`
+are unchanged (still read by `verify-lane.mjs`/the CLI) but no longer decide the give-up point.
+63 unit tests pass (54 existing + 9 new).
+
+**xxna58l** (`package.json`, `scripts/guard-bash.mjs`) — `test:unit` and `check:standards` are now
+wrapped in `node scripts/readiness/heavy-admission.mjs run -- <cmd>` (bringing the prototype to the
+same form `main`'s xaipsbs already landed), and this goes further: `build` (the eleventy+vite
+chain, wrapped via `sh -c '...'` so the compound `&&` still runs under one admission slot) and every
+playwright script (`test:integration`/`test:e2e`/`test:smoke`/`test:a11y`/`test:interaction`) are
+now wrapped too. `test` (vitest watch mode) is deliberately left unwrapped and unrecorded-nowhere-
+else-but-here: it never exits, so wrapping it would hold an admission slot for the entire dev
+session with no way to release it, starving the other slot for as long as someone has `npm test`
+open.
+
+`guard-bash.mjs` gets a new arm, `rawHeavyCommandReason`, extending the raw-heavy-command
+detection: a session's direct, unqueued `vitest run` (whole suite), `playwright test`, or
+`eleventy` invocation is now denied with a message pointing at the wrapped npm script. The
+targeted-vitest threshold (`RAW_VITEST_TARGETED_FILE_LIMIT = 2`) was decided from measured local
+timing: a single-file `vitest run` against `heavy-admission.test.mjs` (54-63 tests) completed in
+~1.6s wall-clock; a 1-2 file run stays in that band, so gating it behind the same queue as a
+25-40-minute full run would only add latency with no contention benefit. Playwright has no
+comparable fast mode, so every direct `playwright test` is denied outright. The eleventy check is
+skipped at primary cwd — it defers to the existing, more specific `isTreeWritingBuildRun`
+tree-write-safety arm (#2749/#2788) and its large spelling-equivalence regression corpus, which
+asserts these commands are untouched in a lane clone; at a lane cwd (which that arm never gates)
+this closes the real gap, since the #3461 admission queue is host-wide across every lane. Two of
+that corpus's own generic assertions ("untouched in a lane" / "never denied at primary") now derive
+an exclusion from `decide()`'s own verdict for the handful of rows the new arm legitimately
+reaches (including through the file's existing nested-command extraction — `yarn dlx eleventy`,
+`sh -c "eleventy"`, `npm exec --package=vitest vitest run`), rather than a hand-maintained list.
+335 unit tests pass (63 heavy-admission + 272 guard-bash, up from a 325 baseline).
+
+Both items commit directly to `lane/mechanical-dispatcher` per #3383 doctrine — no PR. Nothing
+left undone from either card's own scope.
