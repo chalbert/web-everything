@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:package.json", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: one-off
 tags: []
 ---
 
