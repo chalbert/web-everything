@@ -75,10 +75,15 @@ export function installChildReaper({ pollMs = 2000, log = () => {} } = {}) {
  *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number, env?: NodeJS.ProcessEnv, cwd?: string }} [opts]
+ * @param {{ timeoutMs?: number, env?: NodeJS.ProcessEnv, cwd?: string, maxBytes?: number }} [opts] `maxBytes`
+ *   (#x5n4zn3) — an optional stdout cap, matching the `maxBuffer` several `execFileSync` call sites this
+ *   function's rollout replaces already relied on: a verbose-but-not-hung child (a huge `gh`/backlog JSON
+ *   payload) must not grow `out` unbounded in memory just because it never hits the timeout. Killed and
+ *   rejected the same way a timeout is; omitted (the default) keeps today's unbounded behavior for every
+ *   existing caller.
  * @returns {Promise<string>}
  */
-export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, env, cwd } = {}) {
+export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, env, cwd, maxBytes } = {}) {
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
@@ -91,7 +96,12 @@ export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, en
     let out = '';
     let err = '';
     let timedOut = false;
-    child.stdout.setEncoding('utf8').on('data', (d) => { out += d; });
+    let overBudget = false;
+    child.stdout.setEncoding('utf8').on('data', (d) => {
+      if (overBudget) return;
+      out += d;
+      if (maxBytes && out.length > maxBytes) { overBudget = true; killGroup(child, 'SIGKILL'); }
+    });
     child.stderr.setEncoding('utf8').on('data', (d) => { err += d; });
     const timer = setTimeout(() => {
       timedOut = true;
@@ -102,7 +112,8 @@ export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, en
     child.on('error', (e) => { done(); reject(e); });
     child.on('close', (code, signal) => {
       done();
-      if (timedOut) reject(new Error(`timed out after ${timeoutMs}ms (process group killed)`));
+      if (overBudget) reject(new Error(`output exceeded ${maxBytes} bytes (process group killed)`));
+      else if (timedOut) reject(new Error(`timed out after ${timeoutMs}ms (process group killed)`));
       else if (code !== 0) reject(new Error(`exited ${code ?? signal}: ${err.trim().split('\n')[0] || '(no stderr)'}`));
       else resolvePromise(out);
     });

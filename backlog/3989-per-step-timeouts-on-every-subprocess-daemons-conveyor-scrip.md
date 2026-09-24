@@ -3,11 +3,11 @@ bornAs: x5n4zn3
 kind: story
 size: 3
 parent: "3383"
-status: active
-scaffoldedBy: "session-3383-lane-guard"
-dateScaffolded: "2026-09-23"
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/readiness/conveyor-state.mjs", "we:scripts/readiness/dispatch-plan.mjs", "we:scripts/conveyor"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 

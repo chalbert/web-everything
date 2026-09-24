@@ -138,6 +138,7 @@
 import { mintSessionSlug } from './session-slug.mjs';
 import { normNum } from './queue-store.mjs';
 import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurrency.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
@@ -1452,7 +1453,10 @@ async function main(argv) {
   const runJson = (cmd, args, what) => {
     let out;
     try {
-      out = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+      // #x5n4zn3 — was bare (no timeout): this is the tick's read of `conveyor-state.mjs`/`dispatch-plan.mjs`/
+      // `lane-pool.mjs list --acquirable` — literally the class of hang #3383 filed this whole rollout for
+      // (a hung `list --acquirable` burning the drain's whole 45-min pass cap).
+      out = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 2, killSignal: 'SIGKILL' });
     } catch (e) {
       fail(`${what} failed: ${String(e.message || e).split('\n')[0]}`);
     }
@@ -1544,8 +1548,10 @@ async function main(argv) {
     const prViewArgs = ['pr', 'view', String(p.prNumber), '--json', 'comments'];
     if (typeof flags.repo === 'string') { prViewArgs.push(`--repo=${flags.repo}`); }
     try {
+      // #x5n4zn3 — was bare (no timeout); best-effort per-PR read, so a bound here just means one PR's
+      // floor stays unset instead of the whole tick stalling on it.
       const raw = time('prCommentReadsMs', () => execFileSync('gh', prViewArgs,
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }));
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
       const comments = JSON.parse(raw)?.comments;
       if (wantsRearm) prRearmCounts[p.prNumber] = countRearmComments(comments);
       if (wantsCiHeal) prCiHealCounts[p.prNumber] = countCiHealComments(comments);
@@ -1559,7 +1565,8 @@ async function main(argv) {
   if (typeof flags.repo === 'string') { admissionArgs.push(`--repo=${flags.repo}`); }
   let admission = {};
   try {
-    const raw = time('admissionStatusMs', () => execFileSync('node', [ADMISSION_CLI, ...admissionArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }));
+    // #x5n4zn3 — was bare (no timeout).
+    const raw = time('admissionStatusMs', () => execFileSync('node', [ADMISSION_CLI, ...admissionArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
     admission = JSON.parse(raw);
   } catch { /* best-effort — see comment above */ }
 

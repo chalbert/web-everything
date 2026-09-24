@@ -33,7 +33,6 @@
  *   failing the whole tick.
  */
 
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -59,6 +58,13 @@ import { deriveInfraByNum, readInfraStore, resolveInfraStorePath, correlateCause
 import { normScope } from './scope-lease.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
 import { isGroupingKind } from '../check-standards-rules.mjs';
+// #x5n4zn3 — the SAME async rollout `we:scripts/readiness/dispatch-plan.mjs` already uses for its own
+// collectors: `main()` here is already `async` (nothing else to propagate), and every bare `execFileSync`
+// call site below shells another whole CLI (`backlog.mjs`/`lane-pool.mjs`/`scope-lease-collect.mjs`/the
+// cross-repo drain-daemon/`gh`) exactly ONCE per tick, never in a per-item loop — so switching to `runBounded`
+// is the low-risk, faithful rollout here (unlike `we:scripts/lane-pool.mjs`'s own internal git helper, which
+// stays synchronous — see that file's header for why).
+import { runBounded } from '../lib/bounded-child.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process / gh — every input is passed IN) ───────────────────────────
 
@@ -643,10 +649,14 @@ function parseFlags(argv) {
   return flags;
 }
 
+// #x5n4zn3 — a listing/status call's budget: generous enough for a real pool/backlog walk, but bounded so a
+// hung child (the 2026-09-23 incident: `lane-pool.mjs list`-shaped reads stalling) fails THIS one section of
+// the tick, never the whole tick.
+const RUN_JSON_TIMEOUT_MS = 2 * 60_000;
 /** Run a node CLI and JSON-parse its stdout, or return `fallback` + push a message to `errors` on any failure. */
-function runJson(node, args, { cwd = ROOT, errors, label } = {}) {
+async function runJson(node, args, { cwd = ROOT, errors, label } = {}) {
   try {
-    const out = execFileSync(node, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    const out = await runBounded(node, args, { cwd, timeoutMs: RUN_JSON_TIMEOUT_MS, maxBytes: 64 * 1024 * 1024 });
     return JSON.parse(out);
   } catch (e) {
     if (errors) errors.push(`${label}: ${String(e.message || e).split('\n')[0]}`);
@@ -781,7 +791,7 @@ async function main(argv) {
     buildQueueArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
     process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
   }
-  const buildQueue = runJson('node', [BACKLOG_CLI, ...buildQueueArgs], { errors, label: 'build-queue' });
+  const buildQueue = await runJson('node', [BACKLOG_CLI, ...buildQueueArgs], { errors, label: 'build-queue' });
 
   // 1b. Enrich the build-queue rows with each item's predicted `scope`, `kind`, `epicState`, and `preparedDate`
   //     (the `build-queue` view omits them) so the tick picture can flag UNSHAPED armed items — cleared-for-build
@@ -832,12 +842,12 @@ async function main(argv) {
     const poolArgs = ['status', '--json'];
     if (typeof flags.repo === 'string') poolArgs.push(`--repo=${flags.repo}`);
     if (typeof flags.name === 'string') poolArgs.push(`--name=${flags.name}`);
-    poolStatus = runJson('node', [LANE_POOL_CLI, ...poolArgs], { errors, label: 'lane-pool status' });
+    poolStatus = await runJson('node', [LANE_POOL_CLI, ...poolArgs], { errors, label: 'lane-pool status' });
     // `--no-track-attempts` keeps this a PURE read (no breach-counter sidecar writes) — a state read must not mutate.
     const scopeArgs = ['--json', '--no-track-attempts'];
     if (typeof flags.repo === 'string') scopeArgs.push(`--repo=${flags.repo}`);
     if (typeof flags.name === 'string') scopeArgs.push(`--name=${flags.name}`);
-    scopePicture = runJson('node', [SCOPE_COLLECT_CLI, ...scopeArgs], { errors, label: 'scope-lease-collect' });
+    scopePicture = await runJson('node', [SCOPE_COLLECT_CLI, ...scopeArgs], { errors, label: 'scope-lease-collect' });
   }
 
   // 3. In-flight lane PRs (this repo's open PRs).
@@ -848,7 +858,7 @@ async function main(argv) {
     // has nothing to scan.
     const prArgs = ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,state,statusCheckRollup,labels,headRefName,mergeStateStatus,comments'];
     if (typeof flags.repo === 'string') prArgs.push(`--repo=${flags.repo}`);
-    const out = execFileSync('gh', prArgs, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+    const out = await runBounded('gh', prArgs, { cwd: ROOT, timeoutMs: RUN_JSON_TIMEOUT_MS, maxBytes: 32 * 1024 * 1024 });
     prList = JSON.parse(out || '[]');
   } catch (e) {
     errors.push(`gh pr list: ${String(e.message || e).split('\n')[0]}`);
@@ -862,7 +872,7 @@ async function main(argv) {
     // The daemon is explicitly best-effort + cross-repo, so a present-but-THROWING daemon must degrade IDENTICALLY
     // to an absent one: NO `errors` sink is passed here, so a failed read returns undefined → null → shapeDaemon
     // "unavailable", and a cross-repo daemon hiccup never flips the whole tick's health verdict to warn.
-    daemonReport = runJson('node', [daemonCli, 'status', '--json'], { cwd: dirname(daemonCli), label: 'drain-daemon status' }) ?? null;
+    daemonReport = (await runJson('node', [daemonCli, 'status', '--json'], { cwd: dirname(daemonCli), label: 'drain-daemon status' })) ?? null;
   }
   // A null report (absent CLI OR a failed/throwing read) shapes to "unavailable" — expected degradation, never an
   // `errors[]` row (the contract: the daemon section can vanish without warning the whole tick).

@@ -117,6 +117,11 @@ import { readField } from './backlog/frontmatter.mjs';
 // the acquire-time twin of `cleanLaneLitter`'s release-time cleanup — same allowlist, same verdict, never a
 // second hand-rolled classifier.
 import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
+// #x5n4zn3 — the SAME shared budget policy `we:scripts/lib/bounded-child.mjs`'s async `runBounded` rollout
+// uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
+// / the `WE_CHILD_TIMEOUT_MS` env knob), NOT its async primitive — see the `git`/`gitQuiet` header comment
+// below for why this file deliberately stays synchronous.
+import { resolveChildTimeoutMs } from './lib/bounded-child.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -155,10 +160,39 @@ const readOnlyGitEnv = (args) => (isReadOnlyGit(args) ? { env: { ...process.env,
 // per-call `timeout` (ls-remote's 20s) still wins. Null outside a scan ⇒ no cap, today's behaviour.
 let scanDeadlineMs = null;
 const scanTimeoutOpt = () => (scanDeadlineMs === null ? {} : { timeout: Math.max(1, scanDeadlineMs - Date.now()) });
+// #x5n4zn3 — the 2026-09-23 incident (#3383): `list --acquirable` (and, worse, `acquire`/`refresh`/`provision`,
+// none of which ever set `scanDeadlineMs`) could shell a `git` call with NO timeout at all outside an explicit
+// scan, and a stuck one (typically the network transport underneath `fetch`/`ls-remote`, never plain local
+// plumbing) ran for up to an hour, burning a whole 45-minute drain pass. EVERY `git()`/`gitQuiet()` call now
+// gets a hard DEFAULT ceiling — `resolveChildTimeoutMs()` (5 min, env `WE_CHILD_TIMEOUT_MS`) for the fast local
+// plumbing this file mostly does, `NETWORK_GIT_TIMEOUT_MS` (10 min) for the few genuinely network-bound calls
+// (fetch/clone) that pass it explicitly — so a hung child fails FAST instead of eating the caller's whole pass.
+// `scanTimeoutOpt()`'s shrinking scan-remaining budget and any caller-supplied `opts.timeout` still win when
+// smaller (spread last), so this never widens `list --acquirable`'s existing bound, only backstops every OTHER
+// command that had none.
+//
+// DELIBERATELY NOT the async `runBounded` rollout `we:scripts/lib/bounded-child.mjs` also ships (used verbatim
+// in `we:scripts/readiness/dispatch-plan.mjs`): `git`/`tryGit`/`gitQuiet` are called from ~40 sites across
+// nearly every command in this 2000+ line file (acquire/release/provision/refresh/status/list), so switching
+// them to async would ripple `async`/`await` through almost the whole file — exactly the "keep the diff to the
+// spawn call sites only" scope #x5n4zn3 was told to respect, since #x3xz8qp is concurrently adding spawn-COUNT
+// regression tests over these SAME loops (`aheadIsProvablyPushed`, `cherryAllPatchEquivalent`,
+// `otherRemoteHeadsPatchEquivalentBatched`) and a whole-file rewrite here would collide with that work for no
+// gain (this file's callers are direct CLI invocations, not a hung-child-inside-a-bigger-async-pass the way
+// `dispatch-plan.mjs`'s collectors are).
+//
+// ACCEPTED RESIDUAL, stated rather than hidden: `execFileSync`'s native `timeout`/`killSignal` kills only the
+// immediate `git` pid, not a whole process GROUP the way `runBounded`'s `detached: true` + negative-pid kill
+// does — a `git-remote-https`/`ssh` transport helper `git` itself forked could in principle survive past the
+// timeout. Every OUTER caller that shells THIS whole script as a child (`we:scripts/readiness/dispatch-plan.mjs`
+// via `runBounded`, itself `detached: true`) still reaps that residual case at the process-group level, because
+// this script's own `git` children land in the SAME group as the outer `node lane-pool.mjs` process.
+const NETWORK_GIT_TIMEOUT_MS = 10 * 60_000;
+const defaultGitTimeoutOpt = () => ({ timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
 const git = (args, cwd, opts = {}) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...readOnlyGitEnv(args), ...scanTimeoutOpt(), ...opts }).trim();
-const gitQuiet = (args, cwd) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'inherit'] });
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...defaultGitTimeoutOpt(), ...readOnlyGitEnv(args), ...scanTimeoutOpt(), ...opts }).trim();
+const gitQuiet = (args, cwd, opts = {}) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'inherit'], timeout: NETWORK_GIT_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts });
 const tryGit = (args, cwd, opts = {}) => {
   try {
     return git(args, cwd, opts);
@@ -184,7 +218,7 @@ function blockingSleep(ms) {
 function fetchOriginPruneWithRetry(dir) {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return git(['fetch', 'origin', '--prune', '--quiet'], dir);
+      return git(['fetch', 'origin', '--prune', '--quiet'], dir, { timeout: NETWORK_GIT_TIMEOUT_MS });
     } catch (e) {
       const msg = String(e?.stderr || e?.message || e);
       if (!isTransientRefLockError(msg) || attempt >= FETCH_LOCK_RETRY_ATTEMPTS) throw e;
@@ -202,7 +236,13 @@ const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) 
 // `<checkout>`, so handing it a subdirectory would put the pool INSIDE the repo (#1539 reviewer, round 2).
 // A lane needs no normalising — `workspaceFor` strips at `.lanes` from any depth — but this is the honest
 // input either way. Falls back to the cwd outside a git repo, where there is nothing better to say.
-const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd()) || process.cwd();
+// #x5n4zn3 — a purely-local read (no network) that runs on EVERY invocation, before any command dispatch: a
+// short, tight budget (not the generic 5-min default) so a wedged git config/index never stalls the CLI at
+// startup. `Math.min` with `resolveChildTimeoutMs()` so the SAME `WE_CHILD_TIMEOUT_MS` env override that tunes
+// every other call in this file (and a test wanting a fast bounded-hang proof) also tunes this one, while a
+// production run with no override still gets the tighter 15s ceiling, not the generic 5-minute default.
+const LOCAL_GIT_TIMEOUT_MS = Math.min(resolveChildTimeoutMs(), 15_000);
+const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd(), { timeout: LOCAL_GIT_TIMEOUT_MS }) || process.cwd();
 // #3383 — `guardedPoolRoot` (not the bare `defaultPoolRoot`) so a vitest run that spawns this CLI for real with
 // no pool-root override fails LOUDLY and immediately, instead of quietly hammering the shared real pool (see
 // that function's own header for the incident this closes). `fail` is a hoisted function declaration further
@@ -222,8 +262,8 @@ try {
 function resolveRepo() {
   const repoPath = resolve(expandHome(flags.repo) || process.cwd());
   const referencePath = resolve(expandHome(flags.reference) || repoPath);
-  const topLevel = tryGit(['rev-parse', '--show-toplevel'], referencePath) || referencePath;
-  const originUrl = flags.origin || tryGit(['remote', 'get-url', 'origin'], topLevel);
+  const topLevel = tryGit(['rev-parse', '--show-toplevel'], referencePath, { timeout: LOCAL_GIT_TIMEOUT_MS }) || referencePath;
+  const originUrl = flags.origin || tryGit(['remote', 'get-url', 'origin'], topLevel, { timeout: LOCAL_GIT_TIMEOUT_MS });
   // #2667 — `--pool=<name>` selects a pool DIRECTLY by its directory name under POOL_ROOT, bypassing origin-URL
   // derivation. It is the pool selector for the READ / RELEASE ops (status / list / path / release) that need
   // only `poolDir` — e.g. the main session releasing a cross-locus couple's lingering lease in the `plateau-app`
@@ -237,7 +277,7 @@ function resolveRepo() {
   }
   const name = explicitPool || flags.name || basename(originUrl).replace(/\.git$/, '');
   // Default integration branch: the reference's origin/HEAD if known, else `main`.
-  const head = tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], topLevel);
+  const head = tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], topLevel, { timeout: LOCAL_GIT_TIMEOUT_MS });
   const branch = flags.branch || (head ? head.replace(/^origin\//, '') : 'main');
   return { name, originUrl: originUrl || null, referencePath: topLevel, branch, poolDir: join(POOL_ROOT, name) };
 }
@@ -352,7 +392,9 @@ function buildSibling(dir, name) {
   }
   log(`  building ${name} sibling (npm run build:tools) …`);
   try {
-    execFileSync('npm', ['run', 'build:tools'], { cwd: dir, stdio: 'inherit' });
+    // #x5n4zn3 — generous (a real build), but never unbounded: a wedged build must fail this ONE sibling, not
+    // hang the whole `provision`/`refresh` pass.
+    execFileSync('npm', ['run', 'build:tools'], { cwd: dir, stdio: 'inherit', timeout: NPM_TIMEOUT_MS, killSignal: 'SIGKILL' });
   } catch (e) {
     log(`  ⚠ ${name} sibling build:tools failed — WE-lane render may see a stale/missing dist/ (${e.message})`);
   }
@@ -406,7 +448,7 @@ function ensureOneSibling(repo, name, { force = false } = {}) {
 
   const branchRef = tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], dest);
   const branch = branchRef ? branchRef.replace(/^origin\//, '') : 'main';
-  tryGit(['fetch', 'origin', '--prune', '--quiet'], dest);
+  tryGit(['fetch', 'origin', '--prune', '--quiet'], dest, { timeout: NETWORK_GIT_TIMEOUT_MS });
 
   if (!force) {
     // #2267-style data-loss guard, now load-bearing here too: this clone is real & pushable (unlike the
@@ -495,9 +537,15 @@ function registerItemsToLane(repo, n, items) {
 
 // Lane indices on disk under a pool DIR, sorted by index (the primitive both the repo-scoped `existingLanes`
 // and the #2667 cross-pool sweep share, so "what counts as a lane" is defined in exactly one place).
+// #x5n4zn3 — a local directory listing: practically instant, but still bounded (a wedged network mount is the
+// one realistic way this hangs, and it must not take the whole pool status/list with it).
+const LS_TIMEOUT_MS = 15_000;
+// #x5n4zn3 — a real `npm ci`/`install`, generous like the sibling build above: bounded so a stuck npm registry
+// fails ONE lane's dep install, not the whole acquire/provision/refresh pass.
+const NPM_TIMEOUT_MS = 10 * 60_000;
 function laneIndicesIn(poolDir) {
   if (!existsSync(poolDir)) return [];
-  return execFileSync('ls', ['-1', poolDir], { encoding: 'utf8' })
+  return execFileSync('ls', ['-1', poolDir], { encoding: 'utf8', timeout: LS_TIMEOUT_MS, killSignal: 'SIGKILL' })
     .split('\n')
     .map((d) => d.trim())
     .filter((d) => /^lane-\d+$/.test(d))
@@ -516,7 +564,7 @@ function existingLanes(repo) {
 // children, so they never match. This is the set the cross-pool release-by-session sweep walks.
 function existingPools() {
   if (!existsSync(POOL_ROOT)) return [];
-  return execFileSync('ls', ['-1', POOL_ROOT], { encoding: 'utf8' })
+  return execFileSync('ls', ['-1', POOL_ROOT], { encoding: 'utf8', timeout: LS_TIMEOUT_MS, killSignal: 'SIGKILL' })
     .split('\n')
     .map((d) => d.trim())
     .filter(Boolean)
@@ -556,7 +604,7 @@ function ensureDeps(dir) {
   if (state === 'n/a' || state === 'ok') return state;
   const useCi = existsSync(join(dir, 'package-lock.json'));
   log(`  deps ${state} → npm ${useCi ? 'ci' : 'install'} in ${dir} …`);
-  execFileSync('npm', [useCi ? 'ci' : 'install'], { cwd: dir, stdio: 'inherit' });
+  execFileSync('npm', [useCi ? 'ci' : 'install'], { cwd: dir, stdio: 'inherit', timeout: NPM_TIMEOUT_MS, killSignal: 'SIGKILL' });
   writeFileSync(DEPS_MARKER(dir), lockHash(dir));
   return 'installed';
 }
@@ -1183,7 +1231,9 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
   try {
     // `timeout` bounds the worst case: a slow/hung/unauthenticated gh must NEVER stall a dispatch acquire —
     // it degrades the PR axis to OFF (the offline item-resolved axis + TTL still apply), never blocks.
-    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 });
+    // #x5n4zn3 — already had `timeout` (reconciled, not double-wrapped); added `killSignal` for the same
+    // fail-fast certainty every other call site here now gets.
+    const out = execFileSync('gh', ['pr', 'list', '--state', 'all', '--limit', '400', '--json', 'number,state,mergedAt,headRefName'], { cwd: repo.referencePath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, killSignal: 'SIGKILL' });
     prStates = prStatesFromList(JSON.parse(out));
   } catch { prStates = null; }
   // Item-resolved axis (OFFLINE): read the pool's origin/<branch> backlog listing ONCE, then answer

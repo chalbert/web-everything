@@ -776,7 +776,7 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPos
     expect(calls).toEqual([['node', [
       expect.stringMatching(/\/scripts\/conveyor\/rearm-review\.mjs$/), '1920',
       '--actor=parked-pr-conflict-watch (conflict resolved)', '--repo=o/n',
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }]]);
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: 300_000, killSignal: 'SIGKILL' }]]);
   });
 
   it('shells reconcile-finding.mjs with a --body-file, --agent and --repo', () => {

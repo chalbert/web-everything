@@ -46,6 +46,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { normNum } from './queue-store.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // ── TUNING (exported so a caller/test can override; the conveyor tick uses the defaults) ──────────────────────
 
@@ -415,7 +416,8 @@ export function withInfraLock(path, fn, { staleMs = 15_000, timeoutMs = 5_000 } 
  *  WRONG repo when a record carries a `repo` that isn't the local one (#2659 review, finding 2). */
 export function originSlugOf(cwd = INFRA_ROOT) {
   try {
-    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    // #x5n4zn3 — was bare (no timeout); a local config read, short budget.
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000, killSignal: 'SIGKILL' }).trim();
     const m = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
     return m ? m[1] : null;
   } catch {
@@ -523,7 +525,8 @@ function resumeOpen(entry, { cwd = INFRA_ROOT, localSlug = null } = {}) {
   }
   // The ref is already on origin (it was pushed before the open failed). Fetch its objects so pr-land's push of
   // <sha>:<ref> is a local no-op and the create has a head to point at.
-  try { execFileSync('git', ['fetch', 'origin', `+refs/heads/${ref}:refs/remotes/origin/${ref}`], { cwd, stdio: ['ignore', 'ignore', 'pipe'] }); }
+  // #x5n4zn3 — was bare (no timeout): a real network fetch.
+  try { execFileSync('git', ['fetch', 'origin', `+refs/heads/${ref}:refs/remotes/origin/${ref}`], { cwd, stdio: ['ignore', 'ignore', 'pipe'], timeout: 10 * 60_000, killSignal: 'SIGKILL' }); }
   catch { /* best-effort — origin already carries the ref; pr-land re-pushes idempotently */ }
   // Re-open with the recorded body (so nothing is lost). Write it to a temp file for --body-file (robust to
   // multi-line bodies). pr-land refuses a bodyless create, so a missing body is surfaced as a resume failure.
@@ -542,7 +545,10 @@ function resumeOpen(entry, { cwd = INFRA_ROOT, localSlug = null } = {}) {
   // re-failed blocked-on-infra, or push/gh error) keeps the record for another backoff round.
   const parse = (out) => { try { return JSON.parse(String(out || '').trim().split('\n').filter(Boolean).pop() || '{}'); } catch { return {}; } };
   try {
-    const res = parse(execFileSync('node', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 }));
+    // #x5n4zn3 — was bare (no timeout). `pr-land.mjs --label-on-green` has its OWN internal wait-for-green
+    // deadline (`--timeout-min`, default 15 min) — this outer bound must exceed that, with margin for gh/push
+    // overhead, or it would kill a wait pr-land itself would have given up on cleanly moments later.
+    const res = parse(execFileSync('node', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: 20 * 60_000, killSignal: 'SIGKILL' }));
     return { ok: true, prNumber: res.pr ?? null, detail: res.detail || 'resume-opened' };
   } catch (e) {
     const res = parse(e.stdout);

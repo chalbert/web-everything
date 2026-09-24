@@ -66,6 +66,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
       'scripts/__tests__/lane-pool-list-cache.test.mjs',
+      'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',
@@ -74,6 +75,7 @@ export default defineConfig({
       'scripts/operations/__tests__/stage-pr-view-integration.test.mjs',
       // #xu2krte — real git-conflict fixture + real (fake, cost-nothing) `claude` CLI round trip.
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
+      'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
     ],
     poolMatchGlobs: [
       ['scripts/__tests__/stdout-flush.test.mjs', 'forks'],

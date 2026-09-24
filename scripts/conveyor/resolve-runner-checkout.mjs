@@ -89,8 +89,11 @@ export function readAllLockEntries(lockRoot) {
  *  rather than throwing), mirroring `scripts/pr-status.mjs`'s `sh` helper. */
 function defaultLsof(pid) {
   try {
+    // #x5n4zn3 — was bare (no timeout). Short: a normal `lsof` probe returns in milliseconds, and the
+    // existing "any failure ⇒ ''" fail-soft contract already treats a timeout identically to a missing
+    // binary or a gone pid — unresolved, never mistaken for a live-but-slow answer.
     return execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, killSignal: 'SIGKILL',
     });
   } catch { return ''; }
 }
@@ -164,8 +167,9 @@ export function looksLikeCheckout(cwd) {
 /** Default `ps` shell-out for a pid's full command line — fail-soft, mirroring {@link defaultLsof}. */
 function defaultPs(pid) {
   try {
+    // #x5n4zn3 — was bare (no timeout); same fail-soft reasoning as `defaultLsof` above.
     return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, killSignal: 'SIGKILL',
     });
   } catch { return ''; }
 }

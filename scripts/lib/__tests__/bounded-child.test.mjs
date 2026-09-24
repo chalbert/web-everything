@@ -65,6 +65,22 @@ describe('runBounded', () => {
     leftover.push(grandchild);
     expect(await waitFor(() => !alive(grandchild))).toBe(true);
   }, 20_000);
+
+  // #x5n4zn3 — several call sites this function's rollout replaces relied on `execFileSync`'s `maxBuffer` to
+  // cap a verbose-but-not-hung child; `maxBytes` is the same protection for the async primitive, and must not
+  // regress that safety net when they switch over.
+  it('on maxBytes overflow kills the child and rejects, without waiting for the timeout', async () => {
+    const started = Date.now();
+    await expect(
+      runBounded(NODE, ['-e', 'process.stdout.write("x".repeat(1000)); setTimeout(() => {}, 60000)'], { timeoutMs: 20_000, maxBytes: 100 }),
+    ).rejects.toThrow(/output exceeded 100 bytes/);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+
+  it('omitting maxBytes keeps unbounded output (today\'s default, unchanged)', async () => {
+    const big = 'y'.repeat(500_000);
+    await expect(runBounded(NODE, ['-e', `process.stdout.write(${JSON.stringify(big)})`])).resolves.toBe(big);
+  });
 });
 
 describe('installChildReaper', () => {

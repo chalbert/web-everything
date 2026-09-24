@@ -100,6 +100,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 
 import { deliveredItemNumsFromPr } from '../lib/open-pr-items.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -241,7 +242,8 @@ export function defaultListOpenPrs({ exec = execFileSyncThrottled, repo = null }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,title,body,labels,files'];
   if (repo) argv.push('--repo', repo);
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -264,7 +266,8 @@ export function defaultPostFinding({
     const argv = [join(root, 'scripts', 'conveyor', 'reconcile-finding.mjs'), String(pr),
       `--body-file=${file}`, `--agent=${AGENT_NAME}`];
     if (repo) argv.push(`--repo=${repo}`);
-    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+    // #x5n4zn3 — was bare (no timeout).
+    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   } finally {
     try { removeFile(file); } catch { /* best-effort cleanup — a leftover temp file is not this pass's failure */ }
   }
