@@ -2,9 +2,10 @@
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: active
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-24"
 tags: []
 ---
 
@@ -14,4 +15,9 @@ Ruling #3681 Fork 4 condition (ii), we:docs/agent/platform-decisions.md#resident
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/daemon-self-sync.test.mjs`: 22 of 60 cases (every
+   case naming `acquireCloneTickLock`/`acquireCloneMoveLock`/`decideTickLockGate`/`decideMoveLockGate`) fail
+   with `TypeError: ... is not a function` before this item lands (those exports do not exist yet) and all 60
+   pass after. PR body also carries a standalone before/after repro (two simulated daemons, one real shared
+   git clone): merged `merged:true` while a sibling is mid-tick BEFORE, `tick-in-progress` refusal + a stable
+   tree AFTER, plus a same-host dead-pid lease reclaimed at once rather than waiting the 15-minute TTL.
