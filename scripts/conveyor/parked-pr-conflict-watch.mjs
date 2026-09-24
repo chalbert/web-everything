@@ -1093,6 +1093,27 @@ export function watchParkedPrConflicts({
       if (plan.add) provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
       provider.setLabels(resolvedRepo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
       if (plan.newlyDetected) {
+        // #3383 / xaer296 — STACKED-BASE, deferred BEFORE any alert/statute-tier classification, mirroring the
+        // `graceDue` path's own placement (added by #2581) for the IDENTICAL reason stated there: a STACKED PR
+        // (`baseRefName` isn't `main`) is never landed by the drain no matter what this path decides, so there
+        // is no drain turn to wait out and no ordinary main-conflict story to tell. This FRESH-DETECTION path
+        // never had this check at all (unlike `graceDue`), which is exactly how `chalbert/web-everything#2578`
+        // (base `lane/3681-ratify-daemon-lifecycle`) got misrouted: CONFIRMED LIVE, 2026-09-24T14:37:55Z, this
+        // path's plain (non-statute, non-queued-grace) `else` branch bounced it via `postFinding` as an ordinary
+        // main-conflict, and the fix agent that followed (with no reason to doubt the ordinary framing) merged
+        // `main` — the wrong ref — leaving the PR still conflicting against its real base at 15:00:43Z. Deferred
+        // here exactly like `graceDue` already does: no comment, no label beyond the `merge-status:conflicting`
+        // this call already applied above, so `reconcile-core.mjs`'s own STACKED-BASE CONFLICT branch is the
+        // ONLY place this PR's conflict gets a comment or a dispatch, off the SAME live `baseRefName` (#3383's
+        // own "the live `gh pr view` read... is what tells the two apart" discipline applies here unchanged: a
+        // PR GitHub has since retargeted to `main` because its stacked base merged and was deleted is read
+        // correctly, since this reads `pr.baseRefName` fresh off THIS sweep's own listing).
+        const baseRefName = pr?.baseRefName ?? null;
+        if (baseRefName && baseRefName !== 'main') {
+          entry.routedTo = 'deferred-to-reconcile (stacked base — see reconcile-core.mjs#3383, review labels untouched)';
+          results.push(entry);
+          continue;
+        }
         // Computed ONCE, ahead of both the alert comment and the routing decision below, so the two can never
         // disagree about what happens next — PR #1966's own review found exactly that drift (the alert still
         // said "not auto-rebased, human/`/finish` only" for a conflict this same call was about to dispatch a

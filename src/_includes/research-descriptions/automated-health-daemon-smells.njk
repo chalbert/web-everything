@@ -1,0 +1,59 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision card xev8pnf (born-as id; renumbered when it lands), the top priority of the incident epic
+  xqmw8g9 under
+  <a href="/backlog/3383-a-background-mechanical-dispatcher-replaces-the-interactive/">#3383</a>. On 2026-09-24
+  every conveyor problem was found by a person in a chat session, although each one had a cheap mechanical signal.
+  The question: how should a resident process watch those signals, decide when a signal needs an agent to explain
+  it, and tell the operator what to change, with no session open?
+</p>
+
+<h2>What the code does today</h2>
+<ul>
+  <li><strong>One watch already dispatches a diagnosis:</strong> the stuck-PR watch opens one diagnose-only
+    inspection per stalled PR episode, with a global cap of 2, and posts its findings as a PR comment.</li>
+  <li><strong>Liveness has a vocabulary</strong> (<code>down</code>, <code>dead</code>,
+    <code>alive-and-stalled</code>, <code>alive-and-idle</code>) but nothing turns it into an alert.</li>
+  <li><strong>The operator queue</strong> already has per-section row builders (stood-down, stuck-inspected) and
+    is where the operator looks.</li>
+  <li><strong>The only push notifier</strong> is run by the dispatcher itself, and only for "NEEDS YOU" PRs, so it
+    cannot announce the dispatcher's own stall.</li>
+  <li><strong>The pass runner's heartbeat</strong> runs on an independent timer, so it keeps moving while a tick
+    hangs.</li>
+</ul>
+
+<h2>Prior art</h2>
+<ul>
+  <li><strong>Symptom-based alerting</strong> (Google SRE, "Monitoring Distributed Systems"): alert on what the
+    user feels; keep cause signals for diagnosis.</li>
+  <li><strong>Persistence and grouping</strong> (Prometheus <code>for:</code>, Alertmanager
+    <code>group_wait</code> / <code>repeat_interval</code>): a condition must hold before it fires; one notification
+    per group.</li>
+  <li><strong>Inhibition and silences</strong> (Alertmanager): a higher-level alert suppresses its dependents; a
+    silence always expires.</li>
+  <li><strong>Dead-man's switch</strong> (kube-prometheus <code>Watchdog</code>, healthchecks.io): a monitor cannot
+    report its own death, so something outside it checks a heartbeat.</li>
+  <li><strong>Automated diagnosis, reviewed remediation</strong> (PagerDuty runbook diagnostics): automation gathers
+    evidence and proposes; fixes ship through the normal change process.</li>
+  <li><strong>Alert fatigue</strong>: every alert must be actionable, rare and novel; noisy ones are re-tuned.</li>
+</ul>
+
+<h2>Recommended ruling (after a skeptic round and a fresh-context screen)</h2>
+<ol>
+  <li>The watcher runs in its <strong>own failure domain</strong>: never inside a watched daemon, from a
+    main-only clone, with a per-tick timeout and a last-tick-completed stamp.</li>
+  <li><strong>Deterministic diagnosis first</strong>; an agent only for a multi-cause symptom whose evidence must be
+    read, that no other watch covers, while no inhibiting episode is open. The agent holds declared read operations
+    only.</li>
+  <li><strong>Episodes</strong> per (smell, subject) with hysteresis, a flap cap, a high-severity reminder and
+    expiring silences.</li>
+  <li>A <strong>scrubbed per-episode report</strong>, a HEALTH section in the operator queue, and a notification
+    the health process sends itself for high severity.</li>
+  <li>Findings become <strong>uncleared cards</strong> through a filing request landed in a leased lane; the
+    process never clears readiness and never edits code.</li>
+  <li>It ships in <strong>shadow</strong>; the operator turns dispatch, notification and filing on.</li>
+</ol>
+
+<p>Full design and the seed smell table: <code>reports/2026-09-24-health-daemon-design.md</code>.</p>
+{% endraw %}

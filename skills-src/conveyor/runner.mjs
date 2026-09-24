@@ -292,6 +292,7 @@ export const MECHANICAL_PASS_NAMES = Object.freeze([
   'ci-queue-watch',
   'parked-pr-conflict-watch',
   'advisory-label-sweep',
+  'review-hold-reconcile',
   'reconcile-pass',
   'duplicate-pr-watch',
   'parked-pr-progress-watch',
@@ -356,6 +357,12 @@ export function makeCliMechanicalPasses({
         // Dispatcher must skip this to avoid double-running it.
         if (!skip('parked-pr-conflict-watch')) run('conveyor/parked-pr-conflict-watch.mjs', ['sweep', ...prsArgs], key, slug);
         if (!skip('advisory-label-sweep')) run('conveyor/advisory-label-sweep.mjs', ['sweep', ...prsArgs], key, slug);
+        // #x01u7az — the one-time-and-ongoing cleanup for the two review-hold/advisory strays
+        // `we:scripts/review-set-label.mjs#decideSetLabel`'s `rearm`/`clear-human` fix stops PRODUCING going
+        // forward (a stray review:pending beside a live review:human; a stray advisory:* once review:human is
+        // gone) — see that module's own header for the live PRs (#2549, #2578) this cleans up. Piggybacks on the
+        // SAME shared open-PR snapshot as its sibling sweep, one line above.
+        if (!skip('review-hold-reconcile')) run('conveyor/review-hold-reconcile.mjs', ['sweep', ...prsArgs], key, slug);
         // GROUP (skipped as ONE unit): reconcile-pass → review-dispatch (per PR) → review-round-tag /
         // review-status-tag — the exact sequence skills-src/conveyor/review-daemon.mjs now runs standalone,
         // per PR (#3876). A resident Dispatcher must skip 'reconcile-pass' whole to avoid duplicating it.

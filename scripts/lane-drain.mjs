@@ -703,7 +703,54 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // durable origin/main bornAs record before applying this clone's ledger (#2903).
   const unresolvedReferences = [];
   const resolutions = new Map();
-  let visibleHashItems;
+  // #3383 perf — this used to answer "is `hash` visible on ANY ref" by building `visibleHashItems`
+  // (a Set of every backlog file name on every ref) with ONE `git ls-tree -r -- backlog/` SUBPROCESS
+  // PER visible ref (refs/heads/ + refs/remotes/), each one returning EVERY backlog filename at that
+  // ref (thousands of lines). Fine on a fresh clone (a handful of refs); on a mature constellation clone
+  // with 2000+ accumulated lane refs it is an O(refs) subprocess fan-out returning O(refs × backlog-size)
+  // lines of text into Node — measured live (#3383) at 10-14 minutes wall-clock for a SINGLE numbering
+  // pass that needed even one fallback resolve, vs the ~40-60s baseline for a pass that didn't (the
+  // resident drain-daemon's own numbering-critical-section lock caught red-handed: held 4+ minutes,
+  // CPU-bound, no visible child process — i.e. burning time re-parsing giant per-ref listings in JS, not
+  // waiting on git itself).
+  //
+  // Replaced with ONE `git rev-list --objects <refs…> -- backlog/` walk. `rev-list` shares the graph
+  // traversal across every ref given in a single argv (all these refs fork from the same overwhelmingly-
+  // shared history), so the cost tracks the repo's total backlog/ history ONCE, not per ref — measured on
+  // the live 2200+-ref clone: 4.9s total vs the prior O(refs) approach's 10+ minutes, and the output is
+  // ~15k lines (the whole history) instead of ~9M (every ref's full current listing). Slightly more
+  // inclusive than the old CURRENT-TREE-only check: a hash whose backlog file was later removed from
+  // every ref's TIP but still sits somewhere in a ref's REACHABLE HISTORY now reads 'in-flight' where it
+  // would have read 'unresolvable' before. That is the SAFE direction per this function's own contract two
+  // lines up ("Absence is NOT proof of death") — erring toward "still might be alive" only ever DEFERS a
+  // numbering decision, it never wrongly assigns one.
+  const localHashStems = new Set(stems.map(idFromName).filter(isHash)); // this clone's own tree — free, no git call
+  let refsCache = null;
+  const listVisibleRefs = () => {
+    if (!refsCache) refsCache = (quietGit(CWD, ['for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/']) || '').split('\n').filter(Boolean);
+    return refsCache;
+  };
+  let remoteHashSetCache = null; // built lazily ONCE per numberPendingHashes call, only if a fallback is ever needed
+  const remoteVisibleHashes = () => {
+    if (remoteHashSetCache) return remoteHashSetCache;
+    remoteHashSetCache = new Set();
+    const refs = listVisibleRefs();
+    if (!refs.length) return remoteHashSetCache;
+    let out = '';
+    try {
+      out = execFileSync('git', ['rev-list', '--objects', ...refs, '--', 'backlog/'],
+        { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 });
+    } catch { /* best-effort — an exec miss leaves the set empty; every fallback reads 'unresolvable' */ }
+    for (const line of out.split('\n')) {
+      const sp = line.indexOf(' '); // bare `<sha>` (no space) = a commit/tree object, not a backlog file
+      if (sp < 0) continue;
+      const path = line.slice(sp + 1);
+      if (!path.startsWith('backlog/')) continue;
+      const id = idFromName(path.slice('backlog/'.length).replace(/\.md$/, ''));
+      if (isHash(id)) remoteHashSetCache.add(id);
+    }
+    return remoteHashSetCache;
+  };
   const resolveReference = (hash, name) => {
     if (ledger[hash] !== undefined) return hash; // the existing ledger pass owns this rewrite
     if (!resolutions.has(hash)) resolutions.set(hash, landedNumberFor(hash, CWD));
@@ -711,18 +758,8 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     if (landed !== null) return landed;
     // A visible provisional item is positive evidence of in-flight work. Absence is NOT proof
     // of death: another clone may have an unfetched/private branch. Surface that uncertainty.
-    if (!visibleHashItems) {
-      visibleHashItems = new Set(stems.map(idFromName).filter(isHash));
-      const refs = (quietGit(CWD, ['for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/']) || '').split('\n').filter(Boolean);
-      for (const ref of refs) {
-        const paths = quietGit(CWD, ['ls-tree', '-r', '--name-only', ref, '--', 'backlog/']) || '';
-        for (const path of paths.split('\n')) {
-          const id = idFromName(path.replace(/^backlog\//, ''));
-          if (isHash(id)) visibleHashItems.add(id);
-        }
-      }
-    }
-    const status = visibleHashItems.has(hash) ? 'in-flight' : 'unresolvable';
+    const visible = localHashStems.has(hash) || remoteVisibleHashes().has(hash);
+    const status = visible ? 'in-flight' : 'unresolvable';
     if (!unresolvedReferences.some((r) => r.hash === hash && r.name === name)) {
       unresolvedReferences.push({ hash, name, status });
       console.warn(`[numberPendingHashes] ${name}: ${hash} ${status}` +

@@ -2949,7 +2949,13 @@ graduate."* Four clauses:
    touches graduation.
 4. **What the original (narrower) framing got right, and still holds:** (a) the runner's own steady state is
    still tracking `main` — a POC branch is a delivery TARGET for items that declare it, never the default
-   tracking ref; (b) build no more machinery than the POC in front of you actually needs; (c) every POC
+   tracking ref (amended 2026-09-23 by [#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle),
+   #3681, operator: *"3681 ratified"* … *"once we have merge into main, we will still want to be able to run
+   fixes of a darmon live and switch back to main once it merges"* … *"ratified"*: a **resident daemon clone**
+   may additionally run **live overlays** — an explicit per-clone list of fix branches merged onto `main` at
+   each rebuild, each dropped automatically once `main` has it — under that anchor's clause 5; a daemon still
+   never tracks a POC branch as its steady state, and the drain and `merge-orphan-sweep` stay `main`-only);
+   (b) build no more machinery than the POC in front of you actually needs; (c) every POC
    branch must NAME what it is for and who graduates it — a registry entry: branch, graduation target, scope,
    graduation item — an **unnamed** divergent branch is still exactly the failure mode that cost a ~40-minute
    manual reconciliation and 15 hand-resolved conflicts when `origin/lane/mechanical-dispatcher` drifted 97
@@ -3848,6 +3854,9 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    `restart` primitive (`launchctl bootout` + `bootstrap`) is **external-only and unusable for self-reload** — a
    self-issued `bootout` kills the daemon before `bootstrap` runs. `kickstart -k` (b) is redundant with KeepAlive
    (its SIGTERM runs the same clean handler) and exec-in-place (c) discards supervision; (a) wins on simplicity.
+   (amended 2026-09-23 by [#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 1: the
+   "same clean handler" premise is wrong mid-tick — a tick inside a synchronous child call cannot run the handler,
+   so the lease is never released. Never `kickstart -k` a daemon mid-tick.)
 
 3. **Self-source review — the SAME size/complexity-graduated committee as any change, with the ONE retained
    invariant that the review is INDEPENDENT (Fork C, OPERATOR-MODIFIED).** A PR that changes the daemon's own
@@ -5453,6 +5462,78 @@ function checks every constellation checkout before and after each Gemini step; 
 in `/research/planner-build-plan-and-execute/` and `we:reports/2026-09-22-planner-build-g2-prep.md`. Full
 reasoning and the rejected options:
 [#3922](/backlog/3922-decision-the-planner-build-g2-a-planner-splits-a-build-into/).
+
+---
+
+### Every resident daemon updates itself from `main` plus opt-in live overlays — rebuilt fresh each tick, restarted between ticks, never hand-merged {#resident-daemon-reload-lifecycle}
+
+**Ratified 2026-09-23** (`3681`, bornAs `3681`, operator, in session, in order: *"3681 ratified"* ·
+*"seems simpler all on prototype for now, no?"* · *"once we have merge into main, we will still want to be able
+to run fixes of a darmon live and switch back to main once it merges"* · *"yes"* (to the live-overlay design) ·
+*"ratified"*). Forks 2 and 4 as re-prepared; Fork 5 amended by the operator to the live-overlay design below.
+Grounding: `we:reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md` (evening addendum) and
+[/research/resident-daemon-staleness-and-reload/](/research/resident-daemon-staleness-and-reload/). Seven
+clauses:
+
+1. **Reload is a clean exit at the safe point between ticks.** launchd `KeepAlive` or the supervisor relaunches
+   the daemon on the new code (Node cannot unload modules, so there is no in-place reload). A restart request
+   is a request file the daemon reads before its next tick. Never `launchctl kickstart -k` a daemon mid-tick:
+   while a tick is inside a synchronous child call, the SIGTERM cannot run the clean handler, the lease is never
+   released, and every relaunch fails until its TTL expires. This corrects the premise in
+   [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 2 that `kickstart -k`'s
+   SIGTERM "runs the same clean handler".
+2. **Stale = the inputs this process booted from have moved (Fork 2).** At boot every daemon records, for each
+   repo it loads code from, the input heads its clone was built from: the `origin/main` sha plus each active
+   overlay's head. Every tick, every daemon compares them with the clone's current inputs, whoever moved the
+   clone, and exits for relaunch when they differ. Inputs are compared, not HEAD, so re-merging an unchanged
+   overlay never causes a restart loop. A **5-minute restart floor**, counted from process start, applies to
+   every daemon; crash loops are bounded separately by launchd's `ThrottleInterval` and the supervisor's
+   backoff.
+3. **The daemons move their own clone, automatically (Fork 4).** No person promotes a daemon clone. Every
+   self-updating clone meets four conditions: (i) a **coded refusal of the operator's primary checkout**,
+   compared after resolving symlinks, and a check that the checkout is the designated daemon clone; the
+   designated-root setting ships in the plists before the check does; (ii) a **cross-daemon mutex** — a
+   per-clone reader/writer lock: each tick holds a shared hold, the one process that moves the clone holds an
+   exclusive one, so the tree never moves under a running tick and never has two movers; (iii) **pinned state
+   paths** — state found by script location (the `.conveyor/` queue, the tracked scorecard file, the overlay
+   list) lives at a root given by env or flag, per
+   [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates); (iv) the restart floor.
+4. **The clone is rebuilt, never accumulated (Fork 4's rebuild-from-main sub-question).** Each tick the tree is
+   rebuilt fresh: `origin/main`, then each active overlay merged in, in list order — the rebuild form of
+   [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 1. Before any rebuild, if the
+   tree has uncommitted changes or local commits that are in none of its inputs, the daemon **refuses and
+   alerts; it never wipes them**. A hand merge into a daemon clone is not a delivery path.
+5. **Live overlays: a daemon may run a fix before `main` has it (Fork 5, as amended by the operator).** A
+   daemon clone tracks `main` plus an **explicit list of overlay fix branches**, kept in a per-clone state file
+   under its pinned state root (clause 3 (iii)), not checked in.
+   - (a) **Tests pass before new overlay code is picked up** — the daemon's own tests run on the rebuilt tree
+     before the live clone moves.
+   - (b) **An overlay drops automatically once `main` has it**: `git cherry` against `origin/main` shows only
+     `-` lines, or the overlay's PR is merged or closed. With no overlays left, the daemon is plain `main`.
+   - (c) **An overlay that no longer merges cleanly is dropped with an alert**, never frozen at an old head.
+   - (d) **Rollback = remove the overlay.** The trigger lives outside the daemon (new code may crash at
+     import): a crash loop or a stalled heartbeat after an overlay change removes that overlay and alerts.
+   - (e) **Scope: every daemon may run overlays, the review daemon included** — the operator's explicit choice
+     over the re-prep's "never in a clone that reviews, labels or merges PRs". **Carve-out:** the drain daemon
+     and the `merge-orphan-sweep` pass merge to `main`, so they stay `main`-only and never share a clone that
+     runs overlays.
+   - (f) **Graduation is unchanged.** Overlay code reaches `main` only through its own normal PR and review.
+   - (g) **This supersedes the long-lived POC-branch approach for daemons** (`lane/daemon-poc`, tracking epic
+     3999): a daemon never tracks a POC branch as its steady state. It is the daemon exception written into
+     [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode) clause 4(a).
+6. **What runs is visible, and hangs are caught from outside.** Each daemon publishes its boot input heads and
+   active overlays in its heartbeat or lease record, read by `runner-activity`. Every child call a tick makes
+   has a timeout, and a check outside the daemon alerts when its heartbeat stops moving.
+7. **Left open.** How [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3 (a
+   daemon never approves its own daemon-code change) applies to a review daemon running an overlay whose
+   graduation PR it would review was not ruled. Clause 3 stands unamended until decision card 4043 rules it.
+
+**Lineage:** #3681 (ratified 2026-09-23; first prepared the morning of 2026-09-23, re-prepared the same evening
+in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch framing of 3992 and the
+`lane/daemon-poc` registry entry (to be removed by 4042). Composes with
+[#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) (clause 1's rebuild form kept, clause 2's
+premise corrected, clause 3 unchanged), [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode)
+(clause 4(a) amended) and [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates).
 
 ---
 

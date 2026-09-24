@@ -22,7 +22,7 @@ import { dirname, resolve } from 'node:path';
 import {
   STAND_DOWN_MARKER, STAND_DOWN_REASONS, countStandDownComments, buildStandDownComment,
   standDownComments, standDownReason, WATCHER_STAND_DOWN_ACTOR, countTerminalStandDowns,
-  SUPERSEDE_STAND_DOWN_MARKER, isStandDownSuperseded,
+  SUPERSEDE_STAND_DOWN_MARKER, isStandDownSuperseded, isSelfAuthored, AUTOMATION_LOGINS,
 } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
@@ -264,5 +264,46 @@ describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED 
 
   it('non-array / empty input reads as zero, same as countStandDownComments', () => {
     for (const input of [null, undefined, []]) expect(countTerminalStandDowns(input)).toBe(0);
+  });
+});
+
+// xaer296 follow-up (epic #3383) — CONFIRMED LIVE, `chalbert/web-everything#2549`, 2026-09-24: `viewerDidAuthor`
+// read `false` on EVERY marker comment this repo's own automation posted, from BOTH a personal-token read AND
+// the resident daemon's own real production read (loading a candidate fix into the daemon clone and running
+// `runReconcilePass` for real) — `reconcile-pass.mjs`'s discovery read never actually authenticates as the
+// identity that posted those comments. `author.login` is the READ-stable signal that actually works; see
+// `AUTOMATION_LOGINS`'s own docblock for the full incident.
+describe('isSelfAuthored — author.login is the READ-stable signal, viewerDidAuthor is an additional accepted path (xaer296)', () => {
+  it('a real comment shape (author.login, no viewerDidAuthor at all) is recognized — the actual production shape', () => {
+    expect(isSelfAuthored({ author: { login: AUTOMATION_LOGINS[0] } })).toBe(true);
+  });
+
+  it('is case-insensitive on the login', () => {
+    expect(isSelfAuthored({ author: { login: AUTOMATION_LOGINS[0].toUpperCase() } })).toBe(true);
+  });
+
+  it('a DIFFERENT author (a human, e.g. the repo operator) is not self-authored, even with no viewerDidAuthor field', () => {
+    expect(isSelfAuthored({ author: { login: 'chalbert' } })).toBe(false);
+  });
+
+  it('viewerDidAuthor: true is STILL accepted (widened, not replaced) — a reader that genuinely is the posting identity', () => {
+    expect(isSelfAuthored({ viewerDidAuthor: true, author: { login: 'someone-else' } })).toBe(true);
+  });
+
+  it('viewerDidAuthor: false with no matching login is not self-authored (both signals must fail together)', () => {
+    expect(isSelfAuthored({ viewerDidAuthor: false, author: { login: 'chalbert' } })).toBe(false);
+  });
+
+  it('a bare string or missing author is never self-authored', () => {
+    expect(isSelfAuthored('some body')).toBe(false);
+    expect(isSelfAuthored({ body: 'x' })).toBe(false);
+    expect(isSelfAuthored(null)).toBe(false);
+  });
+
+  // The exact real shape observed on `#2549`'s own thread (`gh pr view --json comments`): `viewerDidAuthor`
+  // absent from the object entirely in some `gh` versions' output, `author.login` always present.
+  it('the exact real #2549 shape resolves self-authored (regression pin for the live incident)', () => {
+    const realShape = { author: { login: 'web-everything' }, body: '🛑 conveyor fix — stood down, human judgment needed' };
+    expect(isSelfAuthored(realShape)).toBe(true);
   });
 });

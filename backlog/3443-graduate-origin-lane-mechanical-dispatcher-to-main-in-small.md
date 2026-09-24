@@ -259,6 +259,40 @@ How each slice (a child of this item) graduates, per the statute
       #3748 class, not a #3857 defect, and it left one stale in-flight run record, `probe-3857-sonnet`.
     - #3857's own card is claimed by another session, so its status flip is left to that session.
 
+- **2026-09-24 (#3917 built: dispatch gate + tick-core pure core, S2).** Ported
+  `we:scripts/readiness/dispatch-pause.mjs` (+test), `we:scripts/readiness/dispatch-plan.mjs` (+test),
+  `we:scripts/readiness/queue-report.mjs`, `we:scripts/conveyor/tick-core.mjs` (+2 tests) and
+  `we:scripts/check-standards-rules.mjs` (+test) from snapshot `600acc14f`, diff-merged per rule 3. Main had
+  moved further on `we:scripts/readiness/dispatch-plan.mjs`, `we:scripts/readiness/queue-report.mjs` and
+  `we:scripts/conveyor/tick-core.mjs`/its test since #3917's own merge notes were written (2026-09-22) — the
+  card's precomputed catchup-ref resolutions were reused as the BRANCH-side input, then a fresh diff-apply
+  carried each onto main's CURRENT tip:
+  - `we:scripts/readiness/dispatch-plan.mjs` (+test): preserved main's own `driftGraduationItem` (#3836),
+    `findPocBranch`/`readRegistry` imports, and its `runJson` → `await runJson` async change, alongside the
+    branch's `--queue-file` item-pull (#3720), `dispatchPausedKinds` and `sizePolicy`.
+  - `we:scripts/readiness/queue-report.mjs`: unioned main's own `needs-investigation` addition with the
+    branch's `no-size` (#3849) addition to `NOT_READY_REASONS` — same array, non-overlapping additions.
+  - `we:scripts/conveyor/tick-core.mjs` (+test): preserved main's own `resolveChildTimeoutMs` import (#3989
+    bounded-child rollout) and the multi-repo `lanePoolListArgsForRepo` free-lane read (#3960/#3962),
+    alongside the branch's kind-scoped dispatch-pause wiring; the test file unions main's new
+    `lanePoolListArgsForRepo` describe block with the branch's kind-scoped-pause describe block.
+  - `we:scripts/check-standards-rules.mjs` (+test): clean 3-way, 0 conflicts, despite 2 more main commits
+    landing on it since the card's notes.
+  - **Own bug found and fixed** (caught by this slice's own test suite, not by inspection): the
+    `--queue-file` restructuring scoped `selection`/`observeSelection` inside the non-queue-file branch only,
+    but `plan.selection = [...selection.values()]` is read later in `main()` unconditionally — a live
+    `ReferenceError`. Fixed by hoisting `selection` to the outer scope.
+  - Full gate: `npm run test:unit` (574/574 files, 16455 tests, 0 failures), `npm run check:standards
+    --scope=3917-...` (0 errors). Landed as PR #2597, verified green at `e98dda4b6`, labelled
+    `review:pending` for the drain.
+  - **Not yet landed.** PR #2597 sits behind a REPO-WIDE review-dispatch stall — `review-status:review-stalled`
+    on 5+ other open PRs (#2596, #2591, #2590, #2584, plus #2597) at the same time, unrelated to this slice's
+    own diff. Several concurrent sessions already hold leases on exactly this class of fix
+    (`fix-2549`/`fix-2578`/`fix-2580`/`fix-review-labels-3383-daemon` in the lane pool at the time of this
+    note) — per this repo's own doctrine (fix the daemon, never the instance by hand), this session did not
+    hand-dispatch a review to force it through. #3917 stays unresolved until the PR actually merges; the next
+    session/daemon pass should resolve it once `gh pr view 2597 --json mergedAt` is non-null.
+
 - **2026-09-24 (#3895 telemetry core, first wave-A build): PR #2595 open, pending review+drain.** Ported
   `we:scripts/operations/command-redact.mjs`, `we:scripts/operations/telemetry.mjs`,
   `we:scripts/operations/telemetry-store.mjs`, `we:scripts/operations/telemetry-cli.mjs` and

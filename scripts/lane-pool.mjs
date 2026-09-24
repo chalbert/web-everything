@@ -110,6 +110,11 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
 import { classifyReap, reapPlan, prStatesFromList, itemNumFromSession } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
+// #3383 — the lane-history ledger (`<lane>/.git/lane-history.jsonl`): one line per acquire/adopt/release/reap,
+// so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
+// records that — see `scripts/lane-whois.mjs`, the reader). Lives in its OWN module (another worker owns this
+// file for PR #2606 concurrently) — the four call sites below are the only hook points.
+import { appendLaneHistory, laneHistoryEntry } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -928,8 +933,8 @@ function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
  * lanes chasing a headroom that a live probe would never have needed. Any caller that must react differently
  * to "we don't know" than to "we checked and there is genuinely nothing" needs `ok`, not just `shas`.
  */
-function liveRemoteShasProbe(dir) {
-  const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 20_000 });
+function liveRemoteShasProbe(dir, remote = 'origin') {
+  const out = tryGit(['ls-remote', '--heads', remote], dir, { timeout: 20_000 });
   if (out === null) return { ok: false, shas: new Set() };
   return { ok: true, shas: new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean)) };
 }
@@ -1260,6 +1265,14 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     writeFileSync(file, bodyFor(mintedHolder, adopted), { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
     return mintedHolder;
   } catch (e) {
+    // #xixn30q — ENOENT means the lane's dir/`.git` vanished out from under this write (a concurrent `trim`
+    // deleting it — even with trim's own per-lane claim lock, THIS acquire's cached-scan candidate snapshot
+    // was taken before that claim, so it can still hand a since-deleted lane to `tryClaimLane`; any other cause
+    // of a lane disappearing mid-acquire hits the same gap). Treat it exactly like "someone else has this one":
+    // return null so the caller's existing retry loop (`excluded.add(pick)` then pick the next candidate) moves
+    // on, instead of an uncaught throw crashing the whole acquire. Live-caught: wev-review-daemon session
+    // review-2549 crashed here writing into a lane `trim` had just removed.
+    if (e.code === 'ENOENT') return null;
     if (e.code !== 'EEXIST') throw e;
   }
   const existing = readLease(dir);
@@ -1374,6 +1387,11 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
     // never appear in `reap` (classifyReap short-circuits it), so no memory lane is ever collected.
     if (c.reason !== 'pr-merged' && c.reason !== 'pr-closed') continue;
     try {
+      // #3383 — record the reap in the lane-history ledger BEFORE the marker is dropped (best-effort).
+      appendLaneHistory(c.dir, laneHistoryEntry({
+        event: 'reap', session: c.lease?.session, ownerSession: c.lease?.ownerSession || null,
+        holder: laneHolderSlug(c.lease), item: itemNumFromSession(c.lease?.session), reason: c.reason,
+      }));
       rmSync(LEASE_MARKER(c.dir), { force: true });
       unmapLanes(repo, [c.lane]); // a reaped ghost no longer renders its dead item (#2139)
       log(`  reaped lane-${c.lane} before acquire (${c.reason}; was ${describeLease(c.lease)}) — ghost lease reclaimed (#2748)`);
@@ -1531,34 +1549,37 @@ function cmdAcquire(repo) {
     // right before it touches the tree (#2924), regardless of how the candidate was found. A lease claim
     // (ours or a competitor's) changes the pool's lease fingerprint, which invalidates the cache on the very
     // next read, so a lane just taken is never handed out twice from a stale hit.
-    //
-    // #3383 — live incident 2026-09-24: EVERY review dispatch failed with "no free lane" on a 60-lane pool
-    // where only ~3-4 lanes were actually acquirable (the rest held real work or sat ahead-of-origin) — acquire
-    // itself never grows the pool, it only waits then fails. `grownOnce` bounds this to ONE growth attempt per
-    // `acquire` call (never a second round in the same call, however many times the loop above re-polls).
     let grownOnce = false;
+    // #3383 (coordinator follow-up, live-caught 2026-09-24 16:25 ET) — did the MOST RECENT round's scan fail
+    // to finish at all (`scanTimeout`), as opposed to finishing and genuinely finding zero candidates? These
+    // read identically as "no pickable candidate this round" below, but they are NOT the same fact: 7
+    // concurrent `--wait-ms=30000` review dispatches all failed reporting "60 all held/dirty" while ~13 lanes
+    // were genuinely acquirable, because the shared scan itself took ~56s under load — a scan that never
+    // finished is not evidence the pool is starved, so (a) the eventual failure message must say so, not
+    // claim "all held/dirty", and (b) growth-on-empty (below) must refuse to fire on it — cloning MORE
+    // capacity on top of an already-overloaded scan would only make the NEXT scan slower still.
+    let sawScanTimeout = false;
     while (chosen === null) {
-      const pickNowMs = Date.now();
-      const remainingMs = deadline - pickNowMs;
-      // Bound THIS round's scan by whatever's left of `--wait-ms` (never less than one poll tick, so a
-      // near-zero remainder still gets a real attempt) and never more than the configured/default scan
-      // budget — the "wait-ms plus a scan budget" bound the whole command must respect. The one post-growth
-      // round (past the deadline by construction) gets the full scan budget, so the freshly-cloned lanes are
-      // actually reached rather than lost to a one-poll-tick rescan of the whole pool.
-      const scanBudget = Math.min(waitMs > 0 && !grownOnce ? Math.max(remainingMs, ACQUIRE_POLL_MS) : listScanTimeoutMs(), listScanTimeoutMs());
+      // #3383 — the scan's own budget is now the FULL configured/default scan timeout (`--scan-timeout-ms` /
+      // `LANE_POOL_LIST_SCAN_TIMEOUT_MS`), never shrunk to this caller's OWN remaining `--wait-ms`: the
+      // original cut here tied them together, so a caller with little wait-ms left could truncate a scan a
+      // DIFFERENT, longer-lived caller was relying on (the single-flight lock is pool-wide, one scan at a
+      // time) — and a caller could itself inherit whichever other caller's smaller budget started the
+      // in-flight scan it joined. `--wait-ms` still bounds only how long THIS acquire call may keep polling
+      // for a lane to free up (the loop below), never the scan itself.
       let candidateDirs;
-      // Did THIS round's empty answer come from a scan that ran out of time, rather than a scan that finished
-      // and genuinely found nothing free? Only the latter may trigger growth below.
-      let scanTimedOut = false;
       try {
-        candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: scanBudget, cacheTtlMs: listCacheTtlMs() });
+        candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: listScanTimeoutMs(), cacheTtlMs: listCacheTtlMs() });
+        sawScanTimeout = false;
       } catch (e) {
-        // A scan that overran its own budget this round is not a hard failure here (unlike `list --acquirable`
-        // itself) — it just means "no proven candidate yet"; fall through to the same wait/retry/fail-at-
-        // -deadline handling as "found nothing free" below, so a slow tick self-heals on the next one.
+        // A scan that overran ITS OWN budget is not a hard failure here (unlike `list --acquirable` itself)
+        // — it just means "no proven candidate yet, and we don't know why"; fall through to the same
+        // wait/retry/fail-at-deadline handling as "found nothing free" below, so a slow tick self-heals on
+        // the next one. `sawScanTimeout` (above) is what lets the eventual message/growth-refusal tell this
+        // apart from a completed scan that genuinely found nothing.
         if (!e || !e.scanTimeout) throw e;
         candidateDirs = [];
-        scanTimedOut = true;
+        sawScanTimeout = true;
       }
       const pickable = candidateDirs
         .map((d) => Number(basename(d).slice(5)))
@@ -1579,30 +1600,36 @@ function cmdAcquire(repo) {
       // #3383 — before failing outright, let the pool GROW A LITTLE rather than block every dispatch on a
       // human running `provision` by hand. Bounded two ways, mirroring #4025's provision --acquirable guards
       // exactly: a small per-call cap on brand-new clones (reaching it just means "ask again"), and a hard
-      // ceiling well above the trim target that growth may never cross. A live remote-probe failure disables
-      // growth entirely (fail-SAFE STOP, never fail-safe GROW) — same rationale as #4025. The candidate scan
-      // above is the shared cached one, which cannot say whether ITS ahead-lane probe failed (a cache hit ran no
-      // probe at all), so take one fresh probe here instead: growth clones over the network anyway, so an
-      // unreachable remote must stop it. Lazy — `growPoolOnEmpty` runs it only once its caps allow growth, so
-      // a pool that cannot grow anyway fails as fast as before; one that can pays at most this one call.
-      // Never on a TIMED-OUT scan: "the scan was slow" is not "the pool is full" (a slow pool may be full of free
-      // lanes), and cloning more lanes into an already-slow pool only makes the next scan slower. Main's pre-cache
-      // loop had no scan timeout, so there an empty answer always meant genuinely full; here it may not.
-      if (!grownOnce && !scanTimedOut) {
+      // ceiling well above the trim target that growth may never cross. Growth refuses to fire on EITHER of
+      // two fail-SAFE-STOP (never fail-safe-GROW) signals, mirroring #4025's own rationale: `sawScanTimeout`
+      // (the last scan never proved anything either way) and a fresh, dedicated, ONE-TIME live remote-
+      // reachability probe taken only here (never on the hot scan path above) — a network/remote outage must
+      // never be misread as "genuinely starved, so clone more".
+      if (!grownOnce && !sawScanTimeout) {
         grownOnce = true;
-        const added = growPoolOnEmpty(repo, lanes, () => !liveRemoteShasProbe(laneDir(repo, Math.min(...lanes))).ok);
+        // Probe the exact URL growth will clone from (`provisionLane` → `repo.originUrl`, resolved against the
+        // same process cwd the clone uses) — never from inside an existing lane: a vanished/corrupted `lanes[0]`
+        // (#xixn30q) would fail the probe for a purely LOCAL reason and stickily disable growth against a fully
+        // reachable origin.
+        const remoteProbeFailed = !(repo.originUrl
+          ? liveRemoteShasProbe(process.cwd(), repo.originUrl)
+          : liveRemoteShasProbe(repo.referencePath)
+        ).ok;
+        const added = growPoolOnEmpty(repo, lanes, remoteProbeFailed);
         if (added > 0) {
           excluded.clear();
           continue;
         }
       }
-      // A timed-out final scan proved nothing about the pool — its lanes may all be free — so never report it
-      // with the saturated-pool "all held/dirty" message: that would send the operator hunting for a full pool
-      // instead of the real cause, a slow or hung git probe.
-      if (scanTimedOut) {
-        fail(`no free lane found in pool "${repo.name}": the acquirable scan did not finish within its ${scanBudget}ms budget (${lanes.length} lanes, none proven busy — they may be free). Check for a slow/hung git, or raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS / --wait-ms`);
-      }
-      fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
+      // #3383 bug 3b — say WHICH happened: a scan that never finished (never proven "all held/dirty" at
+      // all) gets its own message, distinct from a completed scan that genuinely found nothing acquirable.
+      fail(
+        sawScanTimeout
+          ? `no free lane in pool "${repo.name}" — the acquirability scan itself did not finish within the ` +
+              `wait window (raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS, or investigate a hung ` +
+              `git — #xn432dz); this is NOT necessarily because all ${lanes.length} lane(s) are held/dirty`
+          : `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`,
+      );
     }
   }
 
@@ -1722,6 +1749,16 @@ function cmdAcquire(repo) {
   // #2997 r2 — OCCUPANCY is a separate declaration from the lease, because `ownerSession` records whoever ran
   // THIS process, which for a dispatched lane is not the agent that will work in it. Say so at the seam.
   const occupant = laneWorkerSession(readLease(dir));
+  // #3383 — record this acquire in the lane-history ledger (best-effort; never fails the acquire itself).
+  appendLaneHistory(dir, laneHistoryEntry({
+    event: flags.reserve ? 'reserve' : 'acquire',
+    session,
+    ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+    workerSession: occupant,
+    purpose: flags.purpose,
+    item: flags.item,
+    holder: holderSlug,
+  }));
   if (occupant) log(`  occupant: ${occupant} (--adopt) — Edit/Write from any OTHER session is now refused (#2997)`);
   else log(`  occupant: NOT declared — hand this lane off with \`node scripts/lane-pool.mjs adopt --lane=${chosen}\` run BY the agent that will work in it (or re-run acquire with --adopt if that is you); until then the Edit/Write guard stays fail-open for this lane`);
   if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, workerSession: occupant, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
@@ -1919,6 +1956,12 @@ function cmdRelease(repo) {
     // litter, the other 2 clean-but-ahead — the whole pool read 0 of 48 acquirable at once). Any
     // non-allowlisted dirty state (real uncommitted work) is left completely untouched by this call.
     cleanLaneLitter(dir);
+    // #3383 — record the release in the lane-history ledger BEFORE the marker is dropped (best-effort; the
+    // ledger lives in `.git/`, never touched by the marker unlink above it).
+    appendLaneHistory(dir, laneHistoryEntry({
+      event: 'release', session, ownerSession: lease.ownerSession || null, workerSession: lease.workerSession || null,
+      purpose: lease.purpose, item: itemNumFromSession(lease.session), holder: laneHolderSlug(lease),
+    }));
     rmSync(LEASE_MARKER(dir), { force: true });
     // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
     // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
@@ -2341,16 +2384,22 @@ function acquireGrowthMaxNew() {
  * #3383 — called ONLY from `cmdAcquire`'s auto-pick path, ONLY once the wait/poll window (if any) is exhausted
  * with genuinely no free lane. Clones a bounded number of brand-new lanes (never past `acquireHardMaxFor`,
  * never more than `acquireGrowthMaxNew()` in this one call) and appends their numbers to `lanes` IN PLACE so
- * the caller's very next candidate scan sees them. Numbers from `highest(lanes) + 1` up — trim always
+ * the caller's very next `chooseFreeLane` pass sees them. Numbers from `highest(lanes) + 1` up — trim always
  * removes the HIGHEST-numbered lanes first (see this file's `trim` section), so a live pool's numbering stays
  * contiguous from 1 in practice; basing growth on the highest existing number (not `lanes.length`) still fails
  * safe if a gap ever exists, since it can only make growth start a little higher than strictly necessary,
  * never collide with an existing lane directory.
- * `remoteProbeFailed` is a LAZY `() => boolean`, asked only once both caps above allow growth — a pool that
- * cannot grow anyway (at its hard cap, or growth disabled) never pays the `ls-remote` it costs.
  * Returns the number of lanes actually added (0 ⇒ the caller's existing "no free lane" failure stands).
  */
 function growPoolOnEmpty(repo, lanes, remoteProbeFailed) {
+  if (remoteProbeFailed) {
+    log(
+      `  ⚠ #3383 a live remote-reachability probe (git ls-remote) failed while evaluating this pool's lanes — ` +
+        `refusing to grow it (deliberate fail-SAFE STOP, never fail-safe GROW, mirrors #4025). Investigate ` +
+        `connectivity/timeouts, then retry \`acquire\` once the probe can actually answer.`,
+    );
+    return 0;
+  }
   const hardMax = acquireHardMaxFor(repo);
   const highest = lanes.length ? Math.max(...lanes) : 0;
   if (highest >= hardMax) {
@@ -2364,14 +2413,6 @@ function growPoolOnEmpty(repo, lanes, remoteProbeFailed) {
   const toAdd = Math.min(maxNew, hardMax - highest);
   if (toAdd <= 0) {
     log(`  ⚠ acquire's per-call growth cap is 0 (--growth-max-new=0 or LANE_POOL_ACQUIRE_GROWTH_MAX_NEW=0) — not growing.`);
-    return 0;
-  }
-  if (remoteProbeFailed()) {
-    log(
-      `  ⚠ #3383 a live remote-reachability probe (git ls-remote) failed while evaluating this pool's lanes — ` +
-        `refusing to grow it (deliberate fail-SAFE STOP, never fail-safe GROW, mirrors #4025). Investigate ` +
-        `connectivity/timeouts, then retry \`acquire\` once the probe can actually answer.`,
-    );
     return 0;
   }
   log(
@@ -2670,6 +2711,8 @@ function cmdAdopt(repo) {
     );
   }
   writeFileSync(LEASE_MARKER(dir), JSON.stringify({ ...lease, workerSession: me }, null, 2) + '\n');
+  // #3383 — record the occupancy hand-off in the lane-history ledger (best-effort).
+  appendLaneHistory(dir, laneHistoryEntry({ event: 'adopt', ownerSession: me, workerSession: me, session: lease.session }));
   log(`  adopted lane-${n} — occupant session is now ${me}${current && current !== me ? ` (took over from ${current})` : ''}`);
   log('    Edit/Write into this lane from ANY other session is now refused by guard-lane.mjs (#2997).');
   if (flags.json) process.stdout.write(JSON.stringify({ lane: n, path: dir, workerSession: me, previousWorkerSession: current }, null, 2) + '\n');

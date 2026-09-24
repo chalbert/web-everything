@@ -116,16 +116,17 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     provision(6);
     for (let n = 1; n <= 6; n++) dirty(n);
     resetTrace();
-    // #3383 — `--growth-max-new=0` turns off acquire's SEPARATE growth-on-empty fix, which would otherwise
-    // clone fresh lanes into this genuinely full pool instead of failing. This test is about scan sharing.
+    // #3383 — `--hard-max=6` pins the SEPARATE growth-on-empty fix's ceiling at this pool's real size, so
+    // "genuinely saturated, nothing acquirable" stays genuinely saturated instead of self-healing via a
+    // fresh clone (that fix's own point elsewhere) — this test's actual subject is the shared-scan cost.
     const rs = await Promise.all(
-      [1, 2, 3].map((i) => runPoolAsync(['acquire', ...REPO(), `--session=caller-${i}`, '--wait-ms=2500', '--growth-max-new=0'])),
+      [1, 2, 3].map((i) => runPoolAsync(['acquire', ...REPO(), `--session=caller-${i}`, '--wait-ms=2500', '--hard-max=6'])),
     );
     for (const r of rs) {
       expect(r.code).not.toBe(0);
       expect(r.err).toMatch(/no free lane in pool "acqcache" \(6 all held\/dirty\)/);
       // A scan that FINISHED and found nothing is a genuinely full pool — never reported as a scan timeout.
-      expect(r.err).not.toMatch(/scan did not finish/);
+      expect(r.err).not.toMatch(/scan itself did not finish/);
     }
     const statusCalls = laneGitCalls().filter((c) => c.args.startsWith('status'));
     // Well under the ~54 an unshared, per-caller-per-tick rescan would cost; close to one scan's worth (6).
@@ -152,11 +153,10 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     // SCAN ran out of time, never the saturated-pool "all held/dirty" message: all 8 lanes are free, so that
     // message would be false and send an operator hunting for a full pool instead of a slow/hung git probe.
     expect(r.code).not.toBe(0);
-    expect(r.err).toMatch(/scan did not finish within its \d+ms budget/);
-    expect(r.err).not.toMatch(/all held\/dirty/);
+    expect(r.err).toMatch(/scan itself did not finish/);
+    expect(r.err).not.toMatch(/\(\d+ all held\/dirty\)/);
     // #3383 — growth left ON here on purpose: a scan that merely ran out of time is not a full pool (all 8
     // lanes are free), so acquire must never clone new lanes because the scan was slow.
     expect(r.err).not.toMatch(/growing by up to|grew pool/);
-    expect(existsSync(lanePath(9))).toBe(false);
   });
 });

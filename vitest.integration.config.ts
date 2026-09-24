@@ -67,6 +67,7 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
       'scripts/__tests__/lane-pool-list-cache.test.mjs',
       'scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs',
+      'scripts/__tests__/lane-pool-acquire-scan-wait-decouple.test.mjs',
       'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',
       'scripts/__tests__/lane-pool-trim.test.mjs',
       'scripts/__tests__/lane-pool-acquirable-growth-cap.test.mjs',

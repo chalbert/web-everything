@@ -28,6 +28,8 @@
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
+import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
 
 /**
  * we:scripts/conveyor/advisory-fix-mark.mjs#ADVISORY_FIX_COMMENT_MARKER — the stable FIRST LINE of the durable
@@ -76,6 +78,108 @@ export function buildAdvisoryFixComment({ actor = 'conveyor fix agent' } = {}) {
       'this comment outnumbers the prior advisory note) — it re-runs the advisory pass on this new head and ' +
       'posts the next real verdict; only that step, or the operator\'s own `/review`, may change any label.',
   ].join('\n');
+}
+
+/**
+ * we:scripts/conveyor/advisory-fix-mark.mjs#isLatestAdvisoryFindingAddressed — xaer296 (epic #3383): has the
+ * MOST RECENT advisory note already been addressed by a fix round, ORDER-wise rather than COUNT-wise? Pure.
+ *
+ * THE BUG THIS REPLACES. `reconcile-core.mjs`'s advisory-fix branch used to compare
+ * `countAdvisoryFixComments(comments) < countAdvisoryComments(comments)` — a raw COUNT comparison that only
+ * holds when the two histories start at parity (0/0) and move in lockstep, one-for-one. That assumption breaks
+ * the moment a `review:human` PR already has advisory-note HISTORY from before this marker mechanism existed
+ * (any PR with `review-round` > 1 the day #xkmu3gv shipped): CONFIRMED LIVE on `chalbert/web-everything#2549`
+ * — 5 advisory-panel comments already on the thread (review rounds 1-5, all pre-dating #xkmu3gv) and exactly
+ * ONE advisory-fix mark ever posted (the round that genuinely fixed the CURRENT, latest finding). `1 < 5` stays
+ * true FOREVER under the old test — no number of further genuine fixes ever catches up to a backlog of
+ * historical notes that were never going to get their own dedicated fix round — so the reconcile pass kept
+ * re-dispatching a fixer at an already-fixed PR, twice (14:29Z, 14:35Z), until the second one (finding nothing
+ * to reproduce) wrongly stood down.
+ *
+ * THE FIX. The real question was never "how many fixes vs. how many notes, ever" — it is "was THE FINDING THE
+ * PR CURRENTLY CARRIES already fixed", which is an ORDER question: does a fix-mark comment appear AFTER the
+ * LATEST advisory note? `comments` arrives in GitHub's own chronological order (array order = posting order,
+ * the same assumption `we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded` already relies on), so this is
+ * a plain index scan, no timestamp parsing needed.
+ *
+ * A PR with NO advisory note at all (should not reach this function via `reconcile-core.mjs`'s own
+ * `ADVISORY_LABELS.CHANGES`-gated call site, but a caller passing a bare/malformed thread is not unreasonable)
+ * returns `false` — nothing to address is not "addressed".
+ *
+ * The fix-mark must be SELF-AUTHORED (`stand-down.mjs#isSelfAuthored`, the same check its sibling
+ * {@link isAdvisoryMechanismStandDownSuperseded} applies). A `true` here routes the PR to a review dispatch that
+ * is EXEMPT from `NEGOTIATION_ROUND_CAP`, so a forged mark (anyone who can comment) re-posted every tick would
+ * otherwise keep the PR cycling through cap-exempt reviews forever, never reaching `cap-exhausted` and never
+ * escalating to a human (PR #2607 review). A bare string or a non-automation author fails closed.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean, author?:{login?:string}}|string>|null|undefined} comments
+ * @returns {boolean}
+ */
+export function isLatestAdvisoryFindingAddressed(comments) {
+  if (!Array.isArray(comments)) return false;
+  let lastNoteIndex = -1;
+  for (let i = 0; i < comments.length; i += 1) {
+    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
+    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_NOTE_MARKER)) lastNoteIndex = i;
+  }
+  if (lastNoteIndex === -1) return false;
+  for (let j = lastNoteIndex + 1; j < comments.length; j += 1) {
+    const body = typeof comments[j] === 'string' ? comments[j] : comments[j]?.body;
+    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER)
+      && isSelfAuthored(comments[j])) return true;
+  }
+  return false;
+}
+
+/**
+ * we:scripts/conveyor/advisory-fix-mark.mjs#isAdvisoryMechanismStandDownSuperseded — xaer296 (epic #3383): is
+ * the stand-down at `index` a fix agent's OWN escalation that the thread itself already PROVES was a mechanism
+ * failure, not a genuine judgment call? PURE. The sibling of
+ * `we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded` (which covers only the parked-PR conflict watch's
+ * OWN prior stand-down, re-classified by a LATER watch sweep) for a DIFFERENT population: a fixer dispatched
+ * into ADVISORY-FIX MODE that could not reproduce the finding — because {@link isLatestAdvisoryFindingAddressed}
+ * was ALREADY true when it ran — and (per the pre-fix brief) wrongly stood down instead of posting the hand-back
+ * marker (CONFIRMED LIVE, `chalbert/web-everything#2549`, 2026-09-24T14:35:41Z).
+ *
+ * UNLIKE the watcher's own supersede, this needs NO new comment posted to become non-terminal: the proof that
+ * the finding was already addressed BEFORE the stand-down already lives on the thread (the fix-mark's own
+ * position relative to the latest advisory note), so this is a pure re-read, not a write waiting to happen —
+ * the daemon's very next tick self-heals a PR in this exact shape with no operator action at all, which is the
+ * whole point (per this repo's own "failure is an opportunity to improve the product, never a manual fix" rule).
+ *
+ * SAFE, NARROWLY: ALL of these must hold —
+ *   1. the comment at `index` is a stand-down (leading-line {@link STAND_DOWN_MARKER}) and self-authored
+ *      (`stand-down.mjs#isSelfAuthored` — `author.login` against `AUTOMATION_LOGINS`, or GitHub's
+ *      `viewerDidAuthor` as an additional accepted path; a forged body can never satisfy either, the same
+ *      fail-closed direction `isStandDownSuperseded` uses);
+ *   2. among every comment BEFORE it, the latest advisory note already has a SELF-AUTHORED advisory-fix mark
+ *      after it — i.e. {@link isLatestAdvisoryFindingAddressed} was already true at the moment this fixer ran.
+ * A stand-down with no advisory-note history before it (unrelated to this population), or one posted before
+ * any fix-mark existed (a genuine, still-current judgment call), is NEVER superseded by this check.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ * @param {number} index
+ * @returns {boolean}
+ */
+export function isAdvisoryMechanismStandDownSuperseded(comments, index) {
+  if (!Array.isArray(comments)) return false;
+  const c = comments[index];
+  const body = typeof c === 'string' ? c : c?.body;
+  if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) return false;
+  if (!isSelfAuthored(c)) return false;
+  const before = comments.slice(0, index);
+  let lastNoteIndex = -1;
+  for (let i = 0; i < before.length; i += 1) {
+    const b = typeof before[i] === 'string' ? before[i] : before[i]?.body;
+    if (typeof b === 'string' && b.trimStart().startsWith(ADVISORY_NOTE_MARKER)) lastNoteIndex = i;
+  }
+  if (lastNoteIndex === -1) return false;
+  for (let j = lastNoteIndex + 1; j < before.length; j += 1) {
+    const b = before[j];
+    const bBody = typeof b === 'string' ? b : b?.body;
+    if (typeof bBody === 'string' && bBody.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER) && isSelfAuthored(b)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────

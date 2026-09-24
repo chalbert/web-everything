@@ -169,3 +169,60 @@ export function mergePr({ pr, repo = null, method = 'merge', caller, exec = exec
   assertMayMerge({ caller, pr, repo, env, log });
   return exec('gh', buildGateMergeArgs({ pr, repo, method }), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
+
+// ── #3383 — retarget a stacked PR BEFORE its base branch is deleted ────────────────────────────────────
+//
+// `mergePr` above always merges with `--delete-branch` (also true if the repo has auto-delete-on-merge
+// enabled). Left alone, a merge that deletes `headRef` orphans any OPEN PR whose OWN base is `headRef`
+// (a PR stacked on top of the one landing now) — and GitHub's behaviour on a deleted base is to CLOSE
+// that PR, never to retarget it. The #2578 incident: an approved, unmerged, entirely unrelated PR
+// (`lane/x3ecgta-…`, based on `lane/3681-…`) was silently killed the instant `lane/3681-…`'s own PR
+// (#2549) merged and its branch was deleted. The fix is to do the retarget FIRST, while the base branch
+// still exists to retarget FROM — GitHub refuses both `pr edit --base` and reopen once a PR is closed by
+// a vanished base (verified live during #2578's recovery), so this must run strictly before the merge.
+
+/** The `gh pr list` argv that finds every OPEN PR stacked on `headRef` (i.e. its base). Scoped by
+ *  `--base`, so this is a narrow, cheap listing — never a full-repo open-PR fan-out. Pure. */
+export function buildStackedPrListArgs({ repo = null, headRef }) {
+  return ['pr', 'list', '--state', 'open', '--base', String(headRef), ...(repo ? ['--repo', repo] : []), '--json', 'number,baseRefName'];
+}
+
+/** The `gh pr edit --base` argv that retargets ONE stacked PR onto `base` (the repo's default branch).
+ *  Pure. */
+export function buildRetargetArgs({ pr, repo = null, base }) {
+  return ['pr', 'edit', String(pr), ...(repo ? ['--repo', repo] : []), '--base', String(base)];
+}
+
+/**
+ * Retarget every OPEN PR based on `headRef` onto `defaultBranch`, BEFORE `headRef` is deleted by the merge
+ * that is about to happen. Best-effort throughout, by design: a `gh` miss here (listing or an individual
+ * edit) must never block the merge itself — the merge landing is the invariant that matters, and a missed
+ * retarget is still recoverable by hand (or the #3383 recovery sweep for a PR GitHub already closed),
+ * while a merge blocked on this side-effect is not. `exec` is injectable so this is unit-testable without
+ * shelling `gh`.
+ * @param {{repo?:(string|null), headRef:string, defaultBranch:string, exec?:Function, onRetarget?:Function, onFailed?:Function}} o
+ * @returns {{retargeted:number[], failed:number[]}}
+ */
+export function retargetStackedPrs({ repo = null, headRef, defaultBranch, exec = execFileSync, onRetarget = () => {}, onFailed = () => {} } = {}) {
+  const retargeted = [];
+  const failed = [];
+  let stacked;
+  try {
+    const out = exec('gh', buildStackedPrListArgs({ repo, headRef }), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    stacked = JSON.parse(String(out || '[]').trim() || '[]');
+  } catch { return { retargeted, failed }; } // listing miss — nothing to safely act on, never blocks the merge
+  if (!Array.isArray(stacked)) return { retargeted, failed };
+  for (const s of stacked) {
+    const num = s && s.number;
+    if (num == null) continue;
+    try {
+      exec('gh', buildRetargetArgs({ pr: num, repo, base: defaultBranch }), { stdio: ['ignore', 'ignore', 'pipe'] });
+      retargeted.push(num);
+      onRetarget(num);
+    } catch {
+      failed.push(num);
+      onFailed(num);
+    }
+  }
+  return { retargeted, failed };
+}
