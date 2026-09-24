@@ -1975,8 +1975,23 @@ export const RAW_VITEST_TARGETED_FILE_LIMIT = 2;
  *  WIDENS what counts as "too many" — it can deny a borderline case, never let a real whole-suite run through
  *  by miscounting down to the allowed range. */
 export function vitestRunFileTargetCount(tail) {
-  return shellTokens(String(tail || '')).map((t) => t.text).filter((t) => t && !t.startsWith('-')).length;
+  const toks = shellTokens(String(tail || ''));
+  let n = 0;
+  for (let i = 0; i < toks.length; i += 1) {
+    const { text: t, op } = toks[i];
+    if (!t) continue;
+    // #3383 (found live 2026-09-23): a redirection is not a file target — `shellTokens` marks `>`/`2>&` as an
+    // operator and its target is the next word — and neither is the separately-worded VALUE of a flag that takes
+    // one (`--root <dir>`, `-t <name>`). Counting them pushed a one-file run over the limit.
+    if (op) { i += 1; continue; }
+    if (t.startsWith('-')) { if (VITEST_VALUE_FLAGS.has(t)) i += 1; continue; }
+    n += 1;
+  }
+  return n;
 }
+
+/** The vitest flags whose value may be a separate word. A value written `--flag=value` is one token and needs no entry. */
+const VITEST_VALUE_FLAGS = new Set(['--root', '-r', '--dir', '--config', '-c', '--testNamePattern', '-t', '--reporter', '--project', '--outputFile', '--environment', '--shard', '--pool']);
 
 /**
  * Does a direct (unqueued) invocation of vitest/playwright/eleventy skip the #3461 admission queue? Pure,

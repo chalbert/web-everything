@@ -113,6 +113,7 @@ import { readField } from './backlog/frontmatter.mjs';
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
 import { cleanLaneLitter } from './lib/lane-litter.mjs';
+import { VERIFY_FILENAME, keepMarkerAfterReset, readVerifyMarker } from './lib/lane-verify.mjs';
 // #x3cepr4 — the shared `list --acquirable` scan cache (a result file with a TTL + a lock so parallel callers
 // reuse ONE in-flight scan instead of each re-scanning every lane, #3383's biggest single load on 2026-09-23).
 // `cmdList` is the ONLY consumer of `listAcquirableCached`; every lane-state-changing command below calls
@@ -1018,6 +1019,19 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
   return reaped;
 }
 
+/**
+ * #3383 — after an acquire's reset, drop the previous holder's verify marker unless it is for the commit the reset
+ * landed on ({@link keepMarkerAfterReset}). Without this a new holder's first `verify-lane.mjs` run refused to start
+ * over a stranger's terminal record. Best-effort: a failure here never fails the acquire.
+ */
+function clearForeignVerifyMarker(dir) {
+  try {
+    const gitDir = join(dir, '.git');
+    const head = git(['rev-parse', 'HEAD'], dir);
+    if (!keepMarkerAfterReset(readVerifyMarker(gitDir), head)) rmSync(join(gitDir, VERIFY_FILENAME), { force: true });
+  } catch { /* advisory */ }
+}
+
 function cmdAcquire(repo) {
   // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
   // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
@@ -1252,6 +1266,7 @@ function cmdAcquire(repo) {
     git(['checkout', '-B', repo.branch, baseRef, '--quiet', '--force'], dir);
     git(['clean', '-fd', '--quiet'], dir);
     unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
+    clearForeignVerifyMarker(dir);
   }
   writeLaneEnv(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);

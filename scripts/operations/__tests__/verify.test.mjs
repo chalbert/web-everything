@@ -14,7 +14,8 @@ import { describe, it, expect } from 'vitest';
 import {
   verifyOperation, shapeRunFinding, assessChecks, VERIFY_MODES, CHECK_OUTCOMES, VERIFY_OP,
 } from '../verify.mjs';
-import { verifyArgv, classifyVerifyResult, createChecksRunner, VERIFY_LANE_CLI } from '../verify-io.mjs';
+import { verifyArgv, classifyVerifyResult, createChecksRunner, VERIFY_LANE_CLI, VERIFY_TIMEOUT_MS, VERIFY_SPAWN_SLACK_MS, verifySpawnTimeoutMs } from '../verify-io.mjs';
+import { DEFAULT_ADMISSION_CEILING_MS } from '../../readiness/heavy-admission.mjs';
 
 const check = (over = {}) => ({ name: 'verify-lane', outcome: 'pass', summary: 'verified green for abc12345', ...over });
 const finding = (checks) => shapeRunFinding({ cwd: '/lane', suite: 'run', checks });
@@ -246,5 +247,19 @@ describe('createChecksRunner', () => {
   it('never throws when the home cannot be spawned', () => {
     const spawn = () => { throw new Error('ENOENT'); };
     expect(createChecksRunner({ spawn })({ cwd: '/x', mode: 'run' }).checks[0].outcome).toBe('unrun');
+  });
+});
+
+describe('the spawn bound covers the admission-queue wait, not only the suites (#3383)', () => {
+  it('is the admission ceiling + the suites bound + slack, and follows the ceiling override', () => {
+    expect(verifySpawnTimeoutMs({})).toBe(DEFAULT_ADMISSION_CEILING_MS + VERIFY_TIMEOUT_MS + VERIFY_SPAWN_SLACK_MS);
+    expect(verifySpawnTimeoutMs({ WE_HEAVY_ADMISSION_CEILING_MS: '60000' })).toBe(60_000 + VERIFY_TIMEOUT_MS + VERIFY_SPAWN_SLACK_MS);
+  });
+  it('the runner hands that bound to the spawn (a 30-minute bound killed a queued gate on 2026-09-23)', () => {
+    let opts = null;
+    const spawn = (_exe, _argv, o) => { opts = o; return { status: 0, stdout: '{"status":"green","sha":"abc"}' }; };
+    createChecksRunner({ spawn, env: {} })({ cwd: '/lane', mode: 'run' });
+    expect(opts.timeout).toBe(verifySpawnTimeoutMs({}));
+    expect(opts.timeout).toBeGreaterThan(VERIFY_TIMEOUT_MS + DEFAULT_ADMISSION_CEILING_MS - 1);
   });
 });
