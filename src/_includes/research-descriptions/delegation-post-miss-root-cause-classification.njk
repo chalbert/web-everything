@@ -54,6 +54,37 @@ row (the diagnosis is reusable text), but each triple accumulates its own post-f
 the already-ratified "trust never carries across triples" (top of
 <a href="/docs/agent/platform-decisions/#delegation-trial-record-graduation">#delegation-trial-record-graduation</a>).</p>
 
+<h2>Rework — operator-directed reshape (2026-09-24)</h2>
+
+<p>The operator rejected the first prep of #4029 for two shape errors: an unconditional step-back to
+<code>full</code> on every miss regardless of cause, and a human-authored, human-confirmed
+<code>rootCauseClass</code> field. The corrected shape — automated attribution by default (a model distinct
+from the builder, never the builder itself), a tooling-caused miss keeps its graduated level with no
+demotion, and the step-back fires only when a miss is both critical and cannot be improved by tooling —
+reuses two more findings from the same survey rather than reopening it.</p>
+
+<h3>Finding 5 — "independent" means not-the-party-under-review, not specifically human</h3>
+
+<p>Findings 2–3's SRE and SCAR precedent require the classifying party to be someone other than the party
+under review, never specifically a human. This repo already treats a non-human distinct party as sufficient
+independence:
+<a href="/docs/agent/platform-decisions/#agent-convergence-independent-validation">#agent-convergence-independent-validation</a>
+rests independence "entirely on a distinct fresh validator," explicitly satisfied by an in-process
+role-separated subagent given fresh context. #4029's reworked Fork 1 reuses that pattern: an automated
+classifier distinct from the delegated triple satisfies the same not-self-certified principle, no human in
+the loop by default.</p>
+
+<h3>Finding 6 — "critical" already has a code-grounded proxy; no new scale invented</h3>
+
+<p><code>deriveRisk</code> (<code>we:scripts/lib/dispatch-contracts.mjs:148-152</code>) computes
+<code>'high'</code> for a statute-tier touch or a high-stakes bugfix/conflict-resolution;
+<code>NEVER_SPOT_CHECK_PATH_PREFIXES</code> (<code>we:scripts/lib/dispatch-thresholds.mjs:42-46</code>) names
+<code>statute</code>/<code>gateSelf</code>/<code>irreversible</code>; <code>humanRequired</code> flags the
+declarative-leash/statute layer. No standalone "security" escalation-reason category exists today — it is a
+jury reviewer lens, not a signal.
+<a href="/backlog/3374-calibrate-the-finding-consequence-scale-one-axis-or-two-asse/">#3374</a> (a jury
+severity scale) is still open/unresolved and is cited as related work, not authority.</p>
+
 <h2>What this survey does not settle</h2>
 
 <p>None of the three disciplines surveyed map a numeric bar onto "proven" — they say "the fix, then fresh

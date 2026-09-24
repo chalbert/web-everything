@@ -8,342 +8,522 @@ status: open
 scope: ["we:scripts/lib/provider-routing.mjs"]
 dateOpened: "2026-09-24"
 preparedDate: "2026-09-24"
-preparedAgainstSha: "b97e0026bb8964f8726bd1dc3ea3d0faa248b0d5"
+preparedAgainstSha: "0211889352056eae78a36c6fd1d4412b7b5e4553"
 relatedReport: reports/2026-09-24-delegation-post-miss-root-cause-classification.md
-tags: [delegation, supervision, graduation, root-cause, decision-prep]
+tags: [delegation, supervision, graduation, root-cause, automated-attribution, decision-prep]
 ---
 
-# A tooling-caused delegation miss re-graduates on the normal bar once the fix is proven
+# A delegated model's miss is auto-attributed and fixed in tooling; demotion only when critical and unfixable
 
-No design exists yet for splitting rule 5's post-miss bar by root-cause kind. Six forks below are grounded
-in the prior-art survey published as
+No design exists yet for how a delegation-trial miss's root cause gets classified, or what that
+classification changes. Seven forks below are grounded in the prior-art survey published as
 [/research/delegation-post-miss-root-cause-classification/](/research/delegation-post-miss-root-cause-classification/)
 (session report: `we:reports/2026-09-24-delegation-post-miss-root-cause-classification.md`), which extends
-the #3690 survey and does not repeat it. Each fork carries a recommended default in **bold**. Operator
-direction (2026-09-24): demotion should not be the first avenue — most misses are fixed by improving
-tooling/instructions, not by distrusting the vendor — while the automatic step-back stays as a cheap safety
-net.
+the #3690 survey and does not repeat it. Each fork carries a recommended default in **bold**.
+
+**Reworked 2026-09-24 (second pass) — operator rejected the first prep.** The first prep (also dated
+2026-09-24) had the wrong shape on two points: it made the automatic step-back to `full` **unconditional**
+on every confirmed miss, and it made root-cause classification (`rootCauseClass`) a **human-authored,
+human-confirmed** field. Both contradict the standing default this repo already runs on — a failure is an
+opportunity to improve the product (the tooling, the instructions), never a problem that needs manual
+intervention (`we:agent-memory-src/failure-is-a-product-improvement.md`). The operator's corrected
+direction, now the bold default throughout this card: (1) classification is **automated by default, no
+human in the loop** — a model distinct from the builder triple attributes the miss to `tooling` or
+`vendor`; (2) a **tooling-caused miss gets its tooling/instruction fix and keeps the triple's graduated
+level — no demotion**; (3) the automatic step-back to `full` fires **only** when a miss is both **critical**
+and **cannot be improved by tooling** — replacing rule 6's unconditional immediate demotion and rule 5's
+post-miss bar as the default path (a real skeptic sub-agent attack found this also needs one narrow
+carve-out in rule 3's hard veto text — see *Proposed codified text*). This prep's job, per the operator's
+own framing, is to ground those three defaults, sharpen them, and surface the real residual risks — not to
+overturn them.
 
 **Builds on, does not re-decide, [#3673](/backlog/3673-define-what-clears-a-triggered-calibration-veto-so-a-role-ca/)**
 (codified at
-[#calibration-veto-clearing](/docs/agent/platform-decisions/#calibration-veto-clearing)), which already
-ruled, for the sibling calibration-veto mechanism rule 5 explicitly borrows its principle from
-(`we:docs/agent/platform-decisions.md:4964-4966`): a documented root-cause finding is a mandatory
-precondition before any post-miss trial counts (its Fork 1), clearing needs a trial specifically targeting
-a case similar to the trigger, not just any N clean trials (its Fork 2), decay/time alone never clears a
-veto (its Fork 3), and a human override is available only as a narrow factual reclassification of the
-trigger, never a trust grant (its Fork 4). Forks 3 and 5 below are this card's direct extension of #3673
-Fork 2's "similar-case trial" principle and Fork 4's "no self-serving reclassification" principle to the
-delegation-trial record; neither re-opens #3673's own ruling.
+[#calibration-veto-clearing](/docs/agent/platform-decisions/#calibration-veto-clearing)) — **and departs
+from it on purpose.** #3673 governs the calibration veto, a rarer, higher-stakes mechanism (a role loses
+the ability to do *independent review at all*), and its Fork 4 keeps a human-only override on that veto's
+clearing. This card governs the ordinary, high-volume delegation-trial supervision level — a much lower-
+stakes, routine mechanism — and departs from #3673's implicit human-centric framing by defaulting its
+classification step to automation. The two are not in tension: #3673 never actually requires that its own
+root-cause note be *human*-authored (it is silent on that point), and nothing in #3673's ruling reaches who
+or what may classify a *different* mechanism's root cause. #3673's Fork 4 narrow-override principle (never
+a trust grant, only a factual reclassification) is reused here too — see Fork 1 and Fork 5 — just applied to
+an automated first pass instead of a human one.
 
 **Blocked by [#3949](/backlog/3949-delegation-trial-logging-stops-once-a-triple-graduates-and-n/).**
 `we:scripts/review-set-label.mjs:1129-1130` logs a session-delegation trial only while
 `!isDelegationTripleGraduated(...)`, so once a triple graduates no further rows are written and no row ever
-records a miss — rule 6's computed demotion (`we:docs/agent/platform-decisions.md:4967-4974`) cannot fire at
-spot-check today. Until #3949 lands, this card's ruling has no live effect: there is no code path by which a
-graduated triple's miss reaches the record this ruling reads.
+records a miss — nothing below can fire at `spot-check` today. **This card's ruling has no live effect until
+#3949 lands**: there is no code path today by which a graduated triple's miss reaches the record this
+ruling reads. Nothing here is built by this card either (see *What this card does not decide*).
 
 ## Axes
 
-Three orthogonal axes, each pinned to the real tree:
+Four orthogonal axes, each pinned to the real tree:
 
-- **The step-back mechanism** — `we:scripts/lib/provider-routing.mjs:816-821`'s hard veto and
-  root-cause-precondition branches inside `selectSupervisionLevel`.
-- **The post-miss bar** — `we:scripts/lib/provider-routing.mjs:148-158`'s `DEFAULT_BACKDOWN_THRESHOLDS`
-  (`minCleanStreak`, `k`) and `:804-810`'s `requiredCleanStreak` computation, gated today only by
-  `hasRootCauseNote` (`:339-342`) with no split by what the root cause names.
-- **The promotion act** — rule 6 (`we:docs/agent/platform-decisions.md:4967-4974`): demotion computed and
-  immediate, promotion an explicit ratified act, never automatic per trial.
+- **Who/what classifies a confirmed miss** — no classification field exists in the recorded row schema
+  today (`we:scripts/conveyor/log-delegation-trial.mjs` has `--root-cause` but no class/attribution flag);
+  `we:scripts/lib/provider-routing.mjs:339-342`'s `hasRootCauseNote` reads only presence of a `rootCause`
+  string, never who wrote it.
+- **What a `tooling` classification changes** — today, none: `we:scripts/lib/provider-routing.mjs:804-826`'s
+  `selectSupervisionLevel` computes `full` for *any* confirmed miss with no root-cause note
+  (`hasConfirmedMiss && !hasRootCause`), and once a note exists, still requires the higher
+  `minCleanStreak + k` bar (`:810`) with no distinction for what the note names as cause.
+- **When the step-back fires** — currently unconditional and immediate: `:816-820` sets `SUPERVISION_LEVELS.FULL`
+  the moment either the most-recent trial has an unresolved finding, or any confirmed miss lacks a root-cause
+  note; `we:docs/agent/platform-decisions.md:4967-4970` (rule 6) frames this as "demotion is computed... and
+  takes effect immediately."
+- **What "critical" and "cannot be improved" mean** — neither concept exists as a named field or predicate
+  in the delegation-trial record today; this card grounds both against measures that already exist
+  elsewhere in the codebase (Forks 4-5), rather than inventing new ones.
 
 ## Recommended path at a glance
 
 | Fork | Recommended default | Main alternative | Confidence |
 | --- | --- | --- | --- |
-| 1 — Does the automatic step-back still fire unconditionally? | The automatic step-back to `full` on any confirmed miss **stays unconditional** — a cheap safety net; demotion means only that the blocking full review returns, delegation continues | Skip the step-back for a miss suspected tooling-caused | High |
-| 2 — Who classifies tooling vs vendor, and is it gameable? | A required `rootCauseClass` field, **human-authored, fails closed to `vendor` when missing, and a `tooling` class must cite a concrete landed fix** — never inferred or self-declared by the automation, provider, or orchestrator | Infer the class from the `rootCause` note's free text, or let any interested party self-declare it | High |
-| 3 — What does "proven on the live case" require? | At least one post-fix clean trial **specifically targets the triggering failure mode**, with the targeting claim confirmed by the rule-6 act (tooling path only) | Any N generic clean trials of the triple's ordinary taskType | High |
-| 4 — Is the re-entry bar exactly cold-start, or can it be lower? | A named **`toolingReentryStreak` config entry, defaulting to `minCleanStreak`**, tunable only by a future ordinary batched finding — never fixed to a number by this card | Cold-start is a hard, permanent floor with no lower door ever | Med-high |
-| 5 — Does a shared tooling fix reset other affected triples? | **No automatic cross-triple reset** — the root-cause finding may be referenced across every affected triple's row, but each triple accumulates its own post-fix trial evidence | A tooling fix proven for one triple auto-clears/lowers the bar for every triple sharing that cause | High |
-| 6 — Does post-miss restoration bypass rule 6's ratified-act requirement? | Post-miss restoration **stays a rule-6 promotion**, and that act is **where a human confirms both the `rootCauseClass` and the targeting claim** — never automatic purely on the computed streak | The computed streak alone flips a demoted triple back to `spot-check`, no explicit act | Med-high |
+| 1 — Who/what classifies tooling vs vendor? | **Automated by default** — a classification step run by a model distinct from the builder triple; never the builder itself, never self-declared, never a required human | A required human-authored field (the first prep's shape) | High |
+| 2 — What happens on a tooling-caused miss? | The tooling/instruction fix lands and the triple **keeps its graduated level — no demotion at all** | Demote first, restore later on a proof streak (the first prep's shape) | High |
+| 3 — When does the step-back to `full` fire? | **Only when the miss is CRITICAL and cannot be improved by tooling** (Forks 4-5), or Fork 6's repeated-miss cap has fired | Unconditional on every confirmed miss (the first prep's shape) | High |
+| 4 — What counts as "critical"? | Reuse the existing code-grounded proxy: `deriveRisk === 'high'`, a `NEVER_SPOT_CHECK_PATH_PREFIXES` group, or `humanRequired` — never a new bespoke scale | Invent a new criticality scale for this mechanism alone | High |
+| 5 — What counts as "cannot be improved by tooling"? | No fix nameable, **or** a fix landed and the same failure class recurred — recurrence is the trigger, detected passively, never proactively gated | Require a targeted post-fix proof trial before trusting any tooling fix | High |
+| 6 — Does a run of tooling-attributed misses ever cap out? | Yes — a named `toolingMissCap` config lever, a lifetime (non-decaying) count by default; past the cap, the pattern reclassifies as vendor-caused for step-back purposes, regardless of any single incident's own criticality | No cap — every miss gets an independent classification forever | Med-high |
+| 7 — Does a shared cause extend across triples? | No — each triple runs its own classification and accumulates its own miss count; the diagnosis is referenceable, not the clearance | A proven tooling fix for one triple auto-clears every triple sharing the cause | High |
 
-## Fork 1 — Does the automatic step-back to `full` still fire unconditionally on every confirmed miss?
+## Fork 1 — Who, or what, classifies a confirmed miss's root cause as tooling vs vendor?
 
-**Why this is a real fork.** The alternative — skip the automatic step-back for a miss suspected
-tooling-caused — is the excluded branch: it contradicts rule 3's already-ratified "A confirmed miss resets
-the triple at once; it is never averaged into a score" (`we:docs/agent/platform-decisions.md:4950-4956`) and
-rule 5's own text that this is "the same principle as
-[#calibration-veto-clearing](/docs/agent/platform-decisions/#calibration-veto-clearing), applied to a
-delivery trial" — #3673 Fork 3 already forecloses letting anything short of affirmative clean-trial evidence
-substitute for the veto's clearing. A pre-emptive "don't even step back, we suspect tooling" would be exactly
-that substitution, decided before any evidence exists.
-
-- **(a)** Skip the automatic step-back to `full` when the miss is suspected (not yet proven) tooling-caused,
-  so delegation continues uninterrupted while the root cause is investigated. **Rejected**: contradicts rule
-  3's "resets at once" hard veto and the anti-dilution principle #3673 Fork 3 already applied to exactly this
-  mechanism family; it would also make the veto's firing depend on an unverified guess about cause, the same
-  shape #3673 Fork 4 rejects for override ("no identity buys an easier bar" — no *guess* buys skipping the
-  bar either).
-- **(b)** **The automatic step-back to `full` on any confirmed miss (rule 3's existing hard veto) stays
-  exactly as ratified, unconditional on suspected cause** ← **RECOMMENDED**. What changes under this card is
-  only how the triple gets *back* to `spot-check` (Forks 2–4), never whether the miss demotes it. Demotion
-  here is deliberately cheap and narrow in effect: rule 2 (`we:docs/agent/platform-decisions.md:4945-4949`)
-  already establishes that a supervision level moves only *how much checking* a delegated draft gets, never
-  *whether* it may be delegated at all — so "the triple steps back to `full`" means the blocking, full
-  independent review returns for that triple's work, not that delegation stops. This is the operator's own
-  framing ("demotion here only means the full, blocking review returns — delegation continues").
-
-**Skeptic:** SURVIVES (real skeptic sub-agent). Classification axis pressed hardest: branch (a) is already
-excluded by ratified rules 3 and 6, so this is a forced-invariant confirmation, not an open merit choice —
-accepted, and matches the fork's own justification above (the sanctioned "forced invariant" fork shape, not
-a bare ratify demoted out of the fork sections). No merit, statute-overlap, or citation-scope attack landed.
-**Screen:** clear — a genuine policy question (does the veto still fire on a mere unverified suspicion of
-cause), and the merit (an unverified guess would substitute for evidence) survives stripping timing and
-build cost (fresh-context agent, #2091).
-
-## Fork 2 — Who classifies a confirmed miss's root cause as tooling vs vendor, and how is that not gameable?
-
-**Why this is a real fork.** Two coherent-looking mechanisms for populating the classification cannot both be
-authoritative: either the field is a fact a human records (reviewable, disputable, narrow), or it is
-produced automatically from data already in the row (cheap, but exactly the party under review supplying its
-own verdict). They are mutually exclusive designs for the same field, and the choice materially changes
-whether rule 5's higher bar can be evaded.
+**Why this is a real fork.** Three mutually exclusive designs for populating the classification cannot all
+be authoritative at once: the field is either produced automatically by a disinterested party, inferred
+from data the interested parties themselves control, or gated on a human. The choice is what the whole rest
+of this card hangs on — get it wrong and either the classification is trivially gameable, or the "no manual
+intervention by default" direction is violated at the very first step.
 
 - **(a)** Infer the classification from the free-text `rootCause` note (keyword match), or let the dispatch
-  automation, the delegated provider's own session, or the orchestrating session self-declare it. **Rejected**:
-  self-certification by any interested party — the same channel #3673 Fork 1 already closed for the
-  underlying `rootCause` field itself ("never inferred from a later row's `findings`"); inferring the *class*
-  from that same free text reopens the identical hole one field over. Gameable concretely: every miss could
-  be worded to read "tooling," always drawing the lighter bar, which would functionally erase rule 5's higher
-  post-miss bar for vendor causes — and no party that could write the field is disinterested in the outcome.
-- **(b)** **A required `rootCauseClass: 'tooling' | 'vendor'` field, written only by a human, with a
-  `'tooling'` classification citing a concrete landed fix (a PR or commit reference) rather than bare prose,
-  and a missing/absent field failing closed to `'vendor'` (the higher bar) — never inferred, never
-  self-declared, and never defaulting lenient** ← **RECOMMENDED**. Mirrors rule 4's shape ("its own recorded
-  field... never inferred"). Writing "only by a human" is not itself enforceable by the logging CLI (nothing
-  checks who invoked it) — the actual enforcement point is Fork 6's rule-6 ratified act, which confirms the
-  classification before restoration; this field records the claim the act then checks. **Authority, corrected
-  by the skeptic pass:** `#model-probation-graduation-criteria`'s "promotion is always an explicit human
-  decision grounded in accumulated data, never automatic" and
+  automation, the delegated provider's own session, or the orchestrating session self-declare it.
+  **Rejected**: self-certification by any interested party is the same channel #3673 Fork 1 already closed
+  for the underlying `rootCause` field itself ("never inferred from a later row's `findings`"); every miss
+  could be worded to read "tooling," always drawing the lighter path, functionally erasing the vendor path.
+- **(b)** **A classification step run by a model distinct from the builder triple — never the builder
+  itself, never inferred from free text, never a required human — writes a `rootCauseClass: 'tooling' |
+  'vendor'` field. A `'tooling'` classification must cite a concrete landed fix (`rootCauseFixRef`, a PR or
+  commit reference); a missing/invalid class fails closed to `'vendor'`** ← **RECOMMENDED**. Independence
+  here does not require a human: this repo's own ratified mechanism for independence,
   [#agent-convergence-independent-validation](/docs/agent/platform-decisions/#agent-convergence-independent-validation)
-  clause 1 ("a distinct fresh validator") are the on-point anchors; `#agent-vendor-registry` rule 3 governs a
-  vendor descriptor module's own declared fields, a narrower turf that does not reach who classifies a miss,
-  so it is supporting context only, not cited as authority.
-- **(c)** No classification field at all — every root-cause note gets the lighter, tooling-shaped bar.
-  **Rejected**: erases rule 5's post-miss-bar distinction outright; a "the model just made a bad call" note
-  would always graduate at cold-start, which the operator's own direction explicitly excludes ("the higher
-  bar applies... when the root cause is the vendor itself").
+  (#2398), rules that independence "rests entirely on a distinct fresh validator" and is explicitly satisfied
+  by "an in-process role-separated subagent, provided it has fresh context" — applied at
+  [#fix-review-convergence-independent-root-cause](/docs/agent/platform-decisions/#fix-review-convergence-independent-root-cause)
+  invariant 1 ("a builder never clears its own diff," not "a human clears every diff"). The classifying
+  model reads the same evidence a human reviewer would (the miss, the diff, the finding) and is barred from
+  being the delegated triple's own provider/model — the same non-author invariant #2398 already establishes
+  for fix convergence, reused here for attribution. **A narrow human override exists**, mirroring #3673 Fork
+  4's own narrow-override principle: a human may correct a classification on identity/evidentiary grounds
+  only — the cited `rootCauseFixRef` does not actually exist, does not match the miss, or the classifier
+  misread the row — never to re-litigate whether a landed fix is good enough, and never as a routine step.
+- **(c)** A required `rootCauseClass` field, **human-authored**, with the CLI unable to enforce who invoked
+  it. **Rejected — this was the first prep's shape, and the operator rejected it 2026-09-24.** It makes
+  every classification a manual-intervention step by default, contradicting the standing "failures improve
+  the product, never manual intervention" default, and gates the overwhelmingly common tooling-fix path
+  behind a human who must show up before any restoration can even be considered.
 
 ```js
 // Illustrative shape only — mirrors hasRootCauseNote (scripts/lib/provider-routing.mjs:339-342, this repo).
 // The real field, predicate and CLI flag are future build work under this ruling, not authored here.
-function hasToolingRootCause(record) {
-  // Fail-closed: an absent/invalid class is never treated as tooling.
-  return hasRootCauseNote(record)
-    && record.rootCauseClass === 'tooling'
-    && typeof record.rootCauseFixRef === 'string' && record.rootCauseFixRef.trim() !== '';
+function hasValidToolingClassification(record, builderTriple) {
+  // Fail-closed: an absent/invalid class, or a classifier equal to the builder triple, is never 'tooling'.
+  return typeof record.rootCauseClass === 'string' && record.rootCauseClass === 'tooling'
+    && typeof record.rootCauseFixRef === 'string' && record.rootCauseFixRef.trim() !== ''
+    && record.rootCauseClassifiedBy && !tripleEquals(record.rootCauseClassifiedBy, builderTriple);
 }
-// Written only via the human-authored CLI path, mirroring #3889's --root-cause flag:
+// Written by an automated CLI path, never by the builder's own session:
 //   node scripts/conveyor/log-delegation-trial.mjs ... --root-cause="..." \
-//     --root-cause-class=tooling --root-cause-fix-ref="PR #1234"
-// Never derived from `findings`, never set by the delegated session or the orchestrator itself; the CLI
-// cannot enforce "a human ran this", so Fork 6's rule-6 act is the real checkpoint that confirms it.
+//     --root-cause-class=tooling --root-cause-fix-ref="PR #1234" \
+//     --root-cause-classified-by="claude:sonnet-5"   # must differ from the builder triple
 ```
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). The attack found "written only by a human" is
-not enforceable by the CLI path alone — nothing in the logging tool checks who invoked it, and the
-orchestrating session itself (not only "the automation" or "the delegated provider") is an equally interested,
-previously-unnamed party. Citation-scope: `#agent-vendor-registry` rule 3 governs a vendor descriptor's own
-declared fields, not who classifies a miss — downgraded to supporting-only as shown above; the on-point
-authorities (`#model-probation-graduation-criteria`, `#agent-convergence-independent-validation` clause 1)
-are cited instead. Fixed by: a missing/absent `rootCauseClass` fails closed to `vendor`; a `tooling`
-classification must cite a concrete landed fix, not bare prose; and enforcement is moved to Fork 6's rule-6
-ratified act, which is the only point in the mechanism where a human checkpoint structurally exists.
-**Screen:** clear — a genuine externally-observable policy question (who may set the bar-determining field,
-and on what evidence), and the merit (self-certification vs. independent confirmation) survives stripping
+**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). Rule 5 as *currently ratified* only requires
+a root-cause note with no classifier concept, so this is genuinely new ground, not precedent-settled. The
+attack found the card's own preamble claimed this fork "reuses #3673 Fork 4's narrow-override principle,"
+but the fork's text, as first drafted, contained no actual override mechanism — a wrongly-tagged
+classification had no stated correction path, weaker than #3673, not an equivalent reuse of it. Fixed by
+writing the override clause into the fork's own text above (identity/evidentiary correction only, never a
+re-litigation of the fix's quality) instead of leaving it an unbacked preamble claim.
+**Screen:** clear (real fresh-context agent) — a genuine externally-observable policy question (who/what may
+set the bar-determining field), and the merit (independent-but-automated vs. human-gated) survives stripping
 timing and build cost.
 
-## Fork 3 — What does "proven on the live failing case" require, concretely?
+## Fork 2 — What happens to a triple whose confirmed miss is classified tooling-caused?
 
-**Why this is a real fork.** A generic clean-trial count and a trigger-targeted trial are mutually exclusive
-readings of what counts as proof; option (a) reopens the same selection-bias gaming rule 5 exists to
-prevent, on its own merits — independent of any one sibling card's exact mechanics (see the skeptic
-correction below on how far the #3673 analogy reaches).
+**Why this is a real fork.** Two designs for what a `tooling` classification *does* are mutually exclusive
+as a governing default: either the triple still pays (demotes now, proves its way back later) or it does
+not pay at all once the fix is named. A design cannot simultaneously treat the miss as "free" and "costly
+until re-proven" — one has to be the default this card names.
 
-- **(a)** Any N clean trials of the triple's ordinary taskType count as proof the fix worked, with no
-  requirement they resemble the failure that triggered the miss. **Rejected**: a fix "proven" only by
-  unrelated, easy trials is not evidence the fix addressed the actual failure — the same selection-bias
-  shape #3673 Fork 2(a) was rejected for in the sibling calibration-veto mechanism, offered here as a
-  supporting analogy, not as rule 5's literal inherited mechanic (rule 5's ratified text borrows #3673's
-  root-cause-and-higher-bar principle, not specifically its similarity-trial clause).
-- **(b)** **At least one post-fix trial specifically targets the triggering failure mode** — the same task
-  re-attempted, or (mirroring #3673 Fork 2(b)'s scarcity allowance, cited as analogy) a deliberately
-  constructed case exercising the same tooling/instruction gap when the exact live case cannot literally be
-  re-run ← **RECOMMENDED**. The trial's row records what it targeted; because self-tagging a row is exactly
-  as gameable as Fork 2's self-declared classification, the claim that a trial actually targeted the trigger
-  is confirmed by the same rule-6 ratified act Fork 6 names, not taken on the row's own say-so. **Scope
-  note:** the vendor-caused path does not get this same targeted-trial requirement layered on top of its
-  already-higher `minCleanStreak + k` bar — that higher streak is that path's own safeguard, and extending
-  Fork 3 to it would exceed what the operator's direction and rule 5's existing text ask this card to decide.
+- **(a)** A tooling-caused miss still demotes the triple to `full`; restoration requires a subsequent proof
+  streak (mirrors the first prep's `toolingReentryStreak` machinery). **Rejected — this was the first prep's
+  shape.** It penalizes the triple regardless of cause, attributing to the triple a gap that is actually in
+  *this repo's own* tooling/instructions, and reproduces the "pay first, prove later" posture the operator's
+  direction explicitly rejects for the tooling path.
+- **(b)** **The system's own delivery loop builds the tooling/instruction fix (the same convergent-fix
+  machinery this repo already uses for any tooling gap), the row records `rootCauseClass: 'tooling'` +
+  `rootCauseFixRef`, and the triple KEEPS its graduated level — no demotion, no reentry bar, no proof streak
+  required** ← **RECOMMENDED**. The confirmed miss is never deleted or hidden from the record — it still
+  counts toward Fork 6's repeated-miss cap, and Fork 5's recurrence test still watches it. This requires the
+  rule-3 carve-out drafted above (*Proposed codified text*): as ratified, rule 3's hard veto fires on the
+  miss itself the moment it is the most-recent trial, with no cause exception, so "no demotion" is not
+  achievable without that one-sentence amendment.
+- **(c)** A tooling-caused miss gets a *shorter* demotion window (some fixed, lower bar) rather than none.
+  **Rejected** — this is the first prep's Fork 4 in different clothes; it still treats every tooling-caused
+  miss as demoted-then-restorable rather than never demoted at all, which is exactly the shape the
+  operator's "keep graduation... no demotion" language forecloses.
 
 ```js
 // Illustrative shape only — future build work, not authored by this card.
-// A post-fix trial counts toward the tooling-proven re-entry bar only when it cites what it targeted,
-// AND that citation has been confirmed by the rule-6 ratified act (never taken on the row's own say-so).
-function isProvenAgainstTrigger(record, triggerHandle) {
-  return isCleanRecord(record) && record.provenAgainst === triggerHandle && record.targetingConfirmed === true;
+function toolingMissOutcome(record) {
+  if (!hasValidToolingClassification(record, record.builderTriple)) return null; // not this path
+  return { demote: false, note: 'tooling fix landed; triple keeps its graduated level' };
 }
 ```
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). The attack found `provenAgainst ===
-triggerHandle` self-tagged by whoever logs the row is the identical self-declaration hole Fork 2 closes,
-reopened here. Citation-scope: rule 5's ratified text borrows #3673's root-cause-and-higher-bar principle,
-not literally its Fork 2 similarity-trial mechanic — this card had over-cited that as direct lineage rather
-than a supporting analogy; downgraded above, and the fork now stands primarily on its own selection-bias
-merit. Fixed by tying the targeting claim's confirmation to the same rule-6 act Fork 6 names, and by
-explicitly scoping the requirement to the tooling path only (added above), rather than silently expanding it
-to the vendor path.
-**Screen:** clear — a genuine correctness/gameability question (what counts as evidence the fix worked), and
-the merit survives stripping timing and build cost.
+**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). Statute-overlap: the strongest finding on the
+whole card. Ratified rule 3 ("a confirmed miss resets the triple at once... never averaged into a score")
+governs the *same* miss this fork says costs nothing — the card's own Axes section already documents that
+today's `hasConfirmedMiss && !hasRootCause` and `mostRecentHasFinding` branches compute `full` from any
+confirmed miss in history, not only a stale one. "No demotion" and "resets at once" cannot both be true of
+the same event unless rule 3 is itself amended. Fixed by drafting the rule-3 carve-out above rather than
+asserting (as an earlier draft of this card did) that rule 3 stays untouched. Merit attack (does "no
+demotion" remove the incentive for the tooling fix to be good) does not land — the fix still has to clear
+`#agent-convergence-independent-validation`'s bar, and Fork 5's recurrence test still catches a fix that
+doesn't actually work.
+**Screen:** clear (real fresh-context agent) — not cost-of-demotion vs. cost-of-not-demoting; the real
+question is whether the triple should pay at all for the repo's own tooling gap, which survives stripping
+build cost entirely.
 
-## Fork 4 — Is the tooling-proven re-entry bar exactly the cold-start bar, or can it go lower ("or shorter")?
+## Fork 3 — When does the automatic step-back to `full` fire?
 
-**Why this is a real fork.** The operator's own phrasing ("the normal cold-start bar or shorter") leaves two
-coherent readings open, and rule 3 already establishes the general mechanism for exactly this kind of
-question — "The streak length N is a `backdownThresholds` config default... proposed and changed by an
-ordinary batched finding against real data, never by a decision ceremony"
-(`we:docs/agent/platform-decisions.md:4950-4956`) — so the excluded branch is the one that would carve a
-silent, permanent exception to that general mechanism with no stated reason.
+**Why this is a real fork.** Rule 6 as ratified reads "demotion is computed from the record and takes
+effect immediately" with no conditional — an unconditional-on-any-miss reading and a
+conditional-on-criticality reading are mutually exclusive governing defaults for the same clause, and the
+choice is the crux of the whole card.
 
-- **(a)** **A named `toolingReentryStreak` entry on `DEFAULT_BACKDOWN_THRESHOLDS`, defaulting to
-  `minCleanStreak` (so today's behavior is "exactly cold-start" until data says otherwise), tunable only by
-  the same future ordinary batched finding that already tunes `minCleanStreak`/`k` — never fixed to a
-  specific lower number by this card** ← **RECOMMENDED**. This is the honest, *mechanically real* reading of
-  "or shorter": rule 3's existing discipline (no numeric threshold from a decision ceremony) governs walking
-  through the door, and the door is a concrete config lever a batched finding can actually turn, not prose
-  that names no lever.
-- **(b)** Cold-start is a hard, permanent floor — no bar lower than cold-start is ever available, even with
-  future data. **Rejected**: this would carve an unexplained, permanent exception to rule 3's general
-  amendment mechanism for this one bar and only this one, with no stated reason a tooling-proven case
-  couldn't, on real future data, justify going lower than an entirely cold triple's own bar.
+- **(a)** The step-back fires unconditionally on any confirmed miss, exactly as rule 6 reads today.
+  **Rejected — this was the first prep's shape, and it now also directly conflicts with Fork 2(b)'s "no
+  demotion" default** for the overwhelmingly common tooling-caused case; the two cannot both be true.
+- **(b)** **The step-back fires only when a miss is classified CRITICAL (Fork 4) *and* cannot be improved by
+  tooling (Fork 5) — or when Fork 6's repeated-miss cap has been reached, which reclassifies the pattern as
+  vendor-caused for step-back purposes regardless of any single incident's own criticality** ← **RECOMMENDED**.
+  This replaces rule 6's unconditional immediate demotion and rule 5's post-miss bar as the default path. A
+  tooling-caused, first-occurrence, fixed miss never steps back. A vendor-caused miss on high-stakes work
+  steps back immediately (criticality is met, and a vendor-caused miss has no fix to cite, so "cannot be
+  improved by tooling" is true by construction). A vendor-caused miss on *routine* work does not step back
+  on its own — but Fork 6's cap still catches a triple that racks up enough of them.
+- **(c)** The step-back fires whenever the miss "cannot be improved by tooling," regardless of criticality —
+  drop the criticality gate. **Rejected** — this would step back on every ordinary, low-stakes vendor
+  judgment slip (a typo-grade miss on a doc-fix task, say), which is exactly the disproportionate,
+  demotion-happy default the operator's direction is pushing away from; criticality is what keeps the
+  step-back "a cheap safety net" rather than a blunt instrument.
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). The attack found the originally-drafted
-codified text contradicted this fork's own default: it hard-coded "the ordinary cold-start `minCleanStreak`"
-prose with no named lever, so a future batched finding would have had nothing to change without a fresh
-statute edit — the "open door" was locked by this card's own wording. Fixed by naming the lever concretely
-(`toolingReentryStreak`, defaulting to `minCleanStreak`) above and in the codified text below, so rule 3's
-existing batched-finding mechanism has something real to tune. Classification axis: close to a config
-dimension, but the fork still rules on something real — whether a tooling-specific lever may ever exist at
-all, vs. being permanently barred — so it stays a fork rather than dissolving to "supported by default."
-**Screen:** clear, though the thinnest of the six — the content is "don't fix a number now," which risks
-reading as deferral, but the real ruling (a permanent bar on ever having a lower tooling lever, vs. leaving
-the door concretely open) is a genuine precedent-consistency question, not a convenience call.
+```js
+// Illustrative shape only — future build work, not authored by this card.
+function shouldStepBackToFull(record, toolingMissCapTripped) {
+  if (toolingMissCapTripped) return true; // Fork 6 — aggregate trigger, bypasses the per-incident AND-gate
+  return isCriticalMiss(record) && cannotBeImprovedByTooling(record); // Forks 4-5 — the per-incident AND-gate
+}
+```
 
-## Fork 5 — Does a proven tooling fix reset other triples that shared the same root cause?
+**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). Two findings, both fixed. First: the original
+draft's criticality-AND-unfixable gate, taken alone, leaves a real gap — a triple doing only *non-critical*
+work could rack up tooling-attributed misses indefinitely (each one individually "fixed," no single one
+critical) with no step-back ever firing. Fixed by making Fork 6's cap an explicit OR-branch on this fork
+(not folded silently into Fork 6's own text only) — the aggregate cap fires regardless of the per-incident
+criticality read, closing the low-stakes-churn gap. Second: this fork inherits Fork 2's rule-3 conflict — a
+"tooling-caused, first-occurrence, fixed miss never steps back" is only true once the rule-3 carve-out
+(*Proposed codified text*) exists; fixed by drafting that carve-out rather than asserting rule 3 untouched.
+**Screen:** clear (real fresh-context agent) — proportionality (blanket step-back vs. criticality-gated) is
+a genuine policy stance about consequences, independent of build cost.
+
+## Fork 4 — What counts as "critical," concretely?
+
+**Why this is a real fork.** Two designs are mutually exclusive: invent a criticality scale bespoke to this
+mechanism, or reuse a measure this repo already computes and has ratified for a closely related purpose
+(what work is too consequential to sample away, or too consequential to route without a human). Inventing a
+parallel scale when an applicable one already exists is the excluded branch — it would duplicate a live
+contract by a different test, the #1886 statute-overlap failure mode.
+
+- **(a)** Invent a new, bespoke "criticality" field and threshold set authored fresh for this card.
+  **Rejected**: this repo already computes exactly this signal for the dispatch path, so a second scale
+  would define the same underlying question — is this work too consequential to sample away or route
+  without oversight — twice, by two different tests; the same diff could then be "critical" under one
+  reading and not the other, an incoherent result a single authoritative measure cannot produce.
+- **(b)** **Reuse the existing, code-grounded escalation-severity proxy already computed for the work that
+  produced the miss: `criticalMiss` is true iff `deriveRisk(...) === 'high'` (reading
+  `we:scripts/lib/dispatch-contracts.mjs:148-152`, which reads `isHighStakesTask` at
+  `we:scripts/lib/provider-routing.mjs:289-312`) OR the touched files match any
+  `NEVER_SPOT_CHECK_PATH_PREFIXES` group — `statute`, `gateSelf`, `irreversible`
+  (`we:scripts/lib/dispatch-thresholds.mjs:42-46`) OR `humanRequired` is true for the diff (the declarative-
+  leash/statute layer, `we:scripts/lib/review-escalation.mjs`)** ← **RECOMMENDED**. No standalone "security"
+  escalation-reason category exists in this codebase today — "security" names a jury reviewer *lens* (a
+  role), not an escalation signal — so a security-relevant miss is caught through these three measures (a
+  security-sensitive path very likely falls inside `gateSelf`/`statute`/`irreversible`, or drives
+  `deriveRisk`'s `'high'`), never a fourth invented category.
+- **(c)** Leave "critical" undefined, to be set whenever [#3374](/backlog/3374-calibrate-the-finding-consequence-scale-one-axis-or-two-asse/)
+  (the jury finding-consequence/severity scale) ratifies. **Rejected as this card's default, open to
+  amendment later** — #3374 is still `status: open`, unresolved as of this rework, and governs a different
+  subject (a jury's *finding* severity within a review) than this card's dispatch-time risk classification;
+  making this card's default depend on an unrelated, unresolved decision would leave "critical" undefined
+  indefinitely. If #3374 later ratifies a general severity scale, folding it in here is a natural future
+  amendment, not a
+  precondition for this card.
+
+```js
+// Illustrative shape only — future build work, not authored by this card.
+// Reuses existing, ratified measures; invents nothing new.
+import { deriveRisk } from './dispatch-contracts.mjs';
+import { isNeverSpotCheckPath } from './dispatch-thresholds.mjs';
+
+function isCriticalMiss(record) {
+  const files = record.filesTouched ?? [];
+  return deriveRisk(record.taskType, files, record.complexity, record.acceptanceTestable) === 'high'
+    || files.some(isNeverSpotCheckPath)
+    || record.humanRequired === true;
+}
+```
+
+**Skeptic:** SURVIVES (real skeptic sub-agent). Classification axis pressed: is this actually a config
+dimension rather than a fork (branch (b) is "reuse an existing measure," which could look like there's
+nothing to decide)? Does not dissolve — the genuine open call is *whether* to reuse vs. invent, and (a) is a
+real, coherent-looking alternative that a careless build could take (a fresh field feels "more precise" to
+an implementer who hasn't checked for the existing proxy), so the fork earns its keep by foreclosing that
+temptation explicitly. Citation-scope: confirmed `#3374` is unresolved and correctly cited as related work
+only, not authority — verified via its frontmatter (`status: open`, no `resolvedDate`). All code citations
+verified current and accurate (`deriveRisk`, `NEVER_SPOT_CHECK_PATH_PREFIXES`, `humanRequired`). Minor nit:
+`deriveRisk`'s `'high'` branch already folds in a statute-path check, overlapping with the `statute` prefix
+group below it — harmless, defensive redundancy, not incorrect.
+**Screen:** flagged(prio) → fixed (real fresh-context agent). The original rejection of branch (a) leaned on
+drift/maintenance cost ("would drift out of sync," "duplicate... by a different test") — a cost argument
+that dissolves if both scales were free to build and perfectly maintained. Reworded above to the real
+merit: two scales would let the *same* diff be "critical" under one reading and not the other, a
+definitional incoherence no amount of maintenance budget fixes.
+
+## Fork 5 — What counts as "cannot be improved by tooling," concretely?
+
+**Why this is a real fork.** Two mutually exclusive postures for closing off the tooling-fix path: gate it
+proactively (no fix counts until proven against a follow-up trial) or watch it passively (trust the fix,
+treat recurrence as the signal it didn't work). Layering both would silently reintroduce the "pay first,
+prove later" cost Fork 2 exists to remove — so the card has to pick one as the actual governing test, not
+both as redundant gates.
+
+- **(a)** No tooling fix counts as sufficient until a subsequent trial specifically targeting the failure
+  mode comes back clean (mirrors the first prep's Fork 3, and #3673 Fork 2's similarity-trial principle by
+  analogy). **Rejected** — a synthetic, pre-arranged proof trial only shows the fix handles a case its
+  author already knows about, which is weaker evidence than the fix holding up against *live, unprompted*
+  recurrence; it also reintroduces exactly the "triple pays first, proves later" structure Fork 2 rejects,
+  by requiring a gate before the fix is ever trusted.
+- **(b)** **"Cannot be improved by tooling" is true iff EITHER (i) the classifier cannot name a concrete
+  landed fix (`rootCauseFixRef` absent/empty — nothing to cite, so treat as vendor by Fork 1's fail-closed
+  rule), OR (ii) a fix WAS landed and a LATER confirmed miss for the same triple is classified by the
+  automated step as the same failure class, recorded as a `recurrenceOfRootCause` reference to the earlier
+  row** ← **RECOMMENDED**. Recurrence is the trigger, detected after the fact by the same distinct-model
+  classifier from Fork 1 (by analogy to #3673 Fork 2's "similar-case" test, now applied to *detecting a
+  repeat* rather than *proving a fix*), never proactively gated before the fix is trusted the first time.
+  The same narrow human override named in Fork 1 applies here: a human may correct a wrongly-tagged
+  `recurrenceOfRootCause` on identity/evidentiary grounds, never to argue the recurrence "doesn't really
+  count."
+- **(c)** Never treat a tooling-caused miss as unfixable, no matter how many times the "same" failure
+  recurs. **Rejected** — this would leave the tooling-caused path permanently ungated even under
+  demonstrated repeated failure, contradicting Fork 6's own cap and leaving no path back to `full` for a
+  triple whose tooling "fix" provably never sticks.
+
+```js
+// Illustrative shape only — future build work, not authored by this card.
+// Passive recurrence, never a proactive proof-trial gate.
+function cannotBeImprovedByTooling(record) {
+  if (!hasValidToolingClassification(record, record.builderTriple)) return true; // no fix named -> vendor path
+  return typeof record.recurrenceOfRootCause === 'string' && record.recurrenceOfRootCause.trim() !== '';
+}
+```
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). The attack found "the same failure class" is
+underspecified — self-tagging a recurrence, like Fork 2's original self-declared classification, is exactly
+as gameable if left to the row's own say-so. Fixed by tying `recurrenceOfRootCause` to the *same* distinct-
+model classifier Fork 1 already established (never the builder, never self-tagged), rather than leaving it
+an unowned field. Citation-scope: #3673 Fork 2's similarity-trial mechanic is borrowed as an analogy for
+*recognizing a repeat*, not cited as rule 5's literal inherited mechanic (rule 5's ratified text borrows
+#3673's root-cause-and-higher-bar principle generally, not its specific trial-similarity clause) — stated
+explicitly above to avoid over-citing, the same correction the first prep's Fork 3 skeptic pass already made
+once. Also found: like Fork 1, this fork's preamble-claimed override was missing from its own text — fixed
+by adding the pointer to Fork 1's override clause above.
+**Screen:** clear, weakly-worded original tightened (real fresh-context agent). The rejection of branch (a)
+originally leaned on cost-sounding language, which reads as a build-effort objection; the real,
+cost-independent merit is evidentiary — a synthetic pre-arranged trial only proves the fix handles a case
+its author already knows about, weaker evidence than the fix holding against live, unprompted recurrence —
+reworded into branch (a)'s rejection above. The underlying question (what counts as proof a fix worked)
+survives stripping timing and build effort entirely.
+
+## Fork 6 — Does a run of tooling-attributed misses for one triple ever cap out?
+
+**Why this is a real fork.** Two mutually exclusive designs for how much weight repeated tooling
+attributions carry: unlimited (every miss gets an independent classification forever, no memory of the
+pattern) or capped (a repeated pattern itself becomes evidence the classification — or the "fix" — isn't
+holding). Rule 3's "never averaged into a score" caution is about not *diluting* a single miss; this fork
+asks the mirror question for a *run* of misses each individually waved through as tooling.
+
+- **(a)** No cap — every miss gets its own independent tooling/vendor classification with no memory of how
+  many prior tooling attributions this triple has accumulated. **Rejected** — makes the tooling-fixed path
+  an unlimited free pass: a triple that keeps tripping a same-shaped bug, each time waved through as
+  "tooling, fixed," never reaches a bar that questions whether the fix is real or the classification is
+  being gamed or simply wrong.
+- **(b)** **A named `toolingMissCap` config lever — `{ count: N, windowDays: null }` (mirroring
+  `DEFAULT_BACKDOWN_THRESHOLDS`'s shape at `we:scripts/lib/provider-routing.mjs:147-158`) — defaulting to a
+  placeholder `count` and `windowDays: null` (a LIFETIME count, no decay), tunable only by a future ordinary
+  batched finding, the same rule-3 mechanism that tunes `minCleanStreak`/`k`, never locked to a number by
+  this card. Once a triple accumulates `count` distinct tooling-attributed confirmed misses (lifetime, by
+  default), the pattern is reclassified as a vendor problem for Fork 3's step-back test — regardless of any
+  single incident's own criticality** ← **RECOMMENDED**. This is Fork 3's explicit aggregate OR-branch,
+  closing the gap where a non-critical taskType could otherwise accumulate tooling-attributed misses
+  indefinitely with no step-back ever firing. **The default is deliberately non-decaying**: a real skeptic
+  sub-agent attack on an earlier draft (which defaulted `windowDays` to a finite trailing window) found that
+  a *sliding* window lets a triple whose tooling misses are spaced further apart than the window dodge the
+  cap forever, no matter how many it accumulates over its lifetime — reopening exactly the "unlimited free
+  pass" branch (a) rejects, just gated by pacing instead of count. A future batched finding may introduce a
+  decay window only once it also demonstrates that window doesn't reopen this gap.
+- **(c)** A cap exists but is advisory only — it files a follow-up item and never itself triggers step-back.
+  **Rejected** — an advisory-only cap leaves exactly the indefinite low-stakes-churn gap open; once a
+  computed condition is met it should act at once (rule 3's own discipline for a single miss, reapplied
+  here to a pattern of them), not wait on someone reading a filed note.
+
+```js
+// Illustrative shape only — future build work, not authored by this card.
+export const DEFAULT_TOOLING_MISS_CAP = Object.freeze({
+  count: 3,          // placeholder — tunable only by a future ordinary batched finding, never fixed here
+  windowDays: null,  // null = lifetime count, no decay (the deliberate, ungameable default; see below)
+});
+function toolingMissCapTripped(sortedRecords, cap = DEFAULT_TOOLING_MISS_CAP) {
+  const cutoff = cap.windowDays == null ? -Infinity : Date.now() - cap.windowDays * 86_400_000;
+  const countedToolingMisses = sortedRecords.filter((r) =>
+    hasValidToolingClassification(r, r.builderTriple) && Date.parse(r.scoredAt) >= cutoff);
+  return countedToolingMisses.length >= cap.count;
+}
+```
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). Two findings, both fixed. First — the
+strongest finding on this fork: the original draft defaulted `windowDays` to a finite trailing window,
+which a triple can dodge indefinitely simply by spacing its tooling misses further apart than the window,
+reopening branch (a)'s "unlimited free pass" gated by pacing instead of count. Fixed by defaulting to a
+lifetime, non-decaying count (`windowDays: null`) above. Second — an earlier draft left the cap's
+consequence implicit ("reclassifies as vendor" without saying what that does downstream); fixed by naming
+the consequence explicitly as Fork 3's aggregate OR-branch (see Fork 3's code example and its own skeptic
+note). No statute-
+overlap found — no existing anchor names a repeated-misclassification cap for this record.
+**Screen:** clear (real fresh-context agent) — a genuine correctness/gaming question (does a repeated
+pattern ever get distrusted), not an implementation detail; survives stripping timing/build cost.
+
+## Fork 7 — Does a shared tooling root cause extend across triples automatically?
 
 **Why this is a real fork.** The already-ratified preamble of this same anchor states "The unit of trust is
 the triple `{provider, model, taskType}`, and trust never carries across triples"
 (`we:docs/agent/platform-decisions.md:4936-4937`) — a forced invariant that directly forecloses letting one
-triple's proof clear another triple's bar, even when the underlying cause is identical.
+triple's classification or fix clear another triple's bar, even when the underlying cause is identical.
 
-- **(a)** A tooling fix proven for one triple automatically clears, or lowers the bar for, every other triple
-  whose confirmed miss shared the same root cause. **Rejected**: directly contradicts "trust never carries
-  across triples" — this would be exactly that cross-triple carry, just gated on cause-identity instead of
-  gated on nothing.
-- **(b)** **Each affected triple accumulates its own post-fix trial evidence per Fork 3's bar, independently.
-  The same root-cause finding may be referenced across every triple's row that shares the cause — the
-  diagnosis itself does not need re-investigating per triple — but that reference never substitutes for the
-  triple's own evidence** ← **RECOMMENDED**. Keeps the record honest (no duplicated diagnosis work across
-  triples affected by one shared bug) while leaving the trust-never-carries invariant untouched.
+- **(a)** A tooling fix and/or classification proven for one triple automatically clears, or extends to,
+  every other triple whose confirmed miss shares the same root cause. **Rejected**: directly contradicts
+  "trust never carries across triples" — this would be exactly that cross-triple carry, now for automated
+  attribution and Fork 6's cap too.
+- **(b)** **Each affected triple runs its own automated classification pass (Fork 1) and accumulates its own
+  Fork 6 miss count independently. The same `rootCause`/`rootCauseFixRef` diagnosis may be referenced across
+  every triple's row that shares the cause — the diagnosis itself is not re-investigated per triple — but
+  that reference never substitutes for the triple's own classification or counts toward another triple's
+  cap** ← **RECOMMENDED**. Keeps the record honest (no duplicated diagnosis authoring across triples hit by
+  one shared bug) while leaving the trust-never-carries invariant, and Fork 6's per-triple cap, untouched.
 
 **Skeptic:** SURVIVES (real skeptic sub-agent). Classification axis: branch (a) is already excluded by the
-anchor's own ratified preamble ("trust never carries across triples"), so like Fork 1 this is a
-forced-invariant confirmation — accepted, matches the fork's own justification. Merit attack (a shared
-tooling bug forcing redundant per-triple retrial cost) does not land: every affected triple had its own
-confirmed miss, so each independently owes its own evidence regardless of shared cause; referencing the same
-finding across triples shares only the diagnosis-authoring cost, not the evidence cost. No statute-overlap or
-citation-scope issue found.
-**Screen:** flagged(impl) → fixed. The fresh-context pass found the original "linked, not re-authored"
-phrasing described a *storage/data-modeling* detail (how the note is stored) rather than the *policy*
-(what's required as evidence); reworded above to state only the externally-observable outcome — the
-diagnosis is referenceable, the evidence requirement is not waived.
-
-## Fork 6 — Does post-miss restoration bypass rule 6's "promotion is an explicit ratified act"?
-
-**Why this is a real fork.** Rule 6 states: "Demotion is computed from the record and takes effect
-immediately. Promotion to a lighter level takes an explicit ratified act naming the triples promoted, done in
-batches against accumulated data, never per dispatch and never per trial"
-(`we:docs/agent/platform-decisions.md:4967-4970`). Restoration after a miss is, structurally, a promotion (a
-triple moving from `full` back to `spot-check`) — so letting the computed streak alone flip it back, with no
-ratified act, would be a silent exception to rule 6 that rule 6's own text does not carve.
-
-- **(a)** Once Fork 2's classification, Fork 3's proof, and Fork 4's bar are all met, the triple returns to
-  `spot-check` automatically, purely from the computed record — no separate human act. **Rejected**:
-  contradicts rule 6's "never per dispatch and never per trial" as written; nothing in the operator's
-  direction asked to change *who* promotes, only *which bar* applies once a human has classified the cause.
-- **(b)** **Post-miss restoration is a promotion under rule 6 like any other — it still requires the same
-  explicit ratified act naming the triples promoted, done in batches, measured against the
-  correctly-selected bar (cold-start once tooling-proven, `minCleanStreak + k` otherwise). That act is also
-  the enforcement point for Forks 2 and 3: it is where a human confirms the triple's `rootCauseClass` and
-  confirms that its cited proof trial actually targeted the trigger** ← **RECOMMENDED**. Rule 6's text
-  already reads "any promotion" broadly enough to cover this without new words; what this card adds is not a
-  new restriction but the load-bearing job that act does — it is the only point in the whole mechanism where
-  a human checkpoint structurally exists, since the logging CLI enforces neither the classification nor the
-  targeting claim on its own.
-
-**Skeptic:** SURVIVES-WITH-AMENDMENT (real skeptic sub-agent). The attack argued the added sentence
-originally read as a redundant restatement of rule 6 as already written (a plain reading of "any promotion"
-already covers post-miss restoration). Accepted as partly right — reworded above to stop presenting this as
-a new restriction and instead state its real job: it is the fix for Forks 2 and 3's enforceability gap, the
-one human checkpoint in the mechanism that can actually confirm the classification and the targeting claim,
-which the logging CLI cannot enforce on its own.
-**Screen:** clear — initially suspected as a non-decision (already foreclosed by rule 6 as written), but this
-card's own bar-splitting logic creates a real temptation a builder could otherwise fall into ("the bar is now
-precisely computable, so why not auto-restore"), and foreclosing that is a genuine policy point, not
-manufactured.
+anchor's own ratified preamble, so like the first prep's Fork 1/5 this is a forced-invariant confirmation —
+accepted, matches the fork's own justification. Merit attack (a shared bug forcing redundant per-triple
+classification cost) does not land: referencing the same diagnosis across triples shares only the
+diagnosis-authoring cost, not the classification or cap-accrual cost, each of which is intrinsic to the
+triple that had the miss. No statute-overlap or citation-scope issue found.
+**Screen:** clear (real fresh-context agent) — extends an already-ratified invariant to a new mechanism by
+analogy; still a genuine policy call (does *this* mechanism inherit that invariant), not an implementation
+detail, and exempt from a code example (naming/scope precedent, no independent code shape beyond what Forks
+1 and 6 already show).
 
 ## Proposed codified text (drafted, ready to ratify verbatim; not yet ratified)
 
-If all six forks are ratified as recommended, rule 5 and rule 6 of
+If all seven forks are ratified as recommended, rules 3, 5, and 6 of
 [#delegation-trial-record-graduation](/docs/agent/platform-decisions/#delegation-trial-record-graduation)
-read (amendments in **bold**, rest unchanged):
+read (amendments in **bold**, rest unchanged). **Rule 3 needs a narrow carve-out, not named in the task
+brief but required for Fork 2/3 to be mechanically true** — a real skeptic sub-agent attack found that rule
+3's hard veto ("a confirmed miss resets the triple at once") fires on the *miss itself* as soon as it is the
+most-recent verified trial, with no cause exception; Fork 2's "no demotion" default is otherwise
+unachievable, since the miss that triggers classification is ordinarily also the most-recent trial rule 3's
+veto reads. The fix is a one-sentence carve-out, not a rewrite — the rest of rule 3 (the streak shape, the
+positive control, "never averaged into a score") is untouched:
 
-> 5. **Re-graduation after a miss — a root-cause note first, then a higher bar, unless the cause is
->    tooling.** After a miss, post-miss trials count toward restoration only once a root-cause note is on
->    record in its own field, not in a later row's `findings`. **The note also carries a `rootCauseClass`
->    (`tooling` or `vendor`), written only by a human. A missing or invalid class fails closed to `vendor`; a
->    `tooling` class must cite a concrete landed fix (a PR or commit reference), never bare prose; neither is
->    ever inferred or self-declared by the dispatch automation, the delegated provider's own session, or the
->    orchestrating session.** The post-miss bar is strictly higher than the cold-start bar (`minCleanStreak +
->    k`, with `k` set by the same batched finding that sets N) **when the root cause is the vendor itself.
->    When the root cause is tooling or instructions, the bar is `toolingReentryStreak` (a new
->    `DEFAULT_BACKDOWN_THRESHOLDS` entry, defaulting to `minCleanStreak` and tunable only by a future ordinary
->    batched finding, the same mechanism that tunes `minCleanStreak`/`k`) once at least one post-fix trial
->    specifically targets the triggering failure mode** (a repeat of the case, or a constructed case
->    exercising the same gap) **— never the vendor path, whose own higher streak is its safeguard. A tooling
->    fix proven for one triple never clears or lowers another triple's bar; the same root-cause finding may be
->    referenced across triples that share the cause, but each accumulates its own post-fix evidence.** This is
->    the same principle as [#calibration-veto-clearing](#calibration-veto-clearing), applied to a delivery
->    trial rather than a reviewer's disposition.
-> 6. **Who moves a level — the data demotes, the operator promotes.** Demotion is computed from the record
->    and takes effect immediately. Promotion to a lighter level takes an explicit ratified act naming the
->    triples promoted, done in batches against accumulated data, never per dispatch and never per trial.
->    **This includes post-miss restoration under rule 5: meeting the applicable bar is never itself
->    sufficient — the ratified act also confirms the triple's `rootCauseClass` and that its cited proof trial
->    actually targeted the trigger, the one human checkpoint the record's own fields cannot enforce
->    themselves.** With no such act, a triple stays at `full`. [rest unchanged]
+> 3. **The evidence bar is a shape: a trailing clean streak, plus a positive control, plus a clean most
+>    recent verified trial, with a confirmed miss as a hard veto — per triple.** The streak length N is a
+>    `backdownThresholds` config default (`DEFAULT_BACKDOWN_THRESHOLDS` in
+>    `we:scripts/lib/provider-routing.mjs`), proposed and changed by an ordinary batched finding against real
+>    data, never by a decision ceremony. A confirmed miss resets the triple at once; it is never averaged
+>    into a score — **except when rule 5's tooling-caused-and-fixed path applies to that miss, in which case
+>    the reset is superseded and the triple keeps its graduated level.** A concurrent-baseline comparison
+>    (the same task run through Claude and through the delegated provider, judged on the difference) is the
+>    preferred evidence shape over raising N.
+> 5. **Re-graduation after a miss — automated attribution first, then a fix or a bar, never a human gate by
+>    default.** After a miss, an automated classification step — run by a model distinct from the delegated
+>    triple, never the triple itself, never inferred from free text — records a `rootCauseClass` (`tooling`
+>    or `vendor`) alongside the existing root-cause note. **A missing or invalid class fails closed to
+>    `vendor`. A `tooling` class must cite a concrete landed fix (`rootCauseFixRef`, a PR or commit
+>    reference), never bare prose.** A narrow human override exists, mirroring
+>    [#calibration-veto-clearing](#calibration-veto-clearing)'s own override: a human may correct a
+>    classification or a recurrence tag only on identity/evidentiary grounds (the cited fix does not
+>    actually exist or does not match the miss, the classifier misread the row) — never to re-litigate
+>    whether a landed fix is good enough, and never as a routine step. When the class is `tooling` and the
+>    fix has landed, **the triple keeps
+>    its graduated level — no demotion, no post-miss bar, no reentry streak.** The automatic step-back to
+>    `full` fires only when the miss is both **critical** (the existing dispatch-risk / never-spot-check /
+>    human-required proxy already computed for the work — never a new bespoke scale) **and cannot be
+>    improved by tooling** (no fix nameable, or a fix landed and the same failure class recurred — recurrence
+>    detected by the same distinct classifier, never a proactive proof-trial requirement) — **or a named
+>    tooling-miss cap (a lifetime count, not a decaying one, tunable only by a future ordinary batched
+>    finding, the same mechanism that tunes `minCleanStreak`/`k`) has been reached for the triple, which
+>    reclassifies the pattern as vendor-caused regardless of any single incident's own criticality.** A
+>    tooling fix proven for one triple
+>    never clears or extends to another triple's classification, fix credit, or cap count; the same
+>    root-cause finding may be referenced across triples that share the cause, but each accumulates its own
+>    evidence. This is the same principle as
+>    [#calibration-veto-clearing](#calibration-veto-clearing), applied to a delivery trial rather than a
+>    reviewer's disposition, with independence satisfied by a distinct automated validator rather than a
+>    required human (per
+>    [#agent-convergence-independent-validation](#agent-convergence-independent-validation)).
+> 6. **Who moves a level — the data demotes when the bar above is met, the operator promotes.** Demotion is
+>    computed from the record **exactly as rule 5 above gates it** — never unconditional on a bare confirmed
+>    miss — and takes effect immediately once the criticality-and-unfixable test (or the repeated-miss cap)
+>    is met. Promotion to a lighter level takes an explicit ratified act naming the triples promoted, done in
+>    batches against accumulated data, never per dispatch and never per trial. **This includes restoring a
+>    triple that was actually stepped back under rule 5's critical-and-unfixable path**: meeting whatever bar
+>    applies is never itself sufficient — the ratified act also confirms the classification and cap state
+>    that put it there. With no such act, a stepped-back triple stays at `full`. [rest unchanged]
 
 `codifiedIn` on resolve is anchor `#delegation-trial-record-graduation` in
 `we:docs/agent/platform-decisions.md`.
 
 ## What this card does not decide
 
-It does not reopen rule 3's hard veto (Fork 1 above confirms it stands), rule 4's `informative` field, or
-rule 7's verification floor (that is `#3867`, already settled "no"). It does not fix a numeric value for
-`minCleanStreak`, `k`, or `toolingReentryStreak` (Fork 4) — those stay ordinary batched findings per rule 3,
-exactly as `#3673` left its own N undefined. It does not itself build the `rootCauseClass`, `rootCauseFixRef`,
-or `provenAgainst` fields, the `toolingReentryStreak` config entry, or the `selectSupervisionLevel` branch
-logic — that is separately-scoped future build work once ratified, matching `#3673`'s own "not built here"
-posture; and it has no live effect until `#3949` restores trial logging for graduated triples.
+**It amends rule 3, narrowly** — a real skeptic sub-agent attack found Fork 2/3's "no demotion" default is
+mechanically impossible without this carve-out, since the miss under classification is ordinarily also the
+most-recent trial rule 3's hard veto reads. Rule 3's streak shape, positive control, and "never averaged
+into a score" principle are otherwise untouched (see *Proposed codified text*). It does not reopen rule 4's
+`informative` field or rule 7's verification floor (that is `#3867`, ratified 2026-09-21: no supervision
+level below `spot-check`, and `spot-check` runs async/non-blocking — unaffected by this card). It does not
+fix a numeric value for `minCleanStreak`, `k`, or `toolingMissCap.count` (Fork 6) — those stay ordinary
+batched findings per rule 3, exactly as `#3673` left its own N undefined. It does not itself build the
+`rootCauseClass`, `rootCauseFixRef`, `rootCauseClassifiedBy`, `recurrenceOfRootCause`, or `toolingMissCap`
+fields, the
+automated classifier, or the `selectSupervisionLevel` branch logic — that is separately-scoped future build
+work once ratified, matching `#3673`'s own "not built here" posture; and it has no live effect until `#3949`
+restores trial logging for graduated triples. It does not touch #3673's own calibration-veto-clearing
+ruling — that mechanism keeps its human-only override on clearing exactly as ratified; only this card's own,
+narrower, routine-supervision mechanism defaults to automated classification (see the departure note above).
+Restoration after an actual critical-and-unfixable step-back stays an ordinary rule-6 promotion act,
+unchanged in mechanism by this card — no new restoration machinery is invented here.
 
 ### Review jury (provisional — pre-registered #2638)
 
@@ -365,14 +545,19 @@ Care level: `high` (this card edits statute). This jury binds against the item's
 
 ## Done when
 
-1. **Executable** — `we:scripts/lib/__tests__/provider-routing.test.mjs` gets a case showing a triple with a
-   recorded `rootCause` note, `rootCauseClass: 'tooling'` and a `rootCauseFixRef`, re-graduates at the
-   `toolingReentryStreak` bar once a trial recorded against the triggering case is clean, while a triple
-   whose `rootCauseClass` is `'vendor'` (or missing/invalid) still needs the higher `minCleanStreak + k` bar
-   — both paths read `we:scripts/lib/provider-routing.mjs`'s shared `DEFAULT_BACKDOWN_THRESHOLDS`, never a
-   local constant, and `toolingReentryStreak` defaults to `minCleanStreak`.
-2. **Assertable** — rules 5 and 6 of
+1. **Executable** — `we:scripts/lib/__tests__/provider-routing.test.mjs` gets cases showing: a triple with a
+   `rootCauseClass: 'tooling'`, a `rootCauseFixRef`, and a `rootCauseClassifiedBy` distinct from the builder
+   triple keeps `spot-check` with no demotion; a triple whose miss is critical (by the Fork 4 proxy) and
+   whose class is `vendor` (or missing/invalid) steps back to `full`; a triple whose tooling fix recurred
+   (`recurrenceOfRootCause` set) also steps back even though it was tooling-classified; and a triple that
+   crosses `toolingMissCap` steps back regardless of any single incident's criticality — all reading
+   `we:scripts/lib/provider-routing.mjs`'s shared `DEFAULT_BACKDOWN_THRESHOLDS`/cap config, never a local
+   constant.
+2. **Assertable** — rules 3, 5, and 6 of
    [#delegation-trial-record-graduation](/docs/agent/platform-decisions/#delegation-trial-record-graduation)
-   are amended to state the split (see *Proposed codified text* above); rule 7 is untouched.
-3. **Grounded** — the ruling states, for each of the six forks above, the option taken, and confirms
-   `#3673`'s calibration-veto-clearing ruling was extended, not re-decided.
+   are amended to state the split (see *Proposed codified text* above — rule 3 gets only the narrow
+   tooling-carve-out a real skeptic pass found necessary; rules 5 and 6 carry the bulk of the change);
+   rules 4 and 7 are untouched.
+3. **Grounded** — the ruling states, for each of the seven forks above, the option taken, confirms
+   `#3673`'s calibration-veto-clearing ruling was extended (its clearing mechanism untouched), and states
+   the departure from its human-centric framing and why.
