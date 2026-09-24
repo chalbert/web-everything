@@ -1261,6 +1261,14 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     writeFileSync(file, bodyFor(mintedHolder, adopted), { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
     return mintedHolder;
   } catch (e) {
+    // #xixn30q — ENOENT means the lane's dir/`.git` vanished out from under this write (a concurrent `trim`
+    // deleting it — even with trim's own per-lane claim lock, THIS acquire's `existingLanes`/`infoFor` snapshot
+    // was taken before that claim, so it can still hand a since-deleted lane to `tryClaimLane`; any other cause
+    // of a lane disappearing mid-acquire hits the same gap). Treat it exactly like "someone else has this one":
+    // return null so the caller's existing retry loop (`excluded.add(pick)` then pick the next candidate) moves
+    // on, instead of an uncaught throw crashing the whole acquire. Live-caught: wev-review-daemon session
+    // review-2549 crashed here writing into a lane `trim` had just removed.
+    if (e.code === 'ENOENT') return null;
     if (e.code !== 'EEXIST') throw e;
   }
   const existing = readLease(dir);
