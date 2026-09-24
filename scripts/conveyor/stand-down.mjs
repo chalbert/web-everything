@@ -117,6 +117,39 @@ export function countStandDownComments(comments) {
 }
 
 /**
+ * we:scripts/conveyor/stand-down.mjs#WATCHER_STAND_DOWN_ACTOR — the exact `--actor=` string
+ * `we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictStandDown` posts with, single-sourced here
+ * so {@link countTerminalStandDowns} and that file can never drift on what counts as "the watch's own marker".
+ */
+export const WATCHER_STAND_DOWN_ACTOR = 'parked-pr-conflict-watch (#xu2krte statute-tier exception)';
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#countTerminalStandDowns — `#xu2krte` Fork 2 (review-human statute amendment).
+ * Like {@link countStandDownComments}, EXCEPT it excludes a stand-down whose actor is
+ * {@link WATCHER_STAND_DOWN_ACTOR} — the parked-PR conflict watch's OWN mechanical routing decision at conflict
+ * detection, never a fix agent's or a human's judgment call. That class of stand-down is not "an agent examined
+ * the actual diff and could not safely proceed" (the case this marker exists to make terminal, per this file's
+ * own header) — it is a routing artifact the SAME watch re-derives fresh every sweep
+ * ({@link ../conveyor/parked-pr-conflict-watch.mjs}'s `classifyStatuteConflict`/`reviewHumanFixable`). A stale
+ * watcher marker sitting on the thread from an earlier, narrower classification (e.g. before the
+ * review-human-statute-amendment exception existed) must never block `reconcile-core.mjs`'s dispatch gate
+ * forever — the SAME reasoning the append-only statute exception already established for its own case.
+ *
+ * NARROWLY KEYED, ON PURPOSE. A fix agent's OWN `needs-judgment` / `gate-red` / `lane-ref-gone` escalation, or a
+ * human's own stand-down via `/finish`, NEVER matches this actor string and stays exactly as terminal as
+ * {@link countStandDownComments} already treats it — only THIS gate call site (`reconcile-core.mjs`'s dispatch
+ * refusal) uses the narrower count; every other reader of stand-down state (the operator queue's STOOD DOWN
+ * section, `pr-status-io.mjs`'s evidence surface, this file's own idempotent re-post guard) keeps using
+ * {@link countStandDownComments} unchanged, because a human should still SEE that the watch once stood this down,
+ * even once it no longer blocks a fresh dispatch.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {number}
+ */
+export function countTerminalStandDowns(comments) {
+  return standDownComments(comments).filter((c) => !c.body.includes(WATCHER_STAND_DOWN_ACTOR)).length;
+}
+
+/**
  * we:scripts/conveyor/stand-down.mjs#standDownReason — read back the stated reason clause from a stand-down
  * comment body built by {@link buildStandDownComment}. Pure string parsing — the inverse of that builder: the
  * comment's third line always reads `<actor> stopped rather than guessing: <why>.<detail>`, so the clause between

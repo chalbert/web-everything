@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
   STAND_DOWN_MARKER, STAND_DOWN_REASONS, countStandDownComments, buildStandDownComment,
-  standDownComments, standDownReason,
+  standDownComments, standDownReason, WATCHER_STAND_DOWN_ACTOR, countTerminalStandDowns,
 } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
@@ -197,5 +197,37 @@ describe('standDownComments and standDownReason — reading a stand-down comment
     expect(standDownReason('some other comment')).toBeNull();
     expect(standDownReason('')).toBeNull();
     expect(standDownReason(undefined)).toBeNull();
+  });
+});
+
+// ── #xu2krte Fork 2 (review-human statute amendment) — countTerminalStandDowns narrows countStandDownComments ──
+describe('countTerminalStandDowns — excludes ONLY the parked-PR conflict watch\'s own marker', () => {
+  const watcherStandDown = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }) };
+  const fixAgentStandDown = { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) };
+
+  it('a watcher-authored conflict stand-down is NOT terminal', () => {
+    expect(countTerminalStandDowns([watcherStandDown])).toBe(0);
+    expect(countStandDownComments([watcherStandDown])).toBe(1); // the raw count is untouched
+  });
+
+  it('a fix agent\'s own judgment stand-down stays exactly as terminal as before', () => {
+    expect(countTerminalStandDowns([fixAgentStandDown])).toBe(1);
+  });
+
+  it('a human\'s /finish stand-down (default actor) stays terminal', () => {
+    const humanStandDown = { body: buildStandDownComment({ reason: 'gate-red' }) };
+    expect(countTerminalStandDowns([humanStandDown])).toBe(1);
+  });
+
+  it('mixed thread: counts only the non-watcher stand-downs', () => {
+    expect(countTerminalStandDowns([watcherStandDown, fixAgentStandDown, watcherStandDown])).toBe(1);
+  });
+
+  it('a human quoting the watcher marker in a reply does not itself count (leading-line rule, unchanged)', () => {
+    expect(countTerminalStandDowns([{ body: `> ${watcherStandDown.body}` }])).toBe(0);
+  });
+
+  it('non-array / empty input reads as zero, same as countStandDownComments', () => {
+    for (const input of [null, undefined, []]) expect(countTerminalStandDowns(input)).toBe(0);
   });
 });

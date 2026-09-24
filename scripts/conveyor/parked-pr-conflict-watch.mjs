@@ -79,7 +79,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
-import { countStandDownComments } from './stand-down.mjs';
+import { countStandDownComments, standDownComments, WATCHER_STAND_DOWN_ACTOR } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
 
@@ -185,14 +185,16 @@ export function planConflictLabelChange({ isConflicting, isResolved = false, cur
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false, appendOnlyStatute = false } = {}) {
+export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrain = false, appendOnlyStatute = false, reviewHumanFixable = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
-  // Precedence mirrors the IO shell's routing EXACTLY (PR #2531 review): stand-down (`isStatuteTier`) wins,
-  // then an append-only statute conflict — dispatched AT ONCE, bypassing the queued-PR drain grace, so it must
-  // never get the drain-grace wording — then the queued drain grace, then an ordinary dispatch. The watch never
-  // passes `isStatuteTier` and `appendOnlyStatute` both true; if a caller does, stand-down wins and the
-  // append-only note is suppressed, so the comment can never claim two outcomes at once.
+  // Precedence mirrors the IO shell's routing EXACTLY (PR #2531 review, extended by #xu2krte Fork 2): stand-down
+  // (`isStatuteTier`) wins, then an append-only statute conflict, then the review-human statute-amendment
+  // exception, then the queued drain grace, then an ordinary dispatch — dispatched AT ONCE, bypassing the
+  // queued-PR drain grace, so neither exception can get the drain-grace wording. The watch never passes more
+  // than one of `isStatuteTier`/`appendOnlyStatute`/`reviewHumanFixable` true at a time; if a caller does,
+  // stand-down wins first, append-only next, so the comment can never claim two outcomes at once.
   const appendOnly = appendOnlyStatute && !isStatuteTier;
+  const reviewHumanAmendment = reviewHumanFixable && !isStatuteTier && !appendOnly;
   const nextStep = isStatuteTier
     ? 'Left as a **judgment call for a human or `/finish`**, not auto-resolved: the conflicting hunk touches a ' +
       "declarative-leash/statute-tier file, so choosing which side's edit wins is drafting principle content, " +
@@ -204,6 +206,10 @@ export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrai
           'and re-reviewed once resolved: the old approval does not cover the resolved diff.'
         : 'A fix agent is being dispatched now to resolve it (`#xu2krte`). The SAME independent-review gate this ' +
           'PR is already parked behind still applies before anything lands.')
+    : reviewHumanAmendment
+    ? 'A fix agent is being dispatched to resolve the CONFLICT ONLY (`#xu2krte` Fork 2): this PR already carries ' +
+      '`review:human`, so a human reviews the final merged result regardless — `review:human` is never cleared ' +
+      'or downgraded by the fix.'
     : deferredToDrain
     ? 'This PR is already approved/queued, so the drain gets the first try — it auto-rebases a PR whose only ' +
       `conflict is the shared manifest. If it is still conflicting in ${QUEUED_CONFLICT_GRACE_MS / 60000} minutes, ` +
@@ -221,6 +227,12 @@ export function buildConflictComment(pr, { isStatuteTier = false, deferredToDrai
       'new rule sections at the same insertion point — nobody edited any existing rule text — so this is being ' +
       'handled as an append-only statute conflict (keep both sections) and will go through a fresh independent ' +
       'review once resolved, exactly like any other bounce.'
+    : reviewHumanAmendment
+    ? '\n\n**The conflict is being resolved mechanically; the amendment itself is not.** `main` did not ' +
+      "independently change the SAME hunk this PR amends (verified by comparing diff hunks against the merge " +
+      "base), so this is a git-proximity conflict, not a competing edit — the fixer resolves the conflict only, " +
+      'makes no other change, and never touches a `review:*` label. A fresh independent review is still owed ' +
+      'once resolved, exactly like any other bounce.'
     : '';
   return [
     `⚠️ **This ${deferredToDrain ? 'approved' : 'parked'} PR has drifted into a real merge conflict against \`main\`**`,
@@ -374,6 +386,173 @@ export function isAppendOnlyStatuteConflict(statuteTierFiles, patchesByFile) {
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#parseHunkOldRanges — parse a unified-diff patch's `@@ -a,b
+ * +c,d @@` hunk headers into the OLD-file line ranges they cover, `[start, end)` (half-open, so a length-0 hunk —
+ * a pure insertion, `,0`/omitted length at that point — still yields an empty-but-valid `[start, start)` range).
+ * Both {@link isAppendOnlyStatuteChange}'s own patch (the PR's hunks against the merge base) and a comparison
+ * patch for `main`'s own changes since that SAME merge base describe positions in the SAME original file, so
+ * their old-file ranges are directly comparable — the basis {@link doesConflictOverlapMainEdits} compares on.
+ * PURE.
+ * @param {string} patch
+ * @returns {Array<[number, number]>}
+ */
+export function parseHunkOldRanges(patch) {
+  if (typeof patch !== 'string') return [];
+  const ranges = [];
+  for (const line of patch.split('\n')) {
+    const m = /^@@ -(\d+)(?:,(\d+))?/.exec(line);
+    if (!m) continue;
+    const start = Number(m[1]);
+    const len = m[2] !== undefined ? Number(m[2]) : 1;
+    ranges.push([start, start + len]);
+  }
+  return ranges;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#hunkRangesOverlap — do any two `[start, end)` ranges from the
+ * two given lists intersect? PURE, O(n·m) — both lists are always "one small statute file's hunk count", never
+ * large enough for this to matter.
+ * @param {Array<[number, number]>} rangesA
+ * @param {Array<[number, number]>} rangesB
+ * @returns {boolean}
+ */
+export function hunkRangesOverlap(rangesA, rangesB) {
+  const a = Array.isArray(rangesA) ? rangesA : [];
+  const b = Array.isArray(rangesB) ? rangesB : [];
+  for (const [aStart, aEnd] of a) {
+    for (const [bStart, bEnd] of b) {
+      if (aStart < bEnd && bStart < aEnd) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#doesConflictOverlapMainEdits — the TRUE semantic-clash test
+ * behind the `review:human` statute-amendment exception (`#xu2krte` Fork 2). A non-append-only statute-tier
+ * conflict is safe to hand a fixer ONLY when `main` never independently touched the SAME hunk region of the SAME
+ * file since the merge base — i.e. the git-level conflict is a PROXIMITY artifact (the two diffs sit close enough
+ * that git refuses to auto-merge them), not two sides genuinely competing over the same rule text. When they DO
+ * overlap, resolving it means choosing which side's edit wins — exactly the judgment this repo reserves for a
+ * person, unchanged from today.
+ *
+ * FAILS CLOSED in every ambiguous direction: a file `main` never touched at all (no entry in `mainPatchesByFile`)
+ * cannot clash there, so it is skipped; but a statute-tier file with NO recoverable PR patch is treated as an
+ * overlap (nothing to compare against a real main edit safely) rather than silently cleared.
+ * @param {string[]} statuteTierFiles
+ * @param {Record<string,string>} prPatchesByFile - this PR's own per-file patch (against the merge base).
+ * @param {Record<string,string>} mainPatchesByFile - `main`'s own per-file patch SINCE THE SAME merge base.
+ * @returns {boolean} true = a true semantic clash (stand down); false = safe to dispatch mechanically.
+ */
+export function doesConflictOverlapMainEdits(statuteTierFiles, prPatchesByFile, mainPatchesByFile) {
+  const files = Array.isArray(statuteTierFiles) ? statuteTierFiles : [];
+  const prPatches = prPatchesByFile && typeof prPatchesByFile === 'object' ? prPatchesByFile : {};
+  const mainPatches = mainPatchesByFile && typeof mainPatchesByFile === 'object' ? mainPatchesByFile : {};
+  for (const path of files) {
+    const mainPatch = mainPatches[path];
+    if (typeof mainPatch !== 'string' || mainPatch === '') continue; // main never independently touched this file
+    const prPatch = prPatches[path];
+    if (typeof prPatch !== 'string' || prPatch === '') return true; // no PR patch to compare — fail closed
+    if (hunkRangesOverlap(parseHunkOldRanges(prPatch), parseHunkOldRanges(mainPatch))) return true;
+  }
+  return false;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#findWatcherStandDownComment — does this PR's comment thread
+ * already carry a stand-down THIS WATCH ITSELF posted (`we:scripts/conveyor/stand-down.mjs#WATCHER_STAND_DOWN_
+ * ACTOR`), as opposed to a fix agent's own judgment stand-down or a human's `/finish` one? PURE. Narrowly keyed
+ * on the actor string {@link defaultPostConflictStandDown} always posts with — never guesses from context.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {?{body:string, createdAt:?string}}
+ */
+export function findWatcherStandDownComment(comments) {
+  return standDownComments(comments).find((c) => c.body.includes(WATCHER_STAND_DOWN_ACTOR)) ?? null;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildSupersedeStandDownComment — posted (best-effort, never
+ * blocking the dispatch that follows it) when a re-check finds the WATCH'S OWN prior stand-down no longer holds
+ * under the narrower `#xu2krte` Fork 2 rule. Explains the earlier marker is now stale rather than silently
+ * leaving two contradictory comments on the thread with no link between them. Says plainly that the marker
+ * itself could not be safely deleted (no sanctioned comment-delete primitive exists yet — see the follow-up
+ * card) rather than pretending it is gone. PURE.
+ * @param {{num?:number|string}} [pr]
+ * @returns {string}
+ */
+export function buildSupersedeStandDownComment(pr) {
+  return [
+    '↩️ **This PR\'s earlier stand-down is superseded — routed to a fix agent instead**',
+    '',
+    'An earlier sweep of the parked-PR conflict watch stood this PR down because its statute-tier conflict was ' +
+      'not append-only. Under the narrower `#xu2krte` Fork 2 rule, a `review:human` PR (a human reviews the ' +
+      'result regardless) whose conflicting statute hunk does NOT overlap what `main` independently changed since ' +
+      'the merge base is now routed to a fix agent instead: `review:human` is never cleared or downgraded, and a ' +
+      'human still reviews the final merged result through the normal review flow before it can land.',
+    '',
+    '_The earlier stand-down comment above is now stale. This pass could not safely delete it — no sanctioned ' +
+      'comment-delete primitive exists yet (tracked as a follow-up) — so it is being explicitly superseded here ' +
+      'instead of silently left to contradict this one._',
+  ].join('\n');
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostSupersedeComment — the IO shell for
+ * {@link buildSupersedeStandDownComment}. Uses the SAME injected `provider.postComment` every other comment in
+ * this file posts through — no new `gh` call site.
+ * @param {{pr:object, repo:string|null, provider:object}} o
+ */
+export function defaultPostSupersedeComment({ pr, repo, provider }) {
+  provider.postComment(repo, pr?.number, buildSupersedeStandDownComment(pr));
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListMainStatutePatchesSinceMergeBase — the fetch
+ * {@link doesConflictOverlapMainEdits} needs: `main`'s own per-file patch, since the SAME merge base the PR's own
+ * `listPrPatches` patch is computed against, keyed by filename. Two plain `gh api` reads, no local git clone/fetch
+ * needed (mirrors this file's existing "gh only" IO-shell discipline):
+ *   1. `pulls/{n}` → this PR's base ref name and head sha.
+ *   2. `compare/{base}...{headSha}` → `.merge_base_commit.sha`, the REAL three-way merge base (not just the base
+ *      branch's tip at PR-open time).
+ *   3. `compare/{mergeBaseSha}...{base}` → every file `main` changed since that merge base, with its own patch —
+ *      exactly "what main did independently", the SAME `@tsv`-projected, {@link unescapeTsvField}-decoded shape
+ *      {@link defaultListPrPatches} already uses for the PR's own side.
+ * Deliberately only called for the narrow population that can actually change an outcome ({@link
+ * classifyStatuteConflict}'s own gating) — the common non-statute, non-`review:human` tick never pays for this.
+ * THROWS on any resolution failure (an empty base ref/head sha, an empty merge-base sha, or a failed `gh` call) —
+ * never returns an empty map on failure, so the caller's fail-closed `catch` (stand down, the safe direction)
+ * actually fires instead of silently reading "main touched nothing" from a call that never really answered.
+ * @param {{number:number|string, repo?:string|null, exec?:Function}} o
+ * @returns {Record<string,string>} filename → main's own patch text since the merge base (possibly `""`)
+ */
+export function defaultListMainStatutePatchesSinceMergeBase({ number, repo, exec = execFileSyncThrottled }) {
+  const viewPath = repo ? `repos/${repo}/pulls/${number}` : `repos/{owner}/{repo}/pulls/${number}`;
+  const viewOut = exec('gh', ['api', '--method', 'GET', viewPath, '--jq', '[.base.ref, .head.sha] | @tsv'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  const [baseRef, headSha] = String(viewOut || '').trim().split('\t');
+  if (!baseRef || !headSha) throw new Error(`could not resolve base/head for PR #${number}`);
+
+  const cmpHeadPath = repo ? `repos/${repo}/compare/${baseRef}...${headSha}` : `repos/{owner}/{repo}/compare/${baseRef}...${headSha}`;
+  const mbOut = exec('gh', ['api', '--method', 'GET', cmpHeadPath, '--jq', '.merge_base_commit.sha // ""'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  const mergeBaseSha = String(mbOut || '').trim();
+  if (!mergeBaseSha) throw new Error(`could not resolve a merge base for PR #${number}`);
+
+  const cmpMainPath = repo ? `repos/${repo}/compare/${mergeBaseSha}...${baseRef}` : `repos/{owner}/{repo}/compare/${mergeBaseSha}...${baseRef}`;
+  const filesOut = exec('gh', ['api', '--method', 'GET', cmpMainPath, '--jq', '.files[]? | [.filename, (.patch // "")] | @tsv'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+  const patches = {};
+  for (const line of String(filesOut || '').split('\n')) {
+    if (line === '') continue;
+    const tab = line.indexOf('\t');
+    if (tab === -1) continue;
+    patches[unescapeTsvField(line.slice(0, tab))] = unescapeTsvField(line.slice(tab + 1));
+  }
+  return patches;
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#GH_FILES_GRAPHQL_CAP — `#xgfzlj1`. The exact, confirmed
  * hard cap `gh`'s own `files(first: 100)` GraphQL query imposes on `--json files` (`gh pr list`/`gh pr view`),
  * with NO pagination and NO truncation signal — a PR with exactly this many or more changed files returns an
@@ -497,7 +676,7 @@ export function defaultListPrComments({ number, repo, exec = execFileSyncThrottl
  * @param {{num:number|string, headRefName?:string}} pr
  * @returns {string}
  */
-export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {}) {
+export function buildConflictFindingBody(pr, { appendOnlyStatute = false, reviewHumanFixable = false } = {}) {
   const ref = pr?.headRefName ? ` (\`${pr.headRefName}\`)` : '';
   // #3383-append-only-statute — an EXPLICIT, narrower instruction for the one case this file's classifier proves
   // mechanical: both sides only ADDED a new `### ` section at the same spot in a statute doc. Stated as its own
@@ -511,6 +690,22 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {})
         "after `main`'s new ones. Change no existing rule text.**",
     ]
     : [];
+  // #xu2krte Fork 2 (review-human statute amendment) — this PR already carries `review:human`: a human reviews
+  // the FINAL merged result regardless, so resolving the git-level conflict mechanically does not skip that
+  // ceremony. Stated as its own explicit instruction (mirrors the append-only case above) so a fixer never has
+  // to guess it is allowed to touch a statute file here, or forgets the scope boundary.
+  const reviewHumanInstruction = reviewHumanFixable
+    ? [
+      '',
+      '**Review-human statute amendment: resolve the CONFLICT ONLY.** `main` did not independently touch the ' +
+        "same hunk this PR amends — verified by comparing diff hunks, not guessed — so keep this PR's own " +
+        "intended amendment and reconcile it against whatever ELSE `main` added nearby. Make NO other edits " +
+        'beyond resolving this conflict, and do **not** touch any `review:*` label — `review:human` stays; a ' +
+        'human still reviews the final merged result before it can land. **Post a comment showing the ' +
+        'conflicting hunk BEFORE your resolution and the resolved hunk AFTER** as before/after evidence of what ' +
+        'you changed.',
+    ]
+    : [];
   return [
     `PR #${pr?.num ?? pr?.number ?? '?'}${ref} has drifted into a real GIT merge conflict against \`main\` — ` +
       "GitHub reports `mergeable: CONFLICTING`. This is the WHOLE finding; there is no separate reviewer comment " +
@@ -520,6 +715,7 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {})
       "hunk by reading BOTH sides' intent (this diff's own and whatever landed on `main` since), push the " +
       'resolution, and let the normal fix-agent flow (this bounce) carry it back to independent review.',
     ...appendOnlyInstruction,
+    ...reviewHumanInstruction,
     '',
     '_Auto-detected by the parked-PR conflict watch (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`, ' +
       '`#xw0odtv`), dispatched per `#xu2krte`._',
@@ -541,25 +737,42 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {})
  * `files` MUST already be the verified-complete list ({@link defaultListPrFiles}'s pagination, never the
  * possibly gh-capped `pr.files`) — the caller owns that check ({@link GH_FILES_GRAPHQL_CAP}); this trusts what
  * it is given.
+ * `#xu2krte` Fork 2 (review-human statute amendment) EXTENDS this: when the conflict is statute-tier, NOT
+ * append-only, and the caller says the PR already carries `review:human` (`hasReviewHuman`), it is worth the
+ * extra `listMainStatutePatches` round trip (`main`'s own patch for the same files, since the SAME merge base) to
+ * ask {@link doesConflictOverlapMainEdits} whether `main` independently touched the SAME hunk region — a TRUE
+ * semantic clash still stands down (unchanged), but a proximity-only conflict is `reviewHumanFixable`. Gated on
+ * `hasReviewHuman` and `!appendOnlyStatute` so the common non-`review:human` / already-mechanical tick never pays
+ * for the extra fetch, and any fetch/parse failure fails CLOSED (`reviewHumanFixable` stays `false` — stand down).
  * @param {Array<{path?:string}|string>} files
- * @param {{number:number|string, repo?:string|null, listPrPatches:Function}} o
- * @returns {{isStatuteTier:boolean, appendOnlyStatute:boolean}}
+ * @param {{number:number|string, repo?:string|null, listPrPatches:Function, hasReviewHuman?:boolean, listMainStatutePatches?:Function}} o
+ * @returns {{isStatuteTier:boolean, appendOnlyStatute:boolean, reviewHumanFixable:boolean}}
  */
-function classifyStatuteConflict(files, { number, repo, listPrPatches }) {
+function classifyStatuteConflict(files, { number, repo, listPrPatches, hasReviewHuman = false, listMainStatutePatches }) {
   const isStatuteTier = isStatuteTierConflict(files);
   let appendOnlyStatute = false;
+  let reviewHumanFixable = false;
   if (isStatuteTier) {
+    const statuteTierFiles = (Array.isArray(files) ? files : [])
+      .map((f) => (typeof f === 'string' ? f : f?.path))
+      .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
+    let patches = null;
     try {
-      const statuteTierFiles = (Array.isArray(files) ? files : [])
-        .map((f) => (typeof f === 'string' ? f : f?.path))
-        .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
-      const patches = listPrPatches({ number, repo });
+      patches = listPrPatches({ number, repo });
       appendOnlyStatute = isAppendOnlyStatuteConflict(statuteTierFiles, patches);
     } catch {
       appendOnlyStatute = false; // fetch failure → stand down, the safe direction
     }
+    if (!appendOnlyStatute && hasReviewHuman && typeof listMainStatutePatches === 'function') {
+      try {
+        const mainPatches = listMainStatutePatches({ number, repo });
+        reviewHumanFixable = patches != null && !doesConflictOverlapMainEdits(statuteTierFiles, patches, mainPatches);
+      } catch {
+        reviewHumanFixable = false; // fetch failure → stand down, the safe direction
+      }
+    }
   }
-  return { isStatuteTier, appendOnlyStatute };
+  return { isStatuteTier, appendOnlyStatute, reviewHumanFixable };
 }
 
 /**
@@ -589,9 +802,9 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
  * path (`we:scripts/review-set-label.mjs#bodyFileRoots`) and removed afterward either way.
  * @param {{pr:object, repo:string|null, exec?:Function}} o
  */
-export function defaultPostConflictFinding({ pr, repo, exec = execFileSync, appendOnlyStatute = false }) {
+export function defaultPostConflictFinding({ pr, repo, exec = execFileSync, appendOnlyStatute = false, reviewHumanFixable = false }) {
   const bodyPath = join(tmpdir(), `reconcile-finding-conflict-${pr?.number}-${randomUUID()}.md`);
-  writeFileSync(bodyPath, buildConflictFindingBody({ num: pr?.number, headRefName: pr?.headRefName }, { appendOnlyStatute }), 'utf8');
+  writeFileSync(bodyPath, buildConflictFindingBody({ num: pr?.number, headRefName: pr?.headRefName }, { appendOnlyStatute, reviewHumanFixable }), 'utf8');
   try {
     const argv = [
       join(REPO_ROOT, 'scripts', 'conveyor', 'reconcile-finding.mjs'), String(pr?.number),
@@ -616,7 +829,7 @@ export function defaultPostConflictFinding({ pr, repo, exec = execFileSync, appe
  */
 export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) {
   const argv = [join(REPO_ROOT, 'scripts', 'conveyor', 'stand-down.mjs'), String(pr?.number),
-    '--reason=conflict', '--actor=parked-pr-conflict-watch (#xu2krte statute-tier exception)'];
+    '--reason=conflict', `--actor=${WATCHER_STAND_DOWN_ACTOR}`];
   if (repo) argv.push(`--repo=${repo}`);
   // #x5n4zn3 — was bare (no timeout).
   exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
@@ -648,15 +861,17 @@ export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
  * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF: with no marker and no env override
  * `scopePrsToQueue` is the IDENTITY function and this sweep stays repo-wide, exactly as it has always been. A
  * scoped checkout only labels/comments on the PRs its own queue names.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function, listPrPatches?:Function, queueScope?:object}} [o]
- * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string}>}
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, postSupersedeComment?:Function, listPrFiles?:Function, listPrPatches?:Function, listMainStatutePatches?:Function, queueScope?:object}} [o]
+ * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string, supersededStandDown?:boolean}>}
  */
 export function watchParkedPrConflicts({
   repo = null, listPrs = defaultListParkedPrs, provider = createGhProvider(), dryRun = false,
   postFinding = defaultPostConflictFinding, postStandDown = defaultPostConflictStandDown,
   postRearm = defaultPostConflictRearm,
+  postSupersedeComment = defaultPostSupersedeComment,
   listPrFiles = defaultListPrFiles,
   listPrPatches = defaultListPrPatches,
+  listMainStatutePatches = defaultListMainStatutePatchesSinceMergeBase,
   listPrComments = defaultListPrComments,
   labelAgeMs = defaultConflictLabelAgeMs,
   queueScope = {},
@@ -685,8 +900,58 @@ export function watchParkedPrConflicts({
     });
     // An approved PR already flagged on an earlier sweep: bounce it once the drain's grace window has passed.
     const graceDue = queued && !plan.add && hasReviewLabel(pr?.labels, CONFLICT_LABEL);
-    if (!plan.add && plan.remove.length === 0 && !graceDue) continue;
+    // #xu2krte Fork 2 (review-human statute amendment) — a PARKED (not queued) `review:human` PR that is ALREADY
+    // labelled + still conflicting used to be permanently skipped here: the fresh-detection path decides ONCE,
+    // at the absent→present label transition, and a non-append-only statute conflict routed straight to
+    // `postStandDown` back then — with no rule this file knows about today, that PR sits invisible to every sweep
+    // after. Re-check ONLY the narrow population this fork can change the answer for (already labelled, still
+    // conflicting, parked, carrying `review:human`); the actual re-classification only fires below if that PR's
+    // thread still carries THIS WATCH'S OWN prior marker (never a fix agent's or human's judgment stand-down),
+    // so an already-correctly-dispatched or genuinely-still-standing-down PR costs nothing extra per sweep.
+    const recheckCandidate = parked && !queued && !plan.add && plan.remove.length === 0
+      && hasReviewLabel(pr?.labels, REVIEW_LABELS.human) && hasReviewLabel(pr?.labels, CONFLICT_LABEL);
+    if (!plan.add && plan.remove.length === 0 && !graceDue && !recheckCandidate) continue;
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
+    if (recheckCandidate && !graceDue) {
+      try {
+        // `repo` (possibly null) is enough for this READ — `defaultListPrComments` falls back to gh's own
+        // `{owner}/{repo}` template exactly like `defaultListParkedPrs` does. `currentRepo()` is only resolved
+        // below, and ONLY once a watcher marker is actually found, so the common "nothing to recheck" tick never
+        // pays for it (mirrors this file's existing xoh8fkw discipline elsewhere in this loop).
+        let comments = [];
+        try { comments = listPrComments({ number: pr?.number, repo }); } catch { comments = []; }
+        const watcherMarker = findWatcherStandDownComment(comments);
+        if (!watcherMarker) continue; // nothing this fork can change here — leave it exactly as today
+        if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+        let filesForCheck = null;
+        try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
+        const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = filesForCheck == null
+          ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false } // fetch failure → over-cautious
+          : classifyStatuteConflict(filesForCheck, {
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman: true, listMainStatutePatches,
+            });
+        if (!isStatuteTier || (!appendOnlyStatute && !reviewHumanFixable)) {
+          // Still a genuine judgment call (or no longer statute-tier at all, an edge case) — the earlier
+          // stand-down stands; never re-post, never duplicate the marker.
+          entry.routedTo = 'stand-down (unchanged)';
+          results.push(entry);
+          continue;
+        }
+        if (!dryRun) {
+          try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort courtesy comment only — never blocks the dispatch below */ }
+          postFinding({ pr, repo: resolvedRepo, appendOnlyStatute, reviewHumanFixable: !appendOnlyStatute });
+        }
+        entry.supersededStandDown = true;
+        entry.routedTo = appendOnlyStatute
+          ? 'reconcile-finding (append-only statute, marker superseded)'
+          : 'reconcile-finding (review-human statute amendment, marker superseded)';
+        results.push(entry);
+      } catch (e) {
+        entry.error = String((e && e.message) || e).split('\n')[0];
+        results.push(entry);
+      }
+      continue;
+    }
     // #3383 — the grace-expiry routing decision below is READ-ONLY (label age, then file/patch/comment fetches;
     // no label/comment write happens until the branches further down call `postStandDown`/`postFinding`, which
     // are themselves gated on `!dryRun`). So `graceDue` is handled BEFORE the dry-run bail, in both modes, and
@@ -703,11 +968,14 @@ export function watchParkedPrConflicts({
         // — this path never reads `pr.files` at all, so it always pays for the paginated, uncapped read.
         let filesForCheck = null;
         try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
-        const { isStatuteTier, appendOnlyStatute } = filesForCheck == null
-          ? { isStatuteTier: true, appendOnlyStatute: false } // fetch failure → over-cautious, the safe direction
-          : classifyStatuteConflict(filesForCheck, { number: pr?.number, repo: resolvedRepo, listPrPatches });
+        const hasReviewHuman = hasReviewLabel(pr?.labels, REVIEW_LABELS.human);
+        const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = filesForCheck == null
+          ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false } // fetch failure → over-cautious, the safe direction
+          : classifyStatuteConflict(filesForCheck, {
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches,
+            });
 
-        if (isStatuteTier && !appendOnlyStatute) {
+        if (isStatuteTier && !appendOnlyStatute && !reviewHumanFixable) {
           // #3383 fix — this is NO LONGER assumed to have already reached a human at detection: the fresh path
           // only stands down IMMEDIATELY when the conflict is ALREADY statute-tier at that moment; a queued,
           // non-statute-tier conflict is deferred to the drain instead (`routedTo: 'deferred-to-drain'`) and can
@@ -723,9 +991,12 @@ export function watchParkedPrConflicts({
           if (alreadyStoodDown) continue; // already handed to a human — never re-post
           if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
           entry.routedTo = 'stand-down (after drain grace)';
-        } else if (isStatuteTier) { // append-only — dispatch to the fixer, exactly like the fresh-detection exception
+        } else if (isStatuteTier && appendOnlyStatute) { // dispatch to the fixer, exactly like the fresh-detection exception
           if (!dryRun) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
           entry.routedTo = 'reconcile-finding (append-only statute, after drain grace)';
+        } else if (isStatuteTier && reviewHumanFixable) {
+          if (!dryRun) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+          entry.routedTo = 'reconcile-finding (review-human statute amendment, after drain grace)';
         } else {
           // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
           if (!dryRun) postFinding({ pr, repo: resolvedRepo });
@@ -774,25 +1045,35 @@ export function watchParkedPrConflicts({
         // non-statute tick pays nothing extra), and only over the STATUTE-TIER subset of files: a
         // declarative-leash file anywhere in that subset, a non-`.md` statute path, or any patch-fetch failure
         // all fail this closed (stand-down), the safe direction.
-        const { isStatuteTier, appendOnlyStatute } = statuteCheckFailed
-          ? { isStatuteTier: true, appendOnlyStatute: false }
-          : classifyStatuteConflict(filesForCheck, { number: pr?.number, repo: resolvedRepo, listPrPatches });
-        const standDown = isStatuteTier && !appendOnlyStatute;
+        const hasReviewHuman = hasReviewLabel(pr?.labels, REVIEW_LABELS.human);
+        const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = statuteCheckFailed
+          ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false }
+          : classifyStatuteConflict(filesForCheck, {
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches,
+            });
+        const standDown = isStatuteTier && !appendOnlyStatute && !reviewHumanFixable;
         provider.postComment(resolvedRepo, pr?.number,
-          buildConflictComment(pr, { isStatuteTier: standDown, deferredToDrain: queued, appendOnlyStatute }));
+          buildConflictComment(pr, {
+            isStatuteTier: standDown, deferredToDrain: queued, appendOnlyStatute,
+            reviewHumanFixable: isStatuteTier && reviewHumanFixable,
+          }));
         entry.commented = true;
         // Fork 2/4 (#xu2krte) — route to exactly one downstream pipeline. Failures here are reported on the
         // entry the SAME way a label/comment failure already is; the alert above has already posted either way.
-        // An append-only statute conflict is dispatched AT ONCE, bypassing the queued-PR drain grace below: that
-        // grace exists to let the drain auto-rebase a shared-manifest-only conflict, which is not this case (a
-        // real content insertion in a statute doc), so waiting on it would only delay the mechanical fix.
+        // An append-only statute conflict, or a review-human statute amendment that does not overlap what `main`
+        // independently changed, is dispatched AT ONCE, bypassing the queued-PR drain grace below: that grace
+        // exists to let the drain auto-rebase a shared-manifest-only conflict, which is not this case (a real
+        // content change in a statute doc), so waiting on it would only delay the mechanical fix.
         try {
           if (standDown) {
             postStandDown({ pr, repo: resolvedRepo });
             entry.routedTo = 'stand-down';
-          } else if (isStatuteTier) {
+          } else if (isStatuteTier && appendOnlyStatute) {
             postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
             entry.routedTo = 'reconcile-finding (append-only statute)';
+          } else if (isStatuteTier && reviewHumanFixable) {
+            postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+            entry.routedTo = 'reconcile-finding (review-human statute amendment)';
           } else if (queued) {
             entry.routedTo = 'deferred-to-drain'; // bounced by a later sweep once QUEUED_CONFLICT_GRACE_MS passes
           } else {

@@ -108,7 +108,7 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
-import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
+import { countTerminalStandDowns, STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -530,7 +530,15 @@ export function planReconcile({
 
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
-    const stoodDown = countStandDownComments(pr?.comments);
+    //
+    // `countTerminalStandDowns`, NOT the raw `countStandDownComments` — #xu2krte Fork 2 (review-human statute
+    // amendment). It excludes ONLY a stand-down whose actor is the parked-PR conflict watch's own mechanical
+    // routing decision (`we:scripts/conveyor/stand-down.mjs#WATCHER_STAND_DOWN_ACTOR`): that class of marker is
+    // not "an agent examined the diff and could not safely proceed" — it is the watch's own routing artifact,
+    // re-derived fresh every sweep, and a stale one from an earlier, narrower classification must not block this
+    // gate forever. A fix agent's OWN needs-judgment/gate-red/lane-ref-gone escalation, or a human's `/finish`
+    // stand-down, is untouched by the narrowing and stays exactly as terminal as before.
+    const stoodDown = countTerminalStandDowns(pr?.comments);
     if (stoodDown > 0) {
       refuse('stood-down', {
         standDowns: stoodDown,

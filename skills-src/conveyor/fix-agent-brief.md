@@ -174,6 +174,17 @@ node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} 
 
 Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
 
+> **Dispatched onto a `review:human` PR for a review-human statute amendment (`#xu2krte` Fork 2,
+> `we:scripts/conveyor/parked-pr-conflict-watch.mjs`).** The finding itself already says this, but it is worth
+> repeating here because the scope discipline is stricter than usual: **resolve the conflict ONLY.** `main` was
+> already verified (by diff-hunk comparison, not guessed) to have NOT independently touched the same region this
+> PR amends, so keep this PR's own intended change and reconcile it against whatever ELSE landed on `main` —
+> make **no other edit**, and do **not** touch any `review:*` label. `review:human` was never cleared or
+> downgraded to get you here and stays exactly as it was: a human still reviews the FINAL merged result through
+> the normal review flow before this can land. **Post a comment on the PR showing the conflicting hunk BEFORE
+> your resolution and the resolved hunk AFTER**, as before/after evidence of exactly what you changed — this is
+> in addition to, not instead of, the ordinary reproduce/fix/verify evidence step 1 above already asks for.
+
 **Build-brief discipline applies to the repair too** (statute:
 [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
 #2819): if the reviewer's finding names a category ("reject X") without enumerating its shapes, name the
