@@ -167,6 +167,38 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
       }
     });
 
+    it('a large (>100KB) gh pr view payload is NOT truncated — the classic write-then-exit race (#x8mpubm follow-up, live-caught review-2578/2601: "Unterminated string in JSON")', () => {
+      const { dir, cachePath, shimPath } = setup();
+      const realGh = join(dir, 'real-gh');
+      // A fake `gh` that prints a large, valid JSON payload — standing in for a real `gh pr view` with a big
+      // body/comments/files list. Padded well past the ~64KB pipe-buffer size that triggers the async-write
+      // race: `stdio: ['inherit','pipe','pipe']` captures this into a Buffer, the shim re-emits it via
+      // `process.stdout.write`, and a `process.exit()` called immediately after (the pre-fix code) tears the
+      // process down before that write drains, truncating the JSON mid-string — exactly the live symptom.
+      const bigBody = 'x'.repeat(150 * 1024);
+      writeFileSync(
+        realGh,
+        '#!/usr/bin/env node\n'
+          + `const body = ${JSON.stringify(bigBody)};\n`
+          + 'process.stdout.write(JSON.stringify({ number: 2578, body, ok: true }));\n',
+        'utf8',
+      );
+      chmodSync(realGh, 0o755);
+      writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath }), 'utf8');
+      chmodSync(shimPath, 0o755);
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_live_fresh', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        const raw = execFileSync(shimPath, ['pr', 'view', '2578', '--json', 'number,body'], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+        expect(raw.length).toBeGreaterThan(150 * 1024); // never silently shorter than what `gh` actually printed
+        const parsed = JSON.parse(raw); // throws "Unterminated string in JSON" on the pre-fix truncation bug
+        expect(parsed.ok).toBe(true);
+        expect(parsed.body).toHaveLength(150 * 1024);
+        expect(parsed.body).toBe(bigBody);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('a REAL gh failure unrelated to auth (e.g. a genuinely missing PR) is passed through untouched — never retried, cache left alone', () => {
       const { dir, cachePath, shimPath } = setup();
       const realGh = join(dir, 'real-gh');

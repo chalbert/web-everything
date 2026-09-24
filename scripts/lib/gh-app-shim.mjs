@@ -174,28 +174,46 @@ function invalidateSharedCache() {
   try { unlinkSync(CACHE_PATH); } catch { /* best-effort — a missing/already-gone cache is fine */ }
 }
 
+// #x8mpubm follow-up (live-caught 2026-09-24, review-2578/2601 — \`Unterminated string in JSON\`, a >64KB
+// \`gh pr view\` payload truncated mid-string). NO PATH BELOW EVER CALLS \`process.exit()\` RIGHT AFTER A WRITE —
+// same rule and same reason as \`we:scripts/conveyor/__tests__/helpers/fake-gh.mjs\` (x3xz8qp/#3988): a captured
+// (\`stdio: ['inherit','pipe','pipe']\`) child's stdout/stderr is written back out through NODE's own stream, and
+// for a payload over the ~64KB pipe-buffer size that write is ASYNCHRONOUS — \`process.exit()\` tears the
+// process down before it drains, silently truncating whatever \`gh\` printed. Setting \`exitCode\` and letting the
+// script fall off the end instead keeps the event loop alive until every queued write really lands.
 function runInherited(env) {
   const result = spawnSync(REAL_GH, process.argv.slice(2), { stdio: 'inherit', env });
-  if (result.error) { process.stderr.write(String(result.error && result.error.message || result.error) + '\\n'); process.exit(1); }
-  process.exit(result.status == null ? 1 : result.status);
+  if (result.error) {
+    process.stderr.write(String(result.error && result.error.message || result.error) + '\\n');
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = result.status == null ? 1 : result.status;
 }
 
 const token = freshCachedToken();
-if (!token) runInherited(process.env); // no cached App token — unchanged, byte-identical to before this existed
-
-const withToken = spawnSync(REAL_GH, process.argv.slice(2), {
-  stdio: ['inherit', 'pipe', 'pipe'],
-  env: Object.assign({}, process.env, { GH_TOKEN: token }),
-});
-if (withToken.error) { process.stderr.write(String(withToken.error.message || withToken.error) + '\\n'); process.exit(1); }
-const stderrText = withToken.stderr ? withToken.stderr.toString('utf8') : '';
-if (withToken.status !== 0 && looksLikeAppTokenAuthFailure(stderrText)) {
-  invalidateSharedCache();
-  runInherited(process.env); // retry once on whatever auth is already in effect — falls back safely
+if (!token) {
+  runInherited(process.env); // no cached App token — unchanged, byte-identical to before this existed
+} else {
+  const withToken = spawnSync(REAL_GH, process.argv.slice(2), {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, { GH_TOKEN: token }),
+  });
+  if (withToken.error) {
+    process.stderr.write(String(withToken.error.message || withToken.error) + '\\n');
+    process.exitCode = 1;
+  } else {
+    const stderrText = withToken.stderr ? withToken.stderr.toString('utf8') : '';
+    if (withToken.status !== 0 && looksLikeAppTokenAuthFailure(stderrText)) {
+      invalidateSharedCache();
+      runInherited(process.env); // retry once on whatever auth is already in effect — falls back safely
+    } else {
+      if (withToken.stdout && withToken.stdout.length) process.stdout.write(withToken.stdout);
+      if (withToken.stderr && withToken.stderr.length) process.stderr.write(withToken.stderr);
+      process.exitCode = withToken.status == null ? 1 : withToken.status;
+    }
+  }
 }
-if (withToken.stdout) process.stdout.write(withToken.stdout);
-if (withToken.stderr) process.stderr.write(withToken.stderr);
-process.exit(withToken.status == null ? 1 : withToken.status);
 `;
 }
 
