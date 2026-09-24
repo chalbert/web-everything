@@ -9,6 +9,7 @@ import {
   WORKFLOW_LANE_PURPOSE,
   isLeaseStale,
   isLaneAcquirable,
+  leaseDisqualifiesAcquire,
   chooseFreeLane,
   ownLaneNumber,
   leaseBody,
@@ -75,6 +76,38 @@ describe('isLaneAcquirable', () => {
   });
   it('a lane with a STALE lease is reclaimable', () => {
     expect(isLaneAcquirable({ ...base, lease: leaseAt(-(DEFAULT_LEASE_TTL_MINUTES + 1)) }, T0, ttlMs)).toBe(true);
+  });
+});
+
+describe('leaseDisqualifiesAcquire (#xn432dz — the lease-first gate that lets a picker skip git)', () => {
+  const doas = [null, undefined, { dirty: false, ahead: 0 }, { dirty: true, ahead: 0 }, { dirty: false, ahead: 3 }, { dirty: true, ahead: 1 }];
+  const leases = [
+    null,
+    leaseAt(0),
+    leaseAt(-(DEFAULT_LEASE_TTL_MINUTES - 1)),
+    leaseAt(-(DEFAULT_LEASE_TTL_MINUTES + 1)),
+    leaseAt(-10, { ttlMinutes: 5 }),
+    leaseAt(-100000, { reserved: true }),
+    {},
+    { acquiredAt: 'not-a-date' },
+  ];
+  it('is true exactly for a LIVE lease (fresh or reserved), false for none/stale/malformed', () => {
+    expect(leases.map((l) => leaseDisqualifiesAcquire(l, T0, ttlMs))).toEqual([false, true, true, false, false, true, false, false]);
+  });
+  it('whenever it is true, isLaneAcquirable is false for EVERY possible dirtyOrAhead (skipping git cannot flip the verdict)', () => {
+    for (const lease of leases) {
+      if (!leaseDisqualifiesAcquire(lease, T0, ttlMs)) continue;
+      for (const dirtyOrAhead of doas) {
+        expect(isLaneAcquirable({ lane: 1, exists: true, lease, dirtyOrAhead }, T0, ttlMs)).toBe(false);
+      }
+    }
+  });
+  it('whenever it is false, the verdict still depends on dirtyOrAhead (the git probe is still owed)', () => {
+    for (const lease of leases) {
+      if (leaseDisqualifiesAcquire(lease, T0, ttlMs)) continue;
+      expect(isLaneAcquirable({ lane: 1, exists: true, lease, dirtyOrAhead: { dirty: false, ahead: 0 } }, T0, ttlMs)).toBe(true);
+      expect(isLaneAcquirable({ lane: 1, exists: true, lease, dirtyOrAhead: { dirty: true, ahead: 0 } }, T0, ttlMs)).toBe(false);
+    }
   });
 });
 
