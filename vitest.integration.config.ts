@@ -39,6 +39,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // #3383 bugfix: same default-telemetry-off setup as `vitest.config.ts` — several of these files spawn
+    // real `node`/CLI children that inherit this process's env, so disabling it here too keeps their
+    // real-subprocess dispatch runs from writing fixture spans into the shared telemetry log.
+    setupFiles: ['./vitest.setup.ts'],
     include: [
       'scripts/__tests__/stdout-flush.test.mjs',
       'scripts/__tests__/rust-scan-stdout-flush-parity.test.mjs',

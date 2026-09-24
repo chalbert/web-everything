@@ -86,6 +86,37 @@ describe('reclaimDecision — #1936 Fork-2 (a)+(b)', () => {
   it('lease expired → reclaim via the TTL floor even when liveness is unknown (host-independent)', () => {
     expect(reclaimDecision(live, T0 + LEASE_MS + 1, 'me', 'unknown')).toMatchObject({ acquirable: true, reason: 'lease-expired' });
   });
+
+  describe('requesterPid (#3383 fix) — an owner string can be shared across DIFFERENT real processes; opt-in only', () => {
+    it('default (no requesterPid, or null) — owner match alone is still "own", byte-identical to before this fix', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0), 111); // held by real pid 111
+      expect(reclaimDecision(entry, T0, 'lane-34')).toMatchObject({ acquirable: true, reason: 'own' });
+      expect(reclaimDecision(entry, T0, 'lane-34', 'unknown', LEASE_MS / 60_000, null)).toMatchObject({ acquirable: true, reason: 'own' });
+    });
+    it('requesterPid matching the held entry\'s pid — same owner AND same real process — still "own"', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0), 111);
+      expect(reclaimDecision(entry, T0, 'lane-34', 'unknown', LEASE_MS / 60_000, 111)).toMatchObject({ acquirable: true, reason: 'own' });
+    });
+    it('requesterPid DIFFERENT from the held entry\'s pid — same owner string, but a genuinely different real process — falls through, NOT "own"', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0), 111); // held by real pid 111
+      const d = reclaimDecision(entry, T0 + 1000, 'lane-34', 'alive', LEASE_MS / 60_000, 222); // requester is pid 222
+      expect(d).toMatchObject({ acquirable: false, reason: 'held', heldBy: 'lane-34' }); // occupied by the other real process
+    });
+    it('same owner string, different requesterPid, but the held pid is provably DEAD — still reclaimed via the pid-dead fast path', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0), 111);
+      const d = reclaimDecision(entry, T0 + 1000, 'lane-34', 'dead', LEASE_MS / 60_000, 222);
+      expect(d).toMatchObject({ acquirable: true, reason: 'pid-dead', heldBy: 'lane-34' });
+    });
+    it('same owner string, different requesterPid, held pid unknown/alive but the lease is genuinely stale — still reclaimed via the TTL floor', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0), 111);
+      const d = reclaimDecision(entry, T0 + LEASE_MS + 1, 'lane-34', 'unknown', LEASE_MS / 60_000, 222);
+      expect(d).toMatchObject({ acquirable: true, reason: 'lease-expired', heldBy: 'lane-34' });
+    });
+    it('requesterPid is a no-op when the held entry never recorded a pid (nothing to compare against)', () => {
+      const entry = makeLockEntry('lane-34', 'p', iso(T0)); // no pid recorded
+      expect(reclaimDecision(entry, T0, 'lane-34', 'unknown', LEASE_MS / 60_000, 222)).toMatchObject({ acquirable: true, reason: 'own' });
+    });
+  });
 });
 
 describe('wasReclaimed — broker fencing point (Kleppmann race)', () => {
@@ -199,6 +230,36 @@ describe('atomic fs primitives — real temp lock root', () => {
     const current = readLockEntry(root, 'p');
     expect(wasReclaimed(current, 'A')).toBe(true);  // A's lease lapsed under it → broker rejects A
     expect(wasReclaimed(current, 'B')).toBe(false); // B legitimately holds it
+  });
+
+  describe('reserve: requireOwnProcess (#3383 fix) — opt-in only, defaults false so every existing caller is unaffected', () => {
+    it('default (requireOwnProcess omitted) — same owner, DIFFERENT pid, still fast-paths as "own" (the pre-fix, still-correct behavior for every OTHER file-locks.mjs consumer, e.g. file-locks-cli.mjs\'s session-spanning reservations)', () => {
+      reserve(root, 'p', 'lane-5', T0, iso(T0), 100); // first CLI invocation, pid 100
+      const r = reserve(root, 'p', 'lane-5', T0 + 1000, iso(T0 + 1000), 200); // a LATER, different CLI invocation, pid 200
+      expect(r).toMatchObject({ ok: true, reason: 'own', heldBy: 'lane-5' });
+    });
+
+    it('requireOwnProcess:true — same owner, SAME pid, still fast-paths as "own" (the legitimate in-process reentrancy this fix must preserve)', () => {
+      reserve(root, 'p', 'lane-34', T0, iso(T0), 100, 'unknown', DEFAULT_LEASE_MINUTES, null, true);
+      const r = reserve(root, 'p', 'lane-34', T0 + 1000, iso(T0 + 1000), 100, 'unknown', DEFAULT_LEASE_MINUTES, null, true);
+      expect(r).toMatchObject({ ok: true, reason: 'own', heldBy: 'lane-34' });
+    });
+
+    it('requireOwnProcess:true — same owner, DIFFERENT (live) pid — BLOCKED, not "own" (the #3383 fix: heavy-admission.mjs\'s lane-path-keyed slots)', () => {
+      reserve(root, 'p', 'lane-34', T0, iso(T0), 100, 'unknown', DEFAULT_LEASE_MINUTES, null, true);
+      // 'alive' liveness (as heavy-admission.mjs's tryAcquireSlot would probe for a real distinct pid) — must
+      // be BLOCKED, never silently heartbeat-refreshed over the other real process.
+      const r = reserve(root, 'p', 'lane-34', T0 + 1000, iso(T0 + 1000), 200, 'alive', DEFAULT_LEASE_MINUTES, null, true);
+      expect(r).toMatchObject({ ok: false, reason: 'held', heldBy: 'lane-34' });
+      expect(readLockEntry(root, 'p').pid).toBe(100); // untouched — the first process's slot survives intact
+    });
+
+    it('requireOwnProcess:true — same owner, DIFFERENT pid, held pid provably dead — still reclaimed (PID fast path unaffected)', () => {
+      reserve(root, 'p', 'lane-34', T0, iso(T0), 100, 'unknown', DEFAULT_LEASE_MINUTES, null, true);
+      const r = reserve(root, 'p', 'lane-34', T0 + 1000, iso(T0 + 1000), 200, 'dead', DEFAULT_LEASE_MINUTES, null, true);
+      expect(r).toMatchObject({ ok: true, reason: 'pid-dead', heldBy: 'lane-34' });
+      expect(readLockEntry(root, 'p').pid).toBe(200); // reclaimed by the new process
+    });
   });
 });
 
