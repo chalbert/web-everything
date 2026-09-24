@@ -99,7 +99,7 @@ Re-ran the trial merges at the new prototype tip (base `ca7e68b71` for both file
 **`we:scripts/operations/dispatch-lane-io.mjs`** — **10 conflicts**, up from the note's 7 (real merge-tree) /
 6 (single-base). One old conflict is GONE (the `findItem` `...size` spread at old ~L859 now merges clean —
 main has independently converged on the same shape), but a bigger, genuinely NEW source of conflict appeared:
-main has grown its OWN unrelated feature, **`we:x8mpubm` (a `gh`-App-token `--settings` env shim)**, touching
+main has grown its OWN unrelated feature, **`we:3979` (a `gh`-App-token `--settings` env shim)**, touching
 the exact same functions the branch's **#3857 model-tier table** touches:
 - `createDispatchSinks(...)` gained a `resolveSettingsEnv = resolveGhShimSettingsEnv` parameter (main) that
   now sits where the branch adds `freshenCheckout = () => {}` — keep BOTH params.
@@ -116,7 +116,7 @@ the exact same functions the branch's **#3857 model-tier table** touches:
 - The three OLD docblock conflicts (`THE HANDLE …`, `PROVEN AGAINST …`, the provider-port paragraph) are
   unchanged in nature/resolution, just shifted ~90 lines down.
 - **Worker step 5 in the existing note ("branch throw + `WE_DISPATCH_KIND`... make docblocks agree") is now
-  INCOMPLETE** — it must also fold in the `x8mpubm` settingsEnv threading through the same three call sites,
+  INCOMPLETE** — it must also fold in the `3979` settingsEnv threading through the same three call sites,
   which the old note never saw because main added it after 2026-09-22.
 
 **`we:scripts/operations/dispatch-lane.mjs`** — **6 conflicts**, up from 5[4]. The two old-ruling conflicts
@@ -150,7 +150,7 @@ union both `we:scripts/operations/dispatch-lane.mjs` conflicts above need.
   `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` — still missing on main, straight adds.
 
 **Worker steps (revise)**
-5'. When hand-merging `we:scripts/operations/dispatch-lane-io.mjs`, ALSO fold in the `x8mpubm` `settingsEnv`
+5'. When hand-merging `we:scripts/operations/dispatch-lane-io.mjs`, ALSO fold in the `3979` `settingsEnv`
     threading (see above) into `createDispatchSinks`, `defaultClaudeProvider`, and `buildAgentArgv`'s signature —
     not just the throw/`WE_DISPATCH_KIND`/argv resolution the original step 5 named.
 4'. When hand-merging `we:scripts/operations/dispatch-lane.mjs`, union `BRIEF_PLACEHOLDERS`/
