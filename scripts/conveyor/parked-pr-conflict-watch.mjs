@@ -81,6 +81,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import { countStandDownComments } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -644,7 +645,10 @@ export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
  * straight to a human, no dispatch attempt). Best-effort like every other write here: a failure is reported on
  * the entry, never thrown, and never stops the sweep from checking the rest of the PRs.
  * On `newlyResolved`, a remaining `review:changes` bounce goes to {@link defaultPostConflictRearm}.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function, listPrPatches?:Function}} [o]
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF: with no marker and no env override
+ * `scopePrsToQueue` is the IDENTITY function and this sweep stays repo-wide, exactly as it has always been. A
+ * scoped checkout only labels/comments on the PRs its own queue names.
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, listPrFiles?:Function, listPrPatches?:Function, queueScope?:object}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string}>}
  */
 export function watchParkedPrConflicts({
@@ -655,8 +659,9 @@ export function watchParkedPrConflicts({
   listPrPatches = defaultListPrPatches,
   listPrComments = defaultListPrComments,
   labelAgeMs = defaultConflictLabelAgeMs,
+  queueScope = {},
 } = {}) {
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
   const results = [];
   // xoh8fkw — resolved LAZILY, only once, only when a real write is about to happen (the common empty-sweep tick
   // never pays for the extra `gh repo view` call). `defaultListParkedPrs` above works fine with a null `repo`
