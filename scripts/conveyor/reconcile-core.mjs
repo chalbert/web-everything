@@ -752,8 +752,43 @@ export function planReconcile({
         });
         continue;
       }
-      // else: `addressed` is true — a fix-mark already postdates the latest advisory note — fall through to
-      // the ordinary `OWED['needs-human'] = 'review'` path below, unchanged.
+      // `addressed` is true — a fix-mark already postdates the latest advisory note. A fresh review is owed AT
+      // ONCE, dispatched HERE rather than falling through to the generic `OWED`-table path below, and — xaer296
+      // FOLLOW-UP 2 (epic #3383) — deliberately EXEMPT from the generic shared `roundCap` that path would
+      // otherwise apply.
+      //
+      // CONFIRMED LIVE, `chalbert/web-everything#2549`, 2026-09-24: once the count-vs-order bug and the
+      // stand-down mechanism-failure gap above were both fixed, the real `runReconcilePass` correctly stopped
+      // refusing `stood-down` — and immediately hit a THIRD gap instead: `cap-exhausted` at `5/5` against
+      // `NEGOTIATION_ROUND_CAP`. That 5 is `countAdvisoryComments` — the very COUNT OF ADVISORY NOTES, i.e. the
+      // number of times a review has ALREADY RUN against this PR — fed into a cap meant to bound REPEATED
+      // FAILURE to converge (#2117/#2298's own motivating incident: a bounced PR that never completes a
+      // rearm). Applying that same floor to "a review is owed right now, because the finding it will judge was
+      // JUST mechanically proven fixed" cannot be right: it caps the discovery step by counting its own past
+      // discoveries, and #2549 had genuinely spent that count on ORDINARY history predating the `#xkmu3gv`
+      // marker regime entirely (5 rounds, 1 genuine advisory-fix) — capping it here would leave the PR
+      // PERMANENTLY stuck at `cap-exhausted` even though the actual finding is provably addressed and nothing
+      // further is owed except letting the review run.
+      //
+      // THE SMALLER OF TWO SAFE FIXES (a full dedicated `ADVISORY_REVIEW_ROUND_CAP` counter, counted only from
+      // markers newer than `#xkmu3gv`, was the other option) — chosen because this exemption is SELF-LIMITING
+      // by construction, with no new counter needed: the moment this review actually runs, `review-pr.mjs`'s
+      // `advise` step posts its OWN fresh advisory note UNCONDITIONALLY on every `review:human` PR — which
+      // immediately flips {@link isLatestAdvisoryFindingAddressed} back to `false` for the NEXT tick. So this
+      // exemption can fire AT MOST ONCE per completed advisory-fix round, and advisory-fix rounds are already
+      // bounded by {@link ADVISORY_FIX_ROUND_CAP} (checked above, on the `!addressed` branch) — a PR cannot
+      // cycle through this exemption more than `advisoryFixCap` times before THAT cap (not this one) correctly
+      // stops it and hands it to a person. A normal PR that has never addressed its advisory finding (the
+      // ordinary `!addressed` branch above) is completely unaffected — it never reaches this line at all.
+      const advisoryFindingsHere = countFindings(pr?.comments);
+      dispatch.push({
+        ...base, ...withPhase, kind: 'review', findings: advisoryFindingsHere,
+        why: 'the admitted advisory:changes finding was already addressed by a fix postdating it (order, not' +
+          ' count) — a fresh review is owed at once to judge the repaired head, exempt from the shared' +
+          ' negotiation-round cap (that cap\'s own count is fed by past advisory notes — this review\'s own' +
+          ' future output — not by a failure to converge)',
+      });
+      continue;
     }
 
     // ── STACKED-BASE CONFLICT (#3383) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table, for

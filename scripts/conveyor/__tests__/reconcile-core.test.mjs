@@ -909,14 +909,50 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   // — before this fix the PR was invisibly STUCK on a terminal `stood-down` forever (case 2's own new tests);
   // after it, the SAME PR reaches a clean, auditable `cap-exhausted` refusal a human can act on (exactly the
   // task's own "owed an advisory review (or clean hand-back)" framing) instead of a silent dead end.
-  it('xaer296 — the exact #2549 shape (5 pre-existing notes + 1 genuine fix) reaches a CLEAN, auditable cap-exhausted refusal, never a silent stood-down', () => {
+  // xaer296 FOLLOW-UP 2 — CONFIRMED LIVE on `chalbert/web-everything#2549`, 2026-09-24: once `addressed` is
+  // correctly `true` (order-based, per the test above), the real reconcile pass hit a THIRD gap — it fell
+  // through to the generic `OWED`-table review dispatch, which is subject to the SAME shared `roundCap`
+  // (`NEGOTIATION_ROUND_CAP`) fed by `countAdvisoryComments` — i.e. the raw COUNT OF ADVISORY NOTES, which is
+  // exactly the pre-existing history (5 rounds, predating `#xkmu3gv`) this branch's own `addressed` check
+  // already correctly looks PAST. So the real #2549 sat `cap-exhausted` (5/5) even once its finding was proven
+  // fixed. The review this branch owns dispatches directly, EXEMPT from that shared cap — see the dispatch
+  // site's own docblock for why that exemption is safe (self-limiting: it can fire at most once per completed
+  // advisory-fix round, and those rounds are already bounded by `ADVISORY_FIX_ROUND_CAP`).
+  it('xaer296 FOLLOW-UP 2 — the exact #2549 shape (5 pre-existing notes + 1 genuine fix) is owed a REVIEW, never cap-exhausted', () => {
     const priorNotes = Array.from({ length: 4 }, (_, i) => ({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i + 1}` }));
     const latestNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 5 — the current finding` };
     const theOneFix = { body: buildAdvisoryFixComment({}), viewerDidAuthor: true };
     const comments = [...priorNotes, latestNote, theOneFix];
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
+    expect(plan.refusals).toHaveLength(0);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2601 })]);
+  });
+
+  // The exemption is NARROW — a `needs-human` PR that carries NO `advisory:changes` at all (the ordinary
+  // population `NEGOTIATION_ROUND_CAP` was built for) must stay EXACTLY as capped as before.
+  it('xaer296 FOLLOW-UP 2 — a normal PR at the shared cap (no advisory:changes at all) is STILL refused cap-exhausted', () => {
+    const rearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER }));
+    const plan = planReconcile({
+      prs: [prNeedsHuman({ labels: lbl('review:human'), comments: [finding(), ...rearms] })],
+      agents: [], now: NOW,
+    });
     expect(plan.dispatch).toHaveLength(0);
-    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2601, attempts: 5, cap: NEGOTIATION_ROUND_CAP })]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2601, attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP })]);
+  });
+
+  // And a PR that carries `advisory:changes` but has NOT YET addressed the latest finding must stay governed
+  // by its OWN `ADVISORY_FIX_ROUND_CAP` (already covered above) — the exemption never reaches this branch at
+  // all, since it is gated on `addressed === true`.
+  it('xaer296 FOLLOW-UP 2 — advisory:changes NOT yet addressed is unaffected by the review exemption (still the advisory-fix cap)', () => {
+    const comments = [];
+    for (let i = 0; i < ADVISORY_FIX_ROUND_CAP; i += 1) {
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}` });
+      comments.push({ body: buildAdvisoryFixComment({}) });
+    }
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken` });
+    const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'advisory-fix', cap: ADVISORY_FIX_ROUND_CAP })]);
   });
 
   it(`AT the cap (${ADVISORY_FIX_ROUND_CAP} durable advisory-fix comments, still behind the note count) the PR is refused \`cap-exhausted\`, capKind \`advisory-fix\``, () => {
