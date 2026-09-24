@@ -3875,6 +3875,17 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    changes."* A directory-keyed (never basename-keyed) in-daemon tripwire that DEFERS a self-source PR so THIS
    daemon's pass is never the one to land it remains a sound belt-and-braces implementation detail, but the
    binding rule is the graduated-committee-with-independence above, not any single guard.
+   (amended 2026-09-24 by 4043, operator: *"B"*.) **Independence covers the code as well as the actor: a PR is
+   never judged by a checkout that contains that PR's own unmerged changes.** A review daemon running a live
+   overlay ([#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 5) dispatches the
+   review of any PR whose changed files overlap an active overlay's changed files (both vs `origin/main`;
+   path-based, so a rebase, amend or rename cannot dodge it) from a dedicated `main`-only checkout, through the
+   same graduated committee. When that checkout is missing, stale or dirty, it **fails closed** to
+   `review:human` and alerts; the fallback is a tooling failure to fix, never the routine path. The label writer
+   (`we:scripts/review-set-label.mjs --to=accepted`) refuses from an overlapping checkout, so a mis-routed review
+   cannot clear either. Rejected: routine human review of overlay PRs (contradicts the operator's words above),
+   skipping the PR while its overlay is live (deadlocks — the overlay drops only once `main` has it), and
+   accepting the risk (reopens the #809 hole).
 
 **Lineage:** #2501 (ratified 2026-07-27, operator; bornAs 2501; prep
 `we:reports/2026-07-14-plateau-loop-self-hosting-boundary.md`, research `/research/plateau-loop-self-hosting-boundary/`).
@@ -5524,9 +5535,10 @@ clauses:
 6. **What runs is visible, and hangs are caught from outside.** Each daemon publishes its boot input heads and
    active overlays in its heartbeat or lease record, read by `runner-activity`. Every child call a tick makes
    has a timeout, and a check outside the daemon alerts when its heartbeat stops moving.
-7. **Left open.** How [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3 (a
-   daemon never approves its own daemon-code change) applies to a review daemon running an overlay whose
-   graduation PR it would review was not ruled. Clause 3 stands unamended until decision card 4043 rules it.
+7. **Overlay graduation review (ruled 2026-09-24 by 4043).** A review daemon running an overlay never reviews
+   that overlay's PR from its own clone: overlapping PRs are reviewed from a `main`-only checkout, failing
+   closed to `review:human` — see the amendment to
+   [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3.
 
 **Lineage:** #3681 (ratified 2026-09-23; first prepared the morning of 2026-09-23, re-prepared the same evening
 in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch framing of 3992 and the
