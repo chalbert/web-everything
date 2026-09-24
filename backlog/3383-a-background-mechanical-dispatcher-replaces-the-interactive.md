@@ -5129,3 +5129,48 @@ pre-existing/unrelated (host-sampler environment tests; identical before/after v
 via git-stash bisection), 0 added by this diff.
 
 Landed as a direct commit to `lane/mechanical-dispatcher`, no PR (family convention).
+
+## Session update (2026-09-23) — x3cepr4: shared list --acquirable cache + dispatch-plan free-lane override
+
+Built backlog/x3cepr4 (share one free-lane scan across callers, and stop the dispatcher test from
+scanning the real lane pool) in a throwaway clone of `lane/mechanical-dispatcher`.
+
+1. `scripts/lib/lane-pool-list-cache.mjs` (new): a shared cache for `lane-pool.mjs list --acquirable`
+   -- a TTL'd result file (default 30s, env `WE_LANE_POOL_LIST_CACHE_TTL_MS` override) plus a scan
+   lock (reuses `file-locks.mjs`'s atomic mkdir+TTL primitive, the same one `drain-lock.mjs`'s
+   numbering mutex is built on) so parallel callers share one in-flight scan instead of each
+   re-scanning every lane. A stale or unreadable/corrupt cache file rescans. `acquire` never reads
+   this cache -- it keeps its own live per-lane check before claiming a lane (the correctness rule the
+   card calls out explicitly). Every lane-state-changing command (`acquire`, `release`/`release
+   --all-pools`, `adopt`, `provision`, `refresh`, `remove`) invalidates it.
+2. `scripts/readiness/dispatch-plan.mjs`: added `--free-lanes-json=<path-or-inline-JSON>` (and env
+   `WE_DISPATCH_PLAN_FREE_LANES_JSON`) that replaces the `lane-pool list --acquirable --json` shell
+   outright.
+3. `scripts/conveyor/__tests__/dispatcher-fixture-harness.test.mjs` now passes
+   `--free-lanes-json=[9101,9102]`, so this run never shells the real lane pool. Updated its header
+   comment and the launch/held assertion's own comment -- the assertion still tolerates a
+   `capacity-cap` hold (the real active-lease/concurrency-cap axis is unchanged) but "no free lane"
+   can no longer occur for #9001 since the synthetic list is always non-empty.
+4. Unit tests in `scripts/__tests__/lane-pool-list-cache.test.mjs` (10 tests): TTL hit, expiry,
+   corrupt-cache-reads-as-absent, invalidation, and two concurrency cases (a waiter reuses the
+   winner's published result with zero scans of its own; a wedged/expired holder falls back to an
+   unlocked scan rather than hanging).
+
+Test results: default-config vitest run (lane-pool-list-cache.test.mjs +
+dispatcher-fixture-harness.test.mjs) -- 2 files, 11 tests, all passing. Integration-config vitest run
+(`--config vitest.integration.config.ts`) for the three real-git-subprocess lane-pool suites
+(lane-pool-acquirable, lane-pool-reap-on-list-acquirable, lane-pool-reap-on-acquire) -- 3 files, 19
+tests, all passing (pre-existing suites, unmodified, confirming the cache wiring didn't regress
+`list --acquirable`'s reap-then-filter behavior). All runs went through
+`scripts/readiness/heavy-admission.mjs run --`.
+
+Timing (this scratch clone has zero lanes provisioned, so both readings are dominated by Node
+process startup rather than the scan itself -- the cache's actual payoff only shows on a populated
+pool):
+  run 1: real 0m0.469s
+  run 2: real 0m0.323s
+Confirmed the cache file (`<poolDir>/.lane-pool-list-cache/acquirable.json`) was created after run 1
+and its lock dir (`.lane-pool-list-cache-lock`) was empty afterward (released cleanly).
+
+Nothing from the card was left undone. Committed and pushed directly to
+`lane/mechanical-dispatcher` per the epic's prototype doctrine (no PR).
