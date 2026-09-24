@@ -10,7 +10,7 @@
  * exercised end-to-end through the resolver, not just re-asserted in isolation.
  */
 import { describe, it, expect } from 'vitest';
-import { resolvePrWorkUnit } from '../pr-work-unit.mjs';
+import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from '../pr-work-unit.mjs';
 import { findItem as realFindItem } from '../../operations/dispatch-lane-io.mjs';
 
 // Bind the real `findItem` to a fixed item corpus, arity-1 — the shape `resolvePrWorkUnit` expects.
@@ -97,7 +97,11 @@ describe('resolvePrWorkUnit (#xdx3ifb)', () => {
         repo: 'we',
         pr: { number: 2553, headRefName: 'lane/xzi292i-stuck-pr-watch', headRefOid: 'deadbeef'.repeat(5) },
         findItem: boundFindItem([]), // nothing on `main` yet
-        fetchDiffPaths: () => ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs'],
+        // #xcla4iv review findings — both card-scope entries must also be present in the PR's own diff (the
+        // real PR #2553's full diff does carry both `stuck-pr-watch-core.mjs` and `stuck-pr-watch.mjs`; this
+        // fixture lists both too, so the new containment guard below doesn't spuriously drop a real,
+        // legitimately-in-diff entry).
+        fetchDiffPaths: () => ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs', 'scripts/conveyor/stuck-pr-watch.mjs'],
         fetchCardScopeAtRef: (path, ref) => {
           calls.push({ path, ref });
           return ['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'];
@@ -181,6 +185,52 @@ describe('resolvePrWorkUnit (#xdx3ifb)', () => {
       });
       expect(unit.attribution).toBe('pr');
       expect(unit.itemNum).toBeNull();
+    });
+
+    // Review findings (correctness + security, chalbert/web-everything#2573) — a card filed IN this PR's own
+    // unmerged diff is exactly as PR-author-controlled/unreviewed as the diff paths themselves (neither has
+    // landed on `main`), so it must get the SAME two guards the diff-paths fallback already gets: character
+    // safety and containment to the PR's own footprint. Before the fix, `cardScope` was returned verbatim.
+    it('SECURITY/CORRECTNESS: drops a card-scope entry that fails isSafeFallbackScopeEntry (comma-smuggled fence entry)', () => {
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 2001, headRefName: 'lane/xevil01-innocuous-thing', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xevil01-innocuous-thing.md', 'scripts/legit.mjs'],
+        // an unsafe entry shaped to read as a SECOND fence entry once `dispatchFix` joins scope with ','.
+        fetchCardScopeAtRef: () => ['we:scripts/legit.mjs', 'we:x,we:evil/anything'],
+      });
+      expect(unit.scope).toEqual(['we:scripts/legit.mjs']);
+      expect(unit.scope).not.toContain('we:x,we:evil/anything');
+      expect(isSafeFallbackScopeEntry('we:x,we:evil/anything')).toBe(false);
+    });
+
+    it('SECURITY: drops a path-traversal card-scope entry even when it is the only entry, falling back to the PR\'s own diff', () => {
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 2002, headRefName: 'lane/xevil02-innocuous-thing', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xevil02-innocuous-thing.md', 'scripts/legit.mjs'],
+        fetchCardScopeAtRef: () => ['we:../../.ssh/authorized_keys', 'we:../../../etc/passwd'],
+      });
+      // both traversal entries are dropped; nothing safe survives, so the resolver falls through to the PR's
+      // own already-changed diff paths — never a looser fence than the PR's own footprint.
+      expect(unit.scope).toEqual(['we:backlog/xevil02-innocuous-thing.md', 'we:scripts/legit.mjs']);
+      expect(unit.scopeSource).toBe('diff');
+    });
+
+    it('SECURITY: a card cannot declare scope for a safe-SHAPED file the PR never actually touched (containment to the PR\'s own diff)', () => {
+      const unit = resolvePrWorkUnit({
+        repo: 'we',
+        pr: { number: 2003, headRefName: 'lane/xevil03-innocuous-thing', headRefOid: 'cafe'.repeat(10) },
+        findItem: boundFindItem([]),
+        fetchDiffPaths: () => ['backlog/xevil03-innocuous-thing.md', 'scripts/legit.mjs'],
+        // syntactically safe (passes isSafeFallbackScopeEntry) but names a file this PR never touched.
+        fetchCardScopeAtRef: () => ['we:scripts/legit.mjs', 'we:.github/workflows/deploy.yml'],
+      });
+      expect(unit.scope).toEqual(['we:scripts/legit.mjs']);
+      expect(unit.scope).not.toContain('we:.github/workflows/deploy.yml');
+      expect(isSafeFallbackScopeEntry('we:.github/workflows/deploy.yml')).toBe(true); // shape alone would have passed
     });
   });
 });

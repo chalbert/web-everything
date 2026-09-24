@@ -213,7 +213,10 @@ describe('planFixesFromReconcile', () => {
       const cardCalls = [];
       const fetchItemlessDiffPaths = (pr) => {
         diffCalls.push(pr);
-        return ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs'];
+        // the real PR #2553's full diff carries both files; this fixture lists both so the containment guard
+        // (review findings, chalbert/web-everything#2573) doesn't spuriously drop a real, legitimately-in-diff
+        // card-scope entry.
+        return ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs', 'scripts/conveyor/stuck-pr-watch.mjs'];
       };
       const resolveCardScopeAtRef = (path, ref) => {
         cardCalls.push({ path, ref });
@@ -249,6 +252,40 @@ describe('planFixesFromReconcile', () => {
         scope: ['we:backlog/xabc123-new-thing.md', 'we:src/Thing.tsx'],
         scopeSource: 'pr-diff', isConflict: false, body: null, headRefOid: 'cafe'.repeat(10),
       }]);
+    });
+
+    // Review findings (correctness + security, chalbert/web-everything#2573, at this file's own
+    // `planFixesFromReconcile`:226/229) — the malicious-shaped repro from the security finding: a PR author
+    // opens `lane/xevil01-innocuous-thing` and files a card in that SAME PR's diff whose OWN `scope:`
+    // frontmatter declares a path-traversal entry. Before the fix, `item.scopeSource === 'card'` skipped
+    // `isSafeFallbackScopeEntry` entirely (only `'diff'` was filtered), so both traversal entries reached
+    // `planned[0].scope` untouched.
+    it('SECURITY: a hostile card-scope entry (path traversal) filed in the PR\'s own diff is filtered, never reaches planned.scope', () => {
+      const entries = [{ kind: 'fix', prNumber: 2222, headRefName: 'lane/xevil01-innocuous-thing', headRefOid: 'cafe'.repeat(10) }];
+      const fetchItemlessDiffPaths = () => ['backlog/xevil01-innocuous-thing.md', 'scripts/legit.mjs'];
+      const resolveCardScopeAtRef = () => ['we:../../.ssh/authorized_keys', 'we:../../../etc/passwd'];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, resolveCardScopeAtRef,
+      );
+      expect(refusals).toEqual([]);
+      expect(planned).toHaveLength(1);
+      expect(planned[0].scope).not.toContain('we:../../.ssh/authorized_keys');
+      expect(planned[0].scope).not.toContain('we:../../../etc/passwd');
+      // nothing safe survives the card, so it falls through to the PR's own (already-touched) diff paths —
+      // never a looser fence than the PR's own footprint.
+      expect(planned[0].scope).toEqual(['we:backlog/xevil01-innocuous-thing.md', 'we:scripts/legit.mjs']);
+      expect(planned[0].scopeSource).toBe('pr-diff');
+    });
+
+    it('CORRECTNESS: a comma-smuggled card-scope entry is dropped, never widens the fence past what the PR actually touches', () => {
+      const entries = [{ kind: 'fix', prNumber: 2223, headRefName: 'lane/xevil02-innocuous-thing', headRefOid: 'cafe'.repeat(10) }];
+      const fetchItemlessDiffPaths = () => ['backlog/xevil02-innocuous-thing.md', 'scripts/legit.mjs'];
+      const resolveCardScopeAtRef = () => ['we:scripts/legit.mjs', 'we:x,we:evil/anything'];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, resolveCardScopeAtRef,
+      );
+      expect(refusals).toEqual([]);
+      expect(planned[0].scope).toEqual(['we:scripts/legit.mjs']);
     });
 
     it('a GENUINE ghost item number — no matching card anywhere in the diff — is still refused `no-scope`, unaffected', () => {

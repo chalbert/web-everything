@@ -43,6 +43,33 @@ import { repoProfile, gateFor } from '../lib/repo-profile.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
 
 /**
+ * we:scripts/conveyor/pr-work-unit.mjs#isSafeFallbackScopeEntry — may this PR-author-controlled string become a
+ * scope-fence entry? PURE. MOVED HERE (from `reconcile-fix-dispatch.mjs`, which still re-exports it for
+ * backward compatibility) by the chalbert/web-everything#2573 review findings (correctness + security): this
+ * is the ONE shared choke point {@link resolvePrWorkUnit} itself can call it from, for every untrusted-scope
+ * branch this resolver produces (PR-diff paths, and #xcla4iv's card-in-diff scope), so every consumer
+ * (`reconcile-fix-dispatch.mjs#planFixesFromReconcile` AND `ci-heal-pr-dispatch.mjs`) is protected without
+ * having to remember to filter untrusted-PR-content scope on its own. A PR author controls its filenames (and,
+ * for #xcla4iv, its own unmerged card's `scope:` frontmatter), and `dispatchFix` joins `scope` with ',' into
+ * the fix agent's `SCOPE:` token, so a name like `x,we:scripts` would read as TWO fence entries (the second a
+ * whole directory the PR never touched) and free text in a name would land in the brief. Rejects: `,`, any
+ * whitespace or control character, a `..` path segment, a leading `/`, and glob metacharacters
+ * (`* ? [ ] { }`). A rejected entry is DROPPED from the fence (never a looser fence, only a narrower one); if
+ * none survive the caller reports `no-scope`. Declared item `scope:` for an item already resolved on `main`
+ * (trusted backlog frontmatter, committed history) is NOT filtered — only content whose provenance traces back
+ * to an unmerged PR's own diff/head.
+ * @param {string} entry - a `we:`-prefixed path.
+ * @returns {boolean}
+ */
+export function isSafeFallbackScopeEntry(entry) {
+  if (typeof entry !== 'string') return false;
+  const path = entry.replace(/^[a-z][a-z0-9-]*:/i, '');
+  if (!path || path.startsWith('/')) return false;
+  if (/[,\s*?[\]{}]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return false;
+  return !path.split('/').includes('..');
+}
+
+/**
  * we:scripts/conveyor/pr-work-unit.mjs#resolvePrWorkUnit — resolve ONE pull request (in any constellation
  * repo) to the work unit it actually delivers: a declared backlog item when its branch names one findable by
  * {@link findItem} (which itself now also matches a renamed card's `bornAs`); failing that, the SAME item when
@@ -117,13 +144,33 @@ export function resolvePrWorkUnit({ repo, pr, findItem, fetchDiffPaths, fetchCar
         try { cardScope = fetchCardScopeAtRef(cardPath, headRefOid) || []; } catch { cardScope = []; }
       }
       cardScope = Array.isArray(cardScope) ? cardScope.map(String).filter(Boolean) : [];
-      if (cardScope.length) {
-        return { attribution: 'item', itemNum, scope: cardScope, gate, scopeSource: 'card' };
+      const diffScope = paths.map((p) => `${profile.canonicalPrefix}:${p}`);
+      // Review findings (correctness + security, chalbert/web-everything#2573) — a card filed IN this PR's own
+      // UNMERGED diff is exactly as PR-author-controlled/unreviewed as the diff paths themselves (neither has
+      // landed on `main` yet), unlike a resolved item's declared `scope:` (trusted above, at the `attribution:
+      // 'item'` return a few lines up, precisely because THAT card already sits on `main`). So this card's
+      // scope gets the SAME two guards the diff-paths fallback below already gets, applied HERE, at the one
+      // shared choke point every consumer of this resolver goes through (`reconcile-fix-dispatch.mjs`'s
+      // `planFixesFromReconcile` AND `ci-heal-pr-dispatch.mjs`), rather than leaving each call site to
+      // remember to filter untrusted-PR-content scope on its own:
+      //   1. character safety (`isSafeFallbackScopeEntry`) — no comma/`..`/control-char smuggling into the
+      //      `dispatchFix` brief's `SCOPE:` fence (see that function's own docblock).
+      //   2. containment — a card cannot declare scope for a file the PR itself never touched. A card's raw
+      //      `scope:` has no bound at all on its own (it could name any file in the whole monorepo, safe-
+      //      shaped or not — e.g. `we:.github/workflows/deploy.yml`), so it is intersected with the PR's own
+      //      already-changed diff paths: never a looser fence than the PR's own footprint, the SAME invariant
+      //      this file's `pr` attribution and every other untrusted-scope fallback already honors. Verified
+      //      safe for the live case this feature exists for (PR #2553): every one of its card's 7 declared
+      //      scope entries is also in that PR's own diff.
+      const diffScopeSet = new Set(diffScope);
+      const safeCardScope = cardScope.filter(isSafeFallbackScopeEntry).filter((entry) => diffScopeSet.has(entry));
+      if (safeCardScope.length) {
+        return { attribution: 'item', itemNum, scope: safeCardScope, gate, scopeSource: 'card' };
       }
       return {
         attribution: 'item',
         itemNum,
-        scope: paths.map((p) => `${profile.canonicalPrefix}:${p}`),
+        scope: diffScope.filter(isSafeFallbackScopeEntry),
         gate,
         scopeSource: 'diff',
       };

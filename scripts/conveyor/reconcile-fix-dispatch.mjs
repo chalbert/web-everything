@@ -55,7 +55,7 @@
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
-import { resolvePrWorkUnit } from './pr-work-unit.mjs';
+import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -222,11 +222,17 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       fetchCardScopeAtRef: resolveCardScopeAtRef,
     });
     const item = unit && unit.attribution === 'item' ? { scope: unit.scope, scopeSource: unit.scopeSource ?? null } : null;
-    // #xcla4iv — the resolver's own `scopeSource` distinguishes a card's TRUSTED committed frontmatter
-    // (`'card'`, or `undefined` for the ordinary on-`main` item branch — neither is filtered, exactly like
-    // the pre-existing "declared item scope: is not filtered" rule) from its UNTRUSTED diff-paths fallback
-    // (`'diff'` — PR-author-controlled filenames, filtered here exactly like the `#3634` fallback below).
-    let scope = item ? (item.scopeSource === 'diff' ? item.scope.filter(isSafeFallbackScopeEntry) : item.scope) : [];
+    // #xcla4iv — the resolver's own `scopeSource` distinguishes the ordinary on-`main` item branch (`undefined`
+    // — a resolved item's declared `scope:` is trusted committed history, not filtered, exactly like the
+    // pre-existing "declared item scope: is not filtered" rule) from EITHER of its two UNTRUSTED,
+    // PR-author-controlled fallbacks for a card filed IN this PR's own unmerged diff: `'card'` (the card's own
+    // frontmatter, read off the PR's own head — an unmerged PR is exactly as author-controlled/unreviewed as
+    // its diff, so it gets the same filter) and `'diff'` (the PR's raw diff paths). Review findings
+    // (correctness + security, chalbert/web-everything#2573) — `resolvePrWorkUnit` itself now ALSO applies
+    // `isSafeFallbackScopeEntry` (plus containment to the PR's own diff, for `'card'`) at its own shared choke
+    // point before returning either of these two `scopeSource`s, so this re-filter here is defense in depth,
+    // never a behavior change for a caller: filtering an already-filtered array is idempotent.
+    let scope = item ? (item.scopeSource ? item.scope.filter(isSafeFallbackScopeEntry) : item.scope) : [];
     let scopeSource = item?.scopeSource === 'diff' ? 'pr-diff' : 'item';
     if (item && !scope.length) {
       // `#3634` — a RESOLVED item with no scope of its own (an epic, typically). Try the PR's own
@@ -265,24 +271,11 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
   return { planned, refusals };
 }
 
-/**
- * we:scripts/conveyor/reconcile-fix-dispatch.mjs#isSafeFallbackScopeEntry — may this PR-diff filename become a
- * scope-fence entry? PURE. A PR author controls its filenames, and `dispatchFix` joins `scope` with ',' into the
- * fix agent's `SCOPE:` token, so a name like `x,we:scripts` would read as TWO fence entries (the second a whole
- * directory the PR never touched) and free text in a name would land in the brief. Rejects: `,`, any whitespace
- * or control character, a `..` path segment, a leading `/`, and glob metacharacters (`* ? [ ] { }`). A rejected
- * file is DROPPED from the fallback fence (never a looser fence, only a narrower one); if none survive the
- * caller reports `no-scope`. Declared item `scope:` (trusted backlog frontmatter) is not filtered.
- * @param {string} entry - a `we:`-prefixed path.
- * @returns {boolean}
- */
-export function isSafeFallbackScopeEntry(entry) {
-  if (typeof entry !== 'string') return false;
-  const path = entry.replace(/^[a-z][a-z0-9-]*:/i, '');
-  if (!path || path.startsWith('/')) return false;
-  if (/[,\s*?[\]{}]/.test(path) || /[\u0000-\u001f\u007f]/.test(path)) return false;
-  return !path.split('/').includes('..');
-}
+// `isSafeFallbackScopeEntry` MOVED to `pr-work-unit.mjs` (chalbert/web-everything#2573 review findings —
+// `resolvePrWorkUnit` itself now needs to call it, at the one shared choke point every consumer of that
+// resolver goes through; see its own docblock there for the full rationale). Re-exported here so existing
+// importers of this file (this module's own three call sites above, and this file's own tests) see no change.
+export { isSafeFallbackScopeEntry };
 
 /**
  * we:scripts/conveyor/reconcile-fix-dispatch.mjs#fetchPrDiffScope — `#3634`'s real fallback-scope reader: ONE
