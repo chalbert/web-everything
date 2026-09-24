@@ -23,7 +23,11 @@
  * NEVER inside `selectSupervisionLevel`. It cannot change recommendation, claudeTier, or level.
  *
  * PROGRESSIVE BACKDOWN & GRADUATION MODEL (#3690):
- *   • Unit of trust is strictly {provider, model, taskType}, never broader (identity never inherits trust).
+ *   • Unit of trust is strictly {provider, model, subjectClass, taskType}, never broader (identity never
+ *     inherits trust). `taskType` carries whatever the caller's subject axis is — a work task type, a role
+ *     kind, or a review lens — and `subjectClass` keeps those axes from colliding: a review-lens or role-kind
+ *     subject never counts toward a work triple's streak, and a work subject never counts toward one of theirs,
+ *     even where the subject strings happen to match (#3801 Fork 3).
  *   • N = 5 consecutive clean trials (verified by claude-subagent or independent-claude) required for spot-check.
  *   • 'other'-verified trials (e.g. smoke tests) neither advance nor reset the streak.
  *   • Informative-trial requirement: at least one historical trial for the triple must have caught and fixed
@@ -144,6 +148,13 @@ export const SUPERVISION_LEVELS = Object.freeze({
 export const DEFAULT_BACKDOWN_THRESHOLDS = Object.freeze({
   minCleanStreak: 5,
   requireInformativeTrial: true,
+  // Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889): once a
+  // confirmed miss is on record for a triple, the clean-streak bar to reach spot-check becomes
+  // minCleanStreak + k, strictly higher than the cold-start bar. `k`, like `minCleanStreak`, is a config
+  // default proposed only by a future ordinary batched finding against real trial-count data — this is a
+  // structural addition (a new config field), not a recalibration; the placeholder value below is
+  // explicitly out of scope for #3889 to justify.
+  k: 3,
 });
 
 /**
@@ -186,6 +197,61 @@ export function isStatuteTierPath(filePath) {
   if (typeof filePath !== 'string' || !filePath.trim()) return false;
   const normalized = filePath.trim().replace(/^\.?\//, '').toLowerCase();
   return normalized === 'docs/agent/platform-decisions.md' || normalized.startsWith('docs/agent/');
+}
+
+/**
+ * WIDE-BLAST-RADIUS DISPATCH MACHINERY (#3857). Every Claude dispatch's argv passes through
+ * `buildAgentArgv` (`we:scripts/operations/dispatch-lane-io.mjs`), which composes the criteria this
+ * file and `we:scripts/lib/dispatch-contracts.mjs` compute — so a scope that touches any of these five
+ * files or the tick core that drives them is the machinery choosing its own successor's routing, not an
+ * ordinary edit. Frozen and short on purpose: a table to change a row of, not a heuristic to widen.
+ */
+// @test-only-export-ok: Shared library exported for the model-tier table (#3857) and its own test
+export const DISPATCH_MACHINERY_PATHS = Object.freeze([
+  'scripts/operations/dispatch-lane-io.mjs',
+  'scripts/operations/dispatch-task.mjs',
+  'scripts/lib/dispatch-contracts.mjs',
+  'scripts/lib/provider-routing.mjs',
+  'scripts/conveyor/tick-core.mjs',
+]);
+
+/**
+ * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
+ * dispatch fact, replacing both the old size/file-count/testability Opus criteria this function's Step 4
+ * used to compute inline and the standalone `STORY_KIND_RUNGS` table (`dispatch-contracts.mjs`), which
+ * this folds in rather than keeping beside. Sourced verbatim from the operator's 2026-09-22 routing rule
+ * (narrower and later than `docs/agent/backlog-workflow.md#model-routing`, which governs the INTERACTIVE
+ * orchestrating loop's own sub-agent spawns and is untouched by this table — see
+ * [delegation-trial-record-graduation](/docs/agent/platform-decisions.md#delegation-trial-record-graduation),
+ * "Reach": mechanical routing binds the mechanical dispatch path only).
+ *
+ * RAISE-ONLY: every row below can only move a dispatch from `sonnet` up to `opus`, never down — the
+ * function returns as soon as one row matches, and the fallback (no row matches) is always `sonnet`.
+ * `haiku` is never a table output.
+ *
+ * @param {{kind?: string, taskType?: string, scopePaths?: string[], tags?: string[]}} [o]
+ * @returns {{tier: 'sonnet'|'opus', reason: string}}
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch spawn path (#3857) and its own test
+export function workerTierFor({ kind, taskType, scopePaths, tags } = {}) {
+  const k = typeof kind === 'string' ? kind.trim() : '';
+  const t = typeof taskType === 'string' ? taskType.trim() : '';
+  const paths = Array.isArray(scopePaths) ? scopePaths.map(String) : [];
+  const tagList = Array.isArray(tags) ? tags.map(String) : [];
+
+  if (k === 'prepare-decision' || t === 'architectural-decision') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: "preparing a decision's forks is judgment" };
+  }
+  if (paths.some(isStatuteTierPath) || k === 'statute-wording') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'rewording statute or rule text' };
+  }
+  if (k === 'security-fix' || tagList.includes('security')) {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'a security-critical fix' };
+  }
+  if (paths.some((p) => DISPATCH_MACHINERY_PATHS.includes(p)) || k === 'dispatch-machinery') {
+    return { tier: CLAUDE_TIERS.OPUS, reason: 'wide-blast-radius dispatch machinery' };
+  }
+  return { tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" };
 }
 
 /**
@@ -252,13 +318,27 @@ function isCleanRecord(record) {
   return record.outcome === 'landed';
 }
 
-/** Check if a scorecard record was informative (had a confirmed real problem from independent review). Pure. */
+/**
+ * Check if a scorecard record was informative (independent review found a real problem that was
+ * then fixed). Pure. Reads ONLY the explicit `informative` field the logging CLI writes — never
+ * inferred from `outcome` or `findings` (platform-decisions.md#delegation-trial-record-graduation,
+ * rule 4; #3888).
+ */
 function isInformativeRecord(record) {
   if (!record || typeof record !== 'object') return false;
   const isVerified = record.verifiedBy === 'claude-subagent' || record.verifiedBy === 'independent-claude';
   if (!isVerified) return false;
-  if (record.outcome !== 'rejected' && record.outcome !== 'reworked') return false;
-  return record.findings !== undefined && record.findings !== null && String(record.findings).trim() !== '';
+  return record.informative === true;
+}
+
+/**
+ * Check if a scorecard record carries a root-cause note in its own recorded field — never inferred
+ * from `findings` or any other free-text field (platform-decisions.md#delegation-trial-record-graduation,
+ * rule 5; #3889). Pure.
+ */
+function hasRootCauseNote(record) {
+  if (!record || typeof record !== 'object') return false;
+  return typeof record.rootCause === 'string' && record.rootCause.trim() !== '';
 }
 
 /**
@@ -415,6 +495,8 @@ export function selectProvider(task, context) {
     : (Array.isArray(rawScorecards?.records) ? rawScorecards.records : []);
   const preferredModel = typeof context?.model === 'string' ? context.model : undefined;
   const acceptanceTestable = context?.acceptanceTestable;
+  const kind = typeof context?.kind === 'string' ? context.kind : '';
+  const tags = Array.isArray(context?.tags) ? context.tags : [];
 
   const auditTrail = [];
   const statuteFiles = filesTouched.filter(isStatuteTierPath);
@@ -544,43 +626,11 @@ export function selectProvider(task, context) {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Step 4: Claude Fallback by Effort Tier
+  // Step 4: Claude Fallback by Effort Tier — the ONE checked-in table (#3857), never inline criteria.
   // ──────────────────────────────────────────────────────────────────────────
-  let claudeTier;
-  let claudeReason;
-
-  // Criteria for Opus:
-  // - Touches a statute-tier path (docs/agent/platform-decisions.md or docs/agent/*)
-  // - OR taskType === 'architectural-decision'
-  // - OR acceptance criteria are NOT concrete/testable (e.g. triage-research or explicit flag)
-  // - OR large blast radius: filesTouched > 8 files OR estimatedSize > 500 LOC
-  if (hasStatuteFile) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = `Touches statute-tier governance files (${statuteFiles.join(', ')}), requiring human-aligned architectural authority.`;
-  } else if (taskType === 'architectural-decision') {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = "Task type 'architectural-decision' requires deep repo-wide judgment and holistic architectural reasoning.";
-  } else if (taskType === 'triage-research') {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = "Task type 'triage-research' is open-ended research without mechanical test criteria, requiring deep qualitative analysis.";
-  } else if (acceptanceTestable === false) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = 'Acceptance criteria are not concrete or testable, requiring open-ended judgment to determine completion.';
-  } else if (filesTouched.length > 8 || estimatedSize > 500) {
-    claudeTier = CLAUDE_TIERS.OPUS;
-    claudeReason = `Task scope (${filesTouched.length} files, ${estimatedSize} LOC) exceeds the bounded Sonnet blast radius (> 8 files or > 500 LOC).`;
-  } else if (filesTouched.length <= 1 && estimatedSize <= 50 && taskType === 'doc-fix') {
-    // Criteria for Haiku:
-    // Trivial, mechanical, single-file (<= 1 file, <= 50 LOC), doc-fix with concrete testable criteria
-    claudeTier = CLAUDE_TIERS.HAIKU;
-    claudeReason = `Trivial, mechanical single-file doc-fix (${filesTouched.length} file, ${estimatedSize} LOC) with concrete testable criteria.`;
-  } else {
-    // Criteria for Sonnet:
-    // Default for real work: multi-file but bounded blast radius (<= 8 files, <= 500 LOC),
-    // acceptance criteria mostly concrete, no statute-tier files touched.
-    claudeTier = CLAUDE_TIERS.SONNET;
-    claudeReason = `Default for real bounded work (${filesTouched.length} files, ${estimatedSize} LOC) with concrete acceptance criteria and no statute paths.`;
-  }
+  const tierDecision = workerTierFor({ kind, taskType, scopePaths: filesTouched, tags });
+  const claudeTier = tierDecision.tier;
+  const claudeReason = tierDecision.reason;
 
   auditTrail.push({
     criterion: 'claude-tier',
@@ -646,7 +696,9 @@ export function selectProvider(task, context) {
  * SELECT SUPERVISION LEVEL (`selectSupervisionLevel`).
  *
  * Implements the progressive backdown plan from backlog item #3690:
- *   - Unit of trust: exact `{provider, model, taskType}` triple.
+ *   - Unit of trust: exact `{provider, model, subjectClass, taskType}` tuple. `taskType` is whatever the
+ *     caller's subject is (a work task type, a role kind, or a review lens); `subjectClass` keeps those
+ *     subject classes from mixing evidence even when the subject strings coincide (#3801 Fork 3).
  *   - Counts TRAILING consecutive clean streak (most recent first; verified by
  *     'claude-subagent' or 'independent-claude'; 'other'-verified records are skipped).
  *   - Clean record: outcome === 'landed' (fail-closed; missing/rejected/reworked all count unclean).
@@ -654,37 +706,52 @@ export function selectProvider(task, context) {
  *     'reworked' with confirmed findings (a 'landed' record's findings text alone never counts).
  *   - Hard veto: any unclean/unresolved record as the MOST RECENT verified trial immediately
  *     forces 'full' supervision, resetting the streak.
- *   - Returns 'spot-check' iff cleanStreak >= minCleanStreak AND (requireInformativeTrial === false
+ *   - Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889): once ANY
+ *     verified record for the triple was ever unclean (a confirmed miss, anywhere in its recorded
+ *     history — not only as the current most-recent trial), post-miss trials count toward restoration
+ *     only once a `rootCause` note is on record in its own field for that triple (never inferred from a
+ *     later row's `findings`); the clean-streak bar to clear then becomes `minCleanStreak + k`, strictly
+ *     higher than the cold-start bar. A cold-start triple with no miss ever recorded is unaffected and
+ *     still graduates at exactly `minCleanStreak`.
+ *   - Returns 'spot-check' iff cleanStreak >= the applicable bar (cold-start `minCleanStreak`, or
+ *     post-miss `minCleanStreak + k` once a rootCause is on record) AND (requireInformativeTrial === false
  *     OR hasInformativeTrial === true).
  *
  * PURE: No filesystem or process reads. Deterministic over its arguments.
  *
  * @param {string} provider
  * @param {string} model
- * @param {string} taskType
+ * @param {string} taskType - the caller's subject: a work task type, a role kind, or a review lens.
  * @param {Array<object>} scorecards
- * @param {{ minCleanStreak?: number, requireInformativeTrial?: boolean }} [backdownThresholds={}]
+ * @param {{ minCleanStreak?: number, requireInformativeTrial?: boolean, k?: number }} [backdownThresholds={}]
+ * @param {string} [subjectClass='work-agent'] - which subject class `taskType` belongs to; only records with
+ *   the same `subjectClass` count toward this triple (#3801 Fork 3).
  * @returns {SupervisionRecommendation}
  */
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
-export function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}) {
+export function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}, subjectClass = 'work-agent') {
   const minCleanStreak = typeof backdownThresholds?.minCleanStreak === 'number'
     ? backdownThresholds.minCleanStreak
     : DEFAULT_BACKDOWN_THRESHOLDS.minCleanStreak;
   const requireInformativeTrial = typeof backdownThresholds?.requireInformativeTrial === 'boolean'
     ? backdownThresholds.requireInformativeTrial
     : DEFAULT_BACKDOWN_THRESHOLDS.requireInformativeTrial;
+  const k = typeof backdownThresholds?.k === 'number'
+    ? backdownThresholds.k
+    : DEFAULT_BACKDOWN_THRESHOLDS.k;
 
   const records = Array.isArray(scorecards)
     ? scorecards
     : (Array.isArray(scorecards?.records) ? scorecards.records : []);
 
-  // Filter to exact {provider, model, taskType} triple
+  // Filter to exact {provider, model, subjectClass, taskType} tuple — subjectClass keeps a review-lens or
+  // role-kind subject from ever counting toward a work triple's streak, or vice versa (#3801 Fork 3).
   const matching = records.filter((r) =>
     r && typeof r === 'object' &&
     r.provider === provider &&
     r.model === model &&
-    r.taskType === taskType
+    r.taskType === taskType &&
+    r.subjectClass === subjectClass
   );
 
   // Walk in scoredAt order, most recent first (deterministic ISO-8601 string sort)
@@ -728,6 +795,20 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
   // Check if at least one record EVER for this triple was informative (confirmed finding from independent review)
   const hasInformativeTrial = sorted.some(isInformativeRecord);
 
+  // Post-miss bar (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889).
+  // A confirmed miss is any verified record for this triple that was NOT clean, anywhere in its recorded
+  // history — not only as the current most-recent trial (that narrower case is the hard veto above; this
+  // is broader, since a triple can have re-accumulated a clean trailing streak since an earlier miss).
+  // Fail-closed, matching the hard veto's own `!isCleanRecord` test: a missing/undefined outcome counts
+  // as a miss here too.
+  const hasConfirmedMiss = sorted.some((r) =>
+    (r.verifiedBy === 'claude-subagent' || r.verifiedBy === 'independent-claude') && !isCleanRecord(r)
+  );
+  // A root-cause note in its own recorded field — never inferred from `findings` or any other row.
+  const hasRootCause = sorted.some(hasRootCauseNote);
+  // Once a miss is on record, the bar to clear is strictly higher than the cold-start bar.
+  const requiredCleanStreak = hasConfirmedMiss ? minCleanStreak + k : minCleanStreak;
+
   // Decision logic
   let level;
   let summaryReason;
@@ -735,15 +816,20 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
   if (mostRecentHasFinding) {
     level = SUPERVISION_LEVELS.FULL;
     summaryReason = `Calibration-miss hard veto: the most recent verified trial for {"${provider}", "${model}", "${taskType}"} (${mostRecentVerified.scoredAt}) had an unresolved finding. Streak counter reset to 0.`;
-  } else if (cleanStreak < minCleanStreak) {
+  } else if (hasConfirmedMiss && !hasRootCause) {
     level = SUPERVISION_LEVELS.FULL;
-    summaryReason = `Trailing clean streak of ${cleanStreak} is below required threshold ${minCleanStreak} for {"${provider}", "${model}", "${taskType}"}.`;
+    summaryReason = `A confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}, but no root-cause note has been recorded in its own field — no number of post-miss clean trials counts toward restoration until one is.`;
+  } else if (cleanStreak < requiredCleanStreak) {
+    level = SUPERVISION_LEVELS.FULL;
+    summaryReason = hasConfirmedMiss
+      ? `Trailing clean streak of ${cleanStreak} is below the post-miss threshold ${requiredCleanStreak} (minCleanStreak ${minCleanStreak} + k ${k}) for {"${provider}", "${model}", "${taskType}"}.`
+      : `Trailing clean streak of ${cleanStreak} is below required threshold ${requiredCleanStreak} for {"${provider}", "${model}", "${taskType}"}.`;
   } else if (requireInformativeTrial && !hasInformativeTrial) {
     level = SUPERVISION_LEVELS.FULL;
-    summaryReason = `Trailing clean streak of ${cleanStreak} reaches ${minCleanStreak}, but no informative trial with confirmed findings has ever been recorded for {"${provider}", "${model}", "${taskType}"}.`;
+    summaryReason = `Trailing clean streak of ${cleanStreak} reaches ${requiredCleanStreak}, but no informative trial with confirmed findings has ever been recorded for {"${provider}", "${model}", "${taskType}"}.`;
   } else {
     level = SUPERVISION_LEVELS.SPOT_CHECK;
-    summaryReason = `Spot-check supervision approved: trailing clean streak of ${cleanStreak} meets threshold ${minCleanStreak}, informative trial requirement is satisfied, and the most recent trial was clean.`;
+    summaryReason = `Spot-check supervision approved: trailing clean streak of ${cleanStreak} meets threshold ${requiredCleanStreak}${hasConfirmedMiss ? ' (post-miss bar, root-cause note on record)' : ''}, informative trial requirement is satisfied, and the most recent trial was clean.`;
   }
 
   const recordsSummary = consulted.length > 0
@@ -760,10 +846,29 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
         : 'Most recent verified trial has no unresolved findings.',
     },
     {
+      // States which bar applied (cold-start vs post-miss) and why, per rule 5 (#3889).
+      criterion: 'post-miss-bar-selection',
+      result: hasConfirmedMiss ? 'post-miss' : 'cold-start',
+      dataConsulted: `hasConfirmedMiss=${hasConfirmedMiss}, requiredCleanStreak=${requiredCleanStreak} (minCleanStreak=${minCleanStreak}${hasConfirmedMiss ? ` + k=${k}` : ''})`,
+      reasoning: hasConfirmedMiss
+        ? `A confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}; the post-miss bar (minCleanStreak ${minCleanStreak} + k ${k} = ${requiredCleanStreak}) applies instead of the cold-start bar.`
+        : `No confirmed miss is on record for {"${provider}", "${model}", "${taskType}"}; the cold-start bar (minCleanStreak = ${minCleanStreak}) applies.`,
+    },
+    {
+      criterion: 'post-miss-root-cause-requirement',
+      result: (!hasConfirmedMiss || hasRootCause) ? 'pass' : 'fail',
+      dataConsulted: `hasConfirmedMiss=${hasConfirmedMiss}, hasRootCause=${hasRootCause}`,
+      reasoning: !hasConfirmedMiss
+        ? 'No confirmed miss is on record for this triple, so no root-cause note is required.'
+        : (hasRootCause
+          ? 'A root-cause note is on record in its own field for this triple.'
+          : 'No root-cause note has been recorded in its own field for this triple — findings text alone never counts.'),
+    },
+    {
       criterion: 'trailing-clean-streak',
-      result: cleanStreak >= minCleanStreak ? 'pass' : 'fail',
-      dataConsulted: `streak=${cleanStreak}, threshold=${minCleanStreak}, consulted=[${recordsSummary}]`,
-      reasoning: `Computed trailing consecutive clean streak is ${cleanStreak} (required: ${minCleanStreak}).`,
+      result: cleanStreak >= requiredCleanStreak ? 'pass' : 'fail',
+      dataConsulted: `streak=${cleanStreak}, threshold=${requiredCleanStreak}, consulted=[${recordsSummary}]`,
+      reasoning: `Computed trailing consecutive clean streak is ${cleanStreak} (required: ${requiredCleanStreak}).`,
     },
     {
       criterion: 'informative-trial-requirement',
@@ -784,6 +889,11 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
     // #delegation-trial-record-graduation: every reader of this record uses the SAME predicates this
     // function already computed — never a second, parallel implementation.
     cleanStreak,
+    // The actual bar `cleanStreak` was just checked against (cold-start `minCleanStreak`, or the higher
+    // post-miss `minCleanStreak + k` once a confirmed miss is on record; #3889 rule 5) — a caller that needs
+    // to know "how far from graduating" (e.g. graduation-progress-report's `owed` text) reads this field
+    // instead of re-deriving hasConfirmedMiss/k itself (rule 1, same reasoning as above).
+    requiredCleanStreak,
     hasInformativeTrial,
     mostRecentVetoed: mostRecentHasFinding,
   };

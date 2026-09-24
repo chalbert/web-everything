@@ -3,9 +3,11 @@ bornAs: xnyz371
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/codex-direct-task.mjs", "we:scripts/gen-dispatch-routing-table.mjs", "we:scripts/lib/__tests__/dispatch-contracts-profile.test.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/lib/__tests__/dispatch-contracts-trial.test.mjs", "we:scripts/lib/__tests__/dispatch-contracts.test.mjs", "we:scripts/lib/__tests__/dispatch-supervision-tree.test.mjs", "we:scripts/lib/__tests__/dispatch-supervisor-contract.test.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs", "we:scripts/lib/__tests__/dispatch-thresholds.test.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/codex-model-routing.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/dispatch-size-policy.json", "we:scripts/lib/dispatch-supervision-tree.mjs", "we:scripts/lib/dispatch-supervisor-contract.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/dispatch-thresholds.mjs", "we:scripts/lib/provider-routing.mjs", "we:package.json", "we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs", "we:scripts/conveyor/concurrent-baseline-comparison.mjs", "we:scripts/conveyor/__tests__/concurrent-baseline-comparison.test.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
