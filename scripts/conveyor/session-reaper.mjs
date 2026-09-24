@@ -113,7 +113,7 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
-import { tryReadCompletion } from '../operations/completion-store.mjs';
+import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion } from '../operations/completion-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -189,6 +189,56 @@ export function sessionTarget(name) {
   if (!parsed) return null;
   return parsed.itemKind ? { kind: 'item', id: parsed.id }
     : { kind: 'pr', id: parsed.id, repo: parsed.repo };
+}
+
+/** The `outcome` a backstop-written completion record carries — deliberately distinct from every REAL
+ *  self-reported outcome (`blocked-on-infra`, a review verdict, …) so a reader can always tell "the dispatched
+ *  agent said this itself" apart from "the reaper concluded this on the agent's behalf, after the fact". */
+export const UNREPORTED_EXIT_OUTCOME = 'unreported-exit';
+
+/** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
+ *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
+ *  actually accepts. `ci-heal` is a real PR-kind session name but has NO completion-record kind at all (its own
+ *  round-count/marker-comment mechanism is entirely separate, see `ci-heal-mark.mjs`) — minting one for it would
+ *  invent a fact this repo's schema was never meant to hold, so it is deliberately excluded, not defaulted. */
+const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#planBackstopCompletion — THE ROOT-CAUSE FIX (epic #3383, xbv32pg
+ * follow-up), not merely a detection axis. {@link classifySessionReapWithGroundTruth}'s hung/ground-truth/idle
+ * axes let the reaper independently CONCLUDE a session is done without ever needing its own self-report — but
+ * until now, concluding that left no trace: a session whose own review/fix brief crashed before running
+ * `completion-cli.mjs report --status=done` stayed `status: 'started'` in its completion record FOREVER, even
+ * after this reaper correctly stopped it. `reconcile-core.mjs#markSelfReportedDone` (and any other future
+ * reader of a completion record) then has no way to tell "still genuinely in flight" apart from "finished,
+ * just never wrote it down" — the exact gap that froze `chalbert/web-everything#2599` and its five siblings for
+ * this incident, and the exact one that would freeze the NEXT crash-before-self-report the same way.
+ *
+ * This function decides whether a session the reaper is ABOUT TO REAP needs a completion record written on its
+ * behalf, and if so, returns it (never writes anything itself — pure). Called only for a session already in
+ * the `reap` set — i.e. only once one of {@link classifySessionReap}'s/{@link classifySessionReapWithGroundTruth}'s
+ * own axes has ALREADY independently concluded the session is done; this function adds no new judgment about
+ * WHETHER a session is finished, only about whether that conclusion has been durably recorded yet.
+ *
+ * NEVER overwrites a real record. `existingRecord.status === 'done'` — however it got there, a genuine
+ * self-report or an earlier backstop write — is left exactly alone; a backstop write only ever fills a GAP, it
+ * never clobbers a fact. A session whose name matches no known PR-kind grammar, or whose kind has no
+ * completion-record schema at all ({@link BACKSTOP_COMPLETION_KINDS}), is left alone too — never a guess.
+ * @param {{name?:string}|null|undefined} session
+ * @param {{status?:string}|null} existingRecord - {@link ../operations/completion-store.mjs#tryReadCompletion}'s
+ *   own return shape, or `null` when nothing is on disk yet.
+ * @param {() => string} [now] - injectable ISO-8601 clock (mirrors every other pure-ish constructor in this
+ *   codebase's completion-record family).
+ * @returns {object|null} the completion record to write, or `null` when nothing is owed.
+ */
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString()) {
+  if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
+  const parsed = parseSessionSlug(session?.name);
+  if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
+  //                                               / prepare-decision-*) — those never carry a completion record.
+  if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
+  const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
+  return applyCompletionUpdate(base, { status: 'done', outcome: UNREPORTED_EXIT_OUTCOME }, now);
 }
 
 /**
@@ -578,10 +628,13 @@ function parseFlags(argv) {
  *   stop?: Function,
  *   log?: (msg:string) => void,
  *   hungFor?: ((session:object) => object|null)|null,
+ *   backstopCompletion?: boolean,
+ *   readCompletionRecord?: (session:string) => object|null,
+ *   writeCompletionRecord?: (record:object) => unknown,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
- *   wouldStop: Array|undefined, collected: Array|undefined, kept: number,
+ *   backstopWritten: number, wouldStop: Array|undefined, collected: Array|undefined, kept: number,
  * }}
  */
 export function runSessionReaperPass({
@@ -596,6 +649,12 @@ export function runSessionReaperPass({
   stop = stopSessionWithRetry,
   log: logFn = log,
   hungFor = makeHungResolver(),
+  // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
+  // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
+  // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
+  backstopCompletion = true,
+  readCompletionRecord = tryReadCompletion,
+  writeCompletionRecord = writeCompletion,
 } = {}) {
   let sessions;
   try {
@@ -614,7 +673,11 @@ export function runSessionReaperPass({
     // `unreadable: true` lets a caller (the CLI `main()` below) reproduce the pre-#3383 behavior exactly — an
     // unreadable listing exits clean with NO stdout report at all, not a "0 of everything" summary that could
     // be misread as a real, empty, successfully-scanned tick.
-    return { scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, wouldStop: dryRun ? [] : undefined, collected: dryRun ? undefined : [], kept: 0, unreadable: true };
+    return {
+      scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, backstopWritten: 0,
+      wouldWriteBackstop: dryRun ? [] : undefined, wouldStop: dryRun ? [] : undefined,
+      collected: dryRun ? undefined : [], kept: 0, unreadable: true,
+    };
   }
   if (!Array.isArray(sessions)) sessions = [];
 
@@ -624,8 +687,22 @@ export function runSessionReaperPass({
   let alreadyGone = 0;
   let failures = 0;
   let anomalies = 0;
+  let backstopWritten = 0;
   const done = [];
+  const wouldBackstop = [];
   for (const { session, reason } of reap) {
+    // xbv32pg follow-up (epic #3383) — computed for EVERY reap candidate, before the `id`/`dryRun` branches
+    // below: a session already independently confirmed done by one of the axes above deserves a durable
+    // completion record whether or not `claude stop` itself later succeeds (this is about the SESSION's own
+    // work being finished, not about the OS-process stop). Never overwrites a real record — see
+    // {@link planBackstopCompletion}'s own doc. A read/parse failure (corrupt record, invalid slug) is treated
+    // exactly like every other resolver in this file: unknown, so skip the backstop this tick rather than guess.
+    let backstopRecord = null;
+    if (backstopCompletion) {
+      try {
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name));
+      } catch { backstopRecord = null; }
+    }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
     // header's "WHY `id`, NOT `sessionId`" section. Every row here already passed `classifySessionReap`'s
     // `kind !== 'background'` guard, and every `kind: 'background'` row measured (live and in the checked-in
@@ -640,7 +717,20 @@ export function runSessionReaperPass({
     }
     if (dryRun) {
       logFn(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
+      if (backstopRecord) {
+        logFn(`  would write backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded`);
+        wouldBackstop.push({ name: session.name ?? null, outcome: UNREPORTED_EXIT_OUTCOME });
+      }
       continue;
+    }
+    if (backstopRecord) {
+      try {
+        writeCompletionRecord(backstopRecord);
+        backstopWritten++;
+        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
+      } catch (e) {
+        logFn(`  ⚠ ${session.name}: failed to write backstop completion record: ${String(e?.message || e).split('\n')[0]}`);
+      }
     }
     try {
       // Retried — see {@link stopSessionWithRetry}'s own doc for why: a `claude stop` failure found live
@@ -666,6 +756,8 @@ export function runSessionReaperPass({
     alreadyGone: dryRun ? 0 : alreadyGone,
     failures: dryRun ? 0 : failures,
     anomalies,
+    backstopWritten: dryRun ? 0 : backstopWritten,
+    wouldWriteBackstop: dryRun ? wouldBackstop : undefined,
     wouldStop: dryRun
       ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
       : undefined,
@@ -700,8 +792,11 @@ function main(argv) {
   const hungFor = flags['no-hung-detection']
     ? null
     : makeHungResolver(flags['hung-minutes'] !== undefined ? { thresholdMs: Number(flags['hung-minutes']) * 60 * 1000 } : {});
+  // `--no-backstop-completion` is the same kind of rollback escape hatch, for the xbv32pg follow-up (epic
+  // #3383) root-cause fix — default ON, same as every other axis this epic ships.
+  const backstopCompletion = !flags['no-backstop-completion'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion });
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -712,10 +807,10 @@ function main(argv) {
   if (flags.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } else {
-    const { scanned, stopped, alreadyGone, failures, anomalies, wouldStop, kept } = result;
+    const { scanned, stopped, alreadyGone, failures, anomalies, backstopWritten, wouldStop, wouldWriteBackstop, kept } = result;
     log(
       `session-reaper: ${scanned} session(s) listed · ` +
-        `${dryRun ? `${(wouldStop ?? []).length} would stop` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}`} · ${kept} kept`,
+        `${dryRun ? `${(wouldStop ?? []).length} would stop${(wouldWriteBackstop ?? []).length ? `, ${(wouldWriteBackstop ?? []).length} would get a backstop completion record` : ''}` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}${backstopWritten ? `, ${backstopWritten} backstop completion record(s) written` : ''}`} · ${kept} kept`,
     );
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its

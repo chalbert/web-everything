@@ -26,6 +26,8 @@ import {
   STOP_RETRY_BACKOFF_MS,
   runSessionReaperPass,
   makeHungResolver,
+  planBackstopCompletion,
+  UNREPORTED_EXIT_OUTCOME,
 } from '../session-reaper.mjs';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
@@ -594,6 +596,7 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
       completionFor: () => null,
       allowedCwd: '/daemon-clone',
       stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      backstopCompletion: false, // this test's own title promises "no real fs/exec" — the backstop write is covered separately below
       log: () => {},
     });
     expect(result.scanned).toBe(2);
@@ -604,7 +607,10 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
 
   it('an unreadable listing returns `unreadable: true` and touches nothing else — never throws', () => {
     const result = runSessionReaperPass({ listAgents: () => { throw new Error('claude: command not found'); }, log: () => {} });
-    expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, wouldStop: undefined, collected: [], kept: 0, unreadable: true });
+    expect(result).toEqual({
+      scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, backstopWritten: 0,
+      wouldWriteBackstop: undefined, wouldStop: undefined, collected: [], kept: 0, unreadable: true,
+    });
   });
 
   it('a `dry-run` pass never calls `stop` at all', () => {
@@ -615,6 +621,7 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
       completionFor: null,
       dryRun: true,
       stop: () => { stopCalls++; return { stopped: true, alreadyGone: false, output: '' }; },
+      backstopCompletion: false,
       log: () => {},
     });
     expect(stopCalls).toBe(0);
@@ -629,6 +636,7 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
       allowedCwd: '/daemon-clone',
       neverReapWorking: true,
       dryRun: true,
+      backstopCompletion: false,
       log: () => {},
     });
     expect(result.wouldStop).toEqual([]);
@@ -643,10 +651,128 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
       neverReapWorking: true,
       hungFor: () => ({ hung: true, reason: 'stale-no-activity' }),
       dryRun: true,
+      backstopCompletion: false,
       log: () => {},
     });
     expect(result.wouldStop).toEqual([{ id: 'w2', sessionId: 'w2-full', name: 'review-2582', reason: 'hung-transcript:stale-no-activity' }]);
     expect(result.kept).toBe(0);
+  });
+});
+
+describe('planBackstopCompletion — the root-cause fix, not just detection (xbv32pg follow-up, epic #3383)', () => {
+  it('mints a fresh done/unreported-exit record for a review-<pr> session with NO existing record', () => {
+    const rec = planBackstopCompletion({ name: 'review-2599' }, null, () => '2026-09-24T21:00:00.000Z');
+    expect(rec).toMatchObject({
+      session: 'review-2599', kind: 'review', pr: '2599', status: 'done', outcome: UNREPORTED_EXIT_OUTCOME,
+      startedAt: '2026-09-24T21:00:00.000Z', updatedAt: '2026-09-24T21:00:00.000Z',
+    });
+  });
+
+  it('upgrades an existing `started` record to done/unreported-exit, preserving its startedAt', () => {
+    const existing = { v: 1, session: 'fix-2607', kind: 'fix', pr: '2607', item: null, status: 'started', outcome: null, verdict: null, label: null, runId: null, startedAt: '2026-09-24T18:40:00.000Z', updatedAt: '2026-09-24T18:40:00.000Z' };
+    const rec = planBackstopCompletion({ name: 'fix-2607' }, existing, () => '2026-09-24T21:00:00.000Z');
+    expect(rec).toMatchObject({ session: 'fix-2607', status: 'done', outcome: UNREPORTED_EXIT_OUTCOME, startedAt: '2026-09-24T18:40:00.000Z', updatedAt: '2026-09-24T21:00:00.000Z' });
+  });
+
+  it('NEVER overwrites a genuinely done record, whatever its outcome — a backstop only ever fills a gap', () => {
+    const existing = { v: 1, session: 'review-2607', kind: 'review', pr: '2607', item: null, status: 'done', outcome: 'blocked-on-infra', verdict: null, label: null, runId: null, startedAt: '2026-09-24T18:40:00.000Z', updatedAt: '2026-09-24T18:45:00.000Z' };
+    expect(planBackstopCompletion({ name: 'review-2607' }, existing)).toBeNull();
+  });
+
+  it('never mints one for an item-kind session (conveyor-*/prepare-*) — no completion-record mechanism exists for those', () => {
+    expect(planBackstopCompletion({ name: 'conveyor-3451' }, null)).toBeNull();
+    expect(planBackstopCompletion({ name: 'prepare-3436' }, null)).toBeNull();
+  });
+
+  it('never mints one for ci-heal-<pr> — a real PR-kind name, but no completion-record kind exists for it', () => {
+    expect(planBackstopCompletion({ name: 'ci-heal-2607' }, null)).toBeNull();
+  });
+
+  it('never mints one for a name matching no known grammar — never a guess', () => {
+    expect(planBackstopCompletion({ name: 'my terminal' }, null)).toBeNull();
+    expect(planBackstopCompletion({ name: undefined }, null)).toBeNull();
+  });
+});
+
+describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow-up, epic #3383)', () => {
+  it('writes a done/unreported-exit record for a session reaped via the hung axis with no existing record', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'w2', sessionId: 'w2-full', cwd: '/daemon-clone', kind: 'background', state: 'working', name: 'review-2582' }],
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      neverReapWorking: true,
+      hungFor: () => ({ hung: true, reason: 'stale-no-activity' }),
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.backstopWritten).toBe(1);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({ session: 'review-2582', kind: 'review', pr: '2582', status: 'done', outcome: UNREPORTED_EXIT_OUTCOME });
+  });
+
+  it('never writes over an existing done record', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'd1', sessionId: 'd1-full', kind: 'background', state: 'done', name: 'review-1862' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => ({ status: 'done', outcome: 'accepted' }),
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.backstopWritten).toBe(0);
+    expect(written).toHaveLength(0);
+  });
+
+  it('`backstopCompletion: false` is a full rollback escape hatch — never calls writeCompletionRecord at all', () => {
+    let readCalls = 0;
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'd1', sessionId: 'd1-full', kind: 'background', state: 'done', name: 'review-1862' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      backstopCompletion: false,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => { readCalls++; return null; },
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(readCalls).toBe(0);
+    expect(written).toHaveLength(0);
+    expect(result.backstopWritten).toBe(0);
+  });
+
+  it('a dry-run pass reports what it WOULD write but never calls writeCompletionRecord', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'd1', sessionId: 'd1-full', kind: 'background', state: 'done', name: 'review-1862' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      dryRun: true,
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(written).toHaveLength(0);
+    expect(result.wouldWriteBackstop).toEqual([{ name: 'review-1862', outcome: UNREPORTED_EXIT_OUTCOME }]);
+  });
+
+  it('a readCompletionRecord that throws (corrupt record / invalid slug) skips the backstop this tick — never guesses, never crashes the pass', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'd1', sessionId: 'd1-full', kind: 'background', state: 'done', name: 'review-1862' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => { throw new Error('corrupt record'); },
+      writeCompletionRecord: () => { throw new Error('should never be called'); },
+      log: () => {},
+    });
+    expect(result.backstopWritten).toBe(0);
+    expect(result.stopped).toBe(1); // the stop itself still proceeds — the backstop write is a side concern
   });
 });
 
