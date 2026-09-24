@@ -92,6 +92,24 @@
  *   • each `run` is its own owner (`<repo>#<pid>`), so two commands from one checkout take two slots.
  * Stale `waiting` markers (owner gone, older than {@link WAITING_TTL_MINUTES}) are reaped by the next
  * admission attempt; `reap` previews them and `reap --apply` removes them.
+ *
+ * A WAITER NEVER RUNS UNSLOTTED WHILE A HOLDER IS ALIVE (xhlriy2, #3383). Observed 2026-09-23: with test runs
+ * taking 25-40 minutes under load and several lanes waiting, `DEFAULT_TIMEOUT_MS`'s old 20-minute elapsed-time
+ * give-up let waiters fail open and run TOGETHER — the cap stopped holding exactly when it mattered most.
+ * {@link acquireSlotBlocking} no longer gives up purely on elapsed time: it keeps polling — logging a periodic
+ * "still waiting" line every {@link STILL_WAITING_LOG_MS} — for as long as {@link tryAcquireSlot} keeps losing,
+ * which (via the PID-liveness + lease-TTL reclaim above) can only happen while every held slot's holder is
+ * still alive with an unexpired lease; the moment every holder is provably dead or lease-expired, the very next
+ * `tryAcquireSlot` attempt reclaims a real slot rather than the caller running unslotted. The one remaining
+ * escape from an indefinite wait is {@link DEFAULT_ADMISSION_CEILING_MS} (default 120 minutes, comfortably past
+ * any realistic gate run, overridable via `WE_HEAVY_ADMISSION_CEILING_MS`) — a hard ceiling so a genuinely
+ * wedged holder cannot strand a lane forever; crossing it still fails OPEN (runs unslotted) but with a LOUD
+ * warning naming the ceiling. `DEFAULT_TIMEOUT_MS`/`resolveTimeoutMs` are UNCHANGED and still read by
+ * `verify-lane.mjs`/the CLI's legacy `--timeout-ms` fallback, but no longer decide when `acquireSlotBlocking`
+ * gives up — see their own doc comments. `WE_HEAVY_ADMISSION=off` ({@link isAdmissionOff}) — the SAME switch
+ * {@link admissionBypassReason} already reads for the `run` wrapper — is now ALSO checked directly at the top
+ * of {@link acquireSlotBlocking} itself, before it ever touches the lock root, so any direct caller of the
+ * blocking primitive (not just `run`) gets the escape hatch too.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -111,10 +129,24 @@ export const DEFAULT_ADMISSION_CAP = 2;
 /** How often a blocking waiter re-polls for a free slot. */
 export const DEFAULT_POLL_MS = 2000;
 
-/** How long a blocking waiter polls before giving up and proceeding unslotted (fail OPEN — a queuing timeout
- *  must never strand a lane's whole delivery arc; see `acquireSlotBlocking`). Overridable via
- *  `WE_HEAVY_ADMISSION_TIMEOUT_MS` (read through {@link resolveTimeoutMs}, mirroring {@link resolveCap}). */
+/** HISTORICAL — no longer the point at which a blocking waiter gives up (xhlriy2, #3383: that was the exact
+ *  bug — a waiter fails open and runs UNSLOTTED after this elapses even while a slot holder is still alive,
+ *  which under real load let waiters time out and run together, breaking the cap). Still read via
+ *  {@link resolveTimeoutMs} (the CLI's legacy `--timeout-ms` fallback), but {@link acquireSlotBlocking} itself
+ *  now gives up only at {@link DEFAULT_ADMISSION_CEILING_MS}. Overridable via `WE_HEAVY_ADMISSION_TIMEOUT_MS`
+ *  (mirroring {@link resolveCap}). */
 export const DEFAULT_TIMEOUT_MS = 20 * 60_000;
+
+/** THE HARD CEILING (xhlriy2, #3383) — far above a normal run, so a wedged holder cannot strand a lane forever.
+ *  A waiter now keeps polling (logging a periodic "still waiting" line, see {@link STILL_WAITING_LOG_MS}) for as
+ *  long as a slot holder is provably alive with an unexpired lease; it gives up and proceeds unslotted only once
+ *  this ceiling elapses, with a loud warning. Overridable via `WE_HEAVY_ADMISSION_CEILING_MS`
+ *  ({@link resolveCeilingMs}). */
+export const DEFAULT_ADMISSION_CEILING_MS = 120 * 60_000;
+
+/** How often, while blocked, {@link acquireSlotBlocking} logs a "still waiting" line (xhlriy2) — observability
+ *  for an operator/tick watching a long queue, distinct from the much-longer give-up ceiling above. */
+export const STILL_WAITING_LOG_MS = 5 * 60_000;
 
 /** The lease a HELD SLOT gets — deliberately longer than `file-locks.mjs`'s general-purpose
  *  `DEFAULT_LEASE_MINUTES` (15). A slot is held across one synchronous, event-loop-blocking `execSync` with no
@@ -158,6 +190,21 @@ export function resolveCap(env = process.env) {
 export function resolveTimeoutMs(env = process.env) {
   const n = Number(env.WE_HEAVY_ADMISSION_TIMEOUT_MS);
   return Number.isFinite(n) && n >= 1000 ? Math.floor(n) : DEFAULT_TIMEOUT_MS;
+}
+
+/** Resolve the hard give-up ceiling from env (xhlriy2), mirroring {@link resolveTimeoutMs}. Clamped to a sane
+ *  minimum of 1000ms. */
+export function resolveCeilingMs(env = process.env) {
+  const n = Number(env.WE_HEAVY_ADMISSION_CEILING_MS);
+  return Number.isFinite(n) && n >= 1000 ? Math.floor(n) : DEFAULT_ADMISSION_CEILING_MS;
+}
+
+/** True when the explicit escape hatch is set (xhlriy2) — `WE_HEAVY_ADMISSION=off` (or `0`/`false`/`no`,
+ *  case-insensitive). The SAME check {@link admissionBypassReason} already applies for the `run` wrapper's
+ *  'off' bypass reason — factored out here so {@link acquireSlotBlocking} can apply it directly too, and so
+ *  there is exactly one regex for this switch rather than two that could drift apart. */
+export function isAdmissionOff(env = process.env) {
+  return /^(?:off|0|false|no)$/i.test(String(env[ADMISSION_SWITCH_ENV] || ''));
 }
 
 /** The host-shared lock root for a checkout (lane or primary) — a sibling of every lane clone, never inside
@@ -385,28 +432,40 @@ export function reapHistory(lockRoot) {
 // ── the blocking wait primitive a heavy-command call site uses ─────────────────────────────────────────
 
 /**
- * Poll for a free slot until one is won or `timeoutMs` elapses. FAILS OPEN on timeout — `{ ok:false,
- * timedOut:true }` — never throws and never blocks forever: a queuing timeout must not strand an otherwise
- * healthy lane's whole delivery arc behind a stuck semaphore. The caller (e.g. `verify-lane.mjs`) proceeds
- * unslotted and logs the fact; this is the same "reduces but does not eliminate contention" residual risk
- * the module header names.
+ * Poll for a free slot until one is won or the hard `ceilingMs` elapses (xhlriy2, #3383). A waiter never runs
+ * unslotted merely because time has passed while a slot holder is alive: each failed {@link tryAcquireSlot}
+ * attempt already reclaims a slot the instant every holder is provably dead or lease-expired (via the PID
+ * fast-path + lease-TTL floor above), so as long as this loop keeps losing, at least one holder is still alive
+ * with an unexpired lease. While blocked it logs a periodic "still waiting" line every {@link
+ * STILL_WAITING_LOG_MS} — plain observability, not a give-up signal. Only `ceilingMs` (default {@link
+ * DEFAULT_ADMISSION_CEILING_MS}) FAILS OPEN — `{ ok:false, timedOut:true, ceilingHit:true }`, with a loud
+ * warning — never throwing and never blocking truly forever: a wedged holder must not strand a lane's whole
+ * delivery arc. `WE_HEAVY_ADMISSION=off` ({@link isAdmissionOff}) is the explicit escape hatch — checked FIRST,
+ * before this function ever touches the lock root, so it is a pure pass-through (`{ ok:false, disabled:true }`).
  * @param {object} opts
  * @param {string} opts.lockRoot
  * @param {number} opts.cap
  * @param {string} opts.owner
  * @param {string|null} [opts.lane]
  * @param {number} [opts.pollMs]
- * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.ceilingMs]        hard give-up ceiling; defaults to {@link DEFAULT_ADMISSION_CEILING_MS}
+ * @param {number} [opts.stillWaitingLogMs]  periodic log cadence; defaults to {@link STILL_WAITING_LOG_MS}
  * @param {number} [opts.leaseMinutes]
+ * @param {(msg:string)=>void} [opts.log]  defaults to `process.stderr.write` — injectable for tests
+ * @param {object} [opts.env]              defaults to `process.env` — injectable for tests
  * @param {() => number} [opts.now]         defaults to Date.now
  * @param {(ms:number) => Promise<void>} [opts.sleep]  defaults to a real timer
- * @returns {Promise<{ ok:boolean, slot:number|null, timedOut:boolean, waitedMs:number }>}
+ * @returns {Promise<{ ok:boolean, slot:number|null, timedOut:boolean, waitedMs:number, disabled?:boolean, ceilingHit?:boolean }>}
  */
 export async function acquireSlotBlocking({
   lockRoot, cap, owner, lane = null, num = null, repo = null,
-  pollMs = DEFAULT_POLL_MS, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
+  pollMs = DEFAULT_POLL_MS, ceilingMs = DEFAULT_ADMISSION_CEILING_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
+  stillWaitingLogMs = STILL_WAITING_LOG_MS,
   pid = process.pid, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  log = (m) => process.stderr.write(m), env = process.env,
 }) {
+  if (isAdmissionOff(env)) return { ok: false, slot: null, timedOut: false, disabled: true, waitedMs: 0 };
+
   const startedAt = now();
   // xaipsbs — every admission attempt first clears stale waiters, so debris never outlives the next caller.
   reapStaleWaiters({ lockRoot, nowMs: startedAt, apply: true });
@@ -414,14 +473,22 @@ export async function acquireSlotBlocking({
   if (first.ok) return { ok: true, slot: first.slot, timedOut: false, waitedMs: 0 };
 
   markWaiting({ lockRoot, owner, lane, num, pid, repo, nowIso: new Date(startedAt).toISOString() });
+  let lastLoggedAt = startedAt;
   try {
     for (;;) {
       const nowMs = now();
-      if (nowMs - startedAt >= timeoutMs) return { ok: false, slot: null, timedOut: true, waitedMs: nowMs - startedAt };
+      if (nowMs - startedAt >= ceilingMs) {
+        log(`⚠⚠ heavy-command admission: HARD CEILING of ${Math.round(ceilingMs / 60_000)}m exceeded waiting for capacity (cap=${cap}) — a slot holder may be wedged; proceeding unslotted. Escape hatch: WE_HEAVY_ADMISSION=off.\n`);
+        return { ok: false, slot: null, timedOut: true, ceilingHit: true, waitedMs: nowMs - startedAt };
+      }
       await sleep(pollMs);
       const attempt = now();
       const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes });
       if (r.ok) return { ok: true, slot: r.slot, timedOut: false, waitedMs: attempt - startedAt };
+      if (attempt - lastLoggedAt >= stillWaitingLogMs) {
+        log(`heavy-command admission: still waiting for a free slot (cap=${cap}) after ${Math.round((attempt - startedAt) / 60_000)}m — every held slot's holder still appears alive; will proceed unslotted at the ${Math.round(ceilingMs / 60_000)}m ceiling.\n`);
+        lastLoggedAt = attempt;
+      }
     }
   } finally {
     clearWaiting({ lockRoot, owner });
@@ -449,7 +516,7 @@ export function admissionStatus({ lockRoot, cap, nowMs = Date.now(), ...reapSeam
 export function admissionBypassReason({ env = process.env, poolExists = true } = {}) {
   if (env[ADMISSION_HELD_ENV] === '1') return 'held';
   if (/^(?:true|1)$/i.test(String(env.CI || ''))) return 'ci';
-  if (/^(?:off|0|false|no)$/i.test(String(env[ADMISSION_SWITCH_ENV] || ''))) return 'off';
+  if (isAdmissionOff(env)) return 'off'; // xhlriy2 — same switch/regex acquireSlotBlocking now checks directly
   if (!poolExists) return 'no-pool';
   return null;
 }
@@ -484,19 +551,20 @@ export function poolRootOf(lockRoot) {
  * @param {string} opts.owner
  * @param {string|null} [opts.lane]
  * @param {string|null} [opts.num]
- * @param {number} [opts.timeoutMs]
+ * @param {number} [opts.ceilingMs]        hard give-up ceiling passed to {@link acquireSlotBlocking} (xhlriy2)
  * @param {number} [opts.leaseMinutes]
  * @param {string} opts.command            the shell command to run (already shell-quoted by the CLI)
  * @param {string} [opts.cwd]              defaults to process.cwd()
  * @param {(cmd:string, opts:object)=>void} [opts.exec]  defaults to `execSync` — injectable; #3621's
  *   container POC passes `container-exec.mjs#execContainerized` here instead
  * @param {(msg:string)=>void} [opts.log]  defaults to `process.stderr.write` — injectable for tests
+ * @param {object} [opts.env]              defaults to `process.env` — injectable for tests
  * @param {() => number} [opts.now]
  * @param {(ms:number) => Promise<void>} [opts.sleep]
  * @returns {Promise<{ exitCode:number, admission:object }>}
  */
 export async function runUnderAdmission({
-  lockRoot, cap, owner, lane = null, num = null, repo = null, timeoutMs = DEFAULT_TIMEOUT_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
+  lockRoot, cap, owner, lane = null, num = null, repo = null, ceilingMs = DEFAULT_ADMISSION_CEILING_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
   command, cwd = process.cwd(), exec = (cmd, o) => execSync(cmd, o), log = (m) => process.stderr.write(m),
   now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   bypass = null, env = process.env,
@@ -510,7 +578,9 @@ export async function runUnderAdmission({
     return { exitCode, admission: { ok: false, slot: null, timedOut: false, waitedMs: 0, bypassed: bypass } };
   }
   mkdirSync(lockRoot, { recursive: true });
-  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, repo, timeoutMs, leaseMinutes, now, sleep });
+  // xhlriy2: `log`/`env` threaded through so acquireSlotBlocking's still-waiting/ceiling warnings and its own
+  // `WE_HEAVY_ADMISSION=off` check apply to the `run` wrapper's wait too, not just this function's own messages.
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, repo, ceilingMs, leaseMinutes, now, sleep, log, env });
   if (admission.timedOut) {
     log(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted.\n`);
   } else if (admission.waitedMs > 0) {
@@ -608,19 +678,27 @@ async function main(argv) {
   }
   if (mode === 'acquire') {
     mkdirSync(lockRoot, { recursive: true });
-    const timeoutMs = flags['timeout-ms'] != null ? Number(flags['timeout-ms']) : resolveTimeoutMs(process.env);
-    const r = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, timeoutMs });
+    // xhlriy2: the hard give-up ceiling. `--ceiling-ms`/`WE_HEAVY_ADMISSION_CEILING_MS` is the current knob;
+    // the old `--timeout-ms` still works too (legacy fallback), it just now feeds the same ceiling rather than
+    // the vestigial 20-minute give-up.
+    const ceilingMs = flags['ceiling-ms'] != null ? Number(flags['ceiling-ms'])
+      : flags['timeout-ms'] != null ? Number(flags['timeout-ms'])
+      : resolveCeilingMs(process.env);
+    const r = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, ceilingMs });
     if (asJson) emit(r);
     else process.stderr.write(r.ok ? `acquired slot-${r.slot} (waited ${r.waitedMs}ms)\n` : `timed out after ${r.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted\n`);
     process.exit(0); // fail-open: a queuing timeout is not a usage error, the caller proceeds regardless
   }
   if (mode === 'run') {
     if (dashDashIdx === -1 || dashDashIdx === argv.length - 1) {
-      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--timeout-ms=] [--container] [--container-node-modules] -- <command…>\n`);
+      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--ceiling-ms=] [--container] [--container-node-modules] -- <command…>\n`);
       process.exit(3);
     }
     const command = argv.slice(dashDashIdx + 1).map(shellQuoteWord).join(' ');
-    const timeoutMs = flags['timeout-ms'] != null ? Number(flags['timeout-ms']) : resolveTimeoutMs(process.env);
+    // xhlriy2: the hard give-up ceiling (default 120 minutes); `--timeout-ms` is kept as a legacy fallback.
+    const ceilingMs = flags['ceiling-ms'] != null ? Number(flags['ceiling-ms'])
+      : flags['timeout-ms'] != null ? Number(flags['timeout-ms'])
+      : resolveCeilingMs(process.env);
     // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC. Opt-in ONLY: a caller
     // must explicitly ask for real OS-level isolation via `--container` or `WE_HEAVY_ADMISSION_CONTAINER=1`;
     // every existing caller (and the bare default here) still runs on the host, byte-identical to before this
@@ -656,12 +734,12 @@ async function main(argv) {
       process.exit(1);
     }
     const bypass = admissionBypassReason({ env: process.env, poolExists: existsSync(poolRootOf(lockRoot)) });
-    const runOpts = { lockRoot, cap, owner, lane: lane ?? (/lane-(\d+)/.exec(repo) || [])[1] ?? null, num, repo, timeoutMs, command, cwd: repo, bypass };
+    const runOpts = { lockRoot, cap, owner, lane: lane ?? (/lane-(\d+)/.exec(repo) || [])[1] ?? null, num, repo, ceilingMs, command, cwd: repo, bypass };
     if (useContainer) runOpts.exec = (cmd, o) => execContainerized(cmd, { ...o, nodeModulesVolume: useNodeModulesVolume });
     const { exitCode } = await runUnderAdmission(runOpts);
     process.exit(exitCode);
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--timeout-ms=] [-- <command…>]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

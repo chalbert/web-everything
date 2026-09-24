@@ -58,23 +58,25 @@
  * TWO SEPARATE CEILINGS, NOT ONE (Skeptic-review fix, 2026-09-14, same epic). The FIRST cut of the ceiling
  * above measured wall-clock time from the moment this file SPAWNS `verify-lane.mjs` — which is BEFORE that
  * child even tries to acquire its own `heavy-admission.mjs` capacity slot, not after. `heavy-admission.mjs`'s
- * `DEFAULT_TIMEOUT_MS` lets a spawned verify legitimately spend up to ~20 minutes just WAITING for a free
- * admission slot before its actual gate work starts — real queuing, not a hang. A single 30-minute ceiling
- * measured from spawn therefore conflates "queued 20 minutes then ran a normal 5-minute gate" (25 min total,
- * healthy) with "queued 20 minutes then ran a genuinely-stuck gate" (also healthy-looking until it blows past
- * 30) — and worse, a HEALTHY run that queues 20 minutes and then hits the very contention this ceiling was
- * built to survive (the live incident's own ~19-20 minute gate) totals ~40 minutes and gets killed anyway,
- * defeating the ceiling's own stated purpose of distinguishing hung from merely-queued. The fix: measure GATE
- * time only. `verify-lane.mjs` now writes an UNCONDITIONAL marker line to its own stderr
- * ({@link GATE_STARTED_MARKER}) the instant before it runs the real gate command — after admission, win or
- * fail-open, every time. This file watches the child's stderr as it streams (a `spawn`, not the old blocking
- * `execFileSync`) and runs TWO SEPARATE timers, never stacked: `QUEUE_PHASE_CEILING_MS` from spawn until the
- * marker appears — a safety net barely above `heavy-admission.mjs`'s own 20-minute fail-open, since that
- * timeout already bounds a HEALTHY wait; this one only fires on a hang BEFORE admission is even reached, or a
- * dropped marker write — and `VERIFY_DISPATCH_TIMEOUT_MS` (unchanged, 30 minutes, same generous multiple of
- * the documented 150-350s range) from the marker until the gate itself finishes. Seeing the marker CANCELS
- * the queue timer and starts a fresh gate timer — it does not extend or add to the queue one. On EITHER
- * timeout the whole process-group kill above still applies unchanged.
+ * admission wait lets a spawned verify legitimately spend real time just WAITING for a free admission slot
+ * before its actual gate work starts — real queuing, not a hang. A single 30-minute ceiling measured from
+ * spawn therefore conflates "queued a while then ran a normal 5-minute gate" (healthy) with "queued a while
+ * then ran a genuinely-stuck gate" (also healthy-looking until it blows past 30) — and worse, a HEALTHY run
+ * that queues and then hits the very contention this ceiling was built to survive (the live incident's own
+ * ~19-20 minute gate) could total more than 30 minutes and get killed anyway, defeating the ceiling's own
+ * stated purpose of distinguishing hung from merely-queued. The fix: measure GATE time only. `verify-lane.mjs`
+ * now writes an UNCONDITIONAL marker line to its own stderr ({@link GATE_STARTED_MARKER}) the instant before
+ * it runs the real gate command — after admission, win or fail-open, every time. This file watches the
+ * child's stderr as it streams (a `spawn`, not the old blocking `execFileSync`) and runs TWO SEPARATE timers,
+ * never stacked: `QUEUE_PHASE_CEILING_MS` from spawn until the marker appears — a safety net barely above
+ * `heavy-admission.mjs`'s own hard give-up ceiling (xhlriy2, #3383: {@link resolveCeilingMs}, 120 minutes by
+ * default — NOT the vestigial 20-minute `resolveTimeoutMs`/`DEFAULT_TIMEOUT_MS`, which no longer bounds how
+ * long `acquireSlotBlocking` legitimately waits while a slot holder is alive), since that ceiling already
+ * bounds a HEALTHY wait; this one only fires on a hang BEFORE admission is even reached, or a dropped marker
+ * write — and `VERIFY_DISPATCH_TIMEOUT_MS` (unchanged, 30 minutes, same generous multiple of the documented
+ * 150-350s range) from the marker until the gate itself finishes. Seeing the marker CANCELS the queue timer
+ * and starts a fresh gate timer — it does not extend or add to the queue one. On EITHER timeout the whole
+ * process-group kill above still applies unchanged.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors lease-reaper.mjs): {@link laneNeedsVerifyDispatch} is pure (no fs/git);
  * the IO shell owns the POOL_ROOT walk, marker reads, the `git rev-parse HEAD` per lane, and the actual
@@ -91,7 +93,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readVerifyMarker } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
-import { resolveTimeoutMs as resolveAdmissionTimeoutMs } from '../readiness/heavy-admission.mjs';
+import { resolveCeilingMs as resolveAdmissionCeilingMs } from '../readiness/heavy-admission.mjs';
 
 /** Several multiples of the gate's documented 150-350s normal range — generous on purpose (see file header):
  *  a slow-but-healthy GATE run under contention must never be mistaken for a stuck one. Applies ONLY to the
@@ -109,20 +111,23 @@ const VERIFY_DISPATCH_TIMEOUT_MS =
 export const GATE_STARTED_MARKER = 'gate execution starting';
 
 /** The PRE-marker (queuing) ceiling — a safety net, not the primary defense against a stuck queue wait. The
- *  real ceiling on legitimate queuing is `heavy-admission.mjs`'s own `DEFAULT_TIMEOUT_MS` /
- *  `WE_HEAVY_ADMISSION_TIMEOUT_MS` (20 minutes by default): `acquireSlotBlocking` FAILS OPEN at that point and
- *  `verify-lane.mjs` proceeds unslotted, logging one of its two admission lines and then — unconditionally,
- *  win or fail-open — {@link GATE_STARTED_MARKER}. So a HEALTHY run's pre-marker phase can never legitimately
- *  exceed that same ~20-minute figure. `QUEUE_PHASE_BUFFER_MS` on top of it covers overhead OUTSIDE the
- *  admission wait itself (the lane's own `git` calls, marker read/write, gate resolution) plus scheduling
- *  slack — this ceiling exists to catch a hang BEFORE `verify-lane.mjs` ever reaches admission (or a bug that
- *  silently drops the marker write), not to re-bound the admission wait a second time. Derived from the SAME
- *  env `verify-lane.mjs`'s own admission wait resolves from (`resolveAdmissionTimeoutMs`), so tuning
- *  `WE_HEAVY_ADMISSION_TIMEOUT_MS` keeps this safety net correctly proportioned automatically. Overridable
- *  independently via `VERIFY_DISPATCH_QUEUE_CEILING_MS`, so a test can shrink either phase without touching
- *  the other. */
+ *  real ceiling on legitimate queuing is `heavy-admission.mjs`'s own hard give-up ceiling (xhlriy2, #3383:
+ *  `DEFAULT_ADMISSION_CEILING_MS` / `WE_HEAVY_ADMISSION_CEILING_MS`, 120 minutes by default) — NOT the
+ *  vestigial `DEFAULT_TIMEOUT_MS` / `WE_HEAVY_ADMISSION_TIMEOUT_MS` (20 minutes), which no longer decides when
+ *  `acquireSlotBlocking` gives up: a waiter now keeps polling for as long as a slot holder is provably alive,
+ *  so a HEALTHY queuing wait can legitimately run all the way to the 120-minute ceiling before
+ *  `acquireSlotBlocking` FAILS OPEN and `verify-lane.mjs` proceeds unslotted, logging one of its two admission
+ *  lines and then — unconditionally, win or fail-open — {@link GATE_STARTED_MARKER}. So a HEALTHY run's
+ *  pre-marker phase can never legitimately exceed that same ~120-minute figure. `QUEUE_PHASE_BUFFER_MS` on top
+ *  of it covers overhead OUTSIDE the admission wait itself (the lane's own `git` calls, marker read/write,
+ *  gate resolution) plus scheduling slack — this ceiling exists to catch a hang BEFORE `verify-lane.mjs` ever
+ *  reaches admission (or a bug that silently drops the marker write), not to re-bound the admission wait a
+ *  second time. Derived from the SAME env `verify-lane.mjs`'s own admission wait resolves from
+ *  (`resolveAdmissionCeilingMs`), so tuning `WE_HEAVY_ADMISSION_CEILING_MS` keeps this safety net correctly
+ *  proportioned automatically. Overridable independently via `VERIFY_DISPATCH_QUEUE_CEILING_MS`, so a test can
+ *  shrink either phase without touching the other. */
 const QUEUE_PHASE_BUFFER_MS = 5 * 60 * 1000;
-const DEFAULT_QUEUE_PHASE_CEILING_MS = resolveAdmissionTimeoutMs(process.env) + QUEUE_PHASE_BUFFER_MS;
+const DEFAULT_QUEUE_PHASE_CEILING_MS = resolveAdmissionCeilingMs(process.env) + QUEUE_PHASE_BUFFER_MS;
 const QUEUE_PHASE_CEILING_MS =
   Number(process.env.VERIFY_DISPATCH_QUEUE_CEILING_MS) > 0
     ? Number(process.env.VERIFY_DISPATCH_QUEUE_CEILING_MS)
