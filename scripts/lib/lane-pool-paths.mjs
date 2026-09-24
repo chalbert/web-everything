@@ -68,6 +68,43 @@ export function defaultPoolRoot(checkoutRoot = process.cwd(), env = process.env)
 }
 
 /**
+ * The GUARDED pool root a REAL CLI entry point resolves — `defaultPoolRoot` wrapped with the #3383 safety net
+ * (live incident 2026-09-23: `dispatch-plan.mjs`'s own IO shell spawns `lane-pool.mjs list --acquirable --json`
+ * for real, and TWO vitest test files spawned that whole chain as a genuine child process with no pool-root
+ * override at all — `scripts/conveyor/__tests__/dispatcher-fixture-harness.test.mjs` and
+ * `scripts/readiness/__tests__/conveyor-state.test.mjs`'s CLI-flush test. Every one of 13 concurrent lane test
+ * suites hammered the REAL `~/workspace/.lanes` pool with an (at the time unbounded) `git cherry` sweep per
+ * lane — load average 70-88; the drain, review daemon, and every other test stalled for over an hour).
+ *
+ * Throws whenever this process is a vitest worker (`env.VITEST`) AND the caller did not pass an explicit
+ * `LANE_POOL_ROOT` override (any value — a private/tmp pool is what a well-behaved test passes; this guard only
+ * cares that SOMETHING was set, never what) AND the one deliberate escape hatch,
+ * `WE_ALLOW_REAL_LANE_POOL_IN_TESTS=1`, is not set (for a genuinely-intended live integration test against the
+ * real pool). A well-behaved test never needs the escape hatch — it isolates its own `mkdtemp` pool root
+ * instead (see `scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs` for the pattern).
+ *
+ * ONLY the real CLI entry points (`lane-pool.mjs`) call this — never `defaultPoolRoot` itself, which stays the
+ * bare PURE function so its own unit test (`lane-pool-root-and-shallow.test.mjs`) can keep probing path
+ * derivation with a synthetic `env` bag, under vitest, with no `LANE_POOL_ROOT`, with no false failure: that
+ * test never touches a filesystem or spawns git, so it is not the hazard this guard exists to stop.
+ *
+ * @param {string} checkoutRoot - the checkout (or lane) ROOT the caller is in.
+ * @param {object} env - environment bag; reads `LANE_POOL_ROOT`, `HOME`, `VITEST`, `WE_ALLOW_REAL_LANE_POOL_IN_TESTS`.
+ * @returns {string} the pool root.
+ */
+export function guardedPoolRoot(checkoutRoot = process.cwd(), env = process.env) {
+  const root = defaultPoolRoot(checkoutRoot, env);
+  if (env.VITEST && !env.LANE_POOL_ROOT && !env.WE_ALLOW_REAL_LANE_POOL_IN_TESTS) {
+    throw new Error(
+      `refusing to resolve the REAL lane-pool root (${root}) from inside a vitest run — pass an explicit ` +
+      `LANE_POOL_ROOT override (a private/tmp pool) or set WE_ALLOW_REAL_LANE_POOL_IN_TESTS=1 for a deliberate ` +
+      `live integration test. (#3383 — closes the 2026-09-23 real-pool-hammering incident.)`,
+    );
+  }
+  return root;
+}
+
+/**
  * The `--reference` argv for a clone — EMPTY when the reference repo is shallow. PURE: the caller does the
  * `rev-parse --is-shallow-repository` probe and passes the answer, so the DECISION is testable without a
  * filesystem (the shape the #1539 reviewer's mutation showed was missing).
