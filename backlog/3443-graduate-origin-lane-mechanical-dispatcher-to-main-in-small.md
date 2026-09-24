@@ -270,3 +270,24 @@ How each slice (a child of this item) graduates, per the statute
   8 intentionally skipped (2 pending #3892's `priority-sync`, 6 pending #3909's
   `we:scripts/lib/prototype-tracker-compact-io.mjs`), matching the landed commit's own message. No further
   build needed for #3891; this entry only closes the Progress-log gap the landing PR itself didn't fill.
+
+- **2026-09-24 (#3916 built; the first slice this card's own merge notes were stale for).** Ported #3916
+  (test setup, heavy-admission and file-locks) from snapshot `600acc14f`. Confirmed live what rule 3 warns
+  about: **its own 2026-09-22 merge notes had already gone stale by land time.** `main`'s `d79512e13`
+  (landed 2026-09-23, one day after the notes were written) independently ported the branch's ghost-marker/
+  stale-waiter fix under a different shape (`classifyWaiter`/`reapStaleWaiters`, `staleWaiting` as a count)
+  and its own commit message calls the branch's `partitionWaiting`/`pruneStaleWaiting` "now-superseded" — so
+  #3916 does NOT re-introduce those exports or the array-shaped `staleWaiting` the old notes called for;
+  doing so would have duplicated `main`'s already-chosen design and broken its own live tests. Only the
+  genuinely un-landed piece of the branch's heavy-admission/file-locks work — the #3383 slot-reentrancy-by-
+  real-pid fix (`8983b136a`) — was ported, onto `main`'s current files as a diff. `we:vitest.integration.config.ts`
+  and `we:.gitignore` had also each taken one more independent `main` commit since the notes were written;
+  both merged clean (disjoint insertion points). `we:package-lock.json` needed no `npm install` regen — it was
+  byte-identical to the merge base except the one-line license field the notes already named. Full gate:
+  573 test files / 16377 tests, `check:standards` 0 errors, `verify-lane` green. Pushed
+  `lane/3916-graduate-test-setup-heavy-command-admission-and-file-locks-c`, opened PR #2594 (green,
+  labelled `review:pending`, `careLevel=elevated` per the shape command). Self-clearing the review was
+  correctly refused (#2439: the clearing session is the PR's author) — this session cannot manufacture the
+  independence a different session's `/review` pass (or the drain, once a review daemon is live for this
+  repo) must supply. **#3916 is left `status: active`, NOT resolved** — landing on `main` is this item's own
+  done-when, and the PR has not landed yet.
