@@ -116,8 +116,10 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     provision(6);
     for (let n = 1; n <= 6; n++) dirty(n);
     resetTrace();
+    // #3383 — `--growth-max-new=0` turns off acquire's SEPARATE growth-on-empty fix, which would otherwise
+    // clone fresh lanes into this genuinely full pool instead of failing. This test is about scan sharing.
     const rs = await Promise.all(
-      [1, 2, 3].map((i) => runPoolAsync(['acquire', ...REPO(), `--session=caller-${i}`, '--wait-ms=2500'])),
+      [1, 2, 3].map((i) => runPoolAsync(['acquire', ...REPO(), `--session=caller-${i}`, '--wait-ms=2500', '--growth-max-new=0'])),
     );
     for (const r of rs) {
       expect(r.code).not.toBe(0);
@@ -147,5 +149,9 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     // Whichever way it resolves (found a lane in time, or cleanly reported none within budget), it must be a
     // real, sane exit — never a hang and never a silent wrong answer.
     if (r.code !== 0) expect(r.err).toMatch(/no free lane|scan exceeded its/);
+    // #3383 — growth left ON here on purpose: a scan that merely ran out of time is not a full pool (all 8
+    // lanes are free), so acquire must never clone new lanes because the scan was slow.
+    expect(r.err).not.toMatch(/growing by up to|grew pool/);
+    expect(existsSync(lanePath(9))).toBe(false);
   });
 });

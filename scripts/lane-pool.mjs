@@ -1531,14 +1531,25 @@ function cmdAcquire(repo) {
     // right before it touches the tree (#2924), regardless of how the candidate was found. A lease claim
     // (ours or a competitor's) changes the pool's lease fingerprint, which invalidates the cache on the very
     // next read, so a lane just taken is never handed out twice from a stale hit.
+    //
+    // #3383 — live incident 2026-09-24: EVERY review dispatch failed with "no free lane" on a 60-lane pool
+    // where only ~3-4 lanes were actually acquirable (the rest held real work or sat ahead-of-origin) — acquire
+    // itself never grows the pool, it only waits then fails. `grownOnce` bounds this to ONE growth attempt per
+    // `acquire` call (never a second round in the same call, however many times the loop above re-polls).
+    let grownOnce = false;
     while (chosen === null) {
       const pickNowMs = Date.now();
       const remainingMs = deadline - pickNowMs;
       // Bound THIS round's scan by whatever's left of `--wait-ms` (never less than one poll tick, so a
       // near-zero remainder still gets a real attempt) and never more than the configured/default scan
-      // budget — the "wait-ms plus a scan budget" bound the whole command must respect.
-      const scanBudget = Math.min(waitMs > 0 ? Math.max(remainingMs, ACQUIRE_POLL_MS) : listScanTimeoutMs(), listScanTimeoutMs());
+      // budget — the "wait-ms plus a scan budget" bound the whole command must respect. The one post-growth
+      // round (past the deadline by construction) gets the full scan budget, so the freshly-cloned lanes are
+      // actually reached rather than lost to a one-poll-tick rescan of the whole pool.
+      const scanBudget = Math.min(waitMs > 0 && !grownOnce ? Math.max(remainingMs, ACQUIRE_POLL_MS) : listScanTimeoutMs(), listScanTimeoutMs());
       let candidateDirs;
+      // Did THIS round's empty answer come from a scan that ran out of time, rather than a scan that finished
+      // and genuinely found nothing free? Only the latter may trigger growth below.
+      let scanTimedOut = false;
       try {
         candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: scanBudget, cacheTtlMs: listCacheTtlMs() });
       } catch (e) {
@@ -1547,6 +1558,7 @@ function cmdAcquire(repo) {
         // -deadline handling as "found nothing free" below, so a slow tick self-heals on the next one.
         if (!e || !e.scanTimeout) throw e;
         candidateDirs = [];
+        scanTimedOut = true;
       }
       const pickable = candidateDirs
         .map((d) => Number(basename(d).slice(5)))
@@ -1563,6 +1575,26 @@ function cmdAcquire(repo) {
         sleepSyncMs(ACQUIRE_POLL_MS);
         excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
         continue;
+      }
+      // #3383 — before failing outright, let the pool GROW A LITTLE rather than block every dispatch on a
+      // human running `provision` by hand. Bounded two ways, mirroring #4025's provision --acquirable guards
+      // exactly: a small per-call cap on brand-new clones (reaching it just means "ask again"), and a hard
+      // ceiling well above the trim target that growth may never cross. A live remote-probe failure disables
+      // growth entirely (fail-SAFE STOP, never fail-safe GROW) — same rationale as #4025. The candidate scan
+      // above is the shared cached one, which cannot say whether ITS ahead-lane probe failed (a cache hit ran no
+      // probe at all), so take one fresh probe here instead: growth clones over the network anyway, so an
+      // unreachable remote must stop it. Lazy — `growPoolOnEmpty` runs it only once its caps allow growth, so
+      // a pool that cannot grow anyway fails as fast as before; one that can pays at most this one call.
+      // Never on a TIMED-OUT scan: "the scan was slow" is not "the pool is full" (a slow pool may be full of free
+      // lanes), and cloning more lanes into an already-slow pool only makes the next scan slower. Main's pre-cache
+      // loop had no scan timeout, so there an empty answer always meant genuinely full; here it may not.
+      if (!grownOnce && !scanTimedOut) {
+        grownOnce = true;
+        const added = growPoolOnEmpty(repo, lanes, () => !liveRemoteShasProbe(laneDir(repo, Math.min(...lanes))).ok);
+        if (added > 0) {
+          excluded.clear();
+          continue;
+        }
       }
       fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
     }
@@ -2238,6 +2270,129 @@ function trimCapFor(repo) {
   return TRIM_DEFAULT_CAP[repo.name] ?? TRIM_DEFAULT_CAP_FALLBACK;
 }
 
+// ── acquire growth-on-empty (#3383) ──────────────────────────────────────────────────────────────────
+// Live incident 2026-09-24: `trim`'s cap (above) shrinks the pool TOWARD a target, but `acquire`'s auto-pick
+// had no corresponding ability to grow PAST it when genuinely starved — a 60-lane pool with only ~3-4
+// acquirable lanes (the rest holding real uncommitted work or sitting un-provably-ahead of origin) made every
+// single dispatch fail with "no free lane", however long `--wait-ms` waited, because nothing in that path ever
+// considered cloning more capacity. This is the separate CEILING growth may push up to — always above the trim
+// target, so trim and growth don't fight each other on every tick.
+//
+// Bounded the same two ways #4025 already bounds `provision --acquirable`'s growth (deliberately reusing that
+// design, not inventing a third): a small per-call cap on brand-new clones (reaching it just means "ask
+// again", never "clone dozens in one shot"), and an outright live remote-probe FAILURE stops growth entirely
+// (fail-SAFE STOP, never fail-safe GROW) rather than risk misreading "we don't know" as "starved, so grow".
+
+/** #3383 — the HARD ceiling `acquire`'s auto-pick may grow a pool up to, keyed by `repo.name` like
+ *  {@link TRIM_DEFAULT_CAP}. Deliberately ABOVE the matching trim target (60→90, 20→30) — real headroom for a
+ *  burst of concurrent dispatch to self-heal into, without racing trim's own shrink-back-down pass. `--hard-
+ *  max=N` or the `LANE_POOL_HARD_MAX` env both override this per pool; unknown pools fall back to
+ *  {@link ACQUIRE_HARD_MAX_FALLBACK}. */
+const ACQUIRE_HARD_MAX = {
+  'web-everything': 90,
+  webeverything: 90,
+  frontierui: 30,
+  'plateau-app': 30,
+};
+const ACQUIRE_HARD_MAX_FALLBACK = 30;
+
+/** `--hard-max=N` > `LANE_POOL_HARD_MAX` env > {@link ACQUIRE_HARD_MAX}[repo.name] > {@link ACQUIRE_HARD_MAX_FALLBACK}. */
+function acquireHardMaxFor(repo) {
+  if (flags['hard-max'] !== undefined) {
+    const n = Number(flags['hard-max']);
+    if (Number.isInteger(n) && n >= 0) return n;
+    fail('acquire needs --hard-max=<non-negative integer>');
+  }
+  const envRaw = process.env.LANE_POOL_HARD_MAX;
+  if (envRaw !== undefined && envRaw !== '') {
+    const n = Number(envRaw);
+    if (Number.isInteger(n) && n >= 0) return n;
+  }
+  return ACQUIRE_HARD_MAX[repo.name] ?? ACQUIRE_HARD_MAX_FALLBACK;
+}
+
+// #3383 — mirrors #4025's `ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT` exactly (same small per-call cap, same
+// rationale), but kept as its OWN constant/flag/env rather than shared: `provision --acquirable`'s cap tunes a
+// human/orchestrator-driven bulk-provisioning call, this one tunes a single starved `acquire`'s own emergency
+// growth — two different callers that happen to want the same default today should stay independently tunable.
+const ACQUIRE_GROWTH_MAX_NEW_DEFAULT = 4;
+
+/** `--growth-max-new=N` > `LANE_POOL_ACQUIRE_GROWTH_MAX_NEW` env > {@link ACQUIRE_GROWTH_MAX_NEW_DEFAULT}. An
+ *  explicit 0 (flag or env) is honored — it disables acquire's own growth — so this parses like
+ *  `trimCapFor`/`acquireHardMaxFor`, never `Number(x) || DEFAULT` (which reads "0" as unset). */
+function acquireGrowthMaxNew() {
+  const asNonNegInt = (raw) => {
+    if (raw === undefined || raw === '' || raw === true) return null;
+    const v = Number(raw);
+    return Number.isInteger(v) && v >= 0 ? v : null;
+  };
+  return asNonNegInt(flags['growth-max-new'])
+    ?? asNonNegInt(process.env.LANE_POOL_ACQUIRE_GROWTH_MAX_NEW)
+    ?? ACQUIRE_GROWTH_MAX_NEW_DEFAULT;
+}
+
+/**
+ * #3383 — called ONLY from `cmdAcquire`'s auto-pick path, ONLY once the wait/poll window (if any) is exhausted
+ * with genuinely no free lane. Clones a bounded number of brand-new lanes (never past `acquireHardMaxFor`,
+ * never more than `acquireGrowthMaxNew()` in this one call) and appends their numbers to `lanes` IN PLACE so
+ * the caller's very next candidate scan sees them. Numbers from `highest(lanes) + 1` up — trim always
+ * removes the HIGHEST-numbered lanes first (see this file's `trim` section), so a live pool's numbering stays
+ * contiguous from 1 in practice; basing growth on the highest existing number (not `lanes.length`) still fails
+ * safe if a gap ever exists, since it can only make growth start a little higher than strictly necessary,
+ * never collide with an existing lane directory.
+ * `remoteProbeFailed` is a LAZY `() => boolean`, asked only once both caps above allow growth — a pool that
+ * cannot grow anyway (at its hard cap, or growth disabled) never pays the `ls-remote` it costs.
+ * Returns the number of lanes actually added (0 ⇒ the caller's existing "no free lane" failure stands).
+ */
+function growPoolOnEmpty(repo, lanes, remoteProbeFailed) {
+  const hardMax = acquireHardMaxFor(repo);
+  const highest = lanes.length ? Math.max(...lanes) : 0;
+  if (highest >= hardMax) {
+    log(
+      `  ⚠ pool "${repo.name}" is already at its hard cap (lane-${highest} ≥ ${hardMax}; override with ` +
+        `--hard-max=N or LANE_POOL_HARD_MAX) — acquire cannot grow it further; release a lane or raise the cap.`,
+    );
+    return 0;
+  }
+  const maxNew = acquireGrowthMaxNew();
+  const toAdd = Math.min(maxNew, hardMax - highest);
+  if (toAdd <= 0) {
+    log(`  ⚠ acquire's per-call growth cap is 0 (--growth-max-new=0 or LANE_POOL_ACQUIRE_GROWTH_MAX_NEW=0) — not growing.`);
+    return 0;
+  }
+  if (remoteProbeFailed()) {
+    log(
+      `  ⚠ #3383 a live remote-reachability probe (git ls-remote) failed while evaluating this pool's lanes — ` +
+        `refusing to grow it (deliberate fail-SAFE STOP, never fail-safe GROW, mirrors #4025). Investigate ` +
+        `connectivity/timeouts, then retry \`acquire\` once the probe can actually answer.`,
+    );
+    return 0;
+  }
+  log(
+    `  no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — growing by up to ${toAdd} new ` +
+      `lane(s) (hard cap ${hardMax}; per-call growth cap ${maxNew}; override with --hard-max/--growth-max-new ` +
+      `or LANE_POOL_HARD_MAX/LANE_POOL_ACQUIRE_GROWTH_MAX_NEW)`,
+  );
+  let added = 0;
+  for (let i = 0; i < toAdd; i++) {
+    const n = highest + i + 1;
+    try {
+      provisionLane(repo, n, false);
+      lanes.push(n);
+      added++;
+    } catch (e) {
+      log(`  ⚠ growth: failed to provision lane-${n} (${e?.message || e}) — stopping growth this call`);
+      break;
+    }
+  }
+  if (added > 0) {
+    lanes.sort((a, b) => a - b);
+    invalidateListCache(repo); // #xn432dz — the pool's composition just changed
+    log(`  grew pool "${repo.name}" by ${added} lane(s) (through lane-${highest + added})`);
+  }
+  return added;
+}
+
 /**
  * Is lane `n` safe to physically remove right now? See the `trim` section header above for the full rule.
  * Returns a `kind` alongside `eligible`/`reason` so `cmdTrim` can bucket its report (reserved / leased / work /
@@ -2566,6 +2721,8 @@ const KNOWN_FLAGS = new Set([
   'limit', 'no-cache', 'cache-ttl-ms', 'scan-timeout-ms',
   // #4025 — provision --acquirable's per-call new-lane cap, and trim's own cap/dry-run knobs.
   'max-new', 'max', 'dry-run',
+  // #3383 — acquire's own growth-on-empty knobs: hard ceiling and per-call new-lane cap.
+  'hard-max', 'growth-max-new',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -2589,7 +2746,10 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
-      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n',
+      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
+      '  # acquire (auto-pick, no --lane): on a full pool, grows it by up to --growth-max-new=N new lanes (default 4, env ' +
+      'LANE_POOL_ACQUIRE_GROWTH_MAX_NEW) up to a --hard-max=N ceiling (default 90 for web-everything/30 for siblings, env LANE_POOL_HARD_MAX) ' +
+      'before failing — refuses to grow on a live remote-probe failure (#3383)\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }
