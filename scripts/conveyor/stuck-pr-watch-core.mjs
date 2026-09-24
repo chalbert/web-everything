@@ -52,7 +52,9 @@ import { assessLiveness, bindAgents } from './reconcile-core.mjs';
 // `node:child_process`). Re-exported here so every existing importer of THIS file is unaffected.
 export {
   STUCK_DISPATCH_MARKER, buildStuckDispatchComment, stuckDispatchEpisodes, alreadyDispatchedForEpisode,
+  STUCK_INSPECTION_COMMENT_PREFIX, isStuckInspectionOwnComment,
 } from './stuck-pr-dispatch-marker.mjs';
+import { isStuckInspectionOwnComment } from './stuck-pr-dispatch-marker.mjs';
 
 /** The informative "actively being reviewed" label `we:scripts/conveyor/review-status-tag.mjs` applies
  *  alongside `review:pending` — checked in addition to `review:pending` itself so a PR that (by some label-
@@ -152,8 +154,11 @@ export const PROGRESS_TIMELINE_EVENTS = Object.freeze(['labeled', 'commented', '
  * The most recent progress timestamp across a PR's own GitHub issue-events/timeline, or `null` when none of
  * the tracked event types are present (never guessed — the caller must fail closed on `null`, exactly like
  * `we:scripts/conveyor/parked-pr-progress-watch.mjs#labeledAtFor` does for its own single-label read). Pure —
- * `events` is already the flattened `{createdAt, event}` list the IO shell's timeline reader produced.
- * @param {Array<{createdAt?:string, event?:string}>} events
+ * `events` is already the flattened `{createdAt, event, body?}` list the IO shell's timeline reader produced.
+ * A `commented` event that is this feature's OWN write (its dispatch marker or the inspection agent's diagnosis,
+ * {@link isStuckInspectionOwnComment}) is NOT progress — counting it reset the clock on every dispatch and made
+ * each threshold a "new episode" forever (PR #2553 review).
+ * @param {Array<{createdAt?:string, event?:string, body?:string}>} events
  * @returns {string|null}
  */
 export function latestActivityAt(events) {
@@ -162,6 +167,7 @@ export function latestActivityAt(events) {
   let bestMs = -Infinity;
   for (const e of list) {
     if (!e || !PROGRESS_TIMELINE_EVENTS.includes(e.event)) continue;
+    if (e.event === 'commented' && isStuckInspectionOwnComment(e.body)) continue;
     const ms = Date.parse(e.createdAt);
     // `>=` (not `>`), matching `parked-pr-progress-watch.mjs#labeledAtFor`'s own tie-break: pick the LATEST by
     // parsed value, never trust array order alone as the sole tie-break signal.

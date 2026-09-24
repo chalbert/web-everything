@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   defaultListOpenPrs, defaultListTimelineEvents, defaultCountLiveInspections, watchStuckPrs, PR_LIST_JSON_FIELDS,
+  defaultReadFullTimeline,
 } from '../stuck-pr-watch.mjs';
 import { STUCK_DISPATCH_MARKER } from '../stuck-pr-watch-core.mjs';
 
@@ -40,7 +41,11 @@ describe('defaultListOpenPrs', () => {
 
 describe('defaultListTimelineEvents', () => {
   it('queries the paginated issues timeline, projecting only the three progress event types', () => {
-    const exec = vi.fn(() => 'T1\tlabeled\nT2\tcommented\n');
+    const exec = vi.fn(() => [
+      JSON.stringify({ createdAt: 'T1', event: 'labeled', body: null }),
+      JSON.stringify({ createdAt: 'T2', event: 'commented', body: 'line one\n\tline two' }),
+      '',
+    ].join('\n'));
     const events = defaultListTimelineEvents({ number: 42, repo: 'chalbert/web-everything', exec });
     expect(exec.mock.calls[0][0]).toBe('gh');
     const argv = exec.mock.calls[0][1];
@@ -48,7 +53,30 @@ describe('defaultListTimelineEvents', () => {
     expect(argv.join(' ')).toContain('labeled');
     expect(argv.join(' ')).toContain('commented');
     expect(argv.join(' ')).toContain('committed');
-    expect(events).toEqual([{ createdAt: 'T1', event: 'labeled' }, { createdAt: 'T2', event: 'commented' }]);
+    expect(argv.join(' ')).toContain('@json'); // one JSON object per line — a comment body may hold tabs/newlines
+    expect(events).toEqual([
+      { createdAt: 'T1', event: 'labeled' },
+      { createdAt: 'T2', event: 'commented', body: 'line one\n\tline two' },
+    ]);
+  });
+});
+
+describe('defaultReadFullTimeline — the inspection agent\'s GET-only replacement for raw `gh api` (PR #2553 review)', () => {
+  it('always issues a fixed -X GET against the PR timeline and parses one JSON object per line', () => {
+    const exec = vi.fn(() => `${JSON.stringify({ event: 'labeled', createdAt: 'T1', actor: 'a', label: 'review:changes', body: null })}\n`);
+    const events = defaultReadFullTimeline({ number: '42', repo: 'chalbert/web-everything', exec });
+    const argv = exec.mock.calls[0][1];
+    expect(argv.slice(0, 7)).toEqual(['api', '--paginate', '-X', 'GET', '-F', 'per_page=100',
+      'repos/chalbert/web-everything/issues/42/timeline']);
+    expect(argv).not.toContain('-f');
+    expect(argv).not.toContain('--input');
+    expect(events).toEqual([{ event: 'labeled', createdAt: 'T1', actor: 'a', label: 'review:changes', body: null }]);
+  });
+  it('refuses a non-integer PR or a non-constellation repo before ever calling gh', () => {
+    const exec = vi.fn();
+    expect(() => defaultReadFullTimeline({ number: '42/../../x', repo: 'chalbert/web-everything', exec })).toThrow(/--pr/);
+    expect(() => defaultReadFullTimeline({ number: 42, repo: 'evil/repo', exec })).toThrow(/constellation/);
+    expect(exec).not.toHaveBeenCalled();
   });
 });
 
@@ -133,6 +161,36 @@ describe('watchStuckPrs — the whole sweep, every IO point injected', () => {
     });
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(result.dispatchedCount).toBe(1);
+  });
+
+  it('ROUND TRIP: the watch\'s own marker + the inspection agent\'s diagnosis never mint a new episode (review finding, PR #2553)', () => {
+    // Sweep 1: genuinely stuck since T1 → dispatches and posts its marker.
+    const postComment = vi.fn();
+    const provider = { postComment, currentRepo: vi.fn(() => 'chalbert/web-everything') };
+    const dispatch = vi.fn(() => ({ sessionSlug: 'inspect-42', agentId: null }));
+    const t1 = '2026-09-23T17:00:00Z';
+    const sweep = (at, timeline, comments) => watchStuckPrs({
+      repo: 'chalbert/web-everything', dryRun: false, now: new Date(at).getTime(),
+      listPrs: () => [stuckFixPr({ comments })], listTimelineEvents: () => timeline,
+      readAgents: () => [], enrich: (a) => a, countLiveInspections: () => 0, dispatch, provider,
+    });
+    sweep('2026-09-23T19:00:00Z', [{ createdAt: t1, event: 'commented', body: 'a real human comment' }], []);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const marker = postComment.mock.calls[0][2];
+    const diagnosis = '🔎 stuck-PR inspection\n\n**Stage:** fix\n…';
+
+    // Sweep 2, well past the threshold AFTER the watch's own writes: feed sweep 1's marker (and the agent's own
+    // diagnosis comment) back in as timeline events AND PR comments — exactly what GitHub would return.
+    const result = sweep('2026-09-23T21:00:00Z', [
+      { createdAt: t1, event: 'commented', body: 'a real human comment' },
+      { createdAt: '2026-09-23T19:00:05Z', event: 'commented', body: marker },
+      { createdAt: '2026-09-23T19:10:00Z', event: 'commented', body: `  ${diagnosis}` },
+    ], [{ body: marker }, { body: diagnosis }]);
+    expect(dispatch).toHaveBeenCalledTimes(1); // no second inspection for the same episode
+    expect(postComment).toHaveBeenCalledTimes(1);
+    const row = result.results.find((r) => r.num === 42);
+    expect(row.verdict).toBe('already-dispatched-this-episode');
+    expect(row.activityAt).toBe(t1);
   });
 
   it('respects the concurrency cap end-to-end — a full cap dispatches nothing', () => {

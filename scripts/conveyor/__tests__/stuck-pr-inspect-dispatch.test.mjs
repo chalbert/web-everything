@@ -5,6 +5,9 @@
  *   and the plan→fill→spawn composition with every IO point injected.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   fillInspectBrief, INSPECT_BRIEF_PLACEHOLDERS, canonicalInspectPlaceholder, inspectSessionSlug,
   planInspectDispatch, INSPECT_DISPATCH_DISALLOWED_TOOLS, inspectDispatchDisallowedToolsArgs, dispatchInspection,
@@ -95,6 +98,44 @@ describe('inspectDispatchDisallowedToolsArgs', () => {
       'Bash(gh pr edit:*)', 'Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh label:*)',
       'Bash(git push:*)', 'Bash(git commit:*)', 'Bash(node scripts/backlog.mjs:*)', 'Bash(node scripts/lane-pool.mjs:*)',
     ]) expect(INSPECT_DISPATCH_DISALLOWED_TOOLS).toContain(must);
+  });
+  it('denies `gh api` — the raw-REST bypass that closes/labels/merges past every per-verb rule (PR #2553 review)', () => {
+    // Every GitHub write the review named reaches through `gh api`: PATCH state=closed, POST .../labels, PUT .../merge.
+    expect(INSPECT_DISPATCH_DISALLOWED_TOOLS).toContain('Bash(gh api:*)');
+  });
+  it('denies every OTHER GitHub-write gh verb family too, not only the ones first thought of', () => {
+    for (const must of [
+      'Bash(gh pr close:*)', 'Bash(gh pr reopen:*)', 'Bash(gh pr ready:*)', 'Bash(gh pr lock:*)',
+      'Bash(gh pr unlock:*)', 'Bash(gh pr update-branch:*)', 'Bash(gh pr create:*)',
+      'Bash(gh issue:*)', 'Bash(gh workflow:*)', 'Bash(gh run:*)', 'Bash(gh repo:*)', 'Bash(gh release:*)',
+      'Bash(gh secret:*)', 'Bash(gh variable:*)', 'Bash(gh cache:*)', 'Bash(gh ruleset:*)',
+      // indirection back to raw REST
+      'Bash(gh alias:*)', 'Bash(gh extension:*)', 'Bash(gh auth:*)',
+      // GitHub-writing repo scripts (their child `gh` escapes Bash deny rules) + the recursive-dispatch sweep
+      'Bash(node scripts/conveyor/stuck-pr-watch.mjs sweep:*)', 'Bash(node scripts/conveyor/stand-down.mjs:*)',
+      'Bash(node scripts/conveyor/rearm-review.mjs:*)', 'Bash(node scripts/conveyor/stuck-pr-inspect-dispatch.mjs:*)',
+    ]) expect(INSPECT_DISPATCH_DISALLOWED_TOOLS).toContain(must);
+  });
+  it('keeps the brief\'s own timeline read reachable (only the sweep verb of the watch is denied)', () => {
+    const cmd = 'node scripts/conveyor/stuck-pr-watch.mjs timeline --pr=1 --repo=chalbert/web-everything';
+    const prefixes = INSPECT_DISPATCH_DISALLOWED_TOOLS.map((p) => p.slice('Bash('.length, -':*)'.length));
+    expect(prefixes.filter((d) => cmd.startsWith(d))).toEqual([]);
+  });
+  it('WIRING: the brief never tells the agent to run a gh command its own deny list refuses', () => {
+    const brief = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../skills-src/conveyor/stuck-pr-inspect-brief.md'), 'utf8',
+    );
+    const ghCmds = [...brief.matchAll(/`(gh [^`]+)`/g)].map((m) => m[1]);
+    expect(ghCmds.length).toBeGreaterThan(0);
+    const denied = INSPECT_DISPATCH_DISALLOWED_TOOLS
+      .filter((p) => p.startsWith('Bash(gh ')).map((p) => p.slice('Bash('.length, -':*)'.length));
+    for (const cmd of ghCmds) expect(denied.filter((d) => cmd.startsWith(d))).toEqual([]);
+    expect(brief).toContain('stuck-pr-watch.mjs timeline --pr={{PR}} --repo={{REPO}}');
+  });
+  it('INVARIANT: any per-verb `gh` deny list must also deny `gh api` (or deny `gh` wholesale)', () => {
+    const perVerb = INSPECT_DISPATCH_DISALLOWED_TOOLS.some((p) => p.startsWith('Bash(gh '));
+    const wholesale = INSPECT_DISPATCH_DISALLOWED_TOOLS.includes('Bash(gh:*)');
+    expect(!perVerb || wholesale || INSPECT_DISPATCH_DISALLOWED_TOOLS.includes('Bash(gh api:*)')).toBe(true);
   });
 });
 

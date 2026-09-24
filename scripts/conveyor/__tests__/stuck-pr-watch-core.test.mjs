@@ -10,7 +10,7 @@ import {
   isDraftPr, isNeverStuckPr, classifyStuckStage, PROGRESS_TIMELINE_EVENTS, latestActivityAt,
   minutesSinceActivity, evaluateStuckPr, STUCK_DISPATCH_MARKER, buildStuckDispatchComment,
   stuckDispatchEpisodes, alreadyDispatchedForEpisode, DEFAULT_MAX_CONCURRENT_INSPECTIONS,
-  MAX_CONCURRENT_INSPECTIONS_ENV, maxConcurrentInspections, planStuckDispatches,
+  MAX_CONCURRENT_INSPECTIONS_ENV, maxConcurrentInspections, planStuckDispatches, isStuckInspectionOwnComment,
 } from '../stuck-pr-watch-core.mjs';
 import { buildStandDownComment } from '../stand-down.mjs';
 
@@ -100,6 +100,25 @@ describe('latestActivityAt', () => {
       { createdAt: '2026-09-21T10:00:00Z', event: 'commented' },
     ];
     expect(latestActivityAt(events)).toBe('2026-09-21T10:00:00Z');
+  });
+  it('never counts the watch\'s own marker or the inspection agent\'s diagnosis as progress (PR #2553 review)', () => {
+    const marker = buildStuckDispatchComment({
+      stage: 'fix', minutesSince: 120, thresholdMinutes: 45, activityAt: '2026-09-20T10:00:00Z', sessionSlug: 'inspect-1',
+    });
+    const events = [
+      { createdAt: '2026-09-20T10:00:00Z', event: 'commented', body: 'real progress' },
+      { createdAt: '2026-09-20T12:00:00Z', event: 'commented', body: marker },
+      { createdAt: '2026-09-20T12:10:00Z', event: 'commented', body: '\n🔎 stuck-PR inspection\n\nfindings…' },
+    ];
+    expect(latestActivityAt(events)).toBe('2026-09-20T10:00:00Z');
+    // A human QUOTING the marker mid-reply is still a real comment — still progress.
+    expect(latestActivityAt([...events, {
+      createdAt: '2026-09-20T13:00:00Z', event: 'commented', body: `why did ${STUCK_DISPATCH_MARKER} fire?`,
+    }])).toBe('2026-09-20T13:00:00Z');
+    // A body-less comment event (no body read) keeps counting — fail toward "progress", never toward a re-dispatch.
+    expect(latestActivityAt([{ createdAt: '2026-09-20T14:00:00Z', event: 'commented' }])).toBe('2026-09-20T14:00:00Z');
+    expect(isStuckInspectionOwnComment(marker)).toBe(true);
+    expect(isStuckInspectionOwnComment(null)).toBe(false);
   });
   it('returns null for no events, or none of the tracked types', () => {
     expect(latestActivityAt([])).toBeNull();

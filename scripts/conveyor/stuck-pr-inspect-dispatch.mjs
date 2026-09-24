@@ -123,13 +123,57 @@ export function inspectSessionSlug(pr, repo = 'we') {
  * Denies: every label/edit/merge/review mutation on GitHub, and every write-side script this repo owns that a
  * diagnosis-only agent has no legitimate reason to run (it never labels, never lands, never claims/resolves a
  * backlog item, never acquires or releases a lane).
+ *
+ * `gh api` IS DENIED WHOLESALE (PR #2553 review): raw REST reaches every write the per-verb rules deny
+ * (`-X PATCH state=closed`, `POST …/labels`, `PUT …/merge`) — the exact bypass `review-dispatch.mjs` already
+ * closed for itself. The brief's one legitimate `gh api` use, the timeline READ, goes through the fixed-argv,
+ * GET-only `node scripts/conveyor/stuck-pr-watch.mjs timeline` instead. Every other gh family that can write
+ * to GitHub (issues, workflows/runs, repo/release/secret/variable/cache/ruleset settings, the remaining pr
+ * state verbs) is denied too; what stays reachable is the read side (`gh pr view`, `gh pr checks`, `gh pr
+ * diff`) plus the brief's own `gh pr comment`.
  */
 export const INSPECT_DISPATCH_DISALLOWED_TOOLS = Object.freeze([
+  'Bash(gh api:*)',
   'Bash(gh pr edit:*)',
   'Bash(gh pr merge:*)',
   'Bash(gh pr review:*)',
   'Bash(gh pr close:*)',
+  'Bash(gh pr reopen:*)',
+  'Bash(gh pr ready:*)',
+  'Bash(gh pr lock:*)',
+  'Bash(gh pr unlock:*)',
+  'Bash(gh pr update-branch:*)',
+  'Bash(gh pr create:*)',
+  'Bash(gh pr checkout:*)', // switches the branch of the PRIMARY checkout this agent runs in
   'Bash(gh label:*)',
+  'Bash(gh issue:*)',
+  'Bash(gh workflow:*)',
+  'Bash(gh run:*)',
+  'Bash(gh repo:*)',
+  'Bash(gh release:*)',
+  'Bash(gh secret:*)',
+  'Bash(gh variable:*)',
+  'Bash(gh cache:*)',
+  'Bash(gh ruleset:*)',
+  'Bash(gh gist:*)',
+  'Bash(gh project:*)',
+  'Bash(gh codespace:*)',
+  'Bash(gh ssh-key:*)',
+  'Bash(gh gpg-key:*)',
+  // Indirection that would re-open the `gh api` door: an alias/extension runs arbitrary gh subcommands under a
+  // name no rule matches, and `gh auth token` hands a raw credential to curl.
+  'Bash(gh alias:*)',
+  'Bash(gh extension:*)',
+  'Bash(gh auth:*)',
+  // This repo's own GitHub-writing conveyor scripts — each shells `gh` as a child process, where Bash deny
+  // rules never reach. `stuck-pr-watch.mjs sweep` would also dispatch MORE inspection agents (recursive fan-out);
+  // its `timeline` verb stays reachable (the brief's own read).
+  'Bash(node scripts/conveyor/stuck-pr-watch.mjs sweep:*)',
+  'Bash(node scripts/conveyor/stuck-pr-inspect-dispatch.mjs:*)',
+  'Bash(node scripts/conveyor/stand-down.mjs:*)',
+  'Bash(node scripts/conveyor/rearm-review.mjs:*)',
+  'Bash(node scripts/conveyor/ci-heal-mark.mjs:*)',
+  'Bash(node scripts/conveyor/advisory-label-sweep.mjs:*)',
   'Bash(git push:*)',
   'Bash(git commit:*)',
   'Bash(node scripts/review-set-label.mjs:*)',

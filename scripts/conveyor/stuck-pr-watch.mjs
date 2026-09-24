@@ -8,6 +8,8 @@
  *   if pr are stuck."
  *
  *   node scripts/conveyor/stuck-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run]
+ *   node scripts/conveyor/stuck-pr-watch.mjs timeline --pr=<n> --repo=<owner/name>   (the inspection agent's
+ *     GET-only timeline read — it is denied `gh api`; see {@link defaultReadFullTimeline})
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrors `we:scripts/conveyor/parked-pr-conflict-watch.mjs` /
  * `we:scripts/conveyor/parked-pr-progress-watch.mjs`):
@@ -73,20 +75,45 @@ export function defaultListOpenPrs({ exec = execFileSyncThrottled, repo = null }
  * cost-avoidance shape). GitHub's issue-events/timeline endpoint carries every `labeled`/`commented`/`committed`
  * event (among others) for a PR; `--jq` projects only the three this watch treats as progress. A commit event's
  * own timestamp rides `committer.date`/`author.date`, not `created_at` (unlike a label or comment event) — the
- * `//` fallback chain covers all three shapes in one query.
+ * `//` fallback chain covers all three shapes in one query. A comment event also carries the head of its `body`
+ * (enough to read its leading line) so the pure core can tell the watch's OWN writes from real progress (PR
+ * #2553 review) — one compact JSON object per line, since a body may hold tabs/newlines a TSV row cannot.
  * @param {{number:number|string, repo?:string|null, exec?:Function}} o
- * @returns {Array<{createdAt:string, event:string}>}
+ * @returns {Array<{createdAt:string, event:string, body?:string}>}
  */
 export function defaultListTimelineEvents({ number, repo, exec = execFileSyncThrottled } = {}) {
   const path = repo ? `repos/${repo}/issues/${number}/timeline` : `repos/{owner}/{repo}/issues/${number}/timeline`;
   const argv = ['api', '--paginate', '-X', 'GET', '-F', 'per_page=100', path,
     '--jq', '.[] | select(.event=="labeled" or .event=="commented" or .event=="committed") | '
-      + '[(.created_at // .committer.date // .author.date // ""), .event] | @tsv'];
+      + '{createdAt: (.created_at // .committer.date // .author.date // ""), event: .event, '
+      + 'body: (if .event=="commented" then ((.body // "") | .[0:200]) else null end)} | @json'];
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
   return String(out || '').split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
-    const [createdAt, event] = line.split('\t');
-    return { createdAt, event };
+    const { createdAt, event, body } = JSON.parse(line);
+    return typeof body === 'string' ? { createdAt, event, body } : { createdAt, event };
   });
+}
+
+/**
+ * THE INSPECTION AGENT'S TIMELINE READ (PR #2553 review). The dispatched inspection agent is denied `gh api`
+ * wholesale (raw REST reaches every write its per-verb deny rules cover — see
+ * `we:scripts/conveyor/stuck-pr-inspect-dispatch.mjs#INSPECT_DISPATCH_DISALLOWED_TOOLS`), yet its brief needs the
+ * PR's full timeline. This is that read with a FIXED argv: always `-X GET`, no caller-supplied method, fields,
+ * or input — so it can never become a write. Projects every event (not just the three progress types) with its
+ * actor, label, and the head of a comment's body — enough to diagnose a stall.
+ * @param {{number:number|string, repo:string, exec?:Function}} o
+ * @returns {Array<{event:string, createdAt:string, actor:string|null, label:string|null, body:string|null}>}
+ */
+export function defaultReadFullTimeline({ number, repo, exec = execFileSyncThrottled } = {}) {
+  const num = Number(number);
+  if (!Number.isInteger(num) || num <= 0) throw new Error(`timeline: --pr must be a positive integer, got ${JSON.stringify(number)}`);
+  if (repoKeyForSlug(String(repo ?? '')) === null) throw new Error(`timeline: --repo ${repo} is not a constellation repo`);
+  const argv = ['api', '--paginate', '-X', 'GET', '-F', 'per_page=100', `repos/${repo}/issues/${num}/timeline`,
+    '--jq', '.[] | {event: (.event // ""), createdAt: (.created_at // .submitted_at // .committer.date // .author.date // ""), '
+      + 'actor: ((.actor // .user // {}).login // null), label: (.label.name // null), '
+      + 'body: (if (.body | type) == "string" then .body[0:500] else null end)} | @json'];
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  return String(out || '').split('\n').map((l) => l.trim()).filter(Boolean).map((line) => JSON.parse(line));
 }
 
 /**
@@ -219,8 +246,16 @@ if (IS_CLI) {
   const repo = flag('repo') || null;
   const dryRun = argv.includes('--dry-run');
   const prsFile = flag('prs-file');
-  if (verb !== 'sweep') {
-    writeLineSync(2, 'usage: stuck-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]');
+  if (verb === 'timeline') {
+    try {
+      writeAllSync(1, `${JSON.stringify(defaultReadFullTimeline({ number: flag('pr'), repo }))}\n`);
+    } catch (e) {
+      writeLineSync(2, `error: ${String(e?.message ?? e)}`);
+      process.exitCode = 1;
+    }
+  } else if (verb !== 'sweep') {
+    writeLineSync(2, 'usage: stuck-pr-watch.mjs sweep [--repo=<owner/name>] [--dry-run] [--prs-file=<path>]\n'
+      + '       stuck-pr-watch.mjs timeline --pr=<n> --repo=<owner/name>   (read-only, GET-only)');
     process.exitCode = 2;
   } else {
     try {

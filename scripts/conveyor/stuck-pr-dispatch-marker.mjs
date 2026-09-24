@@ -21,6 +21,23 @@
  *  miscounted as one another — this one says "the watch dispatched", that one says "the agent found X". */
 export const STUCK_DISPATCH_MARKER = '🔎 stuck-PR inspection dispatched';
 
+/** The leading prefix SHARED by both of this feature's own writes — the watch's dispatch marker above and the
+ *  inspecting agent's diagnosis comment (`we:skills-src/conveyor/stuck-pr-inspect-brief.md`). Neither is
+ *  progress on the PR, so the watch's activity clock must never count them (PR #2553 review: counting them
+ *  reset the clock on every dispatch and minted a fresh "episode" each threshold, forever). */
+export const STUCK_INSPECTION_COMMENT_PREFIX = '🔎 stuck-PR inspection';
+
+/**
+ * Is this comment body one of the stuck-PR feature's OWN writes (dispatch marker or inspection diagnosis)? Pure.
+ * Leading-line narrowing, same as {@link stuckDispatchEpisodes} — a human quoting the marker mid-reply is still
+ * a real human comment, so it still counts as progress.
+ * @param {string|null|undefined} body
+ * @returns {boolean}
+ */
+export function isStuckInspectionOwnComment(body) {
+  return typeof body === 'string' && body.trimStart().startsWith(STUCK_INSPECTION_COMMENT_PREFIX);
+}
+
 const EPISODE_LINE_RE = /^episode:\s*(.+)$/m;
 
 /**
