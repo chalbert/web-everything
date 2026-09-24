@@ -30,16 +30,25 @@ import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BRIEF = resolve(HERE, '../../../skills-src/conveyor/fix-agent-brief.md');
 
+// #3383 — every counter now also requires a TRUSTED author (`we:scripts/lib/marker-authorship.mjs`). This is the
+// real automation login, confirmed live (`chalbert/web-everything#2578`/`#2602`/`#2607`); fixtures below that
+// exercise "a legitimate marker counts" attach it explicitly rather than relying on an implicit default.
+const AUTOMATION = { login: 'web-everything' };
+
 describe('the marker — single-sourced, and distinct from its two siblings (#3296)', () => {
   it('build and count share ONE marker, so posting and counting can never drift', () => {
     expect(buildStandDownComment().split('\n')[0]).toBe(STAND_DOWN_MARKER);
-    expect(countStandDownComments([{ body: buildStandDownComment() }])).toBe(1);
+    expect(countStandDownComments([{ body: buildStandDownComment(), author: AUTOMATION }])).toBe(1);
   });
 
   it('does NOT cross-count with the re-arm (#2643) or CI-heal (#2666) markers', () => {
     // Three durable counts read the same comment thread. If any two shared a prefix, a burned PR would read as
     // stood down, or a stood-down PR would read as re-armed — and each is a different wrong dispatch.
-    const thread = [{ body: REARM_COMMENT_MARKER }, { body: CI_HEAL_COMMENT_MARKER }, { body: buildStandDownComment() }];
+    const thread = [
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+      { body: CI_HEAL_COMMENT_MARKER, author: AUTOMATION },
+      { body: buildStandDownComment(), author: AUTOMATION },
+    ];
     expect(countStandDownComments(thread)).toBe(1);
     expect(STAND_DOWN_MARKER).not.toBe(REARM_COMMENT_MARKER);
     expect(STAND_DOWN_MARKER.startsWith(REARM_COMMENT_MARKER)).toBe(false);
@@ -47,8 +56,8 @@ describe('the marker — single-sourced, and distinct from its two siblings (#32
   });
 
   it('counts only a LEADING marker line — a human quoting it in a reply never inflates the count', () => {
-    expect(countStandDownComments([{ body: `> ${STAND_DOWN_MARKER}\n\nI'll take it.` }])).toBe(0);
-    expect(countStandDownComments([{ body: `  ${STAND_DOWN_MARKER}\n…` }])).toBe(1); // leading whitespace is fine
+    expect(countStandDownComments([{ body: `> ${STAND_DOWN_MARKER}\n\nI'll take it.`, author: AUTOMATION }])).toBe(0);
+    expect(countStandDownComments([{ body: `  ${STAND_DOWN_MARKER}\n…`, author: AUTOMATION }])).toBe(1); // leading whitespace is fine
   });
 
   it('tolerates the shapes `gh` and its callers actually produce', () => {
@@ -56,7 +65,9 @@ describe('the marker — single-sourced, and distinct from its two siblings (#32
     expect(countStandDownComments(undefined)).toBe(0);
     expect(countStandDownComments([])).toBe(0);
     expect(countStandDownComments('not an array')).toBe(0);
-    expect(countStandDownComments([STAND_DOWN_MARKER])).toBe(1);   // bare strings
+    // #3383 — a bare string carries no author at all, so it is a TOLERATED SHAPE (never throws), never a count:
+    // real `gh` output is never a bare string, and an untrusted/unknown author must fail closed.
+    expect(countStandDownComments([STAND_DOWN_MARKER])).toBe(0);
     expect(countStandDownComments([{ body: null }, {}])).toBe(0);
   });
 });
@@ -71,7 +82,7 @@ describe('the comment body — a marker, not a burial (#3296)', () => {
   it('an unknown reason still produces a valid, countable record rather than throwing', () => {
     const body = buildStandDownComment({ reason: 'something-new' });
     expect(body.split('\n')[0]).toBe(STAND_DOWN_MARKER);
-    expect(countStandDownComments([{ body }])).toBe(1);
+    expect(countStandDownComments([{ body, author: AUTOMATION }])).toBe(1);
   });
 
   it('says the loop has stopped AND that a person is the intended exit', () => {
@@ -174,14 +185,14 @@ describe('standDownComments and standDownReason — reading a stand-down comment
   it('returns the matching comments, normalized to {body, createdAt}, leading-marker only', () => {
     const body = buildStandDownComment({ reason: 'gate-red' });
     expect(standDownComments([
-      { body: 'unrelated' },
-      { body, createdAt: '2026-09-20T00:00:00Z' },
-      { body: `> ${STAND_DOWN_MARKER}\nquoted, not leading` },
+      { body: 'unrelated', author: AUTOMATION },
+      { body, createdAt: '2026-09-20T00:00:00Z', author: AUTOMATION },
+      { body: `> ${STAND_DOWN_MARKER}\nquoted, not leading`, author: AUTOMATION },
     ])).toEqual([{ body, createdAt: '2026-09-20T00:00:00Z' }]);
   });
 
-  it('tolerates bare strings, giving them a null createdAt', () => {
-    expect(standDownComments([STAND_DOWN_MARKER])).toEqual([{ body: STAND_DOWN_MARKER, createdAt: null }]);
+  it('tolerates bare strings as a SHAPE (never throws) — but a bare string has no author, so it never counts (#3383)', () => {
+    expect(standDownComments([STAND_DOWN_MARKER])).toEqual([]);
   });
 
   it('tolerates non-array / empty input the same way countStandDownComments does', () => {
@@ -222,13 +233,24 @@ describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED 
     expect(countTerminalStandDowns([supersede, watcherStandDown])).toBe(1);
   });
 
-  it('review finding 3 — a FORGED watcher-actor stand-down (not self-authored) stays terminal', () => {
+  it('review finding 3 — a TRUSTED-author comment merely not provably watcher-self-authored still stays terminal', () => {
+    // Trusted (a real `author.login`) but not provably THE WATCHER'S OWN identity (`viewerDidAuthor: false`) —
+    // narrow-self-authored-false for supersede purposes, but still an ordinary trusted terminal stand-down.
+    const trustedNotWatcherSelf = { body: watcherStandDown.body, viewerDidAuthor: false, author: AUTOMATION };
+    expect(countTerminalStandDowns([trustedNotWatcherSelf, supersede])).toBe(1);
+  });
+
+  // #3383 — adversarial coverage review, 2026-09-24: before this item's fix, ANY of these untrusted-author
+  // variants counted as terminal too (the vulnerability this item closes), including for an impersonated
+  // watcher-actor string. Now only a TRUSTED author counts at all, closing the forgery this finding named.
+  it('#3383 — a genuinely FORGED comment (no trusted author) never counts, watcher-actor text or not', () => {
     for (const forged of [
       { body: watcherStandDown.body },
       { body: watcherStandDown.body, viewerDidAuthor: false },
+      { body: watcherStandDown.body, author: { login: 'mallory' } },
       watcherStandDown.body, // bare string: no provenance at all
     ]) {
-      expect(countTerminalStandDowns([forged, supersede])).toBe(1);
+      expect(countTerminalStandDowns([forged, supersede])).toBe(0);
     }
   });
 
@@ -242,8 +264,8 @@ describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED 
     expect(countTerminalStandDowns([fixAgentStandDown, supersede])).toBe(1);
   });
 
-  it('a human\'s /finish stand-down (default actor) stays terminal', () => {
-    const humanStandDown = { body: buildStandDownComment({ reason: 'gate-red' }) };
+  it('a human\'s /finish stand-down (default actor), posted by the operator, stays terminal', () => {
+    const humanStandDown = { body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'chalbert' } };
     expect(countTerminalStandDowns([humanStandDown, supersede])).toBe(1);
   });
 
@@ -305,5 +327,27 @@ describe('isSelfAuthored — author.login is the READ-stable signal, viewerDidAu
   it('the exact real #2549 shape resolves self-authored (regression pin for the live incident)', () => {
     const realShape = { author: { login: 'web-everything' }, body: '🛑 conveyor fix — stood down, human judgment needed' };
     expect(isSelfAuthored(realShape)).toBe(true);
+  });
+});
+
+// #3383 — adversarial coverage review, 2026-09-24: WE's PRs are public, so any GitHub account can post a
+// comment whose leading line is STAND_DOWN_MARKER, and before the fix in this item that alone made
+// `countStandDownComments` (and therefore `planReconcile`'s dispatch refusal) treat the PR as permanently
+// stood down — terminal, no decay, no clock — exactly as if a real fixer had escalated. `mallory` is a random
+// commenter, never the automation and never the operator.
+describe('countStandDownComments — a forged marker from a random commenter must not count (#3383)', () => {
+  it('a stand-down marker posted by "mallory" (not automation, not the operator) is ignored', () => {
+    const forged = { body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'mallory' } };
+    expect(countStandDownComments([forged])).toBe(0);
+  });
+
+  it('the SAME marker posted by the automation login still counts', () => {
+    const real = { body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'web-everything' } };
+    expect(countStandDownComments([real])).toBe(1);
+  });
+
+  it('the SAME marker posted by the repo operator still counts', () => {
+    const real = { body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'chalbert' } };
+    expect(countStandDownComments([real])).toBe(1);
   });
 });

@@ -34,6 +34,7 @@
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/stand-down.mjs#STAND_DOWN_MARKER — the stable FIRST LINE of the durable stand-down comment.
@@ -85,8 +86,12 @@ export const STAND_DOWN_REASONS = Object.freeze({
  * (`[{ body, createdAt }]`); a bare-string array is tolerated too (its `createdAt` comes back `null`). A comment
  * matches only when the marker is its LEADING line (`trimStart().startsWith`), so a human QUOTING the stand-down
  * comment in a reply never counts — the same narrowing `countRearmComments` and `countCiHealComments` apply, for
- * the same reason.
- * @param {Array<{body?:string, createdAt?:string}|string>|null|undefined} comments
+ * the same reason. #3383 — ALSO requires {@link isTrustedMarkerAuthor}: WE's PRs are public, so before this
+ * requirement any GitHub account could post this exact leading line and make the PR read as permanently stood
+ * down (terminal, no decay) with no fixer having actually escalated. Only the conveyor automation's own login or
+ * the repo operator's login now count — see `we:scripts/lib/marker-authorship.mjs`'s own header for the full
+ * incident and the two-principal trust rule.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}}|string>|null|undefined} comments
  * @returns {Array<{body: string, createdAt: ?string}>}
  */
 export function standDownComments(comments) {
@@ -94,7 +99,7 @@ export function standDownComments(comments) {
   const out = [];
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER)) {
+    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER) && isTrustedMarkerAuthor(c)) {
       out.push({ body, createdAt: (typeof c === 'string' ? null : c?.createdAt) ?? null });
     }
   }
@@ -231,8 +236,10 @@ export function countTerminalStandDowns(comments) {
   if (!Array.isArray(comments)) return 0;
   let n = 0;
   for (let i = 0; i < comments.length; i += 1) {
-    const body = bodyOf(comments[i]);
+    const c = comments[i];
+    const body = bodyOf(c);
     if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
     if (!isStandDownSuperseded(comments, i)) n += 1;
   }
   return n;

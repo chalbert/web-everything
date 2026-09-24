@@ -24,6 +24,7 @@
 import { resolve } from 'node:path';
 import { decideSetLabel, runReviewLabelCli, presentRemoveLabels } from '../review-set-label.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 // we:scripts/conveyor/rearm-review.mjs — re-export the shared narrowing helper on this module's surface so the
 // fix-agent brief's entrypoint and the pinned tests keep importing it from here (it is single-sourced next door).
@@ -57,7 +58,8 @@ export function countRearmComments(comments) {
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(REARM_COMMENT_MARKER)) n += 1;
+    // #3383 — a forged re-arm marker from an untrusted login must not inflate the negotiation-round cap.
+    if (typeof body === 'string' && body.trimStart().startsWith(REARM_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
   }
   return n;
 }

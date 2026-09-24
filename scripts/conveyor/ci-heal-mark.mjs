@@ -21,6 +21,7 @@
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#CI_HEAL_COMMENT_MARKER — the stable FIRST LINE of the durable CI-heal comment.
@@ -46,7 +47,8 @@ export function countCiHealComments(comments) {
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(CI_HEAL_COMMENT_MARKER)) n += 1;
+    // #3383 — a forged CI-heal marker from an untrusted login must not inflate this PR's CI-heal round cap.
+    if (typeof body === 'string' && body.trimStart().startsWith(CI_HEAL_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
   }
   return n;
 }

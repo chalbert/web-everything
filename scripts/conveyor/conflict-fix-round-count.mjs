@@ -26,12 +26,16 @@
  * differs, so this population's rounds can never silently inflate `countRearmComments`, and vice versa.
  *
  * WHY A NEW LEAF FILE AND NOT A CONSTANT INSIDE `reconcile-fix-dispatch.mjs` or `parked-pr-conflict-watch.mjs`.
- * Both of those carry a wide, impure import graph; this file is a true leaf (no imports at all) so
- * `we:scripts/conveyor/reconcile-core.mjs` — deliberately PURE and leaf-light — can depend on it with no new
- * edge to anything heavy. Same reasoning `advisory-round-count.mjs`'s own header states for itself.
+ * Both of those carry a wide, impure import graph; this file stays a leaf so `we:scripts/conveyor/reconcile-core.mjs`
+ * — deliberately PURE and leaf-light — can depend on it with no new edge to anything heavy. Same reasoning
+ * `advisory-round-count.mjs`'s own header states for itself. #3383 adds ONE import,
+ * `we:scripts/lib/marker-authorship.mjs` — itself a true leaf (no imports of its own, reads only `process.env`)
+ * — so this file's own leaf-lightness is unchanged.
  *
- * PURE. No fs, no clock, no process, no network.
+ * PURE. No fs, no clock, no network. Reads `process.env` (via the one leaf import) for the trusted-login
+ * overrides.
  */
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/conflict-fix-round-count.mjs#CONFLICT_FIX_COMMENT_MARKER — the stable FIRST LINE of the
@@ -57,7 +61,8 @@ export function countConflictFixComments(comments) {
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(CONFLICT_FIX_COMMENT_MARKER)) n += 1;
+    // #3383 — a forged conflict-fix marker from an untrusted login must not inflate this population's round cap.
+    if (typeof body === 'string' && body.trimStart().startsWith(CONFLICT_FIX_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
   }
   return n;
 }

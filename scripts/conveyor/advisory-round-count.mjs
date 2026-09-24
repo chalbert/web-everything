@@ -28,11 +28,14 @@
  * heavy, with a wide import graph (codex/antigravity judge-spawn, model-probation, the whole jury core). Pulling
  * that into `we:scripts/conveyor/reconcile-core.mjs`, which is deliberately PURE and leaf-light (no fs, no
  * clock, no process, no network — see that file's own header), would be exactly the kind of drift risk this
- * repo's "widen the shared thing, don't grow a private copy" rule exists to prevent. This file is a true leaf —
- * no imports of its own — so either side can depend on it with no new edge to anything heavy.
+ * repo's "widen the shared thing, don't grow a private copy" rule exists to prevent. This file stays a leaf —
+ * either side can depend on it with no new edge to anything heavy. #3383 adds ONE import,
+ * `we:scripts/lib/marker-authorship.mjs`, itself a true leaf (no imports of its own, reads only `process.env`).
  *
- * PURE. No fs, no clock, no process, no network.
+ * PURE. No fs, no clock, no network. Reads `process.env` (via the one leaf import) for the trusted-login
+ * overrides.
  */
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/advisory-round-count.mjs#ADVISORY_NOTE_MARKER — the stable FIRST LINE of the automatic
@@ -60,7 +63,8 @@ export function countAdvisoryComments(comments) {
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_NOTE_MARKER)) n += 1;
+    // #3383 — a forged advisory-note marker from an untrusted login must not inflate this durable count.
+    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_NOTE_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
   }
   return n;
 }
