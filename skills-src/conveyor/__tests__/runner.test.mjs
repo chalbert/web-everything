@@ -884,6 +884,9 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
       selfSync: true,
       onRestart: () => { order.push('restart'); return 'restarted'; },
       sync: () => ({ merged: true, commits: 3, reason: 'merged' }),
+      // #3383 live-smoke gate: this test is about restart PRECEDENCE (restart before token-refresh/tick), not
+      // the gate's own verdict — inject a passing one (real daemon-live-smoke.test.mjs covers the gate itself).
+      gate: async () => ({ adopt: true, reason: 'test-gate-pass' }),
       authOpts: {
         env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
         setEnv: () => { order.push('token-refresh'); },
@@ -951,6 +954,8 @@ describe('wireSelfSyncAndAppAuth — self-sync is OPT-IN (never mutates an inter
       root: '/irrelevant',
       onRestart: () => { calls.push('restart'); return 'restarted'; },
       sync: syncWouldMerge(calls),
+      // #3383 live-smoke gate: passing, so this test keeps proving selfSync opt-in wiring, not the gate.
+      gate: async () => ({ adopt: true, reason: 'test-gate-pass' }),
       authOpts: { log: { error: () => {} } },
       selfSync: true,
     });
