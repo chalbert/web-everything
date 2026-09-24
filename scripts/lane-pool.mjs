@@ -30,6 +30,7 @@
  *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
  *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease — in ANY pool under POOL_ROOT, per r2 — shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`. A STALE lease is never contested (r2): a dead holder has nothing to prove, so an expired lease releases without --force exactly as on main.
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
+ *   node scripts/lane-pool.mjs trim    [--max=N] [--dry-run] [--json]  # #4025 shrink the pool toward a cap (default per-repo, `LANE_POOL_TRIM_MAX` overridable): deletes HIGHEST-numbered lane dirs first among those with no live (or provably dead) lease, never reserved, nothing uncommitted beyond the scratch allowlist, and every ahead commit provably pushed — a lane with real unpushed/uncommitted work is reported, never removed. Crash-safe (rename to `.trash-<n>` then delete). Wired into `scripts/conveyor/lane-pool-health-watch.mjs`'s periodic pass.
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
  *
@@ -69,7 +70,7 @@
  * `release --lane=N --release-reserved`. (NOTE: this script only PROVISIONS the reserved lane; the live repoint
  * of the machine-global `~/.claude/…/memory` symlink at it is the SUPERVISED, human-gated half of #2350.)
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, statSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, statSync, renameSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
@@ -919,12 +920,26 @@ function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
   return { ...raw, dirty, ahead, aheadPushed };
 }
 
-/** Live remote tip SHAs (one network call, `timeout` guarded like the adjacent `gh` call — #2920). Returns
- *  an EMPTY set on any failure/timeout, so callers fail closed. */
-function liveRemoteShas(dir) {
+/**
+ * #4025 — like `liveRemoteShas`, but tells an outright PROBE FAILURE (timeout / unreachable / any git error —
+ * `tryGit` returned null) apart from a genuinely empty remote (no heads at all). The two read identically
+ * through the plain `liveRemoteShas` wrapper below (both "no SHAs"), which is exactly what let a 2026-09-23
+ * `list --acquirable` slowdown/timeout get silently misread as "nothing on this pool is provably pushed,
+ * therefore nothing is acquirable, therefore GROW" — `cmdProvision`'s `--acquirable` branch cloned 31 new
+ * lanes chasing a headroom that a live probe would never have needed. Any caller that must react differently
+ * to "we don't know" than to "we checked and there is genuinely nothing" needs `ok`, not just `shas`.
+ */
+function liveRemoteShasProbe(dir) {
   const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 20_000 });
-  if (out === null) return new Set();
-  return new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean));
+  if (out === null) return { ok: false, shas: new Set() };
+  return { ok: true, shas: new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean)) };
+}
+
+/** Live remote tip SHAs (one network call, `timeout` guarded like the adjacent `gh` call — #2920). Returns
+ *  an EMPTY set on any failure/timeout, so callers fail closed. Thin wrapper over `liveRemoteShasProbe` —
+ *  every caller that only ever needs "what's out there" (never "did the probe itself fail") keeps this. */
+function liveRemoteShas(dir) {
+  return liveRemoteShasProbe(dir).shas;
 }
 
 /** #2924 — the LOCAL equivalent of `liveRemoteShas`, network-free. Sound ONLY immediately after a fetch: a
@@ -1021,7 +1036,14 @@ function laneAcquirableInfo(repo, n, remoteShasBox = null, nowMs = Date.now(), t
   if (leaseDisqualifiesAcquire(lease, nowMs, ttlMs)) return { lane: n, exists: true, lease, dirtyOrAhead: null };
   const getRemoteShas = () => {
     if (!remoteShasBox) return new Set();
-    if (remoteShasBox.value === null) remoteShasBox.value = liveRemoteShas(dir);
+    if (remoteShasBox.value === null) {
+      // #4025 — record an outright probe FAILURE on the box itself (never on the returned Set, which stays
+      // "no SHAs" either way) so a caller deciding whether to GROW the pool (`cmdProvision`'s `--acquirable`
+      // branch) can tell "genuinely nothing pushed" from "we couldn't check" and refuse to grow on the latter.
+      const probe = liveRemoteShasProbe(dir);
+      remoteShasBox.value = probe.shas;
+      if (!probe.ok) remoteShasBox.failed = true;
+    }
     return remoteShasBox.value;
   };
   return {
@@ -1053,7 +1075,20 @@ function provisionLane(repo, n, force) {
 
 // #2426 — headroom past --count when growing to N ACQUIRABLE lanes, so a run with many foreign-leased lanes can
 // still cover N usable ones without cloning unboundedly (a corrupt lease that never reads acquirable would loop).
+// #4025 — this stays as the ABSOLUTE safety ceiling (belt-and-suspenders), but is no longer the practical bound:
+// see ACQUIRABLE_PROVISION_MAX_NEW below, which is what actually limits how many BRAND-NEW lanes one call clones.
 const ACQUIRABLE_PROVISION_HEADROOM = 32;
+
+// #4025 — live-traced root cause of the 2026-09-23 growth burst (lanes 84-114, 31 new lanes in ~4 minutes): a
+// `list --acquirable`-style acquirability probe failed/timed out under load, was read fail-safe as "0
+// acquirable", and this branch then cloned all the way to ACQUIRABLE_PROVISION_HEADROOM (32) chasing a count
+// that was never really missing. Two independent guards now bound that: (1) a small per-call cap on brand-new
+// clones — reaching it just means "ask again" for more capacity, never "clone dozens in one shot"; (2) an
+// outright remote-reachability PROBE FAILURE (see `liveRemoteShasProbe`) stops growth entirely rather than
+// treating "we don't know" as "grow" — see the loop below. `--max-new=N` overrides the default per call;
+// `LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW` overrides the default globally (e.g. for a daemon that wants a
+// different steady-state cap without touching every call site).
+const ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT = 4;
 
 function cmdProvision(repo) {
   const count = Number(flags.count);
@@ -1070,21 +1105,53 @@ function cmdProvision(repo) {
   if (flags.acquirable) {
     const nowMs = Date.now();
     const ttlMs = ttlMsFromFlags();
+    const existingCount = existingLanes(repo).length; // #4025 — snapshot BEFORE this call clones anything: any
+    // lane numbered past this is a BRAND-NEW clone this call is responsible for, never a pre-existing one.
     const cap = count + ACQUIRABLE_PROVISION_HEADROOM;
-    log(`provisioning up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}; cap lane-${cap})`);
+    const maxNewFlag = Number(flags['max-new']);
+    const maxNew = Number.isInteger(maxNewFlag) && maxNewFlag >= 0
+      ? maxNewFlag
+      : Number(process.env.LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW) || ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT;
+    log(`provisioning up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}; cap lane-${cap}; new-lane cap ${maxNew} this call)`);
     let acquirable = 0;
     let n = 0;
+    let newLanesCloned = 0;
+    let growthStoppedReason = null;
     // #3383 — ONE shared lazy `ls-remote` for this whole provisioning pass (see `laneAcquirableInfo`), not one
-    // per lane checked.
-    const remoteShasBox = { value: null };
+    // per lane checked. #4025 — `.failed` (see `laneAcquirableInfo`) records an outright probe failure the
+    // FIRST time this pass actually needs to check remote reachability (an existing lane read "ahead"); since
+    // existing lanes are always evaluated before any brand-new clone (the loop counts up from 1), a failure
+    // here is always known BEFORE growth would begin.
+    const remoteShasBox = { value: null, failed: false };
     while (acquirable < count && n < cap) {
-      n++;
+      const next = n + 1;
+      const isNewLane = next > existingCount;
+      if (isNewLane) {
+        if (remoteShasBox.failed) { growthStoppedReason = 'remote-probe-failed'; break; }
+        if (newLanesCloned >= maxNew) { growthStoppedReason = 'new-lane-cap'; break; }
+      }
+      n = next;
       const result = provisionLane(repo, n, force);
       if (!result.skipped) resetLanes.push(n);
+      if (isNewLane) newLanesCloned++;
       if (isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs), nowMs, ttlMs)) acquirable++;
     }
+    if (growthStoppedReason === 'remote-probe-failed') {
+      log(
+        `⚠ #4025 remote reachability probe (git ls-remote) failed while checking an existing lane — refusing to ` +
+        `clone MORE new lanes this call (cloned ${newLanesCloned} before stopping, through lane-${n}). This is a ` +
+        `deliberate fail-SAFE STOP, never a fail-safe GROW: investigate connectivity/timeouts, then re-run ` +
+        `provision --acquirable once the probe can actually answer.`,
+      );
+    } else if (growthStoppedReason === 'new-lane-cap') {
+      log(
+        `⚠ reached the per-call new-lane cap (${maxNew}; override with --max-new=N or LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW) ` +
+        `— stopped at lane-${n} having cloned ${newLanesCloned} new lane(s) this call; re-run provision --acquirable ` +
+        `again for more capacity rather than cloning dozens in one shot (#4025).`,
+      );
+    }
     if (acquirable < count) {
-      log(`⚠ only ${acquirable}/${count} lane(s) acquirable after provisioning through lane-${n} (rest hold a foreign lease / un-pushed work) — the orchestrator will log the contention and carry the overflow, never double up a lane.`);
+      log(`⚠ only ${acquirable}/${count} lane(s) acquirable after provisioning through lane-${n} (rest hold a foreign lease / un-pushed work${growthStoppedReason ? ', or growth was deliberately stopped early — see above' : ''}) — the orchestrator will log the contention and carry the overflow, never double up a lane.`);
     } else {
       log(`ensured ${count} acquirable lane(s) (provisioned through lane-${n}; skipped foreign-leased/busy lanes)`);
     }
@@ -1223,15 +1290,30 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
 // acquire's existing path (`tryClaimLane` reclaims a >TTL lease for THIS session, unchanged) — this pass only
 // acts on the NEW terminal axes, so it never changes TTL semantics. Everything is best-effort: a gh/git/fs
 // hiccup degrades the axis and leaves the lease in place, never blocks the acquire. Returns the reaped indices.
-function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
-  if (flags['no-reap']) return [];
+/**
+ * #4025 — the PURE-ISH planning half of the acquire-time ghost-lease backstop, extracted so `cmdTrim` (below)
+ * can reuse the EXACT SAME dead-lease liveness logic — never a second, separately-maintained "is this lease
+ * really dead" check. Computes the full {@link reapPlan} (`reap`/`keep`, each candidate carrying its `reason`)
+ * over every HELD lane in the pool, via the same two death signals `reapDeadLeasesInPool` always has: a
+ * best-effort `gh pr list` (PR-terminal) and an offline backlog-frontmatter read (item-resolved-on-main).
+ * Read-only — never mutates a lease or a lane. `reapDeadLeasesInPool` (the acquire-time MUTATING backstop)
+ * calls this and acts on `pr-merged`/`pr-closed` only, leaving `ttl-stale` to acquire's own reclaim; `cmdTrim`
+ * instead treats ANY `reap`-classified lease (ttl-stale included) as "no live holder", because a lane trim is
+ * about to physically delete has no "acquire falls through to the next lane" recovery path the way a
+ * lease-drop does.
+ * @param {object} repo
+ * @param {number} nowMs
+ * @param {number} ttlMs
+ * @returns {{reap: Array<{lane:number, dir:string, lease:object, reason:string}>, keep: Array}}
+ */
+function deadLeasePlan(repo, nowMs, ttlMs) {
   const candidates = [];
   for (const n of existingLanes(repo)) {
     const dir = laneDir(repo, n);
     const lease = readLease(dir);
     if (lease) candidates.push({ lane: n, dir, lease });
   }
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) return { reap: [], keep: [] };
   // PR-terminal axis (best-effort, one `gh pr list`): a merged/closed PR whose head ref `lane/<num>-*` maps
   // to a lease's item is a positive death signal. Degrades to OFF (null) if gh is absent / not a GitHub repo.
   let prStates = null;
@@ -1275,7 +1357,12 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
     if (holderPresumedGone && prState !== 'open' && prState !== 'merged' && prState !== 'closed' && itemResolvedOnMain(num)) prState = 'merged';
     return { prState, pidAlive: null }; // the pid axis is dormant under today's lease schema (see lease-reaper.pidAliveForLease)
   };
-  const { reap } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
+  return reapPlan(candidates, { nowMs, ttlMs, signalsFor });
+}
+
+function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
+  if (flags['no-reap']) return [];
+  const { reap } = deadLeasePlan(repo, nowMs, ttlMs);
   const reaped = [];
   for (const c of reap) {
     // Only the NEW terminal axes here — leave 'ttl-stale' to acquire's existing reclaim path. 'reserved' can
@@ -2079,6 +2166,194 @@ function cmdRemove(repo) {
   }
 }
 
+// ── trim (#4025) — shrink a pool that only ever grows toward a cap ──────────────────────────────────
+//
+// WHY. `provision --acquirable` grows the pool (via ACQUIRABLE_PROVISION_HEADROOM, see above) whenever nothing
+// looks free, but nothing ever shrinks it back — the real WE pool grew to 118 lanes / 87GB, and
+// `list --acquirable`'s own per-lane scan (bounded per #2547, but still O(pool size)) slowed from ~45s at 83
+// lanes to ~90s at 118. `trim` is the missing other half: delete lane directories, oldest-numbered-kept-first
+// (i.e. HIGHEST numbers removed first), down toward a cap — SAFE direction always wins, so a lane is only ever
+// removed when every one of these holds:
+//   • no live lease, or a lease `deadLeasePlan` (this file's shared reaper core, see above) classifies as
+//     provably dead — never a bare "no lease" check alone, so a lane whose session died mid-build without
+//     releasing is still eligible, exactly like the acquire-time ghost-lease backstop;
+//   • never a RESERVED (permanent) lease — no flag overrides this, unlike `remove --release-reserved`; trim's
+//     whole point is unattended, periodic, automatic capacity management, so it gets no deliberate-teardown
+//     escape hatch;
+//   • nothing uncommitted beyond the shared `we:scripts/lib/lane-litter.mjs` scratch allowlist;
+//   • every commit ahead of `origin/<branch>` is provably pushed or patch-equivalent (the SAME bounded
+//     `aheadIsProvablyPushed`/`effectiveDirtyOrAhead` machinery `list --acquirable` and `provision --acquirable`
+//     already use — never a second, unbounded check).
+// A lane failing any of these is left in place and reported — "N lanes hold unpushed/uncommitted work: lane-X…"
+// — never silently skipped with no trace.
+//
+// Wired into `we:scripts/conveyor/lane-pool-health-watch.mjs`'s periodic pass so pools shrink automatically; see
+// that file for the per-repo cap and cadence.
+
+/** #4025 — the default lane-count CAP per pool, keyed by `repo.name` (the same key `PORT_BANDS` uses). An
+ *  env override (`LANE_POOL_TRIM_MAX`) or an explicit `--max=N` both win over this; unknown pools fall back to
+ *  {@link TRIM_DEFAULT_CAP_FALLBACK}. WE's default (60) leaves real headroom over its current live size; the
+ *  constellation siblings' (20) leaves headroom over their real live sizes (16 / 13 when this was written) —
+ *  see {@link trimCapFor}'s own docblock for how to re-derive these if the live pools grow past them again. */
+const TRIM_DEFAULT_CAP = {
+  'web-everything': 60,
+  webeverything: 60,
+  frontierui: 20,
+  'plateau-app': 20,
+};
+const TRIM_DEFAULT_CAP_FALLBACK = 20;
+
+/** `--max=N` > `LANE_POOL_TRIM_MAX` env > {@link TRIM_DEFAULT_CAP}[repo.name] > {@link TRIM_DEFAULT_CAP_FALLBACK}. */
+function trimCapFor(repo) {
+  if (flags.max !== undefined) {
+    const n = Number(flags.max);
+    if (!Number.isInteger(n) || n < 0) fail('trim needs --max=<non-negative integer>');
+    return n;
+  }
+  const envRaw = process.env.LANE_POOL_TRIM_MAX;
+  if (envRaw !== undefined && envRaw !== '') {
+    const n = Number(envRaw);
+    if (Number.isInteger(n) && n >= 0) return n;
+  }
+  return TRIM_DEFAULT_CAP[repo.name] ?? TRIM_DEFAULT_CAP_FALLBACK;
+}
+
+/**
+ * Is lane `n` safe to physically remove right now? See the `trim` section header above for the full rule.
+ * Returns a `kind` alongside `eligible`/`reason` so `cmdTrim` can bucket its report (reserved / leased / work /
+ * ok) without re-deriving the classification from the prose reason string.
+ * @returns {{eligible:boolean, kind:'reserved'|'leased'|'work'|'ok', reason:string}}
+ */
+function laneRemovalEligibility(repo, n, { remoteShasBox, nowMs, ttlMs, deadReasonByLane }) {
+  const dir = laneDir(repo, n);
+  const lease = readLease(dir);
+  if (isReservedLease(lease)) {
+    return { eligible: false, kind: 'reserved', reason: `${describeLease(lease)} — a PERMANENT reserved lane; trim never removes it` };
+  }
+  if (lease) {
+    const deadReason = deadReasonByLane.get(n);
+    if (!deadReason) {
+      return { eligible: false, kind: 'leased', reason: `held (${describeLease(lease)}) — live lease, not provably dead` };
+    }
+    // Provably dead (ttl-stale / pr-merged / pr-closed / session-gone, per deadLeasePlan) — fall through to the
+    // tree check below rather than trusting the death signal alone: a merged PR proves the PUSHED commits
+    // landed, never that the lane's own working tree has no separate uncommitted residue.
+  }
+  const getRemoteShas = () => {
+    if (!remoteShasBox) return new Set();
+    if (remoteShasBox.value === null) remoteShasBox.value = liveRemoteShas(dir);
+    return remoteShasBox.value;
+  };
+  const { dirty, ahead } = effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas);
+  if (dirty) return { eligible: false, kind: 'work', reason: 'uncommitted changes beyond the scratch allowlist' };
+  if (ahead > 0) return { eligible: false, kind: 'work', reason: `${ahead} commit(s) ahead of origin/${repo.branch}, not provably pushed` };
+  return {
+    eligible: true,
+    kind: 'ok',
+    reason: lease ? `lease provably dead (${deadReasonByLane.get(n)}) — safe to remove` : 'idle, clean, up to date with origin',
+  };
+}
+
+/** Crash-safe removal (#4025): rename the lane dir to a `.trash-<n>-<ts>` SIBLING first (an atomic rename on
+ *  the same filesystem), then delete that. A process killed mid-`rmSync` leaves an inert `.trash-*` directory
+ *  — never a half-deleted `lane-N` that `laneIndicesIn`'s `/^lane-\d+$/` match could misread — which the next
+ *  trim run's {@link sweepLeftoverTrash} finishes. */
+function removeLaneDirSafely(repo, n) {
+  const dir = laneDir(repo, n);
+  if (!existsSync(dir)) return;
+  const trashDir = join(repo.poolDir, `.trash-${n}-${Date.now()}`);
+  try {
+    renameSync(dir, trashDir);
+  } catch (e) {
+    log(`  ⚠ lane-${n}: rename-to-trash failed (${e.message}) — removing directly instead`);
+    rmSync(dir, { recursive: true, force: true });
+    return;
+  }
+  rmSync(trashDir, { recursive: true, force: true });
+}
+
+/** Finish any `.trash-*` directory an earlier trim left behind (killed mid-delete). Real (non-dry-run) only —
+ *  a dry-run must never delete anything, including inert trash from a PRIOR run. */
+function sweepLeftoverTrash(repo) {
+  if (!existsSync(repo.poolDir)) return 0;
+  // `readdirSync`, not a shelled `ls -1` (which hides dot-prefixed entries by default and would silently never
+  // see a `.trash-*` leftover at all) — this needs to see hidden entries.
+  const entries = readdirSync(repo.poolDir).filter((e) => e.startsWith('.trash-'));
+  for (const e of entries) {
+    try {
+      rmSync(join(repo.poolDir, e), { recursive: true, force: true });
+      log(`  swept leftover ${e} (an interrupted earlier trim)`);
+    } catch { /* best-effort — a stuck leftover just waits for the next run */ }
+  }
+  return entries.length;
+}
+
+function cmdTrim(repo) {
+  const dryRun = !!flags['dry-run'];
+  const max = trimCapFor(repo);
+  const laneNums = existingLanes(repo); // ascending
+  const total = laneNums.length;
+
+  if (!dryRun) sweepLeftoverTrash(repo);
+
+  if (total <= max) {
+    log(`lane-pool trim "${repo.name}": ${total} lane(s), at/under the cap of ${max} — nothing to trim`);
+    if (flags.json) process.stdout.write(JSON.stringify({ repo: repo.name, root: repo.poolDir, total, max, removed: [], kept: [], dryRun }, null, 2) + '\n');
+    return;
+  }
+
+  const nowMs = Date.now();
+  const ttlMs = ttlMsFromFlags();
+  const excess = total - max;
+  const { reap: deadLeases } = deadLeasePlan(repo, nowMs, ttlMs);
+  const deadReasonByLane = new Map(deadLeases.map((c) => [c.lane, c.reason]));
+  const remoteShasBox = { value: null };
+
+  // Evaluate EVERY lane, highest lane number first, so the report always reflects the true priority order —
+  // then take only as many eligible ones as needed to reach the cap (highest numbers first, low numbers stay
+  // stable), even when the pool's top end is mostly busy and eligible lanes turn up further down.
+  const descending = [...laneNums].sort((a, b) => b - a);
+  const decisions = descending.map((n) => ({ lane: n, ...laneRemovalEligibility(repo, n, { remoteShasBox, nowMs, ttlMs, deadReasonByLane }) }));
+  const eligibleDesc = decisions.filter((d) => d.eligible);
+  const toRemoveSet = new Set(eligibleDesc.slice(0, excess).map((d) => d.lane));
+
+  const rows = decisions
+    .map((d) => ({
+      lane: d.lane,
+      action: toRemoveSet.has(d.lane) ? (dryRun ? 'would-remove' : 'removed') : 'keep',
+      kind: d.kind,
+      reason: d.eligible && !toRemoveSet.has(d.lane) ? `${d.reason} (cap already reached by higher-numbered removals)` : d.reason,
+    }))
+    .sort((a, b) => a.lane - b.lane);
+
+  if (!dryRun) {
+    const removeNow = [...toRemoveSet];
+    unmapLanes(repo, removeNow); // stop proxying a lane before its directory is gone (#2139)
+    for (const n of removeNow) removeLaneDirSafely(repo, n);
+    invalidateListCache(repo); // #xn432dz — the pool shape changed
+  }
+
+  for (const r of rows) log(`  lane-${r.lane}: ${r.action} — ${r.reason}`);
+  const removedCount = toRemoveSet.size;
+  const remaining = total - removedCount;
+  const workLanes = rows.filter((r) => r.kind === 'work');
+  if (workLanes.length) {
+    log(`  ${workLanes.length} lane(s) hold unpushed/uncommitted work, never removed: ${workLanes.map((r) => `lane-${r.lane}`).join(', ')}`);
+  }
+  log(
+    `lane-pool trim "${repo.name}": ${total} lane(s), cap ${max} → ${dryRun ? 'would remove' : 'removed'} ${removedCount}/${excess} needed ` +
+    `(${total} → ${remaining})${remaining > max ? ` — ⚠ still ${remaining - max} over cap, not enough safely-removable lanes found` : ''}`,
+  );
+  if (flags.json) {
+    process.stdout.write(JSON.stringify({
+      repo: repo.name, root: repo.poolDir, total, max, dryRun,
+      removed: rows.filter((r) => r.action === 'removed' || r.action === 'would-remove').map((r) => r.lane),
+      kept: rows.filter((r) => r.action === 'keep').map(({ lane, kind, reason }) => ({ lane, kind, reason })),
+      remaining, overCap: Math.max(0, remaining - max),
+    }, null, 2) + '\n');
+  }
+}
+
 // ── adopt (#2997 r2) — the dispatcher → worker OCCUPANCY hand-off ──────────────────────────────────
 //
 // WHY THIS EXISTS. `acquire` stamps `ownerSession` from the env of the process that RUNS it. When an operator
@@ -2163,6 +2438,8 @@ const KNOWN_FLAGS = new Set([
   'repo', 'reserve', 'scope', 'session', 'ttl-minutes', 'wait-ms',
   // #xn432dz — list --acquirable's single-flight cache / early-stop / bounded-scan knobs.
   'limit', 'no-cache', 'cache-ttl-ms', 'scan-timeout-ms',
+  // #4025 — provision --acquirable's per-call new-lane cap, and trim's own cap/dry-run knobs.
+  'max-new', 'max', 'dry-run',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -2176,6 +2453,7 @@ const COMMANDS = {
   adopt: cmdAdopt,
   release: cmdRelease,
   remove: cmdRemove,
+  trim: cmdTrim,
   map: cmdMap,
   unmap: cmdUnmap,
 };
@@ -2183,9 +2461,9 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
-      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
+      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }
