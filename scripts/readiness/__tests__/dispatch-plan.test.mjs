@@ -12,6 +12,8 @@ import {
   dispatchPlan, selectClearedRows, clearedNotReady,
   // #3457/#3460 — the age-gated already-done ground-truth enrichment (Fork 2(b)).
   isStaleEnoughForGroundTruth, ALREADY_DONE_AGE_GATE_MS,
+  // #x7xv2xt — the explicit free-lane list that keeps a fixture run off the real lane pool.
+  parseFreeLanes,
 } from '../dispatch-plan.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
 
@@ -852,5 +854,19 @@ describe('dispatchPlan — manual dispatch-pause (#3609): a deliberate operator 
       dispatchPaused: true,
     });
     expect(plan.held).toEqual([{ num: 1, reason: 'dispatch-paused' }]);
+  });
+});
+
+describe('parseFreeLanes — the explicit free-lane list (#x7xv2xt)', () => {
+  it('returns null when no list was given, so the shell reads the real pool', () => {
+    expect(parseFreeLanes(undefined)).toBeNull();
+    expect(parseFreeLanes(null)).toBeNull();
+  });
+  it('an empty value is a real answer: no free lanes', () => {
+    expect(parseFreeLanes('')).toEqual([]);
+    expect(parseFreeLanes(true)).toEqual([]); // a bare `--free-lanes`
+  });
+  it('parses ids ascending and drops non-integer tokens', () => {
+    expect(parseFreeLanes('7, 3,x,12,-1,')).toEqual([3, 7, 12]);
   });
 });

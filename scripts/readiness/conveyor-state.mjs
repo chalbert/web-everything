@@ -819,15 +819,26 @@ async function main(argv) {
   }
 
   // 2. Lane pool status + the live scope-lease picture (leases / overlaps / breach).
-  const poolArgs = ['status', '--json'];
-  if (typeof flags.repo === 'string') poolArgs.push(`--repo=${flags.repo}`);
-  if (typeof flags.name === 'string') poolArgs.push(`--name=${flags.name}`);
-  const poolStatus = runJson('node', [LANE_POOL_CLI, ...poolArgs], { errors, label: 'lane-pool status' });
-  // `--no-track-attempts` keeps this a PURE read (no breach-counter sidecar writes) — a state read must not mutate.
-  const scopeArgs = ['--json', '--no-track-attempts'];
-  if (typeof flags.repo === 'string') scopeArgs.push(`--repo=${flags.repo}`);
-  if (typeof flags.name === 'string') scopeArgs.push(`--name=${flags.name}`);
-  const scopePicture = runJson('node', [SCOPE_COLLECT_CLI, ...scopeArgs], { errors, label: 'scope-lease-collect' });
+  //    #x7xv2xt — FIXTURE MODE (`--backlog-dir`, or an explicit `--no-lane-pool`) never touches the real lane
+  //    pool: both reads would scan every real lane (a `git` walk per lane) for a synthetic corpus that has no
+  //    lanes at all. The picture gets an empty pool instead, and says so in `lanePool`.
+  const skipLanePool = typeof flags['backlog-dir'] === 'string' || flags['no-lane-pool'] === true;
+  let poolStatus;
+  let scopePicture;
+  if (skipLanePool) {
+    poolStatus = { lanes: [] };
+    scopePicture = { leases: [] };
+  } else {
+    const poolArgs = ['status', '--json'];
+    if (typeof flags.repo === 'string') poolArgs.push(`--repo=${flags.repo}`);
+    if (typeof flags.name === 'string') poolArgs.push(`--name=${flags.name}`);
+    poolStatus = runJson('node', [LANE_POOL_CLI, ...poolArgs], { errors, label: 'lane-pool status' });
+    // `--no-track-attempts` keeps this a PURE read (no breach-counter sidecar writes) — a state read must not mutate.
+    const scopeArgs = ['--json', '--no-track-attempts'];
+    if (typeof flags.repo === 'string') scopeArgs.push(`--repo=${flags.repo}`);
+    if (typeof flags.name === 'string') scopeArgs.push(`--name=${flags.name}`);
+    scopePicture = runJson('node', [SCOPE_COLLECT_CLI, ...scopeArgs], { errors, label: 'scope-lease-collect' });
+  }
 
   // 3. In-flight lane PRs (this repo's open PRs).
   let prList;
@@ -906,6 +917,8 @@ async function main(argv) {
   // human summary would just be the "eyeball four commands" this replaces). `--json` is accepted for call-site
   // symmetry with the sibling collectors but is not required.
   void flags.json;
+  // #x7xv2xt — flag a picture whose lane section is a stand-in, not the real pool. Absent on a normal run.
+  if (skipLanePool) picture.lanePool = 'skipped';
   // Emit the payload SYNCHRONOUSLY so it fully drains before the process exits — a plain
   // `process.stdout.write` is async to a pipe and `process.exit(0)` would drop the unflushed tail, truncating
   // this ~23 KB JSON for an `execFileSync`/pipe consumer. `writeLineSync` is remedy (b) from

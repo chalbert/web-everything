@@ -13,10 +13,12 @@
  *   (#9002, `blockedBy` an unresolved id), and two items already `active` with an in-flight PR each — one
  *   carrying `review:changes` (#9003) and one whose required check has gone red after a green open (#9004).
  *
- *   `dispatch-plan.mjs`'s own CLI shells the REAL `lane-pool.mjs list --acquirable --json` (no fixture for the
- *   shared lane pool exists, nor does this item ask for one), so the free-lane COUNT on the machine running
- *   this test is real and can be zero. The launch/held assertions below are written to hold either way — see
- *   the comment at that assertion. The fix/CI-heal decisions are asserted by calling `planTick` (the PURE
+ *   NO REAL LANE POOL (#x7xv2xt). `--backlog-dir` puts `conveyor-state.mjs` and `dispatch-plan.mjs` in fixture
+ *   mode: neither shells `lane-pool.mjs` or `scope-lease-collect.mjs` (both scan every real lane), and
+ *   dispatch-plan takes its free lanes from `--free-lanes=`. This used to shell the real pool, and test-spawned
+ *   runs were observed scanning ~129 real lanes for up to an hour, some orphaned after vitest died. A `node`
+ *   spy on `PATH` ({@link withNodeSpy}) records every script the CLIs start, and the test asserts neither
+ *   pool script is among them. The fix/CI-heal decisions are asserted by calling `planTick` (the PURE
  *   core) directly with a synthetic `freeLanes` + `bookkeeping.launchedNums`, sidestepping the real lane pool
  *   entirely for that half of the chain (a prior-tick "this conveyor already launched #9003/#9004" is supplied
  *   the way the real bookkeeping would carry it across ticks — `planFixSpawns`/`planCiHealSpawns` both gate on
@@ -29,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { withFakeGh } from './helpers/fake-gh.mjs';
+import { withNodeSpy } from './helpers/node-spy.mjs';
 import { planTick } from '../tick-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +69,8 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       ],
     });
 
+    const nodeSpy = withNodeSpy();
+
     try {
       writeItem(backlogDir, '9001-ready-item.md', {
         bornAs: 'x9001fix', kind: 'story', size: 2, status: 'open',
@@ -87,7 +92,11 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       // regardless of clearing, but leaving them uncleared too pins that clearing alone never overrides readiness.
       writeFileSync(queueFile, JSON.stringify([{ num: '9001', addedAt: new Date().toISOString() }]), 'utf8');
 
-      const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile };
+      // The node spy goes first on PATH, so every `node <script>` the CLIs shell is recorded (then really run).
+      const env = {
+        ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile,
+        PATH: `${nodeSpy.env.PATH.split(':')[0]}:${fakeGh.env.PATH}`, NODE_SPY_LOG: nodeSpy.env.NODE_SPY_LOG,
+      };
 
       // 1. backlog.mjs build-queue --backlog-dir — the READY set is exactly #9001 (open, unblocked); #9002 is
       //    blocked (unresolved blockedBy), #9003/#9004 are active (isReady requires status:open).
@@ -108,31 +117,38 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       const pr9004 = state.prs.find((p) => p.num === '9004');
       expect(pr9003?.labels).toContain('review:changes');
       expect(pr9004?.ci).toBe('fail');
+      expect(state.lanePool).toBe('skipped'); // #x7xv2xt — fixture mode: an empty pool, not the real one
 
       // The `--repo` gap this item closes (conveyor-state.mjs's `gh pr list` used to drop the flag other calls
       // in the same file already pass) — proven by inspecting what the fake `gh` actually received.
       const prListCall = fakeGh.calls().find((c) => c.argv[0] === 'pr' && c.argv[1] === 'list');
       expect(prListCall?.argv).toContain('--repo=fixture-org/fixture-repo');
 
-      // 3. dispatch-plan.mjs --backlog-dir — a blocked/active item is EXCLUDED from the ready queue upstream
-      //    (backlog.mjs build-queue never emits it), so #9002/#9003/#9004 can never appear in launch OR held —
-      //    that holds regardless of the machine's real free-lane count. #9001 (cleared + ready + scoped) DOES
-      //    reach the lane-assignment step, so it appears in EITHER launch (a real free lane existed, within the
-      //    concurrency cap) or held with reason "no free lane" (none did) or "capacity-cap" (#xupukxa — a free
-      //    lane existed, but this REAL machine's own already-active lease count already meets/exceeds
-      //    `WE_MAX_CONCURRENT_LANES`/its default, which this test does not control since it deliberately shells
-      //    the REAL lane-pool CLI, not a fixture) — never absent, and never any OTHER held reason.
+      // 3. dispatch-plan.mjs --backlog-dir --free-lanes — a blocked/active item is EXCLUDED from the ready queue
+      //    upstream (backlog.mjs build-queue never emits it), so #9002/#9003/#9004 can never appear in launch OR
+      //    held. #9001 (cleared + ready + scoped) launches onto the ONE fixture lane: fixture mode has no real
+      //    leases, so nothing overlaps and the concurrency cap is not reached. `--no-drift-check` and
+      //    `--no-pause-check` keep the two remaining real-state reads (the drift branch, the operator's pause
+      //    marker) out of a fixture run.
+      const spyMark = nodeSpy.scripts().length;
       const plan = JSON.parse(execFileSync(
-        'node', [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`],
+        process.execPath,
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=901', '--no-drift-check', '--no-pause-check'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       ));
       const allNums = [...plan.launch.map((l) => String(l.num)), ...plan.held.map((h) => String(h.num))];
       expect(allNums).not.toContain('9002');
       expect(allNums).not.toContain('9003');
       expect(allNums).not.toContain('9004');
-      const launched9001 = plan.launch.find((l) => String(l.num) === '9001');
-      const held9001 = plan.held.find((h) => String(h.num) === '9001');
-      expect(Boolean(launched9001) || held9001?.reason === 'no free lane' || held9001?.reason === 'capacity-cap').toBe(true);
+      expect(plan.launch).toEqual([expect.objectContaining({ num: '9001', lane: 901 })]);
+      expect(plan.lanePool).toEqual({ freeLanes: 'explicit', leases: 'fixture-empty' });
+
+      // #x7xv2xt — THE REAL LANE POOL WAS NEVER TOUCHED. The spy saw dispatch-plan's own `backlog.mjs` read
+      // (proving it sits on the path the CLI's children use), and no `lane-pool.mjs` / `scope-lease-collect.mjs`
+      // process was started by conveyor-state or dispatch-plan.
+      const started = nodeSpy.scripts();
+      expect(started.slice(spyMark).some((p) => p.endsWith('backlog.mjs'))).toBe(true);
+      expect(started.filter((p) => /lane-pool\.mjs$|scope-lease-collect\.mjs$/.test(p))).toEqual([]);
 
       // 4. tick-core.mjs's planTick (pure core) — fed the real `state` above, plus a SYNTHETIC freeLanes +
       //    bookkeeping.launchedNums simulating "this conveyor already launched #9003/#9004 on a prior tick"
@@ -149,6 +165,7 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       expect(decisions.spawnCiHeals.map((s) => ({ pr: s.pr, reason: s.reason }))).toEqual([{ pr: 502, reason: 'red-ci' }]);
     } finally {
       fakeGh.cleanup();
+      nodeSpy.cleanup();
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
   }, 60_000); // several `node` subprocess shells — generous timeout, not a perf assertion
