@@ -291,3 +291,40 @@ How each slice (a child of this item) graduates, per the statute
   independence a different session's `/review` pass (or the drain, once a review daemon is live for this
   repo) must supply. **#3916 is left `status: active`, NOT resolved** — landing on `main` is this item's own
   done-when, and the PR has not landed yet.
+
+- **2026-09-24 (#3854 landed — the land-advance core).** Graduation slice 5 of 6 for the land-advance
+  operation, building on #3853 (`we:scripts/operations/land-advance-tools.mjs`, already on `main`). Ported
+  `we:scripts/operations/land-advance.mjs` (the declared operation, `LAND_ADVANCE_OP`/`OWED_ACTIONS`),
+  `we:scripts/operations/land-advance-repair.mjs`, `we:scripts/operations/land-advance-escalations.mjs`,
+  `we:scripts/operations/land-advance-items.mjs` and the fixture byte-identical from the branch tip
+  (confirmed via `git diff origin/lane/mechanical-dispatcher` reporting 0 lines once staged) — none of
+  these five files existed on `main`, so this was a straight new-file port, not a diff-merge. Every named
+  import they take (`registry`, `step-kinds`, `constellation-repos`, `lane-concurrency`, `lane-manifest`,
+  `dispatch-plan`, `hiccup-classify`, plus #3853's own `we:scripts/operations/land-advance-tools.mjs`) was
+  checked name-by-name against `main`'s real exports before porting, matching this card's own claim.
+
+  `we:scripts/operations/__tests__/land-advance.test.mjs` needed a real adaptation, not a straight copy: the
+  branch's current copy has grown two test cases since this card was filed, calling `priorityQueue`/
+  `reconcileHolds` from `we:scripts/operations/land-advance-items-io.mjs` — that module is #3865's scope, and
+  #3865 is `blockedBy` this item, so it cannot land first. #3865's own card already flagged this forward
+  dependency ("Neither #3854 nor #3856 has been re-scoped for this yet"). Deferred rather than dropped: one
+  `it()` (the `priorityQueue` case) and the whole `describe('#3720 owed PR work honours reconcile-pass
+  refusals')` block (its one case calls `reconcileHolds`), each replaced with a comment pointing at #3865 to
+  restore when `we:scripts/operations/land-advance-items-io.mjs` lands. Everything else in the file,
+  including the `dispatchPlan`-based item-pull/budget/mode cases (`dispatchPlan` is already on `main`), is
+  untouched.
+
+  Verification: 51/51 on the two pure test files, 34/34 on `we:scripts/operations/__tests__/http-adapter.test.mjs`
+  (confirming no registration pin is needed yet — the module isn't wired into `we:scripts/operations/run.mjs`,
+  that's slice 6/#3856), full suite 575 files / 16407 tests / 0 failed, `check:standards` 0 errors,
+  `verify-lane` green. Pushed `lane/3854-graduate-land-advance-core`, opened PR #2593 (639 changed lines,
+  green, labelled `review:pending` on the size/blast-radius heuristic as expected). The independent review
+  this session dispatched (`we:scripts/operations/review-dispatch.mjs`) stalled repeatedly with
+  `outcome: blocked-on-infra` over roughly 100 minutes — at the time, EVERY open PR in the repo was stuck in
+  the identical `review-status:reviewing`/`review-stalled` oscillation (confirmed via `gh pr list`), and the
+  machine was running 62 concurrent `claude` processes at load average 13–18. Not a defect in the port; no
+  daemon code was touched — the resident review daemon's own outer retry loop is what eventually cleared it
+  once load eased (down to ~8 by the time it converged). Verdict landed `review:accepted` → `ready-to-merge`
+  → merged `33fdc6cdb` at 2026-09-24T19:55:31Z. Resolved via the drain's own auto-resolve-on-land plus this
+  session's own `we:scripts/operations/run.mjs resolve --ref=3854 --graduatedTo=none` call (idempotent with
+  it): `status: resolved`, `dateResolved: 2026-09-24`.
