@@ -196,9 +196,10 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
   const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
 
   it('matches the exact real-data triples named in the card', () => {
-    // #3897 ports rule 5 (#3889): this triple's one historical miss now carries its own `informative` and
-    // `rootCause` fields (rules 4 and 5), but its post-miss clean streak (5) is still below the post-miss
-    // bar (minCleanStreak + k = 8), so it stays `full`/`accruing` rather than the pre-#3897 `spot-check`.
+    // #3897 ports rule 5 (#3889): the real trial record carries no explicit `informative`/`rootCause`
+    // fields on any row (that data is intentionally not ported — see the #3443 tail-sweep card and
+    // platform-decisions.md#delegation-trial-record-graduation rules 1 and 4), so `hasInformative` is
+    // false here and this triple stays `full`/`accruing` rather than the pre-#3897 `spot-check`.
     expect(findTriple(report, 'codex', 'gpt-6-astra', 'other')).toMatchObject({
       evidenceLevel: 'full', effectiveLevel: 'full', state: 'accruing',
     });
@@ -231,10 +232,14 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
     expect(report.thresholds).toEqual({ minCleanStreak: 5, requireInformativeTrial: true, source: 'config-default', postMissK: 3 });
   });
 
-  it('states criteria rules 4 and 5 as built (landed by #3897), rule 6 as not-built, rule 7 as not-on-main, and the open decision (#3734)', () => {
+  it('states criteria rule 4 as not-on-main (no real row carries the field yet), rule 5 as built (landed by #3897), rule 6 as not-built, rule 7 as not-on-main, and the open decision (#3734)', () => {
+    // Rule 4 stays not-on-main against REAL_RECORDS: the trial-record data itself was intentionally not
+    // ported by #3897 (see #3443 tail-sweep + platform-decisions.md#delegation-trial-record-graduation
+    // rules 1 and 4), so no real row carries an explicit `informative` field yet, even though the router
+    // code now supports reading one (proven against synthetic fixtures elsewhere in this file).
     expect(report.criteria).toEqual([
       { rule: 3, label: 'Clean streak length N', state: 'config-default', detail: 'N = 5. A config default, changed by an ordinary finding against real data — not a ratified number.', ref: null },
-      { rule: 4, label: 'A trial is "informative" only by its own recorded field', state: 'built', detail: 'Built: at least one recorded trial carries its own `informative` field.', ref: '3888' },
+      { rule: 4, label: 'A trial is "informative" only by its own recorded field', state: 'not-on-main', detail: 'Built on the prototype branch. On main the router still infers it from the outcome.', ref: '3888' },
       { rule: 5, label: 'After a miss: root-cause note, then a higher bar (N + k)', state: 'built', detail: 'Built: the post-miss bar is N + k = 8.', ref: '3889' },
       { rule: 6, label: 'Promotion only by your ratified act', state: 'not-built', detail: 'No promotion record exists yet, so every task type stays at Full.', ref: '3784' },
       { rule: 7, label: 'Spot-check keeps a shallower independent look', state: 'not-on-main', detail: 'Built on the prototype branch.', ref: '3887' },
