@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
-  buildGhShimSettingsEnv,
+  buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure,
 } from '../gh-app-shim.mjs';
 
 const CONFIGURED_ENV = {
@@ -58,6 +58,27 @@ describe('resolveRealGhBinary — pure, given exists', () => {
 describe('ghShimPathOverride — pure', () => {
   it('prepends the shim dir ahead of whatever PATH already held', () => {
     expect(ghShimPathOverride({ dir: '/shim', currentPath: '/usr/bin:/bin' })).toBe('/shim:/usr/bin:/bin');
+  });
+});
+
+describe('looksLikeAppTokenAuthFailure — pure, distinguishes a rejected credential from every other gh failure', () => {
+  it('recognizes the exact live-caught signature (review-2582)', () => {
+    expect(looksLikeAppTokenAuthFailure('HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login -h github.com')).toBe(true);
+  });
+
+  it('recognizes "Bad credentials" case-insensitively even without the HTTP 401 line', () => {
+    expect(looksLikeAppTokenAuthFailure('bad credentials')).toBe(true);
+  });
+
+  it('does NOT match an unrelated failure — a missing PR, a bad flag, a network error', () => {
+    expect(looksLikeAppTokenAuthFailure('HTTP 404: Not Found')).toBe(false);
+    expect(looksLikeAppTokenAuthFailure('unknown flag --bogus')).toBe(false);
+    expect(looksLikeAppTokenAuthFailure('dial tcp: connection refused')).toBe(false);
+  });
+
+  it('handles empty/undefined input without throwing', () => {
+    expect(looksLikeAppTokenAuthFailure('')).toBe(false);
+    expect(looksLikeAppTokenAuthFailure(undefined)).toBe(false);
   });
 });
 
@@ -115,6 +136,69 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
         const out = JSON.parse(execFileSync(shimPath, ['--version'], { encoding: 'utf8' }));
         expect(out.ghToken).toBeFalsy();
         expect(out.argv).toEqual(['--version']);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a token that IS fresh by expiresAt but GitHub rejects (HTTP 401) falls back to personal auth instead of failing the session, and invalidates the shared cache (#xkse05k, live-caught review-2582)', () => {
+      const { dir, cachePath, shimPath } = setup();
+      const realGh = join(dir, 'real-gh');
+      // Rejects the App token specifically (exactly what GitHub did to review-2582's "fresh" cached token);
+      // succeeds when called with no GH_TOKEN at all (personal auth, proven healthy in the live incident).
+      writeFileSync(
+        realGh,
+        '#!/usr/bin/env node\n'
+          + 'if (process.env.GH_TOKEN) { process.stderr.write("HTTP 401: Bad credentials (https://api.github.com/graphql)\\n"); process.exit(1); }\n'
+          + 'console.log(JSON.stringify({ ghToken: process.env.GH_TOKEN || null, ok: true }));\n',
+        'utf8',
+      );
+      chmodSync(realGh, 0o755);
+      writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath }), 'utf8');
+      chmodSync(shimPath, 0o755);
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_rejected_but_fresh', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        const out = JSON.parse(execFileSync(shimPath, ['pr', 'view', '2582'], { encoding: 'utf8', env: { ...process.env, GH_TOKEN: undefined } }));
+        expect(out.ok).toBe(true);
+        expect(out.ghToken).toBeFalsy(); // the retry ran with no token override — personal auth, not the rejected one
+        expect(existsSync(cachePath)).toBe(false); // invalidated so the fleet's next refresh mints a replacement
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a REAL gh failure unrelated to auth (e.g. a genuinely missing PR) is passed through untouched — never retried, cache left alone', () => {
+      const { dir, cachePath, shimPath } = setup();
+      const realGh = join(dir, 'real-gh');
+      writeFileSync(
+        realGh,
+        '#!/usr/bin/env node\nprocess.stderr.write("HTTP 404: Not Found (https://api.github.com/graphql)\\n"); process.exit(1);\n',
+      );
+      chmodSync(realGh, 0o755);
+      writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath }), 'utf8');
+      chmodSync(shimPath, 0o755);
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_still_good', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        expect(() => execFileSync(shimPath, ['pr', 'view', '9999'], { encoding: 'utf8' })).toThrow(/status 1|Command failed/);
+        expect(existsSync(cachePath)).toBe(true); // never touched — this wasn't a credential rejection
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a rejected token with NO working fallback either still exits cleanly with the fallback\'s own code (no crash, no double-throw)', () => {
+      const { dir, cachePath, shimPath } = setup();
+      const realGh = join(dir, 'real-gh');
+      // Fails every time, auth-shaped or not — proves the retry's OWN outcome (not a swallowed success) is
+      // what the shim reports, and that trying twice never crashes.
+      writeFileSync(realGh, '#!/usr/bin/env node\nprocess.stderr.write("HTTP 401: Bad credentials (https://api.github.com/graphql)\\n"); process.exit(1);\n');
+      chmodSync(realGh, 0o755);
+      writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath }), 'utf8');
+      chmodSync(shimPath, 0o755);
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_rejected', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        expect(() => execFileSync(shimPath, ['pr', 'view', '2582'], { encoding: 'utf8' })).toThrow(/status 1|Command failed/);
+        expect(existsSync(cachePath)).toBe(false); // still invalidated — the rejection was real either way
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
