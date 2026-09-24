@@ -111,6 +111,11 @@ import { sleepSyncMs } from './readiness/drain-lock.mjs';
 // frontmatter-strict `status:` for the offline item-resolved reap axis (#2603 spoof-safe reader).
 import { classifyReap, reapPlan, prStatesFromList, itemNumFromSession } from './conveyor/lease-reaper.mjs';
 import { readField } from './backlog/frontmatter.mjs';
+// #3383 — the lane-history ledger (`<lane>/.git/lane-history.jsonl`): one line per acquire/adopt/release/reap,
+// so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
+// records that — see `scripts/lane-whois.mjs`, the reader). Lives in its OWN module (another worker owns this
+// file for PR #2606 concurrently) — the four call sites below are the only hook points.
+import { appendLaneHistory, laneHistoryEntry } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -1375,6 +1380,11 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
     // never appear in `reap` (classifyReap short-circuits it), so no memory lane is ever collected.
     if (c.reason !== 'pr-merged' && c.reason !== 'pr-closed') continue;
     try {
+      // #3383 — record the reap in the lane-history ledger BEFORE the marker is dropped (best-effort).
+      appendLaneHistory(c.dir, laneHistoryEntry({
+        event: 'reap', session: c.lease?.session, ownerSession: c.lease?.ownerSession || null,
+        holder: laneHolderSlug(c.lease), item: itemNumFromSession(c.lease?.session), reason: c.reason,
+      }));
       rmSync(LEASE_MARKER(c.dir), { force: true });
       unmapLanes(repo, [c.lane]); // a reaped ghost no longer renders its dead item (#2139)
       log(`  reaped lane-${c.lane} before acquire (${c.reason}; was ${describeLease(c.lease)}) — ghost lease reclaimed (#2748)`);
@@ -1701,6 +1711,16 @@ function cmdAcquire(repo) {
   // #2997 r2 — OCCUPANCY is a separate declaration from the lease, because `ownerSession` records whoever ran
   // THIS process, which for a dispatched lane is not the agent that will work in it. Say so at the seam.
   const occupant = laneWorkerSession(readLease(dir));
+  // #3383 — record this acquire in the lane-history ledger (best-effort; never fails the acquire itself).
+  appendLaneHistory(dir, laneHistoryEntry({
+    event: flags.reserve ? 'reserve' : 'acquire',
+    session,
+    ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+    workerSession: occupant,
+    purpose: flags.purpose,
+    item: flags.item,
+    holder: holderSlug,
+  }));
   if (occupant) log(`  occupant: ${occupant} (--adopt) — Edit/Write from any OTHER session is now refused (#2997)`);
   else log(`  occupant: NOT declared — hand this lane off with \`node scripts/lane-pool.mjs adopt --lane=${chosen}\` run BY the agent that will work in it (or re-run acquire with --adopt if that is you); until then the Edit/Write guard stays fail-open for this lane`);
   if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, holder: holderSlug, workerSession: occupant, purpose: flags.purpose || null, branch: repo.branch, base: flags.base || null, reserved: !!flags.reserve }, null, 2) + '\n');
@@ -1898,6 +1918,12 @@ function cmdRelease(repo) {
     // litter, the other 2 clean-but-ahead — the whole pool read 0 of 48 acquirable at once). Any
     // non-allowlisted dirty state (real uncommitted work) is left completely untouched by this call.
     cleanLaneLitter(dir);
+    // #3383 — record the release in the lane-history ledger BEFORE the marker is dropped (best-effort; the
+    // ledger lives in `.git/`, never touched by the marker unlink above it).
+    appendLaneHistory(dir, laneHistoryEntry({
+      event: 'release', session, ownerSession: lease.ownerSession || null, workerSession: lease.workerSession || null,
+      purpose: lease.purpose, item: itemNumFromSession(lease.session), holder: laneHolderSlug(lease),
+    }));
     rmSync(LEASE_MARKER(dir), { force: true });
     // #3466 — mirror acquire's write: a released lane must stop claiming the item it was working, the same way
     // cmdRefresh/cmdRemove/the acquire-time reset already clear it. Without this a release (or the reaper's
@@ -2645,6 +2671,8 @@ function cmdAdopt(repo) {
     );
   }
   writeFileSync(LEASE_MARKER(dir), JSON.stringify({ ...lease, workerSession: me }, null, 2) + '\n');
+  // #3383 — record the occupancy hand-off in the lane-history ledger (best-effort).
+  appendLaneHistory(dir, laneHistoryEntry({ event: 'adopt', ownerSession: me, workerSession: me, session: lease.session }));
   log(`  adopted lane-${n} — occupant session is now ${me}${current && current !== me ? ` (took over from ${current})` : ''}`);
   log('    Edit/Write into this lane from ANY other session is now refused by guard-lane.mjs (#2997).');
   if (flags.json) process.stdout.write(JSON.stringify({ lane: n, path: dir, workerSession: me, previousWorkerSession: current }, null, 2) + '\n');
