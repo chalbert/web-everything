@@ -5537,6 +5537,54 @@ premise corrected, clause 3 unchanged), [#poc-branch-declared-delivery-mode](#po
 
 ---
 
+### A resident health process watches the conveyor from its own failure domain, diagnoses deterministically first, dedups into episodes, and recommends without a session — it never clears readiness or edits code {#automated-health-daemon}
+
+**Ratified 2026-09-24** (`4065`, bornAs `xev8pnf`, operator, in session, in order: *"amend 1 as suggested"* ·
+*"ok to add new kind for fork 4"* · *"I ratify"*). Forks 2, 3 and 5 as prepared; Fork 1 amended by the operator
+(a dedicated clone that may run overlays of its own code, not a `main`-only clone); Fork 4's widening of the
+notification contract accepted explicitly. Grounding: `we:reports/2026-09-24-health-daemon-design.md` and
+[/research/automated-health-daemon-smells/](/research/automated-health-daemon-smells/). Six clauses:
+
+1. **Its own failure domain.** One health process per host, singleton lease, under
+   [#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle). Never inside a daemon it watches. It
+   runs from its own dedicated clone, shared with no other daemon, tracking `main` plus overlays of its own
+   code only (clause 5 of that statute; not a 5(e) carve-out — it does not merge to `main`). Every child call a
+   tick makes has a hard timeout, and each tick writes a last-tick-completed stamp, separate from the lease
+   heartbeat, which the outside check of that statute's clause 6 reads.
+2. **Deterministic first, agent last.** A smell is a cheap mechanical probe with a threshold; its declared
+   deterministic diagnosis runs first. An agent is dispatched only for a symptom with more than one plausible
+   cause the diagnosis did not settle, whose evidence must be read, that no other watch already dispatches
+   for, while no inhibiting episode (App token / rate limit, host load) is open. The agent is diagnose-only,
+   holds declared read operations only (no Edit, Write or `gh` write), and is launched as a kind on the
+   declared `dispatch-lane` operation
+   ([#conveyor-dispatch-calls-the-declared-operation](#conveyor-dispatch-calls-the-declared-operation)).
+   Per-smell `action` and `diagnose` are data, not code.
+3. **One event is an episode** per (smell, subject), opened and closed with hysteresis, with a flap cap (> 3
+   re-opens in 24 h → one `flapping` episode), one high-severity reminder after 4 h, and silences for a
+   tracked episode that expire after 72 h unless the tracking card is `active`. One agent and one
+   notification per episode.
+4. **The recommendation lands without a session**: a per-episode report passed through the privacy scrub of
+   [#automated-session-introspection](#automated-session-introspection) clause 3, and a HEALTH section in the
+   operator queue headed by the health process's last-tick-completed age. The health process itself (not the
+   dispatcher's `operator-notify` pass) sends an OS notification when a high-severity episode opens — the only
+   class besides NEEDS YOU that notifies.
+5. **A finding becomes a card only as an uncleared filing request**, landed through a lane-bound declared
+   operation in its own leased lane (never the health clone). The health process never clears readiness
+   ([#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates) clause 3) and never edits
+   code; a card scoped to daemon code is never auto-cleared by any path
+   ([#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3). No filing while a
+   lane-starvation episode is open; at most 3 requests a day.
+6. **Ships in `shadow`.** Smells, episodes, diagnoses and reports run; agent dispatch, notifications and
+   filing are each turned on by the operator's settings change, with the shadow run's per-smell episode counts
+   as evidence ([#planner-build-plan-and-execute](#planner-build-plan-and-execute) clause 9 precedent).
+
+**Lineage:** #4065 (ratified 2026-09-24, prepared the same day with one Opus skeptic round and one
+fresh-context screen; ratify-time `judgePanel` skeptic `ratify-4065` found no refutation). Build slices 4077,
+4078, 4068, 4066, 4079, 4081 under epic 4075. Composes with #4045 (outside heartbeat check reads the
+last-tick stamp) and #4052 (state root).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
