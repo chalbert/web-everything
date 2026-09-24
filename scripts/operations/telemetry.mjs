@@ -249,6 +249,8 @@ export const METRIC_NAMES = Object.freeze([
   // names, not one name with a `metric` attribute — this file's own established convention (see
   // `dispatch.tokens.*` / `host.process.*` above) so a plain sum-by-name rollup needs no attribute filter.
   'gh.throttle.rate_limited', 'gh.throttle.backoff_ms', 'gh.throttle.exhausted',
+  // the GitHub API budget left, read by the host sampler every few minutes whoever spent it (`host-sampler-github.mjs`)
+  'gh.rate_limit.remaining', 'gh.rate_limit.error',
   // ── INDEPENDENT HOST SAMPLER (#3383, `host-sampler.mjs`) — written by the sampler on its OWN cadence, not on
   // runner ticks, so a burst between ticks is captured. Every sampler record carries `attributes.source =
   // 'host-sampler'` and a shared `attributes.sample` id (metrics of one sample do NOT share a timestamp otherwise).

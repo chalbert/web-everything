@@ -451,7 +451,11 @@ export async function acquireSlotBlocking({
   if (isAdmissionOff(env)) return { ok: false, slot: null, timedOut: false, disabled: true, waitedMs: 0 };
 
   const startedAt = now();
-  const first = tryAcquireSlot({ lockRoot, cap, owner, nowMs: startedAt, nowIso: new Date(startedAt).toISOString(), pid, leaseMinutes });
+  const requestedAt = new Date(startedAt).toISOString();
+  // The wait is recorded ON the slot at the moment it is won (#3383 capacity audit 2026-09-23): the host sampler
+  // used to infer it from waiting markers it happened to see in an earlier sample, which caught 2 of 927 runs.
+  const waitMeta = (atMs) => ({ requestedAt, acquiredAt: new Date(atMs).toISOString(), waitedMs: Math.max(0, atMs - startedAt) });
+  const first = tryAcquireSlot({ lockRoot, cap, owner, nowMs: startedAt, nowIso: requestedAt, pid, leaseMinutes, meta: waitMeta(startedAt) });
   if (first.ok) return { ok: true, slot: first.slot, timedOut: false, waitedMs: 0 };
 
   pruneStaleWaiting({ lockRoot, nowMs: startedAt, timeoutMs: ceilingMs });
@@ -466,7 +470,7 @@ export async function acquireSlotBlocking({
       }
       await sleep(pollMs);
       const attempt = now();
-      const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes });
+      const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes, meta: waitMeta(attempt) });
       if (r.ok) return { ok: true, slot: r.slot, timedOut: false, waitedMs: attempt - startedAt };
       if (attempt - lastLoggedAt >= stillWaitingLogMs) {
         log(`heavy-command admission: still waiting for a free slot (cap=${cap}) after ${Math.round((attempt - startedAt) / 60_000)}m — every held slot's holder still appears alive; will proceed unslotted at the ${Math.round(ceilingMs / 60_000)}m ceiling.\n`);

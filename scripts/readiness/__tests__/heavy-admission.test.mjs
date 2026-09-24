@@ -303,6 +303,21 @@ describe('acquireSlotBlocking — polls until free, marks/clears waiting, FAILS 
     expect(listWaiting(lockRoot)).toHaveLength(0); // cleared on success
   });
 
+  it('records the wait on the won slot (requestedAt, acquiredAt, waitedMs) so a reader never has to infer it', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    const sleep = async (ms) => { clock += ms; releaseOwnedSlot({ lockRoot, cap: 1, owner: 'HOLDER' }); };
+    const r = await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'W', pollMs: 3000, now: () => clock, sleep });
+    expect(r.ok).toBe(true);
+    const [held] = heldSlots({ lockRoot, cap: 1 });
+    expect(held.meta).toEqual({ requestedAt: iso(T0), acquiredAt: iso(T0 + 3000), waitedMs: 3000 });
+  });
+
+  it('records a zero wait on a slot won at the first try', async () => {
+    await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'A', now: () => T0, sleep: async () => {} });
+    expect(heldSlots({ lockRoot, cap: 1 })[0].meta).toEqual({ requestedAt: iso(T0), acquiredAt: iso(T0), waitedMs: 0 });
+  });
+
   it('keeps polling PAST the old 20-minute DEFAULT_TIMEOUT_MS mark while the holder is still alive — the exact xhlriy2 fix', async () => {
     // 'HOLDER' is recorded under THIS test process's own pid (tryAcquireSlot's pid default), so the waiter's
     // liveness probe against it reports 'unknown' (never provably dead) — it must never be reclaimed by time

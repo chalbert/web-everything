@@ -145,6 +145,91 @@ export function otelSampleToRecord(sample, receivedAt) {
   };
 }
 
+// ── API REQUEST EVENTS (OTLP logs, allowlisted) ─────────────────────────────────────────────────────────
+// #3383 capacity audit 2026-09-23: metrics alone never say how long an API request took or whether it was refused
+// (429 rate limit, 529 overload), so an API-bound hour looked like a hardware limit. Claude Code sends those facts
+// only as LOG events, and log events can carry content (a prompt, a tool's input), so nothing from `/v1/logs` is
+// kept except the two API event kinds below, each projected through a closed field allowlist at ingest. A new
+// attribute Claude Code starts sending is dropped until it is added here on purpose.
+
+/** The log event kinds kept (the `claude_code.` prefix stripped). */
+export const KEPT_API_EVENTS = Object.freeze(['api_request', 'api_error']);
+
+/** The only attributes an API event record may carry. Numbers stay numbers; nothing else passes. */
+export const API_EVENT_FIELDS = Object.freeze([
+  'event.timestamp', 'session.id', 'model', 'query_source', 'effort', 'status_code', 'attempt', 'duration_ms',
+  'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'cost_usd', 'error_type',
+]);
+
+/** An API error message is reduced to its leading error type (`rate_limit_error`, `overloaded_error`, ...), never kept whole. */
+export function errorTypeOf(message) {
+  const m = /\b([a-z]+(?:_[a-z]+)*_error)\b/.exec(String(message ?? ''));
+  return m ? m[1] : (message ? 'other' : null);
+}
+
+/**
+ * PURE. Flatten an OTLP `ExportLogsServiceRequest` JSON body into allowlisted API event records. Everything that is
+ * not an {@link KEPT_API_EVENTS} event is dropped; every kept event keeps only {@link API_EVENT_FIELDS}.
+ * @param {object} body
+ * @param {string} receivedAt ISO instant
+ * @returns {Array<{v:1, receivedAt:string, name:string, attributes:object}>}
+ */
+export function parseOtlpApiEvents(body, receivedAt) {
+  const out = [];
+  for (const rl of Array.isArray(body?.resourceLogs) ? body.resourceLogs : []) {
+    const resourceAttrs = parseOtlpAttributes(rl?.resource?.attributes);
+    for (const sl of Array.isArray(rl?.scopeLogs) ? rl.scopeLogs : []) {
+      for (const rec of Array.isArray(sl?.logRecords) ? sl.logRecords : []) {
+        const attrs = { ...resourceAttrs, ...parseOtlpAttributes(rec?.attributes) };
+        const rawName = String(attrs['event.name'] ?? rec?.body?.stringValue ?? '');
+        const kind = rawName.replace(/^claude_code\./, '');
+        if (!KEPT_API_EVENTS.includes(kind)) continue;
+        const picked = {};
+        for (const k of API_EVENT_FIELDS) {
+          if (k === 'error_type') continue;
+          const v = attrs[k];
+          if (v === undefined || v === null || v === '') continue;
+          const n = Number(v);
+          picked[k] = k === 'session.id' || k === 'model' || k === 'query_source' || k === 'effort' || k === 'event.timestamp' ? String(v).slice(0, 80) : (Number.isFinite(n) ? n : null);
+        }
+        if (kind === 'api_error') picked.error_type = errorTypeOf(attrs.error);
+        out.push({ v: 1, receivedAt, name: `claude_code.${kind}`, attributes: picked });
+      }
+    }
+  }
+  return out;
+}
+
+const pct = (xs, p) => { const s = xs.filter(Number.isFinite).sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : null; };
+
+/**
+ * PURE. Per-hour rollup of API event records: requests, p50/p90 request duration, and errors by type (with the
+ * 429 and 529 counts named, since those are the "the API was the limit" signals).
+ * @param {object[]} records {@link parseOtlpApiEvents} output
+ * @returns {Array<{hour:string, requests:number, durationP50Ms:number|null, durationP90Ms:number|null, errors:number, rateLimited:number, overloaded:number, errorTypes:Record<string,number>}>}
+ */
+export function summarizeApiEvents(records) {
+  const byHour = new Map();
+  for (const r of Array.isArray(records) ? records : []) {
+    const at = r?.attributes?.['event.timestamp'] ?? r?.receivedAt;
+    const t = Date.parse(at);
+    if (!Number.isFinite(t)) continue;
+    // utc-day-slice-ok: an hour bucket key over machine timestamps
+    const hour = new Date(t).toISOString().slice(0, 13);
+    const h = byHour.get(hour) ?? { hour, durations: [], requests: 0, errors: 0, rateLimited: 0, overloaded: 0, errorTypes: {} };
+    if (r.name === 'claude_code.api_request') { h.requests += 1; h.durations.push(r.attributes.duration_ms); }
+    if (r.name === 'claude_code.api_error') {
+      h.errors += 1;
+      const ty = r.attributes.error_type ?? 'other';
+      h.errorTypes[ty] = (h.errorTypes[ty] || 0) + 1;
+      if (r.attributes.status_code === 429) h.rateLimited += 1;
+      if (r.attributes.status_code === 529) h.overloaded += 1;
+    }
+    byHour.set(hour, h);
+  }
+  return [...byHour.values()].sort((a, b) => a.hour.localeCompare(b.hour)).map(({ durations, ...h }) => ({ ...h, durationP50Ms: pct(durations, 0.5), durationP90Ms: pct(durations, 0.9) }));
+}
+
 // ── IO SHELL ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -162,6 +247,12 @@ export function claudeOtelDir(root = CLAUDE_OTEL_ROOT) {
   const override = process.env.OPERATION_CLAUDE_OTEL_DIR;
   if (override && String(override).trim() !== '') return resolve(String(override));
   return join(root, '.operations', 'claude-otel');
+}
+
+/** `<claude-otel dir>/api` — the allowlisted API request/error events, kept apart from the metric day files so a
+ *  reader that sums every record of a day file never mixes the two. */
+export function claudeOtelApiDir(root = CLAUDE_OTEL_ROOT) {
+  return join(claudeOtelDir(root), 'api');
 }
 
 /** The day key (`YYYY-MM-DD`) a record at `iso` belongs to — UTC, same "storage partition key, not an
@@ -265,18 +356,19 @@ function readBody(req, { maxBytes = 8 * 1024 * 1024 } = {}) {
 
 /**
  * Start the collector's `node:http` server. `POST /v1/metrics` parses an OTLP/HTTP-JSON metrics export and
- * appends every `claude_code.*` sample to `store`; every other path/method (including `POST /v1/logs`, in
- * case `OTEL_LOGS_EXPORTER` is ever pointed here by mistake — this repo never sets it, deliberately, since
- * logs carry prompt/response content) gets a harmless 200/404 so Claude Code's own exporter never sees this
- * receiver as a reason to retry or log an error. NEVER throws out of a request handler: a malformed body is
+ * appends every `claude_code.*` sample to `store`. `POST /v1/logs` keeps ONLY the allowlisted API request and
+ * error events ({@link parseOtlpApiEvents}) in `apiStore`: log events can carry prompt or tool content, so every
+ * other event and every non-allowlisted attribute is dropped at ingest (#3383 capacity audit 2026-09-23). Every
+ * other path/method gets a harmless 200/404 so Claude Code's own exporter never sees this receiver as a reason to
+ * retry or log an error. NEVER throws out of a request handler: a malformed body is
  * answered 200 (an OTLP exporter has no retry-on-4xx contract this file wants to trigger) and the parse
  * failure is swallowed — a self-tracking receiver must never be the thing that makes a real Claude Code
  * session slower or noisier.
- * @param {{port?: number, store?: object, now?: () => Date, log?: (msg: string) => void}} [o]
+ * @param {{port?: number, store?: object, apiStore?: object, now?: () => Date, log?: (msg: string) => void}} [o]
  * @returns {Promise<{server: import('node:http').Server, port: number, close: () => Promise<void>}>}
  */
 export function startOtelCollectorServer({
-  port = 4318, store = createFileOtelStore(), now = () => new Date(), log = (m) => process.stdout.write(`${m}\n`),
+  port = 4318, store = createFileOtelStore(), apiStore = createFileOtelStore({ dir: claudeOtelApiDir() }), now = () => new Date(), log = (m) => process.stdout.write(`${m}\n`),
 } = {}) {
   const server = createServer((req, res) => {
     if (req.method === 'POST' && req.url && req.url.startsWith('/v1/metrics')) {
@@ -299,8 +391,13 @@ export function startOtelCollectorServer({
       return;
     }
     if (req.method === 'POST' && req.url && req.url.startsWith('/v1/logs')) {
-      // Drained and dropped — never persisted. See this function's own docblock.
-      readBody(req).then(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}'); });
+      // Only the allowlisted API events are kept; everything else in the body is dropped. See this function's docblock.
+      readBody(req).then((text) => {
+        try {
+          for (const rec of parseOtlpApiEvents(JSON.parse(text || '{}'), now().toISOString())) apiStore.append(rec);
+        } catch { /* a malformed logs body is dropped, never an error to the exporter */ }
+        res.writeHead(200, { 'content-type': 'application/json' }); res.end('{}');
+      });
       return;
     }
     res.writeHead(404, { 'content-type': 'text/plain' });
@@ -321,15 +418,29 @@ export function startOtelCollectorServer({
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-const USAGE = 'usage: claude-otel-collector.mjs [--port=4318]';
+const USAGE = 'usage: claude-otel-collector.mjs [--port=4318]\n       claude-otel-collector.mjs api-report [--hours=24] [--json]   (per-hour API requests, latency and errors, read-only)';
 
-export async function runClaudeOtelCollectorCli(argv, { out = (s) => process.stdout.write(s) } = {}) {
+/** `api-report`: the per-hour API rollup over the last `--hours` hours of the allowlisted event files. Read-only. */
+function apiReport(argv, { out, apiStore = createFileOtelStore({ dir: claudeOtelApiDir() }), nowMs = Date.now() }) {
+  const hoursFlag = argv.find((a) => a.startsWith('--hours='));
+  const hours = Math.max(1, Number(hoursFlag?.slice('--hours='.length)) || 24);
+  const since = nowMs - hours * 3_600_000;
+  const recs = apiStore.readAll().filter((r) => Date.parse(r.attributes?.['event.timestamp'] ?? r.receivedAt) >= since);
+  const rows = summarizeApiEvents(recs);
+  if (argv.includes('--json')) { out(`${JSON.stringify({ hours, rows })}\n`); return 0; }
+  if (!rows.length) { out(`no API events in the last ${hours} h (is OTEL_LOGS_EXPORTER=otlp set for Claude Code?)\n`); return 0; }
+  for (const r of rows) out(`${r.hour}:00Z  ${r.requests} req  p50 ${r.durationP50Ms ?? '-'} ms  p90 ${r.durationP90Ms ?? '-'} ms  errors ${r.errors} (429: ${r.rateLimited}, 529: ${r.overloaded})\n`);
+  return 0;
+}
+
+export async function runClaudeOtelCollectorCli(argv, { out = (s) => process.stdout.write(s), apiStore, nowMs } = {}) {
   if (argv.includes('--help') || argv.includes('-h')) { out(`${USAGE}\n`); return 0; }
+  if (argv[0] === 'api-report') return apiReport(argv.slice(1), { out, ...(apiStore ? { apiStore } : {}), ...(nowMs ? { nowMs } : {}) });
   const portFlag = argv.find((a) => a.startsWith('--port='));
   const port = portFlag ? Number(portFlag.slice('--port='.length)) || 4318 : 4318;
   const store = createFileOtelStore();
   const { port: actualPort } = await startOtelCollectorServer({ port, store, log: (m) => out(`${m}\n`) });
-  out(`claude-otel-collector: listening on http://localhost:${actualPort} (POST /v1/metrics) — writing to ${store.dir}\n`);
+  out(`claude-otel-collector: listening on http://localhost:${actualPort} (POST /v1/metrics, /v1/logs API events only) — writing to ${store.dir}\n`);
   out('This process must keep running for OTEL-configured Claude Code sessions to have anywhere to send usage data. Ctrl-C to stop.\n');
   return 0; // never resolves in practice — the http server keeps the event loop alive until Ctrl-C/SIGTERM.
 }

@@ -77,7 +77,7 @@ export function parseThreadCounts(text) {
  *   cpuPct:number, rssBytes:number, procs:number, lane:string|null, session:{name:string|null,kind:string}|null,
  *   holder:object|null, command:string}>}
  */
-export function findHeavyRuns({ rows, lanes = [], cwds = {}, sessionByPid = null, holders = new Map(), nowMs, redact = (s) => s }) {
+export function findHeavyRuns({ rows, lanes = [], cwds = {}, sessionByPid = null, holders = new Map(), waiting = [], nowMs, redact = (s) => s }) {
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const cls = new Map(rows.map((r) => [r.pid, refineWithRoster(classifyCommandClass(r.command), r.pid, sessionByPid)]));
   const children = new Map();
@@ -104,6 +104,19 @@ export function findHeavyRuns({ rows, lanes = [], cwds = {}, sessionByPid = null
     }
     return null;
   };
+  // A process waiting in the admission queue, keyed by pid → its marker (`heavy-admission.mjs#markWaiting`).
+  const waiterByPid = new Map((Array.isArray(waiting) ? waiting : []).filter((w) => Number.isInteger(w?.pid)).map((w) => [w.pid, w]));
+  const waiterOf = (r) => {
+    const seen = new Set();
+    for (let cur = r, hop = 0; cur && !seen.has(cur.pid) && hop < MAX_HOPS; hop++) { seen.add(cur.pid); if (waiterByPid.has(cur.pid)) return waiterByPid.get(cur.pid); cur = byPid.get(cur.ppid); }
+    return null;
+  };
+  // Lane fallback when the process tree itself gives none (#3383 capacity audit 2026-09-23: 26-66% of runs were
+  // `unattributed` while their slot holder named the lane): the lane path the admission queue recorded as the owner.
+  const laneOfOwner = (owner) => {
+    const p = String(owner ?? '').replace(/#\d+$/, '');
+    return p ? lanes.find((l) => p === l.path || p.startsWith(`${l.path}/`)) ?? null : null;
+  };
   const runs = [];
   for (const root of rows) {
     if (!isHeavy(root) || heavyAncestor(root)) continue;
@@ -111,12 +124,17 @@ export function findHeavyRuns({ rows, lanes = [], cwds = {}, sessionByPid = null
     while (stack.length) { const r = stack.pop(); if (seen.has(r.pid)) continue; seen.add(r.pid); tree.push(r); for (const c of children.get(r.pid) ?? []) stack.push(c); }
     const childFamilies = {};
     for (const r of tree) { const c = cls.get(r.pid); if (HEAVY_CLASSES.includes(c)) childFamilies[c] = (childFamilies[c] || 0) + 1; }
-    const lane = laneOf(root);
+    const holder = holderOf(root) ?? tree.map((r) => holders.get(r.pid)).find(Boolean) ?? null;
+    const waiter = waiterOf(root) ?? tree.map((r) => waiterByPid.get(r.pid)).find(Boolean) ?? null;
+    const own = laneOf(root);
+    const fallback = own ? null : laneOfOwner(holder?.owner) ?? laneOfOwner(waiter?.owner);
+    const lane = own ? own.lane : fallback;
     runs.push({
       rootPid: root.pid, startMs: nowMs - (Number.isFinite(root.etimeS) ? root.etimeS * 1000 : 0), family: cls.get(root.pid), childFamilies,
       treePids: tree.map((r) => r.pid).sort((a, b) => a - b), cpuPct: r1(tree.reduce((t, r) => t + (r.pcpu || 0), 0)), rssBytes: tree.reduce((t, r) => t + (r.rssKb || 0) * 1024, 0), procs: tree.length,
       // the slot's pid may sit ABOVE the root (a `heavy-admission.mjs run` wrapper) or INSIDE its tree (a shell that runs `verify-lane.mjs`, which holds its own slot)
-      lane: lane ? `${lane.lane.pool}/${lane.lane.lane}` : null, session: sessionOf(root), holder: holderOf(root) ?? tree.map((r) => holders.get(r.pid)).find(Boolean) ?? null, command: redact(String(root.command)).slice(0, 120),
+      lane: lane ? `${lane.pool}/${lane.lane}` : null, laneSource: own ? own.source : (fallback ? 'admission-owner' : null),
+      session: sessionOf(root), holder, waiting: waiter != null, command: redact(String(root.command)).slice(0, 120),
     });
   }
   return runs.sort((a, b) => a.rootPid - b.rootPid);
@@ -146,19 +164,29 @@ export function stepEpisodes({ prev, runs, probe = {}, ctx, waiters = {}, nowMs,
     const cpuByPid = { ...(st?.cpuByPid ?? {}) };
     for (const pid of run.treePids) { const t = probe.cpu?.[pid]; if (Number.isFinite(t)) cpuByPid[pid] = Math.max(cpuByPid[pid] ?? 0, t); }
     const threads = run.treePids.reduce((t, pid) => t + (probe.threads?.[pid] ?? 0), 0);
-    const acquiredMs = run.holder && Number.isFinite(run.holder.heldForS) ? nowMs - run.holder.heldForS * 1000 : null;
-    const waitedFrom = run.holder?.pid != null ? waiters[String(run.holder.pid)] : undefined;
+    // An UNSLOTTED holder (a `heavy-admission.mjs run` wrapper that failed open) is not an admission.
+    const slotted = run.holder && !run.holder.unslotted ? run.holder : null;
+    // Prefer the wait the holder recorded at acquire; fall back to the older inference from waiting markers seen
+    // in an earlier sample (only works for waits longer than one interval, and for slots won by an older writer).
+    const acquiredMs = slotted && Number.isFinite(slotted.heldForS) ? nowMs - slotted.heldForS * 1000 : null;
+    const waitedFrom = slotted?.pid != null ? waiters[String(slotted.pid)] : undefined;
+    const inferredWaitS = acquiredMs != null && Number.isFinite(waitedFrom) ? Math.max(0, r1((acquiredMs - waitedFrom) / 1000)) : null;
+    const waitNow = Number.isFinite(slotted?.waitS) ? slotted.waitS : inferredWaitS;
+    const admState = slotted ? 'held' : run.holder?.unslotted ? 'unslotted' : run.waiting ? 'waiting' : 'none';
     const s = st ?? {
       id: `hr-${run.rootPid}-${Math.round(run.startMs / 1000)}`, rootPid: run.rootPid, startMs: run.startMs, firstSeenMs: nowMs, family: run.family, command: run.command,
-      lane: run.lane, session: run.session, admitted: !!run.holder, holder: run.holder?.id ?? null,
-      waitS: acquiredMs != null && Number.isFinite(waitedFrom) ? Math.max(0, r1((acquiredMs - waitedFrom) / 1000)) : null,
+      lane: run.lane, laneSource: run.laneSource ?? null, session: run.session, admitted: false, holder: null, waitS: null,
+      admSamples: { held: 0, waiting: 0, unslotted: 0, none: 0 },
       atStart: { others, activeLanes: ctx.activeLanes, workers: ctx.workersLive, busyPct: ctx.busyPct, idlePct: ctx.idlePct },
       peakOthers: 0, peakActiveLanes: 0, peakWorkers: 0, peakBusy: 0, peakRss: 0, peakProcs: 0, peakThreads: 0, peakCpuPct: 0, cpuIntegralS: 0, concIntegral: 0, concDt: 0, samples: 0,
     };
+    const admSamples = { held: 0, waiting: 0, unslotted: 0, none: 0, ...(s.admSamples ?? {}) };
+    admSamples[admState] += 1;
     next[s.id] = {
       ...s, lastSeenMs: nowMs, family: s.family, cpuByPid, childFamilies: run.childFamilies,
-      admitted: s.admitted || !!run.holder, holder: s.holder ?? run.holder?.id ?? null,
-      lane: s.lane ?? run.lane, session: s.session ?? run.session,
+      admitted: s.admitted || !!slotted, holder: s.holder ?? slotted?.id ?? run.holder?.id ?? null,
+      waitS: s.waitS ?? waitNow, admSamples,
+      lane: s.lane ?? run.lane, laneSource: s.lane ? (s.laneSource ?? null) : (run.laneSource ?? null), session: s.session ?? run.session,
       peakOthers: Math.max(s.peakOthers, others), peakActiveLanes: Math.max(s.peakActiveLanes, ctx.activeLanes ?? 0), peakWorkers: Math.max(s.peakWorkers, ctx.workersLive ?? 0), peakBusy: Math.max(s.peakBusy, ctx.busyPct ?? 0),
       peakRss: Math.max(s.peakRss, run.rssBytes), peakProcs: Math.max(s.peakProcs, run.procs), peakThreads: Math.max(s.peakThreads, threads), peakCpuPct: Math.max(s.peakCpuPct, run.cpuPct),
       cpuIntegralS: s.cpuIntegralS + (run.cpuPct / 100) * dt, concIntegral: s.concIntegral + (others + 1) * dt, concDt: s.concDt + dt, samples: s.samples + 1,
@@ -194,11 +222,39 @@ export function episodeRecord(st, { endedBetween, intervalS, calibration = false
     cpu_s: cpuS, cpu_s_cumulative: r1(cpuSum), cpu_s_integral: r1(st.cpuIntegralS ?? 0), avg_cores: wallS > 0 ? r3(cpuS / wallS) : null, peak_cpu_pct: r1(st.peakCpuPct ?? 0),
     peak_rss_bytes: st.peakRss ?? 0, peak_procs: st.peakProcs ?? 0, peak_threads: st.peakThreads || null,
     admitted: !!st.admitted, admission_holder: st.holder ?? null, admission_wait_s: st.waitS ?? null,
+    admission_class: admissionClass(st), admission_samples: admissionSamplesText(st.admSamples), lane_source: st.laneSource ?? null,
     conc_start: (st.atStart?.others ?? 0) + 1, conc_peak: (st.peakOthers ?? 0) + 1, conc_mean: st.concDt > 0 ? r3(st.concIntegral / st.concDt) : (st.atStart?.others ?? 0) + 1,
     active_lanes_start: st.atStart?.activeLanes ?? null, active_lanes_peak: st.peakActiveLanes ?? 0, workers_start: st.atStart?.workers ?? null, workers_peak: st.peakWorkers ?? 0,
     busy_pct_start: st.atStart?.busyPct ?? null, idle_pct_start: st.atStart?.idlePct ?? null, busy_pct_peak: st.peakBusy || null, samples: st.samples ?? 0,
   };
 }
+
+/** A heavy-named run whose tree never used more than this much CPU and spawned no other heavy family did no heavy work. */
+export const LIGHT_RUN_PEAK_CPU_PCT = 20;
+
+/** The admission classes of an episode, in the order {@link admissionClass} tests them. */
+export const ADMISSION_CLASSES = Object.freeze(['admitted', 'unslotted', 'waiting', 'light', 'bypass']);
+
+/**
+ * PURE. Why a run was, or was not, under the admission queue (#3383 capacity audit 2026-09-23: about half the
+ * episodes read `admitted: false` and nothing said why). `admitted`: a held slot sat above or inside its tree in some
+ * sample. `unslotted`: only an admission wrapper that failed open. `waiting`: every sample saw it queued, never
+ * running. `light`: heavy by name only (a `verify-lane.mjs check` poll, an idle shell): peak CPU under
+ * {@link LIGHT_RUN_PEAK_CPU_PCT} and no other heavy family in its tree. `bypass`: real heavy work with no slot.
+ * @param {object} st the run's persisted state
+ * @returns {typeof ADMISSION_CLASSES[number]}
+ */
+export function admissionClass(st) {
+  const a = st?.admSamples ?? {};
+  if (st?.admitted) return 'admitted';
+  if ((a.unslotted ?? 0) > 0) return 'unslotted';
+  if ((a.waiting ?? 0) > 0 && (a.none ?? 0) === 0) return 'waiting';
+  const otherFamilies = Object.keys(st?.childFamilies ?? {}).filter((f) => f !== st?.family).length;
+  if ((st?.peakCpuPct ?? 0) < LIGHT_RUN_PEAK_CPU_PCT && otherFamilies === 0) return 'light';
+  return 'bypass';
+}
+
+const admissionSamplesText = (a) => ['held', 'waiting', 'unslotted', 'none'].map((k) => `${k}:${a?.[k] ?? 0}`).join(',');
 
 /** The fields of the episode record, in order (documentation and a test pin them). @test-only-export-ok: the documented field list; the test pins every record against it */
 export const EPISODE_FIELDS = Object.freeze(Object.keys(episodeRecord({ id: 'x', startMs: 0, firstSeenMs: 0, lastSeenMs: 0, cpuByPid: {}, atStart: {}, peakOthers: 0, peakCpuPct: 0, peakRss: 0, peakProcs: 0, peakThreads: 0, cpuIntegralS: 0, concIntegral: 0, concDt: 0, samples: 0 }, { endedBetween: [0, 0], intervalS: 30 })));

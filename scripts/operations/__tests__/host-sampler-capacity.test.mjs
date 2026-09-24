@@ -231,7 +231,9 @@ describe('REAL heavy-run episode: a real process that classifies as check-standa
     const b = await runOnce({ env, store, rollover: false, io });
     const mine = b.sample.episodes.filter((e) => e.root_pid === child.pid);
     expect(mine).toHaveLength(1);
-    expect(mine[0]).toMatchObject({ family: 'check-standards', calibration: false, admitted: false, lane: 'unattributed', peak_procs: 1 });
+    expect(mine[0]).toMatchObject({ family: 'check-standards', calibration: false, admitted: false, admission_class: 'bypass', peak_procs: 1 });
+    // the stand-in inherits this test's cwd, so its lane is whichever lane clone runs the suite (`unattributed` outside one)
+    expect(mine[0].lane).toMatch(/^(unattributed|[^/]+\/lane-\d+)$/);
     expect(mine[0].wall_s).toBeGreaterThan(1.5);
     expect(mine[0].cpu_s).toBeGreaterThan(1); // read from the real `ps time` column
     expect(mine[0].peak_rss_bytes).toBeGreaterThan(10e6);

@@ -185,6 +185,60 @@ describe('stepEpisodes — the edge-triggered episode builder over a fixture pro
     expect(nextWaiters(a, { waiting: [] }, T0 + 2 * 86_400_000)).toEqual({});
   });
 
+  describe('admission wait, class and lane fallback (#3383 capacity audit 2026-09-23)', () => {
+    const LANE3 = '/w/.lanes/web-everything/lane-3';
+    const verifyTree = (cpu = 90) => [row(400, 1, 0, 1000, '/bin/bash -c node scripts/verify-lane.mjs', 60), row(401, 400, 5, 60_000, 'node scripts/verify-lane.mjs', 60), row(402, 401, cpu, 400_000, 'node node_modules/.bin/vitest run', 30)];
+    const heldBy = (pid, meta) => ({ held: [{ slot: 0, owner: LANE3, pid, heartbeatAt: new Date(T0 - 30_000).toISOString(), meta }], waiting: [] });
+    const at = (rows, adm, now = T0) => findHeavyRuns({ rows, lanes: LANES, holders: holderTable({ admission: adm, rows, nowMs: now }), waiting: adm.waiting, nowMs: now });
+    const endOf = (runsList) => {
+      let prev; let t = T0;
+      for (const runs of runsList) { prev = stepEpisodes({ prev, runs, probe: {}, ctx: ctx(), nowMs: t, intervalS: 30 }).next; t += 30_000; }
+      return stepEpisodes({ prev, runs: [], probe: {}, ctx: ctx(), nowMs: t, intervalS: 30 }).finished[0];
+    };
+
+    it('takes the wait the holder recorded on its slot, even for a wait shorter than one sample interval', () => {
+      const ep = endOf([at(verifyTree(), heldBy(401, { requestedAt: 'x', acquiredAt: 'y', waitedMs: 4200 }))]);
+      expect(ep).toMatchObject({ admitted: true, admission_wait_s: 4.2, admission_class: 'admitted' });
+    });
+
+    it('records a zero wait as 0, never null', () => {
+      expect(endOf([at(verifyTree(), heldBy(401, { waitedMs: 0 }))]).admission_wait_s).toBe(0);
+    });
+
+    it('falls back to the slot owner for the lane when the process tree names none', () => {
+      const ep = endOf([at(verifyTree(), heldBy(401, { waitedMs: 0 }))]);
+      expect(ep).toMatchObject({ lane: 'web-everything/lane-3', lane_source: 'admission-owner' });
+    });
+
+    it('a run only ever seen queued is `waiting`, with the waiter owner as its lane', () => {
+      const rows = [row(500, 1, 0, 1000, '/bin/bash -c node scripts/verify-lane.mjs', 60), row(501, 500, 0, 50_000, 'node scripts/verify-lane.mjs', 60)];
+      const adm = { held: [], waiting: [{ owner: `${LANE3}#501`, pid: 501, requestedAt: new Date(T0 - 60_000).toISOString() }] };
+      const ep = endOf([at(rows, adm), at(rows, adm)]);
+      expect(ep).toMatchObject({ admitted: false, admission_class: 'waiting', lane: 'web-everything/lane-3', admission_samples: 'held:0,waiting:2,unslotted:0,none:0' });
+    });
+
+    it('an unslotted admission wrapper (failed open) is not an admission', () => {
+      const rows = [row(600, 1, 0, 1000, 'node scripts/readiness/heavy-admission.mjs run -- vitest run', 60), row(601, 600, 90, 400_000, 'node node_modules/.bin/vitest run', 60)];
+      const ep = endOf([at(rows, { held: [], waiting: [] })]);
+      expect(ep).toMatchObject({ admitted: false, admission_class: 'unslotted' });
+    });
+
+    it('a heavy-named run that never did heavy work is `light`; one that did, with no slot, is `bypass`', () => {
+      const poll = [row(700, 1, 1, 30_000, 'node scripts/verify-lane.mjs check', 5)];
+      expect(endOf([at(poll, { held: [], waiting: [] })]).admission_class).toBe('light');
+      const raw = [row(800, 1, 95, 400_000, 'node node_modules/.bin/vitest run', 20)];
+      const ep = endOf([at(raw, { held: [], waiting: [] })]);
+      expect(ep).toMatchObject({ admission_class: 'bypass', admitted: false });
+    });
+
+    it('the lane-load model splits heavy CPU by admission class', () => {
+      const e = (cls, cpu) => ({ family: 'vitest', admission_class: cls, cpu_s: cpu, wall_s: 10, samples: 2 });
+      const m = buildLaneLoadModel({ samples: [{ key: 'a', atMs: T0, cap: { episodes: [e('admitted', 30), e('bypass', 10), { family: 'vitest', cpu_s: 0, wall_s: 1 }] } }] });
+      expect(m.admissionClasses).toEqual({ admitted: { runs: 1, cpuSeconds: 30, cpuShare: 0.75 }, bypass: { runs: 1, cpuSeconds: 10, cpuShare: 0.25 }, unknown: { runs: 1, cpuSeconds: 0, cpuShare: 0 } });
+      expect(renderLaneLoad({ ...m, days: 1 })).toContain('admission: admitted 1 runs 75% cpu | bypass 1 runs 25% cpu');
+    });
+  });
+
   it('episodeRecord tolerates a bare state (defaults, no NaN)', () => {
     const r = episodeRecord({ id: 'x', startMs: T0, firstSeenMs: T0, lastSeenMs: T0, cpuByPid: {}, atStart: {}, peakOthers: 0, peakCpuPct: 0, peakRss: 0, peakProcs: 0, peakThreads: 0, cpuIntegralS: 0, concIntegral: 0, concDt: 0, samples: 0 }, { endedBetween: [T0, T0], intervalS: 30 });
     expect(r).toMatchObject({ wall_s: 0, cpu_s: 0, avg_cores: null, conc_mean: 1 });

@@ -1700,7 +1700,7 @@ second-guessing whether it's allowed.
    fresh explicit instruction.
 4. **The orchestrating session runs the sanctioned clearance, verbatim, no paraphrase:**
    ```
-   node scripts/review-set-label.mjs <PR> --repo=<owner/repo> --to=clear-human \
+   node we:scripts/review-set-label.mjs <PR> --repo=<owner/repo> --to=clear-human \
      --actor="Nicolas Gilbert (operator)" --reason="I approve <PR>" --body-file=/tmp/<pr>-clearance.md
    ```
    `--reason` carries the operator's own words verbatim (confirmed rendered as the `> I approve <PR>`
@@ -5135,65 +5135,65 @@ Landed as a direct commit to `lane/mechanical-dispatcher`, no PR (family convent
 Built backlog/x3cepr4 (share one free-lane scan across callers, and stop the dispatcher test from
 scanning the real lane pool) in a throwaway clone of `lane/mechanical-dispatcher`.
 
-1. `scripts/lib/lane-pool-list-cache.mjs` (new): a shared cache for `lane-pool.mjs list --acquirable`
+1. `we:scripts/lib/lane-pool-list-cache.mjs` (new): a shared cache for `we:lane-pool.mjs list --acquirable`
    -- a TTL'd result file (default 30s, env `WE_LANE_POOL_LIST_CACHE_TTL_MS` override) plus a scan
-   lock (reuses `file-locks.mjs`'s atomic mkdir+TTL primitive, the same one `drain-lock.mjs`'s
+   lock (reuses `we:file-locks.mjs`'s atomic mkdir+TTL primitive, the same one `we:drain-lock.mjs`'s
    numbering mutex is built on) so parallel callers share one in-flight scan instead of each
    re-scanning every lane. A stale or unreadable/corrupt cache file rescans. `acquire` never reads
    this cache -- it keeps its own live per-lane check before claiming a lane (the correctness rule the
    card calls out explicitly). Every lane-state-changing command (`acquire`, `release`/`release
    --all-pools`, `adopt`, `provision`, `refresh`, `remove`) invalidates it.
-2. `scripts/readiness/dispatch-plan.mjs`: added `--free-lanes-json=<path-or-inline-JSON>` (and env
+2. `we:scripts/readiness/dispatch-plan.mjs`: added `--free-lanes-json=<path-or-inline-JSON>` (and env
    `WE_DISPATCH_PLAN_FREE_LANES_JSON`) that replaces the `lane-pool list --acquirable --json` shell
    outright.
-3. `scripts/conveyor/__tests__/dispatcher-fixture-harness.test.mjs` now passes
+3. `we:scripts/conveyor/__tests__/dispatcher-fixture-harness.test.mjs` now passes
    `--free-lanes-json=[9101,9102]`, so this run never shells the real lane pool. Updated its header
    comment and the launch/held assertion's own comment -- the assertion still tolerates a
    `capacity-cap` hold (the real active-lease/concurrency-cap axis is unchanged) but "no free lane"
    can no longer occur for #9001 since the synthetic list is always non-empty.
-4. Unit tests in `scripts/__tests__/lane-pool-list-cache.test.mjs` (10 tests): TTL hit, expiry,
+4. Unit tests in `we:scripts/__tests__/lane-pool-list-cache.test.mjs` (10 tests): TTL hit, expiry,
    corrupt-cache-reads-as-absent, invalidation, and two concurrency cases (a waiter reuses the
    winner's published result with zero scans of its own; a wedged/expired holder falls back to an
    unlocked scan rather than hanging).
 
-Test results: default-config vitest run (lane-pool-list-cache.test.mjs +
-dispatcher-fixture-harness.test.mjs) -- 2 files, 11 tests, all passing. Integration-config vitest run
-(`--config vitest.integration.config.ts`) for the three real-git-subprocess lane-pool suites
+Test results: default-config vitest run (we:lane-pool-list-cache.test.mjs +
+we:dispatcher-fixture-harness.test.mjs) -- 2 files, 11 tests, all passing. Integration-config vitest run
+(`--config we:vitest.integration.config.ts`) for the three real-git-subprocess lane-pool suites
 (lane-pool-acquirable, lane-pool-reap-on-list-acquirable, lane-pool-reap-on-acquire) -- 3 files, 19
 tests, all passing (pre-existing suites, unmodified, confirming the cache wiring didn't regress
 `list --acquirable`'s reap-then-filter behavior). All runs went through
-`scripts/readiness/heavy-admission.mjs run --`.
+`we:scripts/readiness/heavy-admission.mjs run --`.
 
 Timing (this scratch clone has zero lanes provisioned, so both readings are dominated by Node
 process startup rather than the scan itself -- the cache's actual payoff only shows on a populated
 pool):
   run 1: real 0m0.469s
   run 2: real 0m0.323s
-Confirmed the cache file (`<poolDir>/.lane-pool-list-cache/acquirable.json`) was created after run 1
+Confirmed the cache file (the acquirable-list JSON in the pool dir's `.lane-pool-list-cache` folder) was created after run 1
 and its lock dir (`.lane-pool-list-cache-lock`) was empty afterward (released cleanly).
 
 Nothing from the card was left undone. Committed and pushed directly to
 `lane/mechanical-dispatcher` per the epic's prototype doctrine (no PR).
 
-## Session update (2026-09-23) — xhlriy2 + xxna58l: heavy-admission waits out a live holder up to a 120m ceiling (off-escape, still-waiting log); package.json + guard-bash now gate the site build, playwright and raw vitest runs behind the queue
+## Session update (2026-09-23) — xhlriy2 + xxna58l: heavy-admission waits out a live holder up to a 120m ceiling (off-escape, still-waiting log); we:package.json + guard-bash now gate the site build, playwright and raw vitest runs behind the queue
 
-**xhlriy2** (`scripts/readiness/heavy-admission.mjs`) — the old `DEFAULT_TIMEOUT_MS` (20 minutes)
+**xhlriy2** (`we:scripts/readiness/heavy-admission.mjs`) — the old `DEFAULT_TIMEOUT_MS` (20 minutes)
 let a waiter fail open and run unslotted purely on elapsed time, even while a slot holder was
 still alive, which under real load (test runs 25-40 minutes, several lanes waiting) broke the
 admission cap exactly when it mattered. `acquireSlotBlocking` now keeps polling — logging a
 periodic "still waiting" line (`STILL_WAITING_LOG_MS`, 5 min) — for as long as `tryAcquireSlot`
-keeps losing, which (via the existing pid-liveness probe + lease-TTL reclaim in `file-locks.mjs`)
+keeps losing, which (via the existing pid-liveness probe + lease-TTL reclaim in `we:file-locks.mjs`)
 can only happen while a holder is genuinely alive with an unexpired lease; the instant every
 holder is provably dead or lease-expired, the next attempt reclaims a real slot rather than
 running unslotted. A new hard ceiling (`DEFAULT_ADMISSION_CEILING_MS`, default 120 minutes,
 `WE_HEAVY_ADMISSION_CEILING_MS` override) is the only remaining give-up point, firing with a loud
 `⚠⚠ HARD CEILING` warning. Also added the explicit `WE_HEAVY_ADMISSION=off` escape hatch
 (`isAdmissionOff`), checked first, as a pure pass-through. `DEFAULT_TIMEOUT_MS`/`resolveTimeoutMs`
-are unchanged (still read by `verify-lane.mjs`/the CLI) but no longer decide the give-up point.
+are unchanged (still read by `we:verify-lane.mjs`/the CLI) but no longer decide the give-up point.
 63 unit tests pass (54 existing + 9 new).
 
-**xxna58l** (`package.json`, `scripts/guard-bash.mjs`) — `test:unit` and `check:standards` are now
-wrapped in `node scripts/readiness/heavy-admission.mjs run -- <cmd>` (bringing the prototype to the
+**xxna58l** (`we:package.json`, `we:scripts/guard-bash.mjs`) — `test:unit` and `check:standards` are now
+wrapped in `node we:scripts/readiness/heavy-admission.mjs run -- <cmd>` (bringing the prototype to the
 same form `main`'s xaipsbs already landed), and this goes further: `build` (the eleventy+vite
 chain, wrapped via `sh -c '...'` so the compound `&&` still runs under one admission slot) and every
 playwright script (`test:integration`/`test:e2e`/`test:smoke`/`test:a11y`/`test:interaction`) are
@@ -5202,11 +5202,11 @@ else-but-here: it never exits, so wrapping it would hold an admission slot for t
 session with no way to release it, starving the other slot for as long as someone has `npm test`
 open.
 
-`guard-bash.mjs` gets a new arm, `rawHeavyCommandReason`, extending the raw-heavy-command
+`we:guard-bash.mjs` gets a new arm, `rawHeavyCommandReason`, extending the raw-heavy-command
 detection: a session's direct, unqueued `vitest run` (whole suite), `playwright test`, or
 `eleventy` invocation is now denied with a message pointing at the wrapped npm script. The
 targeted-vitest threshold (`RAW_VITEST_TARGETED_FILE_LIMIT = 2`) was decided from measured local
-timing: a single-file `vitest run` against `heavy-admission.test.mjs` (54-63 tests) completed in
+timing: a single-file `vitest run` against `we:heavy-admission.test.mjs` (54-63 tests) completed in
 ~1.6s wall-clock; a 1-2 file run stays in that band, so gating it behind the same queue as a
 25-40-minute full run would only add latency with no contention benefit. Playwright has no
 comparable fast mode, so every direct `playwright test` is denied outright. The eleventy check is
@@ -5222,3 +5222,17 @@ reaches (including through the file's existing nested-command extraction — `ya
 
 Both items commit directly to `lane/mechanical-dispatcher` per #3383 doctrine — no PR. Nothing
 left undone from either card's own scope.
+
+## Session update (2026-09-23) — capacity telemetry: admission wait at acquire, admission class per heavy run, lane fallback, GitHub budget sampling, allowlisted Claude API events
+
+Operator goal: measure what capacity a given machine delivers. An audit of the sampler data (2026-09-20 to 2026-09-23) found the load side sound and several gaps; this lands the fixes that need no design call.
+
+- **Admission wait recorded at acquire** (card #3975). `acquireSlotBlocking` in we:scripts/readiness/heavy-admission.mjs now writes `requestedAt`, `acquiredAt` and `waitedMs` into the won slot's meta, and the sampler's `holderTable` reads it. Before, `admission_wait_s` was set on 2 of 927 episodes because it was inferred from waiting markers seen in an earlier sample.
+- **Why a run was not admitted** (card #3974). Each episode now carries `admission_class`: `admitted`, `unslotted` (an admission wrapper that failed open, which used to count as admitted), `waiting` (only ever seen queued), `light` (heavy by name only, such as a `we:verify-lane.mjs check` poll, peak CPU under 20%), or `bypass`. The card's premise was partly wrong: a vitest nested inside an admitted verify was never its own run. The real mix was queued waiters and status polls read as unadmitted. `lane-load` prints the CPU share per class.
+- **Lane fallback** (card #3972). A run with no lane from its own process tree takes the lane of its slot owner or waiting marker (`lane_source: admission-owner`). The "mislabelled interactive" half of the card was not changed: the runs really came from interactive orchestrator sessions, and telling their subagents apart needs the dispatch environment, which the sampler does not read.
+- **GitHub API budget** (filed as a tracker finding, not a card). New we:scripts/operations/host-sampler-github.mjs: the CLI sampler reads `gh api rate_limit` every 5 minutes and writes `gh.rate_limit.remaining` per bucket (`core`, `graphql`) with `used`, `limit`, `reset_s` and the credential label, or `gh.rate_limit.error`. Opt-in from the CLI, so tests never reach the network. Reason: `gh.throttle.*` wrote zero records in three days while the budget ran out on 2026-09-23.
+- **Claude API request outcomes** (tracker finding; operator approved turning on log export). we:scripts/operations/claude-otel-collector.mjs now keeps `claude_code.api_request` and `claude_code.api_error` from `/v1/logs`, each projected through a closed field allowlist at ingest (no prompt, no tool input, no identity; an error message is reduced to its type), in a separate `api/` directory. New `api-report` subcommand: per-hour requests, p50/p90 duration, 429 and 529 counts. Every other log event is still dropped.
+- **Card #3971 withdrawn** on main: `host.workers.live` never counted the no-pid roster rows; the audit misread the fields.
+- **Test fix.** we:scripts/operations/__tests__/host-sampler-large-file.test.mjs failed once its fixed fixture date passed, because the `lane-load` CLI reads the real clock. The test now reads a 60-day window.
+- **Friction.** The raw-vitest guard counts non-file arguments as test files: `--root <dir>`, `--testNamePattern=x` and even a `| grep -A30` pipe tail pushed a 1-file run over the 2-file limit. It should count only arguments that name test files.
+- **Friction: landing under load.** Three things cost this landing about nine hours on 2026-09-23. (1) A freshly acquired lane kept the previous holder's terminal verify marker, so we:scripts/verify-lane.mjs refused to start (`superseded`) until its `reset` mode was run. (2) The gate of we:scripts/operations/poc-land.mjs goes through we:scripts/operations/verify-io.mjs, whose 30-minute spawn bound includes the admission-queue wait; with 7 or more waiters the wait alone passed it, and the gate came back `unrun`. (3) While that ran, the lane lease expired, and the lane was re-acquired and reset under the running lander. The commit survived only as an unreferenced object and was recovered from the object store. Fixes to consider: count the gate's own run time, not the queue wait, against the bound; refresh the lease while a lander holds the lane; clear a foreign verify marker on acquire.

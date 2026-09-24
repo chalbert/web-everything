@@ -446,8 +446,16 @@ export function buildLaneLoadModel({ samples, days = 1 }) {
   // calibration runs, kept apart from real ones
   const calibration = {};
   for (const f of [...new Set(cal.map((e) => e.family))].sort()) calibration[f] = { bins: wallByConcurrency(cal.filter((e) => e.family === f)), runs: cal.filter((e) => e.family === f).length };
+  // why runs were or were not admitted, weighted by the CPU they burned (records older than the class field read `unknown`)
+  const cpuTotal = real.reduce((t, e) => t + (Number.isFinite(e.cpu_s) ? e.cpu_s : 0), 0);
+  const admissionClasses = {};
+  for (const e of real) {
+    const c = admissionClasses[e.admission_class ?? 'unknown'] ||= { runs: 0, cpuSeconds: 0 };
+    c.runs += 1; c.cpuSeconds += Number.isFinite(e.cpu_s) ? e.cpu_s : 0;
+  }
+  for (const c of Object.values(admissionClasses)) { c.cpuSeconds = r2(c.cpuSeconds); c.cpuShare = cpuTotal > 0 ? r2(c.cpuSeconds / cpuTotal) : null; }
   const suff = { perFamily: sufficiency(real.length, days, 'runs'), wallByConcurrency: sufficiency(real.length, days, 'runs'), perLane: sufficiency(all.filter((s) => Object.keys(s.cap.laneCpu ?? {}).length).length, days, 'samples with lane data'), activeLanesByHeavyRuns: sufficiency(joint.length, days, 'samples') };
-  return { days, spanHours: r2(spanH), heavyRuns: { real: real.length, calibration: cal.length }, perFamily, wallByConcurrency: concurrency, perLane, activeLanesByHeavyRuns: { rows: 'active lanes (leased, live process)', columns: 'concurrent heavy runs', cells: grid, sufficiency: suff.activeLanesByHeavyRuns }, calibration, sufficiency: suff, thresholds: LANE_LOAD };
+  return { days, spanHours: r2(spanH), heavyRuns: { real: real.length, calibration: cal.length }, admissionClasses, perFamily, wallByConcurrency: concurrency, perLane, activeLanesByHeavyRuns: { rows: 'active lanes (leased, live process)', columns: 'concurrent heavy runs', cells: grid, sufficiency: suff.activeLanesByHeavyRuns }, calibration, sufficiency: suff, thresholds: LANE_LOAD };
 }
 
 /** The UTC days present as `YYYY-MM-DD.jsonl[.gz]` in `dir` within the last `days` days (today included), oldest first. */
@@ -481,6 +489,8 @@ export function readLaneLoadModel({ dir, nowMs, days = 7 }) {
 export function renderLaneLoad(m) {
   const L = [`lane load model: ${m.heavyRuns.real} heavy runs (+${m.heavyRuns.calibration} calibration) over ${m.days} day(s), ${m.spanHours} h observed`];
   const q = (d) => (d && d.p50 != null ? `${d.p50}/${d.p90}` : 'n/a');
+  const classes = Object.entries(m.admissionClasses ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  if (classes.length) L.push(`  admission: ${classes.map(([c, v]) => `${c} ${v.runs} runs ${v.cpuShare != null ? `${Math.round(v.cpuShare * 100)}% cpu` : ''}`.trim()).join(' | ')}`);
   for (const [f, v] of Object.entries(m.perFamily)) {
     L.push(`  ${f}: ${v.runs} runs; cpu-s p50/p90 ${q(v.cpuSecondsPerRun)}; avg cores ${q(v.avgCoresUsed)}; peak cores ${q(v.peakCoresUsed)}; wall s ${q(v.wallS)}; peak RSS MB ${v.peakRssBytes.p50 != null ? `${Math.round(v.peakRssBytes.p50 / 1048576)}/${Math.round(v.peakRssBytes.p90 / 1048576)}` : 'n/a'}   [${v.sufficiency.line}]`);
     const bins = m.wallByConcurrency[f].bins;

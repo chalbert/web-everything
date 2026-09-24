@@ -133,7 +133,8 @@ describe('the whole-file readers on the same 200,000-record file', () => {
     expect(model.spanHours).toBeLessThan(14);
     expect(model.perLane).toBeDefined();
     const out = captureStdout();
-    expect(await main(['lane-load', `--dir=${dir}`, '--days=1', '--json'], {})).toBe(0);
+    // the CLI reads the real clock, so a 1-day window stopped reaching the fixture's fixed DAY once that date passed; the dir holds only DAY
+    expect(await main(['lane-load', `--dir=${dir}`, '--days=60', '--json'], {})).toBe(0);
     expect(JSON.parse(out.join('')).spanHours).toBe(model.spanHours);
   }, 60_000);
 

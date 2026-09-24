@@ -50,6 +50,8 @@ export function holderTable({ admission, rows, nowMs }) {
     holders.set(Number.isInteger(h.pid) ? h.pid : `slot-${h.slot}`, {
       id: `slot-${h.slot}:${baseName(h.owner)}`, slot: h.slot, owner: h.owner ?? null, pid: Number.isInteger(h.pid) ? h.pid : null,
       heldForS: Number.isFinite(hb) ? Math.max(0, Math.round((nowMs - hb) / 1000)) : null, alive: row != null, elapsedS: row?.etimeS ?? null, unslotted: false,
+      // the wait the holder itself recorded when it won the slot (`heavy-admission.mjs#acquireSlotBlocking`); null for a slot won by an older writer
+      waitS: Number.isFinite(h.meta?.waitedMs) ? r1(h.meta.waitedMs / 1000) : null,
     });
   }
   // A `run` wrapper NESTED under a process that already holds a slot (`verify-lane.mjs` holds its own slot, then runs its gate
@@ -62,7 +64,7 @@ export function holderTable({ admission, rows, nowMs }) {
   for (const r of rows) {
     if (holders.has(r.pid) || waitingPids.has(r.pid) || insideSlot(r)) continue;
     if (/heavy-admission\.mjs\s+run\b/.test(r.command) && /^(node|nodejs)\b/.test(baseName(String(r.command).split(' ')[0]))) {
-      holders.set(r.pid, { id: `unslotted:${r.pid}`, slot: null, owner: null, pid: r.pid, heldForS: null, alive: true, elapsedS: r.etimeS ?? null, unslotted: true });
+      holders.set(r.pid, { id: `unslotted:${r.pid}`, slot: null, owner: null, pid: r.pid, heldForS: null, alive: true, elapsedS: r.etimeS ?? null, unslotted: true, waitS: null });
     }
   }
   return holders;

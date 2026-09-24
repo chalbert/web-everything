@@ -48,6 +48,7 @@
  *   host-sampler-rollup.mjs      hourly per-class percentiles, burst episodes, `reservation-inputs` (+ `lane-load-model`), `smoothedPressure`
  *   host-sampler-episodes.mjs    one EPISODE record per heavy command run (start, end, CPU-seconds, peak RSS, concurrency), the hardware profile
  *   host-sampler-calibrate.mjs   `calibrate`: a fixed reference workload solo and k-concurrent (opt-in: prints a plan unless --yes)
+ *   host-sampler-github.mjs      the GitHub API budget left (`gh.rate_limit.remaining`), one `gh api rate_limit` every 5 minutes (CLI only)
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -67,6 +68,7 @@ import {
 import { admissionDetail, attributeProcesses, diffWorkers, holderTable, sessionPidMap, summarizeWorkers } from './host-sampler-attribution.mjs';
 import { HARDWARE_KEYS, findHeavyRuns, hardwareProfileDue, nextWaiters, parseHardwareProfile, parsePsTimes, parseThreadCounts, stepEpisodes } from './host-sampler-episodes.mjs';
 import { COMMAND_CLASSES, HEAVY_CLASSES, classifyCommandClass, summarizeClasses } from './host-sampler-classes.mjs';
+import { credentialOf, ghBudgetDue, parseRateLimit } from './host-sampler-github.mjs';
 import { SCHEMA_VERSION, assessQuality, heartbeatGap, makeChildMeter, measureHostCpu } from './host-sampler-selfcheck.mjs';
 import { classifySession, VERDICTS } from '../conveyor/session-verdicts.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES, LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
@@ -330,7 +332,7 @@ export function buildSample(raw) {
   const workerSummary = tier.families && raw.agents ? summarizeWorkers({ agents: agentRows, rows, sessionByPid }) : null;
   const lifecycle = workerSummary ? diffWorkers({ prev: raw.workerState?.prev, live: workerSummary.live, nowMs: raw.nowMs, prevMs: raw.workerState?.prevMs ?? null }) : null;
   // heavy-run EPISODES: one record per heavy command invocation, when it ends (operator addition 2026-09-21)
-  const runs = tier.families ? findHeavyRuns({ rows, lanes: raw.lanes ?? [], cwds: raw.cwds ?? {}, sessionByPid, holders: holderTable({ admission: raw.admission ?? null, rows, nowMs: raw.nowMs }), nowMs: raw.nowMs, redact: redactCommandLine }) : [];
+  const runs = tier.families ? findHeavyRuns({ rows, lanes: raw.lanes ?? [], cwds: raw.cwds ?? {}, sessionByPid, holders: holderTable({ admission: raw.admission ?? null, rows, nowMs: raw.nowMs }), waiting: raw.admission?.waiting ?? [], nowMs: raw.nowMs, redact: redactCommandLine }) : [];
   const episodes = tier.families
     ? stepEpisodes({ prev: raw.episodeState?.prev, runs, probe: raw.runProbe ?? {}, waiters: raw.episodeState?.waiters ?? {}, nowMs: raw.nowMs, intervalS: raw.intervalS ?? DEFAULT_INTERVAL_SEC,
       ctx: { activeLanes: lanes.leased, workersLive: workerSummary?.total ?? null, busyPct: raw.hostCpu?.busyPct ?? null, idlePct: raw.hostCpu?.idlePct ?? null } })
@@ -347,6 +349,7 @@ export function buildSample(raw) {
     heavyRuns: runs.length, episodes: episodes?.finished ?? [], episodeNext: episodes?.next ?? null,
     waitersNext: tier.families ? nextWaiters(raw.episodeState?.waiters, raw.admission ?? null, raw.nowMs) : null,
     hardware: tier.families ? (raw.hardwareProfile ?? null) : null,
+    github: tier.families ? (raw.ghBudget ?? null) : null,
   };
 }
 
@@ -422,6 +425,12 @@ export function sampleToMetrics(s) {
   if (s.hardware) {
     const h = s.hardware;
     out.push(m('host.hardware.profile', h.ncpu, 'count', { ncpu: h.ncpu, physical_cpu: h.physicalCpu, logical_cpu: h.logicalCpu, performance_cores: h.performanceCores, efficiency_cores: h.efficiencyCores, mem_bytes: h.memBytes, mem_gib: h.memGiB, chip: h.chip, model: h.model, os_version: h.osVersion, os_build: h.osBuild, architecture: h.architecture }));
+  }
+  if (s.github) {
+    const g = s.github;
+    if (g.buckets) {
+      for (const b of g.buckets) out.push(m('gh.rate_limit.remaining', b.remaining, 'count', { bucket: b.bucket, limit: b.limit, used: b.used, reset_s: b.resetAtMs != null ? Math.max(0, Math.round((b.resetAtMs - Date.parse(s.at)) / 1000)) : null, credential: g.credential }));
+    } else out.push(m('gh.rate_limit.error', 1, 'count', { reason: g.error ?? 'unknown', credential: g.credential }));
   }
   if (s.workers) {
     const w = s.workers; const wa = { no_pid: w.rosterWorkingNoPid, roster_age_s: s.sessions?.ageS ?? null };
@@ -573,7 +582,7 @@ export function pickCwdCandidates(rows, cap = MAX_CWD_LOOKUPS) {
 
 /** Read every raw fact for one sample. One `ps`, one lease sweep, one admission read, two probes, a few sub-10 ms
  *  collectors, and `lsof` only for top processes whose cwd is not cached. */
-export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT_SESSIONS_EVERY_SEC, fresh = false, mode = 'normal', intervalS = DEFAULT_INTERVAL_SEC, tier = GUARD_TIERS[0], io = {} } = {}) {
+export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT_SESSIONS_EVERY_SEC, fresh = false, mode = 'normal', intervalS = DEFAULT_INTERVAL_SEC, tier = GUARD_TIERS[0], github = false, io = {} } = {}) {
   const nowMs = (io.nowMs ?? Date.now)();
   const cpuNow = io.hrMs ?? (() => Number(process.hrtime.bigint()) / 1e6);
   const meter = io.meter ?? makeChildMeter({ now: cpuNow });
@@ -606,6 +615,18 @@ export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT
   if (!io.hostCpu && !io.ps) { const r = measureHostCpu({ prev: state.cpuTicks ?? null, nowMs }); hostCpu = r.cpu; nextState.cpuTicks = r.ticks; }
   let hw = io.hw ?? state.hw ?? null;
   if (!hw && !io.ps) { hw = readHardware(meter.exec); if (hw) nextState.hw = hw; }
+  // the GitHub API budget (#3383 capacity audit 2026-09-23): one `gh api rate_limit` every few minutes, whoever spends it.
+  // Opt-in (`github: true`, set by the CLI): a test that runs the real sampler never reaches the network.
+  let ghBudget = io.ghBudget ?? null;
+  if (github && !io.ghBudget && !io.ps && ghBudgetDue({ lastAtMs: state.ghBudgetAtMs, nowMs })) {
+    nextState.ghBudgetAtMs = nowMs;
+    const credential = credentialOf(env);
+    // not through the child meter: a failed GitHub read must not mark the host sample `partial`
+    try {
+      const buckets = parseRateLimit((io.execGh ?? execFileSync)('gh', ['api', 'rate_limit'], { encoding: 'utf8', timeout: 10_000, env, stdio: ['ignore', 'pipe', 'ignore'] }));
+      ghBudget = buckets ? { buckets, credential } : { buckets: null, error: 'unparseable', credential };
+    } catch (e) { ghBudget = { buckets: null, error: e?.code === 'ENOENT' ? 'gh-missing' : 'gh-failed', credential }; }
+  }
   const hardwareProfile = hw && hardwareProfileDue({ emittedThisProcess: hardwareEmitted.v, lastAtMs: state.hwProfileAtMs, nowMs }) && !io.ps ? hw : null;
   // heavy-run probe: cumulative CPU time and thread counts of the processes of any heavy run. TWO cheap `ps` reads (~25 ms
   // each) only WHILE a heavy run exists; none otherwise.
@@ -648,7 +669,7 @@ export async function collectRaw({ env = process.env, sessionsEverySec = DEFAULT
     psRows, agents: sessions.data, sessionsAgeS: sessions.ageS, lanes, admission, probe, extras, ioRate, cwds, tier, mode, intervalS,
     hostCpu, childFailed: meter.summary().failed, noExtrasExpected: !!io.extras, selfMeta,
     workerState: { prev: state.workers, prevMs: state.lastSample?.atMs ?? null },
-    episodeState: { prev: state.runs, waiters: state.waiters ?? {} }, runProbe, hardwareProfile,
+    episodeState: { prev: state.runs, waiters: state.waiters ?? {} }, runProbe, hardwareProfile, ghBudget,
     heartbeat: { prevAtMs: state.lastSample?.atMs ?? null, prevExpectedS: state.lastSample?.intervalS ?? null, missedTotal: Number(state.heartbeatMissed) || 0 },
   };
 }
@@ -674,7 +695,7 @@ function finalizeSelf(raw, io = {}) {
  * The free-space guard runs first: it picks the tier that decides how much this sample may write.
  * @returns {Promise<{skipped?:string, sample?:object, written:number, failed:number, file?:string, tier?:string}>}
  */
-export async function runOnce({ env = process.env, dryRun = false, fresh = false, sessionsEverySec = DEFAULT_SESSIONS_EVERY_SEC, mode = 'normal', intervalS = DEFAULT_INTERVAL_SEC, io = {}, store = null, rollover = true } = {}) {
+export async function runOnce({ env = process.env, dryRun = false, fresh = false, sessionsEverySec = DEFAULT_SESSIONS_EVERY_SEC, mode = 'normal', intervalS = DEFAULT_INTERVAL_SEC, io = {}, store = null, rollover = true, github = false } = {}) {
   if (!telemetryEnabled(env)) return { skipped: 'telemetry disabled (WE_TELEMETRY)', written: 0, failed: 0 };
   const release = dryRun ? () => {} : acquireLock(join(stateDir(env), 'sample.lock'));
   if (!release) return { skipped: 'another host-sampler run holds the sample lock', written: 0, failed: 0 };
@@ -688,7 +709,7 @@ export async function runOnce({ env = process.env, dryRun = false, fresh = false
       writeJsonAtomic(join(stateDir(env), 'guard.json'), { tier: tier.name, freeBytes: free, atMs: (io.nowMs ?? Date.now)() });
       if (tier.name !== 'full') maybeEscalate({ tier, freeBytes: free, dir: telDir, escalationsDir: io.escalationsDir ?? join(TELEMETRY_ROOT, '.operations', 'escalations'), now: (io.nowMs ?? Date.now)() });
     }
-    const raw = await collectRaw({ env, sessionsEverySec, fresh, mode, intervalS, tier, io: dryRun ? { ...io, noStateWrite: true } : io });
+    const raw = await collectRaw({ env, sessionsEverySec, fresh, mode, intervalS, tier, github, io: dryRun ? { ...io, noStateWrite: true } : io });
     const built = buildSample(raw);
     const sample = { ...built, self: finalizeSelf(raw, io) };
     const metrics = sampleToMetrics(sample);
@@ -768,7 +789,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, cali
   const sessionsEverySec = Number(val('sessions-every', DEFAULT_SESSIONS_EVERY_SEC)) || DEFAULT_SESSIONS_EVERY_SEC;
   if (cmd === 'once') {
     const burst = !!flag('burst'); // measurement aid: take ONE sample the way burst mode does (top 15, no slow collectors)
-    const r = await runOnce({ env, dryRun: !!flag('dry-run'), fresh: !!flag('fresh-sessions'), sessionsEverySec, mode: burst ? 'burst' : 'normal', intervalS: burst ? CADENCE.burstSec : DEFAULT_INTERVAL_SEC });
+    const r = await runOnce({ env, dryRun: !!flag('dry-run'), fresh: !!flag('fresh-sessions'), sessionsEverySec, mode: burst ? 'burst' : 'normal', intervalS: burst ? CADENCE.burstSec : DEFAULT_INTERVAL_SEC, github: true });
     if (!flag('quiet') || r.failed) process.stdout.write(`${flag('json') ? JSON.stringify(r.sample ?? r, null, 2) : renderSummary(r)}\n`);
     return r.skipped ? 0 : (r.failed ? 1 : 0);
   }
@@ -836,7 +857,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, cali
         const t0 = Date.now();
         let intervalSec = cfg.normalSec;
         try {
-          const r = await runOnce({ env, sessionsEverySec, dryRun: !!flag('dry-run'), mode: cadence.mode, intervalS: cadence.mode === 'burst' ? cfg.burstSec : cfg.normalSec });
+          const r = await runOnce({ env, sessionsEverySec, dryRun: !!flag('dry-run'), mode: cadence.mode, intervalS: cadence.mode === 'burst' ? cfg.burstSec : cfg.normalSec, github: true });
           process.stdout.write(`${renderSummary(r).split('\n')[0]}\n`);
           if (r.sample) {
             const step = nextCadence(cadence, { load1: r.sample.host.load[0], cores: r.sample.host.cpuCount, spawnMs: r.sample.probe.spawnMs, spinMs: r.sample.probe.spinOvershootMs }, Date.now(), cfg);
