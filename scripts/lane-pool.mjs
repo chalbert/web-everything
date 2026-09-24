@@ -928,8 +928,8 @@ function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
  * lanes chasing a headroom that a live probe would never have needed. Any caller that must react differently
  * to "we don't know" than to "we checked and there is genuinely nothing" needs `ok`, not just `shas`.
  */
-function liveRemoteShasProbe(dir) {
-  const out = tryGit(['ls-remote', '--heads', 'origin'], dir, { timeout: 20_000 });
+function liveRemoteShasProbe(dir, remote = 'origin') {
+  const out = tryGit(['ls-remote', '--heads', remote], dir, { timeout: 20_000 });
   if (out === null) return { ok: false, shas: new Set() };
   return { ok: true, shas: new Set(out.split('\n').filter(Boolean).map((l) => l.split(/\s+/)[0]).filter(Boolean)) };
 }
@@ -1261,7 +1261,7 @@ function tryClaimLane(dir, session, nowMs, ttlMs) {
     return mintedHolder;
   } catch (e) {
     // #xixn30q — ENOENT means the lane's dir/`.git` vanished out from under this write (a concurrent `trim`
-    // deleting it — even with trim's own per-lane claim lock, THIS acquire's `existingLanes`/`infoFor` snapshot
+    // deleting it — even with trim's own per-lane claim lock, THIS acquire's cached-scan candidate snapshot
     // was taken before that claim, so it can still hand a since-deleted lane to `tryClaimLane`; any other cause
     // of a lane disappearing mid-acquire hits the same gap). Treat it exactly like "someone else has this one":
     // return null so the caller's existing retry loop (`excluded.add(pick)` then pick the next candidate) moves
@@ -1597,8 +1597,10 @@ function cmdAcquire(repo) {
       // never be misread as "genuinely starved, so clone more".
       if (!grownOnce && !sawScanTimeout) {
         grownOnce = true;
-        const probeDir = lanes.length ? laneDir(repo, lanes[0]) : repo.poolDir;
-        const remoteProbeFailed = !liveRemoteShasProbe(probeDir).ok;
+        // Probe the exact URL growth will clone from (`provisionLane` → `repo.originUrl`), from the reference
+        // checkout — never from an existing lane: a vanished/corrupted `lanes[0]` (#xixn30q) would fail the
+        // probe for a purely LOCAL reason and stickily disable growth against a fully reachable origin.
+        const remoteProbeFailed = !liveRemoteShasProbe(repo.referencePath, repo.originUrl || 'origin').ok;
         const added = growPoolOnEmpty(repo, lanes, remoteProbeFailed);
         if (added > 0) {
           excluded.clear();

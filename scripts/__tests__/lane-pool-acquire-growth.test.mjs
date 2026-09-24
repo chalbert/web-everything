@@ -204,6 +204,20 @@ describe('lane-pool acquire (#3383) — remote-probe-failure stops growth, never
     expect(listLanes([])).toEqual([1, 2]);
   });
 
+  it('a vanished lowest-numbered lane does NOT make the growth probe misread a reachable remote as unreachable', () => {
+    // PR #2607 review finding: the growth probe ran `ls-remote origin` inside `lanes[0]` unconditionally. With
+    // lane-1's `.git` gone (a concurrent trim/vanish, #xixn30q) that probe failed for a LOCAL reason, and
+    // acquire refused to grow a pool whose real origin was fully reachable — sticky until a human re-provisioned.
+    provision(2);
+    rmSync(join(poolRoot, 'growacq', 'lane-1', '.git'), { recursive: true, force: true });
+    leaseLane(2);
+
+    const r = runPool(['acquire', ...REPO(), '--wait-ms=0', '--growth-max-new=1', '--session=picker']);
+    expect(r.code, r.err).toBe(0);
+    expect(r.err).not.toMatch(/remote-reachability probe.*failed/i);
+    expect(r.out.trim()).toMatch(/lane-3$/);
+  });
+
   it('once the probe can succeed again (real git restored), acquire grows normally', () => {
     provision(1);
     leaseLane(1);
