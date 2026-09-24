@@ -136,15 +136,47 @@ export const SUPERSEDE_STAND_DOWN_MARKER = '↩️ **This PR\'s earlier stand-do
 const bodyOf = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
- * we:scripts/conveyor/stand-down.mjs#isSelfAuthored — did the conveyor's OWN authenticated identity write this
- * comment? Reads GitHub's own `viewerDidAuthor` flag (`gh pr view/list --json comments` returns it on every
- * comment). It is computed by GitHub from the comment's real author, so a comment body cannot fake it — unlike
- * any substring of the body. A bare string, or a comment with the flag missing or false, is NOT self-authored:
- * the fail-closed direction. EXPORTED (xaer296) so a sibling supersede predicate for a DIFFERENT population
+ * we:scripts/conveyor/stand-down.mjs#AUTOMATION_LOGINS — the GitHub login(s) this repo's own conveyor
+ * automation posts durable marker comments under. CONFIRMED LIVE (xaer296 follow-up, `chalbert/web-everything
+ * #2549`, 2026-09-24): every durable marker this repo's own tooling posts (`stand-down.mjs`,
+ * `advisory-fix-mark.mjs`, `rearm-review.mjs`, `conflict-fix-mark.mjs`, the parked-PR conflict watch, …) is
+ * authored by `web-everything` — but GitHub's own `viewerDidAuthor` flag ("did the CURRENT caller write this")
+ * read `false` on every single one of them, from BOTH a personal-token read (this repo's own operator account)
+ * AND the resident daemon's own real production read (verified live by loading a candidate fix into the daemon
+ * clone and running `runReconcilePass` for real against the actual PR): `reconcile-pass.mjs#defaultReadPrs`'s
+ * discovery read never actually authenticates AS the identity that posted those comments, whatever env var IS
+ * set for a WRITE (`we:scripts/lib/github-app-auth-env.mjs`). `viewerDidAuthor` is therefore NOT a safe
+ * self-authorship signal for a READ in this system — only `author.login` is: GitHub assigns it from the
+ * comment's real author and nothing a commenter writes in the BODY can forge it, the exact non-forgeability
+ * property `viewerDidAuthor` was originally chosen for, just read off a different, READ-stable field.
+ * Overridable via `WE_AUTOMATION_LOGINS` (comma-separated) for a differently-named install; the default is the
+ * one login measured live across every marker this file's own history covers.
+ */
+export const AUTOMATION_LOGINS = Object.freeze(
+  (process.env.WE_AUTOMATION_LOGINS ? process.env.WE_AUTOMATION_LOGINS.split(',') : ['web-everything'])
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#isSelfAuthored — did THIS repo's own conveyor automation write this
+ * comment? PRIMARY signal: `author.login` against {@link AUTOMATION_LOGINS} (READ-stable — see that constant's
+ * own docblock for why `viewerDidAuthor` alone is not). `viewerDidAuthor === true` is kept as an ADDITIONAL
+ * accepted path (widens, never narrows) for any reader that genuinely does authenticate as the posting
+ * identity — this never disagrees with the login check when both are available, and costs nothing when neither
+ * is. A bare string, or a comment with neither signal, is NOT self-authored: the fail-closed direction.
+ * EXPORTED so a sibling supersede predicate for a DIFFERENT population
  * (`we:scripts/conveyor/advisory-fix-mark.mjs#isAdvisoryMechanismStandDownSuperseded`) can reuse the identical
  * check rather than growing a private copy — this repo's own "widen the shared thing" rule.
+ * @param {{viewerDidAuthor?:boolean, author?:{login?:string}}|string|null|undefined} c
+ * @returns {boolean}
  */
-export const isSelfAuthored = (c) => typeof c === 'object' && c !== null && c.viewerDidAuthor === true;
+export function isSelfAuthored(c) {
+  if (typeof c !== 'object' || c === null) return false;
+  if (c.viewerDidAuthor === true) return true;
+  const login = String(c.author?.login ?? '').trim().toLowerCase();
+  return login.length > 0 && AUTOMATION_LOGINS.includes(login);
+}
 
 /**
  * we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded — is the comment at `index` a watcher stand-down that

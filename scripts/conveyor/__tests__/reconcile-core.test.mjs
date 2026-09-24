@@ -286,6 +286,29 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
     expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
   });
 
+  // xaer296 FOLLOW-UP — CONFIRMED LIVE on `chalbert/web-everything#2549`, 2026-09-24: the coordinator loaded
+  // `viewerDidAuthor`-only fix into the daemon clone and ran `runReconcilePass` for REAL — it still refused
+  // `stood-down` (`standDowns: 2`), because `viewerDidAuthor` reads `false` on every marker comment this repo's
+  // automation posts, from BOTH a personal-token read AND the resident daemon's own real production read (its
+  // discovery read never authenticates as the identity that actually posted them). This pins the fix in the
+  // shape `gh pr view --json comments` ACTUALLY returns — `author.login`, no `viewerDidAuthor` at all — so a
+  // regression back to a `viewerDidAuthor`-only check reddens here even though every OTHER test in this
+  // describe block (which injects `viewerDidAuthor: true` directly) would stay green.
+  it('xaer296 FOLLOW-UP — the REAL gh comment shape (author.login, no viewerDidAuthor field) resolves the exact same way', () => {
+    const realFixMark = { author: { login: 'web-everything' }, body: buildAdvisoryFixComment({}) };
+    const realStandDown = {
+      author: { login: 'web-everything' },
+      body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }),
+    };
+    const pr = pr1563({
+      labels: lbl('review:human', 'advisory:changes'),
+      comments: [advisoryNote1563, realFixMark, realStandDown],
+    });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563 })]);
+  });
+
   it('a human\'s own /finish stand-down (default actor) stays exactly as terminal as before', () => {
     const humanFinish = pr1563({ comments: [finding(), { body: buildStandDownComment({ reason: 'gate-red' }) }] });
     const plan = planReconcile({ prs: [humanFinish], agents: [], durableCounts: {}, now: NOW });

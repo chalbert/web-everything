@@ -624,8 +624,10 @@ export function planReconcile({
     //     in ADVISORY-FIX MODE, where the thread already proves (an earlier, self-authored advisory-fix mark
     //     postdating the latest advisory note) that there was genuinely nothing left to fix — a mechanism
     //     failure (the old count-based "is this addressed" test never caught up), not a real judgment call.
-    // Both require GitHub's own `viewerDidAuthor` on every comment they read (never a body substring anyone
-    // could forge). A stand-down neither predicate excludes — including EVERY fix agent's genuine
+    // Both require the comment's OWN `author.login` (or GitHub's `viewerDidAuthor`, kept as an additional
+    // accepted path) to match this repo's own automation — never a body substring anyone could forge.
+    // `viewerDidAuthor` ALONE is not READ-stable enough here — see `stand-down.mjs#AUTOMATION_LOGINS`'s own
+    // docblock for the live incident that proved it. A stand-down neither predicate excludes — including EVERY fix agent's genuine
     // needs-judgment/gate-red/lane-ref-gone escalation outside the advisory-fix shape above, and any human
     // `/finish` stand-down — stays terminal exactly as before.
     const stoodDown = countUnresolvedStandDowns(pr?.comments);

@@ -141,8 +141,9 @@ export function isLatestAdvisoryFindingAddressed(comments) {
  *
  * SAFE, NARROWLY: ALL of these must hold —
  *   1. the comment at `index` is a stand-down (leading-line {@link STAND_DOWN_MARKER}) and self-authored
- *      (`viewerDidAuthor` — a forged body can never satisfy this, the same fail-closed direction
- *      `isStandDownSuperseded` uses);
+ *      (`stand-down.mjs#isSelfAuthored` — `author.login` against `AUTOMATION_LOGINS`, or GitHub's
+ *      `viewerDidAuthor` as an additional accepted path; a forged body can never satisfy either, the same
+ *      fail-closed direction `isStandDownSuperseded` uses);
  *   2. among every comment BEFORE it, the latest advisory note already has a SELF-AUTHORED advisory-fix mark
  *      after it — i.e. {@link isLatestAdvisoryFindingAddressed} was already true at the moment this fixer ran.
  * A stand-down with no advisory-note history before it (unrelated to this population), or one posted before
