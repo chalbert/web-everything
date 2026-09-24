@@ -53,6 +53,8 @@ import { assessLiveness, bindAgents } from './reconcile-core.mjs';
 export {
   STUCK_DISPATCH_MARKER, buildStuckDispatchComment, stuckDispatchEpisodes, alreadyDispatchedForEpisode,
   STUCK_INSPECTION_COMMENT_PREFIX, isStuckInspectionOwnComment,
+  STUCK_DISPATCH_RETRACTED_MARKER, buildStuckDispatchRetractionComment, stuckDispatchRetractions,
+  MAX_RETRACTIONS_PER_EPISODE,
 } from './stuck-pr-dispatch-marker.mjs';
 import { isStuckInspectionOwnComment } from './stuck-pr-dispatch-marker.mjs';
 

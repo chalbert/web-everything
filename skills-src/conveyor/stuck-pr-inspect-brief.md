@@ -55,6 +55,12 @@ for this two-write shape).
 "It looks like the reviewer never ran" is not a finding; the exact command and its exact output that PROVES no
 reviewer ran is. Cite the command and the relevant slice of its output for every cause you name.
 
+**Redact before you quote.** Your comment is posted on GitHub, where anyone who can see the PR can read it.
+Daemon logs and `ps aux` output can hold things that must never go there. Before you paste any slice of log,
+process, or agent-listing output, remove: every token, key, password, or credential-looking string; every
+environment variable value; and every absolute home-directory path (write `~/…` instead). When a line is
+mostly sensitive, describe it in your own words ("the tick at 14:02 threw an auth error") instead of quoting it.
+
 Work through these, in whatever order the evidence leads you — this is not a fixed checklist to complete
 mechanically, it is where the evidence tends to live:
 

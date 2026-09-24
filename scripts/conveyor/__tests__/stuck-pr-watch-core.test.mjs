@@ -11,8 +11,39 @@ import {
   minutesSinceActivity, evaluateStuckPr, STUCK_DISPATCH_MARKER, buildStuckDispatchComment,
   stuckDispatchEpisodes, alreadyDispatchedForEpisode, DEFAULT_MAX_CONCURRENT_INSPECTIONS,
   MAX_CONCURRENT_INSPECTIONS_ENV, maxConcurrentInspections, planStuckDispatches, isStuckInspectionOwnComment,
+  buildStuckDispatchRetractionComment, stuckDispatchRetractions,
 } from '../stuck-pr-watch-core.mjs';
 import { buildStandDownComment } from '../stand-down.mjs';
+
+describe('dispatch retraction (PR #2553 review — marker first, then launch)', () => {
+  const T = '2026-09-23T17:00:00Z';
+  const marker = { body: buildStuckDispatchComment({ stage: 'fix', minutesSince: 90, thresholdMinutes: 45, activityAt: T, sessionSlug: 'inspect-42' }) };
+  const retraction = { body: buildStuckDispatchRetractionComment({ activityAt: T }) };
+  it('a retraction after the marker reopens the episode; a later marker (the retry) closes it again', () => {
+    expect(alreadyDispatchedForEpisode([marker, retraction], T)).toBe(false);
+    expect(alreadyDispatchedForEpisode([marker, retraction, marker], T)).toBe(true);
+    expect(stuckDispatchEpisodes([marker, retraction])).toEqual([]);
+  });
+  it('orders by createdAt when every comment has one, not by the order given', () => {
+    const at = (c, createdAt) => ({ ...c, createdAt });
+    expect(alreadyDispatchedForEpisode([
+      at(marker, '2026-09-23T19:30:00Z'), at(retraction, '2026-09-23T19:05:00Z'), at(marker, '2026-09-23T19:00:00Z'),
+    ], T)).toBe(true);
+  });
+  it('a retraction only cancels its OWN episode, and is counted per episode', () => {
+    const other = { body: buildStuckDispatchRetractionComment({ activityAt: '2026-09-01T00:00:00Z' }) };
+    expect(alreadyDispatchedForEpisode([marker, other], T)).toBe(true);
+    expect(stuckDispatchRetractions([marker, other, retraction], T)).toBe(1);
+    expect(stuckDispatchRetractions([marker, other], T)).toBe(0);
+  });
+  it('is one of the feature\'s own comments, so it never counts as progress', () => {
+    expect(isStuckInspectionOwnComment(retraction.body)).toBe(true);
+    expect(latestActivityAt([
+      { createdAt: T, event: 'commented', body: 'human' },
+      { createdAt: '2026-09-23T18:00:00Z', event: 'commented', body: retraction.body },
+    ])).toBe(T);
+  });
+});
 
 const HUMAN = { name: 'review:human' };
 const PENDING = { name: 'review:pending' };

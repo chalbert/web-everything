@@ -27,6 +27,15 @@
  * dispatched agent's own (separately-required) diagnostic comment: a fast tick cadence could otherwise dispatch
  * several inspection agents at the same PR before the first one ever got around to commenting.
  *
+ * MARKER FIRST, THEN LAUNCH (PR #2553 review). The marker is the only record that an agent was launched, so it
+ * is written BEFORE the launch: a failed comment launches nothing (the next sweep simply retries), instead of
+ * leaving a live, unrecorded agent that the next sweep would duplicate. If the launch fails after the marker is
+ * up AND the failure proves no agent started (`stuck-pr-inspect-dispatch.mjs#noInspectionStarted`), the watch
+ * posts one retraction ({@link buildStuckDispatchRetractionComment}) that reopens the episode for one more try.
+ * Any other launch failure (a timeout, a non-zero exit — the session may exist), a second failure, or a failed
+ * retraction leaves the episode marked, so it goes uninspected until the PR's next real activity — the
+ * at-most-once side of the trade, chosen over launching duplicates or commenting every sweep.
+ *
  * CONCURRENCY CAP, ACROSS EVERY REPO. `we:scripts/conveyor/stuck-pr-watch-core.mjs#planStuckDispatches` is
  * called with the CURRENT count of live `inspect-*` sessions (any repo tag), so a per-repo invocation of this
  * CLI still respects one GLOBAL cap rather than N independent ones.
@@ -40,11 +49,12 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { defaultReadAgents, enrichAgents } from './reconcile-pass.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { parseSessionSlug } from './session-slug.mjs';
-import { dispatchInspection } from './stuck-pr-inspect-dispatch.mjs';
+import { dispatchInspection, planInspectDispatch, noInspectionStarted } from './stuck-pr-inspect-dispatch.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import {
   isNeverStuckPr, classifyStuckStage, latestActivityAt, evaluateStuckPr, stuckThresholdMinutes,
-  buildStuckDispatchComment, alreadyDispatchedForEpisode, planStuckDispatches, maxConcurrentInspections,
+  buildStuckDispatchComment, buildStuckDispatchRetractionComment, alreadyDispatchedForEpisode,
+  stuckDispatchRetractions, MAX_RETRACTIONS_PER_EPISODE, planStuckDispatches, maxConcurrentInspections,
 } from './stuck-pr-watch-core.mjs';
 
 /** How many open PRs one `gh pr list` call reads per repo — matches the sibling watches' own limit. */
@@ -213,20 +223,35 @@ export function watchStuckPrs({
       activityAt: c.activityAt, verdict: 'stuck',
     };
     if (dryRun) { results.push({ ...base, wouldDispatch: true }); continue; }
+    // Marker first, then launch — see the file header. Nothing is launched until the marker is on the PR.
+    let markerPosted = false;
     try {
       if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+      const { sessionSlug } = planInspectDispatch({ pr: c.num, repo: resolvedRepo });
+      provider.postComment(resolvedRepo, c.num, buildStuckDispatchComment({
+        stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
+        activityAt: c.activityAt, sessionSlug,
+      }));
+      markerPosted = true;
       const d = dispatch({
         pr: c.num, repo: resolvedRepo, stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
       });
-      const comment = buildStuckDispatchComment({
-        stage: c.stage, minutesSince: c.minutesSince, thresholdMinutes: c.thresholdMinutes,
-        activityAt: c.activityAt, sessionSlug: d.sessionSlug,
-      });
-      provider.postComment(resolvedRepo, c.num, comment);
       dispatched.push({ num: c.num, sessionSlug: d.sessionSlug, agentId: d.agentId });
       results.push({ ...base, dispatched: true, sessionSlug: d.sessionSlug, agentId: d.agentId });
     } catch (e) {
-      results.push({ ...base, error: String((e && e.message) || e).split('\n')[0] });
+      const error = String((e && e.message) || e).split('\n')[0];
+      // Reopen the episode ONLY when the failure proves no agent exists (anything else may have started one),
+      // and only once per episode (a failure that repeats every sweep must not post comments forever).
+      const mayRetract = markerPosted && noInspectionStarted(e)
+        && stuckDispatchRetractions(c.pr?.comments, c.activityAt) < MAX_RETRACTIONS_PER_EPISODE;
+      let retracted = false;
+      if (mayRetract) {
+        try {
+          provider.postComment(resolvedRepo, c.num, buildStuckDispatchRetractionComment({ activityAt: c.activityAt }));
+          retracted = true;
+        } catch { /* at-most-once: the episode stays marked, so nothing is ever launched twice for it */ }
+      }
+      results.push({ ...base, error, ...(markerPosted ? { retracted } : {}) });
     }
   }
 

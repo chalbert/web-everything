@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   fillInspectBrief, INSPECT_BRIEF_PLACEHOLDERS, canonicalInspectPlaceholder, inspectSessionSlug,
   planInspectDispatch, INSPECT_DISPATCH_DISALLOWED_TOOLS, inspectDispatchDisallowedToolsArgs, dispatchInspection,
+  noInspectionStarted,
 } from '../stuck-pr-inspect-dispatch.mjs';
 
 describe('inspectSessionSlug', () => {
@@ -96,8 +97,30 @@ describe('inspectDispatchDisallowedToolsArgs', () => {
   it('denies every label/edit/merge mutation and every write-side script', () => {
     for (const must of [
       'Bash(gh pr edit:*)', 'Bash(gh pr merge:*)', 'Bash(gh pr review:*)', 'Bash(gh label:*)',
-      'Bash(git push:*)', 'Bash(git commit:*)', 'Bash(node scripts/backlog.mjs:*)', 'Bash(node scripts/lane-pool.mjs:*)',
+      'Bash(node scripts/backlog.mjs:*)', 'Bash(node scripts/lane-pool.mjs:*)',
     ]) expect(INSPECT_DISPATCH_DISALLOWED_TOOLS).toContain(must);
+  });
+  it('denies EVERY git command — this agent runs in the primary checkout, with no lane to absorb a reset/clean (PR #2553 review)', () => {
+    const prefixes = INSPECT_DISPATCH_DISALLOWED_TOOLS.map((p) => p.slice('Bash('.length, -':*)'.length));
+    const blocked = (cmd) => prefixes.some((d) => cmd === d || cmd.startsWith(`${d} `));
+    for (const cmd of [
+      'git push origin HEAD', 'git commit -m x', 'git checkout main', 'git switch -c x', 'git reset --hard',
+      'git clean -fd', 'git branch -D x', 'git stash', 'git merge x', 'git rebase main', 'git cherry-pick abc',
+      'git restore .', 'git rm -r x', 'git worktree add ../x', 'git -C . reset --hard', 'git -c core.x=y clean -fdx',
+    ]) expect(blocked(cmd), cmd).toBe(true);
+  });
+  it('WIRING: the brief never tells the agent to run a git command (it is denied git wholesale)', () => {
+    const brief = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../skills-src/conveyor/stuck-pr-inspect-brief.md'), 'utf8',
+    );
+    expect([...brief.matchAll(/`(git [^`]+)`/g)].map((m) => m[1])).toEqual([]);
+  });
+  it('the brief tells the agent to redact secrets before quoting any log/process output in its public comment', () => {
+    const brief = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../skills-src/conveyor/stuck-pr-inspect-brief.md'), 'utf8',
+    );
+    expect(brief).toMatch(/\*\*Redact before you quote\.\*\*/);
+    for (const term of ['token', 'environment', 'home-directory']) expect(brief).toContain(term);
   });
   it('denies `gh api` — the raw-REST bypass that closes/labels/merges past every per-verb rule (PR #2553 review)', () => {
     // Every GitHub write the review named reaches through `gh api`: PATCH state=closed, POST .../labels, PUT .../merge.
@@ -169,5 +192,30 @@ describe('dispatchInspection — plan → fill → mint → spawn, every IO poin
       readBrief: () => '{{PR}}{{REPO}}{{SESSION_SLUG}}{{STAGE}}{{MINUTES_SINCE}}{{THRESHOLD_MINUTES}}',
       spawnAgent: vi.fn(),
     })).toThrow();
+  });
+
+  describe('noInspectionStarted — only a failure that PROVES no agent exists (PR #2553 review)', () => {
+    const base = {
+      pr: 1, repo: 'chalbert/web-everything', stage: 'fix', minutesSince: 50, thresholdMinutes: 45, root: '/repo',
+      readBrief: () => '{{PR}}{{REPO}}{{SESSION_SLUG}}{{STAGE}}{{MINUTES_SINCE}}{{THRESHOLD_MINUTES}}',
+      mintSessionId: () => 'uuid-1',
+    };
+    const caught = (o) => { try { dispatchInspection({ ...base, ...o }); } catch (e) { return e; } return null; };
+    it('true for a pre-spawn failure (lane checkout, unreadable brief) — spawn is never reached', () => {
+      const spawnAgent = vi.fn();
+      expect(noInspectionStarted(caught({ root: '/x/.lanes/web-everything/lane-9', spawnAgent }))).toBe(true);
+      expect(noInspectionStarted(caught({ readBrief: () => { throw new Error('ENOENT brief'); }, spawnAgent }))).toBe(true);
+      expect(spawnAgent).not.toHaveBeenCalled();
+    });
+    it('true for a spawn refused before `claude` ran (ENOENT / EACCES)', () => {
+      for (const code of ['ENOENT', 'EACCES']) {
+        const e = caught({ spawnAgent: () => { throw Object.assign(new Error(`spawn claude ${code}`), { code }); } });
+        expect(noInspectionStarted(e), code).toBe(true);
+      }
+    });
+    it('FALSE for a timeout or a non-zero exit — the session may already exist', () => {
+      expect(noInspectionStarted(caught({ spawnAgent: () => { throw Object.assign(new Error('t'), { code: 'ETIMEDOUT' }); } }))).toBe(false);
+      expect(noInspectionStarted(caught({ spawnAgent: () => { throw Object.assign(new Error('exit 1'), { status: 1 }); } }))).toBe(false);
+    });
   });
 });

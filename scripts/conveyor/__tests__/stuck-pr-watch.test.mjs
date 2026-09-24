@@ -10,7 +10,8 @@ import {
   defaultListOpenPrs, defaultListTimelineEvents, defaultCountLiveInspections, watchStuckPrs, PR_LIST_JSON_FIELDS,
   defaultReadFullTimeline,
 } from '../stuck-pr-watch.mjs';
-import { STUCK_DISPATCH_MARKER } from '../stuck-pr-watch-core.mjs';
+import { STUCK_DISPATCH_MARKER, STUCK_DISPATCH_RETRACTED_MARKER } from '../stuck-pr-watch-core.mjs';
+import { markNoInspectionStarted } from '../stuck-pr-inspect-dispatch.mjs';
 
 const PENDING = { name: 'review:pending' };
 const CHANGES = { name: 'review:changes' };
@@ -191,6 +192,95 @@ describe('watchStuckPrs — the whole sweep, every IO point injected', () => {
     const row = result.results.find((r) => r.num === 42);
     expect(row.verdict).toBe('already-dispatched-this-episode');
     expect(row.activityAt).toBe(t1);
+  });
+
+  /** Two sweeps over the same stuck PR, with sweep 1's successfully-posted comments fed back as sweep 2's. */
+  function twoSweeps({ dispatch, postComment }) {
+    const provider = { postComment, currentRepo: vi.fn(() => 'chalbert/web-everything') };
+    const posted = () => postComment.mock.calls
+      .filter((_, i) => postComment.mock.results[i].type === 'return').map((c) => ({ body: c[2] }));
+    const sweep = () => watchStuckPrs({
+      repo: 'chalbert/web-everything', dryRun: false, now,
+      listPrs: () => [stuckFixPr({ comments: posted() })], listTimelineEvents: oldActivity,
+      readAgents: () => [], enrich: (a) => a, countLiveInspections: () => 0, dispatch, provider,
+    });
+    return [sweep(), sweep()];
+  }
+
+  it('a marker-comment failure launches NO agent, so the next sweep\'s retry is the only dispatch (review finding, PR #2553)', () => {
+    // A transient `gh pr comment` failure on sweep 1, then success: exactly ONE real agent is ever launched.
+    const dispatch = vi.fn(() => ({ sessionSlug: 'inspect-42', agentId: 'a1' }));
+    let calls = 0;
+    const postComment = vi.fn(() => { calls += 1; if (calls === 1) throw new Error('gh: rate limited'); });
+    const [first, second] = twoSweeps({ dispatch, postComment });
+    expect(first.results.find((r) => r.num === 42).error).toMatch(/rate limited/);
+    expect(first.dispatchedCount).toBe(0);
+    expect(second.dispatchedCount).toBe(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a PERSISTENT marker-comment failure never launches an agent at all — it cannot eat the concurrency cap', () => {
+    const dispatch = vi.fn(() => ({ sessionSlug: 'inspect-42', agentId: 'a1' }));
+    const postComment = vi.fn(() => { throw new Error('gh: auth'); });
+    twoSweeps({ dispatch, postComment });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('the marker is posted BEFORE the agent is launched, and names the same session slug the dispatch uses', () => {
+    const order = [];
+    const dispatch = vi.fn(() => { order.push('dispatch'); return { sessionSlug: 'inspect-42', agentId: null }; });
+    const postComment = vi.fn(() => { order.push('comment'); });
+    watchStuckPrs({
+      repo: 'chalbert/web-everything', dryRun: false, now,
+      listPrs: () => [stuckFixPr()], listTimelineEvents: oldActivity,
+      readAgents: () => [], enrich: (a) => a, countLiveInspections: () => 0,
+      dispatch, provider: { postComment, currentRepo: vi.fn(() => 'chalbert/web-everything') },
+    });
+    expect(order).toEqual(['comment', 'dispatch']);
+    expect(postComment.mock.calls[0][2]).toContain('`inspect-42`');
+  });
+
+  it('a launch that PROVABLY never started retracts that episode, so the next sweep retries it', () => {
+    let calls = 0;
+    const dispatch = vi.fn(() => {
+      calls += 1;
+      if (calls === 1) throw markNoInspectionStarted(Object.assign(new Error('spawn claude ENOENT --disallowedTools=x'), { code: 'ENOENT' }));
+      return { sessionSlug: 'inspect-42', agentId: 'a2' };
+    });
+    const postComment = vi.fn();
+    const [first, second] = twoSweeps({ dispatch, postComment });
+    expect(first.results.find((r) => r.num === 42)).toMatchObject({ error: expect.stringMatching(/ENOENT/), retracted: true });
+    const retraction = postComment.mock.calls[1][2];
+    expect(retraction.startsWith(STUCK_DISPATCH_RETRACTED_MARKER)).toBe(true);
+    expect(retraction).not.toContain('disallowedTools'); // raw error text stays in the log, never the public comment
+    expect(second.dispatchedCount).toBe(1);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('a launch failure that MAY have started an agent (timeout, non-zero exit) never retracts — no duplicate', () => {
+    const dispatch = vi.fn(() => { throw Object.assign(new Error('spawnSync claude ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+    const postComment = vi.fn();
+    const [first, second] = twoSweeps({ dispatch, postComment });
+    expect(first.results.find((r) => r.num === 42).retracted).toBe(false);
+    expect(postComment).toHaveBeenCalledTimes(1); // the marker only
+    expect(second.results.find((r) => r.num === 42).verdict).toBe('already-dispatched-this-episode');
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a provable failure that REPEATS every sweep retracts at most once — bounded comments, bounded launches', () => {
+    const dispatch = vi.fn(() => { throw markNoInspectionStarted(new Error('refusing to start from a lane checkout')); });
+    const postComment = vi.fn();
+    const provider = { postComment, currentRepo: vi.fn(() => 'chalbert/web-everything') };
+    const posted = () => postComment.mock.calls.map((c) => ({ body: c[2] }));
+    for (let i = 0; i < 5; i += 1) {
+      watchStuckPrs({
+        repo: 'chalbert/web-everything', dryRun: false, now,
+        listPrs: () => [stuckFixPr({ comments: posted() })], listTimelineEvents: oldActivity,
+        readAgents: () => [], enrich: (a) => a, countLiveInspections: () => 0, dispatch, provider,
+      });
+    }
+    expect(dispatch).toHaveBeenCalledTimes(2); // first try + one retry
+    expect(postComment).toHaveBeenCalledTimes(3); // marker, retraction, marker — then silence
   });
 
   it('respects the concurrency cap end-to-end — a full cap dispatches nothing', () => {

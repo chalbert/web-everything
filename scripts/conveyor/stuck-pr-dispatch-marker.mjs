@@ -56,30 +56,95 @@ export function buildStuckDispatchComment({ stage, minutesSince, thresholdMinute
     '',
     `No progress (no new commit, label event, or comment) for ~${Math.round(minutesSince)}m while \`${stage}\` ` +
       `(threshold ${thresholdMinutes}m), and nothing live is working it. An inspection agent (\`${sessionSlug}\`) ` +
-      'has been dispatched to find out why — **diagnosis only**: it will not change labels, code, or branches. ' +
+      'is being dispatched to find out why — **diagnosis only**: it will not change labels, code, or branches. ' +
       'It will post its findings as a separate comment.',
     '',
     '_Auto-detected by the stuck-PR watch (`we:scripts/conveyor/stuck-pr-watch.mjs`, epic #3383)._',
   ].join('\n');
 }
 
+/** The stable FIRST LINE of the watch's RETRACTION of its own dispatch marker. The watch posts the marker
+ *  BEFORE it launches the agent (so a failed comment never leaves an unrecorded live agent — PR #2553 review);
+ *  if the launch itself then fails, this retraction reopens the episode so the next sweep retries it. It shares
+ *  {@link STUCK_INSPECTION_COMMENT_PREFIX}, so it is never counted as progress either. */
+export const STUCK_DISPATCH_RETRACTED_MARKER = '🔎 stuck-PR inspection dispatch failed';
+
+/**
+ * Build the retraction posted when the launch provably fails right after its marker was posted. Same
+ * `episode:` line as {@link buildStuckDispatchComment}, so it cancels exactly that episode. It carries NO raw
+ * error text: that goes to the watch's own log, never a public PR comment (the error line can hold the whole
+ * agent argv).
+ * @param {{activityAt:string}} o
+ * @returns {string}
+ */
+export function buildStuckDispatchRetractionComment({ activityAt }) {
+  return [
+    STUCK_DISPATCH_RETRACTED_MARKER,
+    '',
+    `episode: ${activityAt}`,
+    '',
+    'The inspection agent announced above did NOT start (it failed before launch; see the watch\'s own log). '
+      + 'The next sweep will try once more.',
+    '',
+    '_Auto-detected by the stuck-PR watch (`we:scripts/conveyor/stuck-pr-watch.mjs`, epic #3383)._',
+  ].join('\n');
+}
+
+/** Comments in thread order: by `createdAt` when every comment carries one, else as given. Pure. */
+function inThreadOrder(comments) {
+  const list = Array.isArray(comments) ? comments : [];
+  const at = (c) => (typeof c === 'object' && c ? Date.parse(c.createdAt) : NaN);
+  if (!list.length || !list.every((c) => Number.isFinite(at(c)))) return list;
+  return [...list].sort((a, b) => at(a) - at(b));
+}
+
+/**
+ * How many times has THIS episode already been retracted? Pure. The watch retracts an episode at most once
+ * ({@link MAX_RETRACTIONS_PER_EPISODE}), so a failure that repeats every sweep cannot post comments forever.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @param {string|null|undefined} activityAt
+ * @returns {number}
+ */
+export function stuckDispatchRetractions(comments, activityAt) {
+  if (activityAt === null || activityAt === undefined) return 0;
+  let n = 0;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(STUCK_DISPATCH_RETRACTED_MARKER)) continue;
+    const m = EPISODE_LINE_RE.exec(body);
+    if (m && m[1].trim() === String(activityAt)) n += 1;
+  }
+  return n;
+}
+
+/** At most this many retractions per episode — so at most two marker+launch attempts per stuck episode. */
+export const MAX_RETRACTIONS_PER_EPISODE = 1;
+
 /**
  * Every stuck-episode timestamp this watch has already recorded a dispatch for, read back off the PR's OWN
  * comment thread. Pure. A comment counts only when the marker is its LEADING line (mirrors
  * `we:scripts/conveyor/stand-down.mjs#countStandDownComments`'s own narrowing) — a human quoting the marker in
- * a reply never counts.
+ * a reply never counts. Comments are read in thread order: a later {@link STUCK_DISPATCH_RETRACTED_MARKER} for
+ * an episode cancels the marker before it, and a later marker (the retry) re-records it.
  * @param {Array<{body?:string}|string>|null|undefined} comments
  * @returns {string[]}
  */
 export function stuckDispatchEpisodes(comments) {
-  const out = [];
-  for (const c of Array.isArray(comments) ? comments : []) {
+  const live = new Set();
+  for (const c of inThreadOrder(comments)) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body !== 'string' || !body.trimStart().startsWith(STUCK_DISPATCH_MARKER)) continue;
+    if (typeof body !== 'string') continue;
+    const lead = body.trimStart();
+    // The retraction is checked first: `…dispatch failed` does not start with `…dispatched`, but keep the
+    // order explicit so a future marker rename can't make one read as the other.
+    const retracted = lead.startsWith(STUCK_DISPATCH_RETRACTED_MARKER);
+    if (!retracted && !lead.startsWith(STUCK_DISPATCH_MARKER)) continue;
     const m = EPISODE_LINE_RE.exec(body);
-    if (m) out.push(m[1].trim());
+    if (!m) continue;
+    if (retracted) live.delete(m[1].trim());
+    else live.add(m[1].trim());
   }
-  return out;
+  return [...live];
 }
 
 /**

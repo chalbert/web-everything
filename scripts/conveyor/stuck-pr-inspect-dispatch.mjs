@@ -29,7 +29,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
+  agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, isPreSpawnRefusal, parseBackgroundedId,
+  REPO_ROOT,
 } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
@@ -174,8 +175,10 @@ export const INSPECT_DISPATCH_DISALLOWED_TOOLS = Object.freeze([
   'Bash(node scripts/conveyor/rearm-review.mjs:*)',
   'Bash(node scripts/conveyor/ci-heal-mark.mjs:*)',
   'Bash(node scripts/conveyor/advisory-label-sweep.mjs:*)',
-  'Bash(git push:*)',
-  'Bash(git commit:*)',
+  // `git` IS DENIED WHOLESALE (PR #2553 review). This agent runs in the operator's PRIMARY checkout with no lane
+  // behind it, so a `git checkout`/`reset --hard`/`clean -fd` there cannot be undone. Per-verb rules would also
+  // miss `git -C <dir> …` / `git -c k=v …`. The brief needs no git at all — it reads everything through `gh`.
+  'Bash(git:*)',
   'Bash(node scripts/review-set-label.mjs:*)',
   'Bash(node scripts/backlog.mjs:*)',
   'Bash(node scripts/lane-pool.mjs:*)',
@@ -209,6 +212,26 @@ export function planInspectDispatch({ pr, repo } = {}) {
   return { pr: prNum, repo: CONSTELLATION_REPOS[repoKey].slug, repoKey, sessionSlug: inspectSessionSlug(prNum, repoKey) };
 }
 
+const NO_INSPECTION_STARTED = Symbol('no-inspection-started');
+
+/** Tag an error as proving no agent started (read back by {@link noInspectionStarted}). Exported for tests. */
+export function markNoInspectionStarted(e) {
+  const err = e instanceof Error ? e : new Error(String(e));
+  err[NO_INSPECTION_STARTED] = true;
+  return err;
+}
+
+/**
+ * Does this {@link dispatchInspection} error PROVE no agent was started? True only for a failure before the
+ * spawn, or a spawn refused before `claude` ran (`isPreSpawnRefusal`: ENOENT/EACCES). Every other failure is
+ * INDETERMINATE — the session may exist — so the stuck-PR watch must not reopen the episode for it (PR #2553).
+ * @param {unknown} e
+ * @returns {boolean}
+ */
+export function noInspectionStarted(e) {
+  return Boolean(e && e[NO_INSPECTION_STARTED]);
+}
+
 /**
  * DISPATCH ONE INSPECTION SESSION. The composition: plan → fill the brief → mint a fresh session id → spawn.
  * @param {object} o
@@ -231,24 +254,37 @@ export function dispatchInspection({
   spawnAgent = defaultSpawnAgent,
   extraArgs = [],
 } = {}) {
-  const planned = planInspectDispatch({ pr, repo });
-  assertNotALaneCheckout(root);
-  const { prompt, unknownTokens } = fillInspectBrief(readBrief(root), {
-    PR: planned.pr,
-    REPO: planned.repo,
-    SESSION_SLUG: planned.sessionSlug,
-    STAGE: stage,
-    MINUTES_SINCE: Math.round(Number(minutesSince)),
-    THRESHOLD_MINUTES: thresholdMinutes,
-  });
-  const sessionId = String(mintSessionId());
-  const argv = buildAgentArgv({
-    sessionId,
-    payload: { prompt, sessionSlug: planned.sessionSlug },
-    systemPromptFile: INSPECT_DISPATCH_SYSTEM_PROMPT_FILE,
-    extraArgs: [...inspectDispatchDisallowedToolsArgs(), ...extraArgs],
-  });
-  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+  // Everything before the spawn is pre-spawn: a throw here PROVES no agent exists (see noInspectionStarted).
+  const prepare = () => {
+    const planned = planInspectDispatch({ pr, repo });
+    assertNotALaneCheckout(root);
+    const { prompt, unknownTokens } = fillInspectBrief(readBrief(root), {
+      PR: planned.pr,
+      REPO: planned.repo,
+      SESSION_SLUG: planned.sessionSlug,
+      STAGE: stage,
+      MINUTES_SINCE: Math.round(Number(minutesSince)),
+      THRESHOLD_MINUTES: thresholdMinutes,
+    });
+    const sessionId = String(mintSessionId());
+    const argv = buildAgentArgv({
+      sessionId,
+      payload: { prompt, sessionSlug: planned.sessionSlug },
+      systemPromptFile: INSPECT_DISPATCH_SYSTEM_PROMPT_FILE,
+      extraArgs: [...inspectDispatchDisallowedToolsArgs(), ...extraArgs],
+    });
+    return { planned, prompt, unknownTokens, sessionId, argv };
+  };
+  let prepared;
+  try { prepared = prepare(); } catch (e) { throw markNoInspectionStarted(e); }
+  const { planned, prompt, unknownTokens, sessionId, argv } = prepared;
+  let stdout;
+  try {
+    stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+  } catch (e) {
+    // Only ENOENT/EACCES prove `claude` never ran. A timeout or non-zero exit may still have started a session.
+    throw isPreSpawnRefusal(e) ? markNoInspectionStarted(e) : e;
+  }
   const agentId = parseBackgroundedId(stdout);
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, repoKey: planned.repoKey,
