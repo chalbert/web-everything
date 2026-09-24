@@ -1023,7 +1023,7 @@ describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo 
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('a plateau-app PR with a backlog item is dispatched into a plateau lane (real profile: fix is on, ci-heal is not)', async () => {
+  it('a plateau-app PR with a backlog item is dispatched into a plateau lane (real profile: fix AND ci-heal are both on, #3967)', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
@@ -1047,8 +1047,12 @@ describe('runReconcileFixDispatch — repo capability gate (#x33jgwt multi-repo 
         opts: expect.objectContaining({ repo: 'plateau-app' }),
       }]);
       expect(result.dispatched).toEqual([{ sessionId: 's', sessionSlug: 'fix-pa-177', pr: 177, itemNum: '3438', lane: 4, unknownTokens: [] }]);
-      // ci-heal is a SEPARATE capability, still off for plateau-app (slice 7) — recorded, not silently dropped.
-      expect(result.refusals).toEqual([{ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 50, action: 'ci-heal', why: expect.any(String) }]);
+      // ci-heal is a SEPARATE capability, now ALSO on for plateau-app (#3967 multi-repo slice 7) — this file
+      // (`runReconcileFixDispatch`) still dispatches no `ci-heal` itself either way (that is
+      // `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`'s own job, reading the SAME `reconcile-pass`
+      // reading), so the `kind:'ci-heal'` entry is silently absent from BOTH `dispatched` and `refusals` here —
+      // no `unsupported-repo` row, because the capability is genuinely on.
+      expect(result.refusals).toEqual([]);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
