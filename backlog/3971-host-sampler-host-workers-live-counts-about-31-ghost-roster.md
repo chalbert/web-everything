@@ -3,9 +3,11 @@ bornAs: x85q7yn
 kind: story
 size: 2
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/host-sampler-attribution.mjs", "we:scripts/operations/host-sampler.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
@@ -16,3 +18,7 @@ Audit 2026-09-23: every host.workers.live sample from 2026-09-21 to 2026-09-23 c
 ## Done when
 
 1. **Executable** — TODO: a command that fails before this item lands and passes after.
+
+## Withdrawn (2026-09-23): the finding was a misread
+
+Read in code while building the fix: `summarizeWorkers` in we:scripts/operations/host-sampler-attribution.mjs counts a worker live only when its pid is in the same sample's `ps`, and reports the no-pid roster rows apart as `no_pid`. `host.workers.live` never included them. The audit compared `no_pid` against the sum of the per-kind counts, which is the live total itself, so "37 live, really 6 to 12" was wrong: about 37 workers really were live (for example 40 review sessions at once on 2026-09-23). No code change; recorded on the #3383 tracker.
