@@ -1,9 +1,11 @@
 ---
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:skills-src/review/review-agent-brief.md", "we:skills-src/conveyor/fix-agent-brief.md"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
