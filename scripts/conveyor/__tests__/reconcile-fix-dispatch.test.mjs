@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  dispatchFix, fetchPrDiffPaths, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
+  dispatchFix, fetchCardScopeAtRef, fetchPrDiffPaths, fetchPrDiffScope, fixBriefPath, freeLaneNumbers, isSafeFallbackScopeEntry, planFixesFromReconcile, runReconcileFixDispatch,
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
@@ -201,6 +201,106 @@ describe('planFixesFromReconcile', () => {
       }]);
     });
   });
+
+  // #xcla4iv — the standard file-item-in-PR workflow: the card and the code that delivers it land in the SAME
+  // PR, so `findItemFn` (which reads only `main`) misses it, but the PR's own diff carries the card. Live case:
+  // `chalbert/web-everything` PR #2553 (branch `lane/xzi292i-stuck-pr-watch`) — the daemon refused it `no-scope`
+  // on every tick despite the card's own real `scope:` frontmatter sitting right there in the diff.
+  describe('#xcla4iv — an item whose card is filed IN this PR, not yet on `main`', () => {
+    it('is dispatched with the card\'s own scope (read at the PR head), never refused `no-scope`', () => {
+      const entries = [{ kind: 'fix', prNumber: 2553, headRefName: 'lane/xzi292i-stuck-pr-watch', headRefOid: 'deadbeef'.repeat(5) }];
+      const diffCalls = [];
+      const cardCalls = [];
+      const fetchItemlessDiffPaths = (pr) => {
+        diffCalls.push(pr);
+        // the real PR #2553's full diff carries both files; this fixture lists both so the containment guard
+        // (review findings, chalbert/web-everything#2573) doesn't spuriously drop a real, legitimately-in-diff
+        // card-scope entry.
+        return ['backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md', 'scripts/conveyor/stuck-pr-watch-core.mjs', 'scripts/conveyor/stuck-pr-watch.mjs'];
+      };
+      const resolveCardScopeAtRef = (path, ref) => {
+        cardCalls.push({ path, ref });
+        return ['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'];
+      };
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, resolveCardScopeAtRef,
+      );
+      expect(diffCalls).toEqual([2553]);
+      expect(cardCalls).toEqual([{
+        path: 'backlog/xzi292i-stuck-pr-watch-launch-a-diagnosis-only-inspection-agent-when.md',
+        ref: 'deadbeef'.repeat(5),
+      }]);
+      expect(refusals).toEqual([]);
+      expect(planned).toEqual([{
+        itemNum: 'xzi292i', pr: 2553, laneRef: 'lane/xzi292i-stuck-pr-watch',
+        scope: ['we:scripts/conveyor/stuck-pr-watch-core.mjs', 'we:scripts/conveyor/stuck-pr-watch.mjs'],
+        scopeSource: 'item', isConflict: false, body: null, headRefOid: 'deadbeef'.repeat(5),
+      }]);
+    });
+
+    it('falls back to the PR\'s own (filtered) diff paths when the card itself declares no `scope:`', () => {
+      const entries = [{ kind: 'fix', prNumber: 61, headRefName: 'lane/xabc123-new-thing', headRefOid: 'cafe'.repeat(10) }];
+      const fetchItemlessDiffPaths = () => ['backlog/xabc123-new-thing.md', 'src/Thing.tsx', 'we:x,we:scripts'];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, () => [],
+      );
+      expect(refusals).toEqual([]);
+      // the raw `we:x,we:scripts`-shaped hostile entry is dropped by `isSafeFallbackScopeEntry` here — the
+      // SAME filtering the pre-existing item-with-empty-scope fallback already gets.
+      expect(planned).toEqual([{
+        itemNum: 'xabc123', pr: 61, laneRef: 'lane/xabc123-new-thing',
+        scope: ['we:backlog/xabc123-new-thing.md', 'we:src/Thing.tsx'],
+        scopeSource: 'pr-diff', isConflict: false, body: null, headRefOid: 'cafe'.repeat(10),
+      }]);
+    });
+
+    // Review findings (correctness + security, chalbert/web-everything#2573, at this file's own
+    // `planFixesFromReconcile`:226/229) — the malicious-shaped repro from the security finding: a PR author
+    // opens `lane/xevil01-innocuous-thing` and files a card in that SAME PR's diff whose OWN `scope:`
+    // frontmatter declares a path-traversal entry. Before the fix, `item.scopeSource === 'card'` skipped
+    // `isSafeFallbackScopeEntry` entirely (only `'diff'` was filtered), so both traversal entries reached
+    // `planned[0].scope` untouched.
+    it('SECURITY: a hostile card-scope entry (path traversal) filed in the PR\'s own diff is filtered, never reaches planned.scope', () => {
+      const entries = [{ kind: 'fix', prNumber: 2222, headRefName: 'lane/xevil01-innocuous-thing', headRefOid: 'cafe'.repeat(10) }];
+      const fetchItemlessDiffPaths = () => ['backlog/xevil01-innocuous-thing.md', 'scripts/legit.mjs'];
+      const resolveCardScopeAtRef = () => ['we:../../.ssh/authorized_keys', 'we:../../../etc/passwd'];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, resolveCardScopeAtRef,
+      );
+      expect(refusals).toEqual([]);
+      expect(planned).toHaveLength(1);
+      expect(planned[0].scope).not.toContain('we:../../.ssh/authorized_keys');
+      expect(planned[0].scope).not.toContain('we:../../../etc/passwd');
+      // nothing safe survives the card, so it falls through to the PR's own (already-touched) diff paths —
+      // never a looser fence than the PR's own footprint.
+      expect(planned[0].scope).toEqual(['we:backlog/xevil01-innocuous-thing.md', 'we:scripts/legit.mjs']);
+      expect(planned[0].scopeSource).toBe('pr-diff');
+    });
+
+    it('CORRECTNESS: a comma-smuggled card-scope entry is dropped, never widens the fence past what the PR actually touches', () => {
+      const entries = [{ kind: 'fix', prNumber: 2223, headRefName: 'lane/xevil02-innocuous-thing', headRefOid: 'cafe'.repeat(10) }];
+      const fetchItemlessDiffPaths = () => ['backlog/xevil02-innocuous-thing.md', 'scripts/legit.mjs'];
+      const resolveCardScopeAtRef = () => ['we:scripts/legit.mjs', 'we:x,we:evil/anything'];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we', fetchItemlessDiffPaths, resolveCardScopeAtRef,
+      );
+      expect(refusals).toEqual([]);
+      expect(planned[0].scope).toEqual(['we:scripts/legit.mjs']);
+    });
+
+    it('a GENUINE ghost item number — no matching card anywhere in the diff — is still refused `no-scope`, unaffected', () => {
+      const entries = [{ kind: 'fix', prNumber: 99, headRefName: 'lane/9999-ghost' }];
+      const cardCalls = [];
+      const { planned, refusals } = planFixesFromReconcile(
+        entries, () => null, () => [], () => [], 'we',
+        () => ['scripts/unrelated.mjs'], // some diff, but no `backlog/9999-*.md` in it
+        (path, ref) => { cardCalls.push({ path, ref }); return ['we:should/not/be/used.mjs']; },
+      );
+      expect(cardCalls).toEqual([]); // never even attempted — no candidate card path found
+      expect(planned).toEqual([]);
+      expect(refusals).toEqual([{ pr: 99, kind: 'no-scope', why: expect.stringContaining('no declared scope') }]);
+    });
+  });
 });
 
 describe('fetchPrDiffScope — #3634\'s real fallback-scope reader', () => {
@@ -244,6 +344,49 @@ describe('fetchPrDiffPaths — the un-prefixed read `resolvePrWorkUnit`\'s own `
   it('fails soft to `[]` on any `gh` failure', () => {
     const exec = () => { throw new Error('gh: PR not found'); };
     expect(fetchPrDiffPaths(404, { exec, root: '/repo' })).toEqual([]);
+  });
+});
+
+// #xcla4iv — reads one backlog card's own committed `scope:` frontmatter at a specific ref (a PR's head),
+// for the "card filed IN this PR" population `resolvePrWorkUnit`'s own docblock describes.
+describe('fetchCardScopeAtRef — #xcla4iv\'s real card-scope reader', () => {
+  const toBase64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+
+  it('decodes the `gh api .../contents` response and reads the card\'s `scope:` frontmatter', () => {
+    const calls = [];
+    const exec = (file, argv, opts) => {
+      calls.push({ file, argv, cwd: opts?.cwd });
+      return toBase64('---\nscope: ["we:a.mjs", "we:b.mjs"]\n---\nbody text');
+    };
+    const scope = fetchCardScopeAtRef('backlog/xzi292i-x.md', 'deadbeef'.repeat(5), { exec, root: '/repo' });
+    expect(scope).toEqual(['we:a.mjs', 'we:b.mjs']);
+    expect(calls).toEqual([{
+      file: 'gh',
+      argv: ['api', '--method', 'GET', `repos/{owner}/{repo}/contents/backlog/xzi292i-x.md?ref=${'deadbeef'.repeat(5)}`, '--jq', '.content'],
+      cwd: '/repo',
+    }]);
+  });
+
+  it('embeds an explicit `owner/name` repo slug directly (no `--repo` flag exists for `gh api`)', () => {
+    const calls = [];
+    const exec = (file, argv) => { calls.push(argv); return toBase64('---\nscope: ["plateau:x.tsx"]\n---\n'); };
+    fetchCardScopeAtRef('backlog/xabc-x.md', 'sha1', { exec, root: '/repo', repo: 'chalbert/plateau-app' });
+    expect(calls).toEqual([['api', '--method', 'GET', 'repos/chalbert/plateau-app/contents/backlog/xabc-x.md?ref=sha1', '--jq', '.content']]);
+  });
+
+  it('returns `[]` when the card declares no `scope:` at all (falls back to the diff, one level up)', () => {
+    const exec = () => toBase64('---\nkind: story\n---\nno scope here');
+    expect(fetchCardScopeAtRef('backlog/x.md', 'sha', { exec, root: '/repo' })).toEqual([]);
+  });
+
+  it('fails soft to `[]` on any `gh` failure — never throws the whole pass over one bad read', () => {
+    const exec = () => { throw new Error('gh: not found'); };
+    expect(fetchCardScopeAtRef('backlog/x.md', 'sha', { exec, root: '/repo' })).toEqual([]);
+  });
+
+  it('fails soft to `[]` on malformed base64/frontmatter rather than throwing', () => {
+    const exec = () => 'not-valid-base64!!!';
+    expect(fetchCardScopeAtRef('backlog/x.md', 'sha', { exec, root: '/repo' })).toEqual([]);
   });
 });
 
