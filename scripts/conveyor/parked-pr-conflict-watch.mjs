@@ -79,6 +79,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
+import { countStandDownComments } from './stand-down.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -458,6 +459,29 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListPrComments — `#3383`'s idempotency read for the
+ * grace-expired stand-down routing: a COMPLETE, injectable read of every issue comment on the PR, so
+ * {@link countStandDownComments} (`we:scripts/conveyor/stand-down.mjs`) can tell "did a fixer already stand down
+ * here" from the PR itself before posting a SECOND one. Unlike the fresh-detection stand-down (naturally
+ * one-shot: it only fires on the label's absent→present transition), the grace-expired check re-evaluates on
+ * EVERY sweep for as long as the PR stays queued+conflicting+labelled — a stand-down leaves no label change
+ * (`we:scripts/conveyor/stand-down.mjs`'s own contract), so without this read it would re-post every tick.
+ *
+ * Same paginated-REST shape as {@link defaultListPrPatches} (`issues/{number}/comments`, not `pulls/{n}/files` —
+ * comments live on the issue side of a PR) and the same `@tsv`-then-{@link unescapeTsvField} round trip, for the
+ * same reason: a comment body legitimately spans many lines, and jq's default per-line JSON rendering would
+ * break a "one record per line" reader.
+ * @param {{number:number|string, repo?:string|null, exec?:Function}} o
+ * @returns {Array<{body:string}>}
+ */
+export function defaultListPrComments({ number, repo, exec = execFileSyncThrottled }) {
+  const path = repo ? `repos/${repo}/issues/${number}/comments` : `repos/{owner}/{repo}/issues/${number}/comments`;
+  const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.body] | @tsv'];
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+  return String(out || '').split('\n').filter((l) => l !== '').map((line) => ({ body: unescapeTsvField(line) }));
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildConflictFindingBody — the write-up handed to
  * `we:scripts/conveyor/reconcile-finding.mjs --body-file=` for a DISPATCHABLE (non-statute-tier) fresh
  * conflict (Fork 4). PURE.
@@ -497,6 +521,40 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false } = {})
 }
 
 // ── IO SHELL (gh only past this point — the CLI, gated on the main-module check) ───────────────────────────
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#classifyStatuteConflict — the ONE place BOTH the
+ * fresh-detection routing and the grace-expired routing decide "does this conflict touch a statute-tier file
+ * at all, and if so is it ENTIRELY append-only". Factored out at `#3383` — the grace path used to skip this
+ * classification altogether, on the false assumption ("a statute-tier conflict was already handed to a human at
+ * detection") that does not hold for a QUEUED PR: the fresh path defers a NON-statute-tier queued conflict to
+ * the drain (`routedTo: 'deferred-to-drain'`), never to a human, so a conflict that only becomes recognizably
+ * statute-tier by the time grace expires reaches this exact code path for the FIRST time. Sharing one function
+ * means the two call sites can never compute this differently again.
+ *
+ * `files` MUST already be the verified-complete list ({@link defaultListPrFiles}'s pagination, never the
+ * possibly gh-capped `pr.files`) — the caller owns that check ({@link GH_FILES_GRAPHQL_CAP}); this trusts what
+ * it is given.
+ * @param {Array<{path?:string}|string>} files
+ * @param {{number:number|string, repo?:string|null, listPrPatches:Function}} o
+ * @returns {{isStatuteTier:boolean, appendOnlyStatute:boolean}}
+ */
+function classifyStatuteConflict(files, { number, repo, listPrPatches }) {
+  const isStatuteTier = isStatuteTierConflict(files);
+  let appendOnlyStatute = false;
+  if (isStatuteTier) {
+    try {
+      const statuteTierFiles = (Array.isArray(files) ? files : [])
+        .map((f) => (typeof f === 'string' ? f : f?.path))
+        .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
+      const patches = listPrPatches({ number, repo });
+      appendOnlyStatute = isAppendOnlyStatuteConflict(statuteTierFiles, patches);
+    } catch {
+      appendOnlyStatute = false; // fetch failure → stand down, the safe direction
+    }
+  }
+  return { isStatuteTier, appendOnlyStatute };
+}
 
 /**
  * The open-PR discovery query. `exec` is injectable so the argv is assertable with no `gh` on PATH. Narrower
@@ -586,6 +644,7 @@ export function watchParkedPrConflicts({
   postRearm = defaultPostConflictRearm,
   listPrFiles = defaultListPrFiles,
   listPrPatches = defaultListPrPatches,
+  listPrComments = defaultListPrComments,
   labelAgeMs = defaultConflictLabelAgeMs,
 } = {}) {
   const prs = listPrs({ repo });
@@ -614,23 +673,60 @@ export function watchParkedPrConflicts({
     const graceDue = queued && !plan.add && hasReviewLabel(pr?.labels, CONFLICT_LABEL);
     if (!plan.add && plan.remove.length === 0 && !graceDue) continue;
     const entry = { num: pr?.number, isConflicting, ...plan, commented: false };
+    // #3383 — the grace-expiry routing decision below is READ-ONLY (label age, then file/patch/comment fetches;
+    // no label/comment write happens until the branches further down call `postStandDown`/`postFinding`, which
+    // are themselves gated on `!dryRun`). So `graceDue` is handled BEFORE the dry-run bail, in both modes, and
+    // dry-run reports the SAME routing decision a real sweep would take instead of silently skipping this whole
+    // branch — which is exactly how a queued, approved, statute-tier-conflicting PR (PR #2505, live 2026-09-23)
+    // could sit forever with dry-run never once surfacing what was actually happening to it.
+    if (graceDue) {
+      try {
+        if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
+        const age = labelAgeMs({ pr, repo: resolvedRepo });
+        if (age == null || age < QUEUED_CONFLICT_GRACE_MS) continue; // the drain still has its turn
+
+        // Same verified-complete file fetch the fresh-detection path re-fetches on a suspected-truncated `pr.files`
+        // — this path never reads `pr.files` at all, so it always pays for the paginated, uncapped read.
+        let filesForCheck = null;
+        try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
+        const { isStatuteTier, appendOnlyStatute } = filesForCheck == null
+          ? { isStatuteTier: true, appendOnlyStatute: false } // fetch failure → over-cautious, the safe direction
+          : classifyStatuteConflict(filesForCheck, { number: pr?.number, repo: resolvedRepo, listPrPatches });
+
+        if (isStatuteTier && !appendOnlyStatute) {
+          // #3383 fix — this is NO LONGER assumed to have already reached a human at detection: the fresh path
+          // only stands down IMMEDIATELY when the conflict is ALREADY statute-tier at that moment; a queued,
+          // non-statute-tier conflict is deferred to the drain instead (`routedTo: 'deferred-to-drain'`) and can
+          // only be classified as statute-tier here, for the first time, once grace expires. So hand it to a
+          // human — the SAME stand-down the detection path uses — but idempotently: read the PR's own comment
+          // thread for an existing stand-down marker first, since (unlike a label-transition-gated dispatch)
+          // `graceDue` recomputes true on EVERY sweep for as long as the PR stays queued+conflicting+labelled
+          // (`stand-down.mjs` makes no label change), so without this check it would re-post every tick.
+          let alreadyStoodDown = false;
+          try {
+            alreadyStoodDown = countStandDownComments(listPrComments({ number: pr?.number, repo: resolvedRepo })) > 0;
+          } catch { /* read failure → assume not yet stood down: a duplicate comment beats silent starvation */ }
+          if (alreadyStoodDown) continue; // already handed to a human — never re-post
+          if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
+          entry.routedTo = 'stand-down (after drain grace)';
+        } else if (isStatuteTier) { // append-only — dispatch to the fixer, exactly like the fresh-detection exception
+          if (!dryRun) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+          entry.routedTo = 'reconcile-finding (append-only statute, after drain grace)';
+        } else {
+          // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
+          if (!dryRun) postFinding({ pr, repo: resolvedRepo });
+          entry.routedTo = 'reconcile-finding (after drain grace)';
+        }
+        results.push(entry);
+      } catch (e) {
+        entry.error = String((e && e.message) || e).split('\n')[0];
+        results.push(entry);
+      }
+      continue;
+    }
     if (dryRun) { results.push(entry); continue; }
     try {
       if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
-      if (graceDue) {
-        const age = labelAgeMs({ pr, repo: resolvedRepo });
-        if (age == null || age < QUEUED_CONFLICT_GRACE_MS) continue; // the drain still has its turn
-        let isStatuteTier;
-        try { isStatuteTier = isStatuteTierConflict(listPrFiles({ number: pr?.number, repo: resolvedRepo })); }
-        catch { isStatuteTier = true; } // over-cautious, same safe direction as the fresh-detection path
-        // A statute-tier conflict was already handed to a human at detection; never re-post it every sweep.
-        if (isStatuteTier) continue;
-        // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
-        postFinding({ pr, repo: resolvedRepo });
-        entry.routedTo = 'reconcile-finding (after drain grace)';
-        results.push(entry);
-        continue;
-      }
       if (plan.add) provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
       provider.setLabels(resolvedRepo, pr?.number, { add: plan.add ?? undefined, remove: plan.remove });
       if (plan.newlyDetected) {
@@ -656,25 +752,17 @@ export function watchParkedPrConflicts({
             statuteCheckFailed = true;
           }
         }
-        const isStatuteTier = statuteCheckFailed || isStatuteTierConflict(filesForCheck);
         // #3383-append-only-statute — live 2026-09-23, PR #2505: a statute-tier conflict where BOTH sides only
         // appended a separate new `### ` section is mechanically resolvable (keep both) and does not need to cost
-        // a human review the way an actual overlapping-content statute edit must. Only checked when the file set
-        // already qualifies as statute-tier at all (the common non-statute tick pays nothing extra), and only
-        // over the STATUTE-TIER subset of files — a declarative-leash file anywhere in that subset, a non-`.md`
-        // statute path, or any patch-fetch failure all fail this closed (stand-down), the safe direction.
-        let appendOnlyStatute = false;
-        if (isStatuteTier && !statuteCheckFailed) {
-          try {
-            const statuteTierFiles = filesForCheck
-              .map((f) => (typeof f === 'string' ? f : f?.path))
-              .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
-            const patches = listPrPatches({ number: pr?.number, repo: resolvedRepo });
-            appendOnlyStatute = isAppendOnlyStatuteConflict(statuteTierFiles, patches);
-          } catch {
-            appendOnlyStatute = false; // fetch failure → stand down, the safe direction
-          }
-        }
+        // a human review the way an actual overlapping-content statute edit must. Shared with the grace-expired
+        // routing below via {@link classifyStatuteConflict} so the two can never compute this differently
+        // (`#3383`) — only checked when the file set already qualifies as statute-tier at all (the common
+        // non-statute tick pays nothing extra), and only over the STATUTE-TIER subset of files: a
+        // declarative-leash file anywhere in that subset, a non-`.md` statute path, or any patch-fetch failure
+        // all fail this closed (stand-down), the safe direction.
+        const { isStatuteTier, appendOnlyStatute } = statuteCheckFailed
+          ? { isStatuteTier: true, appendOnlyStatute: false }
+          : classifyStatuteConflict(filesForCheck, { number: pr?.number, repo: resolvedRepo, listPrPatches });
         const standDown = isStatuteTier && !appendOnlyStatute;
         provider.postComment(resolvedRepo, pr?.number,
           buildConflictComment(pr, { isStatuteTier: standDown, deferredToDrain: queued, appendOnlyStatute }));
