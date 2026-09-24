@@ -26,7 +26,7 @@ const esc = (s) => String(s ?? '')
 /** Turn a wall of markdown-ish prose into HTML paragraphs. Deliberately minimal: this card's body prose is
  *  plain paragraphs with occasional `` `code` `` spans and **bold** — not a general markdown renderer, just
  *  enough so the rendered page doesn't show literal asterisks/backticks. PURE. */
-function proseToHtml(text) {
+export function proseToHtml(text) {
   const paras = String(text ?? '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
   return paras.map((p) => {
     let html = esc(p)
@@ -42,6 +42,26 @@ function proseToHtml(text) {
     return `<p>${html}</p>`;
   }).join('\n');
 }
+
+/** The web-font import and the light/dark palette of the tracker pages, shared with the compact page
+ *  (`prototype-tracker-compact.mjs`) so the two never drift apart. Byte-for-byte the text the full page always carried. */
+export const FONT_IMPORT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+`;
+export const PALETTE_CSS = `:root{
+  --paper:#f6f5f2; --raised:#ffffff; --ink:#1c1f22; --ink-soft:#5a6570; --line:#dee3e6;
+  --accent:#a8433d; --accent-soft:#f6e4e2; --ok:#0f7a72; --ok-soft:#e2f1ef; --wait:#b8791f; --wait-soft:#f7ecd9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#14171a; --raised:#1b1f23; --ink:#eef1f2; --ink-soft:#a3adb5; --line:#2b323a;
+    --accent:#e2807a; --accent-soft:#3a1f1d; --ok:#4fc3b8; --ok-soft:#183531; --wait:#e0a94a; --wait-soft:#332a15;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#14171a; --raised:#1b1f23; --ink:#eef1f2; --ink-soft:#a3adb5; --line:#2b323a;
+  --accent:#e2807a; --accent-soft:#3a1f1d; --ok:#4fc3b8; --ok-soft:#183531; --wait:#e0a94a; --wait-soft:#332a15;
+}
+`;
 
 const STATUS_LABEL = { active: 'active', open: 'open', resolved: 'resolved', parked: 'parked' };
 
@@ -63,22 +83,7 @@ export function renderTrackerHtml(data, { generatedAt, itemNumber = '3383', sour
 
   return `<title>Prototype Tracker — #${esc(itemNumber)}</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-:root{
-  --paper:#f6f5f2; --raised:#ffffff; --ink:#1c1f22; --ink-soft:#5a6570; --line:#dee3e6;
-  --accent:#a8433d; --accent-soft:#f6e4e2; --ok:#0f7a72; --ok-soft:#e2f1ef; --wait:#b8791f; --wait-soft:#f7ecd9;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --paper:#14171a; --raised:#1b1f23; --ink:#eef1f2; --ink-soft:#a3adb5; --line:#2b323a;
-    --accent:#e2807a; --accent-soft:#3a1f1d; --ok:#4fc3b8; --ok-soft:#183531; --wait:#e0a94a; --wait-soft:#332a15;
-  }
-}
-:root[data-theme="dark"]{
-  --paper:#14171a; --raised:#1b1f23; --ink:#eef1f2; --ink-soft:#a3adb5; --line:#2b323a;
-  --accent:#e2807a; --accent-soft:#3a1f1d; --ok:#4fc3b8; --ok-soft:#183531; --wait:#e0a94a; --wait-soft:#332a15;
-}
-*{box-sizing:border-box;}
+${FONT_IMPORT_CSS}${PALETTE_CSS}*{box-sizing:border-box;}
 body{background:var(--paper); color:var(--ink); font-family:'Public Sans',-apple-system,sans-serif; line-height:1.55;}
 .wrap{max-width:860px; margin:0 auto; padding:48px 24px 88px;}
 h1,h2,h3{font-family:'Fraunces',Georgia,serif; text-wrap:balance; margin:0 0 8px;}
