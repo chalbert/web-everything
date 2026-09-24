@@ -1596,6 +1596,12 @@ function cmdAcquire(repo) {
           continue;
         }
       }
+      // A timed-out final scan proved nothing about the pool — its lanes may all be free — so never report it
+      // with the saturated-pool "all held/dirty" message: that would send the operator hunting for a full pool
+      // instead of the real cause, a slow or hung git probe.
+      if (scanTimedOut) {
+        fail(`no free lane found in pool "${repo.name}": the acquirable scan did not finish within its ${scanBudget}ms budget (${lanes.length} lanes, none proven busy — they may be free). Check for a slow/hung git, or raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS / --wait-ms`);
+      }
       fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
     }
   }

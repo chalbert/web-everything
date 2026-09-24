@@ -124,6 +124,8 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     for (const r of rs) {
       expect(r.code).not.toBe(0);
       expect(r.err).toMatch(/no free lane in pool "acqcache" \(6 all held\/dirty\)/);
+      // A scan that FINISHED and found nothing is a genuinely full pool — never reported as a scan timeout.
+      expect(r.err).not.toMatch(/scan did not finish/);
     }
     const statusCalls = laneGitCalls().filter((c) => c.args.startsWith('status'));
     // Well under the ~54 an unshared, per-caller-per-tick rescan would cost; close to one scan's worth (6).
@@ -146,9 +148,12 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     // Bounded: well under the >=8000ms an unbounded full rescan of 8 slow lanes would cost, let alone several
     // of them chained across poll ticks (the live incident: a 30s bound that actually ran ~6 minutes).
     expect(elapsedMs).toBeLessThan(6000);
-    // Whichever way it resolves (found a lane in time, or cleanly reported none within budget), it must be a
-    // real, sane exit — never a hang and never a silent wrong answer.
-    if (r.code !== 0) expect(r.err).toMatch(/no free lane|scan exceeded its/);
+    // No 8-lane scan at 1s per git call can finish inside a 1.5s budget, so this must fail — and it must say the
+    // SCAN ran out of time, never the saturated-pool "all held/dirty" message: all 8 lanes are free, so that
+    // message would be false and send an operator hunting for a full pool instead of a slow/hung git probe.
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/scan did not finish within its \d+ms budget/);
+    expect(r.err).not.toMatch(/all held\/dirty/);
     // #3383 — growth left ON here on purpose: a scan that merely ran out of time is not a full pool (all 8
     // lanes are free), so acquire must never clone new lanes because the scan was slow.
     expect(r.err).not.toMatch(/growing by up to|grew pool/);
