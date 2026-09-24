@@ -172,7 +172,7 @@ absorbing a big new branch feature — **Rule 7 of #3690 (#3887)**:
 
 **`we:scripts/operations/__tests__/review-dispatch.test.mjs`** — **10 conflicts** (the existing note only listed
 this file in worker step 7 as "port the branch's test diffs", with no count). Not individually triaged here
-given the size, but expect most of it to be new `#3887`/floor-pass test additions plus the same #3846/#xqa9ttq
+given the size, but expect most of it to be new `#3887`/floor-pass test additions plus the same #3846/#3704
 seat-routing tests the old note's other four test files already describe as "keep both, appended blocks."
 Recommend triaging this file's conflicts alongside the `runFloorPass` wiring question above, since its own
 test fixtures may answer whether `supervision` is meant to reach `reviewSeatRoutes` from a real call site yet.

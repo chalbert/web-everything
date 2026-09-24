@@ -226,7 +226,7 @@ The two message strings are user-visible, so a test may assert them; reword them
 > `dispatching: false` the moment the default flipped) before fixing it. Implemented #3850 Fork 1 as
 > ratified: every routed record now names a supervisor (the land-seam PR review), so a well-formed
 > dispatch is never held at spawn. **#3850 Fork 2 (forcing `review:pending`/a merge hold on delegated
-> routes) remains unbuilt** — filed separately (bornAs `x2h4jmq`), since it was never tracked as its
+> routes) remains unbuilt** — filed separately (bornAs `4021`), since it was never tracked as its
 > own item before.
 >
 > Resolved here as `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through
