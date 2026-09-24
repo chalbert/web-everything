@@ -5369,6 +5369,58 @@ frontierui or plateau-app. Six clauses:
    fixes and item-less-PR fixes follows them directly, without waiting on #3908 (amended 2026-09-23: #3908 is
    on HOLD, and its port rebases over these slices instead).
 
+### A build runs as a plan of typed steps: code runs the plan, each step works in its own leased lane under its own permissions, heavy checks run once, and the design ships on probation {#planner-build-plan-and-execute}
+
+**Ratified 2026-09-23 by the operator (Nicolas Gilbert), after an interactive review that amended Forks 2 to 6,
+plus two skeptic rounds whose amendments are folded in (`#3922`).** The rule:
+
+1. **Code runs the plan, never a model.** The build wrapper asks a planner for a JSON plan, validates it, routes
+   each step through the router, runs it, and asks a checker where rule 5 requires. A model never picks which
+   models do the work.
+2. **Every build gets a plan,** so every build shows live steps. A single-file card gets a one-step plan built by
+   code, with no model call. The planner's model follows the card's size: Sonnet below size 8, Opus at 8 and up and
+   for high-risk or statute-tier work. A card with a `deliveryAgent:` marker is the hand override: that vendor
+   builds it whole and no plan runs.
+3. **Each step works in its own lane leased from the shared pool** (`purpose: plan-step`), started from the item
+   lane's committed tip. Its diff is applied to the item lane on a temporary index and committed only after it is
+   accepted, in dependency order. Parallel steps must have non-overlapping file lists. Step sessions count toward
+   the existing lane-dispatch ceiling; lanes are not the CPU limit.
+4. **A step's task type is derived, never declared:** from why the step exists first (planned; an apply clash is
+   `conflict-resolution`; a repair of already-accepted work is `bugfix`), then from its files for planned steps.
+   A path is a doc only on an allowlist of reader-facing doc places.
+5. **Planner and checker are two roles** with separate trust records. A checker (Sonnet by default) gives a
+   verdict on every step a non-Claude model built; a recorded miss moves that cell up to Opus; moving back down is
+   the operator's act. Any delegated step parks the PR for the review panel.
+6. **The router gains one exploration rule:** while a task type has no qualifying non-Claude model, a few
+   low-risk steps a day, counted fleet-wide, go to the next model on an ordered table (Gemini Flash first). The
+   existing cascade takes over once one qualifies.
+7. **A step session is scoped:** it may edit only its own files and run only pre-approved declared operations,
+   with no free shell. Anything else is a request the wrapper checks and runs (`request-run`, `request-scope`).
+   Every call is an operation, so every call is tracked. Permissions are passed at launch, so a lane's trust flag
+   never matters. This is stricter than, and composes with,
+   [#agent-mutations-through-typed-operations](#agent-mutations-through-typed-operations); widening it to all
+   agent work is a separate decision.
+8. **Splitting never multiplies heavy checks:** per step only its related tests run; the full suite,
+   `check:standards`, `verify-lane` and converge run once per build. The Bash guard enforces this for step
+   sessions.
+9. **The design ships on probation:** `planBuild` starts at `shadow`; `on` is a ratified settings change. Scripted
+   tripwires compare each week's build records with the shadow baseline and file a review card, never switching
+   anything off; a dated review follows 30 days after `on`. Settings change by a ratified settings change; a
+   design rule changes only by reopening this decision. Exit from probation is the operator's act.
+
+**Composes with.** [#delegation-trial-record-graduation](#delegation-trial-record-graduation) (exploration steps
+are ordinary trials; no rule-1 change), [#model-probation-graduation-criteria](#model-probation-graduation-criteria)
+(the probation pattern, to be generalised by a follow-up decision), and [#agent-vendor-registry](#agent-vendor-registry)
+(the marker's meaning is unchanged).
+
+**Accepted residual.** Gemini's agent can write outside its folder. Until containers (`#3621`), the launch
+function checks every constellation checkout before and after each Gemini step; writes elsewhere stay accepted.
+
+**Lineage:** ratified via `#3922` (2026-09-23), under epic `#3383`, extending `#3801` follow-up 1 (G2), grounded
+in `/research/planner-build-plan-and-execute/` and `we:reports/2026-09-22-planner-build-g2-prep.md`. Full
+reasoning and the rejected options:
+[#3922](/backlog/3922-decision-the-planner-build-g2-a-planner-splits-a-build-into/).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
