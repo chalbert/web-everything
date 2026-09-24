@@ -69,3 +69,7 @@ Two more hazards surfaced only once the kept tests actually ran on main's tree, 
    verbatim from the snapshot straight into `we:scripts/operations/action-ground-truth.mjs` — no behaviour
    change, just relocated so the leaf actually loads before #3902 lands; #3902 should delete that block and
    restore the import once `we:scripts/operations/detached-dispatch.mjs` exists on main.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check made this a blocker of #3856 — its moved-in `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` imports a module this card owns.
