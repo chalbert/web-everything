@@ -35,6 +35,6 @@ tags: []
 > but the actual land-time refusal (wiring this into `we:scripts/conveyor/merge-ai-prs.mjs`'s
 > `decideReviewGate`) was deliberately deferred, mirroring this repo's own #3493 precedent (a
 > built-and-tested gate predicate, held back from a live call site until wired) rather than a blind edit
-> to a ~4,000-line production merge gate. Filed as its own item so it doesn't get lost: bornAs `x3m311f`.
+> to a ~4,000-line production merge gate. Filed as its own item so it doesn't get lost: bornAs `4032`.
 >
 > Resolved here as `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through #3443.
