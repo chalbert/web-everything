@@ -85,6 +85,7 @@ import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
@@ -129,8 +130,9 @@ export async function runDaemonLoop({
  * (`dispatch`), then apply the two purely-informative labels (`tagRound`/`tagStatus`) — the exact sequence
  * runner.mjs's own mechanical pass ran (see the file header for what's deliberately NOT replicated). Every
  * per-PR step is isolated in its own try/catch, mirroring `makeCliMechanicalPasses`'s own "one bad entry
- * never aborts the rest" discipline — a failed dispatch or a failed tag never stops the tick.
- * @returns {{reviewsOwed:number, dispatched:Array<{prNumber:number, agentId:string|null}>, failed:Array<{prNumber:number, error:string}>, refusals:number}}
+ * never aborts the rest" discipline — a failed dispatch or a failed tag never stops the tick. `reconcile`
+ * itself is now isolated the same way (#xvzwiew) — see the try/catch around it below for why.
+ * @returns {{reviewsOwed:number, dispatched:Array<{prNumber:number, agentId:string|null}>, failed:Array<{prNumber:number, error:string}>, refusals:number, reconcileError:string|null}}
  */
 export function runReviewTick({
   reconcile = runReconcilePass,
@@ -144,7 +146,29 @@ export function runReviewTick({
   // #xvyuwtg): `reconcile({})` always discovered WE's own PRs regardless of the `repo` this tick was called
   // for, which is exactly why plugging in a non-WE repo here silently kept reconciling WE. `reconcile-pass.mjs`'s
   // own `runReconcilePass` already accepts `{repo}` end to end — this was the one call site that dropped it.
-  const plan = reconcile({ repo });
+  //
+  // RECONCILE ITSELF IS ISOLATED HERE (#xvzwiew, live-caught 2026-09-23) — the one step in this sequence that
+  // used to be the EXCEPTION to this file's own "one bad entry never aborts the rest" discipline. A transient
+  // `claude agents --json` spawn hiccup inside `reconcile-pass.mjs`'s `defaultReadAgents` (`spawnSync claude
+  // ENOENT` in the review daemon's own production log, `~/workspace/wev-review-daemon/.conveyor/
+  // review-daemon.log`; also observed as `Unknown system error -8` and `ETIMEDOUT` — a flaky spawn under load,
+  // not a missing binary or a wrong cwd: `defaultListAgents` never varies its cwd by repo) used to throw
+  // straight out of this function uncaught. `runReviewTickAllRepos` then reported that ONE failure TWICE and
+  // misleadingly: once folded into `failed` as though a SPECIFIC review dispatch had failed (`prNumber: null`,
+  // rendered `#?` in the daemon's own log line — no PR was ever identified, because reconcile crashed before
+  // producing one), and once as a `repos[].error` entry. Catching it here reports it through exactly ONE clear
+  // channel (`reconcileError`) and — the real functional cost of the old behavior — stops it from silently
+  // discarding whatever this repo's tick WOULD have dispatched had the read succeeded; the caller can still
+  // retry next tick, exactly as before, just without the double, contradictory report.
+  let plan;
+  try {
+    plan = reconcile({ repo });
+  } catch (e) {
+    return {
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0,
+      reconcileError: String((e && e.message) || e).split('\n')[0],
+    };
+  }
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
   // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
@@ -168,7 +192,7 @@ export function runReviewTick({
     try { tagStatus({ pr: c.prNumber, repo }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
-  return { reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length };
+  return { reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length, reconcileError: null };
 }
 
 /** The repos this daemon watches each tick. Today: the three constellation repos (WE-only was the ratified
@@ -188,12 +212,19 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to `runReviewTick`); every
  *   other option is forwarded to it for EVERY repo except `repo` itself, which this loop supplies per-iteration.
  * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, reviewsOwed:number,
- *   dispatched:Array<object>, failed:Array<object>, refusals:number}}
+ *   dispatched:Array<object>, failed:Array<object>, refusals:number, reconcileFailed:Array<{repo:string, error:string}>}}
  */
 export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
   const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const failed = [];
+  // #xvzwiew — a RECONCILE-PHASE failure (`runReviewTick` now catches it and returns `reconcileError` instead
+  // of throwing) reports through this SEPARATE bucket, never folded into `failed` as a bogus `prNumber: null`
+  // dispatch failure — no PR was ever identified for a repo whose reconcile crashed, so reporting it as if a
+  // specific review dispatch failed was always misleading. `entry.error` below (a whole-tick throw `tick`
+  // itself never caught — the genuinely-unexpected case) still reports through `failed`/`repos[].error`,
+  // unchanged: that safety net is orthogonal to this and stays in place.
+  const reconcileFailed = [];
   let reviewsOwed = 0;
   let refusals = 0;
   for (const entry of perRepo) {
@@ -202,12 +233,31 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
       continue;
     }
     const { repo, result } = entry;
+    if (result?.reconcileError) {
+      reconcileFailed.push({ repo, error: result.reconcileError });
+      continue; // no dispatch/refusal data — reconcile never produced a plan this tick
+    }
     reviewsOwed += result.reviewsOwed;
     refusals += result.refusals;
     for (const d of result.dispatched) dispatched.push({ ...d, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
   }
-  return { repos: perRepo, reviewsOwed, dispatched, failed, refusals };
+  return { repos: perRepo, reviewsOwed, dispatched, failed, refusals, reconcileFailed };
+}
+
+/**
+ * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one PR or
+ * repo? Two shapes both carry it: a per-PR `dispatchReview` throw (`runReviewTick`'s own `failed.push({
+ * prNumber, error })` loop) and a whole-repo tick failure (`forEachRepo`'s own `{repo, error}` capture, surfaced
+ * here as `result.repos[].error`). Wired into `withSelfSync`'s `hasStaleRefusal` option so the daemon re-syncs
+ * immediately instead of wasting the full interval on a race it will otherwise keep losing. Pure.
+ * @param {{failed?:Array<{error?:string}>, repos?:Array<{error?:string}>}} tickResult
+ * @returns {boolean}
+ */
+export function hasStaleMainRefusal(tickResult) {
+  const failed = tickResult?.failed ?? [];
+  const repos = tickResult?.repos ?? [];
+  return failed.some((f) => isStaleMainRefusalMessage(f?.error)) || repos.some((r) => isStaleMainRefusalMessage(r?.error));
 }
 
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
@@ -266,7 +316,11 @@ export function buildCliDaemonEffects({
     onTick: (result) => {
       log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
-      for (const r of result.repos) if (r.error) log.error(`review-daemon: ${r.repo} reconcile failed (non-fatal, other repos unaffected): ${r.error}`);
+      // #xvzwiew — a reconcile-phase failure (discovery itself, e.g. a transient `claude agents --json`
+      // ENOENT) reports here ONLY, never also folded into the `failed` (dispatch) line above — see
+      // `runReviewTickAllRepos`'s own header for why the old double, contradictory report was a bug.
+      for (const rf of (result.reconcileFailed ?? [])) log.error(`review-daemon: ${rf.repo} reconcile failed (non-fatal, other repos unaffected): ${rf.error}`);
+      for (const r of result.repos) if (r.error) log.error(`review-daemon: ${r.repo} tick failed unexpectedly (non-fatal, other repos unaffected): ${r.error}`);
       if (result.sessionReap && !result.sessionReap.unreadable) {
         const sr = result.sessionReap;
         log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}, ${sr.kept} kept`);
@@ -305,7 +359,9 @@ async function main() {
     process.exit(0);
   };
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+      root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
+    }),
   );
   if (!stopping) {
     console.error(`review-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);

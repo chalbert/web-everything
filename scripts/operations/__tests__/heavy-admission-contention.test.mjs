@@ -27,7 +27,7 @@ afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
  *  real work), release it. Records `{ owner, start, end }` into `timeline` so the test can reconstruct, at
  *  any instant, how many owners were concurrently INSIDE their held window. */
 async function runStubbedHeavyCommand({ lockRoot, cap, owner, holdMs, timeline, concurrentCounter }) {
-  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, pollMs: 15, timeoutMs: 30_000 });
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, pollMs: 15, ceilingMs: 30_000 });
   expect(admission.ok).toBe(true); // this test's cap/timeout are sized so nobody times out — a timeout here is a test bug, not the behavior under test
   concurrentCounter.current += 1;
   concurrentCounter.max = Math.max(concurrentCounter.max, concurrentCounter.current);
@@ -69,11 +69,11 @@ describe('heavy-command admission queue — contention regression (#3461, fails 
   it('the excess owners are OBSERVABLY queued while the cap is saturated (Done-when #1: "the rest observably queued")', async () => {
     const cap = 1;
     // Hold slot-0 for the whole assertion window via a real acquire (not a fake) so a second owner genuinely blocks.
-    const holder = await acquireSlotBlocking({ lockRoot, cap, owner: 'HOLDER', pollMs: 15, timeoutMs: 5000 });
+    const holder = await acquireSlotBlocking({ lockRoot, cap, owner: 'HOLDER', pollMs: 15, ceilingMs: 5000 });
     expect(holder.ok).toBe(true);
 
     // A second owner starts waiting — this call won't resolve until HOLDER releases below.
-    const waiterPromise = acquireSlotBlocking({ lockRoot, cap, owner: 'WAITER', lane: '3', pollMs: 15, timeoutMs: 5000 });
+    const waiterPromise = acquireSlotBlocking({ lockRoot, cap, owner: 'WAITER', lane: '3', pollMs: 15, ceilingMs: 5000 });
 
     // Give the waiter's first poll a moment to land and mark itself waiting.
     await new Promise((r) => setTimeout(r, 60));

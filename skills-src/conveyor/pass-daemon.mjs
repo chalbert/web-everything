@@ -35,6 +35,15 @@
  * fails — see that module's own header. Six resident `lane-pool-health-watch`/`parked-pr-conflict-watch`
  * launchd jobs run through this exact file; their personal-token draw is what exhausted the operator's
  * 5,000/hr budget ("API rate limit already exceeded for user ID 760299") on 2026-09-23.
+ *
+ * SELF-SYNC (#3383 daemon POC, xdpemd4). Unlike `review-daemon.mjs`/`reconcile-fix-dispatch-daemon.mjs`,
+ * this generic daemon never wired `we:scripts/lib/daemon-self-sync.mjs#withSelfSync` in — every OTHER
+ * resident daemon self-syncs its clone between ticks, so a `pass-daemon.mjs`-driven watcher (the
+ * `lane-pool-health-watch`/`parked-pr-conflict-watch` launchd jobs this file's own header names) never did.
+ * {@link main} now wraps its one-shot `runPass` effect in `withSelfSync` exactly the way `review-daemon.mjs`
+ * wraps its own `tickOnce` — same `root`/`onRestart` shape, same opt-in POC-mode env var
+ * (`DAEMON_SELF_SYNC_BRANCH`) `withSelfSync` itself already resolves, so this file needs no new env
+ * convention of its own. Unset (the default), this is a no-op: `withSelfSync` ticks straight through.
  */
 
 import { spawn } from 'node:child_process';
@@ -46,6 +55,7 @@ import {
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { ensureFreshGithubAppEnv } from '../../scripts/lib/github-app-auth-env.mjs';
+import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
 
 /** How often the INDEPENDENT heartbeat timer fires, regardless of whether a pass is mid-run. Deliberately
  *  much shorter than any pass's own `intervalMs` — it exists precisely to keep beating DURING a long single
@@ -58,6 +68,28 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
  *  #3870's Fix-dispatch daemon key, and from every OTHER pass's own key, so N pass-daemon instances never
  *  contend with each other. */
 export function passDaemonLeaseKey(passName) { return `<conveyor:pass-daemon:${passName}-lease>`; }
+
+/** The env var that turns self-sync ON for this generic daemon (xdpemd4). UNLIKE `review-daemon.mjs`'s own
+ *  unconditional self-sync, this one stays OPT-IN: six resident launchd jobs already run this exact file
+ *  (`lane-pool-health-watch`/`parked-pr-conflict-watch`) with no expectation their clone ever advances on its
+ *  own, so wiring `withSelfSync` in unconditionally would be a silent behavior change for every one of them,
+ *  not a fix scoped to the daemon POC that asked for it. Setting `we:scripts/lib/daemon-self-sync.mjs`'s own
+ *  `DAEMON_SELF_SYNC_BRANCH` (POC mode) ALSO turns self-sync on for this daemon — a caller who already opted
+ *  into tracking a POC branch does not need a second flag to mean the same "yes, self-sync" — this var exists
+ *  only for the plain main-tracking case that flag doesn't cover. */
+export const PASS_DAEMON_SELF_SYNC_ENV = 'PASS_DAEMON_SELF_SYNC';
+
+/**
+ * Is self-sync ON for this run? PURE. Mirrors `we:scripts/lib/daemon-self-sync.mjs#resolvePocSyncBranch`'s own
+ * blank-counts-as-unset treatment.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function passDaemonSelfSyncEnabled(env = process.env) {
+  if (env?.[PASS_DAEMON_SELF_SYNC_ENV] === '1') return true;
+  const pocBranch = typeof env?.DAEMON_SELF_SYNC_BRANCH === 'string' ? env.DAEMON_SELF_SYNC_BRANCH.trim() : '';
+  return pocBranch !== '';
+}
 
 // ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
 
@@ -180,9 +212,25 @@ async function main(argv) {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // xdpemd4 — self-sync this watcher's clone between runs, same contract every other resident daemon already
+  // has (see the file header). A no-op unless DAEMON_SELF_SYNC_BRANCH (or plain main-tracking self-sync) is
+  // opted into; `restartOntoNewCode` mirrors `shutdown` (release the lease, exit 0) so launchd's KeepAlive
+  // brings this pass back up on the freshly-merged code, exactly like `review-daemon.mjs`'s own restart path.
+  const restartOntoNewCode = () => {
+    if (stopping) return;
+    stopping = true;
+    console.error(`pass-daemon: "${passName}" self-synced onto new code — releasing the lease and exiting.`);
+    clearInterval(heartbeatTimer);
+    releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key });
+    process.exit(0);
+  };
+  const runPassSelfSynced = passDaemonSelfSyncEnabled()
+    ? withSelfSync({ tickOnce: () => spawnPassOnce(entry) }, { root: REPO_ROOT, onRestart: restartOntoNewCode }).tickOnce
+    : () => spawnPassOnce(entry);
+
   console.error(`pass-daemon: started "${passName}" (${entry.script}) on interval ${intervalMs}ms, heartbeat every ${heartbeatIntervalMs}ms.`);
   const { stoppedReason } = await runPassDaemonLoop({
-    runPass: () => spawnPassOnce(entry),
+    runPass: runPassSelfSynced,
     sleep: realSleep,
     isAlive: () => alive,
     intervalMs,
