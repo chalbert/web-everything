@@ -258,3 +258,15 @@ How each slice (a child of this item) graduates, per the statute
     - First attempt: an untrusted clone folder made `claude --bg` fail ("Workspace not trusted"). That is the
       #3748 class, not a #3857 defect, and it left one stale in-flight run record, `probe-3857-sonnet`.
     - #3857's own card is claimed by another session, so its status flip is left to that session.
+
+- **2026-09-24 (#3891 landed; confirmed on `main`'s tree).** Dispatched to graduate #3891 (priority-order
+  and prototype-tracker-compact libraries) per its own card and this item's slice procedure, but on arrival
+  found it already resolved (`status: resolved`, `dateResolved: 2026-09-24`) — a concurrent wave-A/B session
+  had landed it first, via PR #2572 (`lane/batch-2026-09-24-waveA2-3891`, batched together with #3890, #3893,
+  #3906, #3911 and unrelated work), merged 2026-09-24T13:06:36Z. Verified rather than re-done: all 5 files
+  (`we:scripts/lib/priority-markers.mjs`, `we:scripts/lib/priority-order.mjs`, `we:scripts/lib/tracker-page-hash.mjs`,
+  `we:scripts/lib/prototype-tracker-compact.mjs`, `we:scripts/lib/prototype-tracker-render.mjs`) and their tests
+  are present on `main`; `npx vitest run` on the 3 test files this card names passes — 58 tests, 50 passed,
+  8 intentionally skipped (2 pending #3892's `priority-sync`, 6 pending #3909's
+  `we:scripts/lib/prototype-tracker-compact-io.mjs`), matching the landed commit's own message. No further
+  build needed for #3891; this entry only closes the Progress-log gap the landing PR itself didn't fill.
