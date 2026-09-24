@@ -21,6 +21,15 @@
  *     core and emits its plan. REUSE, never reinvent: the ordering engine, the scope collector, and the pool
  *     picker are each single-sourced; this shell only glues them.
  *
+ *     #x3cepr4 — the free-lane read has a caller-supplied OVERRIDE: `--free-lanes-json=<path-or-inline-JSON>`
+ *     (or env `WE_DISPATCH_PLAN_FREE_LANES_JSON`) replaces the `lane-pool list --acquirable --json` shell
+ *     entirely. Built for `scripts/conveyor/__tests__/dispatcher-fixture-harness.test.mjs`, which used to shell
+ *     the REAL lane pool (a ~28s-per-call scan across every lane, #3383's own incident numbers) on every run
+ *     even though its own assertions never depended on the real pool's free-lane count — see that test for the
+ *     synthetic list it now passes instead. `lane-pool.mjs`'s own `list --acquirable` ALSO grew a shared
+ *     TTL'd cache for the same call (`scripts/lib/lane-pool-list-cache.mjs`) so a production dispatch tick that
+ *     does NOT pass this override still benefits when several ticks/dispatches land within the cache's TTL.
+ *
  * THE DISPATCH RULES (§ conveyor dispatcher). ONE pass over the queue in rank order (highest-priority first).
  * Each queued item resolves to exactly ONE outcome:
  *
@@ -762,15 +771,48 @@ async function main(argv) {
     scope: toRepoRelative([...(l.predicted || []), ...(l.observed || [])]),
   }));
 
-  // 3. THE FREE LANES — reuse the pool's own acquirable picker. `list --acquirable --json` = the free lane
-  //    dirs; the lane id is the trailing `lane-<n>`. Their COUNT is the free-slot count.
-  const paths = runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
+  // 3. THE FREE LANES — reuse the pool's own acquirable picker, UNLESS the caller supplies its own list
+  //    (#x3cepr4). `--free-lanes-json=<path-or-inline-JSON-array>` (or env `WE_DISPATCH_PLAN_FREE_LANES_JSON`)
+  //    replaces the `lane-pool list --acquirable --json` shell outright — see this file's header for why.
+  //    Accepts EITHER a path to a JSON file OR the JSON text itself (inline, detected by a leading `[`), each
+  //    a flat array of bare lane numbers or `lane-pool list --json`-shaped dir paths (either form parses the
+  //    same way below).
+  const freeLanesOverrideRaw =
+    typeof flags['free-lanes-json'] === 'string' && flags['free-lanes-json']
+      ? flags['free-lanes-json']
+      : typeof process.env.WE_DISPATCH_PLAN_FREE_LANES_JSON === 'string' && process.env.WE_DISPATCH_PLAN_FREE_LANES_JSON
+        ? process.env.WE_DISPATCH_PLAN_FREE_LANES_JSON
+        : null;
+  let paths;
+  if (freeLanesOverrideRaw !== null) {
+    const trimmed = freeLanesOverrideRaw.trim();
+    let text = freeLanesOverrideRaw;
+    if (!trimmed.startsWith('[')) {
+      const { readFileSync } = await import('node:fs');
+      try { text = readFileSync(freeLanesOverrideRaw, 'utf8'); }
+      catch (e) { fail(`could not read --free-lanes-json ${freeLanesOverrideRaw}: ${String(e.message || e).split('\n')[0]}`); }
+    }
+    try { paths = JSON.parse(text); }
+    catch (e) { fail(`could not parse --free-lanes-json: ${String(e.message || e).split('\n')[0]}`); }
+    if (!Array.isArray(paths)) fail('--free-lanes-json must be a JSON array of lane numbers or lane-pool paths');
+  } else {
+    // `list --acquirable --json` = the free lane dirs; the lane id is the trailing `lane-<n>`. Their COUNT is
+    // the free-slot count. (#x3cepr4 — this call is itself cache-backed on the lane-pool.mjs side now, so a
+    // production dispatch tick that lands within the cache's TTL of a prior call shares that scan too.)
+    paths = runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
+  }
   const freeLanes = (Array.isArray(paths) ? paths : [])
-    .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
+    .map((p) => {
+      if (typeof p === 'number') return Number.isFinite(p) ? p : null;
+      const m = /lane-(\d+)\/?$/.exec(String(p));
+      if (m) return Number(m[1]);
+      const n = Number(p);
+      return Number.isFinite(n) ? n : null;
+    })
     .filter((n) => n != null)
     // Ascending lane order is a SHELL contract: the pure core assigns launches to freeLanes in the order
     // given, so sorting here makes the plan's lane assignment deterministic regardless of how `lane-pool
-    // list --acquirable` happens to order its output (removes the dependency on the pool's listing stability).
+    // list --acquirable` (or a caller's own --free-lanes-json) happens to order its input.
     .sort((a, b) => a - b);
 
   // 3.5 BRANCH-DRIFT CEILING (#3464) — read the latest `branch-drift.mjs check` verdict for the watched

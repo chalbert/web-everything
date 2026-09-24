@@ -24,7 +24,7 @@
  *   node scripts/lane-pool.mjs provision --count=N [--acquirable] [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166); --acquirable grows PAST foreign-leased lanes so N ACQUIRABLE ones result (#2426)
  *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
- *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
+ *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426); #x3cepr4 — an --acquirable read is served from a shared TTL'd cache (default 30s, env WE_LANE_POOL_LIST_CACHE_TTL_MS) with a scan lock so parallel callers reuse ONE in-flight scan (see lib/lane-pool-list-cache.mjs); every state-changing command below invalidates it, and `acquire` never reads it (always live).
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
  *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
@@ -113,6 +113,12 @@ import { readField } from './backlog/frontmatter.mjs';
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
 import { cleanLaneLitter } from './lib/lane-litter.mjs';
+// #x3cepr4 — the shared `list --acquirable` scan cache (a result file with a TTL + a lock so parallel callers
+// reuse ONE in-flight scan instead of each re-scanning every lane, #3383's biggest single load on 2026-09-23).
+// `cmdList` is the ONLY consumer of `listAcquirableCached`; every lane-state-changing command below calls
+// `invalidateListCache` so a mutation is never masked by a still-fresh cache. `acquire` NEVER touches this
+// cache — see the module's own header for why that is a correctness rule, not an oversight.
+import { listAcquirableCached, invalidateListCache } from './lib/lane-pool-list-cache.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -820,6 +826,7 @@ function cmdProvision(repo) {
   }
   unmapLanes(repo, resetLanes); // refreshed lanes lose stale mappings (#2139); skipped lanes keep theirs
   ensureRepoSiblings(repo, { force }); // pushable+built constellation siblings at the pool root (#2166/#2282/#2349)
+  invalidateListCache(repo.poolDir); // #x3cepr4 — provisioning changed lane state; the next list --acquirable must rescan
   printStatus(repo);
 }
 
@@ -837,6 +844,7 @@ function cmdRefresh(repo) {
   }
   unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
   ensureRepoSiblings(repo, { force }); // keep the WE pool's constellation siblings current on refresh too
+  invalidateListCache(repo.poolDir); // #x3cepr4 — a refresh changed lane state; the next list --acquirable must rescan
   printStatus(repo);
 }
 
@@ -1172,6 +1180,10 @@ function cmdAcquire(repo) {
       else excluded.add(pick); // a concurrent acquire won this one — try the next
     }
   }
+  // #x3cepr4 — a lane's acquirable-ness just changed (claimed, either explicitly or auto-picked); the next
+  // `list --acquirable` must rescan rather than serve a picture that is already known stale. NOTE: `acquire`
+  // itself never READS this cache (see lib/lane-pool-list-cache.mjs's header) — it only ever invalidates it.
+  invalidateListCache(repo.poolDir);
 
   // #2560 (§3i-A4 Fork 1) — ADVISORY, STRICTLY NON-BLOCKING scope-overlap check. Runs AFTER the atomic O_EXCL
   // claim above (the whole-clone lease is the REAL lock): this only WARNS to stderr if the declared scope
@@ -1393,6 +1405,9 @@ function cmdReleaseAllPools(repo) {
       // by `repo` field as well as lane number (see its own comment), so passing the wrong pool name here
       // would silently fail to clear this pool's own entries.
       unmapLanes({ referencePath: repo.referencePath, name }, lanes);
+      // #x3cepr4 — this pool's lane state just changed; invalidate ITS cache (a cross-pool sweep can touch
+      // pools other than `repo`'s own, so this must key off `poolDir`, not `repo.poolDir`).
+      invalidateListCache(poolDir);
     }
   }
   if (released === 0) log(`  no leases held by ${selectorLabel} in any pool (${pools.length} pool(s) scanned)`);
@@ -1490,6 +1505,7 @@ function cmdRelease(repo) {
     log(`  released lane-${n} (was ${describeLease(lease)})`);
     released++;
   }
+  invalidateListCache(repo.poolDir); // #x3cepr4 — a release changed lane state; the next list --acquirable must rescan
   if (flags.json) process.stdout.write(JSON.stringify({ released, targets }, null, 2) + '\n');
 }
 
@@ -1514,24 +1530,39 @@ function printStatus(repo) {
 }
 
 function cmdList(repo) {
-  let lanes = existingLanes(repo);
   // #2426 — `--acquirable` drops any lane a picker must not couple an item onto: one holding a LIVE (foreign)
   // lease or someone's un-pushed work. The parallel /workflow dispatch used the bare list and assigned items to
   // held lanes by position, so a foreign-leased lane's item was carried with zero work. Filtering here (same
   // decision core `acquire` uses) is the throughput fix — the batch holds no leases, so every live lease it sees
   // is foreign; `isLaneAcquirable` excludes all live leases, which is exactly the set to skip.
   if (flags.acquirable) {
+    // #x3cepr4 — this is the expensive call (a live per-lane scan across the whole pool, #3383's own incident
+    // numbers), so it goes through the shared TTL'd cache + scan lock: a caller within the TTL of the last
+    // scan reuses it outright, and N callers racing a cold cache share ONE scan rather than each paying it.
+    // `scan()` below is EXACTLY today's pre-cache logic (reap once, then filter) — the cache changes nothing
+    // about WHAT is computed, only how often.
     const nowMs = Date.now();
-    const ttlMs = ttlMsFromFlags();
-    // #3449 — run the SAME provably-dead-ghost reap `acquire` runs (`reapDeadLeasesInPool`, #2748) before
-    // filtering. Previously only a fresh `acquire` triggered it, so `dispatch-plan.mjs`'s read-only capacity
-    // check (`list --acquirable`) could under-report a pool saturated with ghost leases forever: nothing ever
-    // called `acquire` to clear them, because the low-capacity reading is exactly what makes nothing call it.
-    // `--no-reap` (tests) opts out identically to `acquire`'s own flag.
-    reapDeadLeasesInPool(repo, nowMs, ttlMs);
-    lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs));
+    const leaseTtlMs = ttlMsFromFlags(); // the LEASE staleness TTL (unrelated to the list-cache TTL below)
+    const scan = () => {
+      // #3449 — run the SAME provably-dead-ghost reap `acquire` runs (`reapDeadLeasesInPool`, #2748) before
+      // filtering. Previously only a fresh `acquire` triggered it, so `dispatch-plan.mjs`'s read-only capacity
+      // check (`list --acquirable`) could under-report a pool saturated with ghost leases forever: nothing ever
+      // called `acquire` to clear them, because the low-capacity reading is exactly what makes nothing call it.
+      // `--no-reap` (tests) opts out identically to `acquire`'s own flag.
+      reapDeadLeasesInPool(repo, nowMs, leaseTtlMs);
+      return existingLanes(repo)
+        .filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, leaseTtlMs))
+        .map((n) => laneDir(repo, n));
+    };
+    // `listAcquirableCached`'s own `ttlMs` defaults to the RESULT-CACHE TTL (30s, env-overridable) — a
+    // completely different knob from `leaseTtlMs` above (how stale a LEASE marker may be before it's
+    // reclaimable), so it is deliberately left at its own default here rather than threaded through.
+    const { paths } = listAcquirableCached(repo.poolDir, scan, { nowMs });
+    if (flags.json) process.stdout.write(JSON.stringify(paths, null, 2) + '\n');
+    else paths.forEach((p) => process.stdout.write(p + '\n'));
+    return;
   }
-  const paths = lanes.map((n) => laneDir(repo, n));
+  const paths = existingLanes(repo).map((n) => laneDir(repo, n));
   if (flags.json) process.stdout.write(JSON.stringify(paths, null, 2) + '\n');
   else paths.forEach((p) => process.stdout.write(p + '\n'));
 }
@@ -1572,6 +1603,7 @@ function cmdRemove(repo) {
       log(`removed lane-${n} (${dir})`);
     }
   }
+  invalidateListCache(repo.poolDir); // #x3cepr4 — removal changed lane state; the next list --acquirable must rescan
 }
 
 // ── adopt (#2997 r2) — the dispatcher → worker OCCUPANCY hand-off ──────────────────────────────────
@@ -1603,6 +1635,7 @@ function cmdAdopt(repo) {
     );
   }
   writeFileSync(LEASE_MARKER(dir), JSON.stringify({ ...lease, workerSession: me }, null, 2) + '\n');
+  invalidateListCache(repo.poolDir); // #x3cepr4 — an explicitly-named lane-state-changing command; invalidate on principle
   log(`  adopted lane-${n} — occupant session is now ${me}${current && current !== me ? ` (took over from ${current})` : ''}`);
   log('    Edit/Write into this lane from ANY other session is now refused by guard-lane.mjs (#2997).');
   if (flags.json) process.stdout.write(JSON.stringify({ lane: n, path: dir, workerSession: me, previousWorkerSession: current }, null, 2) + '\n');

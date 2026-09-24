@@ -13,14 +13,19 @@
  *   (#9002, `blockedBy` an unresolved id), and two items already `active` with an in-flight PR each — one
  *   carrying `review:changes` (#9003) and one whose required check has gone red after a green open (#9004).
  *
- *   `dispatch-plan.mjs`'s own CLI shells the REAL `lane-pool.mjs list --acquirable --json` (no fixture for the
- *   shared lane pool exists, nor does this item ask for one), so the free-lane COUNT on the machine running
- *   this test is real and can be zero. The launch/held assertions below are written to hold either way — see
- *   the comment at that assertion. The fix/CI-heal decisions are asserted by calling `planTick` (the PURE
- *   core) directly with a synthetic `freeLanes` + `bookkeeping.launchedNums`, sidestepping the real lane pool
- *   entirely for that half of the chain (a prior-tick "this conveyor already launched #9003/#9004" is supplied
- *   the way the real bookkeeping would carry it across ticks — `planFixSpawns`/`planCiHealSpawns` both gate on
- *   `launchedNums`, never spawning a fix/heal for a PR the conveyor didn't itself launch).
+ *   #x3cepr4 — `dispatch-plan.mjs`'s CLI is called with `--free-lanes-json`, a synthetic always-non-empty
+ *   free-lane list, so this run NEVER shells the real `lane-pool.mjs list --acquirable` (a ~28s-per-call scan
+ *   over the WHOLE real pool, #3383's own incident numbers, that every run of this test used to pay for no
+ *   reason — its own assertions never actually depended on the real pool's free-lane count). The one input on
+ *   this axis this override does NOT fake is the ACTIVE LEASES + concurrency cap (still read from the real, if
+ *   normally near-empty, `scope-lease-collect.mjs` picture + `WE_MAX_CONCURRENT_LANES`) — which is why the
+ *   launch/held assertion below still tolerates a `capacity-cap` hold instead of asserting #9001 always
+ *   launches; "no free lane" can no longer happen for it, since the synthetic list always supplies lanes. The
+ *   fix/CI-heal decisions are asserted by calling `planTick` (the PURE core) directly with a synthetic
+ *   `freeLanes` + `bookkeeping.launchedNums`, sidestepping the real lane pool entirely for that half of the
+ *   chain (a prior-tick "this conveyor already launched #9003/#9004" is supplied the way the real bookkeeping
+ *   would carry it across ticks — `planFixSpawns`/`planCiHealSpawns` both gate on `launchedNums`, never
+ *   spawning a fix/heal for a PR the conveyor didn't itself launch).
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -114,16 +119,17 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       const prListCall = fakeGh.calls().find((c) => c.argv[0] === 'pr' && c.argv[1] === 'list');
       expect(prListCall?.argv).toContain('--repo=fixture-org/fixture-repo');
 
-      // 3. dispatch-plan.mjs --backlog-dir — a blocked/active item is EXCLUDED from the ready queue upstream
-      //    (backlog.mjs build-queue never emits it), so #9002/#9003/#9004 can never appear in launch OR held —
-      //    that holds regardless of the machine's real free-lane count. #9001 (cleared + ready + scoped) DOES
-      //    reach the lane-assignment step, so it appears in EITHER launch (a real free lane existed, within the
-      //    concurrency cap) or held with reason "no free lane" (none did) or "capacity-cap" (#xupukxa — a free
-      //    lane existed, but this REAL machine's own already-active lease count already meets/exceeds
-      //    `WE_MAX_CONCURRENT_LANES`/its default, which this test does not control since it deliberately shells
-      //    the REAL lane-pool CLI, not a fixture) — never absent, and never any OTHER held reason.
+      // 3. dispatch-plan.mjs --backlog-dir --free-lanes-json — a blocked/active item is EXCLUDED from the
+      //    ready queue upstream (backlog.mjs build-queue never emits it), so #9002/#9003/#9004 can never appear
+      //    in launch OR held. #x3cepr4 — `--free-lanes-json` hands the CLI a synthetic, always-non-empty
+      //    free-lane list instead of it shelling the REAL lane pool (see this file's header), so #9001
+      //    (cleared + ready + scoped, and disjoint from every other fixture item's scope) always reaches an
+      //    assignable lane on the free-lane axis; "no free lane" can no longer occur for it. The one axis this
+      //    does NOT control is the real active-lease/concurrency-cap read, so #9001 still may hold
+      //    "capacity-cap" if the machine running this test already has real active leases at/past
+      //    `WE_MAX_CONCURRENT_LANES` — never any OTHER held reason.
       const plan = JSON.parse(execFileSync(
-        'node', [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`],
+        'node', [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes-json=[9101,9102]'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       ));
       const allNums = [...plan.launch.map((l) => String(l.num)), ...plan.held.map((h) => String(h.num))];
@@ -132,7 +138,7 @@ describe('dispatcher fixture-root harness — conveyor-state → dispatch-plan �
       expect(allNums).not.toContain('9004');
       const launched9001 = plan.launch.find((l) => String(l.num) === '9001');
       const held9001 = plan.held.find((h) => String(h.num) === '9001');
-      expect(Boolean(launched9001) || held9001?.reason === 'no free lane' || held9001?.reason === 'capacity-cap').toBe(true);
+      expect(Boolean(launched9001) || held9001?.reason === 'capacity-cap').toBe(true);
 
       // 4. tick-core.mjs's planTick (pure core) — fed the real `state` above, plus a SYNTHETIC freeLanes +
       //    bookkeeping.launchedNums simulating "this conveyor already launched #9003/#9004 on a prior tick"
