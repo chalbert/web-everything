@@ -1,7 +1,8 @@
 ---
+bornAs: xdpemd4
 kind: story
 size: 3
-parent: "xii6vye"
+parent: "3999"
 status: open
 scope: ["we:skills-src/conveyor/pass-daemon.mjs", "we:skills-src/conveyor/__tests__/pass-daemon.test.mjs", "we:scripts/lib/daemon-self-sync.mjs"]
 dateOpened: "2026-09-23"

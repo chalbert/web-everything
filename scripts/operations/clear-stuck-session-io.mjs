@@ -92,19 +92,42 @@ export function readJobState(jobDir, { readFile = readFileSync } = {}) {
 }
 
 /**
- * Does a `ps aux`-style listing carry any process referencing this session at all? A real live Claude Code
- * background session is a `--resume=<full-uuid>` (or `--session-id=<uuid>`) subprocess — matched by the FULL
- * id, never the short one, since an 8-hex short id is exactly the kind of substring that could coincidentally
- * appear elsewhere (a commit sha, a temp path).
+ * Only a REAL Claude Code session process carries the full session id this way — `--resume=<uuid>`,
+ * `--resume <uuid>`, `--session-id=<uuid>` or `--session-id <uuid>` (measured live-fire in
+ * `clear-stuck-session-io-real.test.mjs`'s header). This operation's OWN invocation never does: its input
+ * flag is `--session=<id>` (no `-id`), which the bare-substring version of this scan used to match against
+ * itself — see the next function's header for the bug this fixes.
+ * @param {string} escapedLowerId - already lower-cased and regex-escaped.
+ * @returns {RegExp}
+ */
+function sessionArgvPattern(escapedLowerId) {
+  return new RegExp(`--(?:resume|session-id)[= ]${escapedLowerId}(?:[^0-9a-f-]|$)`);
+}
+
+/**
+ * Does a `ps aux`-style listing carry a REAL Claude Code session process for this id — never THIS OPERATION'S
+ * OWN process. A real live background session is a `--resume=<full-uuid>` or `--session-id <uuid>` subprocess
+ * (matched by the FULL id, never the short one, since an 8-hex short id is exactly the kind of substring that
+ * could coincidentally appear elsewhere — a commit sha, a temp path).
+ *
+ * BUG THIS FIXES (found live 2026-09-23, epic #3383): a bare `out.includes(fullSessionId)` substring match
+ * always found ONE hit no matter what — THIS process's own argv, because `clear-stuck-session`'s own input is
+ * `--session=<full-id>`, which is itself a `ps aux` row containing the full id. Every session this operation
+ * was ever asked about therefore came back `live-process` and refused, regardless of whether anything was
+ * actually running. Anchoring the match on `--resume`/`--session-id` (a real session's OWN argv shape, which
+ * this operation's `--session=` flag never produces) excludes the operation's own process tree without needing
+ * to know its pid or its parents' pids at all.
  * @param {string|null} fullSessionId
  * @param {{exec?: Function}} [o]
- * @returns {boolean}
+ * @returns {boolean|null}
  */
 export function scanPsForSession(fullSessionId, { exec = execFileSync } = {}) {
   if (!fullSessionId) return false;
   try {
     const out = String(exec('ps', ['aux'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 10_000 }));
-    return out.toLowerCase().includes(String(fullSessionId).toLowerCase());
+    const escaped = String(fullSessionId).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = sessionArgvPattern(escaped);
+    return out.toLowerCase().split('\n').some((line) => pattern.test(line));
   } catch {
     // A `ps` that cannot run answers nothing — false is the SAFE direction here only because it is always
     // paired with `assessLiveness`'s own `pidAlive !== false` ⇒ `liveness-unknown` refusal one level up: an

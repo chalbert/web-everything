@@ -81,7 +81,7 @@
  */
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { parseClaims, claimedIdsFor, partitionById } from './readiness/claimScope.mjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
@@ -110,15 +110,17 @@ function parseFrontmatter(src) {
 const norm = s => (s == null ? s : String(parseInt(s, 10)));      // strip leading zeros: "064" -> "64"
 const num = f => { const t = idFromName(f); return isNum(t) ? norm(t) : t; }; // two-form id (#2288): normalize numeric, leave a hash
 
-const files = readdirSync(BL).filter(f => f.endsWith('.md') && idFromName(f));
-const items = new Map();          // id -> {id, file, type, status, fm, body}
-for (const f of files) {
-  const src = readFileSync(join(BL, f), 'utf8');
-  const { fm, body } = parseFrontmatter(src);
-  // Items declare their type via `kind:` (the `type:` field was renamed in the kind-axis migration);
-  // fall back to `type` for any legacy item. Without this, every `it.type === 'decision'` gate
-  // (G3–G7) and the exec gate silently never fire — the whole decision-governance audit goes dead.
-  items.set(num(f), { id: num(f), file: f, fm, body, type: fm.kind ?? fm.type, status: fm.status });
+const items = new Map();          // id -> {id, file, type, status, fm, body} — filled by loadItems() in main()
+function loadItems() {
+  const files = readdirSync(BL).filter(f => f.endsWith('.md') && idFromName(f));
+  for (const f of files) {
+    const src = readFileSync(join(BL, f), 'utf8');
+    const { fm, body } = parseFrontmatter(src);
+    // Items declare their type via `kind:` (the `type:` field was renamed in the kind-axis migration);
+    // fall back to `type` for any legacy item. Without this, every `it.type === 'decision'` gate
+    // (G3–G7) and the exec gate silently never fire — the whole decision-governance audit goes dead.
+    items.set(num(f), { id: num(f), file: f, fm, body, type: fm.kind ?? fm.type, status: fm.status });
+  }
 }
 
 // ---- ref extractors ------------------------------------------------------
@@ -296,26 +298,48 @@ export function missingDoneWhenProof(it) {
 // to `status: resolved` from git, and treat items that were born resolved (added already
 // resolved — no flip commit distinct from the add) as undatable: their date is an import
 // artifact, never a real ruling timeline.
-let REPO_FIRST_COMMIT = null;
-try { REPO_FIRST_COMMIT = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: ROOT }).toString().trim().split('\n').pop(); } catch { /* no git */ }
-const gitCache = new Map();
-function gitResolvedAt(file) {            // -> { date: ISO|null, undatable: bool }
-  if (gitCache.has(file)) return gitCache.get(file);
-  let res = { date: null, undatable: true };
+let REPO_FIRST_COMMIT = null;     // set by main() — reading git at import time would make the import a side effect
+function readRepoFirstCommit() {
+  try { return execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: ROOT }).toString().trim().split('\n').pop(); } catch { return null; /* no git */ }
+}
+// #x7xv2xt — TWO whole-directory history passes, built once on first use, instead of two full-history
+// `git log -- backlog/<file>` walks PER gated item (~0.7s each; hundreds of items made the audit take ~10 min).
+// `--no-renames` keeps a move inside backlog/ reading as an add, exactly as the old single-path log saw it (a
+// single-path log cannot pair the rename's other side, so it reported `A`).
+//   flipBy: file → "<hash>|<iso>" of the NEWEST commit whose diff of that file matches `^status:.*resolved`
+//   addBy:  file → hash of the OLDEST commit that added it
+let gitMaps = null;
+function historyByFile(args, keepFirst) {
+  const out = execFileSync('git', ['-c', 'core.quotePath=false', 'log', '--no-renames', ...args, '--name-only', '--', 'backlog/'],
+    { cwd: ROOT, maxBuffer: 256 * 1024 * 1024 }).toString();
+  const map = new Map();
+  let commit = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('@')) { commit = line.slice(1); continue; }
+    if (!line || !commit || !line.startsWith('backlog/')) continue;
+    const file = line.slice('backlog/'.length);
+    if (keepFirst && map.has(file)) continue;   // log is newest-first: keep the first sighting (newest)
+    map.set(file, commit);                      // …or overwrite, leaving the last sighting (oldest)
+  }
+  return map;
+}
+function loadGitMaps() {
   try {
-    const rel = `backlog/${file}`;
-    const flip = execFileSync('git', ['log', '-1', '--format=%H|%cI', '-G', '^status:.*resolved', '--', rel], { cwd: ROOT }).toString().trim();
-    const addLog = execFileSync('git', ['log', '--diff-filter=A', '--format=%H', '--', rel], { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
-    const add = addLog.pop();            // earliest add commit
-    if (flip) {
-      const [hash, iso] = flip.split('|');
-      const bornResolved = hash === add;             // added already resolved → no real flip
-      const imported = add && add === REPO_FIRST_COMMIT;
-      res = { date: iso, undatable: bornResolved || imported };
-    }
-  } catch { /* leave undatable */ }
-  gitCache.set(file, res);
-  return res;
+    return {
+      flipBy: historyByFile(['--format=@%H|%cI', '-G', '^status:.*resolved'], true),
+      addBy: historyByFile(['--diff-filter=A', '--format=@%H'], false),
+    };
+  } catch { return { flipBy: new Map(), addBy: new Map() }; /* no git — everything reads undatable */ }
+}
+function gitResolvedAt(file) {            // -> { date: ISO|null, undatable: bool }
+  if (!gitMaps) gitMaps = loadGitMaps();
+  const flip = gitMaps.flipBy.get(file);
+  const add = gitMaps.addBy.get(file);   // earliest add commit
+  if (!flip) return { date: null, undatable: true };
+  const [hash, iso] = flip.split('|');
+  const bornResolved = hash === add;             // added already resolved → no real flip
+  const imported = add && add === REPO_FIRST_COMMIT;
+  return { date: iso, undatable: bornResolved || imported };
 }
 
 // G3: the full governing lineage is the transitive closure over parent + blockedBy edges
@@ -377,11 +401,13 @@ function citesCodifiedCase(it) {
 }
 
 // ---- project liveness ----------------------------------------------------
-let projects = new Map();
-try {
-  // per-project specs src/_data/projects/<id>.json, assembled (#1157)
-  for (const p of loadDataRegistry('projects')) if (p && p.id) projects.set(p.id, p.status || '?');
-} catch { /* ignore */ }
+const projects = new Map();      // filled by loadProjects() in main()
+function loadProjects() {
+  try {
+    // per-project specs src/_data/projects/<id>.json, assembled (#1157)
+    for (const p of loadDataRegistry('projects')) if (p && p.id) projects.set(p.id, p.status || '?');
+  } catch { /* ignore */ }
+}
 
 // ---- run checks ----------------------------------------------------------
 
@@ -415,240 +441,252 @@ export function forkLeansOnUnruled(body, blocked, isOpenDecision, ranges, normId
   return [...leans];
 }
 
-const flags = { G1: [], G2: [], G3: [], G4: [], G5: [], G6: [], G7: [], G8: [], A1: [], O1: [], D1: [], D2: [], D3: [] };
-const TODAY = localToday(); // for the O1 born-active-orphan TTL (#670)
-for (const it of items.values()) {
-  const blocked = new Set((it.fm.blockedBy || []).map(norm));
-  const isExec = isExecKind(it.type);
+// ---- the audit itself — runs only as a CLI --------------------------------
+// #x7xv2xt: everything below used to run at import time, so a test importing one pure helper ran the whole
+// audit (git history walks per gated item, the full backlog read) and rewrote the report. It now runs only
+// when this file is the entry point; importing it has no side effects.
+function main() {
+  loadItems();
+  loadProjects();
+  REPO_FIRST_COMMIT = readRepoFirstCommit();
 
-  // G1 edge-gap — a real prose prerequisite (filtered verb set) not lifted into blockedBy.
-  const g1seen = new Set();
-  for (const m of it.body.matchAll(PROSE_PREREQ)) {
-    const kw = m[1].toLowerCase(), p = norm(m[2]);
-    if (p === it.id || blocked.has(p) || !items.has(p) || g1seen.has(p)) continue;
-    // `blocked on/by` guard: another #M within ~40 chars to its left = a citation/enumeration
-    // ("blocked by #M, #N"), already-anchored — not a fresh ungoverned edge.
-    if (kw.startsWith('blocked') && /#\d+\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
-    g1seen.add(p);
-    const dec = isDecision(p), open = items.get(p)?.status !== 'resolved';
-    // both ends resolved → historical lineage, not a live gap: demote to INFO (suppressed from the count).
-    const sev = (it.status === 'resolved' && !open) ? 'INFO' : dec && open ? 'HIGH' : dec ? 'med' : 'low';
-    flags.G1.push({ id: it.id, ref: p, decision: dec, refOpen: open, sev, title: title(it) });
+  const flags = { G1: [], G2: [], G3: [], G4: [], G5: [], G6: [], G7: [], G8: [], A1: [], O1: [], D1: [], D2: [], D3: [] };
+  const TODAY = localToday(); // for the O1 born-active-orphan TTL (#670)
+  for (const it of items.values()) {
+    const blocked = new Set((it.fm.blockedBy || []).map(norm));
+    const isExec = isExecKind(it.type);
+
+    // G1 edge-gap — a real prose prerequisite (filtered verb set) not lifted into blockedBy.
+    const g1seen = new Set();
+    for (const m of it.body.matchAll(PROSE_PREREQ)) {
+      const kw = m[1].toLowerCase(), p = norm(m[2]);
+      if (p === it.id || blocked.has(p) || !items.has(p) || g1seen.has(p)) continue;
+      // `blocked on/by` guard: another #M within ~40 chars to its left = a citation/enumeration
+      // ("blocked by #M, #N"), already-anchored — not a fresh ungoverned edge.
+      if (kw.startsWith('blocked') && /#\d+\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
+      g1seen.add(p);
+      const dec = isDecision(p), open = items.get(p)?.status !== 'resolved';
+      // both ends resolved → historical lineage, not a live gap: demote to INFO (suppressed from the count).
+      const sev = (it.status === 'resolved' && !open) ? 'INFO' : dec && open ? 'HIGH' : dec ? 'med' : 'low';
+      flags.G1.push({ id: it.id, ref: p, decision: dec, refOpen: open, sev, title: title(it) });
+    }
+    // G2 ruling-after-build — a resolved build GATED ON (blockedBy) a decision that resolved
+    // after it. `parent` is epic membership, not a gating edge, so it is excluded. Build order
+    // comes from git (the resolve-flip commit), and undatable (import-born) endpoints are skipped.
+    const gatingEdges = [...new Set((it.fm.blockedBy || []).map(norm).filter(Boolean))];
+    if (isExec && it.status === 'resolved') {
+      for (const p of gatingEdges) {
+        if (!isDecision(p)) continue;
+        const d = items.get(p);
+        if (d.status !== 'resolved') { flags.G2.push({ id: it.id, ref: p, why: 'governing decision still open', title: title(it) }); continue; }
+        const di = gitResolvedAt(d.file), ii = gitResolvedAt(it.file);
+        if (di.undatable || ii.undatable) continue;                  // import artifact — order unknowable
+        if (di.date > ii.date) flags.G2.push({ id: it.id, ref: p, why: `decision resolved ${di.date.slice(0, 10)} (git) > item ${ii.date.slice(0, 10)}`, title: title(it) });
+      }
+    }
+    // G3 ungoverned-arch — CANDIDATE POOL (judgment confirms): graduated build with no governing
+    // decision reachable transitively (parent/blockedBy closure) AND none cited in its prose.
+    if (isExec && it.status === 'resolved' && isEntityGraduation(it.fm.graduatedTo)
+        && ![...transitiveLineage(it)].some(isDecision) && !citesResolvedDecision(it))
+      flags.G3.push({ id: it.id, graduatedTo: it.fm.graduatedTo, title: title(it) });
+    // G4 false-prepared-fork — a PREPARED, still-open decision whose `## Fork` sections carry
+    // prioritization/effort tells (forbidden as branches). CANDIDATE: the claim-time fork-existence
+    // re-run confirms; collapsing the fork to the #088 shape (invariant + supported/deferred list)
+    // clears it. Resolved decisions are historical — skipped.
+    if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
+      const hits = new Set();
+      for (const r of sectionRanges(it.body)) {
+        const head = it.body.slice(r.start, r.end).match(/^#{1,6}\s+(.*)$/m)?.[1] || '';
+        if (!/^fork\b/i.test(head.trim())) continue;
+        const sec = it.body.slice(r.start, r.end);
+        for (const re of FORK_TELLS) { const m = sec.match(re); if (m) hits.add(m[0].replace(/[*`_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 50).toLowerCase()); }
+      }
+      if (hits.size) flags.G4.push({ id: it.id, tells: [...hits].slice(0, 4), title: title(it) });
+    }
+    // G8 unruled-premise — see `forkLeansOnUnruled` above for the rule and why it is scoped to forks.
+    // CANDIDATE: a citation may be context rather than ground; confirm at claim.
+    if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
+      const leans = forkLeansOnUnruled(
+        it.body, blocked,
+        (ref) => ref !== it.id && items.get(ref)?.type === 'decision' && items.get(ref)?.status !== 'resolved',
+        sectionRanges, norm,
+      );
+      if (leans.length) flags.G8.push({ id: it.id, refs: leans.slice(0, 4), title: title(it) });
+    }
+    // G5 missing-fork-existence-justification — a PREPARED, still-open decision with a `## Fork`
+    // section carrying NONE of the fork-existence markers (#819). CANDIDATE: the line may use other
+    // wording; confirm at claim before dissolving the fork or amending its prep.
+    if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
+      const bare = [];
+      for (const r of sectionRanges(it.body)) {
+        const head = it.body.slice(r.start, r.end).match(/^#{1,6}\s+(.*)$/m)?.[1] || '';
+        if (!/^fork\b/i.test(head.trim())) continue;
+        const sec = it.body.slice(r.start, r.end);
+        if (!FORK_EXISTENCE_MARKERS.some(re => re.test(sec))) bare.push(head.trim().slice(0, 40));
+      }
+      if (bare.length) flags.G5.push({ id: it.id, forks: bare.slice(0, 4), title: title(it) });
+    }
+    // G6 codification-gap — a resolved `type: decision` with no `codifiedIn` pointer. Its ruling may
+    // live ONLY in this decision doc (case-law-only); if it states a reusable rule it should be promoted
+    // to the statute layer (platform-decisions.md or a topical doc) with `codifiedIn` set, else marked
+    // `codifiedIn: one-off`. CANDIDATE pool (like G3/G4): a hit is a card to promote-or-mark, never a
+    // hard failure. The count is the uncodified backlog (64% case-law-only at the 2026-06-18 sweep) and
+    // should shrink, not grow silently. See backlog-workflow.md → resolve step, and docs/agent/platform-decisions.md.
+    if (it.type === 'decision' && it.status === 'resolved' && !it.fm.codifiedIn)
+      flags.G6.push({ id: it.id, title: title(it) });
+
+    // G7 cite-the-case-not-the-rule — a LIVE item cites a codified decision's `#N` but not its statute
+    // anchor; re-point to platform-decisions.md#<anchor> so the rule, not the case, is what propagates.
+    // Scoped to non-resolved items: "cite the rule" is *authoring* guidance, and a resolved item is frozen
+    // history whose lineage `#N` cites are correct archaeology (473/550 at the 2026-06-19 sweep were resolved).
+    if (it.status !== 'resolved') {
+      const stale = citesCodifiedCase(it);
+      if (stale.length) flags.G7.push({ id: it.id, refs: stale.slice(0, 4), title: title(it) });
+    }
+    // A1 missing-done-when-proof (#2949) — OPEN, non-decision items only: a resolved item is frozen
+    // history and a decision has no build to prove. See `missingDoneWhenProof` above for the rule.
+    if (it.status === 'open' && isExec) {
+      const proof = missingDoneWhenProof(it);
+      if (proof.hit) flags.A1.push({ id: it.id, reason: proof.reason, title: title(it) });
+    }
+    // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design).
+    // deadFileRefs applies the #613 resolution gaps + prose suppression (absence / planned / generated).
+    if (it.status !== 'resolved')
+      for (const r of deadFileRefs(it)) flags.D1.push({ id: it.id, ref: r, title: title(it) });
+    // D2 dangling-item-ref — OPEN items only
+    if (it.status !== 'resolved')
+      for (const [, p] of it.body.matchAll(ANY_REF)) if (!items.has(norm(p))) { flags.D2.push({ id: it.id, ref: norm(p), title: title(it) }); break; }
+    // O1 orphan-born-active (#670) — a `scaffold --session` item is born `active` + `scaffoldedBy`, owned
+    // until `settle`d. If it lingers past its creating day (dateScaffolded < today) it is a likely stranded
+    // scaffold (a crashed/abandoned session): invisible to other batches yet never published. Recover by
+    // `settle <NNN>` (publish) or revert to open. A born-active item has NO `dateStarted` (claim signal),
+    // which is what distinguishes it from a normally-claimed active item.
+    if (it.status === 'active' && it.fm.scaffoldedBy && !it.fm.dateStarted && it.fm.dateScaffolded && it.fm.dateScaffolded < TODAY)
+      flags.O1.push({ id: it.id, by: it.fm.scaffoldedBy, since: it.fm.dateScaffolded, title: title(it) });
+    // D3 is aggregated PER PROJECT after the loop (per #613), not per item.
   }
-  // G2 ruling-after-build — a resolved build GATED ON (blockedBy) a decision that resolved
-  // after it. `parent` is epic membership, not a gating edge, so it is excluded. Build order
-  // comes from git (the resolve-flip commit), and undatable (import-born) endpoints are skipped.
-  const gatingEdges = [...new Set((it.fm.blockedBy || []).map(norm).filter(Boolean))];
-  if (isExec && it.status === 'resolved') {
-    for (const p of gatingEdges) {
-      if (!isDecision(p)) continue;
-      const d = items.get(p);
-      if (d.status !== 'resolved') { flags.G2.push({ id: it.id, ref: p, why: 'governing decision still open', title: title(it) }); continue; }
-      const di = gitResolvedAt(d.file), ii = gitResolvedAt(it.file);
-      if (di.undatable || ii.undatable) continue;                  // import artifact — order unknowable
-      if (di.date > ii.date) flags.G2.push({ id: it.id, ref: p, why: `decision resolved ${di.date.slice(0, 10)} (git) > item ${ii.date.slice(0, 10)}`, title: title(it) });
+
+  // G3 subject-dedup (#1558) — the kind gate now counts every non-decision kind incl. epic (#1473), so when
+  // an epic and a child both graduate to the SAME entity noun (e.g. #436↔#351 `project:webcompliance`) G3
+  // double-counts the one architectural noun. The fix is subject-axis and NOUN-level (a `graduatedTo` can list
+  // several `+`-joined nouns): drop a G3 candidate only when EVERY entity noun it declares is already covered
+  // by a G3-candidate ANCESTOR (transitive parent/blockedBy closure) — the umbrella. A child that introduces
+  // any noun the umbrella lacks (e.g. #629 adds `protocol:editor-engine`/`plug:…` atop `project:webediting`)
+  // keeps its flag for those unique nouns. (Item-level whole-string compare would mis-handle a compound
+  // umbrella + single-noun child; noun-set coverage is the robust form.)
+  {
+    const g3ById = new Map(flags.G3.map((f) => [f.id, f]));
+    const entityNouns = (g) =>
+      String(g).split('+').map((s) => s.trim().toLowerCase()).filter((s) => isEntityGraduation(s));
+    flags.G3 = flags.G3.filter((f) => {
+      const own = entityNouns(f.graduatedTo);
+      if (!own.length) return true;
+      const covered = new Set();
+      for (const anc of transitiveLineage(items.get(f.id))) {
+        const a = g3ById.get(anc);
+        if (a) for (const n of entityNouns(a.graduatedTo)) covered.add(n);
+      }
+      return !own.every((n) => covered.has(n)); // drop only if the umbrella covers every noun
+    });
+  }
+
+  // D3 stale-project — aggregated PER PROJECT, not per item (per #613). A `relatedProject` that is
+  // absent from projects.json is a dangling ref; a project still `status: concept` despite substantial
+  // shipped work (≥ STALE_RESOLVED_MIN resolved items) is stale drift whose status should advance. A
+  // concept project with little/no resolved work is *intentionally pending* (e.g. `webplugs` pending
+  // the #606 ruling, `webcases` too thin to graduate) and is NOT flagged — the false-positive class the
+  // old per-item check produced 18 of.
+  const STALE_RESOLVED_MIN = 5;
+  const projAgg = new Map();              // relatedProject -> {resolved, graduated, total}
+  for (const it of items.values()) {
+    const rp = it.fm.relatedProject; if (!rp) continue;
+    const a = projAgg.get(rp) || { resolved: 0, graduated: 0, total: 0 };
+    a.total++;
+    if (it.status === 'resolved') a.resolved++;
+    if (it.fm.graduatedTo && it.fm.graduatedTo !== 'none') a.graduated++;
+    projAgg.set(rp, a);
+  }
+  for (const [rp, a] of [...projAgg].sort((x, y) => y[1].resolved - x[1].resolved)) {
+    const st = projects.get(rp);
+    if (st === undefined) { flags.D3.push({ project: rp, why: 'not in projects.json (dangling project ref)', resolved: a.resolved, graduated: a.graduated }); continue; }
+    if (st === 'concept' && a.resolved >= STALE_RESOLVED_MIN)
+      flags.D3.push({ project: rp, why: `\`concept\` but ${a.resolved} resolved / ${a.graduated} graduated — shipped work warrants a status bump`, resolved: a.resolved, graduated: a.graduated });
+  }
+  function title(it) { return (it.body.match(/^#\s+(.+)$/m) || [, it.file])[1].slice(0, 70); }
+
+  // ---- scope attribution (#957 — mirrors `check:standards --scope`, #952/#949, on the id axis) ----
+  // Demote findings owned by another session to a note count; keep mine + unattributable (D3) in view.
+  const scopeArg = process.argv.find(a => a.startsWith('--scope=') || a.startsWith('--mine='));
+  const scopeSession = scopeArg ? scopeArg.split('=').slice(1).join('=') : null;
+  let scopeNote = null;
+  if (scopeSession) {
+    let mineIds = null;
+    try {
+      mineIds = claimedIdsFor(parseClaims(readFileSync(join(ROOT, '.claude/skills/batch-backlog-items/claims.json'), 'utf8')), scopeSession);
+    } catch { mineIds = null; }
+    if (!mineIds) {
+      scopeNote = `--scope="${scopeSession}" has no recorded claim — running whole-backlog.`;
+    } else {
+      // claims.json stamps the full item slug (`964-check-…`); health findings are numeric-id keyed (`964`).
+      // Normalize both to the leading number so attribution joins across the two id formats.
+      const mineNums = new Set([...mineIds].map(s => idFromName(String(s))).filter(Boolean)); // two-form id (#2288)
+      let externalTotal = 0;
+      for (const k of Object.keys(flags)) {
+        // D3 is project-keyed (no owning item id) → partitionById keeps it as `mine` (fail-safe).
+        const { mine, external } = partitionById(flags[k], mineNums);
+        flags[k] = mine;
+        externalTotal += external.length;
+      }
+      scopeNote = `--scope="${scopeSession}" — ${mineNums.size} claimed item(s); ${externalTotal} external flag(s) demoted to a note.`;
     }
   }
-  // G3 ungoverned-arch — CANDIDATE POOL (judgment confirms): graduated build with no governing
-  // decision reachable transitively (parent/blockedBy closure) AND none cited in its prose.
-  if (isExec && it.status === 'resolved' && isEntityGraduation(it.fm.graduatedTo)
-      && ![...transitiveLineage(it)].some(isDecision) && !citesResolvedDecision(it))
-    flags.G3.push({ id: it.id, graduatedTo: it.fm.graduatedTo, title: title(it) });
-  // G4 false-prepared-fork — a PREPARED, still-open decision whose `## Fork` sections carry
-  // prioritization/effort tells (forbidden as branches). CANDIDATE: the claim-time fork-existence
-  // re-run confirms; collapsing the fork to the #088 shape (invariant + supported/deferred list)
-  // clears it. Resolved decisions are historical — skipped.
-  if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
-    const hits = new Set();
-    for (const r of sectionRanges(it.body)) {
-      const head = it.body.slice(r.start, r.end).match(/^#{1,6}\s+(.*)$/m)?.[1] || '';
-      if (!/^fork\b/i.test(head.trim())) continue;
-      const sec = it.body.slice(r.start, r.end);
-      for (const re of FORK_TELLS) { const m = sec.match(re); if (m) hits.add(m[0].replace(/[*`_]/g, '').replace(/\s+/g, ' ').trim().slice(0, 50).toLowerCase()); }
-    }
-    if (hits.size) flags.G4.push({ id: it.id, tells: [...hits].slice(0, 4), title: title(it) });
-  }
-  // G8 unruled-premise — see `forkLeansOnUnruled` above for the rule and why it is scoped to forks.
-  // CANDIDATE: a citation may be context rather than ground; confirm at claim.
-  if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
-    const leans = forkLeansOnUnruled(
-      it.body, blocked,
-      (ref) => ref !== it.id && items.get(ref)?.type === 'decision' && items.get(ref)?.status !== 'resolved',
-      sectionRanges, norm,
-    );
-    if (leans.length) flags.G8.push({ id: it.id, refs: leans.slice(0, 4), title: title(it) });
-  }
-  // G5 missing-fork-existence-justification — a PREPARED, still-open decision with a `## Fork`
-  // section carrying NONE of the fork-existence markers (#819). CANDIDATE: the line may use other
-  // wording; confirm at claim before dissolving the fork or amending its prep.
-  if (it.type === 'decision' && it.fm.preparedDate && it.status !== 'resolved') {
-    const bare = [];
-    for (const r of sectionRanges(it.body)) {
-      const head = it.body.slice(r.start, r.end).match(/^#{1,6}\s+(.*)$/m)?.[1] || '';
-      if (!/^fork\b/i.test(head.trim())) continue;
-      const sec = it.body.slice(r.start, r.end);
-      if (!FORK_EXISTENCE_MARKERS.some(re => re.test(sec))) bare.push(head.trim().slice(0, 40));
-    }
-    if (bare.length) flags.G5.push({ id: it.id, forks: bare.slice(0, 4), title: title(it) });
-  }
-  // G6 codification-gap — a resolved `type: decision` with no `codifiedIn` pointer. Its ruling may
-  // live ONLY in this decision doc (case-law-only); if it states a reusable rule it should be promoted
-  // to the statute layer (platform-decisions.md or a topical doc) with `codifiedIn` set, else marked
-  // `codifiedIn: one-off`. CANDIDATE pool (like G3/G4): a hit is a card to promote-or-mark, never a
-  // hard failure. The count is the uncodified backlog (64% case-law-only at the 2026-06-18 sweep) and
-  // should shrink, not grow silently. See backlog-workflow.md → resolve step, and docs/agent/platform-decisions.md.
-  if (it.type === 'decision' && it.status === 'resolved' && !it.fm.codifiedIn)
-    flags.G6.push({ id: it.id, title: title(it) });
 
-  // G7 cite-the-case-not-the-rule — a LIVE item cites a codified decision's `#N` but not its statute
-  // anchor; re-point to platform-decisions.md#<anchor> so the rule, not the case, is what propagates.
-  // Scoped to non-resolved items: "cite the rule" is *authoring* guidance, and a resolved item is frozen
-  // history whose lineage `#N` cites are correct archaeology (473/550 at the 2026-06-19 sweep were resolved).
-  if (it.status !== 'resolved') {
-    const stale = citesCodifiedCase(it);
-    if (stale.length) flags.G7.push({ id: it.id, refs: stale.slice(0, 4), title: title(it) });
+  // ---- report --------------------------------------------------------------
+  const open = [...items.values()].filter(i => i.status !== 'resolved').length;
+  const L = [];
+  L.push('# Backlog health audit — deterministic sweep', '');
+  L.push(`> Generated by \`scripts/audit-backlog-health.mjs\` (read-only). ${items.size} items (${open} open). The judgment layer (guiding-principle conformance) reads on top of these flags.`, '');
+  if (scopeNote) L.push(`> **Scope:** ${scopeNote}`, '');
+  L.push('## Summary', '', '| Check | What it catches | Hits |', '|---|---|---|');
+  const desc = { G1: 'prose prereq not lifted into `blockedBy` (INFO = both ends resolved)', G2: 'resolved build gated on a decision that was open/later (git-dated)', G3: 'graduated entity with no governing decision (transitive lineage + prose)', G4: 'prepared decision with prioritization/effort tells in a `## Fork` (fork-existence test skipped)', G5: 'prepared decision with a `## Fork` lacking a fork-existence justification line (#819)', G6: 'resolved decision with no `codifiedIn` — rule may be case-law-only (promote to a guideline, or mark `one-off`)', G8: 'prepared decision whose `## Fork` leans on a still-open sibling decision with no `blockedBy` edge (default rests on an unratified premise)', G7: 'cites a codified decision\'s `#N` but not its statute anchor — re-point to platform-decisions.md#<anchor> (cite the rule, not the case)', A1: 'open item with no `## Done when`/`## Acceptance` proof — no heading, or one with no executable/observable token and no exemption (#2949)', O1: 'born-active scaffold (`scaffold --session`, #670) lingering past its creating day — likely a stranded session; `settle` it or revert to open', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'project missing from projects.json, or `concept` despite shipped work' };
+  const G1_INFO = flags.G1.filter(f => f.sev === 'INFO').length;
+  for (const k of Object.keys(flags)) {
+    const n = flags[k].length, note = k === 'G1' && G1_INFO ? ` (${n - G1_INFO} active + ${G1_INFO} INFO)` : '';
+    L.push(`| **${k}** | ${desc[k]} | ${n}${note} |`);
   }
-  // A1 missing-done-when-proof (#2949) — OPEN, non-decision items only: a resolved item is frozen
-  // history and a decision has no build to prove. See `missingDoneWhenProof` above for the rule.
-  if (it.status === 'open' && isExec) {
-    const proof = missingDoneWhenProof(it);
-    if (proof.hit) flags.A1.push({ id: it.id, reason: proof.reason, title: title(it) });
-  }
-  // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design).
-  // deadFileRefs applies the #613 resolution gaps + prose suppression (absence / planned / generated).
-  if (it.status !== 'resolved')
-    for (const r of deadFileRefs(it)) flags.D1.push({ id: it.id, ref: r, title: title(it) });
-  // D2 dangling-item-ref — OPEN items only
-  if (it.status !== 'resolved')
-    for (const [, p] of it.body.matchAll(ANY_REF)) if (!items.has(norm(p))) { flags.D2.push({ id: it.id, ref: norm(p), title: title(it) }); break; }
-  // O1 orphan-born-active (#670) — a `scaffold --session` item is born `active` + `scaffoldedBy`, owned
-  // until `settle`d. If it lingers past its creating day (dateScaffolded < today) it is a likely stranded
-  // scaffold (a crashed/abandoned session): invisible to other batches yet never published. Recover by
-  // `settle <NNN>` (publish) or revert to open. A born-active item has NO `dateStarted` (claim signal),
-  // which is what distinguishes it from a normally-claimed active item.
-  if (it.status === 'active' && it.fm.scaffoldedBy && !it.fm.dateStarted && it.fm.dateScaffolded && it.fm.dateScaffolded < TODAY)
-    flags.O1.push({ id: it.id, by: it.fm.scaffoldedBy, since: it.fm.dateScaffolded, title: title(it) });
-  // D3 is aggregated PER PROJECT after the loop (per #613), not per item.
-}
-
-// G3 subject-dedup (#1558) — the kind gate now counts every non-decision kind incl. epic (#1473), so when
-// an epic and a child both graduate to the SAME entity noun (e.g. #436↔#351 `project:webcompliance`) G3
-// double-counts the one architectural noun. The fix is subject-axis and NOUN-level (a `graduatedTo` can list
-// several `+`-joined nouns): drop a G3 candidate only when EVERY entity noun it declares is already covered
-// by a G3-candidate ANCESTOR (transitive parent/blockedBy closure) — the umbrella. A child that introduces
-// any noun the umbrella lacks (e.g. #629 adds `protocol:editor-engine`/`plug:…` atop `project:webediting`)
-// keeps its flag for those unique nouns. (Item-level whole-string compare would mis-handle a compound
-// umbrella + single-noun child; noun-set coverage is the robust form.)
-{
-  const g3ById = new Map(flags.G3.map((f) => [f.id, f]));
-  const entityNouns = (g) =>
-    String(g).split('+').map((s) => s.trim().toLowerCase()).filter((s) => isEntityGraduation(s));
-  flags.G3 = flags.G3.filter((f) => {
-    const own = entityNouns(f.graduatedTo);
-    if (!own.length) return true;
-    const covered = new Set();
-    for (const anc of transitiveLineage(items.get(f.id))) {
-      const a = g3ById.get(anc);
-      if (a) for (const n of entityNouns(a.graduatedTo)) covered.add(n);
-    }
-    return !own.every((n) => covered.has(n)); // drop only if the umbrella covers every noun
-  });
-}
-
-// D3 stale-project — aggregated PER PROJECT, not per item (per #613). A `relatedProject` that is
-// absent from projects.json is a dangling ref; a project still `status: concept` despite substantial
-// shipped work (≥ STALE_RESOLVED_MIN resolved items) is stale drift whose status should advance. A
-// concept project with little/no resolved work is *intentionally pending* (e.g. `webplugs` pending
-// the #606 ruling, `webcases` too thin to graduate) and is NOT flagged — the false-positive class the
-// old per-item check produced 18 of.
-const STALE_RESOLVED_MIN = 5;
-const projAgg = new Map();              // relatedProject -> {resolved, graduated, total}
-for (const it of items.values()) {
-  const rp = it.fm.relatedProject; if (!rp) continue;
-  const a = projAgg.get(rp) || { resolved: 0, graduated: 0, total: 0 };
-  a.total++;
-  if (it.status === 'resolved') a.resolved++;
-  if (it.fm.graduatedTo && it.fm.graduatedTo !== 'none') a.graduated++;
-  projAgg.set(rp, a);
-}
-for (const [rp, a] of [...projAgg].sort((x, y) => y[1].resolved - x[1].resolved)) {
-  const st = projects.get(rp);
-  if (st === undefined) { flags.D3.push({ project: rp, why: 'not in projects.json (dangling project ref)', resolved: a.resolved, graduated: a.graduated }); continue; }
-  if (st === 'concept' && a.resolved >= STALE_RESOLVED_MIN)
-    flags.D3.push({ project: rp, why: `\`concept\` but ${a.resolved} resolved / ${a.graduated} graduated — shipped work warrants a status bump`, resolved: a.resolved, graduated: a.graduated });
-}
-function title(it) { return (it.body.match(/^#\s+(.+)$/m) || [, it.file])[1].slice(0, 70); }
-
-// ---- scope attribution (#957 — mirrors `check:standards --scope`, #952/#949, on the id axis) ----
-// Demote findings owned by another session to a note count; keep mine + unattributable (D3) in view.
-const scopeArg = process.argv.find(a => a.startsWith('--scope=') || a.startsWith('--mine='));
-const scopeSession = scopeArg ? scopeArg.split('=').slice(1).join('=') : null;
-let scopeNote = null;
-if (scopeSession) {
-  let mineIds = null;
-  try {
-    mineIds = claimedIdsFor(parseClaims(readFileSync(join(ROOT, '.claude/skills/batch-backlog-items/claims.json'), 'utf8')), scopeSession);
-  } catch { mineIds = null; }
-  if (!mineIds) {
-    scopeNote = `--scope="${scopeSession}" has no recorded claim — running whole-backlog.`;
-  } else {
-    // claims.json stamps the full item slug (`964-check-…`); health findings are numeric-id keyed (`964`).
-    // Normalize both to the leading number so attribution joins across the two id formats.
-    const mineNums = new Set([...mineIds].map(s => idFromName(String(s))).filter(Boolean)); // two-form id (#2288)
-    let externalTotal = 0;
-    for (const k of Object.keys(flags)) {
-      // D3 is project-keyed (no owning item id) → partitionById keeps it as `mine` (fail-safe).
-      const { mine, external } = partitionById(flags[k], mineNums);
-      flags[k] = mine;
-      externalTotal += external.length;
-    }
-    scopeNote = `--scope="${scopeSession}" — ${mineNums.size} claimed item(s); ${externalTotal} external flag(s) demoted to a note.`;
-  }
-}
-
-// ---- report --------------------------------------------------------------
-const open = [...items.values()].filter(i => i.status !== 'resolved').length;
-const L = [];
-L.push('# Backlog health audit — deterministic sweep', '');
-L.push(`> Generated by \`scripts/audit-backlog-health.mjs\` (read-only). ${items.size} items (${open} open). The judgment layer (guiding-principle conformance) reads on top of these flags.`, '');
-if (scopeNote) L.push(`> **Scope:** ${scopeNote}`, '');
-L.push('## Summary', '', '| Check | What it catches | Hits |', '|---|---|---|');
-const desc = { G1: 'prose prereq not lifted into `blockedBy` (INFO = both ends resolved)', G2: 'resolved build gated on a decision that was open/later (git-dated)', G3: 'graduated entity with no governing decision (transitive lineage + prose)', G4: 'prepared decision with prioritization/effort tells in a `## Fork` (fork-existence test skipped)', G5: 'prepared decision with a `## Fork` lacking a fork-existence justification line (#819)', G6: 'resolved decision with no `codifiedIn` — rule may be case-law-only (promote to a guideline, or mark `one-off`)', G8: 'prepared decision whose `## Fork` leans on a still-open sibling decision with no `blockedBy` edge (default rests on an unratified premise)', G7: 'cites a codified decision\'s `#N` but not its statute anchor — re-point to platform-decisions.md#<anchor> (cite the rule, not the case)', A1: 'open item with no `## Done when`/`## Acceptance` proof — no heading, or one with no executable/observable token and no exemption (#2949)', O1: 'born-active scaffold (`scaffold --session`, #670) lingering past its creating day — likely a stranded session; `settle` it or revert to open', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'project missing from projects.json, or `concept` despite shipped work' };
-const G1_INFO = flags.G1.filter(f => f.sev === 'INFO').length;
-for (const k of Object.keys(flags)) {
-  const n = flags[k].length, note = k === 'G1' && G1_INFO ? ` (${n - G1_INFO} active + ${G1_INFO} INFO)` : '';
-  L.push(`| **${k}** | ${desc[k]} | ${n}${note} |`);
-}
-L.push('');
-const HI = flags.G1.filter(f => f.sev === 'HIGH');
-L.push(`**Highest-priority (G1 HIGH — build references an _open decision_ with no edge): ${HI.length}**`, '');
-
-const SEV = { HIGH: 0, med: 1, low: 2, INFO: 3 };           // INFO sinks to the bottom
-function section(k, head, fmt) {
-  L.push(`## ${k} — ${head} (${flags[k].length})`, '');
-  if (!flags[k].length) { L.push('_none._', ''); return; }
-  for (const f of flags[k].slice().sort((a, b) => (SEV[a.sev] ?? 1) - (SEV[b.sev] ?? 1)).slice(0, 200))
-    L.push(`- ${fmt(f)}`);
-  if (flags[k].length > 200) L.push(`- …and ${flags[k].length - 200} more`);
   L.push('');
-}
-section('G1', 'Edge-gaps (prose prereq not in blockedBy)', f => `**#${f.id}** → #${f.ref} ${f.decision ? `(decision${f.refOpen ? ', **OPEN**' : ''})` : ''} \`${f.sev}\` — ${f.title}`);
-section('G2', 'Built ahead of its ruling (gated on a later-ruled decision, git-dated)', f => `**#${f.id}** gated on decision #${f.ref} — ${f.why} — ${f.title}`);
-section('G3', 'Graduated with no governing decision (transitive lineage + prose checked)', f => `**#${f.id}** → \`${f.graduatedTo}\` — ${f.title}`);
-section('G4', 'Prepared decision with prioritization tells in a `## Fork` (re-run the fork-existence test at claim)', f => `**#${f.id}** — tells: ${f.tells.map(t => `_${t}_`).join(', ')} — ${f.title}`);
-section('G5', 'Prepared decision with a `## Fork` lacking a fork-existence justification line (#819 — name the excluded branch or why they can\'t coexist)', f => `**#${f.id}** — fork(s): ${f.forks.map(t => `_${t}_`).join(', ')} — ${f.title}`);
-section('G8', 'Prepared decision leaning on an unruled sibling decision (add the `blockedBy` edge, or re-ground the default on a premise that stands alone)', f => `**#${f.id}** → ${f.refs.map(r => `#${r} (**open decision**)`).join(', ')} — ${f.title}`);
-section('G6', 'Resolved decisions missing `codifiedIn` (promote the rule to a guideline, or mark `one-off`)', f => `**#${f.id}** — ${f.title}`);
-section('G7', 'Cites a codified decision by `#N` instead of its statute anchor (re-point to platform-decisions.md#<anchor> — cite the rule, not the case)', f => `**#${f.id}** → ${f.refs.map(r => `#${r.ref} ⇒ \`${r.anchor}\``).join(', ')} — ${f.title}`);
-section('A1', 'Missing `## Done when`/`## Acceptance` proof (#2949 — add a tier-1/2 criterion, or an explicit exemption line)', f => `**#${f.id}** \`${f.reason}\` — ${f.title}`);
-section('O1', 'Orphaned born-active scaffolds (#670 — unsettled past their creating day; `settle <NNN>` to publish or revert to open)', f => `**#${f.id}** — owned by \`${f.by}\` since ${f.since} — ${f.title}`);
-section('D1', 'Dead file references', f => `**#${f.id}** \`${f.ref}\` — ${f.title}`);
-section('D2', 'Dangling item references', f => `**#${f.id}** → #${f.ref} (no such item) — ${f.title}`);
-section('D3', 'Stale project references (per project)', f => `**\`${f.project}\`** — ${f.why}`);
+  const HI = flags.G1.filter(f => f.sev === 'HIGH');
+  L.push(`**Highest-priority (G1 HIGH — build references an _open decision_ with no edge): ${HI.length}**`, '');
 
-writeFileSync(REPORT, L.join('\n'));
-if (process.argv.includes('--json')) console.log(JSON.stringify(flags, null, 2));
-const tot = Object.values(flags).reduce((a, b) => a + b.length, 0);
-console.log(`audit: ${items.size} items, ${tot} flags (G1=${flags.G1.length} [${HI.length} HIGH, ${G1_INFO} INFO], G2=${flags.G2.length}, G3=${flags.G3.length}, G4=${flags.G4.length}, G5=${flags.G5.length}, G6=${flags.G6.length}, G7=${flags.G7.length}, G8=${flags.G8.length}, A1=${flags.A1.length}, O1=${flags.O1.length}, D1=${flags.D1.length}, D2=${flags.D2.length}, D3=${flags.D3.length})`);
-if (scopeNote) console.log(`scope: ${scopeNote}`);
-console.log(`report → ${REPORT.replace(ROOT + '/', '')}`);
+  const SEV = { HIGH: 0, med: 1, low: 2, INFO: 3 };           // INFO sinks to the bottom
+  function section(k, head, fmt) {
+    L.push(`## ${k} — ${head} (${flags[k].length})`, '');
+    if (!flags[k].length) { L.push('_none._', ''); return; }
+    for (const f of flags[k].slice().sort((a, b) => (SEV[a.sev] ?? 1) - (SEV[b.sev] ?? 1)).slice(0, 200))
+      L.push(`- ${fmt(f)}`);
+    if (flags[k].length > 200) L.push(`- …and ${flags[k].length - 200} more`);
+    L.push('');
+  }
+  section('G1', 'Edge-gaps (prose prereq not in blockedBy)', f => `**#${f.id}** → #${f.ref} ${f.decision ? `(decision${f.refOpen ? ', **OPEN**' : ''})` : ''} \`${f.sev}\` — ${f.title}`);
+  section('G2', 'Built ahead of its ruling (gated on a later-ruled decision, git-dated)', f => `**#${f.id}** gated on decision #${f.ref} — ${f.why} — ${f.title}`);
+  section('G3', 'Graduated with no governing decision (transitive lineage + prose checked)', f => `**#${f.id}** → \`${f.graduatedTo}\` — ${f.title}`);
+  section('G4', 'Prepared decision with prioritization tells in a `## Fork` (re-run the fork-existence test at claim)', f => `**#${f.id}** — tells: ${f.tells.map(t => `_${t}_`).join(', ')} — ${f.title}`);
+  section('G5', 'Prepared decision with a `## Fork` lacking a fork-existence justification line (#819 — name the excluded branch or why they can\'t coexist)', f => `**#${f.id}** — fork(s): ${f.forks.map(t => `_${t}_`).join(', ')} — ${f.title}`);
+  section('G8', 'Prepared decision leaning on an unruled sibling decision (add the `blockedBy` edge, or re-ground the default on a premise that stands alone)', f => `**#${f.id}** → ${f.refs.map(r => `#${r} (**open decision**)`).join(', ')} — ${f.title}`);
+  section('G6', 'Resolved decisions missing `codifiedIn` (promote the rule to a guideline, or mark `one-off`)', f => `**#${f.id}** — ${f.title}`);
+  section('G7', 'Cites a codified decision by `#N` instead of its statute anchor (re-point to platform-decisions.md#<anchor> — cite the rule, not the case)', f => `**#${f.id}** → ${f.refs.map(r => `#${r.ref} ⇒ \`${r.anchor}\``).join(', ')} — ${f.title}`);
+  section('A1', 'Missing `## Done when`/`## Acceptance` proof (#2949 — add a tier-1/2 criterion, or an explicit exemption line)', f => `**#${f.id}** \`${f.reason}\` — ${f.title}`);
+  section('O1', 'Orphaned born-active scaffolds (#670 — unsettled past their creating day; `settle <NNN>` to publish or revert to open)', f => `**#${f.id}** — owned by \`${f.by}\` since ${f.since} — ${f.title}`);
+  section('D1', 'Dead file references', f => `**#${f.id}** \`${f.ref}\` — ${f.title}`);
+  section('D2', 'Dangling item references', f => `**#${f.id}** → #${f.ref} (no such item) — ${f.title}`);
+  section('D3', 'Stale project references (per project)', f => `**\`${f.project}\`** — ${f.why}`);
+
+  writeFileSync(REPORT, L.join('\n'));
+  if (process.argv.includes('--json')) console.log(JSON.stringify(flags, null, 2));
+  const tot = Object.values(flags).reduce((a, b) => a + b.length, 0);
+  console.log(`audit: ${items.size} items, ${tot} flags (G1=${flags.G1.length} [${HI.length} HIGH, ${G1_INFO} INFO], G2=${flags.G2.length}, G3=${flags.G3.length}, G4=${flags.G4.length}, G5=${flags.G5.length}, G6=${flags.G6.length}, G7=${flags.G7.length}, G8=${flags.G8.length}, A1=${flags.A1.length}, O1=${flags.O1.length}, D1=${flags.D1.length}, D2=${flags.D2.length}, D3=${flags.D3.length})`);
+  if (scopeNote) console.log(`scope: ${scopeNote}`);
+  console.log(`report → ${REPORT.replace(ROOT + '/', '')}`);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) main();

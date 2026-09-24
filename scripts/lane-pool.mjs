@@ -24,7 +24,7 @@
  *   node scripts/lane-pool.mjs provision --count=N [--acquirable] [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166); --acquirable grows PAST foreign-leased lanes so N ACQUIRABLE ones result (#2426)
  *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
- *   node scripts/lane-pool.mjs list    [--json] [--acquirable]      # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426)
+ *   node scripts/lane-pool.mjs list    [--json] [--acquirable [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N]]  # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426); #xn432dz: lease-first (no git in a live-leased lane), SINGLE-FLIGHT + cached for --cache-ttl-ms (env LANE_POOL_LIST_CACHE_TTL_MS, default 30000; 0 disables) so concurrent callers share one scan, --no-cache forces a fresh one, --limit=N stops at N (never cached), and the scan fails cleanly past --scan-timeout-ms (env LANE_POOL_LIST_SCAN_TIMEOUT_MS, default 120000)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
  *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
@@ -69,13 +69,13 @@
  * `release --lane=N --release-reserved`. (NOTE: this script only PROVISIONS the reserved lane; the live repoint
  * of the machine-global `~/.claude/…/memory` symlink at it is the SUPERVISED, human-gated half of #2350.)
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, statSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
-import { defaultPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
+import { guardedPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -83,6 +83,7 @@ import {
   isLeaseStale,
   isReservedLease,
   isLaneAcquirable,
+  leaseDisqualifiesAcquire,
   chooseFreeLane,
   ownLaneNumber,
   leaseBody,
@@ -139,8 +140,23 @@ for (const a of rest) {
 // fast, like `gh` against a non-GitHub origin) can take multiple seconds just to be scheduled, and an
 // 8s bound fired with no hang present — silently degrading the reap axis and flaking
 // lane-pool-reap-on-acquire.test.mjs red twice on 2026-08-30 (#x01b2gj, mirrors #3011's precedent exactly).
+// #xn432dz — READ-ONLY git calls run with `GIT_OPTIONAL_LOCKS=0`. Without it `git status` opportunistically
+// takes `index.lock` and REWRITES `.git/index` to refresh stat info — a write per lane per scan, which (with 14
+// concurrent `list --acquirable` scans over ~129 lanes, 2026-09-23) fed fseventsd enough events to pin it at
+// ~100% CPU. The allowlist is by subcommand so a MUTATING call (fetch/reset/clean/checkout/clone) never gets
+// it — optional locks are exactly what a mutating command must keep. `remote` only counts for `get-url`.
+const READ_ONLY_GIT = new Set(['status', 'rev-list', 'rev-parse', 'for-each-ref', 'ls-remote', 'cherry', 'ls-tree', 'show', 'symbolic-ref', 'merge-base', 'log', 'cat-file']);
+const isReadOnlyGit = (args) => READ_ONLY_GIT.has(args[0]) || (args[0] === 'remote' && args[1] === 'get-url');
+const readOnlyGitEnv = (args) => (isReadOnlyGit(args) ? { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } } : {});
+// #xn432dz — while a bounded `list --acquirable` scan runs, every git child is capped at the scan's REMAINING
+// budget, so one hung git can't outlive the overall timeout. A killed child reads as `null` through `tryGit`,
+// which some probes read fail-OPEN (e.g. porcelain null ⇒ "clean") — so the scan loop re-checks the deadline
+// after every lane and FAILS the whole scan rather than trusting a result produced past it. An explicit
+// per-call `timeout` (ls-remote's 20s) still wins. Null outside a scan ⇒ no cap, today's behaviour.
+let scanDeadlineMs = null;
+const scanTimeoutOpt = () => (scanDeadlineMs === null ? {} : { timeout: Math.max(1, scanDeadlineMs - Date.now()) });
 const git = (args, cwd, opts = {}) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...readOnlyGitEnv(args), ...scanTimeoutOpt(), ...opts }).trim();
 const gitQuiet = (args, cwd) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'ignore', 'inherit'] });
 const tryGit = (args, cwd, opts = {}) => {
@@ -187,7 +203,20 @@ const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) 
 // A lane needs no normalising — `workspaceFor` strips at `.lanes` from any depth — but this is the honest
 // input either way. Falls back to the cwd outside a git repo, where there is nothing better to say.
 const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd()) || process.cwd();
-const POOL_ROOT = defaultPoolRoot(CHECKOUT_ROOT);
+// #3383 — `guardedPoolRoot` (not the bare `defaultPoolRoot`) so a vitest run that spawns this CLI for real with
+// no pool-root override fails LOUDLY and immediately, instead of quietly hammering the shared real pool (see
+// that function's own header for the incident this closes). `fail` is a hoisted function declaration further
+// down this file, so it's callable here.
+let POOL_ROOT;
+try {
+  POOL_ROOT = guardedPoolRoot(CHECKOUT_ROOT);
+} catch (e) {
+  // `fail` calls `process.exit(1)`, which does not itself unwind JS execution — the `throw` right after is a
+  // belt-and-suspenders stop so nothing below this line ever runs against an undefined POOL_ROOT in the window
+  // before the process actually terminates.
+  fail(String(e.message || e));
+  throw e;
+}
 
 // ── repo descriptor resolution ──────────────────────────────────────────────────────────────────────
 function resolveRepo() {
@@ -668,7 +697,7 @@ function laneDirtyOrAhead(dir, branch) {
  * the live pool + synthetic cases (fully pushed / one unpushed commit / deleted remote ref / detached HEAD /
  * no remotes / empty repo / unresolvable sha mixed with a valid one) — zero verdict flips vs. the old loop.
  */
-function aheadIsProvablyPushed(dir, remoteShas) {
+function aheadIsProvablyPushed(dir, remoteShas, branch) {
   if (!remoteShas || remoteShas.size === 0) return false;
   const headRaw = tryGit(['rev-parse', 'HEAD'], dir);
   if (!headRaw) return false;
@@ -681,37 +710,113 @@ function aheadIsProvablyPushed(dir, remoteShas) {
   // lane's own commit(s), but built on top of whatever else landed first — never on top of the lane's commit
   // itself. No ancestry walk will ever find it (the lane's commit is simply not an ancestor of anything on
   // origin), yet a manual `git cherry origin/<branch> HEAD` shows `-` (patch already applied) for every one.
-  // `git cherry <upstream> <head>` answers exactly that patch-equivalence question, so it's tried next, but
-  // ONLY as a fallback (ancestry is cheaper and covers the ordinary fast-forward/merge-commit case above) and
-  // only against the SAME already-resolved `remoteShas` (no extra network call beyond the one `infoFor`/
-  // `laneAcquirableInfo` already paid to build this set).
-  return aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas);
+  return aheadIsPatchEquivalent(dir, head, remoteShas, branch);
 }
 
 /**
- * #3383 — is `head` (a lane's HEAD sha) patch-equivalent to something already on ANY live remote head?
- * Mirrors `aheadIsProvablyPushed`'s own OR-across-every-live-head design (a lane's work may have landed under
- * a differently-named branch than the one it started on). Fails CLOSED per-candidate exactly like the
- * ancestry check's `--ignore-missing`: `tryGit` never throws, so a remote sha this lane can't resolve locally
- * (an object it never fetched) just proves nothing — it neither stops checking the REST of `remoteShas`, nor
- * is ever treated as a positive result.
+ * #3383-perf — live-caught the morning after #3383 landed: the FIRST cut of this fallback ran one full `git
+ * cherry <head> HEAD` PER live remote head, per ahead lane (an OR-across-every-head fan-out, mirroring
+ * #2920's already-fixed ancestry check). On the real web-everything pool (83 lanes, 160 remote heads) that
+ * stalled a single `list --acquirable` pass for 20+ minutes — `git cherry` itself does a bidirectional
+ * patch-id walk over the ENTIRE divergent history on both sides, so one call against an unrelated, long-lived
+ * branch can be arbitrarily expensive, and #2920's own one-spawn ancestry trick doesn't apply here (there is
+ * no single command that answers "patch-equivalent to ANY of these" the way `rev-list --not` answers ancestry
+ * for containment). The fix daemon's WE tick calls this on every tick, so it hung too.
+ *
+ * Two-tier fix, cheapest and most common case first — total git-spawn count is now BOUNDED (does not scale
+ * with remote-head count):
+ *  1. PRIMARY — ONE bounded `git cherry origin/<branch> HEAD`, exactly the manual diagnosis this item's own
+ *     postmortem used. Cost is proportional to that ONE branch's own divergence, never to how many OTHER
+ *     branches exist — covers the overwhelmingly common case (a lane's work lands on its own integration
+ *     branch) with the full ancestry-aware precision `git cherry` gives (catches a match buried several
+ *     commits back, not just at the tip).
+ *  2. FALLBACK, only if (1) finds no match — a single O(1)-git-spawn-PAIR batched patch-id comparison
+ *     (`git diff-tree --stdin -p | git patch-id --stable`, once for "our" ahead commit(s), once for every
+ *     OTHER remote head) instead of one `git cherry` per head. This is a narrower heuristic than `git cherry`
+ *     (it compares each commit's OWN introduced diff against its immediate parent — it can miss a squash that
+ *     COMBINES several of the lane's commits into one, or a match buried behind a merge commit on the other
+ *     branch), in exchange for NEVER spawning more than a handful of git processes regardless of how many
+ *     remote heads exist. Acceptable: a case this narrower heuristic misses (e.g. lane-11's PR #176 branch,
+ *     if it doesn't hit) simply stays protected — fails closed, same as any other unproven candidate, never a
+ *     false positive.
+ */
+function aheadIsPatchEquivalent(dir, head, remoteShas, branch) {
+  if (branch && cherryAllPatchEquivalent(dir, `origin/${branch}`, head)) return true;
+  return otherRemoteHeadsPatchEquivalentBatched(dir, head, remoteShas, branch);
+}
+
+/** ONE `git cherry <upstream> <head>` call. `true` iff every commit `<head>` has that `<upstream>` lacks is
+ *  patch-equivalent to something already in `<upstream>` (or there are none — already ancestor-contained). */
+function cherryAllPatchEquivalent(dir, upstream, head) {
+  const out = tryGit(['cherry', upstream, head], dir);
+  if (out === null) return false; // unresolvable (e.g. `branch` not fetched here) — try the batched fallback
+  const lines = out.split('\n').filter(Boolean);
+  return lines.length === 0 || lines.every((l) => l.startsWith('-'));
+}
+
+/**
+ * #3383-perf — the bounded fallback: compares the lane's OWN ahead-commit patch-id(s) against EVERY OTHER
+ * live remote head's patch-id, computed in exactly TWO `diff-tree --stdin -p | patch-id --stable` pipelines
+ * total (one for "ours", one for "theirs — all of them at once"), never one pipeline per head. `--stdin`
+ * (rather than one positional arg per commit) is what makes this a single spawn regardless of list length.
+ * Fails CLOSED throughout: any git-call failure, or an empty/unresolvable diff, just means no match found —
+ * never a thrown error, never a false positive.
  * @param {string} dir
  * @param {string} head
  * @param {Set<string>} remoteShas
+ * @param {string} [branch] - excluded from "other" heads (already tried, above, via the precise `git cherry`)
  * @returns {boolean}
  */
-function aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas) {
-  for (const sha of remoteShas) {
-    const out = tryGit(['cherry', sha, head], dir);
-    if (out === null) continue; // unresolvable/unrelated candidate — try the next, never a false positive
-    const lines = out.split('\n').filter(Boolean);
-    // Empty output means `head` is already fully ancestor-contained in `sha` (redundant with the rev-list
-    // check above, harmless to also accept here). Otherwise EVERY line must be patch-equivalent (`-`) — a
-    // single `+` (no equivalent patch found upstream) means real unpushed work against THIS candidate, but
-    // another remote head might still prove it, so this is `continue`, never an early `return false`.
-    if (lines.length === 0 || lines.every((l) => l.startsWith('-'))) return true;
+function otherRemoteHeadsPatchEquivalentBatched(dir, head, remoteShas, branch) {
+  const branchSha = branch ? tryGit(['rev-parse', '--verify', '--quiet', `origin/${branch}`], dir) : null;
+  const others = [...remoteShas].filter((sha) => sha !== branchSha);
+  if (others.length === 0) return false;
+  // "Ours": every ahead commit (origin/<branch>..HEAD when resolvable — matches what `laneDirtyOrAhead` itself
+  // already counts as "ahead" — else just HEAD alone, so this still degrades gracefully with no branch known).
+  const aheadRange = branch ? tryGit(['rev-list', `origin/${branch}..HEAD`], dir) : null;
+  const ourShas = aheadRange ? aheadRange.split('\n').filter(Boolean) : [head];
+  const ourPatchIds = batchPatchIds(dir, ourShas);
+  if (ourPatchIds.size === 0) return false;
+  // `batchPatchIds` maps commitSha → patchId — the match test is on the PATCH ID (the value), never the
+  // commit sha (the key). Compare the VALUE sets, not `Map#has` against a key.
+  const ourPatchIdValues = new Set(ourPatchIds.values());
+  const theirPatchIds = batchPatchIds(dir, others);
+  for (const id of theirPatchIds.values()) {
+    if (ourPatchIdValues.has(id)) return true;
   }
   return false;
+}
+
+// A large-but-bounded buffer: this pipes a POTENTIALLY large batch of commit patches through in one call
+// (never one call per commit), so the default 1MB execFileSync ceiling is too tight for a big pool.
+const PATCH_ID_MAX_BUFFER = 32 * 1024 * 1024;
+
+/** `shas` (newline-fed via `--stdin`, ONE spawn pair regardless of how many) → Map<commitSha, patchId>. Skips
+ *  a merge commit's diff by default (bare `diff-tree`, no `-m`/`-c`) — exactly like `git cherry` itself, so a
+ *  remote head that is a merge commit (e.g. a landed PR's own merge commit) contributes no id, never a
+ *  spurious one. Returns an empty Map on any failure — never throws. */
+function batchPatchIds(dir, shas) {
+  if (!shas.length) return new Map();
+  // `git`/`tryGit`'s own base options hardcode `stdio: ['ignore', 'pipe', 'pipe']` (no caller has ever needed
+  // to WRITE to a spawned git's stdin before this) — passing `input` alone here would silently merge UNDER
+  // that `stdio` key (the object-spread order in `git()` puts `stdio` before `...opts`, so `opts.input` never
+  // overrides `stdio[0]`), and execFileSync then just as silently feeds the child NO stdin at all rather than
+  // erroring — `diff-tree --stdin` with an empty stdin exits 0 with empty output, which every caller here
+  // reads as "no match found" instead of "input was never delivered". Caught by this file's OWN new test
+  // (the fallback case) failing even though a byte-for-byte manual repro of the same two commands proved the
+  // patch-ids DO match — the bug was never the patch-id logic, only this option-merge order. `stdio: ['pipe',
+  // 'pipe', 'pipe']` here is what actually lets `input` reach the child.
+  const withInput = (input) => ({ input, maxBuffer: PATCH_ID_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] });
+  const diff = tryGit(['diff-tree', '--stdin', '-p'], dir, withInput(shas.join('\n') + '\n'));
+  if (diff === null || diff.trim() === '') return new Map();
+  const idsOut = tryGit(['patch-id', '--stable'], dir, withInput(diff));
+  if (idsOut === null) return new Map();
+  const map = new Map();
+  for (const line of idsOut.split('\n').filter(Boolean)) {
+    const [patchId, commit] = line.trim().split(/\s+/);
+    if (patchId && commit) map.set(commit, patchId);
+  }
+  return map;
 }
 
 /**
@@ -751,7 +856,7 @@ function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
   let aheadPushed = false;
   if (ahead > 0) {
     const remoteShas = getRemoteShas();
-    if (aheadIsProvablyPushed(dir, remoteShas)) {
+    if (aheadIsProvablyPushed(dir, remoteShas, branch)) {
       ahead = 0;
       aheadPushed = true;
     }
@@ -848,9 +953,17 @@ function laneStatus(repo, n) {
 // empty set, so `aheadIsProvablyPushed` short-circuits `false`) — preserving the original no-network-call
 // cost for any caller that doesn't pass one; every caller in THIS file always passes one (see `cmdList`/
 // `cmdProvision`), one shared `ls-remote` per whole listing/provision pass, never one per lane.
-function laneAcquirableInfo(repo, n, remoteShasBox = null) {
+// #xn432dz — LEASE-FIRST: the marker is read BEFORE any git, and a lane whose LIVE lease already disqualifies it
+// (`leaseDisqualifiesAcquire`) is returned with `dirtyOrAhead: null` and no git spawned at all. That is exactly
+// verdict-preserving — `isLaneAcquirable` is false for a live lease whatever the tree holds (proved over every
+// dirtyOrAhead shape in lane-lease.test.mjs) — and it is where the cost was: on the real pool most lanes are
+// leased, yet every scan ran `status --porcelain` + `rev-list` (+ a second porcelain for litter) in each one.
+// `nowMs`/`ttlMs` must be the SAME values the caller hands `isLaneAcquirable`, so both reads agree on staleness.
+function laneAcquirableInfo(repo, n, remoteShasBox = null, nowMs = Date.now(), ttlMs = ttlMsFromFlags()) {
   const dir = laneDir(repo, n);
   if (!existsSync(dir)) return { lane: n, exists: false };
+  const lease = readLease(dir);
+  if (leaseDisqualifiesAcquire(lease, nowMs, ttlMs)) return { lane: n, exists: true, lease, dirtyOrAhead: null };
   const getRemoteShas = () => {
     if (!remoteShasBox) return new Set();
     if (remoteShasBox.value === null) remoteShasBox.value = liveRemoteShas(dir);
@@ -859,7 +972,7 @@ function laneAcquirableInfo(repo, n, remoteShasBox = null) {
   return {
     lane: n,
     exists: true,
-    lease: readLease(dir),
+    lease,
     dirtyOrAhead: effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas),
   };
 }
@@ -913,7 +1026,7 @@ function cmdProvision(repo) {
       n++;
       const result = provisionLane(repo, n, force);
       if (!result.skipped) resetLanes.push(n);
-      if (isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox), nowMs, ttlMs)) acquirable++;
+      if (isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs), nowMs, ttlMs)) acquirable++;
     }
     if (acquirable < count) {
       log(`⚠ only ${acquirable}/${count} lane(s) acquirable after provisioning through lane-${n} (rest hold a foreign lease / un-pushed work) — the orchestrator will log the contention and carry the overflow, never double up a lane.`);
@@ -928,6 +1041,7 @@ function cmdProvision(repo) {
     }
   }
   unmapLanes(repo, resetLanes); // refreshed lanes lose stale mappings (#2139); skipped lanes keep theirs
+  invalidateListCache(repo); // #xn432dz — reset lanes may have gone dirty→clean with no lease change
   ensureRepoSiblings(repo, { force }); // pushable+built constellation siblings at the pool root (#2166/#2282/#2349)
   printStatus(repo);
 }
@@ -945,6 +1059,7 @@ function cmdRefresh(repo) {
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
   unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
+  invalidateListCache(repo); // #xn432dz — see cmdProvision
   ensureRepoSiblings(repo, { force }); // keep the WE pool's constellation siblings current on refresh too
   printStatus(repo);
 }
@@ -1161,14 +1276,19 @@ function cmdAcquire(repo) {
   // zero network calls (the no-per-lane-fetch property this design is built around).
   let remoteShas = null;
   const getRemoteShas = (dir) => (remoteShas === null ? (remoteShas = liveRemoteShas(dir)) : remoteShas);
-  const infoFor = (n) => {
+  const infoFor = (n, pickNowMs) => {
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) return { lane: n, exists: false };
+    // #xn432dz — lease-first, same as `laneAcquirableInfo`: a LIVE lease already makes `chooseFreeLane`'s
+    // `isLaneAcquirable` false, so skip the git probe for it. `pickNowMs` is the same clock `chooseFreeLane`
+    // reads below, so the two staleness reads agree. (The explicit `--lane=N` path never calls this.)
+    const lease = readLease(dir);
+    if (leaseDisqualifiesAcquire(lease, pickNowMs, ttlMs)) return { lane: n, exists: true, dirtyOrAhead: null, lease };
     // #3383 — `effectiveDirtyOrAhead` applies BOTH acquire-time-only relaxations (ancestor-OR-patch-equivalent
     // "ahead", litter-only "dirty"); `refreshLane`/`laneStatus` keep reading `laneDirtyOrAhead`'s raw fact.
     // Fails closed either way: unproven ⇒ stays protected (#2267).
     const dirtyOrAhead = effectiveDirtyOrAhead(dir, repo.branch, () => getRemoteShas(dir));
-    return { lane: n, exists: true, dirtyOrAhead, lease: readLease(dir) };
+    return { lane: n, exists: true, dirtyOrAhead, lease };
   };
 
   let chosen = null;
@@ -1269,8 +1389,9 @@ function cmdAcquire(repo) {
     // being acquired from. Pure helper so the parsing is under test, not an inline regex nothing exercises.
     const selfLane = ownLaneNumber(resolveReal(process.cwd()), resolveReal(repo.poolDir), sep);
     while (chosen === null) {
-      const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
-      const pick = chooseFreeLane(infos, Date.now(), ttlMs, { excludeLane: selfLane });
+      const pickNowMs = Date.now();
+      const infos = lanes.filter((n) => !excluded.has(n)).map((n) => infoFor(n, pickNowMs));
+      const pick = chooseFreeLane(infos, pickNowMs, ttlMs, { excludeLane: selfLane });
       if (pick === null) {
         if (Date.now() < deadline) {
           sleepSyncMs(ACQUIRE_POLL_MS);
@@ -1328,7 +1449,7 @@ function cmdAcquire(repo) {
       // without this, a litter-only-dirty lane picked exactly because it looked acquirable would immediately
       // fail this re-verify, one line later, on the identical litter it was already cleared for.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
-      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir));
+      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir), repo.branch);
       if (dirty || !provablyPushed) {
         fail(
           `lane-${chosen} is no longer provably safe to reset as of this fetch (${uncommitted} uncommitted, ` +
@@ -1630,29 +1751,235 @@ function printStatus(repo) {
   }
 }
 
-function cmdList(repo) {
-  let lanes = existingLanes(repo);
-  // #2426 — `--acquirable` drops any lane a picker must not couple an item onto: one holding a LIVE (foreign)
-  // lease or someone's un-pushed work. The parallel /workflow dispatch used the bare list and assigned items to
-  // held lanes by position, so a foreign-leased lane's item was carried with zero work. Filtering here (same
-  // decision core `acquire` uses) is the throughput fix — the batch holds no leases, so every live lease it sees
-  // is foreign; `isLaneAcquirable` excludes all live leases, which is exactly the set to skip.
-  if (flags.acquirable) {
-    const nowMs = Date.now();
+// ── list --acquirable: single-flight + short result cache (#xn432dz) ─────────────────────────────────
+// WHY. Observed live 2026-09-23: fseventsd at ~100% CPU / ~25% RAM because 14 `list --acquirable --json`
+// processes (dispatch-plan / the conveyor tick poll it) were scanning the ~129-lane pool AT ONCE, some for 10–71
+// minutes — each ran git in every lane, and N concurrent scans made every one of them slower, so they piled up.
+// Lease-first (`laneAcquirableInfo`) and GIT_OPTIONAL_LOCKS=0 cut the per-scan cost; this cuts the NUMBER of
+// scans: the first caller takes an atomic mkdir lock under the pool dir, scans, and writes the result with a
+// timestamp; every caller inside the TTL reuses it, and a caller that arrives mid-scan WAITS for that scan
+// instead of starting its own.
+//
+// CORRECTNESS OF A STALE ANSWER. A cached "acquirable" can be up to TTL old (a lane may since have been leased
+// or dirtied). That is acceptable ONLY because nothing trusts this list to CLAIM a lane: `acquire` re-derives
+// every candidate itself (auto-pick recomputes `infoFor`, never reads this cache), claims with `tryClaimLane`'s
+// atomic O_EXCL create (a live lease held by anyone else ⇒ refused), and re-verifies dirty/ahead on the claimed
+// lane right before its destructive reset — #3390 for an explicit `--lane=N`, #2924 post-fetch for both paths.
+// So a stale entry costs at most a lost race / a retry, never a clobbered lane. `list --acquirable` is a
+// CAPACITY read (an optimistic upper bound — conveyor-state.mjs already documents it as such), not a lock.
+//
+// The cache is also invalidated early by (a) a FINGERPRINT of every lane's lease marker (existence + mtime,
+// stat-only — no git, no FS events) so any acquire/release/adopt/hand-written lease misses immediately, and
+// (b) `invalidateListCache` from the commands that reset trees WITHOUT touching a lease (provision/refresh) —
+// acquire/release/adopt/remove all change the fingerprint on their own.
+const LIST_CACHE_FILE = (repo) => join(repo.poolDir, '.list-acquirable-cache.json');
+const LIST_LOCK_DIR = (repo) => join(repo.poolDir, '.list-acquirable.lock');
+const DEFAULT_LIST_CACHE_TTL_MS = 30_000;
+const DEFAULT_LIST_SCAN_TIMEOUT_MS = 120_000;
+const LIST_LOCK_POLL_MS = 200;
+// A lock whose owner record is missing/unreadable (holder died between mkdir and the owner write) is treated as
+// stale once the dir itself is this old — long enough that a live holder has certainly written its record.
+const LIST_LOCK_ORPHAN_GRACE_MS = 10_000;
+const numFlagOrEnv = (flag, env, dflt) => {
+  const raw = flags[flag] !== undefined ? flags[flag] : process.env[env];
+  const n = Number(raw);
+  return raw !== undefined && raw !== true && raw !== '' && Number.isFinite(n) && n >= 0 ? n : dflt;
+};
+const listCacheTtlMs = () => numFlagOrEnv('cache-ttl-ms', 'LANE_POOL_LIST_CACHE_TTL_MS', DEFAULT_LIST_CACHE_TTL_MS);
+const listScanTimeoutMs = () => numFlagOrEnv('scan-timeout-ms', 'LANE_POOL_LIST_SCAN_TIMEOUT_MS', DEFAULT_LIST_SCAN_TIMEOUT_MS);
+
+function invalidateListCache(repo) {
+  try { rmSync(LIST_CACHE_FILE(repo), { force: true }); } catch { /* best-effort — the fingerprint still guards */ }
+}
+// Stat-only fingerprint of the pool's lease state: which lanes exist + each marker's mtime (0 = no marker).
+function leaseFingerprint(repo) {
+  return existingLanes(repo)
+    .map((n) => {
+      let m = 0;
+      try { m = statSync(LEASE_MARKER(laneDir(repo, n))).mtimeMs; } catch { /* no marker */ }
+      return `${n}:${m}`;
+    })
+    .join(',');
+}
+// Inputs that change the ANSWER (not just its freshness) — a cache written under a different reader TTL, branch
+// or reap setting is a miss, never reused.
+const listCacheKey = (repo) => `${repo.branch}|ttl=${ttlMsFromFlags()}|reap=${flags['no-reap'] ? 0 : 1}`;
+
+function readListCache(repo, nowMs, cacheTtlMs) {
+  let c;
+  try { c = JSON.parse(readFileSync(LIST_CACHE_FILE(repo), 'utf8')); } catch { return null; }
+  if (!c || c.v !== 1 || !Array.isArray(c.paths) || typeof c.writtenAt !== 'number') return null;
+  if (c.key !== listCacheKey(repo)) return null;
+  if (nowMs - c.writtenAt >= cacheTtlMs || c.writtenAt > nowMs + 1000) return null; // expired (or clock-skewed)
+  if (c.fingerprint !== leaseFingerprint(repo)) return null; // a lease changed since the scan
+  return c.paths;
+}
+function writeListCache(repo, paths) {
+  const file = LIST_CACHE_FILE(repo);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    // Fingerprint taken AFTER the scan (the reap may have removed markers during it), then tmp+rename so a
+    // concurrent reader never sees a half-written file.
+    writeFileSync(tmp, JSON.stringify({ v: 1, writtenAt: Date.now(), key: listCacheKey(repo), fingerprint: leaseFingerprint(repo), paths }) + '\n');
+    renameSync(tmp, file);
+  } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
+}
+
+const pidAlive = (pid) => {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+};
+function readLockOwner(repo) {
+  try { return JSON.parse(readFileSync(join(LIST_LOCK_DIR(repo), 'owner.json'), 'utf8')); } catch { return null; }
+}
+// Stale = the holder is provably gone (same host, pid dead) OR it has held longer than a scan may run at all
+// (the scan timeout makes a live holder give up by then), OR its owner record never appeared.
+function listLockIsStale(repo, owner, nowMs, scanTimeoutMs) {
+  if (!owner) {
+    try { return nowMs - statSync(LIST_LOCK_DIR(repo)).mtimeMs > LIST_LOCK_ORPHAN_GRACE_MS; } catch { return false; }
+  }
+  if (owner.host === hostname() && !pidAlive(owner.pid)) return true;
+  const started = Number(owner.startedAt);
+  return !Number.isFinite(started) || nowMs - started > scanTimeoutMs + LIST_LOCK_ORPHAN_GRACE_MS;
+}
+function tryTakeListLock(repo) {
+  try {
+    mkdirSync(LIST_LOCK_DIR(repo)); // atomic create-or-fail — exactly one winner
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+  try { writeFileSync(join(LIST_LOCK_DIR(repo), 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname(), startedAt: Date.now() }) + '\n'); } catch { /* orphan grace covers it */ }
+  return true;
+}
+function releaseListLock(repo) {
+  // Only remove a lock that is still OURS — a waiter may have taken over a lock it judged stale.
+  const owner = readLockOwner(repo);
+  if (owner && (owner.pid !== process.pid || owner.host !== hostname())) return;
+  try { rmSync(LIST_LOCK_DIR(repo), { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+// Take over a stale lock: re-read the owner right before removing, and only remove it if it is still the SAME
+// stale owner — narrows (does not close) the window where two waiters both judge it stale. Losing that race just
+// means two scans run; the answer is still correct.
+function takeOverStaleListLock(repo, staleOwner) {
+  const now = readLockOwner(repo);
+  if (JSON.stringify(now) !== JSON.stringify(staleOwner)) return false;
+  try { rmSync(LIST_LOCK_DIR(repo), { recursive: true, force: true }); } catch { return false; }
+  log(`  list --acquirable: took over a stale scan lock (${staleOwner ? `pid ${staleOwner.pid}@${staleOwner.host}` : 'no owner record'}) (#xn432dz)`);
+  return tryTakeListLock(repo);
+}
+
+// The actual scan. `limit` stops at N acquirable lanes (a truncated answer — never cached). Fails the whole scan,
+// cleanly, if it overruns `scanTimeoutMs` (see `scanDeadlineMs`: a result produced past the deadline may rest on
+// a killed git probe, so it is discarded rather than returned).
+function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
+  const startedMs = Date.now();
+  scanDeadlineMs = scanTimeoutMs > 0 ? startedMs + scanTimeoutMs : null;
+  const overrun = () => scanDeadlineMs !== null && Date.now() > scanDeadlineMs;
+  const overrunFail = (where) => {
+    scanDeadlineMs = null;
+    throw Object.assign(new Error(`list --acquirable scan exceeded its ${scanTimeoutMs}ms budget ${where} (pool "${repo.name}" under ${repo.poolDir}) — refusing to return a partial/unsound answer. Raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS, or check for a hung git (#xn432dz)`), { scanTimeout: true });
+  };
+  try {
+    const nowMs = startedMs;
     const ttlMs = ttlMsFromFlags();
     // #3449 — run the SAME provably-dead-ghost reap `acquire` runs (`reapDeadLeasesInPool`, #2748) before
     // filtering. Previously only a fresh `acquire` triggered it, so `dispatch-plan.mjs`'s read-only capacity
     // check (`list --acquirable`) could under-report a pool saturated with ghost leases forever: nothing ever
     // called `acquire` to clear them, because the low-capacity reading is exactly what makes nothing call it.
-    // `--no-reap` (tests) opts out identically to `acquire`'s own flag.
+    // `--no-reap` (tests) opts out identically to `acquire`'s own flag. (#xn432dz: with the cache this now runs
+    // at most once per cache TTL per pool, not once per caller.)
     reapDeadLeasesInPool(repo, nowMs, ttlMs);
+    if (overrun()) overrunFail('during the ghost-lease reap');
     // #3383 — ONE shared lazy `ls-remote` for this whole `list --acquirable` pass (see `laneAcquirableInfo`),
     // not one per lane — keeps this a cheap, at-most-one-network-call read, same cost shape as `cmdAcquire`'s
     // own auto-pick.
     const remoteShasBox = { value: null };
-    lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox), nowMs, ttlMs));
+    const out = [];
+    for (const n of existingLanes(repo)) {
+      const ok = isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs), nowMs, ttlMs);
+      if (overrun()) overrunFail(`at lane-${n}`);
+      if (ok) {
+        out.push(n);
+        if (limit !== null && out.length >= limit) break; // #xn432dz --limit: stop once N are found
+      }
+    }
+    return out.map((n) => laneDir(repo, n));
+  } finally {
+    scanDeadlineMs = null;
   }
-  const paths = lanes.map((n) => laneDir(repo, n));
+}
+
+// Single-flight wrapper: cache hit ⇒ no scan; else take the lock and scan, or wait (bounded) for the holder's
+// result. Waiting is bounded by the scan timeout + grace — past that the lock is stale by definition and taken
+// over, so a waiter can never outlive a holder that is itself bounded.
+function acquirableListCached(repo, { limit, scanTimeoutMs, cacheTtlMs }) {
+  const slice = (paths) => (limit !== null ? paths.slice(0, limit) : paths);
+  const hit = readListCache(repo, Date.now(), cacheTtlMs);
+  if (hit) return slice(hit);
+  // A --limit caller never scans on the cache's behalf (its answer is truncated); it takes a hit if there is
+  // one, else runs its own short early-stopping scan uncached.
+  if (limit !== null) return scanAcquirable(repo, { limit, scanTimeoutMs });
+  const waitDeadline = Date.now() + (scanTimeoutMs > 0 ? scanTimeoutMs : DEFAULT_LIST_SCAN_TIMEOUT_MS) + LIST_LOCK_ORPHAN_GRACE_MS;
+  for (;;) {
+    let mine = tryTakeListLock(repo);
+    if (!mine) {
+      const owner = readLockOwner(repo);
+      if (listLockIsStale(repo, owner, Date.now(), scanTimeoutMs)) mine = takeOverStaleListLock(repo, owner);
+    }
+    if (mine) {
+      try {
+        // Re-check under the lock: the previous holder may have just written a fresh result.
+        const again = readListCache(repo, Date.now(), cacheTtlMs);
+        if (again) return again;
+        const paths = scanAcquirable(repo, { limit: null, scanTimeoutMs });
+        writeListCache(repo, paths);
+        return paths;
+      } finally {
+        releaseListLock(repo);
+      }
+    }
+    sleepSyncMs(LIST_LOCK_POLL_MS);
+    const fresh = readListCache(repo, Date.now(), cacheTtlMs);
+    if (fresh) return fresh;
+    if (Date.now() > waitDeadline) {
+      // Should be unreachable (the lock goes stale first), but never hang: scan ourselves, uncached.
+      log(`  list --acquirable: gave up waiting for the scan lock after ${scanTimeoutMs}ms+grace — scanning uncached (#xn432dz)`);
+      return scanAcquirable(repo, { limit: null, scanTimeoutMs });
+    }
+  }
+}
+
+function cmdList(repo) {
+  let paths = existingLanes(repo).map((n) => laneDir(repo, n));
+  // #2426 — `--acquirable` drops any lane a picker must not couple an item onto: one holding a LIVE (foreign)
+  // lease or someone's un-pushed work. The parallel /workflow dispatch used the bare list and assigned items to
+  // held lanes by position, so a foreign-leased lane's item was carried with zero work. Filtering here (same
+  // decision core `acquire` uses) is the throughput fix — the batch holds no leases, so every live lease it sees
+  // is foreign; `isLaneAcquirable` excludes all live leases, which is exactly the set to skip.
+  // An empty/unprovisioned pool has nothing to scan (and maybe no pool dir to hold a lock) — skip straight out.
+  if (flags.acquirable && paths.length) {
+    let limit = null;
+    if (flags.limit !== undefined) {
+      limit = Number(flags.limit);
+      if (!Number.isInteger(limit) || limit < 1) fail('--limit needs a positive integer (--limit=N)');
+    }
+    const scanTimeoutMs = listScanTimeoutMs();
+    const cacheTtlMs = listCacheTtlMs();
+    try {
+      if (flags['no-cache'] || cacheTtlMs === 0) {
+        // --no-cache forces a fresh scan (no read, no wait). A full fresh scan is still written back — it IS the
+        // freshest answer — unless caching is disabled outright (TTL 0) or the answer is --limit-truncated.
+        paths = scanAcquirable(repo, { limit, scanTimeoutMs });
+        if (limit === null && cacheTtlMs > 0) writeListCache(repo, paths);
+      } else {
+        paths = acquirableListCached(repo, { limit, scanTimeoutMs, cacheTtlMs });
+      }
+    } catch (e) {
+      if (e && e.scanTimeout) fail(e.message);
+      throw e;
+    }
+  }
   if (flags.json) process.stdout.write(JSON.stringify(paths, null, 2) + '\n');
   else paths.forEach((p) => process.stdout.write(p + '\n'));
 }
@@ -1777,6 +2104,8 @@ const KNOWN_FLAGS = new Set([
   'acquirable', 'adopt', 'all', 'all-pools', 'base', 'branch', 'count', 'force', 'item', 'json', 'lane',
   'name', 'no-install', 'no-reap', 'no-reset', 'origin', 'pool', 'purpose', 'reference', 'release-reserved',
   'repo', 'reserve', 'scope', 'session', 'ttl-minutes', 'wait-ms',
+  // #xn432dz — list --acquirable's single-flight cache / early-stop / bounded-scan knobs.
+  'limit', 'no-cache', 'cache-ttl-ms', 'scan-timeout-ms',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -1798,7 +2127,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] ' +
-      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);

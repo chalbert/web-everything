@@ -64,6 +64,8 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-acquire-stale-origin.test.mjs',
       'scripts/__tests__/lane-pool-acquire-wait-ms.test.mjs',
       'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
+      'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
+      'scripts/__tests__/lane-pool-list-cache.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',
