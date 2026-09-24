@@ -735,6 +735,13 @@ export function restampAcceptance({ pr, repo, newHead, cwd, spawn = spawnSync })
       new URL('./review-set-label.mjs', import.meta.url).pathname,
       String(pr), `--repo=${repo}`, '--to=restamp', '--actor=drain',
       '--channel=drain-rebase', `--reason=head moved to ${newHead} by this drain's own content-preserving rebase`,
+      // #x9krtkb (bug 2) — `newHead` used to reach the child ONLY inside `--reason`'s free text, which
+      // `review-set-label.mjs` never parsed back out: it re-derived the head from its OWN fresh `gh pr view`,
+      // seconds after THIS process's own `git push` produced `newHead` — and that re-read can race GitHub's
+      // propagation of the push. Observed live on PR #2572 (2026-09-24): the restamp comment six seconds later
+      // still carried the PRE-rebase head. This process already KNOWS the authoritative value — it is the one
+      // that just minted and pushed it — so it is passed explicitly and wins over the re-read for this target.
+      `--new-head=${newHead}`,
       // NO `--body-file` HERE, and that must stay true while `cwd` is set: the CLI's body-file allowlist is
       // rooted at `process.cwd()`, so a body staged under THIS checkout would be refused by a child pinned to
       // another repo's clone. A caller that needs both has to widen that allowlist deliberately.

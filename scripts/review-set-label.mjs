@@ -67,6 +67,16 @@ import {
   // #3007 — the SAME two digests the markers carry, taken raw so the ledger row records the witnesses
   // themselves rather than re-deriving them from the rendered comment. One computation, two consumers.
   normalizeDiffFingerprint, normalizeContributionFingerprint,
+  // #x9krtkb — the `restamp` path's OWN read-back of the PR's comments: which acceptance is it carrying, was
+  // that acceptance a HUMAN clearance, and does the fresh diff/contribution still cover it. `parseReviewedDiff`/
+  // `parseReviewedContribution`/`parseOperatorClearance` already exist for the accept path's OWN staleness gate
+  // (`acceptanceCoversHead`, `we:scripts/merge-ai-prs.mjs`); reused here rather than re-derived so the two
+  // readers can never disagree about what a comment carries. `parseLatestHumanClearedSha` doubles as BOTH the
+  // human-clearance detector and the accepted SHA to compare against — it already binds the `reviewed-sha` and
+  // `cleared-human` markers to the SAME comment (see its own docstring), so the SHA it returns IS
+  // `parseReviewedSha`'s answer whenever it is non-null; a second independent parse would only ever agree.
+  parseReviewedDiff, parseReviewedContribution, parseOperatorClearance,
+  parseLatestHumanClearedSha, acceptanceCoversHead,
 } from './lib/review-escalation.mjs';
 // #2844 — WHO cleared this verdict, and the refusal when that is the PR's own author. See that module's header
 // for what the id rests on (the harness session identity, NOT the free-text `--actor`) and for the residual.
@@ -519,6 +529,61 @@ export function publishDelegationTrialCommit({ provider, model, taskType, pr, cw
 }
 
 /**
+ * we:scripts/review-set-label.mjs#decideRestampHumanClearance — #x9krtkb: does THIS restamp owe a carried human
+ * clearance? PURE, extracted from `runReviewLabelCli`'s inline call site for the same reason
+ * `shouldReparkForTestTampering` was pulled out of its own inline call site in
+ * `we:scripts/lib/review-escalation.mjs`: the DECISION, not just the marker parsing beneath it, needs its own
+ * unit tests, and there is no end-to-end drain fixture this repo runs that could exercise it otherwise.
+ *
+ * THE BUG THIS CLOSES, live on PR #2572 (2026-09-24): a human ran `--to=clear-human`; the drain's own
+ * content-preserving rebase moved the head a minute later; the drain's `restamp` carried `reviewed-sha` /
+ * `reviewed-diff` / `reviewed-contribution` forward but never `cleared-human` — because the restamp path had no
+ * visibility into the PR's comments at all (see `we:scripts/lib/review-label-provider.mjs`'s `PR_STATE_FIELDS`,
+ * which now includes `comments`). The next drain pass's anti-test-gaming gate
+ * (`shouldReparkForTestTampering`/`parseLatestHumanClearedSha`, both in `we:scripts/lib/review-escalation.mjs`)
+ * then saw the LATEST accept-shaped comment (the restamp itself) carrying no human coverage and re-parked
+ * `review:human` — undoing the clearance on every rebase, forever.
+ *
+ * Returns non-null (the carry is owed) ONLY when BOTH:
+ *   1. the LATEST accept-shaped comment on the PR was itself a `--to=clear-human` ceremony
+ *      (`parseLatestHumanClearedSha` — bound to THAT ONE comment, never an older clearance a later plain accept
+ *      could otherwise inherit; see that function's own docstring for why the binding matters), AND
+ *   2. the content that clearance covered is PROVABLY unchanged at the new head — reusing
+ *      `acceptanceCoversHead`'s existing diff/contribution-equivalence escape (#x169fqe/#x9xqexm) rather than
+ *      trusting the caller's own "this was a content-preserving rebase" classification a second time. The SHA
+ *      branch of that check never fires here (a restamp exists BECAUSE the head moved relative to the accepted
+ *      one), so this is always the diff-or-contribution escape — the exact mechanism `restamp` was built around,
+ *      now also gating the marker carry.
+ *
+ * FAILS CLOSED, like everything else `restamp` touches: a missing/unparseable fingerprint on either side falls
+ * straight through `acceptanceCoversHead` to `covers: false`, so an unproven case returns `null` — no human
+ * marker is minted, matching `decideSetLabel`'s own restamp posture (it can carry an acceptance forward, never
+ * invent one). A restamp of a PLAIN agent accept never even reaches the coverage check: `humanClearedSha` is
+ * `null` for it, so this returns `null` immediately — a restamp of a plain accept ALWAYS stays plain.
+ *
+ * @param {{comments:Array, headSha:string, headDiff:string}} o - `comments` is the PR's raw `gh pr view
+ *   --json comments` array. `headSha` is the head this restamp is stamping (post-#x9krtkb bug-2 fix, the
+ *   caller-asserted `--new-head` when supplied, never a racy re-read). `headDiff` is the FRESH net diff text (or
+ *   precomputed fingerprint) this restamp already computed against that head, reused rather than re-fetched.
+ * @returns {{actor:string, sha:string}|null}
+ */
+export function decideRestampHumanClearance({ comments, headSha, headDiff } = {}) {
+  const humanClearedSha = parseLatestHumanClearedSha(comments);
+  if (!humanClearedSha) return null;
+  const coverage = acceptanceCoversHead({
+    acceptedSha: humanClearedSha,
+    headSha,
+    acceptedDiff: parseReviewedDiff(comments),
+    headDiff,
+    acceptedContribution: parseReviewedContribution(comments),
+    headContribution: headDiff,
+  });
+  if (!coverage.covers) return null;
+  const clearance = parseOperatorClearance(comments);
+  return { actor: clearance ? clearance.actor : 'the operator', sha: humanClearedSha };
+}
+
+/**
  * we:scripts/review-set-label.mjs#runReviewLabelCli — the SHARED review-label CLI harness (#2644). Both this
  * file's reviewer-verdict CLI and the conveyor `rearm-review.mjs` run this SAME observe→decide→write→re-read arc
  * against `gh`; only three things differ and they arrive as config (exactly the deltas #2644 names):
@@ -553,7 +618,8 @@ export function publishDelegationTrialCommit({ provider, model, taskType, pr, cw
  * capability, never supply a verdict (PR #1056 review, B2).
  * @param {{argv?:string[], fixedTo?:string|null, defaultActor:string, repoOptional?:boolean, usage:string,
  *   allowClearHuman?:boolean,
- *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string})=>string,
+ *   buildComment:(o:{to:string,actor:string,decision:object,headSha:string,reason:string,
+ *     humanClearance?:{actor:string,sha:string}|null})=>string,
  *   successResult:(o:{pr:number,to:string,decision:object,labels:string[]})=>object,
  *   refusalResult:(o:{pr:number,decision:object})=>object,
  *   emit?:(line:string)=>void}} cfg
@@ -604,6 +670,15 @@ export function runReviewLabelCli({
   const channelArg = (argv.find((a) => a.startsWith('--channel=')) || '').slice('--channel='.length);
   const pr = argv.find((a) => /^\d+$/.test(a));
   const to = fixedTo || (argv.find((a) => a.startsWith('--to=')) || '').slice('--to='.length);
+  // #x9krtkb (bug 2) — `restamp`'s ONE caller (`restampAcceptance`, `we:scripts/merge-ai-prs.mjs`) already knows
+  // the exact new head: it is the drain's OWN `git push`, computed locally, not a re-read. Before this it threw
+  // that value away past `--reason`'s free text and let `runReviewLabelCli` re-derive the head from a fresh
+  // `gh pr view` a few lines below — which races GitHub's OWN propagation of the push it had just accepted.
+  // Observed live on PR #2572 (2026-09-24): a restamp six seconds after the push still read the PRE-rebase head.
+  // `--new-head` is the fix: an explicit, caller-asserted override that WINS over the re-read for `restamp`
+  // only. Optional and validated here (fail closed on a malformed SHA) so a caller who does not have it yet —
+  // there are none in this repo, but nothing stops a future one — still gets the pre-#x9krtkb re-read fallback.
+  const newHeadArg = (argv.find((a) => a.startsWith('--new-head=')) || '').slice('--new-head='.length).trim();
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — validate every input BEFORE any gh call (fail closed).
   const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -614,6 +689,9 @@ export function runReviewLabelCli({
   // --repo is optional. An ABSENT --repo fails here only when it is REQUIRED; when optional it is derived below.
   if (repo ? !REPO_RE.test(repo) : !repoOptional) {
     fail('invalid --repo — expected <owner/name>');
+  }
+  if (newHeadArg && !/^[0-9a-f]{7,40}$/i.test(newHeadArg)) {
+    fail('invalid --new-head — expected a git commit SHA (7-40 hex chars)');
   }
   // #2895 — every `clear-human` precondition is checked HERE: unconditionally, at the point of use, BEFORE any
   // gh call, and refusing through the `{"error":…}` JSON contract every other refusal here honours. Not folded
@@ -703,6 +781,7 @@ export function runReviewLabelCli({
   let prBody = '';
   let prTitle = '';
   let prCreatedAt = '';
+  let prComments = [];
   try {
     const parsed = provider.readPrState(repo, pr);
     currentLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
@@ -719,8 +798,21 @@ export function runReviewLabelCli({
     // STRIPPED; one missing from an older PR was never written. Until this was read, both looked identical and
     // both were tolerated.
     prCreatedAt = typeof parsed.createdAt === 'string' ? parsed.createdAt : '';
+    // #x9krtkb — the restamp path's own read-back (see the import note above). Read unconditionally, off the
+    // SAME call, for every target: it costs nothing extra to parse a field already in the response, and a
+    // conditional read here would be the second copy of "which targets need comments" for no reason.
+    prComments = Array.isArray(parsed.comments) ? parsed.comments : [];
   } catch (e) {
     fail(ghErr(e, 'gh pr view failed'), 1);
+  }
+
+  // #x9krtkb (bug 2) — THE OVERRIDE. `restamp` alone trusts an explicit `--new-head` over the `headRefOid` this
+  // process just re-read, because for `restamp` alone that read can be racing the very push that produced the
+  // value it is supposed to confirm (see the flag's own docstring above). Every other target has no caller that
+  // could supply a fresher truth than `gh` itself, so they are untouched — this is not a general "trust the
+  // caller over the forge" change, it is narrowed to the one target and the one input this was proven wrong for.
+  if (to === 'restamp' && newHeadArg) {
+    headSha = newHeadArg.toLowerCase();
   }
 
   // #2953 — FAIL CLOSED on anything but an OPEN PR. Every sanctioned caller (the hand-run `/review` skill, the
@@ -868,10 +960,17 @@ export function runReviewLabelCli({
     } catch { reviewedDiff = ''; /* miss → no marker → SHA-identity fallback (the stricter path) */ }
   }
 
+  // #x9krtkb (bug 1) — DOES THIS RESTAMP OWE A CARRIED HUMAN CLEARANCE? See `decideRestampHumanClearance`'s own
+  // docstring for the full decision; only `to==='restamp'` ever asks (a plain accept/changes/clear-human has no
+  // rebase to carry anything across).
+  const humanClearance = to === 'restamp'
+    ? decideRestampHumanClearance({ comments: prComments, headSha, headDiff: reviewedDiff })
+    : null;
+
   // we:scripts/review-set-label.mjs#runReviewLabelCli — render the durable comment ONCE, here, so the bytes
   // that are size-checked, written and posted are the same bytes.
   const commentBody = buildComment({
-    to, actor, decision, headSha, reason: clearReason, reviewedDiff, clearerId, independence,
+    to, actor, decision, headSha, reason: clearReason, reviewedDiff, clearerId, independence, humanClearance,
   });
 
   // we:scripts/review-set-label.mjs#runReviewLabelCli — THE SIZE GUARD, on the RENDERED bytes, before ANY write.
@@ -1110,15 +1209,19 @@ export function runReviewLabelCli({
  *
  * @param {{to:string, actor:string, headSha?:string, body?:string, reason?:string, reviewedDiff?:string,
  *   clearerId?:string, independence?:{independent:boolean,status:string,reason:string}|null,
- *   channel?:string}} o -
+ *   channel?:string, humanClearance?:{actor:string,sha:string}|null}} o -
  *   #x169fqe: `reviewedDiff` is the raw diff (or a precomputed fingerprint) the verdict was formed against.
  *   Omitted → no diff marker → the gate falls back to SHA identity, i.e. pre-#x169fqe behaviour.
  *   #2898: `channel` is the SURFACE the verdict came through, free text like `actor` (see `normalizeChannel`).
+ *   #x9krtkb: `humanClearance` is ONLY meaningful on `to==='restamp'` — the caller's own proof (see
+ *   `runReviewLabelCli`) that the acceptance being carried across this rebase was a `clear-human` ceremony AND
+ *   that the reviewed content is unchanged at the new head. `null`/omitted renders a PLAIN restamp, exactly as
+ *   before this field existed — a restamp of a plain agent accept must never mint a human clearance.
  * @returns {string}
  */
 export function buildVerdictComment({
   to, actor, headSha = '', body = '', reason = '', reviewedDiff = '', clearerId = '', independence = null,
-  channel = '',
+  channel = '', humanClearance = null,
 } = {}) {
   // #2895 — `clear-human` stamps the marker for the same reason `accepted` does: it IS an acceptance (it adds
   // review:accepted), so the drain must be able to refuse it later if the head advances past the cleared tree.
@@ -1132,17 +1235,26 @@ export function buildVerdictComment({
   // pass causes within minutes of every accept — measured on PR #1100, where the clearance was revoked 3m07s
   // after it was granted over three lines of pure base movement.
   const stampsAcceptance = to === 'accepted' || to === 'clear-human' || to === 'restamp';
+  // #x9krtkb — is THIS restamp carrying a human clearance forward? Only ever true on `to==='restamp'`, and only
+  // when the caller (`runReviewLabelCli`) already proved both halves — see the param doc above. Named once so
+  // the marker block and the attribution/heading text below can't drift on what "carrying" means.
+  const carriesHumanClearance = to === 'restamp' && !!humanClearance;
   // #xmnl36p — `clear-human` ALSO stamps a machine-readable clearance marker, so an automated re-score can read
   // the clearance back and announce that it is overriding one (`parseOperatorClearance`). Until this, the only
   // record was the prose attribution below — which the reader still parses as a fallback, so clearances written
   // before this item (WE PR #1106 among them) are covered too. The marker adds NO authority: nothing merges on
   // it; it exists so a re-hold can be loud instead of silent.
+  // #x9krtkb — `restamp` stamps the SAME marker, with the ORIGINAL clearer's name, when `carriesHumanClearance`
+  // — this is what makes `parseLatestHumanClearedSha` (which binds `reviewed-sha` and `cleared-human` to the
+  // SAME comment) see THIS comment as human-covered too, so the carry survives a SECOND rebase off THIS
+  // restamp rather than only the first one off the original clear-human.
   const marker = stampsAcceptance
     ? [
       buildReviewedShaMarker(headSha),
       buildReviewedDiffMarker(reviewedDiff),
       buildReviewedContributionMarker(reviewedDiff),
-      to === 'clear-human' ? buildClearedHumanMarker(actor) : '',
+      to === 'clear-human' ? buildClearedHumanMarker(actor)
+        : carriesHumanClearance ? buildClearedHumanMarker(humanClearance.actor) : '',
       buildClearerActorMarker(clearerId),
     ].filter(Boolean).join('\n')
     : '';
@@ -1183,6 +1295,18 @@ export function buildVerdictComment({
   // followed; it does NOT prove a human followed it, because `--actor` and `--reason` are free text and nothing
   // here verifies either. Saying so in the durable record is the honesty tax, and it is not optional: a reader
   // who trusts this further than it earns is the failure mode the deferral of the actor signal creates.
+  // #x9krtkb — the CARRIED-CLEARANCE sentence. It must say, in plain words, that (a) a human cleared this PR
+  // before, (b) THIS record did not run a review of its own, and (c) the clearance still stands because the
+  // drain's own rebase preserved the content — naming the original clearer so a reader never has to go dig for
+  // which comment actually granted it. This is the sentence #2572 lacked, which is what let the anti-test-
+  // gaming gate see "latest accept-shaped comment has no cleared-human marker" and re-park review:human on a
+  // PR a human had just cleared minutes earlier.
+  const carriedClearanceNote = carriesHumanClearance
+    ? ` The HUMAN clearance ${humanClearance.actor} granted (reviewed-sha ${String(humanClearance.sha).slice(0, 12)}…) `
+      + 'is carried forward to this head: the drain\'s own content-preserving rebase moved the tree, and the '
+      + 'reviewed diff/contribution is unchanged, so that clearance still covers it (#x9krtkb). No new review '
+      + 'ran here — `review:human` stays cleared on the strength of the ORIGINAL clearance, not a fresh one.'
+    : '';
   const attribution = to === 'clear-human'
     ? `Cleared by ${actor} via \`review-set-label.mjs --to=clear-human\` (#2895).\n\n`
       + `> ${String(reason || '').split('\n').join('\n> ')}\n\n`
@@ -1191,7 +1315,7 @@ export function buildVerdictComment({
       + 'it. The actor name and the reason above are free text and nothing verifies who supplied them — #2895 '
       + 'deferred the unforgeable actor signal (no local construct survives an agent with shell access on the '
       + 'same machine), and #2946 is the durable fix.'
-    : `Recorded by ${actor}${normalizeChannel(channel) ? ` via ${normalizeChannel(channel)}` : ''}.`;
+    : `Recorded by ${actor}${normalizeChannel(channel) ? ` via ${normalizeChannel(channel)}` : ''}.${carriedClearanceNote}`;
   // ────────────────────────────────────────────────────────────────────────────────────────────────────────
   // THE RENDER BOUNDARY (PR #1147 review — the structural close of the marker-forgery class).
   //
@@ -1356,9 +1480,20 @@ export function projectVerdictCommentLength({ body = '', actor = '', reason = ''
     decideClearerIndependence({ authorId: '', clearerId: clearerId || 'x' }),
     decideClearerIndependence({ authorId: clearerId || 'x', clearerId: clearerId || 'x' }),
   ];
-  return Math.max(...REVIEW_LABEL_TARGETS.flatMap((to) => outcomes.map((independence) => buildVerdictComment({
-    to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64), clearerId, independence, channel,
-  }).length)));
+  // #x9krtkb — `restamp` can ALSO render the carried-clearance sentence, extra chrome the pre-#x9krtkb
+  // projection never rendered at all. The ORIGINAL clearer's name is not knowable here — this pre-flight runs
+  // before the PR's comments are ever fetched — so it is approximated with the SAME `actor` this call was
+  // already given (the caller-supplied width closest in kind: free-text attribution). This is a HEURISTIC, not
+  // a proof — unlike every other branch of this projection, which is exact — but it is strictly better than the
+  // blind spot it replaces, and the RENDERED-BYTES guard in `runReviewLabelCli` (checked against the REAL
+  // `humanClearance`, before any write) is what actually enforces the cap; this projection is belt-and-braces.
+  const humanClearances = [null, { actor: actor || 'x', sha: 'f'.repeat(40) }];
+  return Math.max(...REVIEW_LABEL_TARGETS.flatMap((to) => outcomes.flatMap((independence) => humanClearances.map(
+    (humanClearance) => buildVerdictComment({
+      to, actor, headSha: 'f'.repeat(40), body, reason, reviewedDiff: 'f'.repeat(64), clearerId, independence,
+      channel, humanClearance,
+    }).length,
+  ))));
 }
 
 // we:scripts/review-set-label.mjs — allow importing the pure decider + shared harness without running the CLI
@@ -1423,8 +1558,9 @@ if (IS_CLI) {
     // (#xd6moh1). The rendered body still comes from the `buildComment` closure below — same text, one read.
     verdictBody,
     usage: 'usage: review-set-label.mjs <pr> --repo=<owner/name> --to=accepted|changes|clear-human [--actor=<name>] [--channel=<surface>] [--body-file=<path>]  (pr must be a positive integer; changes REQUIRES --body-file=<the findings>; clear-human additionally requires --actor and --reason=<stated reason>)',
-    buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence }) => buildVerdictComment({
+    buildComment: ({ to, actor, headSha, reason, reviewedDiff, clearerId, independence, humanClearance }) => buildVerdictComment({
       to, actor, headSha, reason, reviewedDiff, clearerId, independence, body: verdictBody, channel: verdictChannel,
+      humanClearance,
     }),
     successResult: ({ pr, to, labels }) => ({ ok: true, pr, to, labels }),
     refusalResult: ({ decision }) => ({ error: decision.reason }),
