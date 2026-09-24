@@ -110,20 +110,38 @@ export function planLaneReap(lanes, allowlist = LANE_RELEASE_LITTER_ALLOWLIST) {
  * list — never on the pre-execution plan action alone, which would optimistically report a lane "acquirable"
  * even when its reap call failed and left the litter (and hence the dirty tree) exactly where it was, or when
  * a `--dry-run` never touched it at all.
+ * #3383 — live-caught 2026-09-24: this porcelain/litter plan alone is NOT the real eligibility answer. It
+ * classifies a lane from `git status --porcelain` (working-tree dirt vs the shared litter allowlist) ALONE,
+ * and never checks whether the lane is ahead of origin/<branch> — but `we:scripts/lane-pool.mjs`'s own real
+ * gate (`acquire`'s auto-pick, and `list --acquirable`) ALWAYS also checks ahead (`effectiveDirtyOrAhead`,
+ * litter-adjusted AND ahead-adjusted). Live-verified against the real WE pool: this file's own plan-only
+ * classification read 14 lanes "acquirable" while `list --acquirable --json` — the exact function `acquire`
+ * is built on — answered only 3; the 11 false positives were all clean-porcelain but 1-2 commits ahead of
+ * origin/main (real, unpushed, correctly-protected work `acquire` would have refused, exactly the
+ * "acquire's view disagrees with the health watch's" symptom this closes). `acquirableLaneNumbers`, when
+ * given, is cross-referenced so a lane only counts as acquirable here when BOTH this plan AND the real
+ * `list --acquirable` answer agree — the ONE shared eligibility function, reused rather than re-derived, so
+ * this read-only report and `acquire`'s own auto-pick can never diverge again. `null` (the real read was
+ * unavailable this tick, or the caller passed none — every existing caller/test) falls back to the
+ * plan-only answer UNCHANGED, so this is purely additive.
  * @param {Array<{lane:number, exists?:boolean, leased?:boolean}>} lanes
  * @param {Array<{lane:number, action:string}>} plan
  * @param {number[]} [reaped]
+ * @param {Set<number>|null} [acquirableLaneNumbers]
  * @returns {{total:number, leased:number, acquirable:number, dirtyUnleased:number}}
  */
-export function summarizeHealth(lanes, plan, reaped = []) {
+export function summarizeHealth(lanes, plan, reaped = [], acquirableLaneNumbers = null) {
   const existing = (Array.isArray(lanes) ? lanes : []).filter((l) => l && l.exists !== false);
   const leased = existing.filter((l) => l.leased).length;
   const reapedSet = new Set(reaped);
-  const acquirableLanes = new Set(
+  const planAcquirableLanes = new Set(
     plan
       .filter((p) => p.action === 'already-clean' || (p.action === 'reap' && reapedSet.has(p.lane)))
       .map((p) => p.lane),
   );
+  const acquirableLanes = acquirableLaneNumbers === null
+    ? planAcquirableLanes
+    : new Set([...planAcquirableLanes].filter((n) => acquirableLaneNumbers.has(n)));
   const acquirable = existing.filter((l) => !l.leased && acquirableLanes.has(l.lane)).length;
   const dirtyUnleased = existing.filter((l) => !l.leased && !acquirableLanes.has(l.lane)).length;
   return { total: existing.length, leased, acquirable, dirtyUnleased };
@@ -178,6 +196,31 @@ export function defaultListLaneStatus({ exec = execFileSync, repo = null, root =
   const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '{}'));
   return { repo: parsed.repo, root: parsed.root, lanes: Array.isArray(parsed.lanes) ? parsed.lanes : [] };
+}
+
+/**
+ * #3383 — the REAL eligibility read, shelling `node lane-pool.mjs list --acquirable --json`, the SAME
+ * single-flight, cached, shared-with-`acquire` answer this file's own {@link summarizeHealth} cross-checks
+ * its plan-only classification against (see that function's own docblock for why the plan alone diverges).
+ * Best-effort like {@link defaultTrimPool}: any failure (a crashed child, unparsable JSON, no lanes provisioned
+ * yet) returns `null` — "real read unavailable this tick" — never throws, so a bad tick degrades to the
+ * pre-#3383 plan-only answer instead of crashing the whole health-watch pass.
+ * @param {{exec?:Function, repo?:string|null, root?:string}} [o]
+ * @returns {Set<number>|null}
+ */
+export function defaultListAcquirable({ exec = execFileSync, repo = null, root = REPO_ROOT } = {}) {
+  const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'];
+  const repoPath = resolveLanePoolRepoPath(repo);
+  if (repoPath) argv.push(`--repo=${repoPath}`);
+  try {
+    // #x5n4zn3-style bound, matching this file's other real spawned CLI children.
+    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
+    const paths = JSON.parse(String(out || '[]'));
+    if (!Array.isArray(paths)) return null;
+    return new Set(paths.map((p) => Number(String(p).match(/lane-(\d+)$/)?.[1])).filter((n) => Number.isInteger(n)));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -263,14 +306,15 @@ export function defaultTrimPool({ exec = execFileSync, repo = null, root = REPO_
  * existing periodic reap half. `trimMax` forwards to `trim`'s own `--max`; omitted, `trim` falls back to its
  * own per-repo default cap (see `scripts/lane-pool.mjs`'s `TRIM_DEFAULT_CAP`).
  * @param {{repo?:string|null, root?:string, listStatus?:Function, readPorcelain?:Function, reap?:Function,
- *   isLeasedNow?:Function, dryRun?:boolean, trimPool?:Function, trimMax?:number|null}} [o]
+ *   isLeasedNow?:Function, dryRun?:boolean, trimPool?:Function, trimMax?:number|null,
+ *   listAcquirable?:Function}} [o]
  * @returns {{health:{total:number,leased:number,acquirable:number,dirtyUnleased:number}, plan:Array<object>,
  *   reaped:number[], dryRun:boolean, trim:object|null}}
  */
 export function watchLanePoolHealth({
   repo = null, root = REPO_ROOT, listStatus = defaultListLaneStatus, readPorcelain = defaultReadPorcelain,
   reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
-  trimPool = defaultTrimPool, trimMax = null,
+  trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -291,7 +335,13 @@ export function watchLanePoolHealth({
     }
   }
   const trim = trimPool({ repo, root, max: trimMax, dryRun });
-  return { health: summarizeHealth(lanes, plan, reaped), plan, reaped, dryRun, trim };
+  // #3383 — read the REAL eligibility answer AFTER the litter-reap above (a lane just reaped to clean is
+  // fresh again by the time this runs, and the real `list --acquirable` scan itself reaps dead ghost leases
+  // first, #3449) — cross-checked into `summarizeHealth` so this report's "acquirable" count can never
+  // diverge from what `acquire`'s own auto-pick would actually do. `null` (real read unavailable this tick)
+  // degrades to the pre-#3383 plan-only answer.
+  const acquirableLaneNumbers = listAcquirable({ repo, root });
+  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim };
 }
 
 /**

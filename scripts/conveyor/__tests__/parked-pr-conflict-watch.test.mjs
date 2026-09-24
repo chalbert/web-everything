@@ -1288,6 +1288,49 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(provider.calls).toEqual([]); // no second label write, no second comment
   });
 
+  // xaer296 (epic #3383) — the FRESH-DETECTION path (first sighting of a conflict, `newlyDetected: true`) never
+  // got the #2581 stacked-base check at all — ONLY the `graceDue` (queued, already-flagged) path did. For a
+  // QUEUED PR that is unaffected: first sighting already defers to the drain unconditionally (see the "first
+  // sighting" test above), regardless of base, and the later `graceDue` re-check (already fixed by #2581)
+  // correctly defers a stacked base once grace elapses. But a PARKED (non-queued, e.g. `review:human`) PR that
+  // is ALSO stacked and freshly drifts into conflict hits this path's PLAIN, non-statute `else` branch
+  // (`postFinding` unconditionally, first tick, no grace to wait out) — which had NO `baseRefName` awareness at
+  // all, so it would bounce an ordinary main-conflict onto a PR whose real conflict is against its own base,
+  // reproducing the identical `chalbert/web-everything#2578` failure shape for a population `graceDue`'s own fix
+  // never covered.
+  it('xaer296 — FIRST sighting of a PARKED (non-queued) stacked-base PR is ALSO deferred to reconcile-core, never bounced as an ordinary main conflict', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{
+      number: 2578, mergeable: 'CONFLICTING', baseRefName: 'lane/3681-ratify-daemon-lifecycle',
+      labels: L('review:human'),
+      files: [{ path: 'scripts/lib/daemon-self-sync.mjs' }],
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+      listPrFiles: () => { throw new Error('must not be called for a stacked PR'); },
+    });
+    expect(r.newlyDetected).toBe(true);
+    expect(r.routedTo).toBe('deferred-to-reconcile (stacked base — see reconcile-core.mjs#3383, review labels untouched)');
+    expect(routed).toEqual([]); // never bounced via postFinding, never stood down
+    // The label add still happens (an evidence-only fact, unrelated to which ref this conflicts against) —
+    // only the alert-comment + statute-classification + routing is skipped.
+    expect(provider.calls.some((c) => c[0] === 'setLabels')).toBe(true);
+    expect(provider.calls.some((c) => c[0] === 'postComment')).toBe(false);
+  });
+
+  it('xaer296 — a base of `main` at first sighting (the ordinary case) is UNCHANGED — still bounces immediately', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{
+      number: 1920, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:human'),
+      files: [{ path: 'scripts/lib/daemon-self-sync.mjs' }],
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+    });
+    expect(r.routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([1920]);
+  });
+
   // #3383 — a STACKED PR (base isn't `main`) is never landed by the drain, so grace-expiry must NEVER bounce it
   // through `postFinding` (which strips `review:accepted`) — `reconcile-core.mjs`'s own STACKED-BASE CONFLICT
   // branch owns the mechanical rebase instead. `chalbert/web-everything#2578`'s real shape.

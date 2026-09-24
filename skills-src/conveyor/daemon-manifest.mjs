@@ -129,6 +129,20 @@ export const DAEMON_MANIFEST = {
   'branch-drift': { script: 'scripts/conveyor/branch-drift.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'infra-blocked': { script: 'scripts/conveyor/infra-blocked.mjs', args: ['retry'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   'duplicate-pr-watch': { script: 'scripts/conveyor/duplicate-pr-watch.mjs', args: ['sweep'], intervalMs: DEFAULT_PASS_INTERVAL_MS },
+  // #3383 — live-caught 2026-09-24: `scripts/conveyor/lease-reaper.mjs` (reclaims a lane lease whose owning
+  // session is confirmed gone, via its session-gone/ttl-stale/pr-terminal axes) had gone the SAME way
+  // `session-reaper.mjs` had before #3982's fix — its only historical caller was `runner.mjs`'s own
+  // `makeCliMechanicalPasses`, which this epic's daemon split has since retired, and #3873's own "wire the 8
+  // watcher passes" slice never named it (it names a different, narrower set — the read-only watchers, not
+  // this reaper). Left uncalled, no daemon ever runs its session-gone axis, so any lease that axis alone could
+  // reclaim (e.g. a non-dispatcher-grammar session name, which the PR-merged/PR-closed axis already run
+  // inline by `acquire`'s own `reapDeadLeasesInPool` backstop can never resolve to an item) sits held until
+  // pure TTL (4h default) elapses — live-observed: 9 such leases outliving real spare pool capacity.
+  // WE-only, no `--repo`: unlike the per-repo watchers above, this pass is REPO-AGNOSTIC by design — with no
+  // `--pool` flag it walks every pool under the shared `LANE_POOL_ROOT` (every constellation repo) in ONE
+  // process (confirmed by direct read of its own `poolsToScan`), so one manifest entry already covers the
+  // whole constellation; a second, per-repo copy would just re-scan the same pools redundantly.
+  'lease-reaper': { script: 'scripts/conveyor/lease-reaper.mjs', args: [], intervalMs: DEFAULT_PASS_INTERVAL_MS },
   ...perRepoEntries('ci-queue-watch', 'scripts/conveyor/ci-queue-watch.mjs', ['sweep']),
   ...perRepoEntries('parked-pr-conflict-watch', 'scripts/conveyor/parked-pr-conflict-watch.mjs', ['sweep']),
   ...perRepoEntries('parked-pr-progress-watch', 'scripts/conveyor/parked-pr-progress-watch.mjs', ['sweep']),

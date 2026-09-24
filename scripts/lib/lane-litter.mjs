@@ -14,7 +14,7 @@
  * `we:scripts/conveyor/lane-pool-health-watch.mjs` both import it rather than re-deriving it.
  *
  * #3383 — the SAME allowlist also answers a second, ACQUIRE-time question: is a lane misread as "dirty" only
- * because of this litter? `we:scripts/lane-pool.mjs`'s auto-pick (`infoFor`), its pre-reset re-verify, and the
+ * because of this litter? `we:scripts/lane-pool.mjs`'s auto-pick (its shared cached scan), its pre-reset re-verify, and the
  * read-only `list --acquirable` / `provision --acquirable` picker (`laneAcquirableInfo`) all consult
  * {@link planLitterCleanup} (via `lane-pool.mjs`'s own `litterAdjustedDirty` helper) to set aside allowlisted
  * untracked paths before deciding `dirty`. Reusing this exact list — never a second, separately-maintained one
