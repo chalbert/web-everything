@@ -1,10 +1,11 @@
 ---
+bornAs: x9s10dt
 kind: story
 size: 3
 parent: "3383"
 status: open
 blockedBy: ["3949"]
-relatedTo: ["4029", "3690", "xqwoy0a"]
+relatedTo: ["4029", "3690", "4035"]
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs"]
 dateOpened: "2026-09-24"
 tags: []

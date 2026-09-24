@@ -1,10 +1,11 @@
 ---
+bornAs: xzfv3va
 kind: story
 size: 5
 parent: "3383"
 status: open
 blockedBy: ["3949"]
-relatedTo: ["4029", "3690", "3673", "xqwoy0a"]
+relatedTo: ["4029", "3690", "3673", "4035"]
 scope: ["we:scripts/conveyor/log-delegation-trial.mjs", "we:scripts/conveyor/__tests__/log-delegation-trial.test.mjs", "we:scripts/lib/provider-routing.mjs"]
 dateOpened: "2026-09-24"
 tags: []
