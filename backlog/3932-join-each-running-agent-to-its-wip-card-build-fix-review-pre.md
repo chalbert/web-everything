@@ -33,5 +33,5 @@ Lifecycle from `claude agents --json --all` (cached 10 s). Output: `runs[] {runI
 
 ## Additions from 2026-09-24 incident review
 
-- **Add `transcriptAgeS` to each run.** `lastEventAt` from `claude agents` is not enough: on 2026-09-23 and again on 2026-09-24 a session stayed `blocked` in the listing for hours while its transcript never moved (#3951). The transcript file's mtime age is the cheap truth. The new pr-ownership read (xee72b2) uses the same field to flag a stale binding, so compute it once here.
+- **Add `transcriptAgeS` to each run.** `lastEventAt` from `claude agents` is not enough: on 2026-09-23 and again on 2026-09-24 a session stayed `blocked` in the listing for hours while its transcript never moved (#3951). The transcript file's mtime age is the cheap truth. The new pr-ownership read (4056) uses the same field to flag a stale binding, so compute it once here.
 - **Share the PR→card map.** The pr-ownership read needs the same PR→card map this card takes as input. Build it once, as a shared helper, so /wip's per-card agent view and its per-PR ownership view never disagree about which card a PR belongs to.

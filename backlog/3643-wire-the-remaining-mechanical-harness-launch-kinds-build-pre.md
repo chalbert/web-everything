@@ -50,7 +50,7 @@ Two additions:
   the agent and `done` or `failed` from the child's exit, on every exit path. The agent may add an outcome
   note, but the record exists whether or not it remembers. Then #3721's reaper axis reads a fact the agent
   cannot skip.
-- **Count what is left.** The new brief-rule ledger (x446oxf) lists every imperative in each brief and whether
+- **Count what is left.** The new brief-rule ledger (4055) lists every imperative in each brief and whether
   code enforces it. Each child here should end with that count lower for its brief, and say which rules moved
   into its wrapper.
 - **Proposal 5 ("workers that survive interruptions") depends on this epic plus a live dispatcher.** Daemon

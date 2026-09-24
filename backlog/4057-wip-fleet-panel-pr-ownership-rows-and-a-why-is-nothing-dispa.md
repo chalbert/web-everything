@@ -1,10 +1,11 @@
 ---
+bornAs: xqjl5lf
 kind: story
 size: 3
 parent: "3383"
 status: open
 locus: plateau-app
-blockedBy: ["xee72b2", "4051"]
+blockedBy: ["4056", "4051"]
 scope: ["plateau:src/wip/types.ts", "plateau:src/wip/wip-model.ts", "plateau:src/wip/wip-view.ts", "plateau:src/wip/wip-read.ts"]
 dateOpened: "2026-09-24"
 tags: []
