@@ -96,15 +96,49 @@
  *     The parser now FAILS CLOSED instead. This denies nothing real: bash rejects the identical input
  *     (`unexpected EOF while looking for matching quote`), verified against `bash -c`. No override.
  *
- *   • the DELIVERY AGENT (#3627) — `dispatchKind === 'delivery'` (`WE_DISPATCH_KIND=delivery`, stamped by
- *     `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn` onto the agent's own process env; the
- *     SAME channel #3105's dispatched-verification arm above already reads) may never run, ITSELF, any of the
- *     mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`, `backlog.mjs claim`/
- *     `release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`, `learnings-drop.mjs`,
- *     `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`), and
- *     `review-core-cli.mjs`. The brief (`we:skills-src/conveyor/delivery-agent-brief-v2.md`) already told the
- *     agent this in prose; nothing enforced it. Every other session (interactive, or any other
- *     `WE_DISPATCH_KIND`) is unaffected. No override.
+ *   • a WRAPPER-OWNED AGENT (#3627 `delivery`, #3640 `repair`) — `WRAPPER_OWNED_AGENT_KINDS.has(dispatchKind)`
+ *     (`WE_DISPATCH_KIND=delivery` stamped by `deliver-item-wrapper.mjs`'s `CLAUDE_RESTRICTED_PROVIDER.spawn`,
+ *     `WE_DISPATCH_KIND=repair` stamped by `fix-dispatch-wrapper.mjs`'s `buildFixAgentEnv`, onto the agent's
+ *     own process env; the SAME channel #3105's dispatched-verification arm above already reads) may never
+ *     run, ITSELF, any of the mechanical lifecycle commands its own wrapper drives end to end: `lane-pool.mjs`,
+ *     `backlog.mjs claim`/`release`, `gh pr`, `run.mjs open-pr`/`open-pr.mjs`, `pr-land.mjs`,
+ *     `learnings-drop.mjs`, `converge-cli.mjs`, `verify-lane.mjs` (in any mode, including `request`/`check`),
+ *     and `review-core-cli.mjs`. The briefs (`we:skills-src/conveyor/delivery-agent-brief-v2.md`,
+ *     `we:skills-src/conveyor/fix-agent-brief-v2.md`) already told the agent this in prose; nothing enforced
+ *     it. Every other session (interactive, or any LAUNCH-kind `WE_DISPATCH_KIND` — `build`, `fix`, `ci-heal`,
+ *     …, which name an agent running its OWN lifecycle from a full brief) is unaffected. No override.
+ *
+ *   • the DECISION-AUTHORING AGENT (#3644) — `dispatchKind === 'decision-authoring'`
+ *     (`WE_DISPATCH_KIND=decision-authoring`, stamped by `prepare-decision-wrapper.mjs`'s
+ *     `CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn`) — the SAME table for the SAME reason, plus this kind's own
+ *     three verbs (`backlog.mjs prepare-hold`/`prepare-stamp`/`prepare-release`) and `backlog.mjs resolve`.
+ *     Note the KIND VALUE: it is NOT the launch kind `prepare-decision`, deliberately — see that block's own
+ *     comment at the table below for why the distinction is what makes this arm writable at all.
+ *
+ *   • epic #3383 — a DISPATCHED agent (any `WE_DISPATCH_KIND`, every wrapper-owned and launch kind alike)
+ *     referencing the usage-report tool's external admin-key location — the directory
+ *     `~/.we-usage-report/` (`we:scripts/lib/usage-report-secret-paths.mjs`) or its macOS Keychain service
+ *     name (`we-usage-report`) — in a Bash segment. `--restricted` already confines the FILE tools
+ *     (Read/Edit/Write/Glob/Grep) to the lane cwd, a directory this external path is never under, but it
+ *     explicitly RE-ENABLES Bash (`RESTRICTED_PROVIDER_TOOLS`), and a raw shell command is not confined by
+ *     that same cwd rule — this arm closes that one gap. Scoped to a dispatched agent only (`dispatchKind`
+ *     truthy); the operator's own interactive session is the sanctioned caller of that tool and is
+ *     unaffected, same scoping `dispatchedAgentVerificationReason` (#3105) already uses. HONEST LIMIT: a
+ *     text-pattern match over the command string, same class as this file's other content checks — real,
+ *     additional enforcement layered on top of `--restricted`'s own cwd confinement and Codex's OS-enforced
+ *     native `filesystem` deny (`we:scripts/lib/isolation-provider.mjs`), never the only thing standing in
+ *     the way. See `we:scripts/usage-report/README.md` for the full threat-model writeup.
+ *
+ *   • the SCOPE-AUTHORING AGENT (#3642) — `dispatchKind === 'scope-authoring'`
+ *     (`WE_DISPATCH_KIND=scope-authoring`, stamped by `prepare-scope-wrapper.mjs`'s
+ *     `CLAUDE_RESTRICTED_PREPARE_PROVIDER.spawn`) — same shape again, with this kind's own two differences:
+ *     it is denied `git commit` (uniquely among the four — its wrapper commits the one backlog file itself,
+ *     and only after reading `git status --porcelain`, which an agent that committed first would leave
+ *     empty), and its `converge-cli`/`review-core-cli` denies say there is NO converge loop on this arc
+ *     rather than "the wrapper drives it". Same kind-value rule as the two above: NOT the launch kind
+ *     `prepare`, which `dispatch-lane-io.mjs#defaultClaudeProvider` stamps on the fallback agent that runs
+ *     `lane-pool acquire`/`verify-lane`/`open-pr` ITSELF. That collision is why this arm did not exist before
+ *     #3642 and why the wrapper's stamp had to move first.
  *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
@@ -126,6 +160,7 @@ import { readdirSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug, requiredAssertionSlug } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { usageReportSecretDir, USAGE_REPORT_KEYCHAIN_SERVICE } from './lib/usage-report-secret-paths.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -2168,13 +2203,83 @@ export function rawHeavyCommandReason(segment, { primaryCwd = false } = {}) {
  *  lease in the same pool shares its `ownerSession`) and whose minted per-holder slug is this string (computed
  *  by the CLI via the lease read + a sibling-lease scan) — gates the #2997 fail-closed destructive-op rule,
  *  which supersedes the #2367 ownerSession compare in exactly the topology where that compare cannot answer. */
+/**
+ * THE WRAPPER-OWNED AGENT KINDS, and — per kind — who owns each lifecycle command the table below denies.
+ *
+ * KEYED ON `WE_DISPATCH_KIND`'s WRAPPER-AGENT HALF (#3627 `delivery`, #3640 `repair`), never on a LAUNCH kind.
+ * See the deny block in {@link reason} for the full reasoning; in one line: a value in
+ * `we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS` names an agent that IS the dispatch and runs its own
+ * lifecycle from a full brief, and a value here names a restricted worker whose wrapper runs that lifecycle
+ * for it. Only the second may be denied its own first step.
+ *
+ * THE PER-KIND TEXT IS NOT DECORATION. Each entry names the function in that kind's own wrapper that actually
+ * runs the denied command, so an agent that hits a deny is told who does the thing instead of it — and so a
+ * later reader can check the claim. The two kinds genuinely differ (a repair updates an EXISTING PR and never
+ * claims an item; a delivery opens a PR and does claim one), and a shared message would be false for one of
+ * them, which is precisely the class of stale note #3645 had to come back and correct here.
+ *
+ * THE KEYS ARE RE-STATED AS LITERALS RATHER THAN IMPORTED — the same trade `dispatch-lane-io.mjs`'s own
+ * `BUILD_DISPATCH_MODE_ENV` documents. This file is a `PreToolUse` hook that runs on EVERY Bash call in every
+ * session; it deliberately has no imports at all, and pulling in `dispatch-lane.mjs` (and its registry and
+ * step-kinds graph) to read two strings would put that whole graph on the hook's startup path. The no-drift
+ * guarantee is bought back by a test instead (`./__tests__/guard-bash.test.mjs` asserts these keys equal
+ * `WRAPPER_AGENT_KINDS`), which is where a static fact belongs.
+ */
+export const WRAPPER_OWNED_AGENTS = Object.freeze({
+  delivery: Object.freeze({
+    agent: 'delivery',
+    wrapper: 'deliver-item-wrapper.mjs',
+    laneFns: '`acquireLane`/`releaseClaimAndLane`',
+    gateFn: 'runGateWithOneRetry',
+    claim: 'the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst',
+    release: 'release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build',
+    ghPr: 'it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run)',
+    openPr: 'opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes',
+    converge: 'it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited)',
+  }),
+  repair: Object.freeze({
+    agent: 'repair (fix / ci-heal)',
+    wrapper: 'fix-dispatch-wrapper.mjs',
+    laneFns: '`acquireLane`/`releaseAllPools`',
+    gateFn: 'runFixGateWithOneRetry',
+    claim: 'a repair dispatch never claims a backlog item at all — it repairs an EXISTING PR, whose item was claimed (and is still held, or was already released) by the build that opened it',
+    release: 'a repair dispatch never holds a backlog claim to release — see `backlog.mjs claim` above; releasing one it does not hold would strip it from whoever does',
+    ghPr: 'the wrapper reads the PR itself (`resolveFixTarget`\'s own `gh pr view`) and hands the agent the reviewer\'s finding as a plain file in its lane, and it owns every label move through `rearm-review.mjs`/`stand-down.mjs`',
+    openPr: 'a repair never opens a PR — it re-pushes HEAD to the existing PR\'s own `lane/*` ref (`pushLaneRef`), and even that is the wrapper\'s call, made only after the gate and converge have both passed',
+    converge: 'it never initiates review of its own diff — that self-review-inside-the-agent\'s-own-turn step is exactly what #3629 moved OUT of the fixer\'s brief; the wrapper\'s own `runConverge` pass is the ratified replacement, and it runs after the agent has exited',
+  }),
+});
+
+/**
+ * #3383 — deny a DISPATCHED agent's Bash segment that names the usage-report tool's external admin-key
+ * location. See the header bullet above for the full reasoning; in one line: `--restricted` confines the
+ * FILE tools to the lane cwd already, but re-enables Bash, and this arm closes the resulting gap for the one
+ * remaining tool. Pure, text-pattern match — the SAME class of honest limit this file's other content checks
+ * carry (never proven un-obfuscatable, real additional enforcement regardless). Scoped to `dispatchKind`
+ * truthy ONLY; returns null unconditionally for the operator's own interactive session.
+ */
+export function usageReportSecretReadReason(segment, dispatchKind) {
+  if (!dispatchKind) return null;
+  const text = String(segment || '');
+  const dir = usageReportSecretDir();
+  const namesSecretPath = text.includes(dir) || /~\/\.we-usage-report\b/.test(text);
+  const namesKeychainService = text.includes(USAGE_REPORT_KEYCHAIN_SERVICE);
+  if (!namesSecretPath && !namesKeychainService) return null;
+  return `a mechanically-dispatched ${dispatchKind} agent may not reference the usage-report tool's external admin-key location (${dir}, or its Keychain service \`${USAGE_REPORT_KEYCHAIN_SERVICE}\`) at all (#3383) — that key must never reach a dispatched agent's process. There is no override.`;
+}
+
 export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
-  // xxna58l (#3383) — a raw, unqueued vitest/playwright/eleventy invocation. Checked first: cheap,
-  // unconditional (the only cwd-gating is eleventy's own, INSIDE rawHeavyCommandReason — see its doc), and
-  // independent of everything below it.
+  // #3383 — checked FIRST, unconditionally on the segment text: cheap, and must fire regardless of cwd/lease
+  // context (unlike the arms below, which are gated on primaryCwd or a specific WE_DISPATCH_KIND value).
+  const usageSecret = usageReportSecretReadReason(s, dispatchKind);
+  if (usageSecret) return usageSecret;
+
+  // xxna58l (#3383) — a raw, unqueued vitest/playwright/eleventy invocation. Checked next, right after the
+  // usage-report check above: cheap, unconditional (the only cwd-gating is eleventy's own, INSIDE
+  // rawHeavyCommandReason — see its doc), and independent of everything below it.
   const rawHeavy = rawHeavyCommandReason(s, { primaryCwd });
   if (rawHeavy) return rawHeavy;
 
@@ -2424,6 +2529,44 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // interactive operator session (no `WE_DISPATCH_KIND` at all) and every other dispatch kind are unaffected —
   // this whole block is a no-op unless `dispatchKind` is literally `'delivery'`.
   //
+  // THIS TABLE IS LIVE AS OF #3645 (2026-09-12), AND WAS NOT WHEN IT WAS WRITTEN. The note that used to sit
+  // here said `deliver-item-wrapper.mjs` was "still unwired, so nothing stamps `'delivery'` in production and
+  // this whole table is, today, dead code". That is no longer true: a `build` dispatch now routes through
+  // `dispatch-lane-io.mjs#deliverItemDetachedProvider` → `deliver-item-run.mjs` → `deliverItem`, whose
+  // `CLAUDE_RESTRICTED_PROVIDER.spawn` stamps `WE_DISPATCH_KIND=delivery` on the minimal build agent it spawns.
+  // Every deny below now fires for real, on that agent, on the default path.
+  //
+  // WHY THIS STAYS `'delivery'`-ONLY, AND MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT" (#xu2pp2m,
+  // 2026-09-12 — recorded here because the generalization has now been proposed once and is superficially very
+  // plausible). NOTE that the one thing that DID change with #3645 is the honesty note above, not this
+  // scoping: `WE_BUILD_DISPATCH_MODE=agent` still spawns a full-brief `WE_DISPATCH_KIND=build` agent that runs
+  // its own lifecycle, so `'build'` must keep being exempt here just as the other five kinds are.
+  //
+  // THE TABLE IS NOT "WHAT A DISPATCHED AGENT MAY NOT DO". It is "what the DELIVERY WRAPPER does on the
+  // agent's behalf", and that ownership is the entire justification for every line in it. The other six
+  // `LAUNCH_KINDS` (`we:scripts/operations/dispatch-lane.mjs`) have NO wrapper owning their lifecycle — their
+  // briefs tell the agent to do these things ITSELF, and a `WE_DISPATCH_KIND=build|prepare|prepare-decision|
+  // investigate|fix|ci-heal` agent is running one of those briefs. Verified command by command against the
+  // live briefs rather than assumed: `lane-pool.mjs acquire` is step 1 of ALL SIX; `verify-lane.mjs
+  // request`/`check` is the SANCTIONED gate path #3105's arm above deliberately exempts and every brief now
+  // uses; `learnings-drop.mjs` is a named step in five of them; `gh pr view`/`gh pr checks` is how
+  // `fix-agent-brief.md`/`fix-agent-ci-brief.md` read the finding they exist to repair; `run.mjs open-pr` is
+  // how build/prepare/investigate open their PR at all. Flipping the gate to cover those kinds would deny
+  // every dispatched agent its own first step.
+  //
+  // THAT AMBIGUITY IS NOW RESOLVED (#3640), AND THIS IS WHY THERE IS STILL NO `'fix'` ARM. The note that used
+  // to sit here said `WE_DISPATCH_KIND=fix` was stamped by TWO spawners for two INCOMPATIBLE contracts —
+  // `dispatch-lane-io.mjs#defaultClaudeProvider` (the full-brief agent, which runs its own lifecycle) and
+  // `fix-dispatch-wrapper.mjs` (a restricted agent under a wrapper that owns the lifecycle) — and that a
+  // `dispatchKind === 'fix'` arm could not be correct for both. It could not, and one was never written.
+  // Instead the COLLISION was removed at the source: the fix wrapper now stamps `repair`, a WRAPPER-AGENT kind
+  // (`we:scripts/operations/dispatch-lane.mjs#WRAPPER_AGENT_KINDS`), exactly as the delivery wrapper has always
+  // stamped `delivery` rather than `build`. `WE_DISPATCH_KIND` therefore carries a LAUNCH kind when the agent
+  // IS the dispatch and a WRAPPER-AGENT kind when the agent is a restricted worker inside a wrapper — two
+  // disjoint lists, checked at module load by that file's `assertDispatchKindAxesDisjoint`. The table below
+  // keys on the second list ONLY, so `fix` (and `ci-heal`, and `build`) stay exempt on the agent path where
+  // their own briefs require these very commands.
+  //
   // NO OVERRIDE. Every command below is something the WRAPPER runs itself, OUTSIDE the agent's own turn and
   // outside this hook's reach entirely (see this file's own `runGateWithOneRetry`/`runConverge`/`openPr`/
   // `dropLearning` — none of those are Claude Code Bash TOOL calls; they are the wrapper's own plain Node
@@ -2431,27 +2574,153 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // for any of them from inside its own restricted turn, ever — not even the read-only-looking spellings
   // (`lane-pool.mjs status`, `verify-lane.mjs check`), because the agent has no business knowing any of this
   // machinery exists at all (FIRM REQUIREMENT 5 in `deliver-item-wrapper.mjs`'s own header).
-  if (dispatchKind === 'delivery') {
+  // `Object.hasOwn`, never a bare index — `dispatchKind` comes straight off the environment, and an inherited
+  // `toString`/`constructor` must not read as a registered wrapper kind (it would deny with `undefined` text).
+  // Same discipline `dispatch-provider-registry.mjs#dispatchProviderEntry` states for its own lookup.
+  const owner = dispatchKind && Object.hasOwn(WRAPPER_OWNED_AGENTS, dispatchKind)
+    ? WRAPPER_OWNED_AGENTS[dispatchKind]
+    : null;
+  if (owner) {
     if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
-      return 'a delivery agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseClaimAndLane` in deliver-item-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+      return `a ${owner.agent} agent may never run \`lane-pool.mjs\` itself — acquiring/releasing the lane is the wrapper's own job (${owner.laneFns} in ${owner.wrapper}), done before the agent is spawned and after it reports. There is no override.`;
     if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
-      return 'a delivery agent may never run `backlog.mjs claim` itself — the wrapper claims the item before the agent is ever spawned (`claimItem`); a second claim from inside the agent is redundant at best and a race at worst. There is no override.';
+      return `a ${owner.agent} agent may never run \`backlog.mjs claim\` itself — ${owner.claim}. There is no override.`;
     if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
-      return 'a delivery agent may never run `backlog.mjs release` itself — release is decided by the wrapper reading the agent\'s own structured report (`releaseClaimAndLane`), never by the agent releasing its own claim mid-build. There is no override.';
+      return `a ${owner.agent} agent may never run \`backlog.mjs release\` itself — ${owner.release}. There is no override.`;
     if (atCommand(/^gh\s+pr\b/))
-      return 'a delivery agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR (FIRM REQUIREMENT 2 in deliver-item-wrapper.mjs; `openPr` is the only caller, and only after the gate and converge have both run). There is no override.';
+      return `a ${owner.agent} agent may never run \`gh pr\` itself — ${owner.ghPr}. There is no override.`;
     if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
-      return 'a delivery agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPr`), driven by a park decision the agent never computes. There is no override.';
+      return `a ${owner.agent} agent may never run \`open-pr.mjs\` / \`run.mjs open-pr\` itself — ${owner.openPr}. There is no override.`;
     if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
-      return 'a delivery agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+      return `a ${owner.agent} agent may never run \`pr-land.mjs\` itself — landing is the drain's job; neither the agent nor its own wrapper ever lands a PR. There is no override.`;
     if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
-      return 'a delivery agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (`dropLearning`). There is no override.';
+      return `a ${owner.agent} agent may never run \`learnings-drop.mjs\` itself — the agent REPORTS a learning on its structured report, and the wrapper is what drops it (\`dropLearning\`). There is no override.`;
     if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
-      return 'a delivery agent may never run `converge-cli.mjs` itself — it never initiates review of its own diff (FIRM REQUIREMENT 1 in deliver-item-wrapper.mjs; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited). There is no override.';
+      return `a ${owner.agent} agent may never run \`converge-cli.mjs\` itself — ${owner.converge}. There is no override.`;
     if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
-      return 'a delivery agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+      return `a ${owner.agent} agent may never run \`verify-lane.mjs\` itself, in ANY mode (not even \`request\`/\`check\`) — the gate is run by the wrapper (\`${owner.gateFn}\`), synchronously, outside the agent's own turn; the agent reports \`done\` and is resumed with the result if the gate came back red. There is no override.`;
     if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
-      return 'a delivery agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
+      return `a ${owner.agent} agent may never run \`review-core-cli.mjs\` itself — the invite-on-discovery step is driven by the wrapper's own converge loop (\`runConvergeInvite\`), never by the agent. There is no override.`;
+  }
+
+  // #3644 — the DECISION-AUTHORING agent's own Bash session (spawned by
+  // `we:scripts/operations/prepare-decision-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`, the same
+  // `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep` shape). Same table, same justification as the
+  // `'delivery'` block above — every command below is one the PREPARE WRAPPER runs itself, outside the agent's
+  // own turn and outside this hook's reach entirely.
+  //
+  // WHY THE KIND VALUE IS `'decision-authoring'` AND NOT THE LAUNCH KIND `'prepare-decision'` — this is the
+  // whole reason an arm can be written here at all, and it is exactly the collision the `'fix'` note above
+  // says must be settled BEFORE any arm is added.
+  //
+  //   `WE_DISPATCH_KIND=prepare-decision` is stamped by `dispatch-lane-io.mjs#defaultClaudeProvider` on the
+  //   FALLBACK path (`WE_PREPARE_DECISION_DISPATCH_MODE=agent`), which runs the full prose brief
+  //   `we:skills-src/conveyor/prepare-decision-agent-brief.md` — an agent that runs its OWN lifecycle:
+  //   `lane-pool acquire` (its step 1), `prepare-hold` (step 2), `verify-lane request`/`check` (step 4),
+  //   `run.mjs open-pr` (step 6), `learnings-drop` + `prepare-release` (step 7). Denying that agent those
+  //   commands would deny it its own first step, which is precisely what the `#xu2pp2m` non-generalization
+  //   block in `we:scripts/__tests__/guard-bash.test.mjs` asserts must never happen.
+  //
+  //   So this wrapper stamps a DISTINCT value, exactly as #3645's build wrapper stamps `'delivery'` rather
+  //   than `'build'` for the same reason. One env value, one contract. The two paths can now both be correct
+  //   at once, and the fallback brief stays fully runnable.
+  //
+  // FOUR ARMS BEYOND THE DELIVERY TABLE, all `backlog.mjs` verbs specific to a decision's lifecycle:
+  //   • `prepare-hold`/`prepare-release` — the wrapper takes and drops the hold (`prepareHold`/
+  //     `prepareRelease`), before the agent is spawned and after it reports.
+  //   • `prepare-stamp` — THE most important one. `preparedDate` is what makes readiness rank a decision
+  //     `✓ ready to ratify`; the wrapper stamps it only after reading a `done` report, so an agent stamping
+  //     its own half-finished authoring is a false "ready" the next ratify turn would trust.
+  //   • `resolve` — a prepared decision is STILL OPEN. Resolving is the ratify turn's job (MEMORY #39), and
+  //     a decision-authoring agent resolving the very decision it was asked to prepare is the single most
+  //     damaging thing on this page.
+  // NO OVERRIDE, for the same reason the delivery table has none.
+  if (dispatchKind === 'decision-authoring') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `lane-pool.mjs` itself — acquiring/releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseHoldAndLane` in prepare-decision-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-stamp\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-stamp` itself — `preparedDate` is what makes readiness rank a decision `✓ ready to ratify`, and the wrapper stamps it (`stampPreparedDate`) only after reading your `done` report. Stamping your own in-progress authoring is a false "ready" the next ratify turn will trust. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-hold\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-hold` itself — the wrapper holds the decision before the agent is ever spawned (`prepareHold`); a second hold from inside the agent is redundant at best and a lease race at worst. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+prepare-release\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs prepare-release` itself — the hold is dropped by the wrapper reading your own structured report (`releaseHoldAndLane`, or step 11 once the PR is open), never by the agent releasing mid-authoring. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+resolve\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs resolve` — a PREPARED decision is still OPEN; the call has not been made. Resolving belongs to the later, human ratify turn (MEMORY #39 — never take an unprepared decision), never to the agent that prepared it. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs claim` — a prepare HOLDS its decision, it never CLAIMS it (a claim marks the item as being BUILT). The wrapper takes the hold itself (`prepareHold`). There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a decision-authoring agent may never run `backlog.mjs release` — this arc never takes a claim, so there is none to release; the wrapper drops the HOLD (`prepareRelease`) off your own reported outcome. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a decision-authoring agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR; the wrapper\'s `openPreparePr` is the only caller, and only after the stamp, the gate and converge have all run. There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a decision-authoring agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openPreparePr`), on a `lane/<num>-prepare-<slug>` ref and a park decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `converge-cli.mjs` itself — it never initiates review of its own forks; the wrapper\'s `runConverge` drives the whole loop, after the agent has already exited. There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a decision-authoring agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step is driven by the wrapper\'s own converge loop (`runConvergeInvite`), never by the agent. There is no override.';
+  }
+
+  // #3642 — the SCOPE-AUTHORING agent's own Bash session (spawned by
+  // `we:scripts/operations/prepare-scope-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`, the same
+  // `--restricted --tools=Bash,Edit,Write,Read,Glob,Grep` shape). Same discipline as the two blocks above:
+  // every command below is one the PREPARE-SCOPE WRAPPER runs itself, outside the agent's own turn.
+  //
+  // WHY THE KIND VALUE IS `'scope-authoring'` AND NOT THE LAUNCH KIND `'prepare'`, which is what that wrapper
+  // used to stamp — this arm is exactly what the `'fix'` note above said must not be written until the
+  // collision was settled, and #3642 settled it. `WE_DISPATCH_KIND=prepare` is ALSO stamped by
+  // `dispatch-lane-io.mjs#defaultClaudeProvider` on the FALLBACK path (`WE_PREPARE_DISPATCH_MODE=agent`),
+  // which runs the full prose brief `we:skills-src/conveyor/prepare-scope-agent-brief.md` — an agent that
+  // runs its OWN lifecycle: `lane-pool acquire` (its step 1), `verify-lane request`/`check` (step 4),
+  // `run.mjs open-pr` (step 6), `learnings-drop` (step 7). A `'prepare'` arm would deny that agent its own
+  // step 1. So the wrapper now stamps a WRAPPER-AGENT kind and this arm keys on THAT; the fallback brief
+  // stays fully runnable, and both paths are correct at once.
+  //
+  // THE TEXT IS THIS KIND'S OWN, NOT `delivery`'s OR `decision-authoring`'s, because their claims are FALSE
+  // here — verified against `prepare-scope-wrapper.mjs` command-by-command rather than pattern-matched:
+  //   * a prepare-scope arc NEVER claims a backlog item and never holds a decision. `prepareScope`'s own
+  //     docblock: "Never merges, never resolves, never claims the item — a prepare only authors `scope:`."
+  //     So `delivery`'s "the wrapper claims the item before you are spawned" and `decision-authoring`'s
+  //     `prepare-hold`/`prepare-stamp` wording would both be untrue.
+  //   * THE AGENT DOES NOT COMMIT. Unique among the four wrapper-owned kinds: `commitScopeEdit` is the
+  //     wrapper's, run only AFTER `assertOnlyItemSpecTouched` has read `git status --porcelain` — which an
+  //     agent that committed first would leave empty, so a self-commit does not merely duplicate work, it
+  //     makes the one-file guardrail read "the agent left the file unmodified" and abort the whole arc. The
+  //     v2 brief says "Do **not** commit" in prose; this is what enforces it.
+  //   * THERE IS NO CONVERGE PASS ON THIS ARC AT ALL — deliberately (see that file's header: a converge is
+  //     sized for a code diff, and this diff is one frontmatter key). So the deny's reason is "there is no
+  //     loop for you to be spawning part of", not "the wrapper drives the loop".
+  // NO OVERRIDE, for the same reason the other two tables have none.
+  if (dispatchKind === 'scope-authoring') {
+    if (/\bnode\s+\S*\blane-pool\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `lane-pool.mjs` itself — acquiring and releasing the lane is the wrapper\'s own job (`acquireLane`/`releaseLane` in prepare-scope-wrapper.mjs), done before the agent is spawned and after it reports. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+claim\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs claim` — a prepare-scope dispatch never claims its item at all: it predicts where a build WOULD land and writes one `scope:` key. A claim marks the item as being BUILT, which is the very thing this arc has not done. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+release\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs release` — this arc never takes a claim, so there is none to release; releasing one it does not hold would strip it from whoever does. There is no override.';
+    if (/\bnode\s+\S*\bbacklog\.mjs\s+resolve\b/.test(s))
+      return 'a scope-authoring agent may never run `backlog.mjs resolve` — predicting an item\'s `scope:` is not delivering it; the item is still open and still has to be built. There is no override.';
+    if (atCommand(/^git\s+commit\b/))
+      return 'a scope-authoring agent may never run `git commit` itself — the wrapper commits your one backlog file (`commitScopeEdit`), and only AFTER `assertOnlyItemSpecTouched` has read `git status --porcelain` to prove you touched nothing else. Committing first empties that read, so the guardrail concludes you left the file unmodified and the whole prepare aborts. Leave the edit uncommitted in your working tree and report `done`. There is no override.';
+    if (atCommand(/^gh\s+pr\b/))
+      return 'a scope-authoring agent may never run `gh pr` itself — it never opens, watches, labels, or merges its own PR; the wrapper\'s `openScopePr` is the only caller, and only after the gate and the one-file check have both passed. There is no override.';
+    if (/\bnode\s+\S*\bopen-pr\.mjs\b/.test(s) || /\bnode\s+\S*\brun\.mjs\s+open-pr\b/.test(s))
+      return 'a scope-authoring agent may never run `open-pr.mjs` / `run.mjs open-pr` itself — opening the PR is the wrapper\'s own job (`openScopePr`), on a `lane/<num>-scope-<slug>` ref and with a `--mode=label-on-green` decision the agent never computes. There is no override.';
+    if (/\bnode\s+\S*\bpr-land\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `pr-land.mjs` itself — landing is the drain\'s job; neither the agent nor its own wrapper ever lands a PR. There is no override.';
+    if (/\bnode\s+\S*\blearnings-drop\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `learnings-drop.mjs` itself — the agent REPORTS a learning on its structured report and the wrapper is what drops it (`dropLearning`). There is no override.';
+    if (/\bnode\s+\S*\bconverge-cli\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `converge-cli.mjs` itself — a prepare-scope arc runs NO converge pass at all (a converge is sized for a code diff; this diff is one frontmatter key), so there is no loop here for you to be spawning part of. What replaces the old brief\'s self-review is two mechanical checks the wrapper runs: `assertOnlyItemSpecTouched` and the gate. There is no override.';
+    if (/\bnode\s+\S*\bverify-lane\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `verify-lane.mjs` itself, in ANY mode (not even `request`/`check`) — the gate is run by the wrapper (`runPrepareGateWithOneRetry`), synchronously, outside the agent\'s own turn; the agent reports `done` and is resumed with the result if the gate came back red. There is no override.';
+    if (/\bnode\s+\S*\breview-core-cli\.mjs\b/.test(s))
+      return 'a scope-authoring agent may never run `review-core-cli.mjs` itself — the invite-on-discovery step belongs to a converge loop, and this arc has none. There is no override.';
   }
 
   return null;
