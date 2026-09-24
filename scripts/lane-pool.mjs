@@ -75,7 +75,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
-import { defaultPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
+import { guardedPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -187,7 +187,20 @@ const expandHome = (p) => (p && p.startsWith('~') ? join(homedir(), p.slice(1)) 
 // A lane needs no normalising — `workspaceFor` strips at `.lanes` from any depth — but this is the honest
 // input either way. Falls back to the cwd outside a git repo, where there is nothing better to say.
 const CHECKOUT_ROOT = tryGit(['rev-parse', '--show-toplevel'], process.cwd()) || process.cwd();
-const POOL_ROOT = defaultPoolRoot(CHECKOUT_ROOT);
+// #3383 — `guardedPoolRoot` (not the bare `defaultPoolRoot`) so a vitest run that spawns this CLI for real with
+// no pool-root override fails LOUDLY and immediately, instead of quietly hammering the shared real pool (see
+// that function's own header for the incident this closes). `fail` is a hoisted function declaration further
+// down this file, so it's callable here.
+let POOL_ROOT;
+try {
+  POOL_ROOT = guardedPoolRoot(CHECKOUT_ROOT);
+} catch (e) {
+  // `fail` calls `process.exit(1)`, which does not itself unwind JS execution — the `throw` right after is a
+  // belt-and-suspenders stop so nothing below this line ever runs against an undefined POOL_ROOT in the window
+  // before the process actually terminates.
+  fail(String(e.message || e));
+  throw e;
+}
 
 // ── repo descriptor resolution ──────────────────────────────────────────────────────────────────────
 function resolveRepo() {
