@@ -282,8 +282,8 @@ describe('runReviewTick — reconcile itself is isolated (regression, #xvzwiew l
       .not.toThrow();
     const out = runReviewTick({ reconcile, dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
     expect(out).toEqual({
-      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT',
-      deferredForLanes: 0, holdReconcile: [], holdReconcileError: null,
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT', deferredForLanes: 0,
+      holdReconcile: [], holdReconcileError: null,
     });
     expect(dispatch).not.toHaveBeenCalled(); // reconcile crashed before any PR was identified
   });

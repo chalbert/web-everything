@@ -160,8 +160,8 @@ export function runReviewTick({
   tagRound = tagReviewRound,
   tagStatus = tagReviewStatus,
   statusCandidates = selectStatusCandidates,
-  acquirableLanes = () => Infinity,
   holdReconcile = sweepReviewHoldLabels,
+  acquirableLanes = () => Infinity,
   repo = WE_SLUG,
 } = {}) {
   // #x01u7az — runs FIRST and INDEPENDENTLY of `reconcile`'s own plan: it is a plain `gh pr list` + label read

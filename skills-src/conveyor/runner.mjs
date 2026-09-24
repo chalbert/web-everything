@@ -587,16 +587,19 @@ export function resolveSkipPasses(flagValue, { names = MECHANICAL_PASS_NAMES } =
  * a mid-session `process.exit(0)` is wrong. So unless the caller explicitly asserts "this is the dedicated
  * clone" (the CLI's `--self-sync` flag, which the staged launchd plist passes), only the App-token refresh
  * wraps the tick and no git mutation ever happens.
- * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean}} o
+ * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean, gate?:Function}} o
  *   `sync` is forwarded to {@link withSelfSync} (defaults to the real `selfSyncCheckout`) — exposed so a test
  *   can simulate "new commits arrived" without a real git checkout. `selfSync` must be exactly `true` to wire
- *   the self-sync wrapper at all.
+ *   the self-sync wrapper at all. `gate` is likewise forwarded (#3383's live-smoke gate — defaults to the
+ *   real `gateMergedCommit`) — exposed for the same reason `sync` is: a test that injects a merge without a
+ *   real lane-pool/gh/reconcile-pass-shaped `root` needs to inject a passing gate too, or the (correct,
+ *   unconditional-by-design) live smoke would reject that synthetic merge as it would any other broken one.
  * @returns {Function} the wrapped `tickOnce` effect, same call signature as the one passed in.
  */
-export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync, selfSync = false }) {
+export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync, selfSync = false, gate }) {
   const authed = withGithubAppAuth({ tickOnce }, authOpts);
   if (selfSync !== true) return authed.tickOnce;
-  const selfSyncOpts = { root, onRestart, ...(sync ? { sync } : {}) };
+  const selfSyncOpts = { root, onRestart, ...(sync ? { sync } : {}), ...(gate ? { gate } : {}) };
   return withSelfSync(authed, selfSyncOpts).tickOnce;
 }
 
