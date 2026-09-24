@@ -1,0 +1,20 @@
+{
+  "id": "delegation-post-miss-root-cause-classification",
+  "title": "Should a tooling-caused delegation miss re-graduate at the normal bar once the fix is proven? Prior art on root-cause classification and reinstatement",
+  "status": "open",
+  "summary": "Grounds decision #4029, which asks whether rule 5 of #delegation-trial-record-graduation's post-miss bar (minCleanStreak + k) should apply only when a confirmed miss's root cause is the vendor itself, letting a tooling/instruction-caused miss re-graduate at the ordinary cold-start bar once the fix is proven. FINDING 1: Google's flaky-test quarantine reinstates a test only once its root cause is fixed and it has held a run of consecutive passes against the triggering case, never on trial volume alone. FINDING 2: SRE blameless-postmortem culture treats 'human/vendor error' as a red flag that stops investigation too soon, and reviews corrective actions by people other than the party under review, never self-declared. FINDING 3: ISO 9001-lineage Corrective and Preventive Action (CAPA) / Supplier Corrective Action Request (SCAR) practice has the requesting organization, not the supplier, review a submitted root-cause finding, and practitioner guidance explicitly pushes back on 'operator error' as a terminal answer. FINDING 4: no surveyed discipline lets one unit's proven fix transfer clearance to another unit's record without that unit re-accumulating its own evidence, even when the root cause is shared and citable across units. Recommended shape: keep the automatic step-back to full (rule 3's existing hard veto, unaffected); require an explicit human-authored rootCauseClass field (tooling|vendor), never inferred or self-declared; require post-fix evidence to target the triggering failure mode, not a generic clean count; keep the cold-start bar as the tooling-proven re-entry floor, with a lower bar left open only to a future ordinary batched finding; no automatic reset across triples sharing a cause; and post-miss restoration stays a rule-6 ratified promotion act, never automatic on the computed streak alone.",
+  "dateOpened": "2026-09-24",
+  "lastReviewed": "2026-09-24",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "delegation",
+    "graduation",
+    "supervision",
+    "root-cause",
+    "model-routing",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "conveyor"
+}
