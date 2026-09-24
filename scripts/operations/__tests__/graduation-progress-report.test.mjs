@@ -48,10 +48,21 @@ const REAL_TRIALS = [
 ];
 
 function trial(minute, overrides = {}) {
-  return { ...REAL_TRIALS[0], scoredAt: `2026-09-16T00:${String(minute).padStart(2, '0')}:00.000Z`, ...overrides };
+  // subjectClass is stamped here (not on REAL_TRIALS itself, which the io/roundtrip tests above compare
+  // structurally) because #3897 ports #3845's {provider, model, subjectClass, taskType} keying into the
+  // router this file injects: a record with no subjectClass never matches (the safe direction), which would
+  // silently zero every synthetic fixture's streak below. Real scorecard rows all carry it already.
+  return { ...REAL_TRIALS[0], subjectClass: 'work-agent', scoredAt: `2026-09-16T00:${String(minute).padStart(2, '0')}:00.000Z`, ...overrides };
 }
 const cleanTrials = (n) => Array.from({ length: n }, (_, i) => trial(i + 1));
-const informative = () => trial(0, { findings: 'caught and subsequently fixed', verifiedBy: 'independent-claude', outcome: 'reworked' });
+// #3897 ports rules 4 (#3888) and 5 (#3889): `informative` is now read only from its own explicit field, and
+// once ANY unclean record is on record, restoration needs a `rootCause` note in its own field plus the
+// post-miss bar (minCleanStreak + k = 5 + 3 = 8 for these tests' default thresholds), not just minCleanStreak.
+const informative = () => trial(0, {
+  findings: 'caught and subsequently fixed', verifiedBy: 'independent-claude', outcome: 'reworked',
+  informative: true, rootCause: 'Diagnosed: caught by review; fixed and root-caused.',
+});
+const POST_MISS_BAR = DEFAULT_BACKDOWN_THRESHOLDS.minCleanStreak + DEFAULT_BACKDOWN_THRESHOLDS.k;
 
 function runReport(store, { promotions = ABSENT_SOURCE, probation = ABSENT_SOURCE } = {}) {
   const readScorecards = createScorecardReader({ exists: () => true, read: () => JSON.stringify(store), now: () => AS_OF });
@@ -185,8 +196,12 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
   const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
 
   it('matches the exact real-data triples named in the card', () => {
+    // #3897 ports rule 5 (#3889): the real trial record carries no explicit `informative`/`rootCause`
+    // fields on any row (that data is intentionally not ported — see the #3443 tail-sweep card and
+    // platform-decisions.md#delegation-trial-record-graduation rules 1 and 4), so `hasInformative` is
+    // false here and this triple stays `full`/`accruing` rather than the pre-#3897 `spot-check`.
     expect(findTriple(report, 'codex', 'gpt-6-astra', 'other')).toMatchObject({
-      evidenceLevel: 'spot-check', effectiveLevel: 'full', state: 'awaiting-promotion',
+      evidenceLevel: 'full', effectiveLevel: 'full', state: 'accruing',
     });
     expect(findTriple(report, 'antigravity', 'claude-sonnet-4-6', 'other')).toMatchObject({ state: 'vetoed' });
     expect(findTriple(report, 'antigravity', 'gemini-3.8-flash-low', 'conflict-resolution')).toMatchObject({ state: 'needs-positive-control' });
@@ -212,14 +227,20 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
   });
 
   it('never invents a threshold value and reports the config-default source', () => {
-    expect(report.thresholds).toEqual({ minCleanStreak: 5, requireInformativeTrial: true, source: 'config-default', postMissK: null });
+    // #3897 lands rule 5 (#3889) onto main: DEFAULT_BACKDOWN_THRESHOLDS now carries `k: 3`, so postMissK is
+    // no longer null.
+    expect(report.thresholds).toEqual({ minCleanStreak: 5, requireInformativeTrial: true, source: 'config-default', postMissK: 3 });
   });
 
-  it('states criteria rules 4, 5 and 7 as not-on-main, rule 6 as not-built, and the open decision (#3734)', () => {
+  it('states criteria rule 4 as not-on-main (no real row carries the field yet), rule 5 as built (landed by #3897), rule 6 as not-built, rule 7 as not-on-main, and the open decision (#3734)', () => {
+    // Rule 4 stays not-on-main against REAL_RECORDS: the trial-record data itself was intentionally not
+    // ported by #3897 (see #3443 tail-sweep + platform-decisions.md#delegation-trial-record-graduation
+    // rules 1 and 4), so no real row carries an explicit `informative` field yet, even though the router
+    // code now supports reading one (proven against synthetic fixtures elsewhere in this file).
     expect(report.criteria).toEqual([
       { rule: 3, label: 'Clean streak length N', state: 'config-default', detail: 'N = 5. A config default, changed by an ordinary finding against real data — not a ratified number.', ref: null },
       { rule: 4, label: 'A trial is "informative" only by its own recorded field', state: 'not-on-main', detail: 'Built on the prototype branch. On main the router still infers it from the outcome.', ref: '3888' },
-      { rule: 5, label: 'After a miss: root-cause note, then a higher bar (N + k)', state: 'not-on-main', detail: 'k is not set on main.', ref: '3889' },
+      { rule: 5, label: 'After a miss: root-cause note, then a higher bar (N + k)', state: 'built', detail: 'Built: the post-miss bar is N + k = 8.', ref: '3889' },
       { rule: 6, label: 'Promotion only by your ratified act', state: 'not-built', detail: 'No promotion record exists yet, so every task type stays at Full.', ref: '3784' },
       { rule: 7, label: 'Spot-check keeps a shallower independent look', state: 'not-on-main', detail: 'Built on the prototype branch.', ref: '3887' },
       { rule: null, label: 'May family or benchmark data count toward the bar?', state: 'open-decision', detail: 'Prepared; recommendation is no.', ref: '3734' },
@@ -255,7 +276,7 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
     expect(findTriple(report, 'antigravity', 'gemini-3.8-flash-low', 'conflict-resolution').owed)
       .toBe('One trial where review caught a real problem that was then fixed (proves the check works).');
     expect(findTriple(report, 'codex', 'gpt-6-astra', 'other').owed)
-      .toBe('Nothing from the agent. Lighter checking needs your ratified promotion.');
+      .toBe('3 more clean checked trials in a row.');
   });
 
   it('builds an oldest-to-newest trialList with counted/informative flags matching the router\'s own predicates', () => {
@@ -269,13 +290,18 @@ describe('graduation report: real we:scripts/conveyor/run-scorecards.json data',
 });
 
 describe('graduation report: promotion record (rule 6)', () => {
-  it('a promotions row naming codex/gpt-6-astra/other yields promoted + spot-check effective level', () => {
+  it('a promotions row naming a triple with enough post-miss evidence yields promoted + spot-check effective level', () => {
+    // #3897 (rule 5, #3889): the real codex/gpt-6-astra/other triple's post-miss clean streak (5) no longer
+    // reaches the post-miss bar (8) on its own — see the "real ... data" describe block above — so this rule
+    // 6 case is demonstrated on a synthetic triple that DOES clear the bar, same fixtures as the
+    // "graduation arithmetic" describe block.
+    const rows = [informative(), ...cleanTrials(POST_MISS_BAR)];
     const promotions = {
       source: 'ok',
-      entries: [{ provider: 'codex', model: 'gpt-6-astra', taskType: 'other', ratifiedBy: '#3690', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation' }],
+      entries: [{ provider: rows[0].provider, model: rows[0].model, taskType: rows[0].taskType, ratifiedBy: '#3690', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation' }],
     };
-    const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE, ...ROUTER });
-    const triple = findTriple(report, 'codex', 'gpt-6-astra', 'other');
+    const report = buildGraduationProgressReport({ records: rows, asOfIso: AS_OF, promotions, probation: ABSENT_SOURCE, ...ROUTER });
+    const triple = findTriple(report, rows[0].provider, rows[0].model, rows[0].taskType);
     expect(triple.state).toBe('promoted');
     expect(triple.effectiveLevel).toBe('spot-check');
     expect(triple.promotion).toEqual({ ratifiedBy: '#3690', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation' });
@@ -308,7 +334,9 @@ describe('graduation report: promotion record (rule 6)', () => {
   });
 
   it('a demoted (vetoed) triple is never protected by a stale promotion naming it', () => {
-    const rows = [informative(), ...cleanTrials(5)];
+    // #3897 (rule 5, #3889): reaching spot-check after a rootcaused miss needs the post-miss bar
+    // (minCleanStreak + k), not just minCleanStreak — see POST_MISS_BAR above.
+    const rows = [informative(), ...cleanTrials(POST_MISS_BAR)];
     const promoted = buildGraduationProgressReport({
       records: rows, asOfIso: AS_OF,
       promotions: { source: 'ok', entries: [{ provider: rows[0].provider, model: rows[0].model, taskType: rows[0].taskType, ratifiedBy: '#1', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#x' }] },
@@ -317,7 +345,7 @@ describe('graduation report: promotion record (rule 6)', () => {
     });
     expect(findTriple(promoted, rows[0].provider, rows[0].model, rows[0].taskType)).toMatchObject({ state: 'promoted', effectiveLevel: 'spot-check' });
 
-    const miss = trial(8, { findings: 'new miss', outcome: 'reworked' });
+    const miss = trial(POST_MISS_BAR + 1, { findings: 'new miss', outcome: 'reworked' });
     const demoted = buildGraduationProgressReport({
       records: [...rows, miss], asOfIso: AS_OF,
       promotions: { source: 'ok', entries: [{ provider: miss.provider, model: miss.model, taskType: miss.taskType, ratifiedBy: '#1', ratifiedOn: '2026-09-22', anchor: 'we:docs/agent/platform-decisions.md#x' }] },
@@ -350,14 +378,16 @@ describe('graduation arithmetic: streak/informative/veto boundary cases', () => 
     return buildGraduationProgressReport({ records, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER, ...options }).agents[0].triples[0];
   }
 
-  it.each([5, 6])('reaches spot-check evidence after a prior informative miss and %i counted clean trials', (n) => {
+  it.each([POST_MISS_BAR, POST_MISS_BAR + 1])('reaches spot-check evidence after a rootcaused miss and %i counted clean trials', (n) => {
     const triple = soleTriple([informative(), ...cleanTrials(n)]);
     expect(triple).toMatchObject({ cleanStreak: n, hasInformative: true, evidenceLevel: 'spot-check', state: 'awaiting-promotion' });
   });
 
   it('keeps four clean trials below the uniform floor as accruing', () => {
+    // #3897 (rule 5, #3889): `owed` now measures against the post-miss bar (8) once a rootcaused miss is on
+    // record, not the cold-start `minCleanStreak` (5) — 8 - 4 = 4 more, not 5 - 4 = 1.
     const triple = soleTriple([informative(), ...cleanTrials(4)]);
-    expect(triple).toMatchObject({ evidenceLevel: 'full', state: 'accruing', owed: '1 more clean checked trial in a row.' });
+    expect(triple).toMatchObject({ evidenceLevel: 'full', state: 'accruing', owed: '4 more clean checked trials in a row.' });
   });
 
   it('requires informative counted evidence even with six clean trials (needs-positive-control)', () => {
@@ -366,12 +396,12 @@ describe('graduation arithmetic: streak/informative/veto boundary cases', () => 
   });
 
   it('skips other-verified trials within and after a streak without incrementing or resetting it', () => {
-    const rows = [informative(), ...cleanTrials(5),
+    const rows = [informative(), ...cleanTrials(POST_MISS_BAR),
       trial(2, { verifiedBy: 'other', findings: 'smoke finding' }),
-      trial(6, { verifiedBy: 'other', findings: null }),
-      trial(7, { verifiedBy: 'other', findings: 'latest smoke finding' })];
+      trial(POST_MISS_BAR + 1, { verifiedBy: 'other', findings: null }),
+      trial(POST_MISS_BAR + 2, { verifiedBy: 'other', findings: 'latest smoke finding' })];
     const triple = soleTriple(rows);
-    expect(triple).toMatchObject({ trials: 9, countedTrials: 6, cleanStreak: 5, evidenceLevel: 'spot-check', state: 'awaiting-promotion' });
+    expect(triple).toMatchObject({ trials: 12, countedTrials: 9, cleanStreak: POST_MISS_BAR, evidenceLevel: 'spot-check', state: 'awaiting-promotion' });
     expect(triple.lastTrialAt).toBe(rows.at(-1).scoredAt);
   });
 

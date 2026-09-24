@@ -1,0 +1,5 @@
+{
+  "unsizedCardPolicy": "block",
+  "defaultSize": 13,
+  "fixSizeSource": ["card-size", "measured-diff", "assumed"]
+}
