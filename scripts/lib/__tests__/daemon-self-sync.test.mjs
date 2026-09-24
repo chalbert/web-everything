@@ -308,13 +308,21 @@ describe('withSelfSync — REAL git, bug 1 mid-tick race end-to-end (#3383)', ()
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const commit = (cwd, file, text) => { writeFileSync(join(cwd, file), text); git(cwd, 'add', file); git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', `edit ${file}`); };
 
+  // Repo-LOCAL identity (not the host's global ~/.gitconfig, which CI runners don't carry) — the SUT's own
+  // `selfSyncCheckout` merge call (`withSelfSync`'s default, un-injected `sync`) runs plain `git merge`
+  // with no identity flags of its own, exactly as it does in real production use; local config is what makes
+  // that succeed on any host, not a machine-specific global default this test would otherwise depend on.
+  const setLocalIdentity = (cwd) => { git(cwd, 'config', 'user.name', 't'); git(cwd, 'config', 'user.email', 't@t'); };
+
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'self-sync-bug1-'));
     git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
     git(dir, 'clone', '-q', 'origin.git', 'upstream');
+    setLocalIdentity(join(dir, 'upstream'));
     commit(join(dir, 'upstream'), 'a.txt', 'one\n');
     git(join(dir, 'upstream'), 'push', '-q', 'origin', 'main');
     git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'daemon');
+    setLocalIdentity(join(dir, 'daemon'));
     // Give the daemon clone a LOCAL-ONLY commit, exactly like the real dedicated clone accumulates over time
     // (its own prior self-sync merges and other locally-committing passes never get pushed anywhere) — the
     // clone is now permanently DIVERGED (ahead of origin), which is exactly why the live daemon's every
@@ -393,14 +401,19 @@ describe('withSelfSync — REAL git, two processes sharing one clone (#3383 bug 
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const commit = (cwd, file, text) => { writeFileSync(join(cwd, file), text); git(cwd, 'add', file); git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', `edit ${file}`); };
 
+  // See the bug-1 describe block above for why this is repo-local, not the host's global git identity.
+  const setLocalIdentity = (cwd) => { git(cwd, 'config', 'user.name', 't'); git(cwd, 'config', 'user.email', 't@t'); };
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'self-sync-bug2-'));
     git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
     git(dir, 'clone', '-q', 'origin.git', 'upstream');
+    setLocalIdentity(join(dir, 'upstream'));
     commit(join(dir, 'upstream'), 'a.txt', 'one\n');
     git(join(dir, 'upstream'), 'push', '-q', 'origin', 'main');
     // ONE shared clone — both "processes" below point at this exact directory, mirroring the real incident.
     git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'shared');
+    setLocalIdentity(join(dir, 'shared'));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
