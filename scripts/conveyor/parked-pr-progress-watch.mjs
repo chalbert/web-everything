@@ -62,6 +62,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -244,7 +245,8 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,labels'];
   if (repo) argv.push('--repo', repo);
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -261,7 +263,8 @@ export function defaultListLabelEvents({ number, repo, exec = execFileSyncThrott
   const path = repo ? `repos/${repo}/issues/${number}/events` : `repos/{owner}/{repo}/issues/${number}/events`;
   const argv = ['api', '--paginate', '-X', 'GET', '-F', 'per_page=100', path,
     '--jq', '.[] | select(.event == "labeled") | [.created_at, .label.name] | @tsv'];
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   return String(out || '').split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
     const [createdAt, labelName] = line.split('\t');
     return { createdAt, labelName };
@@ -296,7 +299,8 @@ export function defaultPostFinding({
     const argv = [join(root, 'scripts', 'conveyor', 'reconcile-finding.mjs'), String(pr),
       `--body-file=${file}`, `--agent=${AGENT_NAME}`];
     if (repo) argv.push(`--repo=${repo}`);
-    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+    // #x5n4zn3 — was bare (no timeout).
+    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   } finally {
     try { removeFile(file); } catch { /* best-effort cleanup — a leftover temp file is not this pass's failure */ }
   }

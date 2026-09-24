@@ -51,6 +51,7 @@ import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
 import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -84,8 +85,10 @@ export const PR_LIST_LIMIT = 200;
 export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
+  // #x5n4zn3 — was bare (no timeout).
   const out = exec('gh', argv, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
   });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];

@@ -65,6 +65,40 @@ describe('runBounded', () => {
     leftover.push(grandchild);
     expect(await waitFor(() => !alive(grandchild))).toBe(true);
   }, 20_000);
+
+  // #x5n4zn3 — several call sites this function's rollout replaces relied on `execFileSync`'s `maxBuffer` to
+  // cap a verbose-but-not-hung child; `maxBytes` is the same protection for the async primitive, and must not
+  // regress that safety net when they switch over.
+  it('on maxBytes overflow kills the child and rejects, without waiting for the timeout', async () => {
+    const started = Date.now();
+    await expect(
+      runBounded(NODE, ['-e', 'process.stdout.write("x".repeat(1000)); setTimeout(() => {}, 60000)'], { timeoutMs: 20_000, maxBytes: 100 }),
+    ).rejects.toThrow(/output exceeded 100 bytes/);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 20_000);
+
+  // #x5n4zn3 review — `maxBytes` must count real UTF-8 BYTES (what `execFileSync`'s `maxBuffer` counted), not JS
+  // string length: 'é' is 1 UTF-16 code unit but 2 bytes, '😀' is 2 code units but 4 bytes.
+  it('maxBytes counts UTF-8 bytes, not string length, on a multi-byte payload', async () => {
+    await expect(
+      runBounded(NODE, ['-e', "process.stdout.write('é'.repeat(100))"], { timeoutMs: 20_000, maxBytes: 150 }),
+    ).rejects.toThrow(/output exceeded 150 bytes/);
+    await expect(
+      runBounded(NODE, ['-e', "process.stdout.write('😀'.repeat(50))"], { timeoutMs: 20_000, maxBytes: 150 }),
+    ).rejects.toThrow(/output exceeded 150 bytes/);
+    // Exactly at the cap is allowed, and the multi-byte payload still decodes intact.
+    const out = await runBounded(NODE, ['-e', "process.stdout.write('é'.repeat(75))"], { timeoutMs: 20_000, maxBytes: 150 });
+    expect(out).toBe('é'.repeat(75));
+  }, 20_000);
+
+  it('omitting maxBytes keeps unbounded output (today\'s default, unchanged)', async () => {
+    // The big string is built INSIDE the child (never passed as a literal argv value) — a 500KB argv string blew
+    // past `ARG_MAX` on a CI runner (`spawn E2BIG`) even though it fit fine locally; `repeat` in-process has no
+    // such ceiling.
+    const out = await runBounded(NODE, ['-e', "process.stdout.write('y'.repeat(500000))"]);
+    expect(out).toHaveLength(500_000);
+    expect(out).toBe('y'.repeat(500_000));
+  });
 });
 
 describe('installChildReaper', () => {

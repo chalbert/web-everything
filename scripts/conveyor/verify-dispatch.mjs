@@ -94,6 +94,7 @@ import { homedir } from 'node:os';
 import { readVerifyMarker } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { resolveCeilingMs as resolveAdmissionCeilingMs } from '../readiness/heavy-admission.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** Several multiples of the gate's documented 150-350s normal range — generous on purpose (see file header):
  *  a slow-but-healthy GATE run under contention must never be mistaken for a stuck one. Applies ONLY to the
@@ -179,7 +180,10 @@ function poolsToScan() {
 
 function tryGit(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    // #x5n4zn3 — was bare (no timeout). This file's own main `verify-lane.mjs` spawn already has its own
+    // dedicated two-phase queue/gate timeout (see file header) — deliberately untouched here — but this SEPARATE
+    // small git helper (pool-scan / marker reads) had none at all.
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }).trim();
   } catch {
     return null;
   }

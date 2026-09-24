@@ -77,6 +77,7 @@ import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) — the constellation table,
 // so a lease's POOL (ground truth) and a `fix-<tag>-<id>` session's own tag both resolve through the ONE source
 // every other conveyor script already keys off, never a private re-derivation here.
@@ -511,7 +512,8 @@ export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {
   const args = ['pr', 'list', '--state', 'all', '--limit', String(Number(flags['pr-limit']) || 400), '--json', 'number,state,mergedAt,headRefName', '--repo', slug];
   let prs;
   try {
-    prs = JSON.parse(exec('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    // #x5n4zn3 — was bare (no timeout).
+    prs = JSON.parse(exec('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
   } catch (e) {
     log(`  ⚠ gh pr list (${slug}) failed — PR-terminal reap axis OFF for ${repoKey} this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
@@ -547,9 +549,12 @@ function fetchSessionStates(flags) {
 
 /** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
 function releaseLane(pool, lane) {
+  // #x5n4zn3 — was bare (no timeout): a real `lane-pool.mjs release` call, one per reaped lease.
   execFileSync('node', [LANE_POOL_CLI, 'release', `--pool=${pool}`, `--lane=${lane}`, '--force'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: resolveChildTimeoutMs(),
+    killSignal: 'SIGKILL',
   });
 }
 

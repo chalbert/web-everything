@@ -30,6 +30,22 @@ export function resolveChildTimeoutMs(env = process.env) {
   return Number.isInteger(n) && n > 0 ? n : DEFAULT_CHILD_TIMEOUT_MS;
 }
 
+/** Budget for one real `npm ci`/`npm install` (`we:scripts/lane-pool.mjs`'s `ensureDeps`) — the ONE source of it. */
+export const NPM_INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Budget for one genuinely network-bound `git` call (`lane-pool.mjs`'s `fetch origin --prune`). Fixed, not env-tuned. */
+export const NETWORK_GIT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Budget for an OUTER call to `lane-pool.mjs acquire` that may install deps (#x5n4zn3 review). The acquire does
+ * a network `git fetch` (fixed {@link NETWORK_GIT_TIMEOUT_MS}), a few local `git` steps (the env-tuned child
+ * budget each), and `ensureDeps`' `npm ci` ({@link NPM_INSTALL_TIMEOUT_MS}), so the wrapper around it must cover
+ * all of them, never the generic listing-sized default — or a slow-but-healthy install gets killed mid-way.
+ */
+export function resolveLaneAcquireTimeoutMs(env = process.env) {
+  return NETWORK_GIT_TIMEOUT_MS + NPM_INSTALL_TIMEOUT_MS + 4 * resolveChildTimeoutMs(env);
+}
+
 const live = new Set();
 
 function killGroup(child, signal) {
@@ -75,10 +91,15 @@ export function installChildReaper({ pollMs = 2000, log = () => {} } = {}) {
  *
  * @param {string} cmd
  * @param {string[]} args
- * @param {{ timeoutMs?: number, env?: NodeJS.ProcessEnv, cwd?: string }} [opts]
+ * @param {{ timeoutMs?: number, env?: NodeJS.ProcessEnv, cwd?: string, maxBytes?: number }} [opts] `maxBytes`
+ *   (#x5n4zn3) — an optional stdout cap, matching the `maxBuffer` several `execFileSync` call sites this
+ *   function's rollout replaces already relied on: a verbose-but-not-hung child (a huge `gh`/backlog JSON
+ *   payload) must not grow `out` unbounded in memory just because it never hits the timeout. Killed and
+ *   rejected the same way a timeout is; omitted (the default) keeps today's unbounded behavior for every
+ *   existing caller.
  * @returns {Promise<string>}
  */
-export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, env, cwd } = {}) {
+export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, env, cwd, maxBytes } = {}) {
   return new Promise((resolvePromise, reject) => {
     let child;
     try {
@@ -88,10 +109,19 @@ export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, en
       return;
     }
     live.add(child);
-    let out = '';
+    // Raw Buffer chunks, decoded once at the end: `maxBytes` counts real bytes (like `maxBuffer`), not UTF-16
+    // code units, and a multi-byte char split across two chunks still decodes intact.
+    const chunks = [];
+    let outBytes = 0;
     let err = '';
     let timedOut = false;
-    child.stdout.setEncoding('utf8').on('data', (d) => { out += d; });
+    let overBudget = false;
+    child.stdout.on('data', (d) => {
+      if (overBudget) return;
+      outBytes += d.length;
+      if (maxBytes && outBytes > maxBytes) { overBudget = true; killGroup(child, 'SIGKILL'); return; }
+      chunks.push(d);
+    });
     child.stderr.setEncoding('utf8').on('data', (d) => { err += d; });
     const timer = setTimeout(() => {
       timedOut = true;
@@ -102,9 +132,10 @@ export function runBounded(cmd, args, { timeoutMs = DEFAULT_CHILD_TIMEOUT_MS, en
     child.on('error', (e) => { done(); reject(e); });
     child.on('close', (code, signal) => {
       done();
-      if (timedOut) reject(new Error(`timed out after ${timeoutMs}ms (process group killed)`));
+      if (overBudget) reject(new Error(`output exceeded ${maxBytes} bytes (process group killed)`));
+      else if (timedOut) reject(new Error(`timed out after ${timeoutMs}ms (process group killed)`));
       else if (code !== 0) reject(new Error(`exited ${code ?? signal}: ${err.trim().split('\n')[0] || '(no stderr)'}`));
-      else resolvePromise(out);
+      else resolvePromise(Buffer.concat(chunks).toString('utf8'));
     });
   });
 }

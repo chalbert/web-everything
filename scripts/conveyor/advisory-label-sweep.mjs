@@ -33,6 +33,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { ADVISORY_LABELS, planAdvisoryStaleLabels } from '../lib/advisory-labels.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 export const PR_LIST_LIMIT = 200;
 
@@ -54,7 +55,8 @@ export function defaultListPrs({ exec = execFileSyncThrottled, repo = null } = {
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,labels,headRefOid,comments'];
   if (repo) argv.push('--repo', repo);
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }

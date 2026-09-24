@@ -80,6 +80,7 @@ import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLe
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import { countStandDownComments } from './stand-down.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
 export const CONFLICT_LABEL = 'merge-status:conflicting';
@@ -149,9 +150,10 @@ export function defaultConflictLabelAgeMs({ pr, repo, exec = execFileSyncThrottl
   try {
     // Events come oldest-first and a busy PR can span pages: paginate, one line per page, keep the latest date.
     const path = `repos/${repo}/issues/${pr?.number}/events?per_page=100`;
+    // #x5n4zn3 — was bare (no timeout).
     const out = exec('gh', ['api', '--paginate', path, '--jq',
       `[.[] | select(.event=="labeled" and .label.name=="${CONFLICT_LABEL}") | .created_at] | last`],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
     const times = String(out || '').split('\n').map((l) => Date.parse(l.trim())).filter(Number.isFinite);
     return times.length ? now - Math.max(...times) : null;
   } catch {
@@ -402,7 +404,8 @@ export const GH_FILES_GRAPHQL_CAP = 100;
 export function defaultListPrFiles({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/pulls/${number}/files` : `repos/{owner}/{repo}/pulls/${number}/files`;
   const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[].filename'];
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
@@ -446,7 +449,8 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
   // `--method GET` is required whenever `-F`/`-f` is present — see {@link defaultListPrFiles}'s docblock for the
   // confirmed-live 404-on-POST failure this avoids.
   const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.filename, (.patch // "")] | @tsv'];
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const patches = {};
   for (const line of String(out || '').split('\n')) {
     if (line === '') continue;
@@ -477,7 +481,8 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
 export function defaultListPrComments({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/issues/${number}/comments` : `repos/{owner}/{repo}/issues/${number}/comments`;
   const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.body] | @tsv'];
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   return String(out || '').split('\n').filter((l) => l !== '').map((line) => ({ body: unescapeTsvField(line) }));
 }
 
@@ -569,7 +574,8 @@ export function defaultListParkedPrs({ exec = execFileSyncThrottled, repo = null
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT),
     '--json', 'number,headRefName,mergeable,mergeStateStatus,labels,files'];
   if (repo) argv.push('--repo', repo);
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -591,7 +597,8 @@ export function defaultPostConflictFinding({ pr, repo, exec = execFileSync, appe
       `--body-file=${bodyPath}`, '--agent=parked-pr-conflict-watch', '--channel=the parked-PR conflict watch (#xw0odtv, dispatched per #xu2krte)',
     ];
     if (repo) argv.push(`--repo=${repo}`);
-    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+    // #x5n4zn3 — was bare (no timeout).
+    exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   } finally {
     try { unlinkSync(bodyPath); } catch { /* best-effort cleanup only */ }
   }
@@ -610,7 +617,8 @@ export function defaultPostConflictStandDown({ pr, repo, exec = execFileSync }) 
   const argv = [join(REPO_ROOT, 'scripts', 'conveyor', 'stand-down.mjs'), String(pr?.number),
     '--reason=conflict', '--actor=parked-pr-conflict-watch (#xu2krte statute-tier exception)'];
   if (repo) argv.push(`--repo=${repo}`);
-  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
 }
 
 /**
@@ -621,7 +629,8 @@ export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
   const argv = [join(REPO_ROOT, 'scripts', 'conveyor', 'rearm-review.mjs'), String(pr?.number),
     '--actor=parked-pr-conflict-watch (conflict resolved)'];
   if (repo) argv.push(`--repo=${repo}`);
-  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  exec('node', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
 }
 
 /**

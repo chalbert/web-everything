@@ -77,6 +77,7 @@ import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
@@ -293,8 +294,10 @@ export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO
   try {
     const argv = ['pr', 'diff', String(pr), '--name-only'];
     if (repo) argv.push('--repo', repo);
+    // #x5n4zn3 — was bare (no timeout).
     const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
   } catch {
@@ -370,8 +373,11 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT, lanePoo
   try {
     const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'];
     if (lanePoolRepo) argv.push(`--repo=${lanePoolRepo}`);
+    // #x5n4zn3 — was bare (no timeout): this is literally the 2026-09-23 incident's own call shape
+    // (`lane-pool.mjs list --acquirable`), the exact hang that filed this whole rollout.
     const out = exec('node', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     const paths = JSON.parse(String(out || '[]'));
     return (Array.isArray(paths) ? paths : [])
