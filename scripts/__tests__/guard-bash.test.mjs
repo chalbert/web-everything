@@ -223,6 +223,84 @@ describe('guard-bash — a dispatched agent may never reference the usage-report
     expect(usageReportSecretReadReason('npm run check:standards', 'build')).toBeNull();
     expect(usageReportSecretReadReason('cat ~/.other-tool/.env', 'build')).toBeNull();
   });
+  // PR #2570 review — every spelling below still resolves to the real secret (macOS APFS is case-insensitive;
+  // the shell removes quotes/backslashes and expands globs/variables before `cat` ever sees the path), and each
+  // one returned null before this block existed.
+  it.each([
+    ['case flip (APFS resolves it to the same file)', 'cat ~/.WE-USAGE-REPORT/.env'],
+    ['case flip, absolute spelling', `cat ${homedir()}/.We-Usage-Report/.env`],
+    ['case flip on the Keychain service name', 'security find-generic-password -s WE-USAGE-REPORT -w'],
+    ['backslash-escaped hyphen', 'cat ~/.we\\-usage\\-report/.env'],
+    ['quote-split name', "cat ~/.we'-usage'-report/.env"],
+    ['variable-split name', 'cat ~/.${P1}-${P2}/.env'],
+    ['variable-split name under $HOME', 'cat $HOME/.${P1}-report/.env'],
+    ['whole component held in a variable', 'cat "$HOME/$D/.env"'],
+    ['command-substituted (e.g. base64-decoded) name', 'cat ~/.$(echo d2UtdXNhZ2UtcmVwb3J0 | base64 -d)/.env'],
+    ['glob under $HOME', 'cat $HOME/.w*-usage-report/.env'],
+    ['glob under ${HOME}', 'ls ${HOME}/.we-usage-*'],
+    ['character-class glob', 'cat ~/.[w]e-usage-report/.env'],
+    ['glob outside a home-rooted path (after `cd ~`)', 'cat .we-us?ge-rep*/.env'],
+    ['brace expansion', 'cat ~/.we-usage-{report,x}/.env'],
+    ['glob split by a quoted literal', "cat ~/.we'-'usage-rep*/.env"],
+    ['empty first component', 'cat ~//$D/.env'],
+    ['dot first component', 'cat ~/./$D/.env'],
+    ['expansion after `..`', 'cat ~/x/../$D/.env'],
+    ['parameter-expansion HOME', 'cat ${HOME%/}/.$D/.env'],
+    ['default-valued HOME', 'cat ${HOME:-/x}/.$D/.env'],
+    ['Keychain service name in a variable', 'security find-generic-password -s "$S" -w'],
+    ['Keychain service name built from a variable', 'security find-generic-password -s ${A}-report -w'],
+    ['Keychain dump', 'security dump-keychain -d'],
+    ['leading `]` in a bracket class', 'cat ~/.[]w]e-usage-report/.env'],
+    ['POSIX character class', 'cat ~/.we-usage-rep[[:alpha:]]rt/.env'],
+    ['sequence brace', 'cat ~/.we-usage-r{e..e}port/.env'],
+  ])('denies an obfuscated spelling of the secret location — %s', (_label, cmd) => {
+    expect(usageReportSecretReadReason(cmd, 'build'), cmd).toMatch(/#3383/);
+    expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).toMatch(/#3383/);
+  });
+  it('does not over-block ordinary home-rooted or globbed commands a dispatched agent legitimately runs', () => {
+    for (const cmd of [
+      'ls ~/.claude/jobs',
+      'cat $HOME/.npmrc',
+      'ls scripts/*.mjs',
+      'cat ./.env.example',
+      'ls .github/*',
+      'echo $HOME',
+      'node scripts/usage-report/usage-report.mjs --help',
+      // quoted regexes are never globbed by the shell, so `.*` inside them is not a dotfile glob
+      "rg 'import .* from' src",
+      "grep -E 'TODO: .*' -r scripts",
+      "rg -n 'describe\\(.*'",
+      "grep -oE '(.*)' x",
+      "find . -type f -not -path '*/.*'",
+      "sed 's/.*//' f",
+      'rg "a.*b" src',
+      'echo \\.\\*',
+      'security find-generic-password -s other-tool -w',
+      // a `~` inside a word is not a home root; a dotfile glob below some other dir cannot reach home
+      'git show HEAD~1:src/$F',
+      'git diff HEAD~2/$x',
+      'cp -r src/.* dst',
+    ]) {
+      expect(usageReportSecretReadReason(cmd, 'build'), cmd).toBeNull();
+      expect(String(decide(cmd, { dispatchKind: 'build' }) ?? ''), cmd).not.toMatch(/#3383/);
+    }
+  });
+  it('stays linear on hostile wildcard runs (the hook runs on every dispatched Bash call)', () => {
+    for (const cmd of [
+      `cat ~/.${'*'.repeat(3000)}x`,
+      `cat .${'*a'.repeat(1500)}x`,
+      `cat .${'?*'.repeat(1500)}x`,
+      `cat .${'{a,b}'.repeat(40)}x`,
+      `.{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}[${'[:'.repeat(110)} `.repeat(40),
+      `.[${'[:'.repeat(120)} `.repeat(400),
+      '~'.repeat(100000),
+      '${HOME'.repeat(16666),
+    ]) {
+      const start = performance.now();
+      usageReportSecretReadReason(cmd, 'build');
+      expect(performance.now() - start, cmd.slice(0, 20)).toBeLessThan(250);
+    }
+  });
   it('is wired into reason()/decide() so a real dispatched Bash call is actually denied end to end', () => {
     expect(reason('cat ~/.we-usage-report/.env', { dispatchKind: 'build' })).toMatch(/#3383/);
     expect(decide('cat ~/.we-usage-report/.env', { dispatchKind: 'delivery' })).toMatch(/#3383/);
@@ -2743,6 +2821,60 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
     expect(decide('git status && git add -- scripts/x.mjs && git commit -m "build item #1234"', { dispatchKind: 'delivery' })).toBeNull();
     // the identical commands, no dispatchKind at all (interactive) — untouched
     expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
+  });
+});
+
+// PR #2570 review — the `repair` (#3640), `decision-authoring` (#3644) and `scope-authoring` (#3642) deny
+// tables had no test passing their dispatchKind, so disabling any of them left every test green. Each kind is
+// driven through EVERY arm it owns (one command per arm), through decide() as well as reason(), and each is
+// checked to stay scoped to its own kind.
+const LIFECYCLE_ARMS = {
+  'lane-pool': ['node scripts/lane-pool.mjs acquire --lane=3', /lane-pool\.mjs/],
+  'backlog claim': ['node scripts/backlog.mjs claim 1234 --session=x', /backlog\.mjs claim/],
+  'backlog release': ['node scripts/backlog.mjs release 1234 --session=x', /backlog\.mjs release/],
+  'gh pr': ['gh pr view 1234', /gh pr/],
+  'open-pr.mjs': ['node scripts/operations/open-pr.mjs', /open-pr/],
+  'run.mjs open-pr': ['node scripts/operations/run.mjs open-pr --ref=lane/1234-x', /open-pr/],
+  // flag spelled out for #3321's pr-land caller sweep — see the delivery block above
+  'pr-land': ['node scripts/pr-land.mjs --no-require-verified --pr=1234', /pr-land\.mjs/],
+  'learnings-drop': ['node scripts/conveyor/learnings-drop.mjs --kind=friction', /learnings-drop\.mjs/],
+  'converge-cli': ['node scripts/converge-cli.mjs init --lane=/lane-3', /converge-cli\.mjs/],
+  'verify-lane request': ['node scripts/verify-lane.mjs request', /verify-lane\.mjs/],
+  'verify-lane check': ['node scripts/verify-lane.mjs check', /verify-lane\.mjs/],
+  'review-core-cli': ['node scripts/review-core-cli.mjs invite --file=x.json', /review-core-cli\.mjs/],
+};
+const KIND_ONLY_ARMS = {
+  'decision-authoring': {
+    'backlog prepare-stamp': ['node scripts/backlog.mjs prepare-stamp 1234', /prepare-stamp/],
+    'backlog prepare-hold': ['node scripts/backlog.mjs prepare-hold 1234', /prepare-hold/],
+    'backlog prepare-release': ['node scripts/backlog.mjs prepare-release 1234', /prepare-release/],
+    'backlog resolve': ['node scripts/backlog.mjs resolve 1234', /backlog\.mjs resolve/],
+  },
+  'scope-authoring': {
+    'backlog resolve': ['node scripts/backlog.mjs resolve 1234', /backlog\.mjs resolve/],
+    'git commit': ['git commit -m "scope: predict #1234"', /git commit/],
+  },
+};
+describe.each([
+  ['repair', /repair \(fix \/ ci-heal\) agent/],
+  ['decision-authoring', /decision-authoring agent/],
+  ['scope-authoring', /scope-authoring agent/],
+])('guard-bash — a %s wrapper agent may never run the mechanical lifecycle commands itself', (kind, whoRe) => {
+  const arms = Object.entries({ ...LIFECYCLE_ARMS, ...(KIND_ONLY_ARMS[kind] || {}) });
+  it.each(arms)('denies %s — via reason() and decide(), naming the kind', (_arm, [cmd, armRe]) => {
+    const r = reason(cmd, { dispatchKind: kind });
+    expect(r, cmd).toMatch(armRe);
+    expect(r, cmd).toMatch(whoRe);
+    expect(String(decide(`git status && ${cmd}`, { dispatchKind: kind })), cmd).toMatch(whoRe);
+  });
+  it.each(arms)('never fires for an interactive session — %s', (_arm, [cmd]) => {
+    expect(String(reason(cmd, {}) ?? '')).not.toMatch(whoRe);
+    expect(String(reason(cmd, { dispatchKind: 'build' }) ?? '')).not.toMatch(whoRe);
+  });
+  it('does NOT over-block ordinary read/test/git commands', () => {
+    const ordinary = ['git status', 'git diff', 'git add scripts/x.mjs', 'node --test scripts/x.test.mjs', 'gh issue view 1'];
+    if (kind !== 'scope-authoring') ordinary.push('git commit -m "x"');
+    for (const cmd of ordinary) expect(reason(cmd, { dispatchKind: kind }), cmd).toBeNull();
   });
 });
 

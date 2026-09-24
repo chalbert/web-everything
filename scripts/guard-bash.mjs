@@ -2257,15 +2257,185 @@ export const WRAPPER_OWNED_AGENTS = Object.freeze({
  * remaining tool. Pure, text-pattern match — the SAME class of honest limit this file's other content checks
  * carry (never proven un-obfuscatable, real additional enforcement regardless). Scoped to `dispatchKind`
  * truthy ONLY; returns null unconditionally for the operator's own interactive session.
+ *
+ * PR #2570 review — the match is made against the text the SHELL would hand the program, not the literal
+ * spelling, because each of these still reaches the real file and a literal match missed all of them:
+ *   • case: compared lowercased — macOS APFS is case-insensitive, so `~/.WE-USAGE-REPORT/.env` IS the file;
+ *   • quoting/escaping: quotes and escaping backslashes are dropped (`~/.we\-usage\-report`,
+ *     `~/.we'-'usage-report`), but a glob char, `$` or backtick the shell would NOT expand (single-quoted,
+ *     escaped; globs also double-quoted) is neutralized first — so `rg 'import .* from'` is not a glob;
+ *   • expansion: a HOME-rooted path (`~`, `~user`, `$HOME`, `${HOME…}`, the literal home dir) whose first
+ *     component — or any component after a `..` — carries `$` or a backtick is denied outright: its final
+ *     spelling is unknowable to a text check (`~/.${P1}-${P2}`, `$HOME/$D`, `~/.$(… | base64 -d)`);
+ *   • globs/braces: any dot-leading word whose glob/brace pattern MATCHES the secret dir's name is denied
+ *     (`.w*-usage-report`, `.[w]e-usage-*`, `.we-usage-{report,x}`), home-rooted or not. The matcher is a
+ *     linear-time scan, never a generated regex (a `*`-run regex backtracks for minutes on this hot path);
+ *   • Keychain: `security dump-keychain`, or a `security find-*-password` whose arguments carry an expansion.
+ * Still a text check (the honest limit above): e.g. `cd ~; X=.we-usage; cat $X-report/.env` is not caught.
  */
 export function usageReportSecretReadReason(segment, dispatchKind) {
   if (!dispatchKind) return null;
-  const text = String(segment || '');
   const dir = usageReportSecretDir();
-  const namesSecretPath = text.includes(dir) || /~\/\.we-usage-report\b/.test(text);
-  const namesKeychainService = text.includes(USAGE_REPORT_KEYCHAIN_SERVICE);
-  if (!namesSecretPath && !namesKeychainService) return null;
+  const text = shellVisibleText(String(segment || ''));
+  const lowerDir = dir.toLowerCase();
+  const namesSecret = text.includes(lowerDir) || text.includes(USAGE_REPORT_KEYCHAIN_SERVICE.toLowerCase());
+  if (!namesSecret && !homeRootedExpansion(text, lowerDir) && !secretDirGlobMatch(text, lowerDir)
+    && !keychainExpansion(text)) return null;
   return `a mechanically-dispatched ${dispatchKind} agent may not reference the usage-report tool's external admin-key location (${dir}, or its Keychain service \`${USAGE_REPORT_KEYCHAIN_SERVICE}\`) at all (#3383) — that key must never reach a dispatched agent's process. There is no override.`;
+}
+
+// Lowercased text with quoting removed. A char the shell passes through LITERALLY despite looking special
+// (a glob char / `$` / backtick inside single quotes or after `\`; a glob char inside double quotes) becomes
+// NEUTRAL, which no later check treats as a wildcard or an expansion.
+const NEUTRAL = '\u0001';
+const GLOB_CHARS = new Set(['*', '?', '[', ']', '{', '}']);
+function shellVisibleText(raw) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else out += GLOB_CHARS.has(c) || c === '$' || c === '`' ? NEUTRAL : c;
+    } else if (c === '\\' && i + 1 < raw.length) {
+      const n = raw[++i];
+      out += GLOB_CHARS.has(n) || n === '$' || n === '`' ? NEUTRAL : n;
+    } else if (quote === '"') {
+      if (c === '"') quote = null;
+      else out += GLOB_CHARS.has(c) ? NEUTRAL : c;
+    } else if (c === "'" || c === '"') quote = c;
+    else out += c;
+  }
+  return out.toLowerCase();
+}
+
+function homeRootedExpansion(text, lowerDir) {
+  const home = lowerDir.slice(0, lowerDir.lastIndexOf('/')).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // `~` only at a word start (not `HEAD~1:src/$F`), which also keeps the scan linear on a run of `~`.
+  const rooted = new RegExp(`(?:(?<![^\\s=:])~[^/\\s~]{0,32}|\\$home|\\$\\{home[^}]{0,32}\\}|${home})/([^\\s;|&<>()]*)`, 'g');
+  for (const m of text.matchAll(rooted)) {
+    const comps = m[1].split('/').filter((c) => c && c !== '.');
+    if (/[$`]/.test(comps[0] || '')) return true;
+    const up = comps.indexOf('..');
+    if (up >= 0 && comps.slice(up).some((c) => /[$`]/.test(c))) return true;
+  }
+  return false;
+}
+
+function keychainExpansion(text) {
+  if (!/\bsecurity\s/.test(text)) return false;
+  if (/\bdump-keychain\b/.test(text)) return true;
+  return /\bfind-(?:generic|internet)-password\b/.test(text) && /[$`]/.test(text);
+}
+
+// Does a dot-leading glob/brace path component that could sit directly in a home dir — a word's first
+// component, or the one right under a home root — expand to the secret dir's own name? (`src/.*` cannot reach
+// it.) A component not starting with `.` cannot either: bash never lets `*`/`?`/`[…]` match a leading dot.
+function secretDirGlobMatch(text, lowerDir) {
+  const name = lowerDir.slice(lowerDir.lastIndexOf('/') + 1);
+  const home = lowerDir.slice(0, lowerDir.lastIndexOf('/') + 1);
+  for (const word of text.split(/[\s;|&<>()=`]+/)) {
+    const rest = word.startsWith(home) ? word.slice(home.length) : word;
+    const comps = rest.split('/').filter((c) => c && c !== '.');
+    const underHome = rest !== word || /^(?:~|\$home|\$\{home)/.test(rest);
+    const part = (underHome ? comps[1] : comps[0]) || '';
+    if (part.length > 256 || !/[*?[{]/.test(part)) continue;
+    for (const alt of expandBraces(part)) {
+      if (alt.startsWith('.') && globMatch(globTokens(alt), name)) return true;
+    }
+  }
+  return false;
+}
+
+// Bash brace expansion, capped. A sequence (`{a..z}`) becomes `*` — fail closed rather than enumerate it.
+function expandBraces(word, cap = 64) {
+  const open = word.indexOf('{');
+  if (open < 0) return [word];
+  let depth = 0;
+  const cuts = [];
+  for (let i = open; i < word.length; i++) {
+    if (word[i] === '{') depth++;
+    else if (word[i] === '}' && --depth === 0) {
+      const body = word.slice(open + 1, i);
+      const alts = [];
+      let d = 0; let from = 0;
+      for (let j = 0; j < body.length; j++) {
+        if (body[j] === '{') d++;
+        else if (body[j] === '}') d--;
+        else if (body[j] === ',' && d === 0) { alts.push(body.slice(from, j)); from = j + 1; }
+      }
+      alts.push(body.slice(from));
+      const head = word.slice(0, open);
+      const tails = expandBraces(word.slice(i + 1), cap);
+      const mids = alts.length > 1 ? alts.flatMap((a) => expandBraces(a, cap))
+        : body.includes('..') ? ['*'] : [`{${body}}`];
+      for (const mid of mids) for (const tail of tails) {
+        if (cuts.length >= cap) return cuts;
+        cuts.push(head + mid + tail);
+      }
+      return cuts;
+    }
+  }
+  return [word]; // unbalanced — bash leaves it literal
+}
+
+// A glob as tokens: '*' | a per-char predicate. `[…]` handles `!`/`^`, a leading `]`, ranges, and treats a
+// POSIX `[:class:]` as matching anything (fail closed).
+function globTokens(glob) {
+  const tokens = [];
+  // Once a `[` finds no closing `]`, no later `[` can either — stop rescanning (keeps a `[[:[[:…` run linear).
+  let unclosed = false;
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') { if (tokens[tokens.length - 1] !== '*') tokens.push('*'); continue; }
+    if (c === '?') { tokens.push(() => true); continue; }
+    if (c === '[' && !unclosed) {
+      let j = i + 1;
+      const negate = glob[j] === '!' || glob[j] === '^';
+      if (negate) j++;
+      const start = j;
+      if (glob[j] === ']') j++;
+      const lastColonClose = glob.lastIndexOf(':]');
+      while (j < glob.length && glob[j] !== ']') {
+        const close = glob.startsWith('[:', j) && lastColonClose > j + 1 ? glob.indexOf(':]', j + 2) : -1;
+        j = close > 0 ? close + 2 : j + 1;
+      }
+      if (j >= glob.length) unclosed = true;
+      else {
+        const body = glob.slice(start, j);
+        const any = body.includes('[:');
+        tokens.push((ch) => negate !== (any || inClass(body, ch)));
+        i = j;
+        continue;
+      }
+    }
+    tokens.push((ch) => ch === c);
+  }
+  return tokens;
+}
+
+function inClass(body, ch) {
+  for (let k = 0; k < body.length; k++) {
+    if (body[k + 1] === '-' && k + 2 < body.length) {
+      if (ch >= body[k] && ch <= body[k + 2]) return true;
+      k += 2;
+    } else if (body[k] === ch) return true;
+  }
+  return false;
+}
+
+// Classic single-backtrack wildcard match — O(pattern × name), no regex.
+function globMatch(tokens, s) {
+  let t = 0; let i = 0; let starT = -1; let starI = 0;
+  while (i < s.length) {
+    if (tokens[t] === '*') { starT = t++; starI = i; continue; }
+    if (t < tokens.length && tokens[t](s[i])) { t++; i++; continue; }
+    if (starT < 0) return false;
+    t = starT + 1;
+    i = ++starI;
+  }
+  while (tokens[t] === '*') t++;
+  return t === tokens.length;
 }
 
 export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
