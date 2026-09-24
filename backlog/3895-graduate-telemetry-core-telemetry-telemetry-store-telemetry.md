@@ -22,3 +22,8 @@ Ports 4 files (we:scripts/operations/command-redact.mjs, we:scripts/operations/t
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/command-redact.test.mjs` passes on main's tree (this slice's one remaining test file; it fails before the port because its module is missing).
 2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
 3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry.test.mjs` to #3915 — it imports a module #3915 owns.
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` to #3908 — it imports a module #3908 owns.

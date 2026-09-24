@@ -51,3 +51,7 @@ Ports we:scripts/lib/gh-throttle.mjs, we:scripts/lib/forge-land-provider.mjs, we
 - `we:scripts/lib/forge-land-provider.mjs` (+test), `we:scripts/__tests__/pr-land.test.mjs`, `we:scripts/operations/host-process-sample.mjs` (+test) — main untouched / new; apply as-is.
 
 **Moved here from #3895 (2026-09-24, at #3895 land time):** `we:scripts/operations/__tests__/telemetry.test.mjs` — it statically imports `we:scripts/operations/host-process-sample.mjs`, this card's own scope, so it cannot load until this slice ports that file. #3895 ported `we:scripts/operations/telemetry.mjs` and `we:scripts/operations/telemetry-store.mjs` (which this test also exercises) without it; both were confirmed untouched by main since the merge base and are byte-identical to the branch snapshot.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry.test.mjs` here from #3895 — it imports a module this card owns.
