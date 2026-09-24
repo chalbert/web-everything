@@ -21,8 +21,9 @@ describe('buildConflictFixMarkComment — the durable STACKED-BASE conflict-fix 
   it('leads with the SAME marker the ordinary conflict-fix round posts, so both count against one cap', () => {
     const body = buildConflictFixMarkComment({ baseRefName: 'lane/3681-ratify-daemon-lifecycle' });
     expect(body.split('\n')[0]).toBe(CONFLICT_FIX_COMMENT_MARKER);
-    // Round-trips through the SAME counter the ordinary conflict-fix round is counted with.
-    expect(countConflictFixComments([{ body }])).toBe(1);
+    // Round-trips through the SAME counter the ordinary conflict-fix round is counted with. #3383 — that
+    // counter now also requires a trusted author.
+    expect(countConflictFixComments([{ body, author: { login: 'web-everything' } }])).toBe(1);
   });
 
   it('names the base it resolved against', () => {

@@ -109,6 +109,7 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -412,15 +413,25 @@ export function isAwaitingPermission(agent) {
  * itself: that function lives in `stand-down.mjs`, a deliberate leaf with no imports of its own, and importing
  * `advisory-fix-mark.mjs` back into it would be circular (that file already imports FROM `stand-down.mjs`). This
  * file already imports both, so the union lives here — the one place both leaves meet.
- * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ *
+ * #3383 — ALSO requires {@link isTrustedMarkerAuthor} (automation OR the repo operator) before a stand-down
+ * counts at all. This function re-derives the leading-line match itself (rather than calling
+ * `stand-down.mjs#countTerminalStandDowns`, which now carries the identical requirement) so its own two
+ * supersede exclusions can run inline — but that means the trusted-author gate must be repeated here too, or a
+ * comment from ANY GitHub account with this exact leading line would count as terminal again, the precise
+ * adversarial-coverage-review finding this item closes (WE's PRs are public; a forged stand-down here
+ * permanently blocks a fixer, no decay, no clock).
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean, author?:{login?:string}}|string>|null|undefined} comments
  * @returns {number}
  */
 export function countUnresolvedStandDowns(comments) {
   if (!Array.isArray(comments)) return 0;
   let n = 0;
   for (let i = 0; i < comments.length; i += 1) {
-    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
+    const c = comments[i];
+    const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
     if (isStandDownSuperseded(comments, i)) continue;
     if (isAdvisoryMechanismStandDownSuperseded(comments, i)) continue;
     n += 1;
