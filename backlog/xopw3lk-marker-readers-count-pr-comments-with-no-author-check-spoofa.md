@@ -2,10 +2,12 @@
 kind: story
 size: 5
 parent: "3383"
-status: active
+status: resolved
 scaffoldedBy: "security-fix-marker-authorship-lane-27-ffeb2777"
 dateScaffolded: "2026-09-24"
 dateOpened: "2026-09-24"
+dateResolved: "2026-09-24"
+graduatedTo: none
 tags: []
 ---
 
