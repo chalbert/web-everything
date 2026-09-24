@@ -65,7 +65,7 @@ so no slice is built against an unratified design.
 | Plateau observability review | xee72b2 (pr-ownership read), xqjl5lf (/wip Fleet panel), #4051 (heartbeat revision) | xee72b2/xqjl5lf uncommitted in a worker lane |
 | Lane history + `whois` + reclaim of finished lanes | 4058 (PR #2608), xer3jlp (uncommitted in a worker lane), #3407 | PR #2608 open |
 | Open-PR backpressure limit with global/per-PR overrides | x55tmjy | active, uncommitted in a worker lane |
-| Stale live-process bindings + hung sessions + mechanical completion records | xbv32pg (PR #2609); prior: #3296, #3436, 4013 (PR #2555) | PR #2609 open |
+| Stale live-process bindings + hung sessions + mechanical completion records | 4085 (PR #2609); prior: #3296, #3436, 4013 (PR #2555) | PR #2609 open |
 | Drain slow passes + stacked PR closed when its base merges (#2578 recovery) | **no card found** for the slow passes; related: 4063 (PR #2587, stacked-base fresh detection), xqzxroq (PR #2581, merged) | in progress in a chat worker |
 | Overlay chain from #3681 | #4041 / 4041 (PR #2578), #4044 / 4044, #4002 / 4002, #4040, #4042, #4045, #4046, #4047, #4048, #4049, #4050, #4051, #4052, 4074 (PR #2607) | open |
 | Decision: review daemon running a live overlay vs independent review | #4043 / 4043 | open, unprepared |

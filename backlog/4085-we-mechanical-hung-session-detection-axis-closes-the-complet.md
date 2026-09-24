@@ -1,4 +1,5 @@
 ---
+bornAs: xbv32pg
 kind: story
 size: 5
 parent: "3383"
@@ -25,7 +26,7 @@ frees the PR from `live-process`, and reaps the session even when `state: 'worki
 1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/hung-session.test.mjs` and
    `npx vitest run we:scripts/conveyor/__tests__/reconcile-core.test.mjs` and
    `npx vitest run we:scripts/conveyor/__tests__/session-reaper.test.mjs` all carry cases that fail on
-   `origin/lane/xnlrroj-reconcile-daemon-self-sync-gap` (no `we:scripts/conveyor/hung-session.mjs`, no
+   `origin/lane/4074-reconcile-daemon-self-sync-gap` (no `we:scripts/conveyor/hung-session.mjs`, no
    `markHungSessions`, no `hungFor` axis) and pass after this item lands.
 2. **Live-grounded** — `node we:scripts/conveyor/reconcile-pass.mjs` against the real `chalbert/web-everything`
    repo stops refusing PR #2599/#2596/#2594/#2588/#2587/#2582 as `live-process` (their bound sessions'
