@@ -102,6 +102,8 @@ export function resolveRealGhBinary({ pathEnv = process.env.PATH || '', shimDir 
  *  failure direction of a drift is the safe one. */
 const SHIM_CACHE_VERSION = 2;
 const SHIM_REFRESH_BUFFER_MS = 10 * 60 * 1000;
+/** The captured App-token call's per-stream buffer cap — far above any real gh output (see the shim script). */
+const SHIM_CAPTURE_MAX_BUFFER = 1024 * 1024 * 1024;
 
 /**
  * PURE: the pattern the shim script tests a FAILED App-token `gh` call's stderr against to tell "this token
@@ -134,8 +136,10 @@ export function looksLikeAppTokenAuthFailure(stderrText) {
  * the same bad token for up to an hour, and (b) retry the SAME call once more with no token override — falling
  * back to whatever auth was already in effect (the operator's own `gh auth login`), exactly as a session with
  * no App auth configured at all would run. Every other outcome (success, or a failure unrelated to the token)
- * is passed through byte-for-byte, including the original inherited-stdio behavior when there was no cached
- * token to begin with — a host with nothing cached sees zero change from before this existed.
+ * passes the same bytes and exit code through — but BUFFERED, not streamed: on the tokened path gh sees a
+ * pipe, not a TTY, so color/pager/live-progress differ from a direct call (harmless for a non-TTY dispatched
+ * session; an interactive operator run is the known gap, PR #2600 review). With no cached token at all the
+ * original inherited-stdio call runs unchanged — a host with nothing cached sees zero change from before.
  * @param {{realGhPath:string, cachePath:string}} o
  * @returns {string}
  */
@@ -192,12 +196,18 @@ function runInherited(env) {
 }
 
 const token = freshCachedToken();
+// A reader that closed early (\`gh … | head\`) must not turn a deferred write into an unhandled EPIPE stack trace.
+process.stdout.on('error', () => {});
+process.stderr.on('error', () => {});
 if (!token) {
   runInherited(process.env); // no cached App token — unchanged, byte-identical to before this existed
 } else {
   const withToken = spawnSync(REAL_GH, process.argv.slice(2), {
     stdio: ['inherit', 'pipe', 'pipe'],
     env: Object.assign({}, process.env, { GH_TOKEN: token }),
+    // Captured output must never be capped below what a real gh call can emit (a big diff, a CI log): Node's
+    // 1MB default fails a call that SUCCEEDED with ENOBUFS (PR #2600 review).
+    maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)},
   });
   if (withToken.error) {
     process.stderr.write(String(withToken.error.message || withToken.error) + '\\n');

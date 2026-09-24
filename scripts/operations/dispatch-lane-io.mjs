@@ -1080,8 +1080,10 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
     // anything its background-daemon infra bootstraps from it (a pre-warmed spare pool that then outlives
     // this one dispatch) — a token that never refreshes and eventually expires, exactly what the shim exists
     // to prevent. Strip it here so an App-authenticated `gh` call only ever happens behind the shim.
-    env: sanitizeSpawnEnv(),
+    // Spread `opts` FIRST and sanitize whatever env it carries — a caller-supplied `opts.env` (e.g.
+    // deliver-item-wrapper's `{...process.env, ...deliveryEnv}`) must never replace the stripped env (PR #2600).
     ...opts,
+    env: sanitizeSpawnEnv(opts.env || process.env),
   });
 }
 

@@ -747,6 +747,16 @@ describe('the declared effect is a dispatch', () => {
     expect(seenOpts.env.OTHER_VAR).toBe('kept'); // everything else still passes through
   });
 
+  it('PR #2600 review:changes — a caller-supplied opts.env is SANITIZED too, never allowed to replace the stripped env', () => {
+    // The exact shape `deliver-item-wrapper.mjs` passes: `env: { ...process.env, ...deliveryEnv }`.
+    let seenOpts = null;
+    const exec = (cmd, args, opts) => { seenOpts = opts; return ''; };
+    defaultSpawnAgent(['--bg'], { env: { GH_TOKEN: 'ghs_daemon_own_token', GITHUB_TOKEN: 'x', DELIVERY_VAR: 'kept' } }, { exec });
+    expect(seenOpts.env.GH_TOKEN).toBeUndefined();
+    expect(seenOpts.env.GITHUB_TOKEN).toBeUndefined();
+    expect(seenOpts.env.DELIVERY_VAR).toBe('kept'); // the caller's own env is still what the child gets
+  });
+
   it('#x8mpubm follow-up — an explicit opts.cwd from the caller is preserved alongside the stripped env', () => {
     let seenOpts = null;
     const exec = (cmd, args, opts) => { seenOpts = opts; return ''; };

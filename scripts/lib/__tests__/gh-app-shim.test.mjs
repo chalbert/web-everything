@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -133,7 +133,8 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
     it('a missing cache file is treated as absent, never thrown on — the real gh still runs', () => {
       const { dir, shimPath } = setup(); // cache.json is never written
       try {
-        const out = JSON.parse(execFileSync(shimPath, ['--version'], { encoding: 'utf8' }));
+        // GH_TOKEN cleared: a host running under App auth would otherwise leak its own token into the fake.
+        const out = JSON.parse(execFileSync(shimPath, ['--version'], { encoding: 'utf8', env: { ...process.env, GH_TOKEN: undefined } }));
         expect(out.ghToken).toBeFalsy();
         expect(out.argv).toEqual(['--version']);
       } finally {
@@ -231,6 +232,52 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
         writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_rejected', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
         expect(() => execFileSync(shimPath, ['pr', 'view', '2582'], { encoding: 'utf8' })).toThrow(/status 1|Command failed/);
         expect(existsSync(cachePath)).toBe(false); // still invalidated — the rejection was real either way
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // PR #2600 review:changes — the App-token call captures output (so a 401 can be inspected), which put it
+    // behind spawnSync's default 1MB maxBuffer (ENOBUFS → shim exit 1 on a call that SUCCEEDED), and wrote the
+    // captured bytes with process.stdout.write + an immediate process.exit, which drops everything past the
+    // first pipe chunk (~8KB) when stdout is a pipe. Both are exercised here through a REAL pipe.
+    const BIG = 3 * 1024 * 1024; // well past both the 1MB buffer default and the ~8KB pipe chunk
+    function writeBigFakeGh(realGh, { rejectToken = false } = {}) {
+      writeFileSync(
+        realGh,
+        '#!/usr/bin/env node\n'
+          + (rejectToken ? 'if (process.env.GH_TOKEN) { process.stderr.write("HTTP 401: Bad credentials\\n"); process.exit(1); }\n' : '')
+          + `process.stdout.write("x".repeat(${BIG}));\n`
+          + `process.stderr.write("e".repeat(${BIG}));\n`,
+        'utf8',
+      );
+      chmodSync(realGh, 0o755);
+    }
+
+    it('a SUCCESSFUL tokened call with multi-MB output passes every byte through a pipe — no ENOBUFS, no truncation', () => {
+      const { dir, realGh, cachePath, shimPath } = setup();
+      writeBigFakeGh(realGh);
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_fresh', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        const out = spawnSync(shimPath, ['api', 'big'], { maxBuffer: 64 << 20 });
+        expect(out.status).toBe(0);
+        expect(out.stdout.length).toBe(BIG);
+        expect(out.stderr.length).toBe(BIG);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // Regression check only: the retry runs with inherited stdio, which never had either bug.
+    it('the 401 fallback retry (inherited stdio) passes multi-MB output through intact', () => {
+      const { dir, realGh, cachePath, shimPath } = setup();
+      writeBigFakeGh(realGh, { rejectToken: true });
+      try {
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_rejected', expiresAt: new Date(Date.now() + 55 * 60 * 1000).toISOString() }), 'utf8');
+        const out = spawnSync(shimPath, ['api', 'big'], { maxBuffer: 64 << 20, env: { ...process.env, GH_TOKEN: undefined } });
+        expect(out.status).toBe(0);
+        expect(out.stdout.length).toBe(BIG);
+        expect(existsSync(cachePath)).toBe(false);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
