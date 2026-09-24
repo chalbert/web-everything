@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3383"
 status: open
-blockedBy: ["xgomze7"]
+blockedBy: ["xgomze7", "xcw0nxo"]
 relatedTo: ["3681", "3999"]
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-23"

@@ -3854,6 +3854,9 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    `restart` primitive (`launchctl bootout` + `bootstrap`) is **external-only and unusable for self-reload** — a
    self-issued `bootout` kills the daemon before `bootstrap` runs. `kickstart -k` (b) is redundant with KeepAlive
    (its SIGTERM runs the same clean handler) and exec-in-place (c) discards supervision; (a) wins on simplicity.
+   (amended 2026-09-23 by [#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 1: the
+   "same clean handler" premise is wrong mid-tick — a tick inside a synchronous child call cannot run the handler,
+   so the lease is never released. Never `kickstart -k` a daemon mid-tick.)
 
 3. **Self-source review — the SAME size/complexity-graduated committee as any change, with the ONE retained
    invariant that the review is INDEPENDENT (Fork C, OPERATOR-MODIFIED).** A PR that changes the daemon's own
