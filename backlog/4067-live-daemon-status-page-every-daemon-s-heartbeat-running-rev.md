@@ -1,9 +1,10 @@
 ---
+bornAs: xaawsd6
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
-blockedBy: ["xev8pnf"]
+blockedBy: ["4065"]
 scope: ["we:scripts/operations/daemon-status.mjs", "we:scripts/operations/daemon-status-io.mjs"]
 dateOpened: "2026-09-24"
 tags: []

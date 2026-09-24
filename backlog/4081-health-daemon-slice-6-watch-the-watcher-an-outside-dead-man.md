@@ -1,9 +1,10 @@
 ---
+bornAs: xllcgox
 kind: story
 size: 2
-parent: "xqmw8g9"
+parent: "4075"
 status: open
-blockedBy: ["xev8pnf", "xv71n7k", "4045"]
+blockedBy: ["4065", "4077", "4045"]
 scope: ["we:scripts/operations/operator-queue.mjs"]
 dateOpened: "2026-09-24"
 tags: [health-daemon]
@@ -11,7 +12,7 @@ tags: [health-daemon]
 
 # Health daemon slice 6: watch the watcher — the outside check reads the last-tick-completed stamp
 
-Sixth slice of xev8pnf. Watching the watcher is already ruled (clause 6 of #resident-daemon-reload-lifecycle:
+Sixth slice of 4065. Watching the watcher is already ruled (clause 6 of #resident-daemon-reload-lifecycle:
 an outside check alerts when a daemon's heartbeat stops) and #4045 builds that check for every daemon. The
 health process is one more daemon under it. This slice adds only what the skeptic round showed was missing:
 

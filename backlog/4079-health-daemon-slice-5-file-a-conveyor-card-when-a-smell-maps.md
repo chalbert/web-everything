@@ -1,9 +1,10 @@
 ---
+bornAs: x6dyxwq
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
-blockedBy: ["xev8pnf", "xv71n7k"]
+blockedBy: ["4065", "4077"]
 scope: ["we:scripts/conveyor/health-file-request.mjs", "we:scripts/operations/health-file-request-land.mjs", "we:scripts/conveyor/health-watch-core.mjs"]
 dateOpened: "2026-09-24"
 tags: [health-daemon]
@@ -11,7 +12,7 @@ tags: [health-daemon]
 
 # Health daemon slice 5: turn a finding into an uncleared card through a filing request
 
-Fifth slice of xev8pnf (Fork 5, default flipped by the skeptic round). The health process never files from
+Fifth slice of 4065 (Fork 5, default flipped by the skeptic round). The health process never files from
 its own clone and never clears readiness:
 
 - When an episode's smell carries a known-fix template, or the investigation names a concrete product
@@ -21,7 +22,7 @@ its own clone and never clears readiness:
   we:scripts/operations/file-item.mjs with `--queue=false`, verify, open a PR. The daemon clone stays clean
   (a dirty clone freezes self-update, #resident-daemon-reload-lifecycle clause 4).
 - The card arrives **uncleared**; it is cleared through the normal readiness path. A card scoped to daemon
-  code is never auto-cleared (x4g5os9 rules how those are built).
+  code is never auto-cleared (4060 rules how those are built).
 - Dedup: the ledger maps (smell, subject) → request → card; at most 3 requests a day; no landing while a
   lane-starvation episode is open.
 - Stays off in `shadow` until the operator turns filing on.

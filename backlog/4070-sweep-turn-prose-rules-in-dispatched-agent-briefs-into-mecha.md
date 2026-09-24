@@ -1,7 +1,8 @@
 ---
+bornAs: xf8kork
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 scope: ["we:skills-src/conveyor/", "we:skills-src/review/"]
 dateOpened: "2026-09-24"

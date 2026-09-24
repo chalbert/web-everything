@@ -1,7 +1,8 @@
 ---
+bornAs: xfxl484
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 scope: ["we:scripts/lib/telemetry.mjs", "we:scripts/operations/telemetry-summary-io.mjs"]
 dateOpened: "2026-09-24"

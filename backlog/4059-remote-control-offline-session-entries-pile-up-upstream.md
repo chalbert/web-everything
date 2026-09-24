@@ -1,6 +1,7 @@
 ---
+bornAs: x2okvrm
 kind: task
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 dateOpened: "2026-09-24"
 tags: []

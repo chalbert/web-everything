@@ -1,7 +1,8 @@
 ---
+bornAs: xbhoirp
 kind: story
 size: 3
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 scope: ["we:scripts/lib/gh-app-shim.mjs"]
 dateOpened: "2026-09-24"
@@ -10,7 +11,7 @@ tags: []
 
 # gh throttle inside the gh App shim
 
-2026-09-24: many dispatched sessions calling gh at once burned the App's rate limit. Add a host-wide throttle (token bucket over a shared lock) inside the shim script rendered by we:scripts/lib/gh-app-shim.mjs, so every dispatched gh call is paced in one place. Sequenced after PR #2600 (xkse05k, the shim's 401 fallback), which is merged.
+2026-09-24: many dispatched sessions calling gh at once burned the App's rate limit. Add a host-wide throttle (token bucket over a shared lock) inside the shim script rendered by we:scripts/lib/gh-app-shim.mjs, so every dispatched gh call is paced in one place. Sequenced after PR #2600 (4039, the shim's 401 fallback), which is merged.
 
 ## Done when
 

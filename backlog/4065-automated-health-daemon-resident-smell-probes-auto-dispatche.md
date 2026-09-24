@@ -1,6 +1,7 @@
 ---
+bornAs: xev8pnf
 kind: decision
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 dateOpened: "2026-09-24"
 preparedDate: "2026-09-24"
@@ -12,7 +13,7 @@ tags: [conveyor, daemons, health-daemon, monitoring, alerting, incident-2026-09-
 
 # Automated health daemon — resident smell probes, auto-dispatched investigations, operator recommendations without a chat session
 
-**TOP PRIORITY of epic xqmw8g9.** Operator, 2026-09-24 ~6:25 PM ET, verbatim: "In general we should
+**TOP PRIORITY of epic 4075.** Operator, 2026-09-24 ~6:25 PM ET, verbatim: "In general we should
 prioritize the automated health daemon that listen to multiple smell and auto dispatch investigations if
 needed and can tell me what it think we should do without needing a session".
 
@@ -69,7 +70,7 @@ overlay or a conflicted self-sync, both seen 2026-09-24, takes the watcher down 
 - (b) Folded into the dispatcher runner or the review daemon. Excluded (above).
 - (c) Its own process, but from a clone that runs overlays. Excluded (above).
 
-Build note for slice xv71n7k (not ruled here): a `health-watch` entry in `DAEMON_MANIFEST`
+Build note for slice 4077 (not ruled here): a `health-watch` entry in `DAEMON_MANIFEST`
 (`we:skills-src/conveyor/daemon-manifest.mjs:126`, shape `{script, args, intervalMs}`) run by the pass-daemon
 is the expected vehicle; self-sync is opt-in on that runner, so the plist sets it explicitly.
 
@@ -83,7 +84,7 @@ timeout, the last-tick-completed stamp; option (c) added and excluded.
 
 Screen: flagged(impl+prio) → fixed (real fresh-context agent). The draft ruled "manifest entry vs bespoke
 daemon", which no consumer can observe and which differed only in build cost. Re-ruled as the observable
-policy (its own failure domain); the vehicle moved to a build note on slice xv71n7k.
+policy (its own failure domain); the vehicle moved to a build note on slice 4077.
 
 ## Fork 2 — Which smells get an agent, and which only alert?
 
@@ -151,7 +152,7 @@ has no "closed" or "tracked" state, so it cannot tell "fixed" from "still broken
     sits uncleared for weeks must not mute a live high-severity problem.
 - (b) A cooldown keyed per (smell, subject). Excluded (above).
 
-The episode store lives under the pinned daemon state root, so slice xv71n7k is blocked by #4052.
+The episode store lives under the pinned daemon state root, so slice 4077 is blocked by #4052.
 Illustrative record (a build detail, not ruled):
 
 ```json
@@ -196,7 +197,7 @@ conveyor never reads. (c) is broken for most smells: a daemon, a host or a lane 
 "I only review human tag" rule, `we:scripts/operations/operator-notify.mjs` header). (a) adds exactly one
 more class: a *high-severity* health episode opening (and its one 4-hour reminder). Nothing else notifies.
 
-Supported by default (not a fork): the plateau /wip panel and the live status page (xaawsd6) render the same
+Supported by default (not a fork): the plateau /wip panel and the live status page (4067) render the same
 episode reports; they read (a), they do not compete with it. On a host with no desktop (a future VM), layer 3
 is simply absent; layers 1–2 carry the message.
 
@@ -209,7 +210,7 @@ notification, the explicit contract widening, the scrub (statute-overlap with
 `#automated-session-introspection` clause 3 reconciled by applying it).
 
 Screen: flagged(impl) → fixed (real fresh-context agent). The draft bound paths and function names (the
-episode directory layout, a row-builder "like `stuckInspectedRow`") into the ruling; moved to slice xv71n7k.
+episode directory layout, a row-builder "like `stuckInspectedRow`") into the ruling; moved to slice 4077.
 The "no App issue-write permission today" reason was a cost reason, dropped.
 
 ## Fork 5 — May the daemon turn a finding into a card, and who clears it?
@@ -231,7 +232,7 @@ clause 3 forbids.
   rebuild a dirty clone, which would freeze self-update fleet-wide). The card arrives **uncleared**; it is
   cleared through the normal readiness path (the operator, or the existing clear-operator path). A card
   whose scope touches daemon code is never auto-cleared by any path; it waits for the ruling on how daemon
-  fixes are built (x4g5os9). No filing while a lane-starvation episode is open (requests wait in the
+  fixes are built (4060). No filing while a lane-starvation episode is open (requests wait in the
   ledger). Dedup: the ledger maps (smell, subject) → the request and the card it became; at most 3 requests
   a day.
 - (b) Recommend only. Excluded (above).
@@ -239,7 +240,7 @@ clause 3 forbids.
 
 ```bash
 # the default option above: what the lane-bound operation runs, inside its own leased lane — never in the daemon clone
-node scripts/operations/run.mjs file-item --kind=story --size=2 --parent=xqmw8g9 --queue=false \
+node scripts/operations/run.mjs file-item --kind=story --size=2 --parent=4075 --queue=false \
   --title="Lane litter allowlist misses .fix-* scratch" --scope="we:scripts/lib/lane-litter.mjs" \
   --digest="Filed from health episode lane-pool-dirty:repo:we:20260924T1805Z (health daemon filing request)."
 ```
@@ -265,7 +266,7 @@ person is a real authority question with a merit difference at zero cost; cap an
   already requires an outside check that alerts when a daemon's heartbeat stops; #4045 builds it for every
   daemon. The health process is one more daemon under it. The one addition this design needs, and asks #4045
   to adopt: the outside check reads the **last-tick-completed stamp**, not only the lease heartbeat, since
-  the heartbeat keeps moving through a hung tick. Slice xllcgox is therefore blocked by #4045 and only adds
+  the heartbeat keeps moving through a hung tick. Slice 4081 is therefore blocked by #4045 and only adds
   that stamp check and the operator-queue header.
 - **Probation (shadow first).** By the precedent of clause 9 of
   [#planner-build-plan-and-execute](/docs/agent/platform-decisions/#planner-build-plan-and-execute) ("starts
@@ -291,7 +292,7 @@ person is a real authority question with a merit difference at zero cost; cap an
   `scope: host | repo`; repo smells iterate the constellation repos like the other cross-repo passes. Host
   smells run on every host; repo smells run where the leader lease that #3639 / #3615 / #4010 rule puts them.
   This card does not pre-empt that ruling.
-- **Findings parent** — config, default xqmw8g9.
+- **Findings parent** — config, default 4075.
 - **Seed smells and thresholds** — the 15-row table in the report; every threshold is config.
 
 ## Proposed codified text (drafted; ratify verbatim or amend)
@@ -316,18 +317,18 @@ A new anchor `#automated-health-daemon` in `we:docs/agent/platform-decisions.md`
 
 ## Build slices (carved; each blocked by this card, filed uncleared until ratification)
 
-1. xv71n7k — the health process, smell framework, seed smells 1–3 and 15, deterministic diagnoses, episode
+1. 4077 — the health process, smell framework, seed smells 1–3 and 15, deterministic diagnoses, episode
    store, report + HEALTH section, shadow mode. Scope: `we:scripts/conveyor/health-watch-core.mjs`,
    `we:scripts/conveyor/health-watch.mjs`, `we:scripts/conveyor/health-smells/`,
    `we:skills-src/conveyor/daemon-manifest.mjs`, `we:scripts/operations/operator-queue.mjs`. Also blocked by
    #4052.
-2. x61epyr — agent investigation per episode (new `dispatch-lane` kind, declared-reads tool surface, scrub).
-3. xd9lp7o — daemon-code smells (4–7).
-4. x1k0zfj — queue and host smells (8–14).
-5. x6dyxwq — filing requests landed uncleared through a lane-bound operation (Fork 5).
-6. xllcgox — last-tick-completed check in #4045's outside watcher + operator-queue header. Blocked by #4045.
+2. 4078 — agent investigation per episode (new `dispatch-lane` kind, declared-reads tool surface, scrub).
+3. 4068 — daemon-code smells (4–7).
+4. 4066 — queue and host smells (8–14).
+5. 4079 — filing requests landed uncleared through a lane-bound operation (Fork 5).
+6. 4081 — last-tick-completed check in #4045's outside watcher + operator-queue header. Blocked by #4045.
 
-Composing: xaawsd6 (live status page), xag0rnz (stall alerts — the notification for smell 1).
+Composing: 4067 (live status page), 4080 (stall alerts — the notification for smell 1).
 
 ### Review jury (provisional — pre-registered #2638)
 
@@ -344,4 +345,4 @@ Care level: `elevated`. This jury binds against the item's predicted scope and i
 ## Done when
 
 1. **Executable** — each fork carries a ruling, `codifiedIn:` is set to the new anchor, and on ratification
-   the six slice cards are cleared to the conveyor (`we:scripts/conveyor/queue.mjs add xv71n7k …`).
+   the six slice cards are cleared to the conveyor (`we:scripts/conveyor/queue.mjs add 4077 …`).

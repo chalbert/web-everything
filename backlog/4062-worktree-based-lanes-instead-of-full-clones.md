@@ -1,6 +1,7 @@
 ---
+bornAs: x7gu6mc
 kind: investigation
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 scope: ["we:scripts/lane-pool.mjs"]
 dateOpened: "2026-09-24"

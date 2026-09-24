@@ -1,9 +1,10 @@
 ---
+bornAs: xv71n7k
 kind: story
 size: 8
-parent: "xqmw8g9"
+parent: "4075"
 status: open
-blockedBy: ["xev8pnf", "4052"]
+blockedBy: ["4065", "4052"]
 scope: ["we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/", "we:skills-src/conveyor/daemon-manifest.mjs", "we:scripts/operations/operator-queue.mjs"]
 dateOpened: "2026-09-24"
 tags: [health-daemon]
@@ -11,9 +12,9 @@ tags: [health-daemon]
 
 # Health daemon slice 1: smell framework, three seed smells, and the recommendation channel
 
-First build slice of the health daemon ruled in xev8pnf (design: we:reports/2026-09-24-health-daemon-design.md).
+First build slice of the health daemon ruled in 4065 (design: we:reports/2026-09-24-health-daemon-design.md).
 
-- **The process** (xev8pnf Fork 1): its own resident process, singleton per host, from a `main`-only clone
+- **The process** (4065 Fork 1): its own resident process, singleton per host, from a `main`-only clone
   that never runs overlays. Expected vehicle: a `health-watch` entry in we:skills-src/conveyor/daemon-manifest.mjs
   with self-sync set explicitly in its plist. Every child call has a hard timeout; each completed tick writes
   a last-tick-completed stamp separate from the lease heartbeat.

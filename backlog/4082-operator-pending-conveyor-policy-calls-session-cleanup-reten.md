@@ -1,6 +1,7 @@
 ---
+bornAs: xwysd8b
 kind: decision
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 dateOpened: "2026-09-24"
 tags: [conveyor, daemons, sessions, operator-policy, incident-2026-09-24]
@@ -33,7 +34,7 @@ the operator may still be driving.
 
 Options: (a) stay on the subscription login; (b) move every daemon bot to an API key; (c) move only the
 high-volume bots (review, fix-dispatch, investigators). Leaning: (c) — separates bot spend from the
-operator's own usage and makes per-bot cost tracking (xfxl484) exact; needs the cost numbers first.
+operator's own usage and makes per-bot cost tracking (4071) exact; needs the cost numbers first.
 
 ## Fork 5 — Is an interrupted worker auto-resumed, and by what?
 

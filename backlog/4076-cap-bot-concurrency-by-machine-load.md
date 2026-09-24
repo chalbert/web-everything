@@ -1,7 +1,8 @@
 ---
+bornAs: xsed2mb
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
 scope: ["we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/tick-core.mjs"]
 dateOpened: "2026-09-24"

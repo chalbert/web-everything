@@ -1,9 +1,10 @@
 ---
+bornAs: x61epyr
 kind: story
 size: 5
-parent: "xqmw8g9"
+parent: "4075"
 status: open
-blockedBy: ["xev8pnf", "xv71n7k"]
+blockedBy: ["4065", "4077"]
 scope: ["we:scripts/conveyor/health-investigate-dispatch.mjs", "we:skills-src/conveyor/health-investigate-brief.md", "we:scripts/conveyor/health-watch-core.mjs", "we:scripts/operations/dispatch-lane.mjs"]
 dateOpened: "2026-09-24"
 tags: [health-daemon]
@@ -11,7 +12,7 @@ tags: [health-daemon]
 
 # Health daemon slice 2: auto-dispatch a diagnose-only investigation agent per smell episode
 
-Second slice of xev8pnf (Fork 2). When an agent-eligible smell opens an episode and its deterministic
+Second slice of 4065 (Fork 2). When an agent-eligible smell opens an episode and its deterministic
 diagnosis did not settle the cause, dispatch one diagnose-only agent:
 
 - Launched as a **new kind on the declared `dispatch-lane` operation**
