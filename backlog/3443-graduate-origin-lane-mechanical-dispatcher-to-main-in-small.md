@@ -288,3 +288,15 @@ How each slice (a child of this item) graduates, per the statute
     `we:scripts/operations/telemetry.mjs` and `we:scripts/operations/telemetry-store.mjs` themselves) and left
     for the drain to land, per the epic's own established pattern (see the 2026-09-06/07 entry). #3895 is not
     yet resolved — that happens once the PR actually merges.
+
+- **2026-09-24 (#3891 landed; confirmed on `main`'s tree).** Dispatched to graduate #3891 (priority-order
+  and prototype-tracker-compact libraries) per its own card and this item's slice procedure, but on arrival
+  found it already resolved (`status: resolved`, `dateResolved: 2026-09-24`) — a concurrent wave-A/B session
+  had landed it first, via PR #2572 (`lane/batch-2026-09-24-waveA2-3891`, batched together with #3890, #3893,
+  #3906, #3911 and unrelated work), merged 2026-09-24T13:06:36Z. Verified rather than re-done: all 5 files
+  (`we:scripts/lib/priority-markers.mjs`, `we:scripts/lib/priority-order.mjs`, `we:scripts/lib/tracker-page-hash.mjs`,
+  `we:scripts/lib/prototype-tracker-compact.mjs`, `we:scripts/lib/prototype-tracker-render.mjs`) and their tests
+  are present on `main`; `npx vitest run` on the 3 test files this card names passes — 58 tests, 50 passed,
+  8 intentionally skipped (2 pending #3892's `priority-sync`, 6 pending #3909's
+  `we:scripts/lib/prototype-tracker-compact-io.mjs`), matching the landed commit's own message. No further
+  build needed for #3891; this entry only closes the Progress-log gap the landing PR itself didn't fill.
