@@ -11,11 +11,13 @@ tags: []
 
 # Graduate test setup, heavy-command admission and file-locks changes from lane/mechanical-dispatcher to main
 
-Ports the vitest setup/config, we:scripts/readiness/heavy-admission.mjs, we:scripts/readiness/file-locks.mjs, the parallel-execute workflow and small doc/config diffs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot 600acc14f of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports the vitest setup/config, we:scripts/readiness/heavy-admission.mjs, we:scripts/readiness/file-locks.mjs, the parallel-execute workflow and small doc/config diffs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot 600acc14f of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/readiness/__tests__/heavy-admission.test.mjs we:scripts/readiness/__tests__/file-locks.test.mjs we:scripts/__tests__/parallel-execute-workflow.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
+2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
+3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
 
 ### S1 — test infra + heavy-command admission + docs (size 3)
 
