@@ -1,10 +1,11 @@
 ---
 kind: task
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/advisory-fix-mark.mjs", "we:scripts/conveyor/stand-down.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:skills-src/conveyor/fix-agent-brief.md"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 

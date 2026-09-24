@@ -157,6 +157,20 @@ exempt from that escalation path. **Do NOT** treat this comment as a human-cerem
 not one (its own text says so, twice), so nothing here ever touches `review:human`, `review:pending`, or
 `review:accepted` — this repair's only output is the fix itself plus the durable marker at step 7a.
 
+> **If you genuinely cannot reproduce the finding because it was ALREADY FIXED — this is GOOD NEWS, not a
+> judgment call, and you must NOT stand down** (#xkmu3gv incident, CONFIRMED LIVE on `chalbert/web-everything
+> #2549`, 2026-09-24: a fixer correctly found nothing to fix, then wrongly stood down anyway, freezing the PR).
+> A `stand-down` is TERMINAL and reserved for a genuine judgment call your read of the finding could not safely
+> make — it is never the right exit for "there was nothing left to do here". Tell the two apart by re-reading
+> the thread: if an EARLIER comment already shows an advisory-fix marker (leading line `🔧 conveyor fix —
+> advisory finding addressed`) posted AFTER the latest advisory-panel comment, or your own repro attempt shows
+> the described behavior simply does not occur on this HEAD and nothing else about the finding is ambiguous,
+> the finding is already addressed. In that case, skip straight to **7a. Advisory-fix hand-back** below (still
+> post your reproduce-attempt evidence per step 2's own discipline first) and report `#{{ITEM_NUM}} → PR
+> #{{PR_NUM}} (advisory finding already addressed — a fresh review is owed next, not by this agent)`. Reserve
+> `stand-down.mjs` in this mode for a finding that is genuinely ambiguous or requires a judgment call you
+> cannot safely make on its own terms — never merely because a prior round already closed it out.
+
 ### 3. Apply the fix — repair ONLY the reviewer's finding
 
 Make the smallest change that addresses the finding, in `$LANE`, on the lane's **current branch** (its local

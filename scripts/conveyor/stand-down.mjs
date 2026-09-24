@@ -136,12 +136,15 @@ export const SUPERSEDE_STAND_DOWN_MARKER = '↩️ **This PR\'s earlier stand-do
 const bodyOf = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
- * Did the conveyor's OWN authenticated identity write this comment? Reads GitHub's own `viewerDidAuthor` flag
- * (`gh pr view/list --json comments` returns it on every comment). It is computed by GitHub from the comment's
- * real author, so a comment body cannot fake it — unlike any substring of the body. A bare string, or a comment
- * with the flag missing or false, is NOT self-authored: the fail-closed direction.
+ * we:scripts/conveyor/stand-down.mjs#isSelfAuthored — did the conveyor's OWN authenticated identity write this
+ * comment? Reads GitHub's own `viewerDidAuthor` flag (`gh pr view/list --json comments` returns it on every
+ * comment). It is computed by GitHub from the comment's real author, so a comment body cannot fake it — unlike
+ * any substring of the body. A bare string, or a comment with the flag missing or false, is NOT self-authored:
+ * the fail-closed direction. EXPORTED (xaer296) so a sibling supersede predicate for a DIFFERENT population
+ * (`we:scripts/conveyor/advisory-fix-mark.mjs#isAdvisoryMechanismStandDownSuperseded`) can reuse the identical
+ * check rather than growing a private copy — this repo's own "widen the shared thing" rule.
  */
-const isSelfAuthored = (c) => typeof c === 'object' && c !== null && c.viewerDidAuthor === true;
+export const isSelfAuthored = (c) => typeof c === 'object' && c !== null && c.viewerDidAuthor === true;
 
 /**
  * we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded — is the comment at `index` a watcher stand-down that

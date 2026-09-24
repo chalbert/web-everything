@@ -108,7 +108,7 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
-import { countTerminalStandDowns, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
+import { isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -118,7 +118,10 @@ import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 // clock, no process, no network — so importing them keeps this file PURE and leaf-light exactly as its own
 // header requires.
 import { countConflictFixComments, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
-import { countAdvisoryFixComments, ADVISORY_FIX_COMMENT_MARKER } from './advisory-fix-mark.mjs';
+import {
+  countAdvisoryFixComments, ADVISORY_FIX_COMMENT_MARKER,
+  isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
+} from './advisory-fix-mark.mjs';
 import { CONFLICT_LABEL } from './conflict-label.mjs';
 import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 
@@ -397,6 +400,34 @@ export function isAwaitingPermission(agent) {
     && /permission/i.test(String(agent?.waitingFor ?? ''));
 }
 
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#countUnresolvedStandDowns — xaer296 (epic #3383): the stand-down count
+ * REFUSAL 1 actually gates on. Like `we:scripts/conveyor/stand-down.mjs#countTerminalStandDowns`, except it ALSO
+ * excludes a stand-down `we:scripts/conveyor/advisory-fix-mark.mjs#isAdvisoryMechanismStandDownSuperseded` proves
+ * was a mechanism failure (a fixer in ADVISORY-FIX MODE wrongly stood down instead of hand-back, on a finding the
+ * thread already shows was fixed before it ran) — unioned with the existing watcher-supersede exclusion the same
+ * way `bindAgents`'s two liveness paths are unioned ("a union of weak proxies raises confidence; either one alone
+ * does not" does not apply here — these are two INDEPENDENT, narrow, mechanically-provable exclusions, and only
+ * ONE needs to hold to exclude a given stand-down). Composed here, not folded into `countTerminalStandDowns`
+ * itself: that function lives in `stand-down.mjs`, a deliberate leaf with no imports of its own, and importing
+ * `advisory-fix-mark.mjs` back into it would be circular (that file already imports FROM `stand-down.mjs`). This
+ * file already imports both, so the union lives here — the one place both leaves meet.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ * @returns {number}
+ */
+export function countUnresolvedStandDowns(comments) {
+  if (!Array.isArray(comments)) return 0;
+  let n = 0;
+  for (let i = 0; i < comments.length; i += 1) {
+    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
+    if (isStandDownSuperseded(comments, i)) continue;
+    if (isAdvisoryMechanismStandDownSuperseded(comments, i)) continue;
+    n += 1;
+  }
+  return n;
+}
+
 /** How long after a review/fix session reports `blocked-on-infra` before it counts as finished, so the PR is
  *  retried. Long enough that a persistent outage (a spent rate limit, GitHub down) is not hammered by a fresh
  *  agent every two-minute tick; short enough that a recovered outage is retried within one coffee. */
@@ -584,13 +615,20 @@ export function planReconcile({
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
     //
-    // `countTerminalStandDowns`, NOT the raw `countStandDownComments` — #xu2krte Fork 2 (review-human statute
-    // amendment). It excludes ONLY a parked-PR conflict watch stand-down that the watch ITSELF later superseded,
-    // with both comments self-authored (GitHub's `viewerDidAuthor`, not a body substring anyone could forge) —
-    // `we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded`. A watcher stand-down that was never superseded
-    // is current and stays terminal. A fix agent's OWN needs-judgment/gate-red/lane-ref-gone escalation, or a
-    // human's `/finish` stand-down, is never excluded.
-    const stoodDown = countTerminalStandDowns(pr?.comments);
+    // `countUnresolvedStandDowns`, NOT the raw stand-down count — #xu2krte Fork 2 (review-human statute
+    // amendment) UNIONED with xaer296 (epic #3383)'s own advisory-mechanism supersede. Two independent, narrow
+    // predicates each exclude a DIFFERENT population of provably-non-current stand-down:
+    //   - `isStandDownSuperseded` — a parked-PR conflict watch stand-down the watch ITSELF later re-classified
+    //     safe, evidenced by a LATER, self-authored supersede comment on the thread.
+    //   - `isAdvisoryMechanismStandDownSuperseded` (xaer296) — a fix agent's OWN "cannot reproduce" stand-down
+    //     in ADVISORY-FIX MODE, where the thread already proves (an earlier, self-authored advisory-fix mark
+    //     postdating the latest advisory note) that there was genuinely nothing left to fix — a mechanism
+    //     failure (the old count-based "is this addressed" test never caught up), not a real judgment call.
+    // Both require GitHub's own `viewerDidAuthor` on every comment they read (never a body substring anyone
+    // could forge). A stand-down neither predicate excludes — including EVERY fix agent's genuine
+    // needs-judgment/gate-red/lane-ref-gone escalation outside the advisory-fix shape above, and any human
+    // `/finish` stand-down — stays terminal exactly as before.
+    const stoodDown = countUnresolvedStandDowns(pr?.comments);
     if (stoodDown > 0) {
       refuse('stood-down', {
         standDowns: stoodDown,
@@ -658,18 +696,31 @@ export function planReconcile({
 
     // ── ADVISORY-FIX (#xkmu3gv) — its OWN branch, ahead of the generic `OWED` table, the same way `ci-red` sits
     // ahead of it above. A `needs-human` PR carrying an admitted `advisory:changes` finding that has NOT yet
-    // been fixed for the CURRENT advisory note (its own durable advisory-fix count < the advisory-note count)
-    // owes a FIX here, never the `review` the generic table would otherwise dispatch for this phase — a fresh
-    // review before the finding is even addressed would just re-run `advise` against the same broken head and
-    // repost the identical finding. Once a fix round completes (the count catches up), this branch falls
-    // through to the ordinary `needs-human` → `review` path below, which re-runs `advise` and posts the next
-    // real verdict on the repaired head. Gated on `phase === 'needs-human'` specifically — a `bounced` PR (real
-    // `review:changes` present, phase 'bounced' wins in `classifyPr`) is handled by the conflict-fix carve-out
-    // inside the generic cap step below, never here; the two populations are mutually exclusive by phase.
+    // been fixed for the CURRENT (latest) advisory note owes a FIX here, never the `review` the generic table
+    // would otherwise dispatch for this phase — a fresh review before the finding is even addressed would just
+    // re-run `advise` against the same broken head and repost the identical finding. Once a fix round completes,
+    // this branch falls through to the ordinary `needs-human` → `review` path below, which re-runs `advise` and
+    // posts the next real verdict on the repaired head. Gated on `phase === 'needs-human'` specifically — a
+    // `bounced` PR (real `review:changes` present, phase 'bounced' wins in `classifyPr`) is handled by the
+    // conflict-fix carve-out inside the generic cap step below, never here; the two populations are mutually
+    // exclusive by phase.
+    //
+    // xaer296 (epic #3383) — "has THIS been fixed" is now an ORDER question
+    // ({@link isLatestAdvisoryFindingAddressed}: does a fix-mark appear AFTER the latest advisory note?), NOT the
+    // COUNT comparison (`advisoryFixes < advisoryNotes`) this branch used before. The count comparison only holds
+    // when both histories start at 0/0 and move one-for-one; it breaks the moment a `review:human` PR already has
+    // advisory-note history predating this marker mechanism — CONFIRMED LIVE on `chalbert/web-everything#2549`
+    // (5 pre-existing advisory notes, exactly 1 genuine fix, `1 < 5` staying true forever) — the reconcile pass
+    // kept re-dispatching a fixer at an ALREADY-fixed PR, which is exactly how a second fixer that (correctly)
+    // found nothing to reproduce ended up standing down (see `we:scripts/conveyor/advisory-fix-mark.mjs`'s own
+    // header for the full incident, and `countUnresolvedStandDowns`/`isAdvisoryMechanismStandDownSuperseded`
+    // for how a stand-down already caused by this exact bug is recognized as non-terminal).
+    // `advisoryFixes` (the durable attempt COUNT) is still read below, but ONLY for the CAP — a genuinely
+    // unfixable finding must still stop after `advisoryFixCap` real attempts.
     if (phase === 'needs-human' && withPhase.labels.includes(ADVISORY_LABELS.CHANGES)) {
-      const advisoryNotes = countAdvisoryComments(pr?.comments);
       const advisoryFixes = countAdvisoryFixComments(pr?.comments);
-      if (advisoryFixes < advisoryNotes) {
+      const addressed = isLatestAdvisoryFindingAddressed(pr?.comments);
+      if (!addressed) {
         // REFUSAL 2, narrowed to this population: `advisory:changes` implies a posted advisory note, which IS a
         // real finding — countFindings should never read 0 here, but this is named rather than silently
         // falling through to the generic `no-findings` branch below (which is keyed to `OWED[phase] ===
@@ -699,7 +750,7 @@ export function planReconcile({
         });
         continue;
       }
-      // else: already fixed for the CURRENT advisory note (advisoryFixes >= advisoryNotes) — fall through to
+      // else: `addressed` is true — a fix-mark already postdates the latest advisory note — fall through to
       // the ordinary `OWED['needs-human'] = 'review'` path below, unchanged.
     }
 
