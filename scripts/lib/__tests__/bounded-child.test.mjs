@@ -78,8 +78,12 @@ describe('runBounded', () => {
   }, 20_000);
 
   it('omitting maxBytes keeps unbounded output (today\'s default, unchanged)', async () => {
-    const big = 'y'.repeat(500_000);
-    await expect(runBounded(NODE, ['-e', `process.stdout.write(${JSON.stringify(big)})`])).resolves.toBe(big);
+    // The big string is built INSIDE the child (never passed as a literal argv value) — a 500KB argv string blew
+    // past `ARG_MAX` on a CI runner (`spawn E2BIG`) even though it fit fine locally; `repeat` in-process has no
+    // such ceiling.
+    const out = await runBounded(NODE, ['-e', "process.stdout.write('y'.repeat(500000))"]);
+    expect(out).toHaveLength(500_000);
+    expect(out).toBe('y'.repeat(500_000));
   });
 });
 
