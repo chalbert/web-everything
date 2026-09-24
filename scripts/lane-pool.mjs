@@ -668,7 +668,7 @@ function laneDirtyOrAhead(dir, branch) {
  * the live pool + synthetic cases (fully pushed / one unpushed commit / deleted remote ref / detached HEAD /
  * no remotes / empty repo / unresolvable sha mixed with a valid one) — zero verdict flips vs. the old loop.
  */
-function aheadIsProvablyPushed(dir, remoteShas) {
+function aheadIsProvablyPushed(dir, remoteShas, branch) {
   if (!remoteShas || remoteShas.size === 0) return false;
   const headRaw = tryGit(['rev-parse', 'HEAD'], dir);
   if (!headRaw) return false;
@@ -681,37 +681,113 @@ function aheadIsProvablyPushed(dir, remoteShas) {
   // lane's own commit(s), but built on top of whatever else landed first — never on top of the lane's commit
   // itself. No ancestry walk will ever find it (the lane's commit is simply not an ancestor of anything on
   // origin), yet a manual `git cherry origin/<branch> HEAD` shows `-` (patch already applied) for every one.
-  // `git cherry <upstream> <head>` answers exactly that patch-equivalence question, so it's tried next, but
-  // ONLY as a fallback (ancestry is cheaper and covers the ordinary fast-forward/merge-commit case above) and
-  // only against the SAME already-resolved `remoteShas` (no extra network call beyond the one `infoFor`/
-  // `laneAcquirableInfo` already paid to build this set).
-  return aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas);
+  return aheadIsPatchEquivalent(dir, head, remoteShas, branch);
 }
 
 /**
- * #3383 — is `head` (a lane's HEAD sha) patch-equivalent to something already on ANY live remote head?
- * Mirrors `aheadIsProvablyPushed`'s own OR-across-every-live-head design (a lane's work may have landed under
- * a differently-named branch than the one it started on). Fails CLOSED per-candidate exactly like the
- * ancestry check's `--ignore-missing`: `tryGit` never throws, so a remote sha this lane can't resolve locally
- * (an object it never fetched) just proves nothing — it neither stops checking the REST of `remoteShas`, nor
- * is ever treated as a positive result.
+ * #3383-perf — live-caught the morning after #3383 landed: the FIRST cut of this fallback ran one full `git
+ * cherry <head> HEAD` PER live remote head, per ahead lane (an OR-across-every-head fan-out, mirroring
+ * #2920's already-fixed ancestry check). On the real web-everything pool (83 lanes, 160 remote heads) that
+ * stalled a single `list --acquirable` pass for 20+ minutes — `git cherry` itself does a bidirectional
+ * patch-id walk over the ENTIRE divergent history on both sides, so one call against an unrelated, long-lived
+ * branch can be arbitrarily expensive, and #2920's own one-spawn ancestry trick doesn't apply here (there is
+ * no single command that answers "patch-equivalent to ANY of these" the way `rev-list --not` answers ancestry
+ * for containment). The fix daemon's WE tick calls this on every tick, so it hung too.
+ *
+ * Two-tier fix, cheapest and most common case first — total git-spawn count is now BOUNDED (does not scale
+ * with remote-head count):
+ *  1. PRIMARY — ONE bounded `git cherry origin/<branch> HEAD`, exactly the manual diagnosis this item's own
+ *     postmortem used. Cost is proportional to that ONE branch's own divergence, never to how many OTHER
+ *     branches exist — covers the overwhelmingly common case (a lane's work lands on its own integration
+ *     branch) with the full ancestry-aware precision `git cherry` gives (catches a match buried several
+ *     commits back, not just at the tip).
+ *  2. FALLBACK, only if (1) finds no match — a single O(1)-git-spawn-PAIR batched patch-id comparison
+ *     (`git diff-tree --stdin -p | git patch-id --stable`, once for "our" ahead commit(s), once for every
+ *     OTHER remote head) instead of one `git cherry` per head. This is a narrower heuristic than `git cherry`
+ *     (it compares each commit's OWN introduced diff against its immediate parent — it can miss a squash that
+ *     COMBINES several of the lane's commits into one, or a match buried behind a merge commit on the other
+ *     branch), in exchange for NEVER spawning more than a handful of git processes regardless of how many
+ *     remote heads exist. Acceptable: a case this narrower heuristic misses (e.g. lane-11's PR #176 branch,
+ *     if it doesn't hit) simply stays protected — fails closed, same as any other unproven candidate, never a
+ *     false positive.
+ */
+function aheadIsPatchEquivalent(dir, head, remoteShas, branch) {
+  if (branch && cherryAllPatchEquivalent(dir, `origin/${branch}`, head)) return true;
+  return otherRemoteHeadsPatchEquivalentBatched(dir, head, remoteShas, branch);
+}
+
+/** ONE `git cherry <upstream> <head>` call. `true` iff every commit `<head>` has that `<upstream>` lacks is
+ *  patch-equivalent to something already in `<upstream>` (or there are none — already ancestor-contained). */
+function cherryAllPatchEquivalent(dir, upstream, head) {
+  const out = tryGit(['cherry', upstream, head], dir);
+  if (out === null) return false; // unresolvable (e.g. `branch` not fetched here) — try the batched fallback
+  const lines = out.split('\n').filter(Boolean);
+  return lines.length === 0 || lines.every((l) => l.startsWith('-'));
+}
+
+/**
+ * #3383-perf — the bounded fallback: compares the lane's OWN ahead-commit patch-id(s) against EVERY OTHER
+ * live remote head's patch-id, computed in exactly TWO `diff-tree --stdin -p | patch-id --stable` pipelines
+ * total (one for "ours", one for "theirs — all of them at once"), never one pipeline per head. `--stdin`
+ * (rather than one positional arg per commit) is what makes this a single spawn regardless of list length.
+ * Fails CLOSED throughout: any git-call failure, or an empty/unresolvable diff, just means no match found —
+ * never a thrown error, never a false positive.
  * @param {string} dir
  * @param {string} head
  * @param {Set<string>} remoteShas
+ * @param {string} [branch] - excluded from "other" heads (already tried, above, via the precise `git cherry`)
  * @returns {boolean}
  */
-function aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas) {
-  for (const sha of remoteShas) {
-    const out = tryGit(['cherry', sha, head], dir);
-    if (out === null) continue; // unresolvable/unrelated candidate — try the next, never a false positive
-    const lines = out.split('\n').filter(Boolean);
-    // Empty output means `head` is already fully ancestor-contained in `sha` (redundant with the rev-list
-    // check above, harmless to also accept here). Otherwise EVERY line must be patch-equivalent (`-`) — a
-    // single `+` (no equivalent patch found upstream) means real unpushed work against THIS candidate, but
-    // another remote head might still prove it, so this is `continue`, never an early `return false`.
-    if (lines.length === 0 || lines.every((l) => l.startsWith('-'))) return true;
+function otherRemoteHeadsPatchEquivalentBatched(dir, head, remoteShas, branch) {
+  const branchSha = branch ? tryGit(['rev-parse', '--verify', '--quiet', `origin/${branch}`], dir) : null;
+  const others = [...remoteShas].filter((sha) => sha !== branchSha);
+  if (others.length === 0) return false;
+  // "Ours": every ahead commit (origin/<branch>..HEAD when resolvable — matches what `laneDirtyOrAhead` itself
+  // already counts as "ahead" — else just HEAD alone, so this still degrades gracefully with no branch known).
+  const aheadRange = branch ? tryGit(['rev-list', `origin/${branch}..HEAD`], dir) : null;
+  const ourShas = aheadRange ? aheadRange.split('\n').filter(Boolean) : [head];
+  const ourPatchIds = batchPatchIds(dir, ourShas);
+  if (ourPatchIds.size === 0) return false;
+  // `batchPatchIds` maps commitSha → patchId — the match test is on the PATCH ID (the value), never the
+  // commit sha (the key). Compare the VALUE sets, not `Map#has` against a key.
+  const ourPatchIdValues = new Set(ourPatchIds.values());
+  const theirPatchIds = batchPatchIds(dir, others);
+  for (const id of theirPatchIds.values()) {
+    if (ourPatchIdValues.has(id)) return true;
   }
   return false;
+}
+
+// A large-but-bounded buffer: this pipes a POTENTIALLY large batch of commit patches through in one call
+// (never one call per commit), so the default 1MB execFileSync ceiling is too tight for a big pool.
+const PATCH_ID_MAX_BUFFER = 32 * 1024 * 1024;
+
+/** `shas` (newline-fed via `--stdin`, ONE spawn pair regardless of how many) → Map<commitSha, patchId>. Skips
+ *  a merge commit's diff by default (bare `diff-tree`, no `-m`/`-c`) — exactly like `git cherry` itself, so a
+ *  remote head that is a merge commit (e.g. a landed PR's own merge commit) contributes no id, never a
+ *  spurious one. Returns an empty Map on any failure — never throws. */
+function batchPatchIds(dir, shas) {
+  if (!shas.length) return new Map();
+  // `git`/`tryGit`'s own base options hardcode `stdio: ['ignore', 'pipe', 'pipe']` (no caller has ever needed
+  // to WRITE to a spawned git's stdin before this) — passing `input` alone here would silently merge UNDER
+  // that `stdio` key (the object-spread order in `git()` puts `stdio` before `...opts`, so `opts.input` never
+  // overrides `stdio[0]`), and execFileSync then just as silently feeds the child NO stdin at all rather than
+  // erroring — `diff-tree --stdin` with an empty stdin exits 0 with empty output, which every caller here
+  // reads as "no match found" instead of "input was never delivered". Caught by this file's OWN new test
+  // (the fallback case) failing even though a byte-for-byte manual repro of the same two commands proved the
+  // patch-ids DO match — the bug was never the patch-id logic, only this option-merge order. `stdio: ['pipe',
+  // 'pipe', 'pipe']` here is what actually lets `input` reach the child.
+  const withInput = (input) => ({ input, maxBuffer: PATCH_ID_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'] });
+  const diff = tryGit(['diff-tree', '--stdin', '-p'], dir, withInput(shas.join('\n') + '\n'));
+  if (diff === null || diff.trim() === '') return new Map();
+  const idsOut = tryGit(['patch-id', '--stable'], dir, withInput(diff));
+  if (idsOut === null) return new Map();
+  const map = new Map();
+  for (const line of idsOut.split('\n').filter(Boolean)) {
+    const [patchId, commit] = line.trim().split(/\s+/);
+    if (patchId && commit) map.set(commit, patchId);
+  }
+  return map;
 }
 
 /**
@@ -751,7 +827,7 @@ function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
   let aheadPushed = false;
   if (ahead > 0) {
     const remoteShas = getRemoteShas();
-    if (aheadIsProvablyPushed(dir, remoteShas)) {
+    if (aheadIsProvablyPushed(dir, remoteShas, branch)) {
       ahead = 0;
       aheadPushed = true;
     }
@@ -1328,7 +1404,7 @@ function cmdAcquire(repo) {
       // without this, a litter-only-dirty lane picked exactly because it looked acquirable would immediately
       // fail this re-verify, one line later, on the identical litter it was already cleared for.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
-      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir));
+      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir), repo.branch);
       if (dirty || !provablyPushed) {
         fail(
           `lane-${chosen} is no longer provably safe to reset as of this fetch (${uncommitted} uncommitted, ` +
