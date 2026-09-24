@@ -5,29 +5,33 @@ parent: "3383"
 status: open
 dateOpened: "2026-09-14"
 preparedDate: "2026-09-23"
-preparedAgainstSha: "fcc756b2c1d35229a1e95750de02a99bfa4820a5"
-relatedTo: ["3625", "3467", "3397", "3756", "2501", "3443", "3649"]
+preparedAgainstSha: "57cbd30434e523419d4c986f9e51276dfd63b763"
+relatedTo: ["3625", "3467", "3397", "3756", "2501", "3443", "3649", "3952", "3954", "3984"]
 relatedReport: reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md
 tags: [daemons, ops, staleness, live-reload, decision-prep]
 ---
 
 # Mechanize long-running daemon lifecycle: health-check, staleness detection, and live-reload
 
-**Digest.** Every resident daemon should record the commit(s) it booted from and the files it actually loaded,
-check at its own safe point whether any of those files changed, and if so exit cleanly so its relauncher brings
-it back on the new code — the reload the drain daemon already has ratified (#2501,
-[#drain-daemon-self-hosting-boundary](/docs/agent/platform-decisions/#drain-daemon-self-hosting-boundary) clause 2),
-extended to all of them. Drift against *origin* is detected read-only and reported; a daemon only updates its own
-checkout where a per-daemon opt-in's four safety conditions hold. True in-place hot-reload is ruled out: Node
-cannot unload modules, and the in-flight work the operator feared losing (dispatched agents, leases, the drain
-queue) already lives outside the process.
+**Digest.** Most of this decision is no longer open in practice. Since the first prep (morning of 2026-09-23), the
+operator directed that daemon staleness "has to happen automatically", and a narrow slice of this item shipped
+(#3954): the review and fix-dispatch daemons merge `origin/main` into their clone before every tick and exit so
+launchd relaunches them on the new code. The drain daemon does the same behind an opt-in, a primary-checkout guard
+and a 5-minute restart floor. That is the *opposite* of what the first prep recommended for Forks 2 and 4, so this
+re-prep frames them as **ratify what runs, and fix what it gets wrong** — not as a fresh choice. The skeptic found
+three real defects in what runs: two daemons share one clone, so only the one that merged restarts; the merge form
+lets the clone drift 54 commits off `main`; and nothing guards the operator's primary checkout in code. One new
+fork appears: may a daemon run code that has not landed on `main` (the "POC mode" now in flight)? Recommended: yes,
+but only as a per-clone opt-in behind a test gate, a rollback that lives outside the daemon, and a statute
+amendment — and never in a clone whose daemons review, label or land PRs.
 
-*Prepared 2026-09-23 (session prep-3681). Research topic:
-[/research/resident-daemon-staleness-and-reload/](/research/resident-daemon-staleness-and-reload/). Session report:
-`we:reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md`. Cites read on `origin/main` `e43f2b12d`; "(proto)"
-marks a fact that exists only on `origin/lane/mechanical-dispatcher` `600acc14f`. One Opus skeptic round and one
-fresh-context screen ran; the body is the version that survived them (Fork 4 flipped, Fork 3 dissolved, Forks 1–2
-amended).*
+*Re-prepared 2026-09-23 evening (session reprep-3681), superseding the morning prep against `fcc756b2c`. Cites
+read on `origin/main` `051f2fcb3` and on the live host (read-only). Report:
+`we:reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md` — its evening addendum section holds this re-prep's
+grounding; its earlier sections and the research topic
+[/research/resident-daemon-staleness-and-reload/](/research/resident-daemon-staleness-and-reload/) still hold the
+prior-art survey. Two Opus skeptic rounds and two fresh-context screens ran on this version; the body is what
+survived them (Fork 1 dissolved, Fork 2 re-worded, Fork 4 gained a sub-fork, Fork 5 narrowed to a per-clone opt-in).*
 
 ## The ask (operator, epic #3383, 2026-09-14)
 
@@ -36,299 +40,329 @@ hoc investigation. Three linked asks: (1) start/stop/restart/health-check toolin
 daemon's running code is stale against its branch's HEAD; (3) a reload path that does not lose in-flight
 agent/command state — *"if it can reload and reconnect agent and command it could work"*.
 
-**Motivating evidence — the same failure twice in one night (2026-09-14).** (1) The telemetry fix (PR #2198)
-needed a manual restart of the resident runner; nothing noticed the process predated the fix. (2) The dispatch
-fix `14e0a7249` (a 33-hour silent dispatch block) landed on the driver's own branch, and the live driver (PID
-93017) kept running the old code until someone thought to check. Both times the fix was fine; the system just
-did not know a running daemon no longer matched its code. Earlier: #3467 records three hand restarts of the
-runner on 2026-09-03 for the same reason.
+**Operator direction since the first prep (2026-09-23, verbatim — grounding, not a ruling):**
 
-## FOUND (grounding)
+- "This has to happen automatically" — about daemon staleness.
+- "no manual fixes, improve the daemon if needed"
+- "I'd thought we would first fix the deamon in protoytpe to go quick and then graduat to main once perfect"
+- "restart daemonn from lane as soon as the fix is ready"
 
-- **Nothing records the commit a daemon booted from, and nothing compares it to HEAD.** No boot-sha field on
-  either branch. The driver-mode marker is `{mode, startedAt, pid, maxTicks}`. The lease entry
-  (`we:skills-src/conveyor/runner-lock.mjs:108-113`) exposes `{held, stale, owner, heartbeatAt}` — no revision.
-  The drain daemon uses a different lock (WE's `drain-lock`) with its own schema.
-- **The existing "stale" checks are about other things.** `assertMainNotStale`
-  (`we:scripts/lib/main-staleness.mjs:141`) fast-forwards a *checkout*, never the code already imported. The (proto)
-  main-ref-sync pass moves a *ref*. The driver-watchdog's `stale` verdict means "no progress for 20 min"
-  (liveness); its last-known-good marker is a rollback target, and "whoever promotes the driver onto new code runs
-  `record-good` FIRST" (`we:scripts/conveyor/driver-watchdog.mjs:48-55`).
-- **Which daemons freeze code at boot.** Frozen: the runner and supervisor, `review-daemon`
-  (imports its passes in-process, `we:skills-src/conveyor/review-daemon.mjs:49-53`), `reconcile-fix-dispatch-daemon`,
-  `verify-daemon`, the `pass-daemon` shell, and the drain daemon (`plateau:tools/drain-daemon/daemon.mjs`, up ~22 days
-  on 2026-09-23). Not frozen: every pass child the runner, `pass-daemon` and the drain daemon spawn per run.
-- **Not every loaded file is a static import.** The runner lazy-loads the hiccup modules with `await import`
-  (`we:skills-src/conveyor/runner.mjs:369-370`). The drain daemon loads WE's drain lock
-  (`we:scripts/readiness/drain-lock.mjs`) by dynamic import from a *different repo's* clone
-  (`plateau:tools/drain-daemon/daemon.mjs:176-183`) — a clone it hard-resets every pass, so the file on disk changes
-  under the frozen module.
-- **In-flight state is already out of process.** Agents start with `claude --bg` and are tracked through
-  `claude agents`; (proto) spawned `detached` + `unref()` (`we:scripts/operations/detached-dispatch.mjs:96-110`
-  (proto)). (proto) runner bookkeeping is persisted to disk. Drain state is GitHub. Leases are files
-  (`we:skills-src/conveyor/runner-lock.mjs:51`).
-- **Operator state is found by script location.** The queue root is derived from where the script sits, not
-  the working directory (`we:scripts/conveyor/queue-store.mjs:124-130`), and the operator queues from the
-  primary checkout — [#state-lives-where-its-nature-dictates](/docs/agent/platform-decisions/#state-lives-where-its-nature-dictates)
-  clause 1 names that primary-writable queue as its type case. A daemon moved to another checkout would read a
-  different `.conveyor/`.
-- **Known restart loss windows (build gaps, not forks).** Runner on main has no SIGTERM handler, so its lease leaks
-  for the 15-min TTL (fixed (proto) `we:skills-src/conveyor/runner.mjs:1276-1300`). A build agent spawned < 60 s
-  ago may be unlisted — (proto) `restart-runner` refuses in that window. `we:skills-src/conveyor/pass-daemon.mjs:148-155`
-  exits without killing its in-flight child. Review dispatch has no durable claim, only a lagging liveness read.
-- **Relaunch machinery, and its gaps.** The supervisor classifies child exits and relaunches (`classifyExit`
-  `we:skills-src/conveyor/supervisor.mjs:94-101`, `decideRestart` `:120`) — but `classifyExit` has no `reload` reason
-  and treats any exit under 3 s (`:52`) as a crash before it reads `stoppedReason`. launchd `KeepAlive` relaunches
-  review / fix-dispatch / pass daemons and the drain daemon; **nothing relaunches the conveyor supervisor or the
-  manifest launcher** (no plist installed; `we:skills-src/conveyor/com.we.conveyor-supervisor.plist.example` is
-  inert). The launcher already treats `DAEMON_MANIFEST` as the list of "every resident conveyor daemon"
-  (`we:skills-src/conveyor/supervisor-launcher.mjs:4-7`). (proto) `restart-runner` is a declared safe-restart
-  operation. `runner-activity` covers only three daemons.
-- **Checkouts.** review / fix / pass daemons run from a dedicated `wev-review-daemon` checkout that something
-  outside the repo merges `origin/main` into, followed by a manual restart 4 s later (reflog). The live driver runs
-  from the primary checkout (detached HEAD, 26 behind). The drain daemon runs from plateau-app primary — the
-  ratified #2501 dedicated clone is unbuilt.
-- **Merge rate.** Main took ~43 first-parent merges a day over 2026-09-16..23, and
-  [#poc-branch-mechanical-sync](/docs/agent/platform-decisions/#poc-branch-mechanical-sync) merges each into the POC
-  branch too. `review-daemon`'s import closure (83 files) was touched by ~9% of those commits.
-- **Statute precedent.** [#drain-daemon-self-hosting-boundary](/docs/agent/platform-decisions/#drain-daemon-self-hosting-boundary)
-  (#2501) rules, for the drain daemon only: a dedicated clone it resets itself, justified *because* it self-updates
-  (clause 1); reload by clean exit + `KeepAlive` between passes (clause 2); independent review of self-source changes
-  (clause 3), which the #3649 rider already extends to driver-class processes.
+## FOUND (grounding, re-read 2026-09-23 evening)
 
-**Prior art** (full survey in the research topic). Every production system except Erlang/OTP reloads by *stop at
-a safe point → supervisor relaunches fresh code*, with state outside the process: systemd/launchd, Kubernetes
-rolling updates (`preStop` + grace period), nginx/Unicorn re-exec, pm2 `reload`. Node's own `--watch` restarts;
-it does not hot-swap. Staleness is detected by the process *publishing the revision it runs* (Prometheus
-`build_info{revision}`) and comparing it with the *desired* revision (Argo CD / Flux "OutOfSync") — and Argo CD
-*detects* drift by default, while auto-sync is a per-application opt-in.
+**What runs now.**
+
+- **Shared self-sync helper: `we:scripts/lib/daemon-self-sync.mjs`** (#3954, then #2533 timeouts). Its header
+  calls it "xv6fciw (narrow slice of decision #3681)". `decideSelfSync` (`:39`) is pure: merge only when fetched,
+  behind, on `main` and clean; every failed probe fails closed (`fetch-failed`, `count-failed`, `head-failed`,
+  `status-failed`). `selfSyncCheckout` (`:66`) fetches `origin/main`, then runs a real `git merge` (not a
+  fast-forward, because the clone usually carries extra commits) and runs `git merge --abort` on any failure.
+  Every git call has a 60 s timeout. `withSelfSync` (`:97`) runs the sync before each tick; if *this process*
+  merged commits, it calls `onRestart` instead of the tick. The helper has **no restart floor, no test gate, no
+  rollback, and no lock** between processes sharing a clone. It tracks `main` only.
+- **Who uses it.**
+  - Review daemon (`we:skills-src/conveyor/review-daemon.mjs:301-308`) and fix-dispatch daemon
+    (`we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:189`): **always on**, no flag, and **both in the
+    same clone** `wev-review-daemon` (plus six pass-daemon watchers). `onRestart` releases the lease and calls
+    `process.exit(0)`; launchd `KeepAlive` relaunches. Their only guards are "on `main`" and "clean tree". The
+    operator's primary is safe today only by accident: it sits on a detached HEAD, so `symbolic-ref` fails and
+    the helper skips (`head-failed`).
+  - Dispatcher (`we:skills-src/conveyor/runner.mjs:589-593`, #2527 / #3984): **opt-in**. `wireSelfSyncAndAppAuth`
+    wires self-sync only with the `--self-sync` flag (`:661`); there is no coded primary guard, only the flag. The
+    flag is passed by `we:skills-src/conveyor/launchd/com.we.dispatcher.plist.example`, marked "STAGED, NOT
+    INSTALLED", which also points at `wev-review-daemon`. No dispatcher launchd job is loaded.
+  - Drain daemon (`plateau:tools/drain-daemon/`): **opt-in** (`DRAIN_DAEMON_SELF_SYNC=1` plus
+    `DRAIN_DAEMON_SELF_SYNC_ROOT`, both set in its live plist). `decideSelfSyncAllowed`
+    (`plateau:tools/drain-daemon/lib.mjs:86`) refuses when the checkout is the operator's primary. A **5-minute
+    restart floor** (`minRestartIntervalSec: 300`, `plateau:tools/drain-daemon/lib.mjs:28`, plateau PR #183,
+    merged 2026-09-23) defers a restart for a young process. It loads WE's helper at run time from its WE clone.
+    It runs alone in the dedicated clone `plateau-drain-daemon`, so #2501 clause 1's dedicated clone is now built.
+  - Pass-daemon watchers (`we:skills-src/conveyor/pass-daemon.mjs`) and the verify daemon: **no self-sync.** The
+    six watchers in `wev-review-daemon` had been up about 5 h at 18:45 while that clone merged `main` 30+ times
+    under them. **In flight, not landed:** a worker is adding self-sync to them plus a "POC mode": the clone
+    follows a registered branch `lane/daemon-poc` and merges both `origin/main` and `origin/lane/daemon-poc`
+    (env `DAEMON_SELF_SYNC_BRANCH`). `origin/lane/daemon-poc` exists but has no commits past `main`, and
+    `DAEMON_SELF_SYNC_BRANCH` appears in no pushed commit yet.
+- **Still unbuilt from the first prep:** no boot sha in any heartbeat or lease (`bootSha` appears nowhere);
+  `classifyExit` (`we:skills-src/conveyor/supervisor.mjs:94`) has no `reload` reason, so an early exit is still
+  `too-short` (`:97`); `DAEMON_MANIFEST` (`we:skills-src/conveyor/daemon-manifest.mjs`) lists pass scripts only,
+  with no lifecycle fields and no drain entry; no daemon status/restart operation; the watchdog last-known-good pin
+  is not on `main`.
+
+**What happened today (evidence for the forks).**
+
+1. **Self-sync restarts work — for the process that merged.** The `wev-review-daemon` reflog shows 33 self-sync
+   `merge origin/main` entries between 10:28:03 (when the self-sync branch itself was merged in by hand) and 18:30, about four an hour, each
+   between ticks. The logs repeat `daemon-self-sync: merged N new commit(s) from origin/main — restarting onto the
+   new code`. The drain clone fast-forwarded at 14:06 and 14:52 with a matching restart line. No lost work was
+   traced to these restarts. **But** each merge restarted only the daemon that made it: at 18:45 the fix-dispatch
+   daemon had been up since about 18:10, while the clone moved at 18:21 and 18:30, so it was running code older
+   than its checkout.
+2. **Launch-from-lane shipped a hang.** At 18:20 an unreviewed lane commit (`38b8b0ab9`, PR #2542, still open)
+   was merged by hand into `wev-review-daemon` so the daemons would run it early. It added a `git cherry` call
+   per lane per remote head to `we:scripts/lane-pool.mjs` (O(lanes×heads)), which hung the fix daemon's WE tick
+   for more than 5 minutes. It was reverted in the clone by hand at 18:40 (`fff012906`). A
+   `we:scripts/lane-pool.mjs` `list` child started about 18:22 was still running at 18:45. Nothing detected the
+   hang and nothing rolled it back. The reflog shows the same hand-merge habit earlier (08:25, 09:22, 09:30,
+   17:51).
+3. **A force-killed daemon blocks its own relaunch.** A SIGTERM mid-tick cannot run the shutdown handler (the
+   tick is inside long synchronous `execFileSync` calls). `launchctl kickstart -k` then SIGKILLs it, the lease
+   is never released, and every relaunch fails with "a live instance already holds the lease" until the TTL
+   expires. Seen twice today; #3952 (open) proposes reclaiming a same-host lease whose pid is dead.
+4. **`kickstart -k` mid-tick is the hazard** behind (3). This contradicts a premise in
+   [#drain-daemon-self-hosting-boundary](/docs/agent/platform-decisions/#drain-daemon-self-hosting-boundary)
+   clause 2, which calls `kickstart -k` redundant because "its SIGTERM runs the same clean handler". It does not
+   while a tick is inside a synchronous call.
+5. **The clone is not `main`.** `wev-review-daemon` sits 54 commits ahead of `origin/main` (hand merges of lane
+   work, then self-sync merge commits). The daemons already run `main` plus unreviewed extras, with no record of
+   which.
+6. **State split still applies to the dispatcher.** The operator's queue is found by script location
+   (`we:scripts/conveyor/queue-store.mjs:129`). The staged dispatcher plist runs from `wev-review-daemon`, so it
+   would read that clone's `.conveyor/`, not the primary's
+   ([#state-lives-where-its-nature-dictates](/docs/agent/platform-decisions/#state-lives-where-its-nature-dictates)).
+
+**Unchanged from the first prep:** Node cannot unload modules; agents, leases and drain state live outside the
+process; pass children spawn fresh code; nothing relaunches the conveyor supervisor. Statute:
+#drain-daemon-self-hosting-boundary (#2501) — dedicated clone updated by `fetch` + `reset --hard origin/main` +
+`clean -fdq` (clause 1), clean exit + `KeepAlive` between passes (clause 2), independent review of the daemon's own
+source (clause 3). [#poc-branch-declared-delivery-mode](/docs/agent/platform-decisions/#poc-branch-declared-delivery-mode)
+clause 4(a): "the runner's own steady state is still tracking `main` — a POC branch is a delivery TARGET … never
+the default tracking ref"; clause 4(c): every POC branch needs a registry entry.
 
 ## Axis framing
 
-Three separate questions: **how** a daemon picks up new code (reload primitive, Fork 1), **what** counts as
-stale (Fork 2), and **who moves the checkout** the daemon runs from (Fork 4). The drain-daemon statute answered
-the first and third for one daemon; this item generalizes the first, adds the second, and narrows the third —
-clause 1's self-update was justified by the drain's own conditions, which most daemons do not meet. When to run
-the check, lifecycle tooling and per-daemon scope are not forks (see Supported by default).
+Three live questions: **when** a daemon counts as stale (Fork 2), **who moves its clone and how** (Fork 4 and its
+sub-fork), and **which code a daemon may run before `main` has it** (Fork 5, new). Forks 2 and 4 are *de facto*
+decided by what runs and by the operator's "has to happen automatically"; for them the call is **ratify what
+runs, or change it**, and each default names exactly what it changes. How a daemon reloads (old Fork 1) and when
+it checks (old Fork 3) are now forced by the platform and by what runs — see Supported by default.
 
 ## Recommended path at a glance
 
-| Fork | Recommended default | Main alternative (excluded) | Confidence |
-|---|---|---|---|
-| Fork 1 — reload primitive | **(b) exit cleanly at a safe point; an outside relauncher brings it back** (extend #2501 clause 2) | (a) in-place hot-reload | high — precedent + platform limit |
-| Fork 2 — what counts as stale | **(b) a file the daemon actually loaded changed since boot (runtime-recorded, per repo), with an age backstop** | (a) any new commit on the checkout | med-high |
-| ~~Fork 3 — what triggers the check~~ | dissolved → Supported by default (poll at the safe point) | — | — |
-| Fork 4 — who moves the daemon's checkout | **(a) nobody automatically: detect origin drift read-only and report; self-update is a per-daemon opt-in, off by default, only where four safety conditions hold** | (b) self-update on for every daemon, gate stripped | med-high |
+| Fork | What runs today | Recommended default | Main alternative (excluded) | Confidence |
+|---|---|---|---|---|
+| ~~Fork 1 — reload primitive~~ | clean exit + `KeepAlive` | dissolved → Supported by default (forced: Node cannot hot-reload) | — | — |
+| Fork 2 — what counts as stale | "I just merged" → that process restarts | **(a) any new commit, re-worded: stale = the clone's input heads (`main`, POC) moved since this process booted, checked by every daemon every tick; 5-min restart floor** (flipped from the first prep) | (b) loader-hook check of loaded files | high |
+| ~~Fork 3 — what triggers the check~~ | check before each tick | dissolved → Supported by default | — | — |
+| Fork 4 — who moves the clone | each daemon, racing in a shared clone | **(a) automatic, by the daemons, under a per-clone reader/writer lock, a coded primary guard and a fixed state root** (flipped from the first prep) | (b) detect-only, someone promotes | high |
+| Fork 4 sub-fork — how the clone moves | `git merge` on top of whatever is there | **(y) rebuild: reset to `origin/main` (plus the registered POC head, if any) — #2501 clause 1's form** | (x) keep merging on top | med-high |
+| Fork 5 — code not yet on `main` (new) | hand merges of lane commits; POC mode in flight | **(c) per-clone opt-in POC branch, off by default, never in a clone that reviews or lands PRs, behind a test gate and an outside rollback, with a statute amendment** | (b) ad hoc launch-from-lane | med |
 
 ## Supported by default (not forks)
 
-- **Check at the safe point (was Fork 3, dissolved by the screen).** Fork 1 only acts at the safe point, so a file
-  watcher's earlier notice buys nothing; the two are behaviourally identical to the operator. Builder default: run
-  the Fork 2 check at each loop iteration before the next pass. Acceptance bar: a reload happens within one loop
-  interval of the change reaching the checkout, and no resident file-watch handle is added.
-- **One mechanism for every daemon, per-daemon parameters (the original "uniform vs tiered" fork, dissolved).** The
-  mechanism (boot record, closure check, clean exit, relaunch) is the same; what differs is data — entry, safe
-  point, checkout, tracked branch, relauncher, and whether self-update is allowed (Fork 4). Blast radius is handled
-  by the review invariant, not by a different reload mechanism: *reloading onto code already in the checkout the
-  operator runs* opens no review hole; *pulling* new code in does, which is exactly what Fork 4 gates.
-- **One source of truth for the daemon list: extend `DAEMON_MANIFEST`, not a second registry.** The manifest
-  launcher already treats it as the list of every resident conveyor daemon. Add the lifecycle fields (entry,
-  checkout, tracked branch, relauncher, safe-point kind, `selfUpdate`) there. The plateau-app drain daemon is listed
-  as a read-only external entry for status; its lifecycle stays with its own CLI per #2501. `runner-activity` reads
-  this list to cover every daemon, not three.
-- **A declared `daemon` status/restart operation (ask 1)** generalizing the (proto) `restart-runner` refusals
-  (just-spawned-agent window, evidence-confirmed shutdown, leaked-lease sweep). `daemon restart <name>` (or SIGHUP)
-  means "reload at your next safe point", never an immediate kill. A `daemon promote <name>` step is the one
-  sanctioned way to move a non-self-updating daemon's checkout: run `record-good` first, then fast-forward, then the
-  daemon reloads on its own.
-- **Publish the running revision in the daemon's heartbeat record** — the runner-lock lease entry, or the
-  drain-lock entry for the drain — as `bootShas` (per repo) and `closureDigest`. Observers *report* drift ("running
-  `abc123`, checkout at `def456`, origin at `9f0e11`"); the daemon itself *acts*.
-- **The driver-watchdog is related, not the same mechanism.** It watches liveness; this watches code revision.
-  Under Fork 4 (a) a daemon never moves its own checkout, so a watchdog rollback (`reset --hard <last-known-good>`)
-  is respected by construction — and the reload then puts the daemon on the known-good code.
-- **Restart-storm guard (needed — the draft's "no new guard" was wrong).** (1) A `reload` exit is its own clean
-  reason in `classifyExit`, exempt from the 3 s `too-short` rule and from crash backoff. (2) A daemon that reloads
-  twice onto the same boot sha, or reloads and then crash-loops, stops reloading and alerts. (3) launchd-hosted
-  daemons get no backoff beyond launchd's ~10 s throttle and have no last-known-good — so for them the alert is the
-  guard.
-- **Build prerequisites (gaps to close first, not choices):** runner SIGTERM handler on main (lands with #3443);
-  `pass-daemon` kills its in-flight child on SIGTERM; review dispatch gets a durable claim like fix dispatch's
-  `action-store`; an outside relauncher for the conveyor supervisor (Fork 1); build #2501 clauses 1–2 for the drain.
-
-## Fork 1 — reload primitive: how a daemon picks up new code
-
-*Fork-existence:* real either/or with a broken branch — (a) cannot be built correctly on Node (no module unload),
-and #2501 clause 2 already rejected exec-in-place for the same daemon class.
-
-- **(a) In-place hot-reload.** Re-import changed modules into the running process (cache-busting dynamic import)
-  and swap handlers without exiting. *Pro:* no process gap. *Con:* Node ESM never frees a loaded module, so every
-  reload leaks a full module graph; timers, listeners and closures from the old graph keep running old code;
-  module-level singletons (the lease handle, heartbeat timer) duplicate. Doing it safely means Erlang-style
-  explicit state migration per module — a runtime Node does not have.
-- **(b) Exit cleanly at a safe point; an outside relauncher brings it back (default).** At the daemon's safe point
-  (between passes / ticks), release the lease, exit with a distinct `reload` reason, and let launchd `KeepAlive` or
-  the conveyor supervisor (`we:skills-src/conveyor/supervisor.mjs`) relaunch it on the new code. *Pro:* exactly
-  #2501 clause 2; the "in-flight agent/command state" survives because it is already out of process (detached
-  agents, file leases, GitHub). *Con:* a few seconds' gap per reload; needs the build prerequisites above.
-  **Two amendments from the skeptic:** (1) `classifyExit` gains a `reload` clean reason, checked *before* the
-  `too-short` rule, so a reload on the first tick after boot is not counted as a crash. (2) A daemon with no outside
-  relauncher — today the conveyor supervisor and the manifest launcher — first gets one (install its launchd
-  `KeepAlive` agent from the existing plist example). Its safe point is: SIGTERM the child → wait for the child's
-  clean exit → exit itself.
-
-**Default: (b).** It delivers what the operator asked for — "reconnect agent and command" — because nothing needs
-reconnecting: the new process reads the same leases, bookkeeping and `claude agents` listing the old one did.
-
-```js
-// Fork 1 (b) — in every resident daemon's loop, at its safe point (between passes).
-import { releaseRunnerLeaseIfOwned, RUNNER_LOCK_ROOT } from './runner-lock.mjs';
-
-if (codeIsStale()) {                                   // Fork 2
-  log({ event: 'reload', reason: 'code-stale', bootShas, headShas });
-  releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key });
-  announceStop('reload');                              // read back as stoppedReason by the supervisor
-  process.exitCode = 0;
-  return;                                              // leave the loop; launchd KeepAlive / supervisor relaunches
-}
-
-// supervisor classifyExit — the reload reason is checked before the too-short crash rule:
-if (code === 0 && stoppedReason === 'reload') return { kind: 'clean', reason: 'reload' };
-if (ranMs < crashThresholdMs) return { kind: 'crash', reason: 'too-short' };
-```
-
-Skeptic: SURVIVES-WITH-AMENDMENT — hot-reload's exclusion held; the attack found `classifyExit` would misread an
-early reload as a crash and that nothing relaunches the supervisor; both folded in as amendments (1) and (2).
-Screen: clear — reload semantics set the no-lost-work guarantee the operator relies on; (a) is impossible on Node
-at any build cost, not a scheduling call.
+- **Reload = exit cleanly at the safe point; launchd or the supervisor relaunches (was Fork 1).** Forced: Node ESM
+  cannot unload modules, so in-place hot-reload leaves old timers, listeners and lease handles running old code.
+  This is #2501 clause 2 and what the review, fix and drain daemons do today
+  (`we:skills-src/conveyor/review-daemon.mjs:302-306`). A thin parent that runs each tick as a fresh child is a
+  compatible build shape — it shrinks what can go stale — not a competing rule.
+- **Check before each tick (was Fork 3).** What `withSelfSync` does. A file watcher buys nothing, since nothing
+  acts before the safe point.
+- **Restart means "exit at your next safe point".** Never `launchctl kickstart -k` a daemon mid-tick (incidents
+  3–4). A `daemon restart <name>` operation drops a request file the daemon reads before its next tick. #3952's
+  same-host dead-pid lease reclaim is a prerequisite, so a daemon that *was* killed hard still relaunches at once.
+- **A `reload` exit reason in `classifyExit`,** checked before the `too-short` rule, for daemons the conveyor
+  supervisor hosts. launchd-hosted daemons already treat exit 0 as a normal relaunch.
+- **Publish the running revision** (the boot sha per repo, and the tracked heads) in the heartbeat or lease
+  record, so `runner-activity` can say "running `abc`, clone at `def`".
+- **One mechanism, per-daemon settings.** Every daemon uses `we:scripts/lib/daemon-self-sync.mjs`. Per-daemon
+  data (clone, tracked branches, floor, relauncher, POC opt-in) goes on `DAEMON_MANIFEST`, extended with
+  lifecycle fields and a read-only entry for the drain daemon — not a second registry.
+- **Hang detection lives outside the tick.** A per-tick budget cannot fire inside a synchronous `execFileSync`
+  (incident 2). So: a timeout on every child call the tick makes, plus an outside check that the heartbeat keeps
+  moving. This is what would have caught incident 2 without a human.
+- **Build prerequisites:** #3952 (dead-pid lease reclaim); `pass-daemon` kills its in-flight child on SIGTERM; a
+  durable review claim; an outside relauncher for the conveyor supervisor.
 
 ## Fork 2 — what counts as stale
 
-*Fork-existence:* real either/or — (a) is flawed: at ~43 merges a day (FOUND) it bounces every frozen daemon about
-40 times a day even when none of its code changed, and each bounce opens the restart loss windows in FOUND for no
-benefit. One trigger rule has to be the default.
+*Fork-existence:* real either/or — one rule decides when a daemon restarts. (b) needs a loader hook in every
+daemon and still misses code read with `fs`; (a) restarts more. Only one can be the trigger. What runs today is
+neither cleanly: it restarts only the process that did the merge.
 
-- **(a) Any new commit.** Stale when the checkout's HEAD ≠ the boot sha. *Pro:* trivial; never misses a change.
-  *Con:* ~10× the restarts of (b) (the review-daemon's closure was touched by ~9% of commits); each restart risks
-  the just-spawned-agent window and the review claim race; pass children already get fresh code without a restart.
-- **(b) A file the daemon actually loaded changed (default).** At boot, record the boot sha of **every repo** the
-  process loads code from, and — via a Node module-loader hook (`module.register` with a `resolve` hook that logs
-  each `file://` URL) — the set of (repo, path) pairs it actually loaded, including lazy and cross-repo dynamic
-  imports. Stale when `git diff --name-only <bootSha> HEAD` in any of those repos touches a recorded path. **Age
-  backstop:** also stale when any boot sha is more than 24 h or 200 commits behind, so a missed file (e.g. a data
-  file read with `fs`, not `import`) cannot leave a daemon stale indefinitely. *Pro:* restarts only when it matters;
-  catches the runner's lazy hiccup imports and the drain's cross-repo drain-lock load. *Con:* the loader hook is
-  a new piece of boot code every daemon must load first.
+- **(a) Any new commit — re-worded: stale = the inputs this process booted from have moved (default, flipped
+  from the first prep).** At boot every daemon records, for each repo it loads code from (the drain loads WE's
+  helper from a second clone), the input heads its clone was built from: the `origin/main` sha, plus the POC-branch
+  sha if the clone has one (Fork 5). At every tick it compares them with the clone's current inputs, whoever moved
+  the clone. Comparing *inputs*, not HEAD, matters: a rebuild that re-merges an unchanged POC head writes a new
+  merge commit, and a HEAD check would then restart forever. *Pro:* the running code never lags its checkout, for
+  every daemon in a shared clone (fixes incident 1's fix-daemon gap); restarts are between ticks with state
+  outside the process, so each costs seconds. *Con:* about four restarts an hour per daemon at today's merge rate;
+  the floor caps it.
+- **(b) Restart only when a file the daemon loaded changed.** The first prep's default: a `module.register` hook
+  records loaded files. *Pro:* about 10× fewer restarts. *Con:* a new boot-time piece in every daemon; misses
+  files read with `fs`; needs an age backstop. Once the clone moves by itself (Fork 4), a missed file means the
+  daemon silently runs old code next to new code.
 
-**Default: (b).** Matches the GitOps pattern (compare the *relevant* live revision with the desired one), keeps
-restarts rare, and the backstop bounds the one failure mode (a file the hook cannot see).
+**Default: (a) as re-worded, with a 5-minute restart floor on every daemon** (WE's helper gains the drain's
+`minRestartIntervalSec`). The floor counts from process start, so it bounds self-sync restarts only; a crash loop
+is bounded by launchd's `ThrottleInterval` (60 s in these plists) and the supervisor's crash backoff.
 
 ```js
-// Fork 2 (b) — boot: record what was actually loaded (runs before the daemon's own imports).
-import { register } from 'node:module';
-register('./record-loaded.mjs', import.meta.url);      // resolve hook appends each file:// URL to a shared list
-
-// safe point: compare per repo, with the age backstop.
-function codeIsStale() {
-  for (const { repo, checkout, bootSha, paths } of loadedByRepo()) {   // grouped from the hook's list
-    const head = git(['rev-parse', 'HEAD'], { cwd: checkout });
-    if (head === bootSha) continue;
-    const changed = git(['diff', '--name-only', bootSha, head], { cwd: checkout }).split('\n');
-    if (changed.some((f) => paths.has(f))) return true;
-    if (commitsBetween(checkout, bootSha, head) > 200 || ageHours(checkout, bootSha) > 24) return true;
+// Fork 2 (a) — we:scripts/lib/daemon-self-sync.mjs withSelfSync, proposed
+// BOOT_INPUTS, per repo the daemon loads code from: { main: '<origin/main sha>', poc: '<POC sha>' | null }
+const BOOT_INPUTS = readCloneInputs(roots);                          // recorded once, at process start
+tickOnce: async (...args) => {
+  if (Date.now() - PROCESS_START_MS >= minRestartIntervalMs) {
+    syncClonesIfInputsMoved({ roots, branches });                    // Fork 4: only the lock holder moves a clone
+    if (!sameInputs(readCloneInputs(roots), BOOT_INPUTS)) return onRestart();
   }
-  return false;
+  return tick(...args);
+},
+```
+
+Skeptic: REFUTED as first worded ("any merge → restart"): in a shared clone only the merging daemon restarts and
+the others keep old code (confirmed live: the fix daemon at 18:45). Re-worded to a per-process check; the second
+round then showed a HEAD check would loop once a POC head is re-merged on every rebuild, and that the drain loads
+code from two clones — so the check compares recorded input heads per repo. Also noted the floor does not cap
+crash loops — stated above.
+Screen: clear — whether a daemon can run code older than its checkout is operator-visible; with both free to
+build, (b) can still run stale code and (a) cannot, so a merit difference remains.
+
+## Fork 4 — who moves the clone a daemon runs from
+
+*Fork-existence:* real either/or — for a given clone, either the daemons move it automatically or a separate
+actor does after a report. The operator's "This has to happen automatically" and "no manual fixes" exclude the
+branch that waits on a person; a mechanical promoter is just (a) under another name.
+
+- **(a) Automatic, done by the daemons in the clone (default, flipped from the first prep).** Conditions every
+  self-updating clone must meet:
+  (i) **coded primary guard** — lift the drain's `decideSelfSyncAllowed` into WE's helper: refuse when the
+  checkout is the operator's primary (compared after resolving symlinks), and require the clone to be the
+  designated one. Ship the designated-root setting in the review, fix and dispatcher plists *before* the guard, or
+  the guard silently turns self-sync off;
+  (ii) **per-clone reader/writer lock** — each tick holds a shared hold on its clone; the mover takes an
+  exclusive hold, so the tree never moves under a running tick or its children, and only one process moves it.
+  The others see the inputs move and restart via Fork 2. Today two daemons can `git merge` in one tree at once,
+  and a lock failure is treated as a conflict whose `merge --abort` can undo the other's merge;
+  (iii) **state at a fixed root** — every file a daemon reads or writes that is found by script location moves to
+  a root given by env or flag: the `.conveyor/` queue (FOUND 6) and the tracked
+  `we:scripts/conveyor/run-scorecards.json` (`we:scripts/conveyor/run-scorecard-store.mjs:50`, committed locally by
+  `we:scripts/review-set-label.mjs:491`). The dispatcher plist is not installed until this holds;
+  (iv) **restart floor** (Fork 2).
+- **(b) Detect-only: publish "origin is N ahead", a person promotes.** The first prep's default. *Con — excluded:*
+  it is the manual step the operator ruled out; the helper's header records the clone re-synced by hand "5+ times
+  on 2026-09-23 alone" before self-sync shipped.
+
+**Default: (a).**
+
+```js
+// Fork 4 (a)(i) — the drain's guard (plateau:tools/drain-daemon/lib.mjs:86), lifted into the WE helper
+export function decideSelfSyncAllowed({ root, primaryRoot, designatedRoot }) {
+  if (realpath(root) === realpath(primaryRoot)) return { allowed: false, reason: 'primary checkout — never self-sync' };
+  if (realpath(designatedRoot ?? '') !== realpath(root)) return { allowed: false, reason: 'not the designated daemon clone' };
+  return { allowed: true };
 }
 ```
 
-Skeptic: SURVIVES-WITH-AMENDMENT — the merit held (measured ~10× fewer restarts than (a)); the attack showed a
-*static* import closure misses the runner's lazy imports and the drain's cross-repo dynamic import and that "the
-next natural restart" is no bound (22-day uptime); fixed by the runtime loader hook, per-repo boot shas and the
-age backstop.
-Screen: clear (re-screened after the amendment) — sets restart frequency, a behaviour the operator sees; (a)'s churn
-is inherent, not an effort cost.
+**Fork 4 sub-fork — how the clone moves.** *Fork-existence:* the two forms cannot both hold — either the clone is
+rebuilt to a known state or it accumulates.
 
-## Fork 4 — who moves the checkout a daemon runs from (self-update: gated and off by default, or on everywhere)
+- **(x) Keep merging on top — what runs today.** *Con:* the clone drifts (54 ahead, incident 5) and carries
+  whatever anyone merged by hand, with no record; a rollback needs a reset anyway; and it contradicts #2501 clause
+  1, so ratifying it means amending that clause, a principle-level change.
+- **(y) Rebuild: `reset --hard origin/main`, then merge the registered POC head if the clone has one (default).**
+  *Pro:* the clone is always a pure function of (`origin/main`, POC head); rollback is "reset to the last good
+  pair"; hand merges cannot linger; matches #2501 clause 1. `clean` is safe once state lives at a fixed root
+  (condition iii); until then, reset without `clean`. **Safety rule:** before any reset, refuse and alert if the
+  tree is dirty or HEAD carries commits that are in neither input head — so an unpushed scorecard commit or a
+  stray hand merge is surfaced, never silently wiped. *Con:* anything merged by hand is refused, then must go
+  through a lane PR or the POC branch — which is the point ("no manual fixes").
 
-*Fork-existence:* real either/or with a broken branch — (b) is broken on three independent counts at any build
-cost: it splits the daemon from the operator's state, it undoes the watchdog's rollback, and it runs unreviewed
-POC-branch code in a process that dispatches agents and pushes (details under (b)). One of the two must be the
-default for a daemon that has not opted in.
+**Default: (y).**
 
-- **(a) Detect-only by default; self-update is a per-daemon opt-in under four conditions (default).** Every daemon
-  runs a read-only `git fetch` of its tracked branch at the safe point and publishes "origin is N commits ahead,
-  and M of them touch my loaded files" in its heartbeat record; `runner-activity` / `daemon status` show it and the
-  runner-down alert (#3756) can surface it. The daemon never writes its own checkout; moving it is `daemon promote`
-  (runs `record-good`, fast-forwards, the daemon then reloads via Forks 1–2). A daemon may instead set
-  `selfUpdate: true` in its manifest entry **only when all four hold:** (i) its tracked branch is review-gated —
-  never a POC branch — or independent review is proven before the reload (#2501 clause 3 and the #3649 rider);
-  (ii) all operator state it reads (`.conveyor/*`) lives at a fixed state root outside the clone, passed by flag or
-  env, never found by script location; (iii) a watchdog last-known-good pin blocks the fast-forward until cleared,
-  and every self-update runs `record-good` first; (iv) `git clean` excludes the state directory. The drain daemon,
-  once #2501 clause 1 is built, meets all four (tracks `main`, state on GitHub). *Pro:* detection covers both
-  incident shapes; nothing silently pulls code; composes with every statute below. *Con:* for a non-opted daemon,
-  origin drift is *reported*, not auto-applied — someone (or a later mechanical promoter) runs `promote`.
-- **(b) Self-update on for every daemon, with the gate stripped** — every daemon runs from its own dedicated clone and
-  fast-forwards it at the safe point, with none of (a)'s four conditions. This is the same `selfUpdate` knob as (a),
-  set on everywhere with its safety gate removed, not a separate architecture. *Pro:* fully hands-off. *Con — broken:* (1) a runner in its own clone reads *its own* queue, dispatch-pause and queue-scope
-  files under `.conveyor/`, so the operator's queue and pause from the primary are silently ignored (FOUND; collides
-  with #state-lives-where-its-nature-dictates clause 1); (2) the next safe point fast-forwards straight past a
-  watchdog rollback, re-applying the bad code in a loop, and never runs `record-good`, so the watchdog then refuses
-  to heal; (3) the runner tracks the POC branch, where landing skips review
-  ([#poc-branch-declared-delivery-mode](/docs/agent/platform-decisions/#poc-branch-declared-delivery-mode) clause 2),
-  so it would self-apply unreviewed code — the #809 self-approval hole #2501 clause 3 closes; (4) after graduation,
-  `git clean -fdq` on main deletes `.conveyor/` state files main does not ignore.
+Skeptic: SURVIVES-WITH-AMENDMENT — the attack showed the shared clone needs one mover (added the lock), that the
+guard would silently disable self-sync unless the plists gain the designated root first (added), that the primary
+is protected only by its detached HEAD today (recorded in FOUND), and that the draft's "merge, never reset"
+reversed #2501 clause 1 and fought Fork 5's rollback — so the sub-fork was added with rebuild as its default. The
+second round attacked (y): a reset would wipe tracked runtime state (the scorecard file in condition iii) and
+could move the tree under a mid-tick child; folded in as the refuse-if-dirty-or-foreign-commits rule, the
+reader/writer lock, and condition (iii)'s wider scope.
+Screen: clear (Fork 4 and its sub-fork, fresh re-screen) — whether a person must act, and whether the clone can
+silently diverge from `main`, are operator-visible; neither is an effort call.
 
-**Default: (a).** Mirrors the GitOps split (Argo CD detects drift by default; auto-sync is a per-app opt-in) and
-keeps #2501 clause 1's self-update where its own justification holds, instead of stretching it to daemons that
-only need to detect.
+## Fork 5 — which code a daemon may run before `main` has it (new)
+
+*Fork-existence:* real either/or at the statute level — either a daemon clone may track a POC branch at all, or
+it may not. #poc-branch-declared-delivery-mode clause 4(a) says the runner's steady state tracks `main`, never a POC
+branch; the operator wants daemon fixes to run "in protoytpe to go quick". (b) is broken (incident 2). Once POC
+tracking is allowed, whether a given clone uses it is a per-clone setting, not a further fork.
+
+- **(a) `main` only, everywhere.** Daemons run only merged, reviewed code; the in-flight POC mode is not wired.
+  *Pro:* no statute change; no review hole. *Con:* against "first fix the deamon in protoytpe to go quick" and
+  "restart daemonn from lane as soon as the fix is ready"; every daemon fix waits for full review and landing.
+- **(b) Ad hoc launch-from-lane — what happened today.** Anyone merges a lane commit into a clone by hand.
+  *Con — broken:* incident 2 — an unreviewed perf regression hung the fix daemon, nothing noticed, and the repair
+  was a hand revert (against "no manual fixes").
+- **(c) A per-clone opt-in POC branch, off by default, under conditions (default).** A clone may set
+  `DAEMON_SELF_SYNC_BRANCH` to one registered POC branch (e.g. `lane/daemon-poc`, the in-flight build). Conditions:
+  (1) **statute first** — amend clause 4(a) to allow a daemon clone, by explicit opt-in, to track `main` plus one
+  registered POC branch, and give the branch its clause 4(c) registry entry;
+  (2) **never in a clone that runs anything which reviews, labels, merges or lands PRs** — the review daemon, the
+  drain daemon, and the `merge-orphan-sweep` pass (it runs `we:scripts/merge-ai-prs.mjs`). POC code there could
+  review or land its own graduation PR (the #809 self-approval hole #2501 clause 3 closes). A POC-tracking daemon
+  runs in its own clone; today's shared `wev-review-daemon` must be split first;
+  (3) **test gate before the POC head is taken** — the daemon's own tests pass on the rebuilt tree in a scratch
+  worktree before the live clone moves;
+  (4) **rollback outside the daemon** — the relaunch wrapper (not the new code, which may crash at import) sees a
+  crash loop or a stalled heartbeat after a move, rebuilds the clone at the last good (`main`, POC) pair, skips
+  that POC head until it changes, and alerts;
+  (5) **graduate by review** — POC commits reach `main` through the normal independent review.
+  "Restart the daemon from a lane" becomes "push the fix to the clone's POC branch".
+
+**Default: (c).** It gives the operator the fast path he asked for, keeps `main`-only as the default for every
+clone, and closes each hole incident 2 exposed.
 
 ```js
-// Fork 4 (a) — at the safe point, read-only. `entry` is the DAEMON_MANIFEST row.
-git(['fetch', '--quiet', 'origin', entry.trackedBranch], { cwd: entry.checkout });   // updates refs only
-const ahead = git(['rev-list', '--count', `HEAD..origin/${entry.trackedBranch}`], { cwd: entry.checkout });
-publishHeartbeat({ originAhead: Number(ahead), originTouchesLoaded: touchesLoaded(`origin/${entry.trackedBranch}`) });
-if (entry.selfUpdate) selfFastForward(entry);          // only entries that meet conditions (i)–(iv)
+// Fork 5 (c) — which heads a clone rebuilds from (Fork 4 sub-fork (y)); gate and rollback are build slice 3
+const heads = ['origin/main', entry.pocBranch && `origin/${entry.pocBranch}`].filter(Boolean);
+if (entry.pocBranch && cloneRunsPrActor(entry.clone)) throw new Error('POC tracking not allowed: this clone reviews, labels or lands PRs');
+rebuildClone({ root, heads, gate: runDaemonTests });  // moves the live clone only if the gate passes
 ```
 
-Skeptic: REFUTED the draft default (every daemon self-updates its own clone) — state split from the primary queue,
-watchdog-rollback loop, unreviewed POC code, `git clean` data loss, and a circular citation of #2501 clause 1 (its
-forced invariant presumes self-update, so it cannot be cited to *choose* self-update). Default flipped to (a), with
-the skeptic's four conditions as the opt-in gate.
-Screen: clear (re-screened after the flip) — decides whether a daemon can silently run unreviewed code and whether
-it sees the operator's queue; (b)'s breaks are outcome defects, not effort costs. Config-dimension check: the
-`selfUpdate` knob is real, but (b) is that knob with its gate removed — an illegitimate value, not a second
-legitimate setting — so the either/or holds; relabelled (b) accordingly.
+Skeptic: REFUTED the draft (c) as a plain default — it collided with clause 4(a), which the draft had cited as
+support; it let POC code run in the review daemon (self-approval); and its rollback lived inside the new code and
+reverted `main` commits along with POC ones. Rewritten as a per-clone opt-in with the statute amendment, the
+review/drain exclusion, an outside rollback keyed on the (`main`, POC) pair, and rebuild instead of accumulated
+merges. The attack's fallback was (a); (c) as rewritten keeps (a) as every clone's default. Second round:
+SURVIVES-WITH-AMENDMENT — the exclusion was keyed on two roles and missed `merge-orphan-sweep`, which merges PRs;
+now keyed on what the clone does, with that pass named.
+Screen: flagged(impl) on the draft (it hard-coded a dry-tick timeout and pin mechanics in the ruling) → moved
+those to build slice 3; the ruling now states only the policy. Re-screen (fresh): clear — whether unreviewed code
+may run in a daemon, and where, is operator-visible.
 
 ## Statute note (for `codifiedIn` at resolve)
 
-**Mint a new anchor** (working name `#resident-daemon-reload-lifecycle`), not an amendment of
-#drain-daemon-self-hosting-boundary: that anchor's clause 1 is justified by self-update and does not transfer to
-detect-only daemons. The new anchor states Forks 1, 2 and 4 for every resident daemon and cites #2501 for the
-drain-specific clauses. How it composes with existing statute:
+Mint `#resident-daemon-reload-lifecycle` covering Forks 2, 4 and 5 and the forced reload rule for every resident
+daemon. How it composes:
 
-- **#drain-daemon-self-hosting-boundary** — the drain is the first `selfUpdate: true` daemon; its clauses 1–2 are the
-  worked instance. Clause 3's independence invariant is carried across as Fork 4 condition (i), not kept drain-only
-  (the #3649 rider already extends it to driver-class processes).
-- **#state-lives-where-its-nature-dictates** — Fork 4 condition (ii): operator state stays primary-writable; a daemon
-  clone points at it, never copies it.
-- **#poc-branch-declared-delivery-mode** — a POC-tracking daemon cannot self-update (condition (i)).
-- **#poc-branch-mechanical-sync** — supports Fork 2 (b): every landing on main is merged into the POC branch too, so
-  "any commit" would multiply restarts on both.
-- **#primary-read-only-lanes-only** — no conflict: it limits *writes* to the primary; a detect-only daemon executing
-  from the primary writes nothing to its tree.
-- **Driver-watchdog last-known-good** (proto, not yet statute) — Fork 4 condition (iii).
+- **#drain-daemon-self-hosting-boundary** — the drain is the worked instance. Clause 1's rebuild form is kept
+  (Fork 4 sub-fork (y)). Clause 2's premise that `kickstart -k`'s SIGTERM "runs the same clean handler" is wrong
+  during a synchronous tick (incidents 3–4); the new anchor records that correction. Clause 3's independence rule
+  is why Fork 5 (c)(2) excludes any clone that reviews or lands PRs.
+- **#poc-branch-declared-delivery-mode** — Fork 5 (c) *amends* clause 4(a) (a daemon clone may opt in to tracking
+  one registered POC branch) and uses clause 4(c)'s registry. This is a principle-level change for the operator
+  to ratify with Fork 5, not something a build may assume.
+- **#state-lives-where-its-nature-dictates** — Fork 4 condition (iii).
+- **#drain-daemon-self-hosting-boundary clause 1** (dedicated clone), not #primary-read-only-lanes-only, is the
+  authority for Fork 4 condition (i); the latter governs agent edits and is only supporting context.
 
 ## Follow-on build (on ratification)
 
-The existing open build cards become this ruling's slices, re-scoped rather than duplicated: #3467 (runner restart
-on main) and #3397 (supervisor reload lifecycle, blocked by #3443) implement Forks 1–2 for the runner/supervisor;
-#3756's runner-down alert reads the extended manifest and the origin-drift field. New slices: manifest lifecycle
-fields + `runner-activity` coverage; the loader hook + boot record in the heartbeat; `classifyExit` `reload` reason
-+ the reload-loop guard; the supervisor's launchd relauncher; the `daemon status/restart/promote` operation;
-`pass-daemon` child-kill on SIGTERM; a durable review claim; the drain daemon's #2501 clause 1–2 build. Predicted
-touch-set: `we:skills-src/conveyor/`, `we:scripts/operations/runner-activity.mjs`, `we:scripts/operations/runner-activity-io.mjs`,
-`we:scripts/operations/restart-runner.mjs` (proto), `we:scripts/conveyor/driver-watchdog.mjs`, `plateau:tools/drain-daemon/`.
+Re-scope the existing cards rather than duplicate them: #3467 and #3397 (runner and supervisor reload) adopt the
+exit path and the `reload` reason; #3756 reads the published revision; #3952 lands as a prerequisite; #3984
+(dispatcher daemon) waits for Fork 4 (i) and (iii) before its plist is installed. New slices:
+
+1. WE helper: boot input heads + per-tick check, restart floor, reader/writer clone lock, primary/designated guard, rebuild form (Forks 2, 4) — `we:scripts/lib/daemon-self-sync.mjs`, plus the designated-root setting in the plist examples under `we:skills-src/conveyor/`.
+2. Pass-daemon self-sync (the in-flight work), `main`-only until Fork 5's statute amendment lands — `we:skills-src/conveyor/pass-daemon.mjs`.
+3. POC opt-in: test gate, outside rollback keyed on the (`main`, POC) pair, head skip — `we:scripts/lib/daemon-self-sync.mjs`, `we:skills-src/conveyor/`.
+4. Split `wev-review-daemon` so the PR-acting daemons (review, fix, `merge-orphan-sweep`) never share a clone with a POC-tracking one (Fork 5 c 2) — plist examples under `we:skills-src/conveyor/`.
+5. Child-call timeouts + an outside heartbeat check — `we:skills-src/conveyor/`.
+6. Fixed state root for script-located state (`.conveyor/`, the scorecard file) — `we:scripts/conveyor/queue-store.mjs`, `we:scripts/conveyor/run-scorecard-store.mjs`.
+7. Running revision in the heartbeat + `runner-activity` coverage from `DAEMON_MANIFEST` — `we:scripts/operations/runner-activity.mjs`.
+8. `daemon restart` via a request file, no `kickstart -k` — `we:skills-src/conveyor/`.
+
+Predicted touch-set: `we:scripts/lib/daemon-self-sync.mjs`, `we:skills-src/conveyor/`,
+`we:scripts/conveyor/queue-store.mjs`, `we:scripts/conveyor/run-scorecard-store.mjs`, `we:scripts/operations/runner-activity.mjs`,
+`plateau:tools/drain-daemon/`.
 
 ### Review jury (provisional — pre-registered #2638)
 
@@ -344,5 +378,6 @@ Care level: `elevated`. This jury binds against the item's predicted scope and i
 
 ## Done when
 
-This is a decision item, not a build. Done when ratified via `/next decision`; the build lands through the
-follow-on slices above.
+This is a decision item, not a build. Done when the operator rules on it via `/next decision`: for Forks 2 and 4
+that means ratifying what runs with the named changes (or overriding them); for Fork 5, whether daemon clones may
+track a POC branch and under which conditions. The build lands through the follow-on slices above.
