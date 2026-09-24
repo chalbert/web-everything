@@ -49,9 +49,10 @@ import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -103,13 +104,24 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * `defaultListAgents` (`we:scripts/operations/dispatch-lane-io.mjs`), not a second builder of the same argv: one
  * caller asking `claude agents --json` a different way than another is precisely the drift that makes two halves
  * of one chain disagree about what is alive.
- * @param {{exec?:Function, env?:object}} [o]
+ * ALSO runs {@link markHungSessions} (epic #3383 continuation) after the self-reported-done pre-pass, so a
+ * session neither `state: 'done'` nor self-reported but whose OWN transcript file has gone stale (per
+ * `we:scripts/conveyor/hung-session.mjs`) also stops reading as `live-process` in {@link
+ * planReconcile}/`assessLiveness` — the mechanical backstop for exactly the case a crashed review agent's
+ * unreported infra failure leaves behind (`review-agent-brief.md`'s "report done on exit" is prose, and prose
+ * is not guaranteed to run).
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, now?:number, hungThresholdMs?:number}} [o]
  * @returns {Array<object>}
  */
-export function defaultReadAgents({ exec = execFileSync, env = process.env, completionFor = tryReadCompletion, now = Date.now() } = {}) {
+export function defaultReadAgents({
+  exec = execFileSync, env = process.env, completionFor = tryReadCompletion,
+  hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
+} = {}) {
   const listed = defaultListAgents({ exec, env });
   // xpb0zyq — a session that already wrote its own completion record is finished, whatever the listing says.
-  return markSelfReportedDone(Array.isArray(listed) ? listed : [], completionFor, now);
+  const selfReported = markSelfReportedDone(Array.isArray(listed) ? listed : [], completionFor, now);
+  // #3383 continuation — a session whose OWN transcript has gone stale is finished too, self-report or not.
+  return markHungSessions(selfReported, hungInfoFor, now, hungThresholdMs);
 }
 
 /**

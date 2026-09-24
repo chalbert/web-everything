@@ -25,6 +25,7 @@ import {
   STOP_RETRY_ATTEMPTS,
   STOP_RETRY_BACKOFF_MS,
   runSessionReaperPass,
+  makeHungResolver,
 } from '../session-reaper.mjs';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
@@ -463,6 +464,60 @@ describe('classifySessionReapWithGroundTruth — neverReapWorking (epic #3383 st
   });
 });
 
+describe('classifySessionReapWithGroundTruth — hung-transcript detection, axis 0 (epic #3383 continuation)', () => {
+  const alwaysHung = () => ({ hung: true, reason: 'stale-no-activity' });
+  const neverHung = () => ({ hung: false, reason: 'fresh' });
+
+  it('a `working` session confirmed hung is reaped — THE LIVE CASE (review-2582, state working, dead)', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-2582' }), null, { hungFor: alwaysHung }))
+      .toEqual({ reap: true, reason: 'hung-transcript:stale-no-activity' });
+  });
+
+  it('OVERRIDES `neverReapWorking:true` — the one axis allowed to, since it independently disproves `working` itself', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-2582' }), null, { neverReapWorking: true, hungFor: alwaysHung }))
+      .toEqual({ reap: true, reason: 'hung-transcript:stale-no-activity' });
+  });
+
+  it('a `blocked` session confirmed hung is reaped too, tried BEFORE the ground-truth/completion/idle axes', () => {
+    let groundTruthCalled = false;
+    const groundTruthFor = () => { groundTruthCalled = true; return { resolved: false }; };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'review-2599' }), groundTruthFor, { hungFor: alwaysHung }))
+      .toEqual({ reap: true, reason: 'hung-transcript:stale-no-activity' });
+    expect(groundTruthCalled).toBe(false);
+  });
+
+  it('a resolver answering not-hung falls through to every later axis unaffected', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-2582' }), null, { neverReapWorking: true, hungFor: neverHung }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('a resolver that throws is treated as unknown, never a guess, and never crashes the pass', () => {
+    const throws = () => { throw new Error('unreadable transcript'); };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-2582' }), null, { hungFor: throws }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('omitting hungFor entirely is byte-identical to before — additive only', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'review-2582' }), null, { neverReapWorking: true }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('an already-terminal `done` session is unaffected — axis 0 only ever runs after the base `not-terminal` check', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'done', name: 'review-2582' }), null, { hungFor: alwaysHung }))
+      .toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('makeHungResolver — the IO-shell resolver over hung-session.mjs (epic #3383 continuation)', () => {
+  it('delegates to readHungInfo with the injected clock and threshold, never throwing on a bad row', () => {
+    const resolver = makeHungResolver({ thresholdMs: 30 * 60_000, now: () => 1_000_000 });
+    // No cwd/sessionId on this fixture (`bg()` DOES carry both — strip them to hit the "no signal" path) —
+    // proves the resolver never throws even when the shared detector cannot locate a transcript at all.
+    const { cwd, sessionId, ...noTranscript } = bg({ state: 'working' });
+    expect(resolver(noTranscript)).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
+  });
+});
+
 describe('classifySessionReapWithGroundTruth — the completion-record axis (epic #3383, #3436)', () => {
   it('a `blocked` session whose completion record reports done is reaped, tried BEFORE backlog/PR ground truth', () => {
     let groundTruthCalled = false;
@@ -578,6 +633,20 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
     });
     expect(result.wouldStop).toEqual([]);
     expect(result.kept).toBe(1);
+  });
+
+  it('threads hungFor through, and it overrides neverReapWorking exactly like classifySessionReapWithGroundTruth does directly', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'w2', sessionId: 'w2-full', cwd: '/daemon-clone', kind: 'background', state: 'working', name: 'review-2582' }],
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      neverReapWorking: true,
+      hungFor: () => ({ hung: true, reason: 'stale-no-activity' }),
+      dryRun: true,
+      log: () => {},
+    });
+    expect(result.wouldStop).toEqual([{ id: 'w2', sessionId: 'w2-full', name: 'review-2582', reason: 'hung-transcript:stale-no-activity' }]);
+    expect(result.kept).toBe(0);
   });
 });
 

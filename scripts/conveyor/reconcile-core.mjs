@@ -437,6 +437,39 @@ export function markSelfReportedDone(agents, completionFor, nowMs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#markHungSessions — mark each listed session whose OWN transcript file
+ * has gone stale as `hung: true`. Pure (the classification is injected via `hungInfoFor`); modeled directly on
+ * {@link markSelfReportedDone} just above — a SEPARATE pre-pass over AGENT rows, run before {@link
+ * assessLiveness}, never a change to that pinned function itself.
+ *
+ * WHY THIS EXISTS, SEPARATELY FROM `markSelfReportedDone` (epic #3383 continuation, live 2026-09-24,
+ * chalbert/web-everything #2599/#2596/#2594/#2588/#2587/#2582): those six PRs' bound review sessions never
+ * wrote a `status: done` completion record — the review brief's "report done on infra failure" instruction is
+ * PROSE, and an agent that crashes/exits under stress can skip it — so `markSelfReportedDone` never fires for
+ * them and `assessLiveness` keeps reading them as live, freezing the PR forever. This is a THIRD, MECHANICAL
+ * signal that does not depend on the dispatched agent reporting anything: see
+ * `we:scripts/conveyor/hung-session.mjs` for the shared pure-core/IO-shell detector (also imported by
+ * `we:scripts/conveyor/session-reaper.mjs`'s hung axis — ONE implementation, not two).
+ *
+ * @param {Array<object>} agents - the `claude agents --json` rows (optionally already carrying
+ *   `selfReportedDone` from {@link markSelfReportedDone}, run first).
+ * @param {(agent:object, nowMs:number, thresholdMs:number) => ({hung:boolean, reason?:string, ageMs?:number|null}|null)} hungInfoFor
+ * @param {number} nowMs
+ * @param {number} thresholdMs
+ * @returns {Array<object>} the same rows; hung ones gain `hung: true`, `hungReason`, `hungAgeMs`
+ */
+export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (String(a?.state ?? '').toLowerCase() === 'done' || a?.selfReportedDone === true) return a;
+    let info = null;
+    try { info = hungInfoFor(a, nowMs, thresholdMs); } catch { info = null; }
+    if (!info || info.hung !== true) return a;
+    return { ...a, hung: true, hungReason: info.reason ?? null, hungAgeMs: Number.isFinite(info.ageMs) ? info.ageMs : null };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#assessLiveness — the liveness verdict for ONE PR, over the sessions
  * bound to it. Pure, and it is refusal 4 in code.
  *
@@ -465,11 +498,19 @@ export function markSelfReportedDone(agents, completionFor, nowMs) {
  *
  * The same holds for a session whose OWN completion record says done ({@link markSelfReportedDone} sets
  * `selfReportedDone`), even when the listing still reads `blocked` (xpb0zyq, live 2026-09-23).
+ *
+ * AND the same holds for a session {@link markHungSessions} has independently confirmed HUNG (`hung: true`) —
+ * epic #3383 continuation, live 2026-09-24. This is a DIFFERENT fact from `transcriptMtimeMs` above: that field
+ * is PR-level evidence this function is pinned to never consult; `hung` is a pre-computed AGENT-level verdict
+ * from a separate detector (`we:scripts/conveyor/hung-session.mjs`) that this function trusts exactly the way
+ * it already trusts `selfReportedDone` — as an upstream fact, not a raw timestamp it would otherwise have to
+ * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
+ * as `live-process` and free its PR to be reconciled again.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true;
+  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true || agent?.hung === true;
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,
