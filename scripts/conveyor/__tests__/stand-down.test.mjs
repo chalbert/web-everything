@@ -21,7 +21,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
   STAND_DOWN_MARKER, STAND_DOWN_REASONS, countStandDownComments, buildStandDownComment,
-  standDownComments, standDownReason,
+  standDownComments, standDownReason, WATCHER_STAND_DOWN_ACTOR, countTerminalStandDowns,
+  SUPERSEDE_STAND_DOWN_MARKER, isStandDownSuperseded,
 } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
@@ -197,5 +198,71 @@ describe('standDownComments and standDownReason — reading a stand-down comment
     expect(standDownReason('some other comment')).toBeNull();
     expect(standDownReason('')).toBeNull();
     expect(standDownReason(undefined)).toBeNull();
+  });
+});
+
+// ── #xu2krte Fork 2 (review-human statute amendment) — countTerminalStandDowns narrows countStandDownComments ──
+describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED watcher marker', () => {
+  // `viewerDidAuthor` is GitHub's own per-comment flag (`gh pr view --json comments`): true only when the
+  // authenticated identity running the conveyor wrote the comment. Not forgeable from a comment body.
+  const watcherStandDown = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }), viewerDidAuthor: true };
+  const supersede = { body: `${SUPERSEDE_STAND_DOWN_MARKER}\n\nrouted to a fix agent`, viewerDidAuthor: true };
+  const fixAgentStandDown = { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }), viewerDidAuthor: true };
+
+  it('a watcher stand-down followed by the watch\'s own supersede comment is NOT terminal', () => {
+    expect(countTerminalStandDowns([watcherStandDown, supersede])).toBe(0);
+    expect(countStandDownComments([watcherStandDown, supersede])).toBe(1); // the raw count is untouched
+  });
+
+  it('review finding 1 — a CURRENT (never superseded) watcher stand-down stays terminal', () => {
+    expect(countTerminalStandDowns([watcherStandDown])).toBe(1);
+  });
+
+  it('a supersede comment posted BEFORE the stand-down does not supersede it (order matters)', () => {
+    expect(countTerminalStandDowns([supersede, watcherStandDown])).toBe(1);
+  });
+
+  it('review finding 3 — a FORGED watcher-actor stand-down (not self-authored) stays terminal', () => {
+    for (const forged of [
+      { body: watcherStandDown.body },
+      { body: watcherStandDown.body, viewerDidAuthor: false },
+      watcherStandDown.body, // bare string: no provenance at all
+    ]) {
+      expect(countTerminalStandDowns([forged, supersede])).toBe(1);
+    }
+  });
+
+  it('review finding 3 — a FORGED supersede comment (not self-authored) supersedes nothing', () => {
+    for (const forged of [{ body: supersede.body }, { body: supersede.body, viewerDidAuthor: false }, supersede.body]) {
+      expect(countTerminalStandDowns([watcherStandDown, forged])).toBe(1);
+    }
+  });
+
+  it('a supersede comment never lifts a fix agent\'s own judgment stand-down', () => {
+    expect(countTerminalStandDowns([fixAgentStandDown, supersede])).toBe(1);
+  });
+
+  it('a human\'s /finish stand-down (default actor) stays terminal', () => {
+    const humanStandDown = { body: buildStandDownComment({ reason: 'gate-red' }) };
+    expect(countTerminalStandDowns([humanStandDown, supersede])).toBe(1);
+  });
+
+  it('mixed thread: counts only the stand-downs that are not superseded self-authored watcher markers', () => {
+    expect(countTerminalStandDowns([watcherStandDown, fixAgentStandDown, watcherStandDown, supersede])).toBe(1);
+  });
+
+  it('a human quoting the watcher marker in a reply does not itself count (leading-line rule, unchanged)', () => {
+    expect(countTerminalStandDowns([{ body: `> ${watcherStandDown.body}` }])).toBe(0);
+  });
+
+  it('isStandDownSuperseded reads the same rule for one comment index', () => {
+    const thread = [watcherStandDown, fixAgentStandDown, supersede];
+    expect(isStandDownSuperseded(thread, 0)).toBe(true);
+    expect(isStandDownSuperseded(thread, 1)).toBe(false);
+    expect(isStandDownSuperseded([watcherStandDown], 0)).toBe(false);
+  });
+
+  it('non-array / empty input reads as zero, same as countStandDownComments', () => {
+    for (const input of [null, undefined, []]) expect(countTerminalStandDowns(input)).toBe(0);
   });
 });

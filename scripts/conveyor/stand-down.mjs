@@ -117,6 +117,93 @@ export function countStandDownComments(comments) {
 }
 
 /**
+ * we:scripts/conveyor/stand-down.mjs#WATCHER_STAND_DOWN_ACTOR — the exact `--actor=` string
+ * `we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictStandDown` posts with, single-sourced here
+ * so {@link countTerminalStandDowns} and that file can never drift on what counts as "the watch's own marker".
+ */
+export const WATCHER_STAND_DOWN_ACTOR = 'parked-pr-conflict-watch (#xu2krte statute-tier exception)';
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#SUPERSEDE_STAND_DOWN_MARKER — the stable FIRST LINE of the comment the
+ * parked-PR conflict watch posts when its re-check finds its OWN earlier stand-down no longer holds
+ * (`we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildSupersedeStandDownComment`). Single-sourced here so
+ * {@link isStandDownSuperseded} and that builder can never drift. Same "treat as fixed" rule as
+ * {@link STAND_DOWN_MARKER}: changing it orphans every supersede already on a PR.
+ */
+export const SUPERSEDE_STAND_DOWN_MARKER = '↩️ **This PR\'s earlier stand-down is superseded — routed to a fix agent instead**';
+
+/** Body of one comment (`gh --json comments` shape or a bare string). */
+const bodyOf = (c) => (typeof c === 'string' ? c : c?.body);
+
+/**
+ * Did the conveyor's OWN authenticated identity write this comment? Reads GitHub's own `viewerDidAuthor` flag
+ * (`gh pr view/list --json comments` returns it on every comment). It is computed by GitHub from the comment's
+ * real author, so a comment body cannot fake it — unlike any substring of the body. A bare string, or a comment
+ * with the flag missing or false, is NOT self-authored: the fail-closed direction.
+ */
+const isSelfAuthored = (c) => typeof c === 'object' && c !== null && c.viewerDidAuthor === true;
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded — is the comment at `index` a watcher stand-down that
+ * the watch ITSELF later superseded? PURE. True only when ALL of these hold:
+ *   1. the comment is a stand-down (leading-line {@link STAND_DOWN_MARKER}) carrying {@link WATCHER_STAND_DOWN_ACTOR};
+ *   2. it is self-authored (GitHub's `viewerDidAuthor`), so a forged body naming the watcher's actor never counts;
+ *   3. a LATER comment in the thread (array order = GitHub's chronological order) leads with
+ *      {@link SUPERSEDE_STAND_DOWN_MARKER} and is ALSO self-authored.
+ * The watch posts that supersede comment only after re-classifying the conflict as safe to hand a fixer, so a
+ * watcher stand-down that is still CURRENT (never re-classified) is never superseded and stays terminal.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ * @param {number} index
+ * @returns {boolean}
+ */
+export function isStandDownSuperseded(comments, index) {
+  if (!Array.isArray(comments)) return false;
+  const c = comments[index];
+  const body = bodyOf(c);
+  if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) return false;
+  if (!body.includes(WATCHER_STAND_DOWN_ACTOR) || !isSelfAuthored(c)) return false;
+  for (let j = index + 1; j < comments.length; j += 1) {
+    const later = comments[j];
+    const laterBody = bodyOf(later);
+    if (typeof laterBody === 'string' && laterBody.trimStart().startsWith(SUPERSEDE_STAND_DOWN_MARKER)
+      && isSelfAuthored(later)) return true;
+  }
+  return false;
+}
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#countTerminalStandDowns — `#xu2krte` Fork 2 (review-human statute amendment).
+ * Like {@link countStandDownComments}, EXCEPT it excludes a watcher stand-down the watch ITSELF has since
+ * superseded ({@link isStandDownSuperseded}). The watcher's stand-down is a routing decision the same watch
+ * re-derives every sweep, not "an agent examined the diff and could not safely proceed". When a later sweep
+ * re-classifies the conflict as safe to hand a fixer, the watch posts a supersede comment, and only THEN does
+ * the old marker stop blocking `reconcile-core.mjs`'s dispatch gate.
+ *
+ * NARROW, ON PURPOSE — two review findings on PR #2577 shaped it:
+ *   - A watcher stand-down that was never superseded is a CURRENT, correct stand-down (e.g. a true hunk overlap,
+ *     or a plain non-`review:human` statute conflict). It stays terminal, exactly like any other stand-down.
+ *   - Both the stand-down and the supersede must be self-authored (`viewerDidAuthor`). Matching the actor string
+ *     in the body alone let anyone who can comment forge a marker that escapes the gate.
+ * A fix agent's OWN `needs-judgment` / `gate-red` / `lane-ref-gone` escalation, or a human's `/finish` stand-down,
+ * never carries the watcher's actor and stays terminal whatever follows it. Only THIS gate call site
+ * (`reconcile-core.mjs`'s dispatch refusal) uses the narrower count; every other reader (the operator queue's
+ * STOOD DOWN section, `pr-status-io.mjs`, the watch's own idempotent re-post guard) keeps
+ * {@link countStandDownComments}, so a human still SEES that the watch once stood this down.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ * @returns {number}
+ */
+export function countTerminalStandDowns(comments) {
+  if (!Array.isArray(comments)) return 0;
+  let n = 0;
+  for (let i = 0; i < comments.length; i += 1) {
+    const body = bodyOf(comments[i]);
+    if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
+    if (!isStandDownSuperseded(comments, i)) n += 1;
+  }
+  return n;
+}
+
+/**
  * we:scripts/conveyor/stand-down.mjs#standDownReason — read back the stated reason clause from a stand-down
  * comment body built by {@link buildStandDownComment}. Pure string parsing — the inverse of that builder: the
  * comment's third line always reads `<actor> stopped rather than guessing: <why>.<detail>`, so the clause between

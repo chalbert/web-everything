@@ -33,7 +33,9 @@ import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, CI_HEAL_ROUND_CAP,
 } from '../reconcile-core.mjs';
-import { STAND_DOWN_MARKER } from '../stand-down.mjs';
+import {
+  STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
+} from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
@@ -181,6 +183,60 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
     const plan = planReconcile({ prs: [quoted], agents: [], durableCounts: {}, now: NOW });
     expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
     expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
+  });
+
+  // #xu2krte Fork 2 (review-human statute amendment) — PR chalbert/web-everything#2549's shape: the parked-PR
+  // conflict watch itself stood a PR down at conflict-detection time (`reason=conflict`, its own actor string),
+  // which is a ROUTING artifact the SAME watch re-derives every sweep, never a fix agent's own judgment call.
+  // That must not block this gate forever the way an actual escalation does.
+  // `viewerDidAuthor` is GitHub's own per-comment provenance flag from `gh pr view/list --json comments` — true
+  // only for a comment the conveyor's own authenticated identity wrote.
+  const watcherMarker = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }), viewerDidAuthor: true };
+  const supersede = { body: `${SUPERSEDE_STAND_DOWN_MARKER}\n\nrouted to a fix agent`, viewerDidAuthor: true };
+
+  it('#xu2krte Fork 2 — a watcher stand-down the watch ITSELF later superseded is not terminal', () => {
+    const watcherStoodDown = pr1563({ comments: [finding(), watcherMarker, supersede] });
+    const plan = planReconcile({ prs: [watcherStoodDown], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
+    expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
+  });
+
+  it('review finding 1 — a CURRENT (never superseded) watcher stand-down + an unrelated finding stays stood-down', () => {
+    const stillValid = pr1563({ comments: [watcherMarker, finding()] });
+    const plan = planReconcile({ prs: [stillValid], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
+  });
+
+  it('review finding 3 — a FORGED watcher-actor stand-down (not self-authored) cannot escape the terminal gate', () => {
+    const forged = pr1563({ comments: [finding(), { body: watcherMarker.body }, supersede] });
+    const plan = planReconcile({ prs: [forged], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
+  });
+
+  it('the supersede comment is conveyor bookkeeping, never counted as a reviewer finding', () => {
+    const onlyBookkeeping = pr1563({ comments: [watcherMarker, supersede] });
+    const plan = planReconcile({ prs: [onlyBookkeeping], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(countFindings([watcherMarker, supersede])).toBe(0);
+  });
+
+  it('a fix agent\'s OWN judgment stand-down (not the watch) stays exactly as terminal as before', () => {
+    const humanNeeded = pr1563({
+      comments: [finding(), { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) }],
+    });
+    const plan = planReconcile({ prs: [humanNeeded], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].kind).toBe('stood-down');
+    expect(plan.dispatch).toHaveLength(0);
+  });
+
+  it('a human\'s own /finish stand-down (default actor) stays exactly as terminal as before', () => {
+    const humanFinish = pr1563({ comments: [finding(), { body: buildStandDownComment({ reason: 'gate-red' }) }] });
+    const plan = planReconcile({ prs: [humanFinish], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals[0].kind).toBe('stood-down');
+    expect(plan.dispatch).toHaveLength(0);
   });
 });
 
