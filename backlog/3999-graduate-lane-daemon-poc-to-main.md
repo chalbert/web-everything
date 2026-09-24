@@ -36,3 +36,9 @@ a bulk merge of the branch and never a direct push to `main`.
 - 2026-09-23: Branch opened (`origin/lane/daemon-poc` = `origin/main` at `75298c517`), registered in
   `we:scripts/lib/poc-branches.json` with this item as `graduationItem`, per the operator's ruling this item's
   digest quotes verbatim.
+- 2026-09-23 (evening): ruling #3681 superseded this branch as a daemon steady state. Daemons now run `main` plus
+  live overlays
+  ([#resident-daemon-reload-lifecycle](../docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle)
+  clause 5). Done-when 2 is met by that ruling (clause 4(a) amended, for overlays rather than POC tracking). The
+  wind-down is x8kenvp: the pass-daemon commit graduates via xdpemd4, the POC-mode commit `69b2ec0cc` is dropped
+  as superseded by xlqampw, then the registry entry is removed and this epic resolves.

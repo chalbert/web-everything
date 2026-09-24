@@ -2,8 +2,10 @@
 bornAs: x6einv9
 kind: decision
 parent: "3383"
-status: open
+status: resolved
 dateOpened: "2026-09-14"
+dateResolved: "2026-09-23"
+codifiedIn: "docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle"
 preparedDate: "2026-09-23"
 preparedAgainstSha: "57cbd30434e523419d4c986f9e51276dfd63b763"
 relatedTo: ["3625", "3467", "3397", "3756", "2501", "3443", "3649", "3952", "3954", "3984"]
@@ -32,6 +34,69 @@ grounding; its earlier sections and the research topic
 [/research/resident-daemon-staleness-and-reload/](/research/resident-daemon-staleness-and-reload/) still hold the
 prior-art survey. Two Opus skeptic rounds and two fresh-context screens ran on this version; the body is what
 survived them (Fork 1 dissolved, Fork 2 re-worded, Fork 4 gained a sub-fork, Fork 5 narrowed to a per-clone opt-in).*
+
+## Ruling
+
+Ratified 2026-09-23, about 7:45–8:00 PM ET, by the operator in session, on this re-prepared body (PR #2546). The
+operator's own words, in order:
+
+1. "3681 ratified"
+2. "seems simpler all on prototype for now, no?"
+3. "once we have merge into main, we will still want to be able to run fixes of a darmon live and switch back
+   to main once it merges"
+4. "yes" — to the live-overlay design recorded under Fork 5 below
+5. "ratified" — confirming the ruling as amended by the overlay design
+
+- **Fork 1 — DISSOLVED, as re-prepared:** reload is a clean exit at the safe point; launchd or the supervisor
+  relaunches. Never `kickstart -k` mid-tick.
+- **Fork 2 — RATIFIED as re-prepared, option (a):** any new commit counts. Stale = the input heads the process
+  booted from (`origin/main`, plus each overlay head) have moved. Every daemon checks its own inputs every tick,
+  whoever moved the clone. 5-minute restart floor on every daemon.
+- **Fork 4 — RATIFIED as re-prepared, option (a):** the daemons move their clone automatically, under a coded
+  refusal of the operator's primary checkout (plus a designated-clone check), a cross-daemon per-clone
+  reader/writer lock, pinned state paths, and the restart floor.
+- **Fork 4 sub-question (how the clone moves) — RATIFIED, option (y) rebuild:** each tick the tree is rebuilt
+  fresh from `origin/main`, then each overlay merged in. Uncommitted changes, or local commits in none of the
+  inputs, make the daemon refuse and alert. It never wipes them.
+- **Fork 5 — RATIFIED, AMENDED by the operator to "live overlays"** (replacing the re-prep's single opt-in POC
+  branch):
+  - Every daemon clone tracks `main` plus an explicit list of overlay fix branches, in a per-clone state file
+    under its pinned state root (not checked in, so adding or removing an overlay never waits on a PR).
+  - Each tick it rebuilds its tree: `main`, then each overlay merged in.
+  - Tests pass before new overlay code is picked up.
+  - An overlay drops automatically once it is in `main`: `git cherry` shows only `-`, or its PR is merged or
+    closed. With no overlays left, the daemon is plain `main`.
+  - An overlay that no longer merges cleanly is dropped with an alert, never frozen.
+  - Rollback = remove the overlay. The re-prep's outside trigger (crash loop or stalled heartbeat after a
+    change) is kept, and its action is now removing that overlay.
+  - Scope: **all daemons may run overlays, the review daemon included** — the operator's explicit choice over
+    the re-prep's "never in a clone that reviews, labels or merges PRs". Carve-out: the drain daemon and the
+    `merge-orphan-sweep` pass merge to `main`, so they stay `main`-only.
+  - This supersedes the long-lived POC-branch approach for daemons (`lane/daemon-poc`, epic xii6vye) and
+    amends #poc-branch-declared-delivery-mode clause 4(a); card x923r7y was the vehicle for that amendment and
+    resolves with this ruling.
+
+**Left open (filed, not ruled):** the re-prep excluded review clones *because of*
+#drain-daemon-self-hosting-boundary clause 3 (a daemon never approves its own daemon-code change). The operator
+allowed overlays in the review daemon but did not say how clause 3 then applies to an overlay whose graduation
+PR that daemon would review. No default was stated, so it is its own decision card, **xcw0nxo**. Clause 3
+stands unamended until then.
+
+Codified as [#resident-daemon-reload-lifecycle](../docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle),
+which also amends [#poc-branch-declared-delivery-mode](../docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode)
+clause 4(a).
+
+**Follow-on build, as filed (all under #3383):** xlqazzv (primary/designated-clone refusal), xt8j3yk (boot
+input heads + per-tick check + 5-min floor), x3ecgta (per-clone reader/writer lock), xvxs2u3 (pinned state
+root), xgomze7 (rebuild form; blocked by x3ecgta), xlqampw (re-scoped: the live-overlay core; blocked by
+xgomze7), xibzioo (test gate before new overlay code; blocked by xlqampw), xmiknhd (drain and
+`merge-orphan-sweep` stay `main`-only; blocked by xlqampw), xi58xoz (child-call timeouts + outside heartbeat
+check), xlpy3qt (outside rollback removes an overlay; blocked by xlqampw, xi58xoz), x0m1pkt (running revision
+and overlays in the heartbeat; blocked by xt8j3yk), x0o7184 (restart via request file), x8kenvp (retire
+`lane/daemon-poc`; blocked by xdpemd4, xlqampw). Existing cards kept: xdpemd4 (pass-daemon self-sync), #3952
+(dead-pid lease reclaim, a prerequisite), and #3467, #3397, #3756, #3984 as the re-prep's "Follow-on build"
+section describes. The re-prep's slice 4 (split `wev-review-daemon` so no PR-acting daemon shares a POC clone) is
+narrowed by the amendment to moving `merge-orphan-sweep` out (xmiknhd).
 
 ## The ask (operator, epic #3383, 2026-09-14)
 

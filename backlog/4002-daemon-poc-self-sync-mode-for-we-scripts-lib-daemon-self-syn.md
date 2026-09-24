@@ -1,18 +1,44 @@
 ---
 bornAs: xlqampw
 kind: story
-size: 3
-parent: "3999"
+size: 5
+parent: "3383"
 status: open
+blockedBy: ["xgomze7", "xcw0nxo"]
+relatedTo: ["3681", "xii6vye"]
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-23"
 tags: []
 ---
 
-# Daemon POC self-sync mode for we:scripts/lib/daemon-self-sync.mjs
+# Live overlays: a daemon clone runs main plus a list of fix branches, each dropped once main has it
 
-Epic #3383's daemon POC (backlog/3999-*.md, we:docs/agent/platform-decisions.md#poc-branch-declared-delivery-mode) needs a daemon clone that can run tracking lane/daemon-poc instead of main. Add an opt-in mode to we:scripts/lib/daemon-self-sync.mjs: when DAEMON_SELF_SYNC_BRANCH=<poc-branch> is set, the clone runs on that local branch (decideSelfSync's onBase check widens to it) and each tick fetches origin/main AND origin/<poc>, merges both into HEAD by merge commit (never rebase, never push), aborts and skips on conflict, and the wrapper restarts the daemon when anything new arrived -- mirroring the existing merge-not-rebase / restart-on-new-code contract. Default (unset) behavior stays byte-identical. Unit tests in we:scripts/lib/__tests__/daemon-self-sync.test.mjs.
+**Re-scoped 2026-09-23 by ruling #3681.** This card first asked for a "POC mode" (`DAEMON_SELF_SYNC_BRANCH`,
+one clone tracking `lane/daemon-poc`). The ruling replaced that approach with **live overlays**
+([we:docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle](../docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle)
+clause 5). The POC-mode commit on `origin/lane/daemon-poc` (`69b2ec0cc`) is superseded and does not graduate.
+
+Build the overlay core in `we:scripts/lib/daemon-self-sync.mjs`, on top of the rebuild form (xgomze7):
+
+- **Overlay list.** Each daemon clone reads an explicit list of overlay fix branches from a per-clone state
+  file under its pinned state root (xvxs2u3). The file is not checked in. An empty or missing list means plain
+  `main`.
+- **Rebuild.** Each tick the tree is rebuilt fresh: `origin/main`, then each overlay merged in, in list order.
+- **Auto-drop once in main.** An overlay drops from the list when `git cherry origin/main origin/<overlay>`
+  prints only `-` lines, or when its PR is merged or closed. With no overlays left, the daemon runs plain
+  `main`.
+- **Conflict = drop with an alert.** An overlay that no longer merges cleanly onto `main` (plus the overlays
+  before it) is dropped from the list and an alert is raised. It is never frozen at an old head.
+- **Rollback = remove the overlay** from the list; the next rebuild runs without it.
+- The boot-input check (xt8j3yk) counts each overlay head as an input, so adding, moving or dropping an
+  overlay restarts the daemons in that clone.
+
+Not in this card: the test gate before new overlay code is picked up, the drain / `merge-orphan-sweep`
+carve-out, and the outside rollback trigger. Each has its own card under #3383 (see #3681's `## Ruling`).
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — unit tests in `we:scripts/lib/__tests__/daemon-self-sync.test.mjs` cover: empty list →
+   plain `main`; two overlays merged in order; an overlay whose `git cherry` is all `-` is dropped; an overlay
+   whose PR is merged or closed is dropped; a conflicting overlay is dropped with an alert and the rest still
+   apply.
