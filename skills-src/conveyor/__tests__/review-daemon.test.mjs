@@ -100,7 +100,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: 'chalbert/web-everything' });
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
-    expect(out).toEqual({ reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], refusals: 0 });
+    expect(out).toEqual({ reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], refusals: 0, reconcileError: null });
   });
 
   it('a failed dispatch is isolated: no round tag, recorded in failed, does not stop the tick', () => {
@@ -158,6 +158,38 @@ describe('runReviewTick — the per-tick sequence', () => {
     const out = runReviewTick({ reconcile, dispatch: () => { throw new Error('should not be called'); }, tagRound: () => {}, tagStatus, statusCandidates: (r, ref) => ref });
     expect(out).toMatchObject({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 1 });
     expect(tagStatus).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runReviewTick — reconcile itself is isolated (regression, #xvzwiew live-caught 2026-09-23)', () => {
+  // Live production evidence (`~/workspace/wev-review-daemon/.conveyor/review-daemon.log`):
+  //   review-daemon: chalbert/frontierui#? failed (non-fatal): spawnSync claude ENOENT
+  //   review-daemon: chalbert/frontierui reconcile failed (non-fatal, other repos unaffected): spawnSync claude ENOENT
+  // Both lines were ONE underlying failure — `reconcile-pass.mjs`'s own `claude agents --json` read throwing —
+  // reported twice and misleadingly: the first line reads as if a SPECIFIC PR's review dispatch failed, but no
+  // PR was ever identified (reconcile crashed before `dispatch` could even be reached).
+  const throwingClaudeSpawn = () => {
+    const err = new Error('spawnSync claude ENOENT');
+    err.code = 'ENOENT';
+    throw err;
+  };
+
+  it('a reconcile throw no longer escapes runReviewTick — it comes back as reconcileError, not a thrown exception', () => {
+    const reconcile = vi.fn(() => throwingClaudeSpawn());
+    const dispatch = vi.fn();
+    expect(() => runReviewTick({ reconcile, dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] }))
+      .not.toThrow();
+    const out = runReviewTick({ reconcile, dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(out).toEqual({
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT',
+    });
+    expect(dispatch).not.toHaveBeenCalled(); // reconcile crashed before any PR was identified
+  });
+
+  it('a successful reconcile still reports reconcileError: null (never undefined)', () => {
+    const reconcile = vi.fn(() => ({ dispatch: [], refusals: [] }));
+    const out = runReviewTick({ reconcile, dispatch: () => ({}), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(out.reconcileError).toBeNull();
   });
 });
 
@@ -234,6 +266,24 @@ describe('runReviewTickAllRepos — one runReviewTick call per watched repo', ()
     const dispatch = () => ({});
     runReviewTickAllRepos({ repos: ['repo-a'], tick, dispatch });
     expect(tick).toHaveBeenCalledWith({ dispatch, repo: 'repo-a' });
+  });
+
+  // Regression, #xvzwiew live-caught 2026-09-23: a repo whose `runReviewTick` catches its own reconcile
+  // failure (see the sibling describe block above) used to have NO way to surface that — before this fix,
+  // `runReviewTick` just threw, `forEachRepo` caught it, and this function double-reported it (once as a
+  // bogus `prNumber: null` "failed dispatch", once as `repos[].error`). Now `runReviewTick` never throws for
+  // a reconcile failure; it returns `reconcileError` instead, and THIS function must fold that into its own
+  // `reconcileFailed` bucket — never into `failed` (that would resurrect the exact misleading report this
+  // whole fix removes).
+  it('a repo whose tick reports reconcileError is folded into reconcileFailed, never into failed', () => {
+    const tick = vi.fn(({ repo }) => (repo === 'chalbert/frontierui'
+      ? { reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: 'spawnSync claude ENOENT' }
+      : { reviewsOwed: 1, dispatched: [{ prNumber: 1, agentId: 'a1' }], failed: [], refusals: 0, reconcileError: null }));
+    const out = runReviewTickAllRepos({ repos: ['chalbert/web-everything', 'chalbert/frontierui'], tick });
+    expect(out.failed).toEqual([]); // no bogus `prNumber: null` dispatch failure
+    expect(out.reconcileFailed).toEqual([{ repo: 'chalbert/frontierui', error: 'spawnSync claude ENOENT' }]);
+    expect(out.dispatched).toEqual([{ prNumber: 1, agentId: 'a1', repo: 'chalbert/web-everything' }]);
+    expect(out.reviewsOwed).toBe(1); // the healthy repo's own count is untouched by the other repo's reconcile failure
   });
 
   it('defaults to REVIEW_DAEMON_REPOS and to the real runReviewTick when nothing is injected', () => {
