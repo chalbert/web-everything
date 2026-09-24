@@ -1,0 +1,20 @@
+{
+  "id": "automated-health-daemon-smells",
+  "title": "Automated health daemon — smell probes, auto-dispatched diagnosis, and operator recommendations without a session",
+  "status": "open",
+  "summary": "Grounds decision xev8pnf (epic xqmw8g9 under #3383): a resident process that watches this system's own conveyor through many cheap mechanical 'smells', dispatches a diagnose-only agent when a smell needs reading to explain, and tells the operator what is wrong and what product change fixes it, with no chat session. Grounding: on 2026-09-24 every conveyor problem (daemons alive but dispatching nothing, bots failing GitHub auth while the smoke gate passed, lane starvation, pool growth, high load, stuck and stood-down PRs) was found by a person in a session, although each had a cheap signal. Existing parts are reused: the stuck-PR watch's one-inspection-per-episode pattern, the runner-activity liveness vocabulary, the operator queue's per-section row builders, the declared dispatch-lane operation and file-item. Prior art converges: alert on symptoms, keep causes for diagnosis (Google SRE); require a condition to persist before firing and group notifications (Prometheus for:, Alertmanager); inhibit dependent alerts and expire silences (Alertmanager); watch the watcher with an outside dead-man switch (kube-prometheus Watchdog, healthchecks.io); automate diagnosis but ship remediation through the normal change process (PagerDuty runbook diagnostics). Recommended ruling after an adversarial skeptic round and a fresh-context screen: the watcher runs in its own failure domain (never inside a watched daemon, main-only clone, per-tick timeout, last-tick-completed stamp); deterministic diagnosis before any agent, agents only for multi-cause symptoms no other watch covers and never under an inhibiting episode, with declared read operations only; episodes per (smell, subject) with hysteresis, flap cap, reminder and expiring silences; a scrubbed per-episode report plus an operator-queue HEALTH section plus a self-delivered notification for high severity; findings become uncleared cards through a lane-landed filing request, never cleared by the daemon; ships in shadow, turned on by the operator. Report: reports/2026-09-24-health-daemon-design.md.",
+  "dateOpened": "2026-09-24",
+  "lastReviewed": "2026-09-24",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "daemons",
+    "conveyor",
+    "monitoring",
+    "alerting",
+    "health-daemon",
+    "self-driven-project",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

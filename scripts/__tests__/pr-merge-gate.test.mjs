@@ -6,7 +6,7 @@
  *   a loud audit line). The gh shell is injected (never actually called).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody, isTestPath, parseUnifiedDiff, scanTestTampering } from '../lib/pr-merge-gate.mjs';
+import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody, isTestPath, parseUnifiedDiff, scanTestTampering, buildStackedPrListArgs, buildRetargetArgs, retargetStackedPrs } from '../lib/pr-merge-gate.mjs';
 
 // A capturing fake gh exec + a capturing stderr sink, so nothing shells out and the audit line is observable.
 const fakeExec = () => { const calls = []; const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { ok: true }; }; return { exec, calls }; };
@@ -283,5 +283,60 @@ describe('pr-merge-gate — assertMayMerge (the no-gh write-to-main guard, e.g. 
     const r = assertMayMerge({ caller: 'pr-land', pr: null, repo: null, env: { WE_MERGE_BREAK_GLASS: '1' }, log });
     expect(r).toEqual({ breakGlass: true });
     expect(lines.join('')).toMatch(/BREAK-GLASS merge by route=pr-land pr=null repo=cwd/);
+  });
+});
+
+describe('pr-merge-gate — retargetStackedPrs (#3383, the #2578 incident)', () => {
+  it('buildStackedPrListArgs scopes the listing to --base <headRef> — never a full-repo fan-out', () => {
+    expect(buildStackedPrListArgs({ headRef: 'lane/3681-ratify-daemon-lifecycle' }))
+      .toEqual(['pr', 'list', '--state', 'open', '--base', 'lane/3681-ratify-daemon-lifecycle', '--json', 'number,baseRefName']);
+    expect(buildStackedPrListArgs({ repo: 'chalbert/frontierui', headRef: 'lane/x' }))
+      .toEqual(['pr', 'list', '--state', 'open', '--base', 'lane/x', '--repo', 'chalbert/frontierui', '--json', 'number,baseRefName']);
+  });
+
+  it('buildRetargetArgs builds `pr edit <n> --base <default>`', () => {
+    expect(buildRetargetArgs({ pr: 2578, base: 'main' })).toEqual(['pr', 'edit', '2578', '--base', 'main']);
+    expect(buildRetargetArgs({ pr: 9, repo: 'chalbert/plateau-app', base: 'main' }))
+      .toEqual(['pr', 'edit', '9', '--repo', 'chalbert/plateau-app', '--base', 'main']);
+  });
+
+  it('retargets every PR the listing names, onto the default branch, BEFORE any merge/delete happens', () => {
+    const calls = [];
+    const exec = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify([{ number: 2578, baseRefName: 'lane/3681' }, { number: 2601, baseRefName: 'lane/3681' }]);
+      return '';
+    };
+    const retargeted = [];
+    const r = retargetStackedPrs({ headRef: 'lane/3681', defaultBranch: 'main', exec, onRetarget: (n) => retargeted.push(n) });
+    expect(r).toEqual({ retargeted: [2578, 2601], failed: [] });
+    expect(retargeted).toEqual([2578, 2601]);
+    // The listing call comes first, then one `pr edit --base main` per stacked PR found.
+    expect(calls[0].args).toEqual(['pr', 'list', '--state', 'open', '--base', 'lane/3681', '--json', 'number,baseRefName']);
+    expect(calls[1].args).toEqual(['pr', 'edit', '2578', '--base', 'main']);
+    expect(calls[2].args).toEqual(['pr', 'edit', '2601', '--base', 'main']);
+  });
+
+  it('is a no-op when nothing is stacked on the branch (the common case)', () => {
+    const exec = (cmd, args) => (args[1] === 'list' ? '[]' : '');
+    expect(retargetStackedPrs({ headRef: 'lane/solo', defaultBranch: 'main', exec })).toEqual({ retargeted: [], failed: [] });
+  });
+
+  it('a listing failure never throws — best-effort, never blocks the merge that is about to happen', () => {
+    const exec = () => { throw new Error('gh: rate limited'); };
+    expect(() => retargetStackedPrs({ headRef: 'lane/x', defaultBranch: 'main', exec })).not.toThrow();
+    expect(retargetStackedPrs({ headRef: 'lane/x', defaultBranch: 'main', exec })).toEqual({ retargeted: [], failed: [] });
+  });
+
+  it('one failed retarget is reported but does not stop the others — best-effort per PR', () => {
+    const exec = (cmd, args) => {
+      if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify([{ number: 1 }, { number: 2 }, { number: 3 }]);
+      if (args[1] === 'edit' && args[2] === '2') throw new Error('gh: 422 already closed');
+      return '';
+    };
+    const failed = [];
+    const r = retargetStackedPrs({ headRef: 'lane/x', defaultBranch: 'main', exec, onFailed: (n) => failed.push(n) });
+    expect(r).toEqual({ retargeted: [1, 3], failed: [2] });
+    expect(failed).toEqual([2]);
   });
 });
