@@ -129,6 +129,16 @@ describe('lane-pool provision --acquirable (#4025) — per-call new-lane cap', (
     expect(listLanes([])).toEqual([1, 2]); // lane-1 (held) + exactly 1 new
   });
 
+  it('LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW=0 disables new-lane growth (0 is honored, never read as "unset")', () => {
+    const p = provision(1);
+    expect(p.code).toBe(0);
+    leaseLane(1);
+
+    const r = provision(20, ['--acquirable'], { LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW: '0' });
+    expect(r.out + r.err).toMatch(/new-lane cap 0 this call/);
+    expect(listLanes([])).toEqual([1]); // no new lane cloned
+  });
+
   it('a second call picks up where the first stopped (repeated calls converge without one giant clone)', () => {
     const p = provision(1);
     expect(p.code).toBe(0);

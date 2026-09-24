@@ -70,7 +70,7 @@
  * `release --lane=N --release-reserved`. (NOTE: this script only PROVISIONS the reserved lane; the live repoint
  * of the machine-global `~/.claude/…/memory` symlink at it is the SUPERVISED, human-gated half of #2350.)
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, statSync, renameSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, statSync, renameSync, readdirSync, linkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
@@ -1108,10 +1108,16 @@ function cmdProvision(repo) {
     const existingCount = existingLanes(repo).length; // #4025 — snapshot BEFORE this call clones anything: any
     // lane numbered past this is a BRAND-NEW clone this call is responsible for, never a pre-existing one.
     const cap = count + ACQUIRABLE_PROVISION_HEADROOM;
-    const maxNewFlag = Number(flags['max-new']);
-    const maxNew = Number.isInteger(maxNewFlag) && maxNewFlag >= 0
-      ? maxNewFlag
-      : Number(process.env.LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW) || ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT;
+    // An explicit 0 (flag or env) is honored — it pauses new-lane cloning — so parse with the same
+    // non-negative-integer guard as `trimCapFor`, never `Number(x) || DEFAULT` (which reads "0" as unset).
+    const asNonNegInt = (raw) => {
+      if (raw === undefined || raw === '' || raw === true) return null;
+      const v = Number(raw);
+      return Number.isInteger(v) && v >= 0 ? v : null;
+    };
+    const maxNew = asNonNegInt(flags['max-new'])
+      ?? asNonNegInt(process.env.LANE_POOL_ACQUIRABLE_PROVISION_MAX_NEW)
+      ?? ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT;
     log(`provisioning up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}; cap lane-${cap}; new-lane cap ${maxNew} this call)`);
     let acquirable = 0;
     let n = 0;
@@ -2251,25 +2257,102 @@ function laneRemovalEligibility(repo, n, { remoteShasBox, nowMs, ttlMs, deadReas
     eligible: true,
     kind: 'ok',
     reason: lease ? `lease provably dead (${deadReasonByLane.get(n)}) — safe to remove` : 'idle, clean, up to date with origin',
+    lease, // the exact (dead) lease judged here — `claimLaneForRemoval` re-checks it is still the one on disk
   };
 }
 
-/** Crash-safe removal (#4025): rename the lane dir to a `.trash-<n>-<ts>` SIBLING first (an atomic rename on
- *  the same filesystem), then delete that. A process killed mid-`rmSync` leaves an inert `.trash-*` directory
- *  — never a half-deleted `lane-N` that `laneIndicesIn`'s `/^lane-\d+$/` match could misread — which the next
- *  trim run's {@link sweepLeftoverTrash} finishes. */
-function removeLaneDirSafely(repo, n) {
+/** Same lease? A re-acquire always rewrites `acquiredAt` (and a reclaim mints a fresh `holder`), so these three
+ *  fields tell "the dead lease we judged" apart from "a new hold written since". */
+const sameLease = (a, b) => !!a && !!b && a.acquiredAt === b.acquiredAt && a.session === b.session && a.holder === b.holder;
+
+const TRIM_REACQUIRED = { kind: 'leased', reason: 're-leased after trim evaluated it — a live hold now owns it, kept' };
+
+/** Move lane `dir`'s lease marker aside atomically (only one renamer wins) and keep it gone ONLY if `isMine`
+ *  accepts what was moved; otherwise put it back without clobbering a marker written meanwhile (`link` fails if
+ *  the name exists). Returns true iff the marker was taken. */
+function takeMarkerIf(dir, isMine, n) {
+  const file = LEASE_MARKER(dir);
+  const aside = `${file}.trim-${process.pid}`;
+  try { renameSync(file, aside); } catch { return false; } // gone or replaced since — don't guess
+  let moved = null;
+  try { moved = JSON.parse(readFileSync(aside, 'utf8')); } catch { /* unreadable ⇒ not provably ours */ }
+  if (isMine(moved)) { rmSync(aside, { force: true }); return true; }
+  try {
+    linkSync(aside, file);
+  } catch {
+    log(`  ⚠ lane-${n}: could not restore a lease trim moved aside (another marker appeared) — ${describeLease(moved || {})} lost its marker; check this lane`);
+  }
+  rmSync(aside, { force: true });
+  return false;
+}
+
+/**
+ * #4025 r2 — the per-lane TOCTOU guard, run right before each deletion. `cmdTrim` judges the whole pool in one
+ * pass and only then deletes, so a real `acquire` (or fresh work) can land on a lane in between. Like
+ * `cleanLaneLitter`'s #3568 re-check, this re-verifies from inside the mutation: trim TAKES the lane through the
+ * same O_EXCL lease marker `tryClaimLane` uses — an acquire that already won makes our create fail, and one that
+ * comes later is refused by our live marker — then re-checks the tree under that hold. A lease judged dead is
+ * first compared, then moved aside atomically, and kept unless it is still the SAME lease. {@link
+ * removeClaimedLane} then re-confirms the marker is still trim's own after the directory is out of reach, since
+ * `tryClaimLane`'s stale-reclaim and own-lease rewrite paths can replace a marker without O_EXCL.
+ * A trim killed after claiming leaves only an ordinary TTL lease, which expires like any other.
+ * @returns {{session:string} | {keep:{kind:'leased'|'work', reason:string}}}
+ */
+function claimLaneForRemoval(repo, n, evaluatedLease, remoteShasBox) {
   const dir = laneDir(repo, n);
-  if (!existsSync(dir)) return;
+  const file = LEASE_MARKER(dir);
+  if (evaluatedLease) {
+    if (!sameLease(readLease(dir), evaluatedLease)) return { keep: TRIM_REACQUIRED }; // cheap pre-check
+    if (!takeMarkerIf(dir, (moved) => sameLease(moved, evaluatedLease), n)) return { keep: TRIM_REACQUIRED };
+  }
+  const session = `lane-pool-trim-${process.pid}-${randomBytes(4).toString('hex')}`;
+  const body = JSON.stringify(leaseBody({
+    session, purpose: 'lane-pool-trim', acquiredAt: new Date().toISOString(),
+    host: hostname(), pid: process.pid, ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+  }), null, 2) + '\n';
+  try {
+    writeFileSync(file, body, { flag: 'wx' });
+  } catch {
+    return { keep: TRIM_REACQUIRED };
+  }
+  const getRemoteShas = () => {
+    if (remoteShasBox.value === null) remoteShasBox.value = liveRemoteShas(dir);
+    return remoteShasBox.value;
+  };
+  const { dirty, ahead } = effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas);
+  if (dirty || ahead > 0) {
+    // Hand the lane back as it was — no lease, its new work intact — dropping only a marker that is still ours.
+    takeMarkerIf(dir, (moved) => moved?.session === session, n);
+    return { keep: { kind: 'work', reason: 'work appeared after trim evaluated it (uncommitted or unpushed), kept' } };
+  }
+  return { session };
+}
+
+/** Crash-safe, race-safe removal (#4025): rename the lane dir to a `.trash-<n>-<ts>` SIBLING first (an atomic
+ *  rename on the same filesystem). Once renamed, nothing can reach it as `lane-N`, so the lease read inside it is
+ *  final: if it is no longer trim's own claim (`session`), a concurrent acquire replaced it and the lane is
+ *  renamed back and kept. A process killed mid-`rmSync` leaves an inert `.trash-*` directory — never a
+ *  half-deleted `lane-N` that `laneIndicesIn`'s `/^lane-\d+$/` match could misread — which the next trim run's
+ *  {@link sweepLeftoverTrash} finishes. Returns the trash dir to delete, or `{keep}`. */
+function moveClaimedLaneToTrash(repo, n, session) {
+  const dir = laneDir(repo, n);
   const trashDir = join(repo.poolDir, `.trash-${n}-${Date.now()}`);
   try {
     renameSync(dir, trashDir);
   } catch (e) {
-    log(`  ⚠ lane-${n}: rename-to-trash failed (${e.message}) — removing directly instead`);
-    rmSync(dir, { recursive: true, force: true });
-    return;
+    takeMarkerIf(dir, (moved) => moved?.session === session, n);
+    return { keep: { kind: 'leased', reason: `rename-to-trash failed (${e.message}), kept` } };
   }
-  rmSync(trashDir, { recursive: true, force: true });
+  if (readLease(trashDir)?.session === session) return { trashDir };
+  try {
+    renameSync(trashDir, dir);
+  } catch (e) {
+    // Never leave a live lane under a `.trash-*` name the next sweep would delete.
+    const parked = join(repo.poolDir, `.kept-lane-${n}-${Date.now()}`);
+    try { renameSync(trashDir, parked); } catch { /* best-effort */ }
+    log(`  ⚠ lane-${n}: re-leased mid-trim but could not be moved back (${e.message}) — parked intact at ${parked}`);
+  }
+  return { keep: TRIM_REACQUIRED };
 }
 
 /** Finish any `.trash-*` directory an earlier trim left behind (killed mid-delete). Real (non-dry-run) only —
@@ -2288,6 +2371,18 @@ function sweepLeftoverTrash(repo) {
   return entries.length;
 }
 
+/** Test-only seam: `LANE_POOL_TRIM_TEST_BARRIER=<path>` makes a real trim write `<path>.ready` at `stage`, then
+ *  wait (≤30s) for `<path>.go` — so a test can land a real `acquire` exactly inside a race window. `stage` is
+ *  `evaluated` (after the batch verdict, before any claim — the default) or `claimed` (after a lane is claimed,
+ *  before it is moved to trash), picked by `LANE_POOL_TRIM_TEST_BARRIER_AT`. Unset (production) ⇒ a no-op. */
+function trimTestBarrier(stage) {
+  const p = process.env.LANE_POOL_TRIM_TEST_BARRIER;
+  if (!p || (process.env.LANE_POOL_TRIM_TEST_BARRIER_AT || 'evaluated') !== stage) return;
+  writeFileSync(`${p}.ready`, '');
+  const deadline = Date.now() + 30_000;
+  while (!existsSync(`${p}.go`) && Date.now() < deadline) sleepSyncMs(50);
+}
+
 function cmdTrim(repo) {
   const dryRun = !!flags['dry-run'];
   const max = trimCapFor(repo);
@@ -2298,7 +2393,8 @@ function cmdTrim(repo) {
 
   if (total <= max) {
     log(`lane-pool trim "${repo.name}": ${total} lane(s), at/under the cap of ${max} — nothing to trim`);
-    if (flags.json) process.stdout.write(JSON.stringify({ repo: repo.name, root: repo.poolDir, total, max, removed: [], kept: [], dryRun }, null, 2) + '\n');
+    // Same key set as the compute path below, so a consumer never reads `remaining`/`overCap` as undefined.
+    if (flags.json) process.stdout.write(JSON.stringify({ repo: repo.name, root: repo.poolDir, total, max, dryRun, removed: [], kept: [], remaining: total, overCap: 0 }, null, 2) + '\n');
     return;
   }
 
@@ -2317,21 +2413,37 @@ function cmdTrim(repo) {
   const eligibleDesc = decisions.filter((d) => d.eligible);
   const toRemoveSet = new Set(eligibleDesc.slice(0, excess).map((d) => d.lane));
 
-  const rows = decisions
-    .map((d) => ({
-      lane: d.lane,
-      action: toRemoveSet.has(d.lane) ? (dryRun ? 'would-remove' : 'removed') : 'keep',
-      kind: d.kind,
-      reason: d.eligible && !toRemoveSet.has(d.lane) ? `${d.reason} (cap already reached by higher-numbered removals)` : d.reason,
-    }))
-    .sort((a, b) => a.lane - b.lane);
-
+  // #4025 r2 — the batch verdict above is a snapshot; each lane is re-claimed and re-checked right before its
+  // deletion (`claimLaneForRemoval` → `moveClaimedLaneToTrash`), and one that changed hands or gained work since
+  // is kept instead.
+  const lostRace = new Map();
   if (!dryRun) {
-    const removeNow = [...toRemoveSet];
-    unmapLanes(repo, removeNow); // stop proxying a lane before its directory is gone (#2139)
-    for (const n of removeNow) removeLaneDirSafely(repo, n);
+    trimTestBarrier('evaluated');
+    const trashed = [];
+    for (const d of decisions) {
+      if (!toRemoveSet.has(d.lane)) continue;
+      const claim = claimLaneForRemoval(repo, d.lane, d.lease, remoteShasBox);
+      if (!claim.keep) trimTestBarrier('claimed');
+      const moved = claim.keep ? claim : moveClaimedLaneToTrash(repo, d.lane, claim.session);
+      if (moved.keep) { lostRace.set(d.lane, moved.keep); toRemoveSet.delete(d.lane); } else trashed.push(moved.trashDir);
+    }
+    unmapLanes(repo, [...toRemoveSet]); // stop proxying a lane before its files are deleted (#2139)
+    for (const t of trashed) rmSync(t, { recursive: true, force: true });
     invalidateListCache(repo); // #xn432dz — the pool shape changed
   }
+
+  const rows = decisions
+    .map((d) => {
+      const lost = lostRace.get(d.lane);
+      if (lost) return { lane: d.lane, action: 'keep', kind: lost.kind, reason: lost.reason };
+      return {
+        lane: d.lane,
+        action: toRemoveSet.has(d.lane) ? (dryRun ? 'would-remove' : 'removed') : 'keep',
+        kind: d.kind,
+        reason: d.eligible && !toRemoveSet.has(d.lane) ? `${d.reason} (cap already reached by higher-numbered removals)` : d.reason,
+      };
+    })
+    .sort((a, b) => a.lane - b.lane);
 
   for (const r of rows) log(`  lane-${r.lane}: ${r.action} — ${r.reason}`);
   const removedCount = toRemoveSet.size;

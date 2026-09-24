@@ -12,7 +12,7 @@
  *   (see that file's exclude list in `vitest.config.ts`).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -88,6 +88,77 @@ describe('lane-pool trim (#4025) — at/under cap', () => {
     const parsed = JSON.parse(r.out);
     expect(parsed.removed).toEqual([]);
     expect(existingLaneNums()).toEqual([1, 2, 3]);
+    // Same key set as the compute path, so a consumer (health-watch's summary line) never reads undefined.
+    expect(parsed.remaining).toBe(3);
+    expect(parsed.overCap).toBe(0);
+  });
+});
+
+describe('lane-pool trim (#4025) — TOCTOU: a lane acquired between evaluation and deletion survives', () => {
+  /** Run a real trim in the background, pause it (test seam) after evaluation, acquire+dirty `lane` inside
+   *  that window, then release trim and return its parsed JSON. */
+  async function trimWithMidRunAcquire(args, lane, { dirty = true, acquire = true, at = 'evaluated', during } = {}) {
+    const barrier = join(base, 'trim-barrier');
+    const child = spawn('node', [SCRIPT, 'trim', ...REPO(), '--json', ...args], {
+      env: { ...process.env, ...ENV(), LANE_POOL_TRIM_TEST_BARRIER: barrier, LANE_POOL_TRIM_TEST_BARRIER_AT: at },
+    });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    const done = new Promise((res) => child.on('exit', res));
+    for (let i = 0; i < 600 && !existsSync(`${barrier}.ready`); i++) await new Promise((r) => setTimeout(r, 50));
+    expect(existsSync(`${barrier}.ready`)).toBe(true);
+    if (during) during();
+    if (acquire) leaseLane(lane, { session: 'mid-trim-acquirer' });
+    if (dirty) writeFileSync(join(laneDir(lane), 'real-work.txt'), 'written right after acquire\n');
+    writeFileSync(`${barrier}.go`, '');
+    await done;
+    return JSON.parse(out);
+  }
+
+  it('never deletes a lane a live session acquired after trim evaluated it (lease + work survive)', async () => {
+    provision(3);
+    const parsed = await trimWithMidRunAcquire(['--max=0'], 3);
+    expect(existingLaneNums()).toContain(3);
+    expect(existsSync(join(laneDir(3), 'real-work.txt'))).toBe(true);
+    expect(readFileSync(join(laneDir(3), '.git', '.lane-lease'), 'utf8')).toMatch(/mid-trim-acquirer/);
+    expect(parsed.removed).not.toContain(3);
+    expect(parsed.kept.find((k) => k.lane === 3).kind).toBe('leased');
+    // The lanes nobody touched are still trimmed.
+    expect(parsed.removed.sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(parsed.remaining).toBe(1);
+  });
+
+  it('a lane whose provably-dead lease was re-acquired mid-run survives too', async () => {
+    provision(2);
+    leaseLane(2, { ttlMinutes: 0 }); // dead at evaluation time → eligible
+    const parsed = await trimWithMidRunAcquire(['--max=0'], 2, { dirty: false });
+    expect(existingLaneNums()).toContain(2);
+    expect(readFileSync(join(laneDir(2), '.git', '.lane-lease'), 'utf8')).toMatch(/mid-trim-acquirer/);
+    expect(parsed.removed).toEqual([1]);
+  });
+
+  it('a lane that gains real work mid-run (no lease) is re-checked and kept, with no trim lease left behind', async () => {
+    provision(2);
+    const parsed = await trimWithMidRunAcquire(['--max=0'], 2, { acquire: false });
+    expect(existingLaneNums()).toContain(2);
+    expect(existsSync(join(laneDir(2), 'real-work.txt'))).toBe(true);
+    expect(existsSync(join(laneDir(2), '.git', '.lane-lease'))).toBe(false);
+    expect(parsed.kept.find((k) => k.lane === 2).kind).toBe('work');
+    expect(parsed.removed).toEqual([1]);
+  });
+
+  it("a lease that REPLACES trim's own claim before the move (acquire's non-O_EXCL rewrite/reclaim paths) keeps the lane", async () => {
+    provision(1);
+    const marker = join(laneDir(1), '.git', '.lane-lease');
+    const parsed = await trimWithMidRunAcquire(['--max=0'], 1, {
+      at: 'claimed', acquire: false, dirty: false,
+      // Overwrite trim's fresh claim the way `tryClaimLane`'s own-lease rewrite does: a plain write, no O_EXCL.
+      during: () => writeFileSync(marker, JSON.stringify({ session: 'returning-owner', purpose: 'test', acquiredAt: new Date().toISOString(), ttlMinutes: 240 })),
+    });
+    expect(existingLaneNums()).toEqual([1]);
+    expect(readFileSync(marker, 'utf8')).toMatch(/returning-owner/);
+    expect(parsed.removed).toEqual([]);
+    expect(parsed.kept.find((k) => k.lane === 1).kind).toBe('leased');
   });
 });
 
