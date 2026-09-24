@@ -10,9 +10,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, slotPath,
+  DEFAULT_ADMISSION_CAP, DEFAULT_TIMEOUT_MS, DEFAULT_ADMISSION_CEILING_MS, ADMISSION_SWITCH_ENV,
+  ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, resolveCeilingMs, isAdmissionOff, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
-  markWaiting, clearWaiting, listWaiting, partitionWaiting, pruneStaleWaiting, WAITING_STALE_GRACE_MS, DEFAULT_TIMEOUT_MS,
+  markWaiting, clearWaiting, listWaiting, partitionWaiting, pruneStaleWaiting, WAITING_STALE_GRACE_MS,
   acquireSlotBlocking, admissionStatus,
   runUnderAdmission, shellQuoteWord,
 } from '../heavy-admission.mjs';
@@ -39,6 +40,31 @@ describe('resolveTimeoutMs — env override, clamped sane (the doc/impl mismatch
   it('falls back on a non-finite or sub-1000ms value', () => {
     expect(resolveTimeoutMs({ WE_HEAVY_ADMISSION_TIMEOUT_MS: 'nope' })).toBe(DEFAULT_TIMEOUT_MS);
     expect(resolveTimeoutMs({ WE_HEAVY_ADMISSION_TIMEOUT_MS: '0' })).toBe(DEFAULT_TIMEOUT_MS);
+  });
+});
+
+describe('resolveCeilingMs — the xhlriy2 hard give-up ceiling, env override, clamped sane', () => {
+  it('defaults to 120 minutes when unset', () => {
+    expect(resolveCeilingMs({})).toBe(DEFAULT_ADMISSION_CEILING_MS);
+    expect(DEFAULT_ADMISSION_CEILING_MS).toBe(120 * 60_000);
+  });
+  it('reads WE_HEAVY_ADMISSION_CEILING_MS', () => expect(resolveCeilingMs({ WE_HEAVY_ADMISSION_CEILING_MS: '9000' })).toBe(9000));
+  it('falls back on a non-finite or sub-1000ms value', () => {
+    expect(resolveCeilingMs({ WE_HEAVY_ADMISSION_CEILING_MS: 'nope' })).toBe(DEFAULT_ADMISSION_CEILING_MS);
+    expect(resolveCeilingMs({ WE_HEAVY_ADMISSION_CEILING_MS: '0' })).toBe(DEFAULT_ADMISSION_CEILING_MS);
+  });
+});
+
+describe('isAdmissionOff — the WE_HEAVY_ADMISSION=off escape hatch', () => {
+  it('is off for off/0/false/no, case-insensitively', () => {
+    for (const v of ['off', 'OFF', '0', 'false', 'FALSE', 'no', 'No']) {
+      expect(isAdmissionOff({ [ADMISSION_SWITCH_ENV]: v })).toBe(true);
+    }
+  });
+  it('is on (not off) when unset or set to anything else', () => {
+    expect(isAdmissionOff({})).toBe(false);
+    expect(isAdmissionOff({ [ADMISSION_SWITCH_ENV]: 'on' })).toBe(false);
+    expect(isAdmissionOff({ [ADMISSION_SWITCH_ENV]: '1' })).toBe(false);
   });
 });
 
@@ -254,7 +280,7 @@ describe('waiting-intent markers — the observable queue', () => {
   });
 });
 
-describe('acquireSlotBlocking — polls until free, marks/clears waiting, FAILS OPEN on timeout', () => {
+describe('acquireSlotBlocking — polls until free, marks/clears waiting, FAILS OPEN only at the hard ceiling (xhlriy2)', () => {
   it('acquires immediately with zero wait when a slot is free', async () => {
     const r = await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'A', now: () => T0, sleep: async () => {} });
     expect(r).toEqual({ ok: true, slot: 0, timedOut: false, waitedMs: 0 });
@@ -277,15 +303,72 @@ describe('acquireSlotBlocking — polls until free, marks/clears waiting, FAILS 
     expect(listWaiting(lockRoot)).toHaveLength(0); // cleared on success
   });
 
-  it('gives up and reports timedOut when no slot frees before timeoutMs — fails OPEN, never throws', async () => {
+  it('keeps polling PAST the old 20-minute DEFAULT_TIMEOUT_MS mark while the holder is still alive — the exact xhlriy2 fix', async () => {
+    // 'HOLDER' is recorded under THIS test process's own pid (tryAcquireSlot's pid default), so the waiter's
+    // liveness probe against it reports 'unknown' (never provably dead) — it must never be reclaimed by time
+    // alone, and the old code's 20-minute elapsed-time give-up must no longer fire here.
     tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
     let clock = T0;
     const r = await acquireSlotBlocking({
-      lockRoot, cap: 1, owner: 'B', pollMs: 1000, timeoutMs: 3000,
+      lockRoot, cap: 1, owner: 'B', pollMs: 60_000, ceilingMs: 40 * 60_000, // ceiling well past the old timeout
       now: () => clock, sleep: async (ms) => { clock += ms; },
     });
-    expect(r).toMatchObject({ ok: false, slot: null, timedOut: true });
+    // Never acquires (the holder never frees or dies) — but must have polled well past DEFAULT_TIMEOUT_MS
+    // (20 min) before finally giving up at the 40-minute ceiling, proving it did NOT give up early.
+    expect(r).toMatchObject({ ok: false, slot: null, timedOut: true, ceilingHit: true });
+    expect(r.waitedMs).toBeGreaterThanOrEqual(40 * 60_000);
+    expect(r.waitedMs).toBeGreaterThan(DEFAULT_TIMEOUT_MS);
     expect(listWaiting(lockRoot)).toHaveLength(0); // marker cleared even on give-up (the `finally`)
+  });
+
+  it('gives up and reports timedOut/ceilingHit only once the hard ceiling elapses — fails OPEN, never throws, with a loud warning', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    const logs = [];
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'B', pollMs: 1000, ceilingMs: 3000, log: (m) => logs.push(m),
+      now: () => clock, sleep: async (ms) => { clock += ms; },
+    });
+    expect(r).toMatchObject({ ok: false, slot: null, timedOut: true, ceilingHit: true });
+    expect(listWaiting(lockRoot)).toHaveLength(0); // marker cleared even on give-up (the `finally`)
+    expect(logs.some((m) => /HARD CEILING/.test(m) && /proceeding unslotted/.test(m))).toBe(true);
+  });
+
+  it('logs a periodic "still waiting" line at stillWaitingLogMs cadence while blocked, well before the ceiling', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    let clock = T0;
+    let polls = 0;
+    const sleep = async (ms) => { clock += ms; polls += 1; if (polls === 5) releaseOwnedSlot({ lockRoot, cap: 1, owner: 'HOLDER' }); };
+    const logs = [];
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'B', pollMs: 1000, stillWaitingLogMs: 3000, ceilingMs: 60_000,
+      log: (m) => logs.push(m), now: () => clock, sleep,
+    });
+    expect(r.ok).toBe(true);
+    expect(logs.some((m) => /still waiting/.test(m))).toBe(true);
+    expect(logs.some((m) => /HARD CEILING/.test(m))).toBe(false); // never hit the ceiling
+  });
+
+  it('a provably-dead holder is reclaimed immediately (a REAL slot, not "proceeding unslotted") — the mechanism the ceiling never needs to engage for a dead holder', async () => {
+    const deadPid = 999999; // kill(pid,0) throws ESRCH — cannot exist
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0), pid: deadPid });
+    let clock = T0;
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'B', pollMs: 1000, ceilingMs: 60_000,
+      now: () => clock, sleep: async (ms) => { clock += ms; },
+    });
+    expect(r).toMatchObject({ ok: true }); // a REAL slot, reclaimed — never "unslotted"
+    expect(heldSlots({ lockRoot, cap: 1 })[0].owner).toBe('B');
+  });
+
+  it('WE_HEAVY_ADMISSION=off is a pure pass-through — returns unslotted immediately, never touches the lock root or a waiting marker', async () => {
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'HOLDER', nowMs: T0, nowIso: iso(T0) });
+    const sleep = async () => { throw new Error('must never poll/sleep when disabled'); };
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'B', now: () => T0, sleep, env: { [ADMISSION_SWITCH_ENV]: 'off' },
+    });
+    expect(r).toEqual({ ok: false, slot: null, timedOut: false, disabled: true, waitedMs: 0 });
+    expect(listWaiting(lockRoot)).toHaveLength(0); // never marked waiting
   });
 });
 
@@ -344,7 +427,7 @@ describe('runUnderAdmission — acquire → exec → release, the #3621 containe
     let clock = T0;
     const calls = [];
     const r = await runUnderAdmission({
-      lockRoot, cap: 1, owner: 'B', command: 'echo hi', timeoutMs: 3000,
+      lockRoot, cap: 1, owner: 'B', command: 'echo hi', ceilingMs: 3000,
       exec: (cmd) => calls.push(cmd), now: () => clock, sleep: async (ms) => { clock += ms; },
     });
     expect(r.admission.timedOut).toBe(true);
@@ -402,7 +485,7 @@ describe('runUnderAdmission — the general-purpose wrapper (#3383): acquire →
     const logs = [];
     const r = await runUnderAdmission({
       lockRoot, cap: 1, owner: 'B', command: 'echo hi', exec, log: (m) => logs.push(m),
-      now: () => clock, sleep: async (ms) => { clock += ms; }, timeoutMs: 3000, pollMs: 1000,
+      now: () => clock, sleep: async (ms) => { clock += ms; }, ceilingMs: 3000, pollMs: 1000,
     });
     expect(r.admission).toMatchObject({ ok: false, timedOut: true });
     expect(calls).toEqual(['echo hi']); // ran anyway, unslotted
@@ -431,7 +514,11 @@ describe('shellQuoteWord — re-quoting the `run` CLI\'s post-`--` argv tail int
 describe('host-sampler fix — heavy.admission.waiting counted ghost markers, not waiters', () => {
   const dead = () => 'dead';
   const alive = () => 'alive';
-  const OLD = iso(T0 - DEFAULT_TIMEOUT_MS - WAITING_STALE_GRACE_MS - 1000);
+  // xhlriy2: a LIVE marker can now legitimately be waiting up to DEFAULT_ADMISSION_CEILING_MS (120 minutes,
+  // not the old 20-minute DEFAULT_TIMEOUT_MS) before it gives up and clears its own marker — so "old enough to
+  // be a ghost" must be measured against the ceiling now, or a genuinely still-waiting long queue entry would
+  // be misclassified as stale and pruned out from under it.
+  const OLD = iso(T0 - DEFAULT_ADMISSION_CEILING_MS - WAITING_STALE_GRACE_MS - 1000);
 
   it('REGRESSION: markers left by dead/aged-out waiters no longer read as queue depth while a slot is free', () => {
     // The live host: 1 of 2 slots held, FOUR ghost markers (2026-09-04 / 2026-09-14) → the old status said waiting=4.
