@@ -173,6 +173,8 @@ describe('stepEpisodes — the edge-triggered episode builder over a fixture pro
     expect(METRIC_NAMES).toContain('heavy.run.episode');
     const rec = newMetric({ name: 'heavy.run.episode', kind: 'sampler', value: s4.finished[0].wall_s, unit: 'count', timestamp: new Date(T3).toISOString(), attributes: { source: 'host-sampler', sample: 'x', schema: 2, quality: 'ok', ...s4.finished[0] }, resource: resourceAttributes() });
     expect(validateTelemetryEvent(rec).ok).toBe(true);
+    // every field survives the attribute-key cap (at 40 keys the alphabetical cut dropped `wall_s` and `worker_kind`)
+    for (const f of EPISODE_FIELDS) expect(Object.keys(rec.attributes)).toContain(f);
     expect(Buffer.byteLength(serializeTelemetryEvent(rec))).toBeLessThan(MAX_LINE_BYTES);
     expect(serializeTelemetryEvent(rec)).not.toContain('_truncated');
   });

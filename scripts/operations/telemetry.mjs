@@ -366,8 +366,11 @@ export const TELEMETRY_SCHEMA_VERSION = 1;
 
 /** Max characters of any single string attribute value or `statusMessage`. */
 export const MAX_VALUE_LENGTH = 500;
-/** Max number of keys kept in an `attributes` bag; extras are dropped (deterministically, by sort order). */
-export const MAX_ATTRIBUTE_KEYS = 40;
+/** Max number of keys kept in an `attributes` bag; extras are dropped (deterministically, by sort order). 48, not
+ *  40 (#3383, 2026-09-24): a `heavy.run.episode` record plus the sampler's base attributes is 46 keys, and at 40 the
+ *  alphabetical cut silently dropped `wall_s`, `worker_kind`, `workers_start` and `workers_peak`. The byte ceiling
+ *  below is the real disk guard; this only bounds a runaway bag. */
+export const MAX_ATTRIBUTE_KEYS = 48;
 /**
  * Hard ceiling on ONE serialized line, in bytes.
  *
