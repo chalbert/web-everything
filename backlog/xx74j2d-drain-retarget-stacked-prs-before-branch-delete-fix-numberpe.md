@@ -2,10 +2,12 @@
 kind: story
 size: 5
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lane-drain.mjs", "we:scripts/__tests__/lane-drain-numbering.test.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
+codifiedIn: one-off
 tags: []
 ---
 
