@@ -5467,7 +5467,7 @@ reasoning and the rejected options:
 
 ### Every resident daemon updates itself from `main` plus opt-in live overlays — rebuilt fresh each tick, restarted between ticks, never hand-merged {#resident-daemon-reload-lifecycle}
 
-**Ratified 2026-09-23** (`3681`, bornAs `x6einv9`, operator, in session, in order: *"3681 ratified"* ·
+**Ratified 2026-09-23** (`3681`, bornAs `3681`, operator, in session, in order: *"3681 ratified"* ·
 *"seems simpler all on prototype for now, no?"* · *"once we have merge into main, we will still want to be able
 to run fixes of a darmon live and switch back to main once it merges"* · *"yes"* (to the live-overlay design) ·
 *"ratified"*). Forks 2 and 4 as re-prepared; Fork 5 amended by the operator to the live-overlay design below.
@@ -5519,18 +5519,18 @@ clauses:
      runs overlays.
    - (f) **Graduation is unchanged.** Overlay code reaches `main` only through its own normal PR and review.
    - (g) **This supersedes the long-lived POC-branch approach for daemons** (`lane/daemon-poc`, tracking epic
-     xii6vye): a daemon never tracks a POC branch as its steady state. It is the daemon exception written into
+     3999): a daemon never tracks a POC branch as its steady state. It is the daemon exception written into
      [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode) clause 4(a).
 6. **What runs is visible, and hangs are caught from outside.** Each daemon publishes its boot input heads and
    active overlays in its heartbeat or lease record, read by `runner-activity`. Every child call a tick makes
    has a timeout, and a check outside the daemon alerts when its heartbeat stops moving.
 7. **Left open.** How [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3 (a
    daemon never approves its own daemon-code change) applies to a review daemon running an overlay whose
-   graduation PR it would review was not ruled. Clause 3 stands unamended until decision card xcw0nxo rules it.
+   graduation PR it would review was not ruled. Clause 3 stands unamended until decision card 4043 rules it.
 
 **Lineage:** #3681 (ratified 2026-09-23; first prepared the morning of 2026-09-23, re-prepared the same evening
-in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch framing of x923r7y and the
-`lane/daemon-poc` registry entry (to be removed by x8kenvp). Composes with
+in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch framing of 3992 and the
+`lane/daemon-poc` registry entry (to be removed by 4042). Composes with
 [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) (clause 1's rebuild form kept, clause 2's
 premise corrected, clause 3 unchanged), [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode)
 (clause 4(a) amended) and [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates).

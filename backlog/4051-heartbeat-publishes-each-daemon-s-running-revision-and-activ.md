@@ -1,9 +1,10 @@
 ---
+bornAs: x0m1pkt
 kind: story
 size: 3
 parent: "3383"
 status: open
-blockedBy: ["xt8j3yk"]
+blockedBy: ["4050"]
 scope: ["we:scripts/operations/runner-activity.mjs", "we:skills-src/conveyor/daemon-manifest.mjs", "we:scripts/lib/daemon-self-sync.mjs"]
 dateOpened: "2026-09-23"
 tags: []
