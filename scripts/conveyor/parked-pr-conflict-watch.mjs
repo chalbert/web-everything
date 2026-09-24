@@ -85,18 +85,15 @@ import {
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
 
-/** The informative, auto-managed label this pass owns exclusively — nothing else applies or reads it. */
-export const CONFLICT_LABEL = 'merge-status:conflicting';
+// #xkmu3gv — single-sourced in the new leaf `we:scripts/conveyor/conflict-label.mjs` (a genuine pure leaf, no
+// imports) so `we:scripts/conveyor/reconcile-core.mjs` can read the label with no heavier pull-in than this
+// file's own fs/gh/network graph. IMPORTED (not `export … from`, which binds no local name) AND re-exported so
+// this file's OWN detection/posting logic below keeps working unchanged, and every existing importer of this
+// module's `CONFLICT_LABEL`/`CONFLICT_LABEL_META` (`reconcile-fix-dispatch.mjs`) needs no edit either. See that
+// leaf's own header for the full reasoning and the original docblock this text used to carry.
+import { CONFLICT_LABEL, CONFLICT_LABEL_META } from './conflict-label.mjs';
 
-/** Provisioning metadata, mirrors `we:scripts/conveyor/review-status-tag.mjs`'s own `ensureLabel` call shape.
- *  `description` MUST stay at or under GitHub's 100-char label-description cap — the original 163-char text
- *  made every `gh label create` call fail `HTTP 422: description is too long`, confirmed live 2026-09-05
- *  re-verifying the xoh8fkw repo-resolution fix against real PR #1932: the repo resolved correctly, then THIS
- *  hit, so the label was still never actually applied. */
-export const CONFLICT_LABEL_META = Object.freeze({
-  color: 'B60205', // same red as `review:human` — this is also a "something needs a human" signal
-  description: 'auto-managed: this review-parked PR has drifted into a real merge conflict — see #xw0odtv',
-});
+export { CONFLICT_LABEL, CONFLICT_LABEL_META };
 
 /** How many open PRs one `gh pr list` call reads per repo — generous relative to any repo's live parked count. */
 export const PR_LIST_LIMIT = 200;
