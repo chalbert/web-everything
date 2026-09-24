@@ -186,6 +186,14 @@ export default defineConfig({
       // #xn432dz — same tier: real throwaway origin/pool, a PATH git shim, real spawned (incl. concurrent)
       // `lane-pool.mjs list --acquirable` children proving the lease-first skip, cache and single-flight lock.
       'scripts/__tests__/lane-pool-list-cache.test.mjs',
+      // #3383 — same tier: real throwaway origin/pool, a PATH git shim (incl. an injected per-call delay),
+      // real spawned CONCURRENT `lane-pool.mjs acquire` children proving auto-pick now shares the same
+      // single-flight scan/cache `list --acquirable` uses, and that its total time is bounded.
+      'scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs',
+      // #3383 (coordinator follow-up) — same tier: real throwaway origin/pool, a PATH git shim (a per-call
+      // sleep), real spawned CONCURRENT `lane-pool.mjs acquire` children proving the scan's own timeout is
+      // independent of any one caller's --wait-ms.
+      'scripts/__tests__/lane-pool-acquire-scan-wait-decouple.test.mjs',
       // #x5n4zn3 — same tier: real throwaway origin/reference/pool, a PATH git shim (this one deliberately
       // HANGS, ignoring SIGTERM), a real spawned `lane-pool.mjs status` child.
       'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',

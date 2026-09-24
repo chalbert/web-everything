@@ -15,6 +15,7 @@ import {
   planLaneReap,
   summarizeHealth,
   defaultListLaneStatus,
+  defaultListAcquirable,
   defaultReadPorcelain,
   defaultIsLeasedNow,
   defaultTrimPool,
@@ -105,6 +106,35 @@ describe('summarizeHealth — pure', () => {
     const plan = [{ lane: 1, action: 'reap' }];
     expect(summarizeHealth(lanes, plan)).toEqual({ total: 1, leased: 0, acquirable: 0, dirtyUnleased: 1 });
   });
+
+  // #3383 — live-caught 2026-09-24: the plan alone never checks ahead-of-origin state, so a lane with a clean
+  // working tree but real unpushed commits (the exact live false-positive: 11 of 14 lanes this file called
+  // "acquirable" were really just clean-but-ahead) used to count as acquirable. The 4th arg is the REAL
+  // `list --acquirable` answer (the same function `acquire`'s own auto-pick is built on) to cross-check
+  // against, closing that divergence.
+  describe('the 4th arg (real `list --acquirable` cross-check, #3383)', () => {
+    it('omitted (null/undefined) — UNCHANGED plan-only behavior, for every existing caller', () => {
+      const lanes = [{ lane: 1, exists: true, leased: false }, { lane: 2, exists: true, leased: false }];
+      const plan = [{ lane: 1, action: 'already-clean' }, { lane: 2, action: 'already-clean' }];
+      expect(summarizeHealth(lanes, plan, [])).toEqual({ total: 2, leased: 0, acquirable: 2, dirtyUnleased: 0 });
+      expect(summarizeHealth(lanes, plan, [], null)).toEqual({ total: 2, leased: 0, acquirable: 2, dirtyUnleased: 0 });
+    });
+
+    it('a plan-clean lane the REAL answer excludes (clean-but-ahead) does NOT count as acquirable', () => {
+      const lanes = [{ lane: 1, exists: true, leased: false }, { lane: 2, exists: true, leased: false }];
+      const plan = [{ lane: 1, action: 'already-clean' }, { lane: 2, action: 'already-clean' }];
+      // lane 1 is genuinely acquirable (real gate agrees); lane 2's porcelain is clean but it is really ahead
+      // of origin — `list --acquirable` correctly excludes it, so this report must too.
+      expect(summarizeHealth(lanes, plan, [], new Set([1]))).toEqual({ total: 2, leased: 0, acquirable: 1, dirtyUnleased: 1 });
+    });
+
+    it('the real answer can only NARROW the plan, never widen it — a plan-dirty lane never becomes acquirable', () => {
+      const lanes = [{ lane: 1, exists: true, leased: false }];
+      const plan = [{ lane: 1, action: 'leave-dirty', leaveDirty: ['file.txt'] }];
+      // Even if the real read (implausibly) named lane 1 acquirable, real dirt in the plan still wins.
+      expect(summarizeHealth(lanes, plan, [], new Set([1]))).toEqual({ total: 1, leased: 0, acquirable: 0, dirtyUnleased: 1 });
+    });
+  });
 });
 
 describe('defaultListLaneStatus — argv shape (exec injected, no real subprocess)', () => {
@@ -140,6 +170,44 @@ describe('defaultListLaneStatus — argv shape (exec injected, no real subproces
     const exec = (cmd, argv) => { capturedArgv = argv; return '{"lanes":[]}'; };
     defaultListLaneStatus({ exec, root: '/repo', repo: 'chalbert/web-everything' });
     expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'status', '--json']);
+  });
+});
+
+// #3383 — the REAL eligibility read `summarizeHealth` cross-checks its plan-only classification against.
+describe('defaultListAcquirable — argv shape (exec injected, no real subprocess)', () => {
+  it('shells lane-pool.mjs list --acquirable --json with no --repo when omitted, and returns a Set of lane numbers', () => {
+    let capturedCmd; let capturedArgv; let capturedOpts;
+    const exec = (cmd, argv, opts) => {
+      capturedCmd = cmd; capturedArgv = argv; capturedOpts = opts;
+      return JSON.stringify(['/pool/web-everything/lane-3', '/pool/web-everything/lane-11']);
+    };
+    const out = defaultListAcquirable({ exec, root: '/repo' });
+    expect(capturedCmd).toBe('node');
+    expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'list', '--acquirable', '--json']);
+    expect(capturedOpts.cwd).toBe('/repo');
+    expect(out).toEqual(new Set([3, 11]));
+  });
+
+  it('resolves a constellation slug the same way defaultListLaneStatus does', () => {
+    let capturedArgv;
+    const exec = (cmd, argv) => { capturedArgv = argv; return '[]'; };
+    defaultListAcquirable({ exec, root: '/repo', repo: 'chalbert/plateau-app' });
+    expect(capturedArgv).toEqual(['/repo/scripts/lane-pool.mjs', 'list', '--acquirable', '--json', `--repo=${process.env.HOME}/workspace/plateau-app`]);
+  });
+
+  it('returns null (never throws) when the child fails', () => {
+    const exec = () => { throw new Error('boom'); };
+    expect(defaultListAcquirable({ exec })).toBeNull();
+  });
+
+  it('returns null on unparsable JSON, rather than throwing', () => {
+    const exec = () => 'not json';
+    expect(defaultListAcquirable({ exec })).toBeNull();
+  });
+
+  it('returns null when the parsed output is not an array', () => {
+    const exec = () => '{"not":"an array"}';
+    expect(defaultListAcquirable({ exec })).toBeNull();
   });
 });
 
@@ -223,7 +291,7 @@ describe('watchLanePoolHealth — IO shell over injected fakes', () => {
     const readPorcelain = (dir) => porcelains[dir] ?? '';
     const reapedDirs = [];
     const reap = (dir) => { reapedDirs.push(dir); return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true }; };
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null, listAcquirable: () => null });
     expect(result.plan.find((p) => p.lane === 1)).toEqual({ lane: 1, path: '/pool/web-everything/lane-1', action: 'reap', toRemove: ['.commit-msg.txt'] });
     expect(result.plan.find((p) => p.lane === 2)).toEqual({ lane: 2, path: '/pool/web-everything/lane-2', action: 'skip-leased' });
     expect(result.plan.find((p) => p.lane === 3)).toEqual({ lane: 3, path: '/pool/web-everything/lane-3', action: 'already-clean' });
@@ -232,13 +300,37 @@ describe('watchLanePoolHealth — IO shell over injected fakes', () => {
     expect(result.health).toEqual({ total: 3, leased: 1, acquirable: 2, dirtyUnleased: 0 });
   });
 
+  // #3383 — end-to-end proof of the wiring: `listAcquirable` is called (after the litter-reap, with the
+  // same repo/root this pass was given) and its answer narrows the plan-only count — lane 3 here looks
+  // plan-clean (porcelain has no litter) but the REAL `list --acquirable` answer excludes it (e.g. it is
+  // really ahead of origin), so it must NOT be reported acquirable even though its plan action is clean.
+  it('narrows the acquirable count by the real list --acquirable answer, and forwards repo/root to it', () => {
+    const listStatus = () => ({
+      lanes: [
+        { lane: 1, path: '/pool/web-everything/lane-1', exists: true, leased: false },
+        { lane: 3, path: '/pool/web-everything/lane-3', exists: true, leased: false },
+      ],
+    });
+    const readPorcelain = () => '';
+    let capturedListAcquirableArgs;
+    const listAcquirable = (o) => { capturedListAcquirableArgs = o; return new Set([1]); }; // lane 3 excluded
+    const result = watchLanePoolHealth({
+      listStatus, readPorcelain, reap: () => {}, trimPool: () => null, listAcquirable,
+      repo: 'chalbert/plateau-app', root: '/repo',
+    });
+    expect(capturedListAcquirableArgs).toEqual({ repo: 'chalbert/plateau-app', root: '/repo' });
+    expect(result.plan.find((p) => p.lane === 1).action).toBe('already-clean');
+    expect(result.plan.find((p) => p.lane === 3).action).toBe('already-clean'); // plan alone still says clean
+    expect(result.health).toEqual({ total: 2, leased: 0, acquirable: 1, dirtyUnleased: 1 }); // real answer wins
+  });
+
   it('never reads a LEASED lane\'s porcelain at all', () => {
     const listStatus = () => ({
       lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: true, clean: false }],
     });
     let readCalled = false;
     const readPorcelain = () => { readCalled = true; return '?? .commit-msg.txt\n'; };
-    watchLanePoolHealth({ listStatus, readPorcelain, reap: () => {}, trimPool: () => null });
+    watchLanePoolHealth({ listStatus, readPorcelain, reap: () => {}, trimPool: () => null, listAcquirable: () => null });
     expect(readCalled).toBe(false);
   });
 
@@ -248,7 +340,7 @@ describe('watchLanePoolHealth — IO shell over injected fakes', () => {
     });
     const readPorcelain = () => '?? .commit-msg.txt\n';
     let reapCalled = false;
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap: () => { reapCalled = true; }, dryRun: true, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap: () => { reapCalled = true; }, dryRun: true, trimPool: () => null, listAcquirable: () => null });
     expect(reapCalled).toBe(false);
     expect(result.reaped).toEqual([]);
     expect(result.plan[0].action).toBe('reap');
@@ -267,7 +359,7 @@ describe('watchLanePoolHealth — IO shell over injected fakes', () => {
       if (dir === '/pool/lane-1') throw new Error('boom');
       return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true };
     };
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null, listAcquirable: () => null });
     expect(result.reaped).toEqual([2]);
   });
 });
@@ -279,7 +371,7 @@ describe('watchLanePoolHealth — trim wiring (#4025)', () => {
     const listStatus = () => ({ lanes: [] });
     let captured;
     const trimPool = (o) => { captured = o; return { total: 10, max: 5, removed: [9, 10], kept: [], remaining: 8, overCap: 3, dryRun: false }; };
-    const result = watchLanePoolHealth({ listStatus, readPorcelain: () => '', repo: 'chalbert/plateau-app', root: '/repo', trimMax: 5, trimPool });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain: () => '', repo: 'chalbert/plateau-app', root: '/repo', trimMax: 5, trimPool, listAcquirable: () => null });
     expect(captured).toEqual({ repo: 'chalbert/plateau-app', root: '/repo', max: 5, dryRun: false });
     expect(result.trim).toEqual({ total: 10, max: 5, removed: [9, 10], kept: [], remaining: 8, overCap: 3, dryRun: false });
   });
@@ -288,13 +380,13 @@ describe('watchLanePoolHealth — trim wiring (#4025)', () => {
     const listStatus = () => ({ lanes: [] });
     let captured;
     const trimPool = (o) => { captured = o; return null; };
-    watchLanePoolHealth({ listStatus, readPorcelain: () => '', dryRun: true, trimPool });
+    watchLanePoolHealth({ listStatus, readPorcelain: () => '', dryRun: true, trimPool, listAcquirable: () => null });
     expect(captured.dryRun).toBe(true);
   });
 
   it('a null trim result (best-effort failure) is reported as .trim: null, never thrown', () => {
     const listStatus = () => ({ lanes: [] });
-    const result = watchLanePoolHealth({ listStatus, readPorcelain: () => '', trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain: () => '', trimPool: () => null, listAcquirable: () => null });
     expect(result.trim).toBeNull();
   });
 
@@ -302,7 +394,7 @@ describe('watchLanePoolHealth — trim wiring (#4025)', () => {
     const listStatus = () => ({ lanes: [] });
     let captured;
     const trimPool = (o) => { captured = o; return null; };
-    watchLanePoolHealth({ listStatus, readPorcelain: () => '', trimPool });
+    watchLanePoolHealth({ listStatus, readPorcelain: () => '', trimPool, listAcquirable: () => null });
     expect(captured.max).toBeNull();
   });
 });
@@ -318,7 +410,7 @@ describe('runLanePoolHealthWatch — the entrypoint', () => {
 
   it('runs normally when the env var is absent', () => {
     const listStatus = () => ({ lanes: [] });
-    const result = runLanePoolHealthWatch({ env: {}, listStatus, trimPool: () => null });
+    const result = runLanePoolHealthWatch({ env: {}, listStatus, trimPool: () => null, listAcquirable: () => null });
     expect(result.disabled).toBeUndefined();
     expect(result.health).toEqual({ total: 0, leased: 0, acquirable: 0, dirtyUnleased: 0 });
   });
@@ -345,7 +437,7 @@ describe('watchLanePoolHealth — TOCTOU guard (#3568)', () => {
     const isLeasedNow = () => false;
     let capturedArgs;
     const reap = (path, opts) => { capturedArgs = [path, opts]; return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true }; };
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, isLeasedNow, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, isLeasedNow, trimPool: () => null, listAcquirable: () => null });
     expect(capturedArgs).toEqual(['/pool/lane-1', { isLeasedNow }]);
     expect(result.reaped).toEqual([1]);
   });
@@ -354,7 +446,7 @@ describe('watchLanePoolHealth — TOCTOU guard (#3568)', () => {
     const listStatus = () => ({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: false }] });
     const readPorcelain = () => '?? .commit-msg.txt\n';
     const reap = () => ({ removed: [], leaveDirty: [], skipped: true, complete: false });
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, reap, trimPool: () => null, listAcquirable: () => null });
     expect(result.reaped).toEqual([]);
     // still PLANNED as 'reap' (the plan is a snapshot decision) — only the actual mutation was declined
     expect(result.plan[0].action).toBe('reap');
@@ -363,7 +455,7 @@ describe('watchLanePoolHealth — TOCTOU guard (#3568)', () => {
   it('reap is never even called for a lane the plan did not mark for reap (already-clean)', () => {
     const listStatus = () => ({ lanes: [{ lane: 1, path: '/pool/lane-1', exists: true, leased: false }] });
     let called = false;
-    watchLanePoolHealth({ listStatus, readPorcelain: () => '', reap: () => { called = true; }, trimPool: () => null });
+    watchLanePoolHealth({ listStatus, readPorcelain: () => '', reap: () => { called = true; }, trimPool: () => null, listAcquirable: () => null });
     expect(called).toBe(false);
   });
 
@@ -373,7 +465,7 @@ describe('watchLanePoolHealth — TOCTOU guard (#3568)', () => {
     let reapCalled = false;
     const result = watchLanePoolHealth({
       listStatus, readPorcelain, reap: () => { reapCalled = true; return { removed: ['.commit-msg.txt'], leaveDirty: [], skipped: false, complete: true }; },
-      trimPool: () => null,
+      trimPool: () => null, listAcquirable: () => null,
     });
     expect(reapCalled).toBe(true);
     expect(result.reaped).toEqual([1]);
@@ -437,7 +529,7 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
     writeFileSync(join(dir, 'review-3568-output.json'), '{}\n');
 
     const listStatus = () => ({ lanes: [{ lane: 1, path: dir, exists: true, leased: false }] });
-    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, trimPool: () => null, listAcquirable: () => null });
 
     expect(result.reaped).toEqual([1]);
     expect(existsSync(join(dir, '.commit-msg.txt'))).toBe(false);
@@ -450,7 +542,7 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
     writeFileSync(join(dir, '.commit-msg.txt'), 'litter\n');
 
     const listStatus = () => ({ lanes: [{ lane: 1, path: dir, exists: true, leased: false }] });
-    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain: defaultReadPorcelain, trimPool: () => null, listAcquirable: () => null });
 
     expect(result.reaped).toEqual([]);
     expect(result.plan[0].action).toBe('leave-dirty');
@@ -473,7 +565,7 @@ describe('watchLanePoolHealth — real git integration (proves the SAME shared c
       writeFileSync(join(dir, 'raced-in.txt'), 'a concurrent real edit\n'); // lands after the snapshot is taken
       return snapshot;
     };
-    const result = watchLanePoolHealth({ listStatus, readPorcelain, trimPool: () => null });
+    const result = watchLanePoolHealth({ listStatus, readPorcelain, trimPool: () => null, listAcquirable: () => null });
 
     expect(result.plan[0].action).toBe('reap'); // the STALE plan still says reap — it saw only litter
     expect(result.reaped).toEqual([]); // but the actual mutation was cancelled by the fresh re-read
