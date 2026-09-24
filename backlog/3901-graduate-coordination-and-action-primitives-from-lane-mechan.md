@@ -4,8 +4,7 @@ kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["3856"]
-scope: ["we:scripts/operations/__tests__/action-cli.test.mjs", "we:scripts/operations/__tests__/coordination-root.test.mjs", "we:scripts/operations/__tests__/tick-mutex.test.mjs", "we:scripts/operations/__tests__/tick-throttle.test.mjs", "we:scripts/operations/action-cli.mjs", "we:scripts/operations/action-dispatch.mjs", "we:scripts/operations/action-ground-truth.mjs", "we:scripts/operations/action-record.mjs", "we:scripts/operations/action-store.mjs", "we:scripts/operations/coordination-lock.mjs", "we:scripts/operations/coordination-root.mjs", "we:scripts/operations/session-role.mjs", "we:scripts/operations/tick-mutex.mjs", "we:scripts/operations/tick-throttle.mjs", "we:scripts/operations/__tests__/action-records.test.mjs", "we:scripts/operations/__tests__/coordination-cross-clone.test.mjs", "we:scripts/operations/__tests__/action-dispatch-paths.test.mjs"]
+scope: ["we:scripts/operations/__tests__/action-cli.test.mjs", "we:scripts/operations/__tests__/coordination-root.test.mjs", "we:scripts/operations/__tests__/tick-mutex.test.mjs", "we:scripts/operations/__tests__/tick-throttle.test.mjs", "we:scripts/operations/action-cli.mjs", "we:scripts/operations/action-dispatch.mjs", "we:scripts/operations/action-ground-truth.mjs", "we:scripts/operations/action-record.mjs", "we:scripts/operations/action-store.mjs", "we:scripts/operations/coordination-lock.mjs", "we:scripts/operations/coordination-root.mjs", "we:scripts/operations/session-role.mjs", "we:scripts/operations/tick-mutex.mjs", "we:scripts/operations/tick-throttle.mjs", "we:scripts/operations/__tests__/action-records.test.mjs", "we:scripts/operations/__tests__/coordination-cross-clone.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -29,5 +28,4 @@ The first lane found three of this slice's tests import modules owned by later s
 
 ## Graduation import check
 
-- 2026-09-24: graduation-import-check added blockedBy #3856 — the moved-in `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` also imports a module #3856 owns.
-- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` here from #3856 — it imports a module this card owns.
+- 2026-09-24: graduation-import-check made this a blocker of #3856 — its moved-in `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` imports a module this card owns.

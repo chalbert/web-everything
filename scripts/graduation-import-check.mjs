@@ -275,15 +275,25 @@ export function classifyImportPath({ repoPath, ownerId, cardsById, mainPaths }) 
   return { kind: 'unowned' };
 }
 
-/** Pick the `later` owner that LANDS LAST (max `landingDepth`), tie-broken deterministically by `idCompare`. */
-export function chooseMoveTarget(ownerIds, cardsById) {
-  const unique = [...new Set(ownerIds)].sort(idCompare);
-  let best = null, bestDepth = -Infinity;
-  for (const id of unique) {
-    const d = landingDepth(id, cardsById);
-    if (d > bestDepth) { bestDepth = d; best = id; }
-  }
-  return best;
+/**
+ * Rank candidate owner ids by which one SHOULD end up hosting a multi-owner test file, deepest-first:
+ *   1. greater `landingDepth` (lands later in the OPEN-card `blockedBy` DAG) wins;
+ *   2. tie-break: a card that ALREADY carries ≥1 `blockedBy` entry wins over one with none — never make a
+ *      currently blocker-free card (typically a foundational leaf, e.g. #3901) the first to gain a new
+ *      blocker when an already-more-constrained alternative exists;
+ *   3. further tie-break: {@link idCompare}, for determinism.
+ * PURE. `planTestFileFix` walks this order looking for the first ACYCLIC placement — see its doc for why
+ * "deepest" alone (this order's #1) is not sufficient on its own to pick a placement.
+ */
+export function rankOwnerCandidates(ids, cardsById) {
+  return [...new Set(ids)].sort((a, b) => {
+    const da = landingDepth(a, cardsById), db = landingDepth(b, cardsById);
+    if (da !== db) return db - da;
+    const ha = (cardsById.get(a)?.blockedBy.length ?? 0) > 0 ? 1 : 0;
+    const hb = (cardsById.get(b)?.blockedBy.length ?? 0) > 0 ? 1 : 0;
+    if (ha !== hb) return hb - ha;
+    return idCompare(a, b);
+  });
 }
 
 const isTestFile = (repoOrWePath) => /\.test\.mjs$/.test(repoOrWePath);
@@ -296,31 +306,50 @@ function wouldCycle(target, blockerId, cardsById) {
 }
 
 /**
- * A MOVE alone is not always sufficient: relocating a test to the owner that lands last among its CURRENTLY
- * later-classified imports can turn one of the file's OTHER imports (safely `own`/`blocker` under its old
- * owner) into a NEW `later` hazard under the new owner — e.g. moving a test that also needs its old owner's
- * own file. Real case found live: `action-dispatch-paths.test.mjs` moves from #3856 to #3901 (fixing its
- * `action-store.mjs`/`action-record.mjs` imports, both #3901's) but also imports `land-advance-io.mjs`
- * (#3856's own file) — safely fixed by ALSO giving #3901 a `blockedBy` on #3856, not by moving again (which
- * would just recreate the original hazard in reverse — two owners with no order between them can ping-pong a
- * pure "move" forever). Re-classifies every import of the file as if it belonged to the chosen target, and
- * folds any newly-`later` import into an extra `blockedBy` — UNLESS that edge would cycle (target's candidate
- * blocker already depends on target), which is left as a manual `cycleWarnings` entry instead of silently
- * mis-wiring the graph. PURE.
- * @param {{classifications:Array, cardsById:Map<string,object>, mainPaths:Set<string>}} a
+ * Choose the home for a test file with imports spread across several cards, and the extra `blockedBy` edges
+ * that placement needs. THE CANDIDATE SET IS the file's CURRENT owner plus every `later`-classified owner —
+ * not just the `later` owners — because the current owner may ALREADY own some of the file's other imports
+ * (classified `own`), and those are exactly as real a constraint on where the file can safely live.
+ *
+ * Real case found live that a naive "move to whichever later-owner lands deepest" gets BACKWARDS:
+ * `action-dispatch-paths.test.mjs` lives at #3856 (owns `land-advance-io.mjs`) and also imports
+ * `action-store.mjs`/`action-record.mjs`, both #3901's. #3901 is a foundational LEAF (currently zero
+ * `blockedBy`, feeding #3902/#3906/#3907/#3863 downstream); #3856 sits at the END of the land-advance chain
+ * (7 blockers already). Only looking at the later owner (#3901) and moving there, then blocking #3901 on
+ * #3856, would give a foundational leaf a brand-new dependency on something far downstream — stalling
+ * everything #3901 feeds behind the whole land-advance chain. The right call is the reverse: the file STAYS
+ * at #3856 (already the deeper, already-more-constrained card — so `target === currentOwnerId` here, no scope
+ * move at all) and #3856 gains `blockedBy #3901` instead.
+ *
+ * Mechanism: rank the candidate set with {@link rankOwnerCandidates} (deepest, then already-has-blockers,
+ * first) and walk that order picking the first candidate that can safely receive a `blockedBy` edge to EVERY
+ * other candidate (no cycle) — never picking a shallower/blocker-free candidate over a deeper acyclic one.
+ * Falls back to the top-ranked candidate (reporting the unavoidable edges as `cycleWarnings`) only if no
+ * candidate is fully clean — a genuine circular need between two slices, left for a human.
+ *
+ * Once a target is chosen, every import of the file is RE-classified as if it belonged to that target (not
+ * just the original candidate owners) — a move can turn some other import (safely `own`/`blocker` under the
+ * old owner) into a fresh hazard under the new one, exactly the mechanism the #3895→#3908 case needed
+ * (residual `blockedBy #3905`). PURE.
+ * @param {{currentOwnerId:string, classifications:Array, cardsById:Map<string,object>, mainPaths:Set<string>}} a
  * @returns {{target:string, addBlockedBy:string[], cycleWarnings:Array<{path:string, ownerId:string}>}|null}
- *   `null` when the file has no `later` import (nothing to move for).
+ *   `null` when the file has no `later` import (nothing to place for). `target === currentOwnerId` means
+ *   "stays put" — the caller must not treat that as a scope move.
  */
-export function planTestFileFix({ classifications, cardsById, mainPaths }) {
+export function planTestFileFix({ currentOwnerId, classifications, cardsById, mainPaths }) {
   const laterOwnerIds = classifications.filter((c) => c.kind === 'later').map((c) => c.ownerId);
   if (!laterOwnerIds.length) return null;
-  const target = chooseMoveTarget(laterOwnerIds, cardsById);
+  const candidates = [...new Set([currentOwnerId, ...laterOwnerIds])];
+  const ranked = rankOwnerCandidates(candidates, cardsById);
+  const isFullyAcyclic = (t) => candidates.every((other) => other === t || !wouldCycle(t, other, cardsById) || transitiveBlockedBy(t, cardsById).has(other));
+  const target = ranked.find(isFullyAcyclic) ?? ranked[0];
+
   const addBlockedBy = new Set();
   const cycleWarnings = [];
   for (const c of classifications) {
     if (c.kind === 'on-main') continue; // owner-independent; reclassifying is a no-op
     const under = classifyImportPath({ repoPath: c.repoPath, ownerId: target, cardsById, mainPaths });
-    if (under.kind !== 'later') continue; // own/blocker/on-main under the new owner — no edge needed
+    if (under.kind !== 'later') continue; // own/blocker/on-main under the chosen home — no edge needed
     if (under.ownerId === target) continue; // defensive; classifyImportPath never returns this
     if (wouldCycle(target, under.ownerId, cardsById)) cycleWarnings.push({ path: c.repoPath, ownerId: under.ownerId });
     else addBlockedBy.add(under.ownerId);
@@ -344,11 +373,32 @@ export function buildFindings({ cardsById, mainPaths, results }) {
     const test = isTestFile(r.file);
     let fix;
     if (later.length) {
-      fix = test
-        ? { kind: 'move', ...planTestFileFix({ classifications: r.classifications, cardsById, mainPaths }) }
-        : { kind: 'blockedBy', targets: [...new Set(later.map((c) => c.ownerId))].sort(idCompare) };
+      if (test) {
+        fix = { kind: 'move', ...planTestFileFix({ currentOwnerId: r.ownerId, classifications: r.classifications, cardsById, mainPaths }) };
+      } else {
+        // An impl file cannot move (the card's own scope IS the code) — but a proposed blockedBy edge can
+        // still cycle (the later owner already depends, transitively, on THIS card). Guard it the same way
+        // planTestFileFix does, rather than blindly wiring a self-defeating edge.
+        const targets = [], cycleWarnings = [];
+        for (const t of new Set(later.map((c) => c.ownerId))) {
+          if (wouldCycle(r.ownerId, t, cardsById)) cycleWarnings.push({ path: null, ownerId: t });
+          else targets.push(t);
+        }
+        fix = { kind: 'blockedBy', targets: targets.sort(idCompare), cycleWarnings };
+      }
     } else {
-      fix = { kind: 'unresolved', reason: 'no open card owns this import — investigate (moved/renamed file, or a real scope gap) before porting' };
+      // Every remaining import is `unowned`: the branch has the file, but no OPEN card in the epic claims it —
+      // it has to be ported together with the code that needs it, so the fix is to add it to the IMPORTING
+      // card's own scope (never invented as a new card, never guessed onto some other card).
+      fix = { kind: 'add-to-scope', owner: r.ownerId, paths: [] };
+    }
+    // A file can carry BOTH `later` and `unowned` imports at once. Whichever card ends up owning the FILE
+    // (the move target, or this card unchanged) is also the one whose scope should gain the unowned path(s) —
+    // same reasoning as the unowned-only case above, just attached to whatever the primary fix already is.
+    if (unowned.length) {
+      const owner = fix.kind === 'move' ? fix.target : r.ownerId;
+      fix.addToScope = { owner, paths: unowned.map((c) => withWe(c.repoPath)) };
+      if (fix.kind === 'add-to-scope') fix.paths = fix.addToScope.paths; // unowned-only: same list, top-level too
     }
     findings.push({ ownerId: r.ownerId, file: r.file, isTest: test, later, unowned, fix });
   }
@@ -357,14 +407,27 @@ export function buildFindings({ cardsById, mainPaths, results }) {
 
 /** One-line, human-readable rendering of a finding's proposed fix. PURE. */
 export function describeFix(finding) {
+  const scopeSuffix = finding.fix.addToScope?.paths.length
+    ? `; add ${finding.fix.addToScope.paths.map((p) => `\`${p}\``).join(', ')} to #${finding.fix.addToScope.owner}'s scope (unowned)`
+    : '';
   if (finding.fix.kind === 'move') {
-    const extra = finding.fix.addBlockedBy?.length ? `, plus blockedBy ${finding.fix.addBlockedBy.map((t) => `#${t}`).join(', ')} (its other imports, under the new owner)` : '';
     const cyc = finding.fix.cycleWarnings?.length
       ? ` — MANUAL: ${finding.fix.cycleWarnings.map((w) => `${withWe(w.path)} needs #${w.ownerId}, which would cycle`).join('; ')}`
       : '';
-    return `move to #${finding.fix.target} (lands last among: ${finding.later.map((c) => `#${c.ownerId}`).join(', ')})${extra}${cyc}`;
+    if (finding.fix.target === finding.ownerId) {
+      const extra = finding.fix.addBlockedBy?.length ? ` blockedBy ${finding.fix.addBlockedBy.map((t) => `#${t}`).join(', ')}` : '';
+      return `stays here; add${extra}${cyc}${scopeSuffix}`;
+    }
+    const extra = finding.fix.addBlockedBy?.length ? `, plus blockedBy ${finding.fix.addBlockedBy.map((t) => `#${t}`).join(', ')} (its other imports, under the new owner)` : '';
+    return `move to #${finding.fix.target} (lands last among: ${finding.later.map((c) => `#${c.ownerId}`).join(', ')})${extra}${cyc}${scopeSuffix}`;
   }
-  if (finding.fix.kind === 'blockedBy') return `add blockedBy ${finding.fix.targets.map((t) => `#${t}`).join(', ')}`;
+  if (finding.fix.kind === 'blockedBy') {
+    const cyc = finding.fix.cycleWarnings?.length
+      ? ` — MANUAL: #${finding.fix.cycleWarnings.map((w) => w.ownerId).join(', #')} would cycle`
+      : '';
+    return `add blockedBy ${finding.fix.targets.map((t) => `#${t}`).join(', ')}${cyc}${scopeSuffix}`;
+  }
+  if (finding.fix.kind === 'add-to-scope') return `add ${finding.fix.paths.map((p) => `\`${p}\``).join(', ')} to #${finding.fix.owner}'s own scope (unowned; ports with the code that needs it)`;
   return finding.fix.reason;
 }
 
@@ -386,13 +449,15 @@ export function planEdits(findings, today) {
   for (const f of findings) {
     if (f.fix.kind === 'move') {
       const target = f.fix.target;
-      get(f.ownerId).removeScope.push(f.file);
-      get(target).addScope.push(f.file);
-      get(f.ownerId).notes.push(`- ${today}: graduation-import-check moved \`${f.file}\` to #${target} — it imports a module #${target} owns.`);
-      get(target).notes.push(`- ${today}: graduation-import-check moved \`${f.file}\` here from #${f.ownerId} — it imports a module this card owns.`);
-      // The move can turn one of the file's OTHER imports (fine under the old owner) into a fresh `later`
-      // hazard under the new owner — see planTestFileFix's doc. Cover those with blockedBy on the new owner
-      // rather than moving again (which could ping-pong between two unrelated owners forever).
+      if (target !== f.ownerId) {
+        get(f.ownerId).removeScope.push(f.file);
+        get(target).addScope.push(f.file);
+        get(f.ownerId).notes.push(`- ${today}: graduation-import-check moved \`${f.file}\` to #${target} — it imports a module #${target} owns.`);
+        get(target).notes.push(`- ${today}: graduation-import-check moved \`${f.file}\` here from #${f.ownerId} — it imports a module this card owns.`);
+      }
+      // Placing (or keeping) the file at `target` can leave one of its OTHER imports uncovered — see
+      // planTestFileFix's doc for the #3901/#3856 and #3895/#3908 shapes this covers. Fix with blockedBy on
+      // `target` rather than moving again (which could ping-pong between two unrelated owners forever).
       for (const t of f.fix.addBlockedBy ?? []) {
         get(target).addBlockedBy.push(t);
         get(target).notes.push(`- ${today}: graduation-import-check added blockedBy #${t} — the moved-in \`${f.file}\` also imports a module #${t} owns.`);
@@ -403,6 +468,13 @@ export function planEdits(findings, today) {
         get(f.ownerId).addBlockedBy.push(t);
         get(f.ownerId).notes.push(`- ${today}: graduation-import-check added blockedBy #${t} — \`${f.file}\` imports a module #${t} owns.`);
         get(t).notes.push(`- ${today}: graduation-import-check made this a blocker of #${f.ownerId} — its \`${f.file}\` imports a module this card owns.`);
+      }
+    }
+    if (f.fix.addToScope?.paths.length) {
+      const { owner, paths } = f.fix.addToScope;
+      for (const p of paths) {
+        get(owner).addScope.push(p);
+        get(owner).notes.push(`- ${today}: graduation-import-check added ${p} to this card's own scope — no open card owned it, and it is imported by \`${f.file}\`, which this card ports.`);
       }
     }
   }

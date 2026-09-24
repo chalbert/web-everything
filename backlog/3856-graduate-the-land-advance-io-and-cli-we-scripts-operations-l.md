@@ -4,8 +4,8 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3853", "3854", "3851", "3852", "3855", "3865", "3891"]
-scope: ["we:scripts/operations/land-advance-io.mjs", "we:scripts/operations/land-advance-cli.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/land-advance-io.test.mjs", "we:scripts/operations/__tests__/land-advance-io-real.test.mjs", "we:scripts/operations/__tests__/land-advance-cli.test.mjs", "we:scripts/operations/__tests__/land-advance-repair-io.test.mjs", "we:scripts/operations/__tests__/land-advance-items-io.test.mjs"]
+blockedBy: ["3853", "3854", "3851", "3852", "3855", "3865", "3891", "3901"]
+scope: ["we:scripts/operations/land-advance-io.mjs", "we:scripts/operations/land-advance-cli.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/land-advance-io.test.mjs", "we:scripts/operations/__tests__/land-advance-io-real.test.mjs", "we:scripts/operations/__tests__/land-advance-cli.test.mjs", "we:scripts/operations/__tests__/land-advance-repair-io.test.mjs", "we:scripts/operations/__tests__/action-dispatch-paths.test.mjs", "we:scripts/operations/__tests__/land-advance-items-io.test.mjs"]
 dateOpened: "2026-09-21"
 tags: []
 ---
@@ -38,5 +38,4 @@ Added blockers #3865 and 3891: `we:scripts/operations/land-advance-io.mjs` impor
 ## Graduation import check
 
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/land-advance-items-io.test.mjs` here from #3865 — it imports a module this card owns.
-- 2026-09-24: graduation-import-check made this a blocker of #3901 — its moved-in `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` imports a module this card owns.
-- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` to #3901 — it imports a module #3901 owns.
+- 2026-09-24: graduation-import-check added blockedBy #3901 — the moved-in `we:scripts/operations/__tests__/action-dispatch-paths.test.mjs` also imports a module #3901 owns.
