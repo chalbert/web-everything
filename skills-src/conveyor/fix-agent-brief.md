@@ -21,6 +21,18 @@
 > unchanged (this brief never resolves, claims, or otherwise touches a backlog card at any point; the repair is
 > always scoped to the PR's own diff, item or no item).
 
+> **ADVISORY-FIX MODE (#xkmu3gv) — a `needs-human` PR carrying `advisory:changes`, no `review:changes`.** The
+> reconcile pass (`we:scripts/conveyor/reconcile-core.mjs`) now also dispatches this brief at a `review:human`
+> PR that carries `advisory:changes` but no `review:changes` — an admitted finding from
+> `we:scripts/operations/review-pr.mjs`'s automatic `advise` step, which runs BEFORE the human review ceremony
+> and never touches any `review:*` label. **Confirm which mode you are in before step 2**:
+> `gh pr view {{PR_NUM}} --json labels --repo {{REPO}}`. If `review:changes` is present, this is the ORDINARY
+> (or conflict) mode below — proceed as written. If it is **absent** and `advisory:changes` is present, you are
+> in ADVISORY-FIX MODE: skip straight to *2a. Read the advisory finding (advisory-fix mode)* below instead of
+> step 2, and at hand-back use *7a. Advisory-fix hand-back* instead of step 7. Every other step (3–6, 8) is
+> unchanged — same reproduce/fix/converge/evidence discipline — except the fence is the advisory finding alone,
+> never a fresh `review:human` gate concern.
+
 ## Fill these before spawning
 
 | Placeholder | What the conveyor fills it with |
@@ -128,6 +140,23 @@ A human handles it via `/finish`.
 > there to answer. The marker is what tells the two apart. It changes **no label** and re-arms nothing; it is
 > terminal for the automatic loop and cleared by a **person**.
 
+### 2a. Read the advisory finding (advisory-fix mode, #xkmu3gv — skip if you are NOT in this mode)
+
+There is no `review:changes` comment on this population — the finding is the automatic advisory-panel comment
+instead (leading line `⚠️ THIS IS AN ADVISORY REVIEW, NOT A RECORDED VERDICT.`):
+
+```bash
+gh pr view {{PR_NUM}} --json title,body,comments --repo {{REPO}}
+```
+
+Take the **latest** such comment as the authoritative ask — read its findings table and its
+`**Advisory outcome:** \`changes\`` line. Everything else in step 2 above still applies unchanged: reproduce the
+finding red before you touch code, and if it is ambiguous or needs judgment you cannot safely make, **stand
+down** exactly as step 2 says (`stand-down.mjs {{PR_NUM}} --reason=needs-judgment`) — this population is never
+exempt from that escalation path. **Do NOT** treat this comment as a human-ceremony bounce: it explicitly is
+not one (its own text says so, twice), so nothing here ever touches `review:human`, `review:pending`, or
+`review:accepted` — this repair's only output is the fix itself plus the durable marker at step 7a.
+
 ### 3. Apply the fix — repair ONLY the reviewer's finding
 
 Make the smallest change that addresses the finding, in `$LANE`, on the lane's **current branch** (its local
@@ -184,6 +213,10 @@ Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
 > the normal review flow before this can land. **Post a comment on the PR showing the conflicting hunk BEFORE
 > your resolution and the resolved hunk AFTER**, as before/after evidence of exactly what you changed — this is
 > in addition to, not instead of, the ordinary reproduce/fix/verify evidence step 1 above already asks for.
+> **At hand-back (step 7), use `rearm-review.mjs {{PR_NUM}} --repo={{REPO}} --round=conflict`** (#xkmu3gv) — the
+> SAME `review:changes → review:pending` swap, but it posts the mechanical-round marker so this repair counts
+> against its own, smaller `CONFLICT_FIX_ROUND_CAP` (3) instead of the ordinary 5-round negotiation cap; using
+> the plain (no `--round=`) form here would silently spend the wrong budget.
 
 **Build-brief discipline applies to the repair too** (statute:
 [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
@@ -281,6 +314,22 @@ do not force a label:
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-rearm-refused
 ```
 
+### 7a. Advisory-fix hand-back (#xkmu3gv — use instead of step 7 in ADVISORY-FIX MODE only)
+
+There is no `review:changes` to swap here, so there is **no label to touch at all** — post the durable
+advisory-fix marker instead:
+
+```bash
+node "{{WE_ROOT}}/scripts/conveyor/advisory-fix-mark.mjs" {{PR_NUM}} --repo={{REPO}} && \
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=re-armed
+```
+
+`advisory-fix-mark.mjs` posts one comment recording that the advisory finding was addressed. It **NEVER**
+touches `review:human`, `review:pending`, `review:changes`, or any `advisory:*` label, and it records **no**
+verdict — only the next `advise` run (a fresh `review` dispatch, already owed automatically once this comment
+outnumbers the prior advisory note) may change any of those, by judging the repaired head fresh. **Do NOT** run
+`gh pr edit`, **do NOT** run `rearm-review.mjs` here (there is nothing for it to rearm), **do NOT** merge.
+
 ### 8. Append a structured learnings entry to the session drop-box (#2614)
 
 Append **exactly one** generalized-lesson entry (a friction hit, a missing convention, a doc/skill gap, an
@@ -305,8 +354,10 @@ Skip only if you genuinely hit no generalizable friction.
 (`scripts/conveyor/pr-watch.mjs {{PR_NUM}}`) is re-armed by the conveyor skill, sees the PR return to
 `review:pending` (still parked, exit 2), and surfaces it for `/review`. Return a one-line result:
 `#{{ITEM_NUM}} → PR #{{PR_NUM}} (re-armed review:pending | fix escalated <reason> | fix gate-red)`, or, for the
-tooling-denial exit in step 3, `#{{ITEM_NUM}} → blocked-on-infra (...)`. A red gate / red CI / a blocked-on-infra
-exit is NOT watcher-visible — your one-line RETURN is the only signal that surfaces it, so always report it.
+tooling-denial exit in step 3, `#{{ITEM_NUM}} → blocked-on-infra (...)`, or, for ADVISORY-FIX MODE (step 7a),
+`#{{ITEM_NUM}} → PR #{{PR_NUM}} (advisory finding addressed — a fresh review is owed next, not by this agent)`.
+A red gate / red CI / a blocked-on-infra exit is NOT watcher-visible — your one-line RETURN is the only signal
+that surfaces it, so always report it.
 
 ---
 
@@ -345,7 +396,14 @@ re-push, re-arm-never-clear shape is identical — which is the point (#2630).
   the trimmed before/after evidence as a PR comment (step 6) before you re-arm. A genuine non-repro is stated
   explicitly, with the reason — never silently skipped.
 - **Work only through the normal verbs** — `acquire --base=<ref>` → repair → `git push … lane/*` →
-  `rearm-review.mjs` → daemon/human re-review. No parallel state store (#2612 ruling).
+  `rearm-review.mjs` (or, in ADVISORY-FIX MODE, `advisory-fix-mark.mjs` — never `rearm-review.mjs`, there is no
+  `review:changes` to swap) → daemon/human re-review. No parallel state store (#2612 ruling).
+- **ADVISORY-FIX MODE never touches any `review:*` or `advisory:*` label** (#xkmu3gv) — its only output is the
+  fix itself and the durable marker at step 7a; the NEXT `review` dispatch (already owed automatically, not run
+  by this agent) is what may change a label, by judging the repaired head fresh.
+- **A mechanical conflict-resolution round hands back with `rearm-review.mjs --round=conflict`** (#xkmu3gv), so
+  it counts against its own smaller cap — the plain form would silently spend the ordinary negotiation cap
+  instead.
 - **If you stop, say so ON THE PR** — every escalation exit runs `stand-down.mjs` before it returns (#3296). A
   refusal that leaves no durable trace is indistinguishable from a crash, and gets re-dispatched forever. The
   marker changes no label; it is terminal for the auto-fix loop and cleared by a human.

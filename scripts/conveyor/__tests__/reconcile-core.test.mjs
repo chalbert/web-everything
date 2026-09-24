@@ -32,6 +32,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, CI_HEAL_ROUND_CAP,
+  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -39,6 +40,8 @@ import {
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
+import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
+import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment } from '../advisory-fix-mark.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
@@ -711,6 +714,158 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
     expect(DISPATCH_KINDS).toContain('ci-heal');
     const plan = planReconcile({ prs: [prRed()], agents: [], now: NOW });
     for (const d of plan.dispatch) expect(DISPATCH_KINDS).toContain(d.kind);
+  });
+});
+
+describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
+  // `chalbert/web-everything#2549`, shape measured live 2026-09-24: `bounced` (review:changes present, wins
+  // `classifyPr`'s precedence over `review:human`), ALSO carrying `merge-status:conflicting` (the mechanical
+  // conflict-resolution route PR #2577 introduces) and `advisory:changes`, with 5 prior real negotiation rounds
+  // already spent (`review-round:5`, at the shared `NEGOTIATION_ROUND_CAP` of 5).
+  const prConflict = (over = {}) => pr1563({
+    number: 2549,
+    labels: [...lbl('review:changes', 'review:human', 'merge-status:conflicting', 'advisory:changes')],
+    ...over,
+  });
+
+  it('a conflict-labelled bounce with zero prior conflict-fix rounds is dispatched `fix`, even though the shared cap is fully spent', () => {
+    // Flood the thread with REARM/advisory markers past `NEGOTIATION_ROUND_CAP` — the shared cap this bounce
+    // would otherwise be refused on — and confirm it still dispatches, because the conflict-fix cap reads its
+    // OWN marker, never this one.
+    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...shared] })], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'fix', prNumber: 2549, isConflict: true, advisoryPending: true, attempts: 0, cap: CONFLICT_FIX_ROUND_CAP,
+    })]);
+  });
+
+  it(`the durable conflict-fix count is read from the PR's OWN comments — ${CONFLICT_FIX_ROUND_CAP - 1} prior rounds still dispatches`, () => {
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP - 1 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }))];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', attempts: CONFLICT_FIX_ROUND_CAP - 1 })]);
+  });
+
+  it(`AT the cap (${CONFLICT_FIX_ROUND_CAP} durable conflict-fix comments) the PR is refused \`cap-exhausted\`, capKind \`conflict-fix\``, () => {
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }))];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'cap-exhausted', prNumber: 2549, attempts: CONFLICT_FIX_ROUND_CAP, cap: CONFLICT_FIX_ROUND_CAP, capKind: 'conflict-fix',
+    })]);
+  });
+
+  it('a caller-supplied `conflictFixCap` overrides the default', () => {
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), { body: CONFLICT_FIX_COMMENT_MARKER }] })], agents: [], now: NOW, conflictFixCap: 1 });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
+  });
+
+  it('a bounce WITHOUT the conflict label is unaffected — the ordinary shared cap still governs it', () => {
+    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const plan = planReconcile({ prs: [pr1563({ comments: [finding(), ...shared] })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 5 })]);
+    expect(plan.refusals[0].capKind).toBeUndefined();
+  });
+
+  it('`countConflictFixComments` narrows on the leading line, like every sibling counter', async () => {
+    const { countConflictFixComments } = await import('../conflict-fix-round-count.mjs');
+    expect(countConflictFixComments([{ body: CONFLICT_FIX_COMMENT_MARKER + '\n\nmore' }])).toBe(1);
+    expect(countConflictFixComments([{ body: `> ${CONFLICT_FIX_COMMENT_MARKER}` }])).toBe(0);
+    expect(countConflictFixComments(null)).toBe(0);
+  });
+});
+
+describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advisory:changes` (#xkmu3gv)', () => {
+  // A `needs-human` PR (review:human, no review:changes) that already carries an admitted `advisory:changes`
+  // finding from `we:scripts/operations/review-pr.mjs`'s `advise` step — the population no daemon ever acted on
+  // before this item: the reconcile pass only ever dispatched `review` for `needs-human`, never a `fix`.
+  const advisoryNote = { body: `${ADVISORY_NOTE_MARKER}\n\nSome admitted finding text.` };
+  const prNeedsHuman = (over = {}) => pr1563({
+    number: 2601,
+    labels: [...lbl('review:human', 'advisory:changes')],
+    comments: [advisoryNote],
+    ...over,
+  });
+
+  it('owes a `fix` (mode advisory-fix), never a `review`, when the current advisory note has not yet been fixed', () => {
+    const plan = planReconcile({ prs: [prNeedsHuman()], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'fix', mode: 'advisory-fix', prNumber: 2601, attempts: 0, cap: ADVISORY_FIX_ROUND_CAP,
+    })]);
+  });
+
+  it('once the advisory-fix marker outnumbers stale, it falls through to the ordinary `needs-human` → `review` path (a fresh review is owed, not another fix)', () => {
+    // One advisory note, one completed advisory-fix round already posted AFTER it — the count has caught up,
+    // so the SAME finding is not re-fixed; a fresh review is owed to judge the repaired head.
+    const comments = [advisoryNote, { body: buildAdvisoryFixComment({}) }];
+    const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2601 })]);
+  });
+
+  it(`AT the cap (${ADVISORY_FIX_ROUND_CAP} durable advisory-fix comments, still behind the note count) the PR is refused \`cap-exhausted\`, capKind \`advisory-fix\``, () => {
+    // ADVISORY_FIX_ROUND_CAP advisory-fix rounds, each followed by ANOTHER advisory note that still found
+    // something wrong (so the fix count never catches up to the note count) — genuinely exhausted.
+    const comments = [];
+    for (let i = 0; i < ADVISORY_FIX_ROUND_CAP; i += 1) {
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}` });
+      comments.push({ body: buildAdvisoryFixComment({}) });
+    }
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken` }); // the note the last fix didn't clear
+    const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'cap-exhausted', prNumber: 2601, attempts: ADVISORY_FIX_ROUND_CAP, cap: ADVISORY_FIX_ROUND_CAP, capKind: 'advisory-fix',
+    })]);
+  });
+
+  it('a caller-supplied `advisoryFixCap` overrides the default', () => {
+    const plan = planReconcile({ prs: [prNeedsHuman()], agents: [], now: NOW, advisoryFixCap: 0 });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 0, capKind: 'advisory-fix' })]);
+  });
+
+  it('a REARM/ordinary comment count never leaks into the advisory-fix cap — independent floors', () => {
+    const shared = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const plan = planReconcile({ prs: [prNeedsHuman({ comments: [advisoryNote, ...shared] })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', mode: 'advisory-fix', attempts: 0 })]);
+  });
+
+  it('`needs-human` with NO `advisory:changes` label is unaffected — still the ordinary `review` dispatch', () => {
+    const plan = planReconcile({ prs: [prNeedsHuman({ labels: lbl('review:human'), comments: [finding()] })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2601 })]);
+  });
+
+  it('the advisory-fix and conflict-fix markers are BOOKKEEPING, never counted as a reviewer finding', () => {
+    expect(countFindings([{ body: CONFLICT_FIX_COMMENT_MARKER }, { body: ADVISORY_FIX_COMMENT_MARKER }])).toBe(0);
+  });
+
+  it('`countAdvisoryFixComments` narrows on the leading line, like every sibling counter', async () => {
+    const { countAdvisoryFixComments } = await import('../advisory-fix-mark.mjs');
+    expect(countAdvisoryFixComments([{ body: ADVISORY_FIX_COMMENT_MARKER + '\n\nmore' }])).toBe(1);
+    expect(countAdvisoryFixComments([{ body: `> ${ADVISORY_FIX_COMMENT_MARKER}` }])).toBe(0);
+    expect(countAdvisoryFixComments(undefined)).toBe(0);
+  });
+});
+
+describe('case 5h — real chalbert/web-everything#2549 shape (measured 2026-09-24, the live case #xkmu3gv closes)', () => {
+  // The actual live labels this PR carried when this item was built (`review:changes`, `review:human`,
+  // `merge-status:conflicting`, `advisory:changes`, `review-round:5`) — before this item, `runReconcilePass`
+  // against the real repo refused it `cap-exhausted` outright, with no advisory fix ever owed. See the PR body
+  // for the full real dry-run output this pins as a fixture.
+  it('is owed a `fix` (conflict route, with the advisory finding named on the row), not refused', () => {
+    const pr2549 = pr1563({
+      number: 2549,
+      labels: [...lbl('review:changes', 'review:human', 'merge-status:conflicting', 'review-round:5', 'advisory:changes')],
+      comments: [finding('a security/coverage gap — card xlqampw lacks a blockedBy on decision card xcw0nxo')],
+    });
+    const plan = planReconcile({ prs: [pr2549], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'fix', prNumber: 2549, isConflict: true, advisoryPending: true, attempts: 0, cap: CONFLICT_FIX_ROUND_CAP,
+    })]);
   });
 });
 
