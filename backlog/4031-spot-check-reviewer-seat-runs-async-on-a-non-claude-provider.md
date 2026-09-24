@@ -24,3 +24,21 @@ Rule 7 of #delegation-trial-record-graduation lets any provider fill the reviewe
 3. **Observable** — cost (`costUsd`) and wall time are recorded for the first 10 real spot-check runs and
    reported against the #3318 ~$0.43/PR full-lens baseline, distinguishing the floor's own cost from the
    `~$12.50 across 29 PRs` figure (#3313), which is the full-lens cost (29 × $0.43), not the floor's.
+
+## Folded into #3330 (2026-09-24)
+
+This card's scope sits entirely inside #3330 ("Always-on advisory sanity check over the no-reason PRs that
+reach no reviewer"), which already required the floor and its cost measurement. Its genuinely new content —
+the non-Claude provider default, the now-statute async/non-blocking footing (rule 7 of
+`#delegation-trial-record-graduation`, ratified via #3867), the every-PR (Claude-built and delegated alike)
+scope note, and the #3313 cost-baseline correction — has been merged into #3330's body. No independent work
+should be scoped under this id; track it under #3330.
+
+**Left `status: open` rather than closing it.** Nothing under this card has shipped, so `resolve` would book
+points for undelivered work — the exact failure `we:backlog/2982-how-a-folded-duplicate-backlog-item-retires-foldedinto-point.md`
+was opened over. `parkedReason: superseded` was retired 2026-06-22 (`we:src/_data/backlogMeta.js`) and
+`status: folded` is #2982's own recommended-but-unratified fork, not yet implemented in the schema or
+`check:standards`. #2982 is prepared (`preparedDate: 2026-08-17`) but not ratified; once it lands, retire
+this card through that mechanism instead. Until then this note plus the existing `relatedTo: ["3330"]` is
+the fold record, per `we:skills-src/consolidate-backlog-items/SKILL.md`'s own "fold = report only, no
+mutation, pending the folded-duplicate retirement decision."
