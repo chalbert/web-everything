@@ -108,7 +108,7 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
-import { countTerminalStandDowns, STAND_DOWN_MARKER } from './stand-down.mjs';
+import { countTerminalStandDowns, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
@@ -165,11 +165,13 @@ export const REFUSAL_KINDS = Object.freeze([
  * we:scripts/conveyor/reconcile-core.mjs#BOOKKEEPING_MARKERS — the durable conveyor marker comments, which are
  * this loop's OWN bookkeeping and must never be mistaken for a reviewer's finding. A PR whose only comments are
  * three re-arm markers has had zero findings raised on it, and dispatching a fixer at it is exactly the
- * invent-work failure refusal 2 exists to prevent. Single-sourced from the three files that POST them so this
- * list cannot drift from what is actually on a PR.
+ * invent-work failure refusal 2 exists to prevent. Single-sourced from the files that POST them so this
+ * list cannot drift from what is actually on a PR. The parked-PR conflict watch's supersede comment
+ * (`SUPERSEDE_STAND_DOWN_MARKER`, #xu2krte Fork 2) is bookkeeping too — it says a stand-down no longer holds,
+ * it raises no finding.
  */
 export const BOOKKEEPING_MARKERS = Object.freeze([
-  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER,
+  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
 ]);
 
 /**
@@ -532,12 +534,11 @@ export function planReconcile({
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
     //
     // `countTerminalStandDowns`, NOT the raw `countStandDownComments` — #xu2krte Fork 2 (review-human statute
-    // amendment). It excludes ONLY a stand-down whose actor is the parked-PR conflict watch's own mechanical
-    // routing decision (`we:scripts/conveyor/stand-down.mjs#WATCHER_STAND_DOWN_ACTOR`): that class of marker is
-    // not "an agent examined the diff and could not safely proceed" — it is the watch's own routing artifact,
-    // re-derived fresh every sweep, and a stale one from an earlier, narrower classification must not block this
-    // gate forever. A fix agent's OWN needs-judgment/gate-red/lane-ref-gone escalation, or a human's `/finish`
-    // stand-down, is untouched by the narrowing and stays exactly as terminal as before.
+    // amendment). It excludes ONLY a parked-PR conflict watch stand-down that the watch ITSELF later superseded,
+    // with both comments self-authored (GitHub's `viewerDidAuthor`, not a body substring anyone could forge) —
+    // `we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded`. A watcher stand-down that was never superseded
+    // is current and stays terminal. A fix agent's OWN needs-judgment/gate-red/lane-ref-gone escalation, or a
+    // human's `/finish` stand-down, is never excluded.
     const stoodDown = countTerminalStandDowns(pr?.comments);
     if (stoodDown > 0) {
       refuse('stood-down', {

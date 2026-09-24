@@ -79,7 +79,9 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLeashPath, isStatutePath } from '../lib/review-escalation.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
-import { countStandDownComments, standDownComments, WATCHER_STAND_DOWN_ACTOR } from './stand-down.mjs';
+import {
+  countStandDownComments, standDownComments, WATCHER_STAND_DOWN_ACTOR, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
+} from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
 
@@ -437,9 +439,13 @@ export function hunkRangesOverlap(rangesA, rangesB) {
  * overlap, resolving it means choosing which side's edit wins — exactly the judgment this repo reserves for a
  * person, unchanged from today.
  *
- * FAILS CLOSED in every ambiguous direction: a file `main` never touched at all (no entry in `mainPatchesByFile`)
- * cannot clash there, so it is skipped; but a statute-tier file with NO recoverable PR patch is treated as an
- * overlap (nothing to compare against a real main edit safely) rather than silently cleared.
+ * FAILS CLOSED in every ambiguous direction. Only a file with NO KEY in `mainPatchesByFile` counts as "main never
+ * touched it" and is skipped. A file that IS keyed there is a real main edit, so it must be readable to be cleared:
+ *   - main's patch is empty or not a string — GitHub's compare API omits `.patch` for a binary file or a diff too
+ *     large to render, and the fetcher's `.patch // ""` turns that into `''` (PR #2577 review finding 2);
+ *   - main's patch, or the PR's own patch, carries no parseable `@@` hunk header (nothing to compare);
+ *   - the PR's own patch is missing or empty.
+ * Each of those is treated as an overlap (stand down) rather than silently cleared.
  * @param {string[]} statuteTierFiles
  * @param {Record<string,string>} prPatchesByFile - this PR's own per-file patch (against the merge base).
  * @param {Record<string,string>} mainPatchesByFile - `main`'s own per-file patch SINCE THE SAME merge base.
@@ -450,11 +456,12 @@ export function doesConflictOverlapMainEdits(statuteTierFiles, prPatchesByFile, 
   const prPatches = prPatchesByFile && typeof prPatchesByFile === 'object' ? prPatchesByFile : {};
   const mainPatches = mainPatchesByFile && typeof mainPatchesByFile === 'object' ? mainPatchesByFile : {};
   for (const path of files) {
-    const mainPatch = mainPatches[path];
-    if (typeof mainPatch !== 'string' || mainPatch === '') continue; // main never independently touched this file
-    const prPatch = prPatches[path];
-    if (typeof prPatch !== 'string' || prPatch === '') return true; // no PR patch to compare — fail closed
-    if (hunkRangesOverlap(parseHunkOldRanges(prPatch), parseHunkOldRanges(mainPatch))) return true;
+    if (!Object.prototype.hasOwnProperty.call(mainPatches, path)) continue; // main never independently touched this file
+    const mainRanges = parseHunkOldRanges(mainPatches[path]);
+    if (mainRanges.length === 0) return true; // main changed it but we cannot see how — fail closed
+    const prRanges = parseHunkOldRanges(prPatches[path]);
+    if (prRanges.length === 0) return true; // no readable PR patch to compare — fail closed
+    if (hunkRangesOverlap(prRanges, mainRanges)) return true;
   }
   return false;
 }
@@ -472,6 +479,35 @@ export function findWatcherStandDownComment(comments) {
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#isWatcherMarkerAlreadySuperseded — has a supersede comment
+ * ({@link SUPERSEDE_STAND_DOWN_MARKER}) already been posted AFTER the latest watcher stand-down on this thread?
+ * PURE. The re-check's idempotency read: without it every sweep re-posted the supersede comment and a fresh
+ * `review:changes` finding (live on chalbert/web-everything#2549, 2026-09-24, one pair every ~2 minutes).
+ *
+ * Body-only on purpose. This read only ever SUPPRESSES a re-dispatch, so a forged supersede comment can do no
+ * worse than leave the PR stood down (the safe direction). The dispatch gate that could be unblocked by a forgery
+ * (`we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded`) checks authorship too.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {boolean}
+ */
+export function isWatcherMarkerAlreadySuperseded(comments) {
+  if (!Array.isArray(comments)) return false;
+  const bodyAt = (i) => { const c = comments[i]; return typeof c === 'string' ? c : c?.body; };
+  let lastMarker = -1;
+  for (let i = 0; i < comments.length; i += 1) {
+    const body = bodyAt(i);
+    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER)
+      && body.includes(WATCHER_STAND_DOWN_ACTOR)) lastMarker = i;
+  }
+  if (lastMarker === -1) return false;
+  for (let j = lastMarker + 1; j < comments.length; j += 1) {
+    const body = bodyAt(j);
+    if (typeof body === 'string' && body.trimStart().startsWith(SUPERSEDE_STAND_DOWN_MARKER)) return true;
+  }
+  return false;
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#buildSupersedeStandDownComment — posted (best-effort, never
  * blocking the dispatch that follows it) when a re-check finds the WATCH'S OWN prior stand-down no longer holds
  * under the narrower `#xu2krte` Fork 2 rule. Explains the earlier marker is now stale rather than silently
@@ -483,7 +519,7 @@ export function findWatcherStandDownComment(comments) {
  */
 export function buildSupersedeStandDownComment(pr) {
   return [
-    '↩️ **This PR\'s earlier stand-down is superseded — routed to a fix agent instead**',
+    SUPERSEDE_STAND_DOWN_MARKER,
     '',
     'An earlier sweep of the parked-PR conflict watch stood this PR down because its statute-tier conflict was ' +
       'not append-only. Under the narrower `#xu2krte` Fork 2 rule, a `review:human` PR (a human reviews the ' +
@@ -543,14 +579,28 @@ export function defaultListMainStatutePatchesSinceMergeBase({ number, repo, exec
   const filesOut = exec('gh', ['api', '--method', 'GET', cmpMainPath, '--jq', '.files[]? | [.filename, (.patch // "")] | @tsv'],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const patches = {};
+  let rows = 0;
   for (const line of String(filesOut || '').split('\n')) {
     if (line === '') continue;
     const tab = line.indexOf('\t');
-    if (tab === -1) continue;
+    if (tab === -1) throw new Error(`unreadable compare row for PR #${number}`); // never drop a main-touched file
+    rows += 1;
+    // An omitted `.patch` stays an EMPTY-STRING entry: the key alone says "main touched this file", and
+    // {@link doesConflictOverlapMainEdits} fails closed on a keyed file it cannot read.
     patches[unescapeTsvField(line.slice(0, tab))] = unescapeTsvField(line.slice(tab + 1));
   }
+  // The compare API lists at most COMPARE_FILES_CAP files and silently drops the rest, so a full list may be
+  // missing a file main really touched — which would read as "untouched". Treat it as a failed read.
+  if (rows >= COMPARE_FILES_CAP) throw new Error(`main's comparison for PR #${number} hit the ${COMPARE_FILES_CAP}-file compare cap`);
   return patches;
 }
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#COMPARE_FILES_CAP — GitHub's REST `compare` endpoint returns
+ * at most this many changed files, with no pagination of `.files` and no truncation flag. A list this long is
+ * indistinguishable from a truncated one (the same reasoning as {@link GH_FILES_GRAPHQL_CAP}).
+ */
+export const COMPARE_FILES_CAP = 300;
 
 /**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#GH_FILES_GRAPHQL_CAP — `#xgfzlj1`. The exact, confirmed
@@ -922,6 +972,9 @@ export function watchParkedPrConflicts({
         try { comments = listPrComments({ number: pr?.number, repo }); } catch { comments = []; }
         const watcherMarker = findWatcherStandDownComment(comments);
         if (!watcherMarker) continue; // nothing this fork can change here — leave it exactly as today
+        // Already superseded (and dispatched) on an earlier sweep — the supersede comment is the durable record,
+        // so re-posting it and a fresh finding every tick is pure noise (live on #2549, 2026-09-24).
+        if (isWatcherMarkerAlreadySuperseded(comments)) continue;
         if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
         let filesForCheck = null;
         try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
@@ -938,8 +991,12 @@ export function watchParkedPrConflicts({
           continue;
         }
         if (!dryRun) {
-          try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort courtesy comment only — never blocks the dispatch below */ }
+          // Finding FIRST, supersede SECOND. The supersede comment is what the next sweep's idempotency read
+          // (`isWatcherMarkerAlreadySuperseded`) and the dispatch gate (`isStandDownSuperseded`) key on, so it must
+          // only exist once the finding really went out. If `postFinding` throws, no supersede is posted and the
+          // next sweep retries — instead of a "routed to a fix agent" note with no fix request behind it.
           postFinding({ pr, repo: resolvedRepo, appendOnlyStatute, reviewHumanFixable: !appendOnlyStatute });
+          try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort: a missing supersede only leaves the gate terminal and the next sweep retries */ }
         }
         entry.supersededStandDown = true;
         entry.routedTo = appendOnlyStatute

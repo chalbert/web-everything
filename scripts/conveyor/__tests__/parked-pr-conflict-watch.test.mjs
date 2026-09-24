@@ -34,8 +34,11 @@ import {
   findWatcherStandDownComment,
   buildSupersedeStandDownComment,
   defaultListMainStatutePatchesSinceMergeBase,
+  COMPARE_FILES_CAP,
 } from '../parked-pr-conflict-watch.mjs';
-import { STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, buildStandDownComment } from '../stand-down.mjs';
+import {
+  STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
+} from '../stand-down.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
 // `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
@@ -877,6 +880,33 @@ describe('doesConflictOverlapMainEdits — the TRUE semantic-clash test', () => 
       {}, { 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING })).toBe(true);
   });
 
+  // Review finding 2 — a file PRESENT in main's comparison diff whose patch GitHub omitted (binary, or a diff too
+  // large to render: the jq `.patch // ""` yields ''), or whose patch carries no parseable hunk header, is a
+  // REAL main edit we cannot see. It must fail closed, never read as "main never touched this file".
+  it('fails CLOSED (true) when main touched the file but its patch text is empty (GitHub omitted .patch)', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }, { 'docs/agent/platform-decisions.md': '' })).toBe(true);
+  });
+
+  it('fails CLOSED (true) when main\'s patch for the file is not a string at all', () => {
+    for (const bad of [null, undefined, 42]) {
+      expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+        { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }, { 'docs/agent/platform-decisions.md': bad })).toBe(true);
+    }
+  });
+
+  it('fails CLOSED (true) when main\'s patch has no parseable @@ hunk header', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 },
+      { 'docs/agent/platform-decisions.md': 'Binary files differ\n' })).toBe(true);
+  });
+
+  it('fails CLOSED (true) when the PR\'s own patch has no parseable @@ hunk header', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': 'Binary files differ\n' },
+      { 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING })).toBe(true);
+  });
+
   it('empty statute-tier file list never clashes', () => {
     expect(doesConflictOverlapMainEdits([], { a: PR_HUNK_10_13 }, { a: MAIN_HUNK_OVERLAPPING })).toBe(false);
   });
@@ -909,6 +939,22 @@ describe('defaultListMainStatutePatchesSinceMergeBase — argv shape + failure m
     let call = 0;
     const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : '\n'; };
     expect(() => defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec })).toThrow();
+  });
+
+  // Review finding 2, same category — GitHub's compare API lists at most 300 changed files and silently drops
+  // the rest. A file main DID change past that cap would be absent from the map and read as untouched.
+  it('throws (fails closed) when main\'s comparison file list hits the compare API\'s file cap', () => {
+    const rows = Array.from({ length: COMPARE_FILES_CAP }, (_, i) => `f${i}.md\t@@ -1 +1 @@\\n-a\\n+b`).join('\n');
+    let call = 0;
+    const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : call === 2 ? 'deadbeef\n' : `${rows}\n`; };
+    expect(() => defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec })).toThrow(/cap/);
+  });
+
+  it('keeps an empty patch as an EMPTY STRING entry (a touched file), never dropping the key', () => {
+    let call = 0;
+    const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : call === 2 ? 'deadbeef\n' : 'docs/agent/platform-decisions.md\t\n'; };
+    expect(defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec }))
+      .toEqual({ 'docs/agent/platform-decisions.md': '' });
   });
 });
 
@@ -1041,6 +1087,65 @@ describe('watchParkedPrConflicts — #xu2krte Fork 2 recheck of an ALREADY stood
     }]);
     expect(routed).toEqual([['finding', { pr: alreadyLabelledPr(), repo: 'o/n', appendOnlyStatute: false, reviewHumanFixable: true }]]);
     expect(provider.calls).toEqual([['postComment', 'o/n', 2549, expect.stringMatching(/superseded/i)]]);
+  });
+
+  // Live on chalbert/web-everything#2549 (2026-09-24): with no durable "already superseded" read, every sweep
+  // (~2 min) re-posted the supersede comment AND a fresh review:changes finding. The supersede comment IS the
+  // durable record, so once one follows the watcher's marker the recheck is done.
+  it('a watcher marker ALREADY followed by a supersede comment is not re-superseded or re-dispatched', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment, { body: buildSupersedeStandDownComment({ num: 2549 }) }],
+      listPrFiles: () => { throw new Error('must not re-classify an already-superseded marker'); },
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results).toEqual([]);
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('a NEW watcher stand-down posted after an old supersede is re-checked (only the latest marker counts)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment, { body: buildSupersedeStandDownComment({ num: 2549 }) }, watcherMarkerComment],
+      listPrFiles: () => ['docs/agent/platform-decisions.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].supersededStandDown).toBe(true);
+    expect(routed.map(([k]) => k)).toEqual(['finding']);
+  });
+
+  it('posts the finding BEFORE the supersede, and no supersede at all when the finding fails', () => {
+    const run = (postFinding) => {
+      const order = [];
+      const provider = { ensureLabel: () => {}, setLabels: () => {}, postComment: () => order.push('supersede') };
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+        listPrComments: () => [watcherMarkerComment],
+        listPrFiles: () => ['docs/agent/platform-decisions.md'],
+        listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+        listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+        postFinding: () => postFinding(order),
+        postStandDown: () => order.push('stand-down'),
+      });
+      return { order, results };
+    };
+    expect(run((order) => order.push('finding')).order).toEqual(['finding', 'supersede']);
+    const failed = run(() => { throw new Error('gh timeout'); });
+    expect(failed.order).toEqual([]); // no supersede → the next sweep retries
+    expect(failed.results[0].error).toMatch(/gh timeout/);
+  });
+
+  it('the supersede comment it posts starts with the single-sourced SUPERSEDE_STAND_DOWN_MARKER', () => {
+    expect(buildSupersedeStandDownComment({ num: 2549 }).startsWith(SUPERSEDE_STAND_DOWN_MARKER)).toBe(true);
   });
 
   it('a watcher-marked PR that STILL overlaps main leaves the stand-down exactly alone — no re-post, no dispatch', () => {
