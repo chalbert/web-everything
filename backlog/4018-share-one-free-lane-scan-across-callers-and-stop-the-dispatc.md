@@ -1,4 +1,5 @@
 ---
+bornAs: x3cepr4
 kind: story
 size: 3
 parent: "3383"
@@ -21,4 +22,4 @@ The biggest single load on 2026-09-23 was we:scripts/lane-pool.mjs list --acquir
 
 ## Delivered on main by parallel work (2026-09-24)
 
-Built on the prototype (`c51e09bfa`), but main already received the same fix from other sessions before this port landed: #xn432dz (lease-first skip, read-only git, single-flight cache for `list --acquirable`), #xuctzoz and #x7xv2xt (tests never touch the real lane pool) and #xjyn3fg (bounded fallback). The fast-track port therefore keeps main's versions of we:scripts/lane-pool.mjs, we:scripts/readiness/dispatch-plan.mjs and the dispatcher fixture test, and drops the prototype's separate cache module. The prototype copy is superseded; the #3443 tail sweep should not port it.
+Built on the prototype (`c51e09bfa`), but main already received the same fix from other sessions before this port landed: #4012 (lease-first skip, read-only git, single-flight cache for `list --acquirable`), #4005 and #3991 (tests never touch the real lane pool) and #4000 (bounded fallback). The fast-track port therefore keeps main's versions of we:scripts/lane-pool.mjs, we:scripts/readiness/dispatch-plan.mjs and the dispatcher fixture test, and drops the prototype's separate cache module. The prototype copy is superseded; the #3443 tail sweep should not port it.

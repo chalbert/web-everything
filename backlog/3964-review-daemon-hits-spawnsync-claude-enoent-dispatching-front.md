@@ -16,7 +16,7 @@ The 2026-09-23 multi-repo audit saw the review daemon log spawnSync claude ENOEN
 
 ## Done when
 
-1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/review-daemon.test.mjs` (the `#xvzwiew` describe blocks) fails on the pre-fix code and passes after.
+1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/review-daemon.test.mjs` (the `#3964` describe blocks) fails on the pre-fix code and passes after.
 
 ## Resolution notes (2026-09-23)
 
@@ -44,4 +44,4 @@ Reproduced for real, root cause found, cwd hypothesis RULED OUT:
 - Proof: reproduced with a real, read-only `gh pr list` per repo plus a real, merged FrontierUI PR (#50, since
   frontierui has zero open PRs today) fed through the real planner, and the exact observed low-level spawn
   error fault-injected at the one real call site that throws it. Red then green vitest in
-  we:skills-src/conveyor/__tests__/review-daemon.test.mjs (`#xvzwiew` describe blocks).
+  we:skills-src/conveyor/__tests__/review-daemon.test.mjs (`#3964` describe blocks).
