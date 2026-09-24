@@ -12,7 +12,7 @@ tags: []
 
 # Graduate land path, gh-throttle, lease-reaper and host-process-sample from lane/mechanical-dispatcher to main
 
-Ports we:scripts/lib/gh-throttle.mjs, we:scripts/lib/forge-land-provider.mjs, we:scripts/pr-land.mjs, we:scripts/conveyor/lease-reaper.mjs and we:scripts/operations/host-process-sample.mjs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot ff1618065 of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports we:scripts/lib/gh-throttle.mjs, we:scripts/lib/forge-land-provider.mjs, we:scripts/pr-land.mjs, we:scripts/conveyor/lease-reaper.mjs and we:scripts/operations/host-process-sample.mjs, plus their tests. Graduation slice of epic #3443, split out of #3487 on 2026-09-22. FAITHFUL PORT: no behaviour change; port from snapshot 600acc14f of origin/lane/mechanical-dispatcher and diff-merge every file main has also changed (see the merge notes on this card). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
 
 ## Done when
 
