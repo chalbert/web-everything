@@ -1597,10 +1597,14 @@ function cmdAcquire(repo) {
       // never be misread as "genuinely starved, so clone more".
       if (!grownOnce && !sawScanTimeout) {
         grownOnce = true;
-        // Probe the exact URL growth will clone from (`provisionLane` → `repo.originUrl`), from the reference
-        // checkout — never from an existing lane: a vanished/corrupted `lanes[0]` (#xixn30q) would fail the
-        // probe for a purely LOCAL reason and stickily disable growth against a fully reachable origin.
-        const remoteProbeFailed = !liveRemoteShasProbe(repo.referencePath, repo.originUrl || 'origin').ok;
+        // Probe the exact URL growth will clone from (`provisionLane` → `repo.originUrl`, resolved against the
+        // same process cwd the clone uses) — never from inside an existing lane: a vanished/corrupted `lanes[0]`
+        // (#xixn30q) would fail the probe for a purely LOCAL reason and stickily disable growth against a fully
+        // reachable origin.
+        const remoteProbeFailed = !(repo.originUrl
+          ? liveRemoteShasProbe(process.cwd(), repo.originUrl)
+          : liveRemoteShasProbe(repo.referencePath)
+        ).ok;
         const added = growPoolOnEmpty(repo, lanes, remoteProbeFailed);
         if (added > 0) {
           excluded.clear();

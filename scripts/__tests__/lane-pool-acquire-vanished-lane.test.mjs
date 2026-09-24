@@ -80,9 +80,11 @@ describe('lane-pool acquire vs a vanished lane (#xixn30q)', () => {
     provision(1);
     rmSync(join(poolRoot, 'vanishtest', 'lane-1', '.git'), { recursive: true, force: true });
 
+    // Growth disabled: with it on, acquire now (correctly) grows past the vanished lane — PR #2607 review, the
+    // growth probe no longer runs inside `lanes[0]` — so this case pins only the no-crash refusal.
     const r = runPool(
       ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=vanishtest', '--branch=main', '--no-install', '--json'],
-      { LANE_POOL_ROOT: poolRoot },
+      { LANE_POOL_ROOT: poolRoot, LANE_POOL_ACQUIRE_GROWTH_MAX_NEW: '0' },
     );
 
     expect(r.code).not.toBe(0);
