@@ -1398,6 +1398,17 @@ function clearForeignVerifyMarker(dir) {
   } catch { /* advisory */ }
 }
 
+/**
+ * #3383 — undo a claim that the acquire then refused: put back the lease that was there before when it was a live one
+ * (a holder re-acquiring its own lane keeps its hold), otherwise remove the lease the claim just wrote.
+ */
+function restoreLeaseAfterRefusedClaim(dir, preExisting) {
+  try {
+    if (preExisting && !isLeaseStale(preExisting, Date.now(), ttlMsFromFlags())) writeFileSync(LEASE_MARKER(dir), JSON.stringify(preExisting, null, 2) + '\n');
+    else rmSync(LEASE_MARKER(dir), { force: true });
+  } catch { /* the refusal still stands; a stale lease ages out on its own */ }
+}
+
 function cmdAcquire(repo) {
   // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
   // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
@@ -1523,6 +1534,9 @@ function cmdAcquire(repo) {
       // genuinely ahead still needs `--force`.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
       if (dirty || ahead > 0) {
+        // #3383 — a refusal hands the lane back: the claim above already wrote OUR lease, and leaving it would hold
+        // a lane nobody is using until its TTL (found live 2026-09-24: two refused acquires held lane-1 and lane-11).
+        restoreLeaseAfterRefusedClaim(dir, preExisting);
         fail(
           `lane-${n} has ${uncommitted} uncommitted change(s) and is ${ahead} commit(s) ahead of origin/${repo.branch} ` +
             `— acquire --lane=${n} would destroy that work via its reset-to-origin step. Use --force to reclaim it ` +
