@@ -102,6 +102,7 @@ import { deliveredItemNumsFromPr } from '../lib/open-pr-items.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -278,13 +279,18 @@ export function defaultPostFinding({
  * and reports what happened. Never throws on a per-PR write failure — one bad `reconcile-finding.mjs` call must
  * not stop the sweep from posting the rest (mirrors `we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s own
  * best-effort contract).
- * @param {{repo?:string|null, listPrs?:Function, postFinding?:Function, dryRun?:boolean}} [o]
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF ⇒ `scopePrsToQueue` is the IDENTITY
+ * function and this sweep stays repo-wide. Note what scoping means for THIS pass specifically: the duplicate
+ * GROUPING is computed over the narrowed list, so a scoped checkout reports duplicates only among the PRs its
+ * own queue names — which is the honest answer for a scoped instance (it has no business posting a finding on
+ * a pair of PRs that are not its work), and is why the filter sits before `planDuplicateFindings`, not after.
+ * @param {{repo?:string|null, listPrs?:Function, postFinding?:Function, dryRun?:boolean, queueScope?:object}} [o]
  * @returns {Array<{pr:number, itemNums:string[], posted:boolean, error?:string}>}
  */
 export function watchDuplicatePrs({
-  repo = null, listPrs = defaultListOpenPrs, postFinding = defaultPostFinding, dryRun = false,
+  repo = null, listPrs = defaultListOpenPrs, postFinding = defaultPostFinding, dryRun = false, queueScope = {},
 } = {}) {
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'duplicate-pr-watch', ...queueScope });
   const plans = planDuplicateFindings(prs);
   const results = [];
   for (const plan of plans) {

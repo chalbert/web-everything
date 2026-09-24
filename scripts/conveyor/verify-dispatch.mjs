@@ -95,6 +95,7 @@ import { readVerifyMarker } from '../lib/lane-verify.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { resolveCeilingMs as resolveAdmissionCeilingMs } from '../readiness/heavy-admission.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { branchMatchesQueueIds, isQueueScopeEnabled, readScopedQueueIds } from './queue-scope.mjs';
 
 /** Several multiples of the gate's documented 150-350s normal range — generous on purpose (see file header):
  *  a slow-but-healthy GATE run under contention must never be mistaken for a stuck one. Applies ONLY to the
@@ -149,6 +150,30 @@ const QUEUE_PHASE_CEILING_MS =
 export function laneNeedsVerifyDispatch(marker, headSha) {
   if (!marker || marker.corrupt || !headSha) return false;
   return marker.status === 'running' && marker.sha === headSha;
+}
+
+/**
+ * Is this lane in scope for THIS checkout? Pure, and the ONE place this pass's own cross-instance leak is
+ * closed (epic #3383).
+ *
+ * A DIFFERENT LEAK AXIS FROM THE PR PASSES, WORTH STATING PLAINLY. The three `gh pr list` watches and
+ * `reconcile-pass.mjs` leak across the whole REPOSITORY. This pass never touches `gh` at all — it walks the
+ * HOST-WIDE lane pool (`LANE_POOL_ROOT`, default `~/workspace/.lanes`), so a deliberately-scoped scratch
+ * instance would happily run a full `verify-lane.mjs` gate for a lane belonging to a completely different
+ * conveyor instance on the same machine. Same class of "an isolated instance is not actually isolated" bug,
+ * reached through the filesystem rather than through GitHub.
+ *
+ * DEFAULT OFF, exactly like the PR passes: `enabled: false` ⇒ `true` for every lane, i.e. today's behavior to
+ * the byte. Scoped ⇒ the lane's own branch must name a queued item. A lane with NO readable branch (a detached
+ * HEAD, an unreadable checkout) is OUT of scope when scoping is on — the safe direction here, since the whole
+ * point of a scoped instance is to touch only what it can positively identify as its own.
+ * @param {string|null} branch the lane's current branch (`git -C <laneDir> rev-parse --abbrev-ref HEAD`)
+ * @param {{enabled?:boolean, ids?:string[]}} [scope]
+ * @returns {boolean}
+ */
+export function laneInQueueScope(branch, { enabled = false, ids = [] } = {}) {
+  if (!enabled) return true;
+  return branchMatchesQueueIds(branch, ids);
 }
 
 // ── IO SHELL (runs only as a CLI) ───────────────────────────────────────────────────────────────────────────
@@ -288,11 +313,19 @@ export function spawnGateBounded(args, { queueCeilingMs, gateCeilingMs }) {
  * (`we:skills-src/conveyor/verify-daemon.mjs`) ticks directly, and `main()` below is now a thin CLI shell over
  * it (exit code + `--json`/plain formatting only).
  * @param {{dryRun?:boolean}} [o]
- * @returns {Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>}>}
+ * @returns {Promise<{dryRun:boolean, dispatched:Array<object>, failures:Array<object>, skippedOutOfScope:Array<object>}>}
  */
 export async function runVerifyDispatch({ dryRun = false } = {}) {
   const dispatched = [];
   const failures = [];
+  // epic #3383 — read ONCE per run, never per lane. Both reads are cheap, but the marker/queue pair must be a
+  // single consistent snapshot for the whole sweep rather than re-read mid-walk.
+  const scopeEnabled = isQueueScopeEnabled();
+  const scopeIds = scopeEnabled ? readScopedQueueIds() : [];
+  const skippedOutOfScope = [];
+  if (scopeEnabled) {
+    log(`⊂ queue-scoped: verify-dispatch will run the gate only for lanes on ${scopeIds.length ? scopeIds.join(', ') : '(nothing — the queue is empty)'}`);
+  }
 
   for (const pool of poolsToScan()) {
     const poolDir = join(POOL_ROOT, pool);
@@ -301,6 +334,16 @@ export async function runVerifyDispatch({ dryRun = false } = {}) {
       const headSha = tryGit(['rev-parse', 'HEAD'], dir);
       const marker = markerFor(dir);
       if (!laneNeedsVerifyDispatch(marker, headSha)) continue;
+      // Read the branch ONLY for a lane that already wants a gate run — the common "nothing pending" lane
+      // never pays for the extra `git` call, and an unscoped run never pays for it at all.
+      if (scopeEnabled) {
+        const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
+        if (!laneInQueueScope(branch, { enabled: true, ids: scopeIds })) {
+          log(`  ⊂ skipping ${pool}/lane-${lane} (${branch || 'no branch'}) — not in this checkout's queue scope`);
+          skippedOutOfScope.push({ pool, lane, branch });
+          continue;
+        }
+      }
 
       if (dryRun) {
         log(`  would dispatch verify for ${pool}/lane-${lane} @ ${String(headSha).slice(0, 8)} (suites: ${marker.suites || 'default'})`);
@@ -345,7 +388,7 @@ export async function runVerifyDispatch({ dryRun = false } = {}) {
     }
   }
 
-  return { dryRun, dispatched, failures };
+  return { dryRun, dispatched, failures, skippedOutOfScope };
 }
 
 async function main(argv) {
