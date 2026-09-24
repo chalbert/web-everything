@@ -4,9 +4,11 @@ kind: decision
 parent: "3690"
 relatedTo: ["3867", "3949", "3673"]
 blockedBy: ["3949"]
-status: open
+status: resolved
 scope: ["we:scripts/lib/provider-routing.mjs"]
 dateOpened: "2026-09-24"
+dateResolved: "2026-09-24"
+codifiedIn: "docs/agent/platform-decisions.md#delegation-trial-record-graduation"
 preparedDate: "2026-09-24"
 preparedAgainstSha: "0211889352056eae78a36c6fd1d4412b7b5e4553"
 relatedReport: reports/2026-09-24-delegation-post-miss-root-cause-classification.md
@@ -14,6 +16,14 @@ tags: [delegation, supervision, graduation, root-cause, automated-attribution, d
 ---
 
 # A delegated model's miss is auto-attributed and fixed in tooling; demotion only when critical and unfixable
+
+**Ruled 2026-09-24 by the operator (Nicolas Gilbert): all seven forks ratified as prepared, every fork at
+its bold default, no amendments** — including the narrow human override named in Forks 1 and 5, and the
+lifetime (non-decaying) `toolingMissCap` default in Fork 6. The *Proposed codified text* below is ratified
+verbatim: rules 3, 5, and 6 of
+[#delegation-trial-record-graduation](/docs/agent/platform-decisions/#delegation-trial-record-graduation) are
+amended as drafted; rules 4 and 7 are untouched. Codified in
+[we:docs/agent/platform-decisions.md#delegation-trial-record-graduation](/docs/agent/platform-decisions/#delegation-trial-record-graduation).
 
 No design exists yet for how a delegation-trial miss's root cause gets classified, or what that
 classification changes. Seven forks below are grounded in the prior-art survey published as
