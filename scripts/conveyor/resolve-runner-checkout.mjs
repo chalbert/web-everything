@@ -110,27 +110,40 @@ export function pidToCwd(pid, execFn = defaultLsof) {
   return parseCwdFromLsof(out);
 }
 
+/** The dispatcher's own script-path token — {@link looksLikeRunnerProcess}'s default `scriptToken`, unchanged
+ *  from before its generalization (see that function's header) so every existing caller here keeps checking
+ *  the dispatcher specifically unless it opts into a different token. */
+export const RUNNER_SCRIPT_TOKEN = 'skills-src/conveyor/runner.mjs';
+
 /**
- * Does a process's full command line look like the conveyor runner's own invocation? Heartbeat freshness alone
- * proves only that SOME process is alive at the recorded pid — not that it is still the runner (the OS can
- * reuse a pid once its original owner exits, inside the same lease window). This checks every whitespace-split
- * TOKEN of the command line for an EXACT match against the runner's script-path suffix — never a bare substring
- * of the whole line (accepts an unrelated process whose argv merely CONTAINS that text, e.g. a log path or a
- * flag value) and never a FIXED token position (breaks on an interpreter flag ahead of the script path, or a
- * path containing whitespace splitting the script-path token itself away from a preceding directory segment —
- * the whitespace still can't land INSIDE `skills-src/conveyor/runner.mjs`, so the trailing token carrying it
- * still matches). WE #3478 review, rounds 2 and 3: both a substring check and a fixed-position check were tried
- * and found to concede one of these two failure modes; scanning every token for the exact path-suffix concedes
- * neither against an ACCIDENTAL pid reuse (an unrelated, ordinary process). It does NOT defend a DELIBERATE
- * local attacker who plants a decoy file tree ending in exactly `skills-src/conveyor/runner.mjs` — that is a
- * different, local-filesystem-write threat model this item was never scoped to address.
+ * Does a process's full command line look like a given standalone daemon's own invocation? Heartbeat
+ * freshness alone proves only that SOME process is alive at the recorded pid — not that it is still that
+ * daemon (the OS can reuse a pid once its original owner exits, inside the same lease window). This checks
+ * every whitespace-split TOKEN of the command line for an EXACT match against `scriptToken` (defaulting to
+ * the conveyor dispatcher's own path, {@link RUNNER_SCRIPT_TOKEN}) — never a bare substring of the whole
+ * line (accepts an unrelated process whose argv merely CONTAINS that text, e.g. a log path or a flag value)
+ * and never a FIXED token position (breaks on an interpreter flag ahead of the script path, or a path
+ * containing whitespace splitting the script-path token itself away from a preceding directory segment — the
+ * whitespace still can't land INSIDE the token itself, so the trailing token carrying it still matches). WE
+ * #3478 review, rounds 2 and 3: both a substring check and a fixed-position check were tried and found to
+ * concede one of these two failure modes; scanning every token for the exact path-suffix concedes neither
+ * against an ACCIDENTAL pid reuse (an unrelated, ordinary process). It does NOT defend a DELIBERATE local
+ * attacker who plants a decoy file tree ending in exactly the target script path — that is a different,
+ * local-filesystem-write threat model this item was never scoped to address.
+ *
+ * Generalized (originally hardcoded to the dispatcher's own path) so the same recycled-pid-safe check covers
+ * every standalone daemon built on the same singleton-lease primitive (runner-activity's `KNOWN_DAEMONS`,
+ * `we:scripts/operations/runner-activity-io.mjs`) — every existing caller here (`verifyRunnerProcess`,
+ * `resolveRunnerCheckout`) still checks the dispatcher by omitting `scriptToken`, so this is additive, not a
+ * behavior change for them.
  * @param {string} commandLine
+ * @param {string} [scriptToken]
  * @returns {boolean}
  */
-export function looksLikeRunnerProcess(commandLine) {
+export function looksLikeRunnerProcess(commandLine, scriptToken = RUNNER_SCRIPT_TOKEN) {
   if (typeof commandLine !== 'string') return false;
   const tokens = commandLine.trim().split(/\s+/);
-  return tokens.some((t) => t === 'skills-src/conveyor/runner.mjs' || t.endsWith('/skills-src/conveyor/runner.mjs'));
+  return tokens.some((t) => t === scriptToken || t.endsWith(`/${scriptToken}`));
 }
 
 /**

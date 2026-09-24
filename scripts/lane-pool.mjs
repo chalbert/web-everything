@@ -112,7 +112,10 @@ import { readField } from './backlog/frontmatter.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
-import { cleanLaneLitter } from './lib/lane-litter.mjs';
+// #3383 — `planLitterCleanup` (PURE) is ALSO reused directly by this file's own `litterAdjustedDirty` below,
+// the acquire-time twin of `cleanLaneLitter`'s release-time cleanup — same allowlist, same verdict, never a
+// second hand-rolled classifier.
+import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -672,7 +675,88 @@ function aheadIsProvablyPushed(dir, remoteShas) {
   const head = headRaw.trim();
   if (remoteShas.has(head)) return true;
   const out = tryGit(['rev-list', '--ignore-missing', '--max-count=1', 'HEAD', '--not', ...remoteShas], dir);
-  return out !== null && out.trim() === '';
+  if (out !== null && out.trim() === '') return true;
+  // #3383 — ancestry alone MISSES the squash/rebase-merge case, live-observed on the plateau-app pool: a
+  // squash (or rebase) merge lands origin/<branch> on a brand-new commit carrying the SAME patch as the
+  // lane's own commit(s), but built on top of whatever else landed first — never on top of the lane's commit
+  // itself. No ancestry walk will ever find it (the lane's commit is simply not an ancestor of anything on
+  // origin), yet a manual `git cherry origin/<branch> HEAD` shows `-` (patch already applied) for every one.
+  // `git cherry <upstream> <head>` answers exactly that patch-equivalence question, so it's tried next, but
+  // ONLY as a fallback (ancestry is cheaper and covers the ordinary fast-forward/merge-commit case above) and
+  // only against the SAME already-resolved `remoteShas` (no extra network call beyond the one `infoFor`/
+  // `laneAcquirableInfo` already paid to build this set).
+  return aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas);
+}
+
+/**
+ * #3383 — is `head` (a lane's HEAD sha) patch-equivalent to something already on ANY live remote head?
+ * Mirrors `aheadIsProvablyPushed`'s own OR-across-every-live-head design (a lane's work may have landed under
+ * a differently-named branch than the one it started on). Fails CLOSED per-candidate exactly like the
+ * ancestry check's `--ignore-missing`: `tryGit` never throws, so a remote sha this lane can't resolve locally
+ * (an object it never fetched) just proves nothing — it neither stops checking the REST of `remoteShas`, nor
+ * is ever treated as a positive result.
+ * @param {string} dir
+ * @param {string} head
+ * @param {Set<string>} remoteShas
+ * @returns {boolean}
+ */
+function aheadIsPatchEquivalentToSomeRemoteHead(dir, head, remoteShas) {
+  for (const sha of remoteShas) {
+    const out = tryGit(['cherry', sha, head], dir);
+    if (out === null) continue; // unresolvable/unrelated candidate — try the next, never a false positive
+    const lines = out.split('\n').filter(Boolean);
+    // Empty output means `head` is already fully ancestor-contained in `sha` (redundant with the rev-list
+    // check above, harmless to also accept here). Otherwise EVERY line must be patch-equivalent (`-`) — a
+    // single `+` (no equivalent patch found upstream) means real unpushed work against THIS candidate, but
+    // another remote head might still prove it, so this is `continue`, never an early `return false`.
+    if (lines.length === 0 || lines.every((l) => l.startsWith('-'))) return true;
+  }
+  return false;
+}
+
+/**
+ * #3383 — is this lane ACTUALLY dirty once known-safe agent-scratch litter (the shared
+ * `we:scripts/lib/lane-litter.mjs` allowlist — `.pr-body.md`, `.converge-*`, …) is set aside? Re-reads
+ * porcelain itself (`laneDirtyOrAhead` doesn't expose the raw text, and its OWN contract must stay the raw
+ * fact for every other caller — `refreshLane`/`laneStatus`/the board — per the #2452 review this mirrors:
+ * the relaxation lives at the acquire-time call sites that opt into it, never inside the shared primitive).
+ * On any read failure, returns `rawDirty` UNCHANGED — an inconclusive read must never be reported as clean.
+ * @param {string} dir
+ * @param {boolean} rawDirty
+ * @returns {boolean}
+ */
+function litterAdjustedDirty(dir, rawDirty) {
+  if (!rawDirty) return false;
+  const porcelain = tryGit(['status', '--porcelain'], dir);
+  if (porcelain === null) return rawDirty;
+  const { leaveDirty } = planLitterCleanup(porcelain);
+  return leaveDirty.length > 0;
+}
+
+/**
+ * #3383 — the EFFECTIVE dirty/ahead verdict a picker should act on: `laneDirtyOrAhead`'s raw fact, adjusted by
+ * the two acquire-time-only relaxations above (litter-only dirt counts as clean; a squash/rebase-merged or
+ * ancestor-contained "ahead" commit counts as pushed). `getRemoteShas` is a caller-supplied lazy getter (NOT
+ * called unless some candidate actually looks ahead) so a whole listing/auto-pick pass pays at most ONE
+ * `ls-remote`, shared across every lane it considers — never one network call per lane.
+ * @param {string} dir
+ * @param {string} branch
+ * @param {() => Set<string>} getRemoteShas
+ * @returns {{dirty: boolean, uncommitted: number, ahead: number, aheadPushed?: boolean}}
+ */
+function effectiveDirtyOrAhead(dir, branch, getRemoteShas) {
+  const raw = laneDirtyOrAhead(dir, branch);
+  const dirty = litterAdjustedDirty(dir, raw.dirty);
+  let ahead = raw.ahead;
+  let aheadPushed = false;
+  if (ahead > 0) {
+    const remoteShas = getRemoteShas();
+    if (aheadIsProvablyPushed(dir, remoteShas)) {
+      ahead = 0;
+      aheadPushed = true;
+    }
+  }
+  return { ...raw, dirty, ahead, aheadPushed };
 }
 
 /** Live remote tip SHAs (one network call, `timeout` guarded like the adjacent `gh` call — #2920). Returns
@@ -755,12 +839,29 @@ function laneStatus(repo, n) {
 
 // #2426 — the lease/dirty snapshot a lease-aware picker (`list --acquirable`, `provision --acquirable`) needs to
 // decide whether a lane is safe to couple an item onto. Shape matches `isLaneAcquirable(info, now, ttl)` in
-// lane-lease.mjs: `exists`, the raw `lease` marker, and `dirtyOrAhead` (someone's un-pushed work). It reads the
-// LOCAL `origin/<branch>` ref (no fetch — a cheap snapshot; a stale-looking "ahead" only fails safe by skipping).
-function laneAcquirableInfo(repo, n) {
+// lane-lease.mjs: `exists`, the raw `lease` marker, and `dirtyOrAhead` (someone's un-pushed work).
+// #3383 — applies the SAME two acquire-time relaxations `cmdAcquire`'s own `infoFor` applies
+// (`effectiveDirtyOrAhead`: litter-only dirt counts as clean, a squash/rebase-merged or ancestor-contained
+// "ahead" commit counts as pushed), via the SAME shared, lazy `remoteShasBox` — so this read-only picker and
+// `acquire`'s actual auto-pick can never diverge (a lane reported acquirable here is exactly one `acquire`
+// will take). `remoteShasBox` is optional and OMITTED means "no ls-remote" (a getter that always returns an
+// empty set, so `aheadIsProvablyPushed` short-circuits `false`) — preserving the original no-network-call
+// cost for any caller that doesn't pass one; every caller in THIS file always passes one (see `cmdList`/
+// `cmdProvision`), one shared `ls-remote` per whole listing/provision pass, never one per lane.
+function laneAcquirableInfo(repo, n, remoteShasBox = null) {
   const dir = laneDir(repo, n);
   if (!existsSync(dir)) return { lane: n, exists: false };
-  return { lane: n, exists: true, lease: readLease(dir), dirtyOrAhead: laneDirtyOrAhead(dir, repo.branch) };
+  const getRemoteShas = () => {
+    if (!remoteShasBox) return new Set();
+    if (remoteShasBox.value === null) remoteShasBox.value = liveRemoteShas(dir);
+    return remoteShasBox.value;
+  };
+  return {
+    lane: n,
+    exists: true,
+    lease: readLease(dir),
+    dirtyOrAhead: effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas),
+  };
 }
 
 // ── output ──────────────────────────────────────────────────────────────────────────────────────────
@@ -805,11 +906,14 @@ function cmdProvision(repo) {
     log(`provisioning up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}; cap lane-${cap})`);
     let acquirable = 0;
     let n = 0;
+    // #3383 — ONE shared lazy `ls-remote` for this whole provisioning pass (see `laneAcquirableInfo`), not one
+    // per lane checked.
+    const remoteShasBox = { value: null };
     while (acquirable < count && n < cap) {
       n++;
       const result = provisionLane(repo, n, force);
       if (!result.skipped) resetLanes.push(n);
-      if (isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs)) acquirable++;
+      if (isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox), nowMs, ttlMs)) acquirable++;
     }
     if (acquirable < count) {
       log(`⚠ only ${acquirable}/${count} lane(s) acquirable after provisioning through lane-${n} (rest hold a foreign lease / un-pushed work) — the orchestrator will log the contention and carry the overflow, never double up a lane.`);
@@ -1056,17 +1160,14 @@ function cmdAcquire(repo) {
   // lane that actually looks ahead pays the single `ls-remote`, so a pool with no ahead lanes still makes
   // zero network calls (the no-per-lane-fetch property this design is built around).
   let remoteShas = null;
+  const getRemoteShas = (dir) => (remoteShas === null ? (remoteShas = liveRemoteShas(dir)) : remoteShas);
   const infoFor = (n) => {
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) return { lane: n, exists: false };
-    const raw = laneDirtyOrAhead(dir, repo.branch);
-    let dirtyOrAhead = raw;
-    if (raw.ahead > 0) {
-      // Only HERE (acquire's auto-pick) may a provably-pushed "ahead" lane be treated as recyclable —
-      // `refreshLane`/`status` keep reading the raw fact. Fails closed: unproven ⇒ stays protected (#2267).
-      if (remoteShas === null) remoteShas = liveRemoteShas(dir);
-      if (aheadIsProvablyPushed(dir, remoteShas)) dirtyOrAhead = { ...raw, ahead: 0, aheadPushed: true };
-    }
+    // #3383 — `effectiveDirtyOrAhead` applies BOTH acquire-time-only relaxations (ancestor-OR-patch-equivalent
+    // "ahead", litter-only "dirty"); `refreshLane`/`laneStatus` keep reading `laneDirtyOrAhead`'s raw fact.
+    // Fails closed either way: unproven ⇒ stays protected (#2267).
+    const dirtyOrAhead = effectiveDirtyOrAhead(dir, repo.branch, () => getRemoteShas(dir));
     return { lane: n, exists: true, dirtyOrAhead, lease: readLease(dir) };
   };
 
@@ -1130,7 +1231,13 @@ function cmdAcquire(repo) {
     // Skipped when the reset itself would be skipped (`--no-reset`, or the reserved-lane re-reserve path,
     // which never resets either) so this never blocks an acquire that was never going to touch the tree.
     if (!flags.force && !targetWasReserved && !flags['no-reset']) {
-      const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      // #3383 — litter-only "dirty" (known-safe agent scratch, `we:scripts/lib/lane-litter.mjs`'s allowlist)
+      // must not force an explicit `--lane=N` acquire into `--force` any more than it forces auto-pick to
+      // skip the lane (`infoFor` applies the identical relaxation). `ahead` deliberately stays the RAW fact
+      // here — #2452's provably-pushed relaxation is scoped to auto-pick only; an explicit target that is
+      // genuinely ahead still needs `--force`.
+      const dirty = litterAdjustedDirty(dir, uncommitted > 0);
       if (dirty || ahead > 0) {
         fail(
           `lane-${n} has ${uncommitted} uncommitted change(s) and is ${ahead} commit(s) ahead of origin/${repo.branch} ` +
@@ -1215,7 +1322,12 @@ function cmdAcquire(repo) {
     // on origin inside that window means the earlier proof no longer holds. Network-free: the fetch above
     // already refreshed every remote-tracking ref, so `localRemoteShas` answers from local state alone.
     if (!flags.force) {
-      const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+      // #3383 — re-apply the SAME litter relaxation `infoFor`'s earlier auto-pick snapshot already granted
+      // this lane (or that an explicit `--lane=N` acquire's own pre-claim check just granted it, just above):
+      // without this, a litter-only-dirty lane picked exactly because it looked acquirable would immediately
+      // fail this re-verify, one line later, on the identical litter it was already cleared for.
+      const dirty = litterAdjustedDirty(dir, uncommitted > 0);
       const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir));
       if (dirty || !provablyPushed) {
         fail(
@@ -1534,7 +1646,11 @@ function cmdList(repo) {
     // called `acquire` to clear them, because the low-capacity reading is exactly what makes nothing call it.
     // `--no-reap` (tests) opts out identically to `acquire`'s own flag.
     reapDeadLeasesInPool(repo, nowMs, ttlMs);
-    lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n), nowMs, ttlMs));
+    // #3383 — ONE shared lazy `ls-remote` for this whole `list --acquirable` pass (see `laneAcquirableInfo`),
+    // not one per lane — keeps this a cheap, at-most-one-network-call read, same cost shape as `cmdAcquire`'s
+    // own auto-pick.
+    const remoteShasBox = { value: null };
+    lanes = lanes.filter((n) => isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox), nowMs, ttlMs));
   }
   const paths = lanes.map((n) => laneDir(repo, n));
   if (flags.json) process.stdout.write(JSON.stringify(paths, null, 2) + '\n');

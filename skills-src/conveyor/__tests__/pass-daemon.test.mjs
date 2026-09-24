@@ -55,6 +55,38 @@ describe('runPassDaemonLoop — the pure run/sleep control flow', () => {
   });
 });
 
+describe('runPassDaemonLoop — refreshAuth (GitHub App token, xsdm0n7) runs before every spawn', () => {
+  it('awaits refreshAuth before each runPass call, in order', async () => {
+    const order = [];
+    const refreshAuth = vi.fn(async () => { order.push('refresh'); });
+    const runPass = vi.fn(async () => { order.push('run'); return { code: 0 }; });
+    const out = await runPassDaemonLoop({ runPass, refreshAuth, sleep: async () => {}, intervalMs: 1000, maxRuns: 3 });
+    expect(refreshAuth).toHaveBeenCalledTimes(3);
+    expect(runPass).toHaveBeenCalledTimes(3);
+    expect(order).toEqual(['refresh', 'run', 'refresh', 'run', 'refresh', 'run']);
+    expect(out).toEqual({ runs: 3, stoppedReason: 'max-runs' });
+  });
+
+  it('a failed refresh never prevents the spawn — onRefreshError fires, runPass still runs', async () => {
+    const onRefreshError = vi.fn();
+    const refreshAuth = vi.fn(async () => { throw new Error('mint failed'); });
+    const runPass = vi.fn(async () => ({ code: 0 }));
+    const out = await runPassDaemonLoop({ runPass, refreshAuth, onRefreshError, sleep: async () => {}, intervalMs: 1000, maxRuns: 2 });
+    expect(refreshAuth).toHaveBeenCalledTimes(2);
+    expect(runPass).toHaveBeenCalledTimes(2);
+    expect(onRefreshError).toHaveBeenCalledTimes(2);
+    expect(onRefreshError.mock.calls[0][0].message).toBe('mint failed');
+    expect(out).toEqual({ runs: 2, stoppedReason: 'max-runs' });
+  });
+
+  it('defaults refreshAuth to a no-op — existing callers with no App auth configured are unaffected', async () => {
+    const runPass = vi.fn(async () => ({ code: 0 }));
+    const out = await runPassDaemonLoop({ runPass, sleep: async () => {}, intervalMs: 1000, maxRuns: 1 });
+    expect(runPass).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({ runs: 1, stoppedReason: 'max-runs' });
+  });
+});
+
 describe('passDaemonLeaseKey — one distinct key per pass name', () => {
   it('two different pass names never collide', () => {
     expect(passDaemonLeaseKey('branch-drift')).not.toBe(passDaemonLeaseKey('ci-queue-watch'));

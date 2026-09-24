@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone,
 } from '../reconcile-core.mjs';
 import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
@@ -288,6 +288,37 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
   it('one attempt below the cap still dispatches — the cap binds AT the cap, not before it', () => {
     const plan = planReconcile({ prs: [pr1563()], agents: [], durableCounts: { 1563: 4 }, now: NOW });
     expect(plan.dispatch.map((d) => d.attempts)).toEqual([4]);
+  });
+
+  // xpprcdz — a PR that is `review:human` FROM OPEN (no `review:changes`, no `review:pending`) previously
+  // refused as `owed-elsewhere` and was NEVER dispatched at all, so `we:scripts/operations/review-pr.mjs`'s own
+  // `advise` step — built specifically for this population — never ran. Live-caught 2026-09-23: PR #2486 and
+  // #2492 sat with zero advisory-panel comments and no status label, indistinguishable from "nobody has looked"
+  // versus "an advisory pass already ran and found nothing new". `needs-human` now dispatches `review` too —
+  // `review-pr.mjs`'s `confirm` step still suspends on an operator, so this never clears the human gate; only
+  // `advise` (a comment plus an `advisory:*` label) runs unattended.
+  it('xpprcdz — a PURE review:human PR (no review:changes, no review:pending) with a finding now dispatches `review`, not `owed-elsewhere`', () => {
+    const humanFromOpen = pr1563({ labels: lbl('review:human') });
+    const plan = planReconcile({ prs: [humanFromOpen], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563, phase: 'needs-human' })]);
+    expect(plan.refusals).toHaveLength(0);
+  });
+
+  it('xpprcdz — the SAME round cap that binds a bounced+review:human PR also binds a PURE review:human one — advisory comments alone trip it', () => {
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const burned = pr1563({
+      labels: lbl('review:human'),
+      comments: [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, (_, i) => advisoryRound(i + 1))],
+    });
+    const plan = planReconcile({ prs: [burned], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('xpprcdz — review:accepted supersedes review:human (classifyPr\'s own rule) — an already-cleared PR is not re-dispatched as needs-human', () => {
+    const cleared = pr1563({ labels: lbl('review:human', 'review:accepted') });
+    const plan = planReconcile({ prs: [cleared], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch.map((d) => d.kind)).not.toContain('review');
   });
 });
 
@@ -578,8 +609,10 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
 });
 
 describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
-  it('includes an owed-elsewhere refusal (e.g. needs-human) — it is a real conveyor PR, not an unrelated one', () => {
-    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'needs-human' }];
+  it('includes an owed-elsewhere refusal (e.g. ci-red) — it is a real conveyor PR, not an unrelated one', () => {
+    // `needs-human` no longer produces `owed-elsewhere` (xpprcdz dispatches `review` for it instead) — `ci-red`
+    // is the current real example of a phase this pass refuses as someone else's job.
+    const refusals = [{ prNumber: 1920, kind: 'owed-elsewhere', phase: 'ci-red' }];
     expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
@@ -637,4 +670,56 @@ it('binds names only for the invocation repo', () => {
   const live = [{ name: 'review-fui-49', pidAlive: true, pid: 1 }];
   expect(planReconcile({ prs: [pr], agents: live, repo: 'frontierui' }).refusals.some((r) => r.kind === 'live-process')).toBe(true);
   expect(planReconcile({ prs: [pr], agents: live }).dispatch).toHaveLength(1);
+});
+
+// ── xpb0zyq — a session that REPORTED its own completion is finished, whatever the listing says ──────────────
+describe('markSelfReportedDone + assessLiveness — self-reported completion (xpb0zyq, live 2026-09-23)', () => {
+  const T0 = Date.parse('2026-09-23T13:51:10Z');
+  // The live shape: `claude agents` still says `blocked`; the session's own record says done/blocked-on-infra.
+  const listed = { name: 'review-2513', state: 'blocked', status: 'idle', startedAt: T0, pid: 4242 };
+  const record = { status: 'done', outcome: 'blocked-on-infra', updatedAt: '2026-09-23T13:52:01Z' };
+  const recFor = (r) => (name) => (name === 'review-2513' ? r : null);
+
+  it('THE LIVE CASE: blocked-on-infra, cool-off elapsed → finished, so the PR is re-dispatched', () => {
+    const [a] = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T14:30:00Z'));
+    expect(a.selfReportedDone).toBe(true);
+    expect(a.selfReportedOutcome).toBe('blocked-on-infra');
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('blocked-on-infra INSIDE the cool-off is not yet finished — a persistent outage is not retried every tick', () => {
+    const [a] = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T13:55:00Z'));
+    expect(a.selfReportedDone).toBeUndefined();
+  });
+
+  it('any other done outcome counts at once', () => {
+    const [a] = markSelfReportedDone([listed], recFor({ ...record, outcome: 'accepted' }), Date.parse('2026-09-23T13:52:30Z'));
+    expect(a.selfReportedDone).toBe(true);
+  });
+
+  it('a record OLDER than the session is a previous run with the same name — the fresh run stays live', () => {
+    const fresh = { ...listed, startedAt: Date.parse('2026-09-23T14:10:00Z') };
+    const [a] = markSelfReportedDone([fresh], recFor(record), Date.parse('2026-09-23T15:00:00Z'));
+    expect(a.selfReportedDone).toBeUndefined();
+  });
+
+  it('no record, a not-done record, or a reader that throws → the row is untouched', () => {
+    const now = Date.parse('2026-09-23T15:00:00Z');
+    expect(markSelfReportedDone([listed], () => null, now)[0]).toBe(listed);
+    expect(markSelfReportedDone([listed], recFor({ ...record, status: 'running' }), now)[0]).toBe(listed);
+    expect(markSelfReportedDone([listed], () => { throw new Error('corrupt'); }, now)[0]).toBe(listed);
+  });
+
+  it('end to end: a review:pending PR bound (by name) only to a self-reported-done reviewer is owed a review again', () => {
+    const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
+    const agents = markSelfReportedDone([listed], recFor(record), Date.parse('2026-09-23T14:30:00Z'));
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2513 })]);
+  });
+
+  it('the same PR with the RAW listing (no self-report marking) stays refused — the bug this fixes', () => {
+    const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [listed], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+  });
 });

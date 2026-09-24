@@ -234,6 +234,201 @@ Screen: clear.`;
     expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
     expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
   });
+
+  it('accepts an unbolded lettered option bullet ("- (b) …") sharing a paragraph with a bolded one, rather than swallowing it into the prior option\'s text (backlog/3128, backlog/2134)', () => {
+    const section = `Why.
+
+- **(a) Bolded option.** Real case for (a).
+- (b) Unbolded option, no bold wrap at all. Rejected: loses on merit.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+    expect(fork.options).toHaveLength(2);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+    expect(fork.options[1].body).toMatch(/^Unbolded option/);
+    // (a)'s body must NOT have absorbed (b)'s text (the pre-fix bug: an unbolded sibling bullet fell through
+    // as a continuation line of the previous option instead of opening its own).
+    expect(fork.options[0].body).not.toMatch(/Unbolded option/);
+  });
+
+  it('absorbs an INDENTED continuation paragraph (a fenced code sample, or nested prose) into the option it belongs to, rather than truncating the option at the first blank line (backlog/3055 Fork 2)', () => {
+    const section = `Why.
+
+- **(a) Commit-time trailer.** Intro sentence.
+
+  \`\`\`js
+  export function f() {}
+  \`\`\`
+
+  Tradeoffs: real reasoning that must survive.
+
+- **(b) Push-time marker [RECOMMENDED DEFAULT].** Rest of the story.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+    expect(fork.options).toHaveLength(2);
+    expect(fork.options[0].body).toMatch(/export function f/);
+    expect(fork.options[0].body).toMatch(/Tradeoffs: real reasoning/);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.DEFAULT);
+  });
+
+  it('falls back to NUMBERED options ("1. **Title**" / "2. **Title**") when no lettered bullet exists anywhere in the fork (backlog/3132, backlog/3136), and cross-references a "Recommended default: (N)" paragraph by number', () => {
+    const section = `Why a real either/or.
+
+1. **Shared-row contract.** Matches the ratified mock, no re-baseline.
+2. **Independent-section contract.** A real design change nobody asked for.
+
+**Recommended default: (1)**, shared row.
+
+Skeptic: SURVIVES-WITH-AMENDMENT.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+    expect(fork.options.map((o) => o.label)).toEqual(['(1)', '(2)']);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('recognizes a "(default / …)"-style parenthetical with trailing words after the marker, not just a bare "(default)" (backlog/2300, backlog/2544)', () => {
+    const section = `Why.
+
+- **(a) Stays WE (default / ruling).** The no-leakage client.
+- **(b) Relocate the loop (dissolved).** No merit survives.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('recognizes the bare "**DEFAULT.**"/"**NEW DEFAULT.**" marker (backlog/3281\'s own documented convention), case-sensitive so ordinary lowercase "default" prose is never mistaken for it, and never counts a "**SUPERSEDED DEFAULT …**" retraction', () => {
+    const section = `Why.
+
+- **(a) One weighted budget. — DEFAULT.** Models the shared resource as one budget, not the (default false) flag some OTHER option happens to mention.
+- **(b) Two separate budgets.** **SUPERSEDED DEFAULT — see the amendment above.** Historical only, not a live pick.
+- **(c) Three budgets.** Rejected: no merit.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED); // superseded marker never counts as live default
+    expect(fork.options[2].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('recognizes the lowercase arrow marker "← **default**" as an alias of "← **RECOMMENDED**" (backlog/3364, the one live instance of this spelling)', () => {
+    const section = `Why.
+
+- **(a) Impact alone.** Rejected as the sole licence — no precision floor.
+- **(b) Impact and a precision floor.**
+  ← **default**
+- **(c) Precision alone.** Rejected.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.DEFAULT);
+  });
+
+  it('recognizes an inline "(a · DEFAULT)"/"(a — recommended, …)" marker inside the option\'s own label parens (backlog/1826, backlog/3732, backlog/2544)', () => {
+    const section = `Why.
+
+- **(a · DEFAULT) The producer numbers at PR open.** Fails closed.
+- (b) A persistent integration branch. Needs a repair policy.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.REJECTED);
+
+    const section2 = `Why.
+
+- **(a — recommended, FLIPPED by the red-team) Shape the seam now.** Ship the adapter interface.
+- (b) Mint the formal Protocol now. Rejected — one conforming impl.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork2 = parseForkSection(1, '', section2);
+    expect(fork2.parseOk).toBe(true);
+    expect(fork2.options[0].kind).toBe(OPTION_KINDS.DEFAULT);
+  });
+
+  it('promotes the sole surviving (un-marked) option to default once every OTHER option is explicitly excluded — a logical consequence of the exclusions already stated, never a guess (backlog/3043, backlog/3041 Fork 2)', () => {
+    const section = `Why exactly one of three survives.
+
+- **(a) Extend the gate unconditionally.** Rejected as the implementation shape.
+- **(b) Leave it ungated, and record why.** No marker of its own at all.
+- **(c) Gate it too, lower the default band.** Rejected as the default, not as unreasonable.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.REJECTED);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.DEFAULT); // sole survivor by elimination
+    expect(fork.options[2].kind).toBe(OPTION_KINDS.REJECTED);
+  });
+
+  it('never applies the sole-survivor fallback when nothing was actually excluded (a genuinely un-attacked, open fork stays un-resolved rather than guessing)', () => {
+    const section = `Why.
+
+- **(a) Option one.** No marker.
+- **(b) Option two.** No marker either.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options.every((o) => o.kind === OPTION_KINDS.OPEN)).toBe(true);
+    expect(fork.parseOk).toBe(false);
+    expect(fork.warning).toMatch(/no option marked RECOMMENDED/);
+  });
+
+  it('never applies the sole-survivor fallback when 2+ options survive exclusion — a real ambiguity the body left open, not a case to resolve by guessing (backlog/3123)', () => {
+    const section = `Why.
+
+- **(a) Option one.** No marker.
+- **(b) Option two.** No marker.
+- **(c) Option three.** Rejected: worse on every axis.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.options[0].kind).toBe(OPTION_KINDS.OPEN);
+    expect(fork.options[1].kind).toBe(OPTION_KINDS.OPEN);
+    expect(fork.options[2].kind).toBe(OPTION_KINDS.REJECTED);
+    expect(fork.parseOk).toBe(false);
+  });
+
+  it('never mistakes a literal "**" inside a code span (a glob like `we:scripts/**`) for an unclosed bold marker (backlog/3049, backlog/3013)', () => {
+    const section = `Why.
+
+- **(a) Add a third class — DEFAULT.** Route \`we:scripts/operations/**\` and \`we:scripts/**\` generally into it.
+- (b) Stay two-class. Rejected: needs a fresh human decision per file, forever.
+
+Skeptic: SURVIVES.
+Screen: clear.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.parseOk).toBe(true);
+    expect(fork.warning).toBeNull();
+  });
+
+  it('splits a Skeptic:/Screen: verdict out of a bulleted list with NO blank line between bullets, in the fork\'s own trailing context after the options block (mirrors the gate-shape fix below)', () => {
+    const section = `Why.
+
+- **(a) Option A.** No marker.
+- (b) Option B. Rejected: no.
+
+- \`Skeptic: SURVIVES-WITH-AMENDMENT.\` A refute-only pass landed three fixes.
+- \`Screen: clear.\` No implementation detail leaks through.`;
+    const fork = parseForkSection(1, '', section);
+    expect(fork.skeptic).toMatch(/^SURVIVES-WITH-AMENDMENT/);
+    expect(fork.screen).toMatch(/^clear/);
+  });
 });
 
 describe('parseDecisionBody', () => {
@@ -345,6 +540,109 @@ One-sided gate.
       expect(parsed.forks).toHaveLength(1);
       expect(parsed.gate).toBeNull();
     });
+
+    it('splits a Skeptic:/Screen: verdict out of a "## Recommendation" bulleted list with NO blank line between bullets (backlog/2224, backlog/1648, backlog/2544)', () => {
+      const body = `# T
+
+Digest.
+
+## What you're deciding
+
+Whether to build X.
+
+## Recommendation
+
+- **Verdict: GO.** Confidence Medium.
+- **Un-gate trigger:** n/a, already cleared.
+- \`Skeptic: SURVIVES-WITH-AMENDMENT.\` A refute-only pass landed three fixes, all folded above.
+- \`Screen: flagged(prio) → fixed.\` The two-confusion screen refuted merit-vs-prioritization.
+`;
+      const parsed = parseDecisionBody(body);
+      expect(parsed.forks).toHaveLength(0);
+      expect(parsed.gate).not.toBeNull();
+      expect(parsed.gate.skeptic).toMatch(/^SURVIVES-WITH-AMENDMENT/);
+      expect(parsed.gate.screen).toMatch(/^flagged\(prio\)/);
+      expect(parsed.gate.recommendation).toMatch(/Verdict: GO/);
+      expect(parsed.gate.recommendation).not.toMatch(/Skeptic|Screen/);
+      expect(parsed.parseOk).toBe(true);
+    });
+  });
+
+  it('falls back to the "### Fork [A-Z]" h3/letter heading when the body has no canonical "## Fork N" at all (backlog/2544), mapping letter position to fork number', () => {
+    const body = `# T
+
+Digest.
+
+## Some framing section
+
+### Fork A — first question
+
+- **(a — recommended) Option one.** The chosen shape.
+- (b) Option two. Rejected: worse on every axis.
+
+Skeptic: SURVIVES.
+Screen: clear.
+
+### Fork B — second question
+
+- **(a) Option one.** ← **RECOMMENDED**
+- (b) Option two. Rejected.
+
+Skeptic: SURVIVES.
+Screen: clear.
+
+## Recommendation to the ratification turn
+
+Ratify both columns.
+`;
+    const parsed = parseDecisionBody(body);
+    expect(parsed.forks).toHaveLength(2);
+    expect(parsed.forks[0].n).toBe(1);
+    expect(parsed.forks[0].crux).toBe('first question');
+    expect(parsed.forks[1].n).toBe(2);
+    expect(parsed.parseOk).toBe(true);
+    // no "## Recommendation"-as-gate reading once real forks are found (letter-fork fallback still routes
+    // through the fork path, never the gate path).
+    expect(parsed.gate).toBeNull();
+  });
+
+  it('falls back to a single bare "## Fork"/"## The fork" heading (no number — there\'s only one) as Fork 1, but ONLY when exactly one such heading exists (backlog/3114, backlog/3115)', () => {
+    const oneForkBody = `# T
+
+Digest.
+
+## Fork — mint a new id vs reuse
+
+- **(a — recommended) Mint a new id.** Matches established precedent.
+- (b) Reuse an existing id. Rejected: misreports the cause.
+
+**Default: (a) mint a new id.**
+`;
+    const parsed = parseDecisionBody(oneForkBody);
+    expect(parsed.forks).toHaveLength(1);
+    expect(parsed.forks[0].n).toBe(1);
+    expect(parsed.forks[0].crux).toBe('mint a new id vs reuse');
+    // still honestly flags the missing Skeptic verdict rather than fabricating one — the fallback widens
+    // HEADING recognition only, it never invents content the body doesn't carry.
+    expect(parsed.parseOk).toBe(false);
+    expect(parsed.forks[0].warning).toMatch(/no "Skeptic:" verdict line/);
+
+    const twoForksBody = `# T
+
+Digest.
+
+## Fork — first
+
+Some content.
+
+## Fork — second
+
+Some other content.
+`;
+    // two bare, un-numbered "## Fork" headings is a real ambiguity the fallback deliberately leaves alone
+    // rather than guessing an order for.
+    const parsedAmbiguous = parseDecisionBody(twoForksBody);
+    expect(parsedAmbiguous.forks).toHaveLength(0);
   });
 });
 

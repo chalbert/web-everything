@@ -178,6 +178,9 @@ export default defineConfig({
       // boundary (proves the retry actually waits, not just that the flag parses); same shape as its
       // lane-pool-acquire-* siblings above, excluded from the default suite for the same reason.
       'scripts/__tests__/lane-pool-acquire-wait-ms.test.mjs',
+      // #3383 — same tier: real throwaway origin/reference/filler clones, real `git cherry`/`ls-remote`, real
+      // spawned `lane-pool.mjs` CLI invocations (list/provision/acquire).
+      'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',

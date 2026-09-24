@@ -38,6 +38,76 @@ export function scanInvisibleCharacters(docs) {
   });
 }
 
+/**
+ * #3960 (multi-repo slice 4) — conveyor briefs that `cd` INTO an acquired lane clone and then invoke a WE tool
+ * by a RELATIVE `node scripts/...` path are wrong the moment that lane's checkout is not WE's own: there is no
+ * `scripts/` directory to find at that relative location, because the agent's cwd is the TARGET repo, not WE
+ * (`we:reports/2026-09-23-conveyor-multi-repo-gap-map.md`, root cause 2 — "the tools' repo is the target repo").
+ * The fix is to qualify every such call with an absolute WE root (`{{WE_ROOT}}` in the templates this repo
+ * ships); this scan is what keeps that qualification from silently rotting back to a relative path.
+ *
+ * WHY THIS IS NOT EVERY `skills-src/conveyor/*.md`. `delivery-agent-brief.md` (and its v2, plus the
+ * investigation/prepare-scope/prepare-decision briefs) also `cd "$LANE"` and then call WE tools by relative
+ * path — but THEIR `$LANE` is acquired with no `--repo=` at all (`lane-pool.mjs acquire --lane=… --item=…`, no
+ * repo flag), so it is always a WE lane by construction; a cross-locus build's SECOND, impl-repo lane is a
+ * DIFFERENT variable acquired separately and never `cd`-relied-on for a WE tool call. `fix-agent-brief.md` /
+ * `fix-agent-ci-brief.md` are different: `{{LANE_REF}}` is an EXISTING PR's head ref, which under multi-repo
+ * fix/ci-heal dispatch (slice 5, not turned on by this item) can belong to any constellation repo — so THEIR
+ * lane is the one that can silently stop being WE's own. {@link WE_ONLY_LANE_CONVEYOR_BRIEFS} names the briefs
+ * exempt for that reason; anything NOT listed is checked by default, so a new conveyor brief earns the same
+ * bug-closed default the rest of this file uses rather than needing to remember to opt in.
+ */
+export const WE_ONLY_LANE_CONVEYOR_BRIEFS = new Set([
+  'skills-src/conveyor/delivery-agent-brief.md',
+  'skills-src/conveyor/delivery-agent-brief-v2.md',
+  'skills-src/conveyor/investigation-agent-brief.md',
+  'skills-src/conveyor/prepare-decision-agent-brief.md',
+  'skills-src/conveyor/prepare-scope-agent-brief.md',
+]);
+
+/**
+ * Find every RELATIVE `node scripts/...` invocation that appears AFTER a `cd "$LANE"` / `cd "{{SOME_TOKEN}}"`
+ * line, in any `skills-src/conveyor/*.md` brief not in {@link WE_ONLY_LANE_CONVEYOR_BRIEFS}. Pure; takes the
+ * same `{file, content}[]` shape every other rule here does (the recursive `skills-src` markdown walk
+ * `check-standards.mjs` already builds for the #3224/#3253 scans).
+ *
+ * "AFTER", once tripped, stays tripped for the REST OF THE FILE — not just the same fenced code block. A brief
+ * `cd`s into its lane once (near the top) and then references WE tools across many separate steps/headers for
+ * the rest of the document; the bug is exactly as real in step 7 as it would be immediately after the `cd`.
+ *
+ * A qualified call — `node "{{WE_ROOT}}/scripts/..."` or `node "/abs/path/scripts/..."` — never matches: the
+ * regex requires `scripts/` to follow `node` (plus optional whitespace/quote) immediately, and an interposed
+ * `{{WE_ROOT}}`/absolute segment breaks that adjacency.
+ * @param {Array<{file: string, content: string}>} docs
+ * @returns {{errors: Array<{message: string, descriptor: object}>, warnings: []}}
+ */
+export function findRelativeNodeScriptsAfterLaneCd(docs) {
+  const CD_LANE_RE = /\bcd\s+"(?:\$LANE|\{\{[A-Za-z0-9_]+\}\})"/;
+  const RELATIVE_NODE_SCRIPTS_RE = /\bnode\s+"?scripts\//;
+  const errors = docs.flatMap(({ file, content }) => {
+    if (!/^skills-src\/conveyor\/.*\.md$/.test(file) || WE_ONLY_LANE_CONVEYOR_BRIEFS.has(file)) return [];
+    const lines = String(content ?? '').split('\n');
+    let afterCd = false;
+    const found = [];
+    lines.forEach((line, i) => {
+      if (!afterCd) {
+        if (CD_LANE_RE.test(line)) afterCd = true;
+        return;
+      }
+      if (RELATIVE_NODE_SCRIPTS_RE.test(line)) {
+        found.push({
+          message: `${file}:${i + 1}: a relative \`node scripts/...\` call after \`cd "$LANE"\`/\`cd "{{…}}"\` — `
+            + 'that lane may not be a WE checkout, so there is no `scripts/` directory at this relative path. '
+            + 'Qualify the tool with an absolute WE root (e.g. `node "{{WE_ROOT}}/scripts/..."`) (#3960).',
+          descriptor: { kind: 'conveyor-brief-relative-node-after-lane-cd', fix: 'model', file, line: i + 1 },
+        });
+      }
+    });
+    return found;
+  });
+  return { errors, warnings: [] };
+}
+
 // ── Definition-of-green THRESHOLD registry (#2786) ─────────────────────────────────────────────
 // check-standards.conformance.test.mjs proves no definition-of-green knob escapes
 // check-standards.contract.json. The suite's two knob classes use two different discovery
@@ -995,6 +1065,18 @@ export function lintBacklogItemRendering({ item, body, pocRegistry = null }) {
         `"TBD"-style) — a live choice left OUTSIDE a \`## Fork N\` is an un-prepared fork in disguise (#1935). Promote it to ` +
         `its own \`## Fork N\` with a bold default (research it now), fold it into an existing fork's default, or drop it as ` +
         `not-actually-a-choice. See docs/agent/backlog-workflow.md → "no live choice may sit outside a Fork N".`);
+  }
+
+  // Stale-ratified/verified-done status guard (#3383) — see the header comment above findStaleRatifiedClaims.
+  if ((item.status === 'open' || item.status === 'active') && item.kind !== 'epic') {
+    const staleHits = findStaleRatifiedClaims(body);
+    if (staleHits.length) {
+      const where = staleHits.map((h) => `"${h.match}" (${h.label}, line ${h.line})`).join('; ');
+      warnings.push(`Backlog item "${id}" is \`status: ${item.status}\` but its body reads as already ` +
+        `ratified or built — ${where}. If the work is genuinely done, flip the status (\`resolved\`, with a ` +
+        `\`graduatedTo\`) or file/link the follow-through that finishes it; if this only cites another ` +
+        `item's ratification in passing, reword it so it doesn't read as a claim about THIS card (#3383).`);
+    }
   }
 
   // #3637 Fork 3 — `deliveryTarget:` must name a DECLARED POC branch (or be absent / `main`).
@@ -1984,6 +2066,66 @@ export function scanHarnessScaffolding(docs) {
     const hits = findHarnessScaffoldingMarkers(content);
     if (hits.length) findings.push({ file, hits });
   }
+  return findings;
+}
+
+// ── Stale-ratified/verified-done status guard (#3383 session lesson) ─────────────────────────────
+// This session found the same defect at least 11 times on the `lane/mechanical-dispatcher` prototype
+// branch (#3838–#3849, #3801): frontmatter said `status: open` while the body already recorded the work
+// as ratified or built — a decision ratified inline per-fork ("ratified at operator review, <date>") with
+// no status flip, or a build story carrying a "Verified done, <date>" blockquote (the convention this
+// session introduced while fixing #3838–#3849) whose status was never resolved. A batch pass re-selected
+// several of these as "ready to build" though they were already done — real wasted effort, and it
+// depended on a human/agent noticing by luck. This is the standing mechanical check for it.
+//
+// WARN, never ERROR: this is a heuristic over prose, and a body may legitimately DISCUSS "ratified"
+// without asserting that THIS card is done — most commonly by citing ANOTHER item's ratified anchor
+// ("Ruled in #3801 Fork 2", "ratified #2089 Fork 1(b)"). Calibrated against the real corpus: a bare
+// "ratified"/"Ratified" match is FAR too broad (1000+ backlog files mention it, almost all citing some
+// other anchor), so the markers below require a DATED, EMPHASIZED (bold/italic) assertion or the specific
+// blockquote convention — and even then, a matched span naming a `#NNNN` reference is treated as citing
+// that OTHER item's ratification and dropped (this alone cleared 3 of 7 raw hits found calibrating against
+// the current corpus — #1137, #2821, #3374 — each citing a different item's ratification date, not its
+// own).
+//
+// Scoped to `open`/`active` — a `resolved` item is definitionally not stale in this sense (#3383's own
+// framing) — and skips `kind: epic`: an epic's own "## Ratified …" heading routinely documents a ratified
+// DESIGN for its children's build, not completion of the umbrella itself (verified against two real open
+// epics with exactly that shape, #2612 and #2804 — both carry a dated "## Ratified …" heading for how their
+// children should be built, while the epic itself correctly stays open pending those children). A `kind:
+// decision` whose forks are ratified inline is the readiest true-positive case (#3801) but is still only a
+// WARN, never auto-resolved — a decision can rule some forks and leave others open, so a human/skill must
+// read the body and decide whether the CARD is done, only a follow-through item is missing, or the mention
+// is legitimately partial.
+const STALE_RATIFIED_MARKERS = [
+  { label: '"Verified done" blockquote', re: /^>\s*\*\*[^*\n]*\bVerified done\b[^*\n]*\*\*/i },
+  { label: '"## Ratified" heading', re: /^#{1,4}\s*Ratified\b/i },
+  { label: 'dated "ratified" assertion', re: /\*{1,2}[^*\n]{0,80}\bratified\b[^*\n]{0,60}\d{4}-\d{2}-\d{2}[^*\n]{0,40}\*{1,2}/i },
+];
+
+/**
+ * Find dated completion/ratification assertions in a markdown body, outside fenced code blocks (mirrors
+ * findHarnessScaffoldingMarkers's fence-toggle scan). A match naming a `#NNNN` reference is dropped — that
+ * shape reads as citing ANOTHER item's ratification (`ratified #2089 Fork 1(b)`, `RATIFIED … (#2607)`),
+ * not asserting this card's own. Returns `[{ line, label, match }]`.
+ */
+export function findStaleRatifiedClaims(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null;
+  let fenceLen = 0;
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return; // inside a fence — a documented example, not an assertion
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    for (const { label, re } of STALE_RATIFIED_MARKERS) {
+      const m = line.match(re);
+      if (m && !/#\d/.test(m[0])) findings.push({ line: i + 1, label, match: m[0].trim() });
+    }
+  });
   return findings;
 }
 

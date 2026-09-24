@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
   STAND_DOWN_MARKER, STAND_DOWN_REASONS, countStandDownComments, buildStandDownComment,
+  standDownComments, standDownReason,
 } from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { CI_HEAL_COMMENT_MARKER } from '../ci-heal-mark.mjs';
@@ -136,7 +137,65 @@ describe('the fix-agent brief actually CALLS it — the half that would otherwis
     for (const r of reasons) expect(Object.keys(STAND_DOWN_REASONS)).toContain(r);
   });
 
+  // PR #2518 / #3945 (2026-09-23) — a fix agent whose Edit/Write (or any tool call) was denied by a
+  // permission/tool-use guard while applying an otherwise-CLEAR fix wrongly stood down under `needs-judgment`,
+  // stalling a mechanically-clear repair on a human. The correct exit is `blocked-on-infra`
+  // (`completion-cli.mjs`), which the reconciler retries — never a NEW stand-down reason, which would make it
+  // terminal. Pin both halves of that: the vocabulary never grows a permission/infra-shaped reason, and the
+  // brief's own denial-exit paragraph never calls this script.
+  it('never carries a permission/infra-shaped reason — that case is blocked-on-infra, not a stand-down', () => {
+    for (const key of Object.keys(STAND_DOWN_REASONS)) {
+      expect(key).not.toMatch(/permission|infra/i);
+    }
+  });
+
+  it('the brief\'s tool/permission-denial exit reports blocked-on-infra and does not call this script', () => {
+    const denialAt = lines.findIndex((l) => l.includes('If applying an otherwise-CLEAR fix is denied'));
+    expect(denialAt).toBeGreaterThanOrEqual(0);
+    const exitAt = lines.findIndex((l, i) => i > denialAt && l.includes('blocked-on-infra ('));
+    expect(exitAt).toBeGreaterThan(denialAt);
+    const paragraph = lines.slice(denialAt, exitAt + 1).join('\n');
+    expect(paragraph).toMatch(/--outcome=blocked-on-infra/);
+    // The paragraph is allowed to MENTION stand-down.mjs in prose (contrasting this exit with it) — it must
+    // never actually INVOKE it, the shape every real escalation call takes (`node ".../stand-down.mjs" <pr>`).
+    expect(paragraph).not.toMatch(/stand-down\.mjs"\s+\{\{PR_NUM\}\}/);
+  });
+
   it('still tells the agent NOT to re-arm at an escalation — the marker is not a hand-back', () => {
     expect(brief).toMatch(/do \*\*not\*\* re-arm/i);   // markdown emphasis and all — the instruction is unchanged
+  });
+});
+
+// `standDownComments`/`standDownReason` — the reader half, added for the operator queue's STOOD DOWN section
+// (we:backlog/x6cjgz5). `countStandDownComments` is now built on `standDownComments`, so this also re-covers its
+// existing contract from the inside.
+describe('standDownComments and standDownReason — reading a stand-down comment back', () => {
+  it('returns the matching comments, normalized to {body, createdAt}, leading-marker only', () => {
+    const body = buildStandDownComment({ reason: 'gate-red' });
+    expect(standDownComments([
+      { body: 'unrelated' },
+      { body, createdAt: '2026-09-20T00:00:00Z' },
+      { body: `> ${STAND_DOWN_MARKER}\nquoted, not leading` },
+    ])).toEqual([{ body, createdAt: '2026-09-20T00:00:00Z' }]);
+  });
+
+  it('tolerates bare strings, giving them a null createdAt', () => {
+    expect(standDownComments([STAND_DOWN_MARKER])).toEqual([{ body: STAND_DOWN_MARKER, createdAt: null }]);
+  });
+
+  it('tolerates non-array / empty input the same way countStandDownComments does', () => {
+    for (const input of [null, undefined, [], 'not an array']) expect(standDownComments(input)).toEqual([]);
+  });
+
+  it('extracts the stated reason clause for each named reason', () => {
+    for (const [reason, clause] of Object.entries(STAND_DOWN_REASONS)) {
+      expect(standDownReason(buildStandDownComment({ reason }))).toBe(clause);
+    }
+  });
+
+  it('returns null for a body with no "stopped rather than guessing" sentence', () => {
+    expect(standDownReason('some other comment')).toBeNull();
+    expect(standDownReason('')).toBeNull();
+    expect(standDownReason(undefined)).toBeNull();
   });
 });

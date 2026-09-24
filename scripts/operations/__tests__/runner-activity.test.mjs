@@ -1,26 +1,66 @@
 import { describe, it, expect, vi } from 'vitest';
+import { join } from 'node:path';
 import { runnerActivityOperation } from '../runner-activity.mjs';
-import { collectRunnerActivity, createRunnerActivityReader, READ_TIMEOUT_MS } from '../runner-activity-io.mjs';
+import { collectRunnerActivity, createRunnerActivityReader, READ_TIMEOUT_MS, KNOWN_DAEMONS } from '../runner-activity-io.mjs';
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { runOperationCli } from '../cli-adapter.mjs';
 import { createRegistry } from '../registry.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
+import { lockDirFor } from '../../readiness/file-locks.mjs';
+import { RUNNER_LOCK_ROOT } from '../../../skills-src/conveyor/runner-lock.mjs';
 
 const NOW = '2026-09-15T12:00:00.000Z';
 const fresh = '2026-09-15T11:59:00.000Z';
 const old = '2026-09-15T10:00:00.000Z';
 const lease = { owner: 'host:42:conveyor-runner', pid: 42, heartbeatAt: fresh };
+const fixLease = { owner: 'host:43:reconcile-fix-dispatch-daemon', pid: 43, heartbeatAt: fresh };
+const reviewLease = { owner: 'host:44:review-daemon', pid: 44, heartbeatAt: fresh };
 const tick = { tick: 7, at: fresh, stalled: [], dispatch: {}, statusLine: 'quiet' };
 
-function fixture({ lock = lease, status = tick, records = [], agents = [], dead = false } = {}) {
+/** The three known daemons' own lease-file paths, precomputed with the SAME pure hashing `collectRunnerActivity`
+ *  uses at read time — lets the fixture route each daemon's lease independently rather than one shared mock
+ *  answering every `lock.json` read identically (which would make every daemon share one lease). */
+const LOCK_PATH = Object.fromEntries(KNOWN_DAEMONS.map((d) =>
+  [d.name, join(lockDirFor(RUNNER_LOCK_ROOT, d.leaseKey), 'lock.json')]));
+
+/** Absolute, already-resolved command lines for each daemon's own script token — avoids exercising the
+ *  cwd/`lsof` resolution path (covered separately by the existing relative-invocation tests below) so these
+ *  fixtures stay focused on the daemon-generalization behavior under test. */
+const ALIVE_COMMAND = Object.fromEntries(KNOWN_DAEMONS.map((d) => [d.name, `node /driver/${d.scriptToken}`]));
+const PID = { dispatcher: 42, 'fix-dispatch': 43, review: 44 };
+
+function dispatcherOf(verdict) { return verdict.runners.find((r) => r.name === 'dispatcher'); }
+
+/**
+ * @param {{ leases?: Record<string, object|null>, status?: object|null, records?: object[], agents?: object[],
+ *   commandsByPid?: Record<number, string>, throwOnRead?: Record<string, Error>, dead?: boolean }} o
+ *   `leases` maps daemon name -> lease object (or `null`/omitted for "no lease"). `throwOnRead` maps daemon
+ *   name -> an Error to throw when its own lock.json is read (simulating an unreadable lock directory,
+ *   distinct from a merely-absent one). `dead` makes every `ps` call fail as "no such pid" (exit 1, no
+ *   stderr) — the existing recycled-pid/process-gone simulation, now shared across every daemon under test.
+ */
+function fixture({ leases = { dispatcher: lease }, status = tick, records = [], agents = [],
+  commandsByPid = {}, throwOnRead = {}, dead = false } = {}) {
   const store = { list: vi.fn(() => records.map((r) => r.id)), read: vi.fn((id) => records.find((r) => r.id === id)),
     write: vi.fn(() => { throw new Error('unexpected write'); }), delete: vi.fn(() => { throw new Error('unexpected delete'); }) };
   const io = {
     env: {}, now: () => new Date(NOW), storeFor: vi.fn(() => store),
-    readText: vi.fn((path) => path.endsWith('lock.json') ? lock && JSON.stringify(lock) : status && JSON.stringify(status)),
-    exec: vi.fn(() => {
+    readText: vi.fn((path) => {
+      const daemonName = Object.entries(LOCK_PATH).find(([, p]) => p === path)?.[0];
+      if (daemonName) {
+        if (throwOnRead[daemonName]) throw throwOnRead[daemonName];
+        const entry = leases[daemonName];
+        return entry ? JSON.stringify(entry) : null;
+      }
+      return status && JSON.stringify(status);
+    }),
+    exec: vi.fn((file, argv) => {
       if (dead) throw Object.assign(new Error('no process'), { status: 1, stderr: '' });
-      return 'node /driver/skills-src/conveyor/runner.mjs';
+      if (file === 'ps') {
+        const pid = Number(argv[argv.indexOf('-p') + 1]);
+        return commandsByPid[pid] ?? ALIVE_COMMAND.dispatcher;
+      }
+      return ALIVE_COMMAND.dispatcher;
     }),
     listAgents: vi.fn(() => agents),
   };
@@ -45,11 +85,14 @@ function dispatch(id, status = 'in-flight', extra = {}) {
 
 describe('runner-activity through the declared CLI adapter', () => {
   it('reports down with no runner and no durable data', async () => {
-    const f = fixture({ lock: null, status: null });
+    const f = fixture({ leases: {}, status: null });
     const out = await report(f);
     expect(out.code).toBe(0);
     expect(out.payload.verdict).toMatchObject({ state: 'down', stalled: false, dispatching: false,
-      runner: { pid: null, alive: false }, lastTick: { number: null, at: null } });
+      lastTick: { number: null, at: null } });
+    expect(dispatcherOf(out.payload.verdict)).toMatchObject({ name: 'dispatcher', present: false, pid: null, alive: false, state: 'down' });
+    expect(out.payload.verdict.runners).toHaveLength(3);
+    expect(out.payload.verdict.runners.map((r) => r.state)).toEqual(['down', 'down', 'down']);
     expect(f.io.exec).not.toHaveBeenCalled();
     expect(f.io.listAgents).not.toHaveBeenCalled();
     expect(f.store.write).not.toHaveBeenCalled();
@@ -60,7 +103,8 @@ describe('runner-activity through the declared CLI adapter', () => {
   it('keeps alive-and-idle distinct from a stalled runner', async () => {
     const out = await report(fixture());
     expect(out.payload.verdict).toMatchObject({ state: 'alive-and-idle', stalled: false,
-      runner: { pid: 42, alive: true, heartbeatAt: fresh }, lastTick: { number: 7, at: fresh, proxy: false } });
+      lastTick: { number: 7, at: fresh, proxy: false } });
+    expect(dispatcherOf(out.payload.verdict)).toMatchObject({ pid: 42, alive: true, heartbeatAt: fresh, state: 'alive-and-idle' });
     expect(out.payload.verdict.stalledReason).toMatch(/Quiet work is not a stall/);
     expect(out.payload.verdict.checkout).toBe('/driver');
   });
@@ -71,18 +115,16 @@ describe('runner-activity through the declared CLI adapter', () => {
   ])('resolves a live relative invocation from %s: %s', async (cwd, script) => {
     const f = fixture();
     f.io.exec.mockImplementation((file) => file === 'ps' ? `node ${script}` : `p42\nn${cwd}\n`);
-    f.io.readText.mockImplementation((path) => path.endsWith('lock.json') ? JSON.stringify(lease)
+    f.io.readText.mockImplementation((path) => path === LOCK_PATH.dispatcher ? JSON.stringify(lease)
       : path === '/driver/.conveyor/driver-status.json' ? JSON.stringify(tick) : null);
     const out = await report(f);
-    expect(out.payload.verdict).toMatchObject({
-      state: 'alive-and-idle', checkout: '/driver', runner: { alive: true },
-      lastTick: { number: 7, at: fresh },
-    });
+    expect(out.payload.verdict).toMatchObject({ state: 'alive-and-idle', checkout: '/driver', lastTick: { number: 7, at: fresh } });
+    expect(dispatcherOf(out.payload.verdict)).toMatchObject({ alive: true });
     expect(f.io.storeFor).toHaveBeenCalledWith('/driver');
   });
 
   it('reports alive-and-stalled when the existing heartbeat window expires', async () => {
-    const out = await report(fixture({ lock: { ...lease, heartbeatAt: old }, status: { ...tick, at: old } }));
+    const out = await report(fixture({ leases: { dispatcher: { ...lease, heartbeatAt: old } }, status: { ...tick, at: old } }));
     expect(out.payload.verdict).toMatchObject({ state: 'alive-and-stalled', stalled: true });
     expect(out.payload.verdict.stalledReason).toMatch(/lease window/);
   });
@@ -163,6 +205,103 @@ describe('runner-activity through the declared CLI adapter', () => {
     const f = fixture();
     for (const limit of ['-1', '1.5', '1001']) expect((await report(f, ['--json', `--limit=${limit}`])).code).toBe(1);
     expect(f.io.readText).not.toHaveBeenCalled();
+  });
+});
+
+describe('runner-activity reports all three known daemons', () => {
+  it('reports all three daemons alive-and-idle when every lease is fresh and identity-matched', async () => {
+    const f = fixture({
+      leases: { dispatcher: lease, 'fix-dispatch': fixLease, review: reviewLease },
+      commandsByPid: { 42: ALIVE_COMMAND.dispatcher, 43: ALIVE_COMMAND['fix-dispatch'], 44: ALIVE_COMMAND.review },
+    });
+    const out = await report(f);
+    expect(out.code).toBe(0);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher).toMatchObject({ present: true, alive: true, pid: 42, state: 'alive-and-idle' });
+    expect(byName['fix-dispatch']).toMatchObject({ present: true, alive: true, pid: 43, state: 'alive-and-idle' });
+    expect(byName.review).toMatchObject({ present: true, alive: true, pid: 44, state: 'alive-and-idle' });
+    // Non-dispatcher daemons have no tick concept: their stalledReason never mentions the tick core.
+    expect(byName['fix-dispatch'].stalledReason).toMatch(/heartbeat is fresh/i);
+    expect(byName.review.stalledReason).toMatch(/heartbeat is fresh/i);
+  });
+
+  it('reports one daemon down (no lease) while the other two are up', async () => {
+    const f = fixture({
+      leases: { dispatcher: lease, review: reviewLease },
+      commandsByPid: { 42: ALIVE_COMMAND.dispatcher, 44: ALIVE_COMMAND.review },
+    });
+    const out = await report(f);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher.state).toBe('alive-and-idle');
+    expect(byName.review.state).toBe('alive-and-idle');
+    expect(byName['fix-dispatch']).toMatchObject({ present: false, alive: false, pid: null, state: 'down' });
+  });
+
+  it('reports one daemon dead (stale heartbeat) while the others are alive-and-idle', async () => {
+    const f = fixture({
+      leases: { dispatcher: lease, 'fix-dispatch': { ...fixLease, heartbeatAt: old }, review: reviewLease },
+      commandsByPid: { 42: ALIVE_COMMAND.dispatcher, 43: ALIVE_COMMAND['fix-dispatch'], 44: ALIVE_COMMAND.review },
+    });
+    const out = await report(f);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher.state).toBe('alive-and-idle');
+    expect(byName.review.state).toBe('alive-and-idle');
+    expect(byName['fix-dispatch']).toMatchObject({ state: 'alive-and-stalled', stalled: true });
+  });
+
+  it('reports one daemon dead (recycled pid — command no longer matches its own script) while others are fine', async () => {
+    const f = fixture({
+      leases: { dispatcher: lease, 'fix-dispatch': fixLease, review: reviewLease },
+      commandsByPid: { 42: ALIVE_COMMAND.dispatcher, 43: 'node some-unrelated-process.mjs', 44: ALIVE_COMMAND.review },
+    });
+    const out = await report(f);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher.state).toBe('alive-and-idle');
+    expect(byName.review.state).toBe('alive-and-idle');
+    expect(byName['fix-dispatch']).toMatchObject({ present: true, pid: 43, alive: false, state: 'dead' });
+  });
+
+  it('isolates one daemon\'s unreadable lock directory: it reports down/unreadable in its own entry, never aborts the whole snapshot', async () => {
+    const f = fixture({
+      leases: { dispatcher: lease, review: reviewLease },
+      commandsByPid: { 42: ALIVE_COMMAND.dispatcher, 44: ALIVE_COMMAND.review },
+      throwOnRead: { 'fix-dispatch': Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }) },
+    });
+    const out = await report(f);
+    expect(out.code).toBe(0);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher.state).toBe('alive-and-idle');
+    expect(byName.review.state).toBe('alive-and-idle');
+    expect(byName['fix-dispatch']).toMatchObject({ present: null, alive: false, state: 'down' });
+    expect(byName['fix-dispatch'].error).toMatch(/lock directory unreadable/);
+    expect(byName['fix-dispatch'].stalledReason).toMatch(/could not be read reliably/);
+  });
+
+  it('isolates one daemon\'s malformed lease the same way', async () => {
+    const f = fixture({ leases: { dispatcher: lease } });
+    f.io.readText.mockImplementation((path) => {
+      if (path === LOCK_PATH['fix-dispatch']) return '{not-json';
+      if (path === LOCK_PATH.dispatcher) return JSON.stringify(lease);
+      if (path === LOCK_PATH.review) return null;
+      return JSON.stringify(tick);
+    });
+    const out = await report(f);
+    expect(out.code).toBe(0);
+    const byName = Object.fromEntries(out.payload.verdict.runners.map((r) => [r.name, r]));
+    expect(byName.dispatcher.state).toBe('alive-and-idle');
+    expect(byName['fix-dispatch']).toMatchObject({ present: null, state: 'down' });
+    expect(byName['fix-dispatch'].error).toBe('malformed lease');
+  });
+
+  it('still hard-fails the whole read on a genuine process-identity infra error for a NON-dispatcher daemon (never masquerades as dead)', async () => {
+    const f = fixture({ leases: { dispatcher: lease, 'fix-dispatch': fixLease } });
+    f.io.exec.mockImplementation((file, argv) => {
+      const pid = Number(argv?.[argv.indexOf('-p') + 1]);
+      if (file === 'ps' && pid === 43) throw Object.assign(new Error('permission denied'), { status: 13, stderr: 'ps: not permitted' });
+      if (file === 'ps') return ALIVE_COMMAND.dispatcher;
+      return ALIVE_COMMAND.dispatcher;
+    });
+    expect((await report(f)).code).toBe(1);
   });
 });
 

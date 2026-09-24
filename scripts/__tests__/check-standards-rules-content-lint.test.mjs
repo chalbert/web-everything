@@ -14,11 +14,13 @@ import {
   flattenExportsTargets, validateRenderersNotPublished, validateReferenceRuntimeForms, REFERENCE_RUNTIME_FORMS,
   findRawHtmlInMarkdown, findBadBodyLinks,
   findHarnessScaffoldingMarkers, scanHarnessScaffolding,
+  findStaleRatifiedClaims,
   findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
   findBuriedForkSections, findNonBatchableMarkers,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
+  findRelativeNodeScriptsAfterLaneCd, WE_ONLY_LANE_CONVEYOR_BRIEFS,
 } from '../check-standards-rules.mjs';
 import { require, ROOT, SRC } from './fixtures/check-standards-rules-fixtures.mjs';
 
@@ -559,5 +561,117 @@ describe('findHarnessScaffoldingMarkers — leaked harness-scaffolding in backlo
   it('returns [] for an empty or non-string body', () => {
     expect(findHarnessScaffoldingMarkers('')).toEqual([]);
     expect(findHarnessScaffoldingMarkers(undefined)).toEqual([]);
+  });
+});
+
+describe('findStaleRatifiedClaims — dated ratified/verified-done body assertion vs. open status (#3383)', () => {
+  it('flags the "Verified done, <date>" blockquote convention', () => {
+    const body = '# T\n\n> **Verified done, 2026-09-22.** Already built and committed straight to the branch.\n';
+    const f = findStaleRatifiedClaims(body);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ line: 3, label: '"Verified done" blockquote' });
+    expect(f[0].match).toMatch(/Verified done, 2026-09-22\./);
+  });
+
+  it('flags a "## Ratified" heading', () => {
+    const f = findStaleRatifiedClaims('# T\n\nSome prose.\n\n## Ratified design (2026-09-07, operator)\n\nMore.');
+    expect(f).toEqual([{ line: 5, label: '"## Ratified" heading', match: '## Ratified' }]);
+  });
+
+  it('flags a dated, emphasized "ratified at operator review" assertion (the #3801 shape)', () => {
+    const body = '*Ratified at operator review, 2026-09-21: (c).* The rest of the fork text follows.';
+    const f = findStaleRatifiedClaims(body);
+    expect(f).toHaveLength(1);
+    expect(f[0].label).toBe('dated "ratified" assertion');
+  });
+
+  it('does NOT flag a bare, unemphasized mention of "ratified" with no date (the common case)', () => {
+    const body = 'Ruled in #3801 Fork 2 (a): the criteria stays ratified as shape, not as a value.';
+    expect(findStaleRatifiedClaims(body)).toEqual([]);
+  });
+
+  it('does NOT flag an emphasized dated assertion that cites ANOTHER item\'s ratification (#1137/#2821/#3374 shape)', () => {
+    // Real corpus false-positive shapes found calibrating this rule — each cites a DIFFERENT item's
+    // ratification event, not this card's own, and must not fire.
+    expect(findStaleRatifiedClaims('**Go-live gate (ratified #2089 Fork 1(b)) — CLEARED 2026-07-02:**')).toEqual([]);
+    expect(findStaleRatifiedClaims('#2801 (records "RATIFIED by the operator on 2026-08-01")')).toEqual([]);
+    expect(findStaleRatifiedClaims('> **Ratified 2026-07-22 (#2607).** In delivery-loop machinery…')).toEqual([]);
+  });
+
+  it('ignores a marker fenced in a code block (documenting the pattern itself)', () => {
+    const body = '# T\n\n```\n> **Verified done, 2026-09-22.** example only\n```\n\nmore prose.';
+    expect(findStaleRatifiedClaims(body)).toEqual([]);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findStaleRatifiedClaims('')).toEqual([]);
+    expect(findStaleRatifiedClaims(undefined)).toEqual([]);
+  });
+});
+
+// #3960 (multi-repo slice 4) — a conveyor fix/ci-heal brief that `cd`s into an acquired lane and then invokes a
+// WE tool by a RELATIVE `node scripts/...` path breaks the moment that lane is not WE's own checkout.
+describe('findRelativeNodeScriptsAfterLaneCd (#3960)', () => {
+  const OLD_PATTERN = [
+    '### 1. Reconstitute',
+    '',
+    '```bash',
+    'LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}}) && cd "$LANE"',
+    '```',
+    '',
+    '### 2. Repair',
+    '',
+    '```bash',
+    'node scripts/conveyor/rearm-review.mjs {{PR_NUM}}',
+    '```',
+  ].join('\n');
+
+  it('fails a fixture with the old pattern — a relative call after `cd "$LANE"`', () => {
+    const { errors } = findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: OLD_PATTERN }]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/relative `node scripts\/\.\.\.` call after `cd "\$LANE"`/);
+    expect(errors[0].descriptor).toMatchObject({ kind: 'conveyor-brief-relative-node-after-lane-cd', file: 'skills-src/conveyor/fix-agent-brief.md', line: 10 });
+  });
+
+  it('also fires for `cd "{{SOME_TOKEN}}"`, not only the literal `$LANE`', () => {
+    const content = 'cd "{{LANE_DIR}}"\nnode scripts/conveyor/stand-down.mjs 1\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-ci-brief.md', content }]).errors).toHaveLength(1);
+  });
+
+  it('does not fire before the `cd` line, or for a call already qualified with an absolute root', () => {
+    const before = 'node scripts/lane-pool.mjs acquire --lane=1\ncd "$LANE"\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: before }]).errors).toEqual([]);
+    const qualified = 'cd "$LANE"\nnode "{{WE_ROOT}}/scripts/conveyor/rearm-review.mjs" 1\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content: qualified }]).errors).toEqual([]);
+  });
+
+  it('passes on the REAL, rewritten fix and ci-heal briefs on disk', () => {
+    const fixBrief = readFileSync(join(ROOT, 'skills-src/conveyor/fix-agent-brief.md'), 'utf8');
+    const ciHealBrief = readFileSync(join(ROOT, 'skills-src/conveyor/fix-agent-ci-brief.md'), 'utf8');
+    expect(findRelativeNodeScriptsAfterLaneCd([
+      { file: 'skills-src/conveyor/fix-agent-brief.md', content: fixBrief },
+      { file: 'skills-src/conveyor/fix-agent-ci-brief.md', content: ciHealBrief },
+    ]).errors).toEqual([]);
+  });
+
+  it('exempts the WE-only-lane briefs (delivery-agent-brief.md et al.) even though they share the same `cd` shape', () => {
+    for (const file of WE_ONLY_LANE_CONVEYOR_BRIEFS) {
+      expect(findRelativeNodeScriptsAfterLaneCd([{ file, content: OLD_PATTERN }]).errors, file).toEqual([]);
+    }
+    // The real delivery-agent-brief.md IS this exact shape today (`cd "$LANE"` then many relative `node
+    // scripts/...` calls) — proving the exemption is load-bearing, not merely untested.
+    const deliveryBrief = readFileSync(join(ROOT, 'skills-src/conveyor/delivery-agent-brief.md'), 'utf8');
+    expect(deliveryBrief).toMatch(/cd "\$LANE"/);
+    expect(deliveryBrief).toMatch(/\bnode scripts\//);
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/delivery-agent-brief.md', content: deliveryBrief }]).errors).toEqual([]);
+  });
+
+  it('ignores a file outside skills-src/conveyor entirely', () => {
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'docs/agent/some-doc.md', content: OLD_PATTERN }]).errors).toEqual([]);
+  });
+
+  it('a `cd` once tripped stays tripped for the rest of the file, across separate fenced blocks/headers', () => {
+    const content = 'cd "$LANE"\n\n### later step\n\n```bash\nnode scripts/conveyor/x.mjs\n```\n';
+    expect(findRelativeNodeScriptsAfterLaneCd([{ file: 'skills-src/conveyor/fix-agent-brief.md', content }]).errors).toHaveLength(1);
   });
 });

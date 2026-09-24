@@ -3,12 +3,15 @@ bornAs: xd6uqr9
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scaffoldedBy: "design-3784-supervision"
 dateScaffolded: "2026-09-22"
 scope: ["we:scripts/lib/jury-core.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:docs/agent/dispatcher-runbook.md"]
 relatedTo: ["3690", "3784", "3850", "3313", "3867"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-22"
+dateResolved: "2026-09-22"
+graduatedTo: none
 tags: [dispatch, delegation, supervision, review]
 ---
 
@@ -33,3 +36,10 @@ Rule 7 of we:docs/agent/platform-decisions.md#delegation-trial-record-graduation
 3. **Executable** — `npx vitest run we:scripts/lib/__tests__/jury-core.test.mjs` passes with a case that fails before: a floor-depth run records its verdict and its cost (juror count, rounds, tokens or wall time) in a field a report can read.
 4. **Observable** — a finding recorded by a `spot-check` floor pass files a follow-up backlog item through the declared `file-item` operation, and the item references the PR and the finding.
 5. **Observable** — we:docs/agent/dispatcher-runbook.md states, in one table row per level, what independent pass each supervision level gets and who enforces it.
+
+> **Verified done, 2026-09-22.** Built and committed to `lane/mechanical-dispatcher` at `d9ebfff1f`
+> (tracker note `b01c98416`). Both #3313 obligations wired and tested: a floor finding files a real
+> follow-up item through the declared `file-item` operation, and cost/yield are recorded via
+> `we:scripts/lib/jury-core.mjs`'s `recordFloorRun`. The `full` regression guard (#3850's panel,
+> unchanged) is covered. Resolved here as `graduatedTo: none` — the code is not yet on `main`; it
+> reaches `main` through #3443.

@@ -3,7 +3,7 @@ bornAs: xpb92yn
 kind: story
 size: 8
 parent: "2445"
-status: active
+status: open
 dateOpened: "2026-08-18"
 dateStarted: "2026-08-18"
 tags: [delivery, cloud-vm, bootstrap, portability, consent]

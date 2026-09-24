@@ -24,6 +24,7 @@ import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
   summarizeMechanicalPassError, MECHANICAL_PASS_ERROR_LOG_CHARS, makeCliMechanicalPasses,
   writeDriverStatus, appendDecisionTrace, DRIVER_STATUS_FILENAME,
+  MECHANICAL_PASS_NAMES, resolveSkipPasses, wireSelfSyncAndAppAuth,
 } from '../runner.mjs';
 import { localDateString } from '../../../scripts/lib/local-date.mjs';
 
@@ -630,5 +631,233 @@ describe('one open-PR snapshot per mechanical tick', () => {
     expect(calls.filter(([cmd]) => cmd === 'gh')).toHaveLength(2);
     expect(new Set(files).size).toBe(2);
     for (const file of files) expect(existsSync(file)).toBe(false);
+  });
+});
+
+// ── (7) --skip-pass — resolveSkipPasses' typo-safety refusal and repeatable-flag acceptance ──────────────────
+
+describe('resolveSkipPasses — typo-safety for --skip-pass (repeatable)', () => {
+  it('accepts a single known name', () => {
+    expect(resolveSkipPasses('reconcile-fix-dispatch')).toEqual({ ok: true, skipPasses: new Set(['reconcile-fix-dispatch']) });
+  });
+
+  it('accepts several repeated known names as an array (what parseFlags produces for a repeated flag)', () => {
+    const names = ['reconcile-fix-dispatch', 'parked-pr-conflict-watch', 'lane-pool-health-watch', 'reconcile-pass'];
+    const result = resolveSkipPasses(names);
+    expect(result.ok).toBe(true);
+    expect(result.skipPasses).toEqual(new Set(names));
+  });
+
+  it('no flag at all → an empty skip set, not a refusal', () => {
+    expect(resolveSkipPasses(undefined)).toEqual({ ok: true, skipPasses: new Set() });
+  });
+
+  it('refuses a single unknown/typo name, naming it', () => {
+    const result = resolveSkipPasses('reconcile-fix-dispach'); // typo: missing 't'
+    expect(result).toEqual({ ok: false, unknown: ['reconcile-fix-dispach'] });
+  });
+
+  it('refuses the WHOLE set when even one of several repeated names is unknown', () => {
+    const result = resolveSkipPasses(['reconcile-fix-dispatch', 'not-a-real-pass']);
+    expect(result.ok).toBe(false);
+    expect(result.unknown).toEqual(['not-a-real-pass']);
+  });
+
+  it('every name MECHANICAL_PASS_NAMES itself declares is individually accepted', () => {
+    for (const name of MECHANICAL_PASS_NAMES) {
+      expect(resolveSkipPasses(name).ok).toBe(true);
+    }
+  });
+});
+
+// ── (8) makeCliMechanicalPasses honors skipPasses — a skipped pass is not run at all, and the reconcile-pass
+//        → review-dispatch → review-round-tag/review-status-tag sequence skips as ONE unit ──────────────────
+
+describe('makeCliMechanicalPasses — skipPasses omits exactly the named pass(es), nothing else', () => {
+  async function runWithSkip(skipPasses) {
+    const calls = [];
+    const execFileSync = vi.fn((cmd, args) => {
+      calls.push([cmd, ...args]);
+      const joined = args.join(' ');
+      if (joined.includes('reconcile-pass.mjs')) return JSON.stringify({ dispatch: [{ kind: 'review', prNumber: 7, attempts: 0 }], refusals: [] });
+      return '';
+    });
+    const cp = await import('node:child_process');
+    cp.execFileSync.mockImplementation(execFileSync);
+    const mechanicalPasses = makeCliMechanicalPasses({
+      scriptsDir: '/scripts', repo: 'chalbert/web-everything', exec: cp.execFileSync, skipPasses,
+    });
+    await mechanicalPasses({ out: {} });
+    return calls.filter((c) => c[0] === 'node').map((c) => c[1]);
+  }
+
+  it('an empty skip set runs every pass (unchanged default behavior)', async () => {
+    const paths = await runWithSkip(new Set());
+    expect(paths).toEqual(expect.arrayContaining([
+      '/scripts/conveyor/reconcile-fix-dispatch.mjs',
+      '/scripts/conveyor/parked-pr-conflict-watch.mjs',
+      '/scripts/conveyor/lane-pool-health-watch.mjs',
+      '/scripts/conveyor/reconcile-pass.mjs',
+      '/scripts/operations/review-dispatch.mjs',
+      '/scripts/conveyor/review-round-tag.mjs',
+    ]));
+  });
+
+  it('skipping "reconcile-fix-dispatch" omits only that one script', async () => {
+    const paths = await runWithSkip(new Set(['reconcile-fix-dispatch']));
+    expect(paths).not.toContain('/scripts/conveyor/reconcile-fix-dispatch.mjs');
+    expect(paths).toContain('/scripts/conveyor/parked-pr-conflict-watch.mjs');
+    expect(paths).toContain('/scripts/conveyor/reconcile-pass.mjs');
+  });
+
+  it('skipping "parked-pr-conflict-watch" omits only that one script', async () => {
+    const paths = await runWithSkip(new Set(['parked-pr-conflict-watch']));
+    expect(paths).not.toContain('/scripts/conveyor/parked-pr-conflict-watch.mjs');
+    expect(paths).toContain('/scripts/conveyor/reconcile-fix-dispatch.mjs');
+  });
+
+  it('skipping "lane-pool-health-watch" omits only that one script', async () => {
+    const paths = await runWithSkip(new Set(['lane-pool-health-watch']));
+    expect(paths).not.toContain('/scripts/conveyor/lane-pool-health-watch.mjs');
+    expect(paths).toContain('/scripts/conveyor/infra-blocked.mjs');
+  });
+
+  it('skipping "reconcile-pass" drops the WHOLE group — reconcile-pass, review-dispatch, AND review-round-tag — as one unit', async () => {
+    const paths = await runWithSkip(new Set(['reconcile-pass']));
+    expect(paths).not.toContain('/scripts/conveyor/reconcile-pass.mjs');
+    expect(paths).not.toContain('/scripts/operations/review-dispatch.mjs');
+    expect(paths).not.toContain('/scripts/conveyor/review-round-tag.mjs');
+    expect(paths).not.toContain('/scripts/conveyor/review-status-tag.mjs');
+    // everything outside the group still runs
+    expect(paths).toContain('/scripts/conveyor/reconcile-fix-dispatch.mjs');
+    expect(paths).toContain('/scripts/conveyor/duplicate-pr-watch.mjs');
+    expect(paths).toContain('/scripts/conveyor/parked-pr-progress-watch.mjs');
+  });
+
+  it('skipping all four daemonized passes together leaves the rest running', async () => {
+    const paths = await runWithSkip(new Set(['reconcile-fix-dispatch', 'reconcile-pass', 'parked-pr-conflict-watch', 'lane-pool-health-watch']));
+    for (const gone of [
+      '/scripts/conveyor/reconcile-fix-dispatch.mjs', '/scripts/conveyor/reconcile-pass.mjs',
+      '/scripts/operations/review-dispatch.mjs', '/scripts/conveyor/parked-pr-conflict-watch.mjs',
+      '/scripts/conveyor/lane-pool-health-watch.mjs',
+    ]) expect(paths).not.toContain(gone);
+    for (const kept of [
+      '/scripts/conveyor/infra-blocked.mjs', '/scripts/conveyor/lease-reaper.mjs',
+      '/scripts/conveyor/session-reaper.mjs', '/scripts/conveyor/branch-drift.mjs',
+      '/scripts/conveyor/ci-queue-watch.mjs', '/scripts/conveyor/advisory-label-sweep.mjs',
+      '/scripts/conveyor/duplicate-pr-watch.mjs', '/scripts/conveyor/parked-pr-progress-watch.mjs',
+    ]) expect(paths).toContain(kept);
+  });
+});
+
+// ── (9) wireSelfSyncAndAppAuth — the per-tick ordering: self-sync first (a restart PRE-EMPTS the tick and the
+//        token refresh), then the App-token refresh (before the real tick), then the tick — with the tick's
+//        own payload argument threaded through both wrappers unchanged ─────────────────────────────────────
+
+describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tick, in order', () => {
+  it('up-to-date self-sync: token refresh runs, THEN the tick, and the tick receives the forwarded payload', async () => {
+    const order = [];
+    const payloadsSeen = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async (payload) => { order.push('tick'); payloadsSeen.push(payload); return { nextState: { fromTick: true } }; },
+      root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
+      onRestart: () => { throw new Error('onRestart must not run when nothing merged'); },
+      sync: () => ({ merged: false, commits: 0, reason: 'up-to-date' }),
+      authOpts: {
+        env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
+        readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }), // fresh cache → no real mint
+        setEnv: () => { order.push('token-refresh'); },
+        log: { error: () => {} },
+      },
+    });
+
+    const out = await wrapped({ carriedOver: 'bookkeeping' });
+
+    expect(order).toEqual(['token-refresh', 'tick']); // token refresh strictly before the tick
+    expect(payloadsSeen).toEqual([{ carriedOver: 'bookkeeping' }]); // the payload survived both wrappers unchanged
+    expect(out).toEqual({ nextState: { fromTick: true } });
+  });
+
+  it('self-sync merged: onRestart pre-empts BOTH the token refresh and the tick', async () => {
+    const order = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async () => { order.push('tick'); return {}; },
+      root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
+      onRestart: () => { order.push('restart'); return 'restarted'; },
+      sync: () => ({ merged: true, commits: 3, reason: 'merged' }),
+      authOpts: {
+        env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
+        setEnv: () => { order.push('token-refresh'); },
+        log: { error: () => {} },
+      },
+    });
+
+    const out = await wrapped({ carriedOver: 'bookkeeping' });
+
+    expect(order).toEqual(['restart']); // neither the token refresh nor the tick ran
+    expect(out).toBe('restarted');
+  });
+
+  it('a self-sync conflict still ticks (never worse than today), still refreshing the token first', async () => {
+    const order = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async () => { order.push('tick'); return {}; },
+      root: '/irrelevant-since-sync-is-injected',
+      selfSync: true,
+      onRestart: () => { throw new Error('must not restart on a conflict'); },
+      sync: () => ({ merged: false, commits: 0, reason: 'conflict' }),
+      authOpts: { log: { error: () => {} } }, // not-configured → token refresh is a fast no-op, still runs first
+    });
+
+    await wrapped({});
+    expect(order).toEqual(['tick']); // no App env configured, so no 'token-refresh' entry — but no throw, and the tick still ran
+  });
+});
+
+describe('wireSelfSyncAndAppAuth — self-sync is OPT-IN (never mutates an interactive checkout by default)', () => {
+  const syncWouldMerge = (calls) => () => { calls.push('sync'); return { merged: true, commits: 2, reason: 'merged' }; };
+
+  it.each([
+    ['omitted', {}],
+    ['false', { selfSync: false }],
+    ['a truthy non-boolean string', { selfSync: 'true' }],
+    ['a truthy non-boolean number', { selfSync: 1 }],
+  ])('selfSync %s: sync never runs, no restart, token refresh + tick still run with the payload', async (_label, extra) => {
+    const calls = [];
+    const payloadsSeen = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async (payload) => { calls.push('tick'); payloadsSeen.push(payload); return { ok: 1 }; },
+      root: '/irrelevant',
+      onRestart: () => { throw new Error('must never restart without the self-sync opt-in'); },
+      sync: syncWouldMerge(calls),
+      authOpts: {
+        env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
+        readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }),
+        setEnv: () => { calls.push('token-refresh'); },
+        log: { error: () => {} },
+      },
+      ...extra,
+    });
+
+    const out = await wrapped({ carriedOver: 'x' });
+    expect(calls).toEqual(['token-refresh', 'tick']); // no 'sync' — the git mutation was never attempted
+    expect(payloadsSeen).toEqual([{ carriedOver: 'x' }]);
+    expect(out).toEqual({ ok: 1 });
+  });
+
+  it('selfSync: true is the only value that wires the sync (and a merge then restarts)', async () => {
+    const calls = [];
+    const wrapped = wireSelfSyncAndAppAuth({
+      tickOnce: async () => { calls.push('tick'); return {}; },
+      root: '/irrelevant',
+      onRestart: () => { calls.push('restart'); return 'restarted'; },
+      sync: syncWouldMerge(calls),
+      authOpts: { log: { error: () => {} } },
+      selfSync: true,
+    });
+    expect(await wrapped({})).toBe('restarted');
+    expect(calls).toEqual(['sync', 'restart']);
   });
 });

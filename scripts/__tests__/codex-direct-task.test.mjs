@@ -444,7 +444,7 @@ describe('#x8wbivt Fork 4 — the ratified quota signal: locate, parse, read, an
 });
 
 describe('setupScratchClone — clones locally and installs deps, over injected execFn/mkTempDir/existsFn', () => {
-  it('clones from repoRoot, fixes up origin to the real remote, and installs deps when a lockfile exists', () => {
+  it('#3782: clones from repoRoot, LEAVES origin at the local clone source by default, and REPORTS the real remote without wiring it in', () => {
     const calls = [];
     const execFn = (bin, args, opts) => {
       calls.push({ bin, args, opts });
@@ -461,10 +461,42 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
     // clone happened first, against the real buildScratchCloneArgv recipe
     const cloneCall = calls.find((c) => c.bin === 'git' && c.args[0] === 'clone');
     expect(cloneCall.args).toEqual(buildScratchCloneArgv({ repoRoot: '/repo', dest: result.dest }));
-    // origin fixup attempted
-    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url') && c.args.includes('https://github.com/x/y.git'))).toBe(true);
+    // the real remote is resolved and reported...
+    expect(result.realOrigin).toBe('https://github.com/x/y.git');
+    // ...but NEVER wired into the clone's own git config by default (#3782 — the security-hardening fix:
+    // a scratch clone's origin must not be silently made push-capable to the real remote).
+    expect(result.originWired).toBe(false);
+    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url'))).toBe(false);
     // deps actually installed in the clone
     expect(calls.some((c) => c.bin === 'npm' && c.args[0] === 'ci' && c.opts?.cwd === result.dest)).toBe(true);
+  });
+
+  it('#3782: wireOriginToRemote:true opts back into rewriting origin to the real remote', () => {
+    const calls = [];
+    const execFn = (bin, args, opts) => {
+      calls.push({ bin, args, opts });
+      if (bin === 'git' && args.includes('get-url')) return 'https://github.com/x/y.git\n';
+      return '';
+    };
+    const result = setupScratchClone({
+      repoRoot: '/repo', execFn, mkTempDir: (p) => `${p}FAKE`, existsFn: () => false, wireOriginToRemote: true,
+    });
+
+    expect(result.realOrigin).toBe('https://github.com/x/y.git');
+    expect(result.originWired).toBe(true);
+    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url') && c.args.includes('https://github.com/x/y.git'))).toBe(true);
+  });
+
+  it('#3782: wireOriginToRemote:true is a no-op (originWired stays false) when repoRoot has no origin to resolve', () => {
+    const execFn = (bin, args) => {
+      if (bin === 'git' && args.includes('get-url')) throw new Error('no such remote');
+      return '';
+    };
+    const result = setupScratchClone({
+      repoRoot: '/repo', execFn, mkTempDir: (p) => `${p}FAKE`, existsFn: () => false, wireOriginToRemote: true,
+    });
+    expect(result.realOrigin).toBeNull();
+    expect(result.originWired).toBe(false);
   });
 
   it('tolerates a repoRoot with no origin remote — clone still succeeds', () => {
@@ -477,6 +509,8 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
     });
     expect(result.dest).toMatch(/FAKE$/);
     expect(result.depsInstall).toBeNull(); // existsFn says no package.json
+    expect(result.realOrigin).toBeNull();
+    expect(result.originWired).toBe(false);
   });
 
   it('skips dep install when installDeps is false, even with a lockfile present', () => {
@@ -840,6 +874,40 @@ describe('runCodexDirectExec / codexDirectTask — the orchestrator, over an inj
     expect(report.scratch.created).toBe(true);
     expect(report.dir).toMatch(/FAKE$/);
     expect(flagValueFrom(seen.argv, '-C')).toBe(report.dir);
+    // #3782: no origin on repoRoot here (get-url throws) — realOrigin is honestly null, origin was never wired.
+    expect(report.scratch.realOrigin).toBeNull();
+    expect(report.scratch.originWired).toBe(false);
+  });
+
+  it('#3782: codexDirectTask threads through the default (origin left local, real remote only reported) and the wireOriginToRemote opt-in end to end', async () => {
+    const stdout = '{"type":"turn.completed","usage":{}}\n';
+    const { fn: spawnFn } = fakeSpawn(stdout);
+    const setUrlCalls = [];
+    const execFn = (bin, args) => {
+      if (bin === 'git' && args[0] === 'clone') return '';
+      if (bin === 'git' && args.includes('get-url')) return 'git@github.com:x/y.git\n';
+      if (bin === 'git' && args.includes('set-url')) { setUrlCalls.push(args); return ''; }
+      if (args.includes('--absolute-git-dir')) return join(args[1], 'git-metadata');
+      if (bin === 'git' && args.includes('rev-parse')) return 'sha0\n';
+      if (bin === 'git' && args.includes('status')) return '';
+      if (bin === 'git' && args.includes('diff')) return '';
+      if (bin === 'git' && args.includes('log')) return '';
+      return '';
+    };
+    const baseOpts = {
+      task: 't', repoRoot: '/repo', gate: 'none', stream: false, execFn, spawnFn,
+      mkTempDir: (p) => `${p}FAKE`, existsFn: () => false,
+    };
+
+    const defaultReport = await codexDirectTask(baseOpts);
+    expect(defaultReport.scratch.realOrigin).toBe('git@github.com:x/y.git');
+    expect(defaultReport.scratch.originWired).toBe(false);
+    expect(setUrlCalls).toHaveLength(0);
+
+    const wiredReport = await codexDirectTask({ ...baseOpts, wireOriginToRemote: true });
+    expect(wiredReport.scratch.realOrigin).toBe('git@github.com:x/y.git');
+    expect(wiredReport.scratch.originWired).toBe(true);
+    expect(setUrlCalls).toHaveLength(1);
   });
 
   function flagValueFrom(argv, flag) {

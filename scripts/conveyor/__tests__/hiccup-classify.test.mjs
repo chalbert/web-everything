@@ -57,6 +57,16 @@ describe('classifyAgentReturn — #3412 free-form-question fixture', () => {
     expect(isStructuredReturn('#3 → pr #7 (ready-to-merge)')).toBe(true);
     expect(isStructuredReturn('I think this PR looks fine to me')).toBe(false);
   });
+
+  // PR #2518 / #3945 (2026-09-23) — the fix-agent-brief's new escalation exit (a permission/tool-use denial
+  // applying an otherwise-clear fix) returns this exact shape instead of standing down. It must read as a
+  // KNOWN structured return, same as every other brief exit, so a dispatched fixer using it is never flagged
+  // as the #3412 free-form-response hiccup.
+  it('recognizes the fix-agent-brief\'s new tool/permission-denial exit as a KNOWN structured return', () => {
+    const text = '#3945 → blocked-on-infra (tool/permission denial applying an otherwise-clear fix on PR #2518)';
+    expect(isStructuredReturn(text)).toBe(true);
+    expect(classifyAgentReturn({ num: 3945, text })).toBeNull();
+  });
 });
 
 describe('assessMissingOperationConfidence — #3421 addendum axis', () => {

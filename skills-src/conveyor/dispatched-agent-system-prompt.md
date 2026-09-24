@@ -29,3 +29,16 @@ turn by turn (see above) to answer it, so you wedge indefinitely. Put anything e
 commit-message file, captured command output, a PR-body file — **inside the lane clone you acquire in your own
 first step** instead: it is an ordinary git-tracked project directory this dispatcher already grants full
 Edit/Write/Bash access to, and nothing about it resembles the shape that triggers the sensitive-file heuristic.
+
+**Change a TRACKED file's content with the Edit/Write tool — never a `Bash` rewrite (a `python`/`node`/`sed`
+heredoc or one-liner that reads and overwrites the file itself).** Confirmed live on PR #2518 (`fix-2518`,
+2026-09-23): a `python3 - <<'EOF'` heredoc rewriting `backlog/3945-*.md` inside an already-acquired lane clone
+was denied outright — *"Permission for this action was denied by the Claude Code auto mode classifier. Reason:
+[Modify Shared Resources]."* Nobody was watching to answer it (see above), so the edit simply never happened.
+The Edit/Write tool is the sanctioned surface for this — already unconditionally allow-listed
+(`we:.claude/settings.json`) and observed to change backlog cards and source files routinely with no such
+classification — because it is a structured, single-file diff the harness itself understands, not an
+arbitrary shell command that could touch anything. This applies EVEN INSIDE your own lane clone, where Bash
+itself is fully permitted: the auto-mode classifier's "shared resource" categorization keys on what the
+command DOES (rewrite a git-tracked file), not on whose directory it runs in. Reach for Edit/Write first;
+treat a Bash-based full-file rewrite as a last resort only for a shape those tools genuinely cannot express.

@@ -1,0 +1,61 @@
+/**
+ * @file scripts/conveyor/__tests__/github-app-status.test.mjs
+ * @description Unit proof of {@link formatGithubAppStatus} — the pure core of
+ *   `we:scripts/conveyor/github-app-status.mjs`, the one-command read that turns the fail-closed App-auth
+ *   state (#x8mpubm) from a line in one daemon's log into a plain-language, actionable report.
+ */
+import { describe, it, expect } from 'vitest';
+import { formatGithubAppStatus } from '../github-app-status.mjs';
+
+describe('formatGithubAppStatus — pure, given a status record or null', () => {
+  it('no status recorded (never run on this host) says so, distinctly from "not applied"', () => {
+    expect(formatGithubAppStatus(null)).toContain('no status recorded yet');
+  });
+
+  it('applied:true reports APPLIED, and names when it was last checked', () => {
+    const out = formatGithubAppStatus({ applied: true, reason: 'ok', checkedAt: '2026-09-23T13:51:32.000Z' });
+    expect(out).toContain('APPLIED');
+    expect(out).toContain('2026-09-23T13:51:32.000Z');
+    expect(out).not.toContain('NOT APPLIED');
+  });
+
+  it('not-configured explains the process never opted in', () => {
+    const out = formatGithubAppStatus({ applied: false, reason: 'not-configured', checkedAt: '2026-09-23T13:00:00.000Z' });
+    expect(out).toContain('NOT APPLIED');
+    expect(out).toContain('has not opted in');
+  });
+
+  it('mint-failed explains a transient failure, not a permanent one', () => {
+    const out = formatGithubAppStatus({ applied: false, reason: 'mint-failed', checkedAt: '2026-09-23T13:00:00.000Z' });
+    expect(out).toContain('mint attempt failed');
+  });
+
+  it('insufficient-access — THE LIVE CASE — names the exact permissions and repos to grant', () => {
+    const out = formatGithubAppStatus({
+      applied: false,
+      reason: 'insufficient-access',
+      missingPermissions: ['metadata:read', 'pull_requests:write'],
+      missingRepos: ['chalbert/web-everything', 'chalbert/plateau-app'],
+      checkedAt: '2026-09-23T13:51:32.000Z',
+    });
+    expect(out).toContain('grant repository permissions: metadata:read, pull_requests:write');
+    expect(out).toContain('add repositories to the installation: chalbert/web-everything, chalbert/plateau-app');
+  });
+
+  it('insufficient-access with only one of the two gaps omits the other line entirely', () => {
+    const out = formatGithubAppStatus({ applied: false, reason: 'insufficient-access', missingPermissions: ['checks:read'], missingRepos: [], checkedAt: '2026-09-23T13:00:00.000Z' });
+    expect(out).toContain('grant repository permissions: checks:read');
+    expect(out).not.toContain('add repositories to the installation');
+  });
+
+  it('an unrecognised reason still renders rather than throwing, naming itself', () => {
+    expect(() => formatGithubAppStatus({ applied: false, reason: 'some-future-reason' })).not.toThrow();
+    expect(formatGithubAppStatus({ applied: false, reason: 'some-future-reason' })).toContain('some-future-reason');
+  });
+
+  it('missing checkedAt omits the "(as of ...)" clause rather than printing "undefined"', () => {
+    expect(formatGithubAppStatus({ applied: true, reason: 'ok' })).toBe(
+      "github-app-status: APPLIED — gh calls are authenticating as the App installation, not the operator's personal token.",
+    );
+  });
+});

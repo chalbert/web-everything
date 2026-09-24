@@ -75,7 +75,7 @@ describe('JSONL parsing — tolerant of blank/malformed lines, never throws', ()
 });
 
 describe('setupScratchClone — clones locally and installs deps, over injected execFn/mkTempDir/existsFn', () => {
-  it('clones from repoRoot, fixes up origin to the real remote, and installs deps when a lockfile exists', () => {
+  it('#3782: clones from repoRoot, LEAVES origin at the local clone source by default, and REPORTS the real remote without wiring it in', () => {
     const calls = [];
     const execFn = (bin, args, opts) => {
       calls.push({ bin, args, opts });
@@ -92,10 +92,27 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
     // clone happened first, against the real buildScratchCloneArgv recipe
     const cloneCall = calls.find((c) => c.bin === 'git' && c.args[0] === 'clone');
     expect(cloneCall.args).toEqual(buildScratchCloneArgv({ repoRoot: '/repo', dest: result.dest }));
-    // origin fixup attempted
-    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url') && c.args.includes('https://github.com/x/y.git'))).toBe(true);
+    // the real remote is resolved and reported, but never wired into the clone's own git config by default.
+    expect(result.realOrigin).toBe('https://github.com/x/y.git');
+    expect(result.originWired).toBe(false);
+    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url'))).toBe(false);
     // deps actually installed in the clone
     expect(calls.some((c) => c.bin === 'npm' && c.args[0] === 'ci' && c.opts?.cwd === result.dest)).toBe(true);
+  });
+
+  it('#3782: wireOriginToRemote:true opts back into rewriting origin to the real remote', () => {
+    const calls = [];
+    const execFn = (bin, args, opts) => {
+      calls.push({ bin, args, opts });
+      if (bin === 'git' && args.includes('get-url')) return 'https://github.com/x/y.git\n';
+      return '';
+    };
+    const result = setupScratchClone({
+      repoRoot: '/repo', execFn, mkTempDir: (p) => `${p}FAKE`, existsFn: () => false, wireOriginToRemote: true,
+    });
+    expect(result.realOrigin).toBe('https://github.com/x/y.git');
+    expect(result.originWired).toBe(true);
+    expect(calls.some((c) => c.bin === 'git' && c.args.includes('set-url') && c.args.includes('https://github.com/x/y.git'))).toBe(true);
   });
 
   it('tolerates a repoRoot with no origin remote — clone still succeeds', () => {
@@ -108,6 +125,8 @@ describe('setupScratchClone — clones locally and installs deps, over injected 
     });
     expect(result.dest).toMatch(/FAKE$/);
     expect(result.depsInstall).toBeNull(); // existsFn says no package.json
+    expect(result.realOrigin).toBeNull();
+    expect(result.originWired).toBe(false);
   });
 
   it('skips dep install when installDeps is false, even with a lockfile present', () => {
@@ -714,7 +733,7 @@ describe('runAgyDirectExec / geminiDirectTask — injected process mechanics', (
     const spawnFn = (...args) => { expect(calls[0].args).toEqual(['clone', '--quiet', '/source', dir]); return fn(...args); };
     const r = await geminiDirectTask({ task: 't', repoRoot: '/source', stream: false, execFn, spawnFn,
       mkTempDir: () => dir, existsFn: () => false });
-    expect(r.scratch).toEqual({ created: true, source: '/source', depsInstall: null });
+    expect(r.scratch).toEqual({ created: true, source: '/source', depsInstall: null, realOrigin: null, originWired: false });
     expect(seen.opts.cwd).toBe(dir);
     expect(calls.filter((c) => c.args.includes('diff')).every((c) => c.args[1] === dir)).toBe(true);
     expect(calls.filter((c) => c.bin === 'git').every((c) => !c.args.includes('commit') && !c.args.includes('push') && (!c.args.includes('add') || c.args.includes('--intent-to-add')))).toBe(true);

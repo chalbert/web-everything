@@ -96,7 +96,10 @@
  * required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks the merge.
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
- * (surfaced); 3 = bad input / `gh` unavailable.
+ * (surfaced); 3 = duplicate backlog NNN survives on main — the #2318 tripwire, a globally-red state that needs
+ * a human; 4 = `gh` listing failure (env/auth/rate-limit — bad input or `gh` unavailable, #3383: kept OFF exit 3
+ * so a transient `gh` hiccup is never misread as the duplicate-NNN tripwire); 5 = red-main dispatch-freeze
+ * stop-the-line (#2681).
  */
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -135,6 +138,7 @@ import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.
 // #3215 — the drain applies holds of its own (a fresh park, a #2409 stale-acceptance re-park); this is the
 // same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
 import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
+import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -3092,6 +3096,12 @@ const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLTo
 if (IS_CLI) runCli().catch((e) => { process.stderr.write(`merge-ai-prs ✗ ${String(e && e.stack || e)}\n`); process.exit(1); });
 
 async function runCli() {
+  // #3866 (ratified) — opt-in only: a no-op unless WE_GITHUB_APP_* is configured, in which case every `gh`
+  // call this drain run makes draws from the App installation's own rate-limit bucket instead of the
+  // operator's personal one. Awaited HERE, before any gh work, so a fresh env var is in place for even the
+  // very first discovery call; a `--watch` run re-checks at the top of every pass (see the watch loop). See
+  // github-app-auth-env.mjs's own header for why this lives outside gh-throttle.mjs.
+  await ensureFreshGithubAppEnv({ log: console });
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
@@ -3565,8 +3575,10 @@ async function runCli() {
     if (!AS_JSON) process.stderr.write('  ⚠ --assume-complete-context: FORCING contextComplete=true — the couple gate will treat a carrier ABSENT from this pass\'s (possibly incomplete) open-PR context as LANDED. Operator waiver; use only to unstick a queue you have verified by hand (#xc7p3q9 R2).\n');
   }
   // #2417 — list ALL repos CONCURRENTLY up front (was one `gh pr list` per repo, serial, interleaved with the
-  // per-repo processing below). A single repo's list failure is a bad-env hard-fail (exit 3), preserved — but
-  // now surfaced after the concurrent batch instead of mid-loop. The rollup + mergeable come from the list;
+  // per-repo processing below). A single repo's list failure is a bad-env hard-fail, preserved — but
+  // now surfaced after the concurrent batch instead of mid-loop. #3383 gh-error — exit 4, distinct from the
+  // dup-id tripwire's exit 3, so a transient/rate-limited `gh` listing is never misread as a duplicate NNN on
+  // main. The rollup + mergeable come from the list;
   // commits (the AI gate) are fetched per-PR below (asking for them in the list overflows GitHub's node cap).
   const listOne = async (repo) => {
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
@@ -3588,7 +3600,7 @@ async function runCli() {
   };
   const [listings] = await Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]);
   const listErr = listings.find((l) => l.err);
-  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 3);
+  if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 4);
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
   // a single-repo sweep (`--this-repo` / `--repos=<one>` — the legacy `/pr`+`/finish` callers) matches its one
   // repo; a multi-repo default sweep with no `--only-repo` disambiguates to the LOCAL repo. This narrows the
@@ -4940,6 +4952,10 @@ async function runCli() {
   let lastDup = [];
   let redMainStopped = false; // #2681 — a freeze raised MID-watch stops the line this pass
   for (let pass = 1; ; pass++) {
+    // #3881 — refresh the App token at the top of EVERY pass (a no-op unless configured, and a plain cache read
+    // until the token nears expiry). Never on a timer: this loop sleeps with `sleepSync`, so the event loop is
+    // never free for a background refresh to run — the top of a pass is the only point it can.
+    if (pass > 1) await ensureFreshGithubAppEnv({ log: console });
     if (leaseHeld) heartbeatDrainLease(DRAIN_LOCK_ROOT, leaseOwner, { scope: leaseScope, repoKey: localSlug }); // #2395 — keep the whole-process lease alive across a long watch (an `under-lease` child never heartbeats — its parent daemon owns that); #2458 re-supply the scope so it survives the heartbeat rewrite; #3440 repoKey selects the same per-repo lock dir
     // #2681 — RE-CHECK the red-main dispatch-freeze EVERY pass: a post-land red can be raised DURING a running
     // watch (the resident drain daemon is a long-lived `--watch`), and stop-the-line must catch it, not just a

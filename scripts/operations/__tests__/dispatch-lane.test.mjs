@@ -15,7 +15,7 @@
  * exactly (it is the contract with the `claude` CLI), and no `claude` process is ever started by the suite.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,7 @@ import {
   DISPATCH_GUARD_LISTING_GRACE_MINUTES,
   dispatchStillHolds,
   fillBrief,
+  REPO_AWARE_VALUE_PATTERNS,
   sessionSlugFor,
   shapeDispatchRead,
 } from '../dispatch-lane.mjs';
@@ -83,6 +84,8 @@ import {
   // #3637 — the POC delivery target.
   resolveDeliveryBase,
 } from '../dispatch-lane-io.mjs';
+// #3960 — the repo-aware brief quintet.
+import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 /**
@@ -691,6 +694,37 @@ describe('the declared effect is a dispatch', () => {
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].expectedBy).toBe('2026-08-13T10:15:00.000Z');
   });
+
+  it('#x8mpubm — resolveSettingsEnv is called once per dispatch and its result reaches the real argv via --settings', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    let seenArgv = null;
+    const resolveSettingsEnv = vi.fn(() => ({ PATH: '/shim:/usr/bin' }));
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => { seenArgv = argv; return ''; },
+      mintSessionId: () => 'sess-shim',
+      resolveSettingsEnv,
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(resolveSettingsEnv).toHaveBeenCalledTimes(1);
+    expect(seenArgv).toContain('--settings');
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+  });
+
+  it('#x8mpubm — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    let seenArgv = null;
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => { seenArgv = argv; return ''; },
+      mintSessionId: () => 'sess-noshim',
+      resolveSettingsEnv: () => null,
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(seenArgv).not.toContain('--settings');
+  });
 });
 
 // ── 5. the sink's argv IS the contract with the CLI ─────────────────────────────────────────────────────────
@@ -720,6 +754,25 @@ describe('what the sink actually runs', () => {
     ]);
   });
 
+  it('#x8mpubm — settingsEnv folds into --settings \'{"env":...}\', ahead of systemPromptFile/extraArgs', () => {
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--settings');
+    const argv = buildAgentArgv({
+      sessionId: 'sess-c3', payload, settingsEnv: { PATH: '/shim:/usr/bin' },
+      systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
+    });
+    expect(argv).toEqual([
+      '--bg', '-n', 'conveyor-3037',
+      '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }),
+      '--append-system-prompt-file', '/path/to/identity.md',
+      '--model', 'sonnet', '# build #3037',
+    ]);
+  });
+
+  it('#x8mpubm — an empty settingsEnv object emits no --settings at all, same as null/omitted', () => {
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: {} })).not.toContain('--settings');
+    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: null })).not.toContain('--settings');
+  });
+
   it('#xu2krte — resumeSessionId emits a BARE `--bg --resume <id> <prompt>`, no -n/systemPromptFile/extraArgs', () => {
     // The live build-time probe (docs/agent/platform-decisions.md#parked-pr-conflict-dispatched-not-scripted)
     // found any OTHER flag alongside `--resume` makes the CLI fork a copy instead of continuing the named
@@ -727,6 +780,14 @@ describe('what the sink actually runs', () => {
     const argv = buildAgentArgv({
       sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
       systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
+    });
+    expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
+  });
+
+  it('#x8mpubm — settingsEnv is NEVER emitted on the resume branch either, same reasoning as extraArgs above', () => {
+    const argv = buildAgentArgv({
+      sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
+      settingsEnv: { PATH: '/shim:/usr/bin' },
     });
     expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
   });
@@ -1893,10 +1954,20 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     return { run: outcome.run, spawned };
   }
 
-  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. */
+  /** The brief a kind SHOULD produce, filled from the file on disk — byte-exact, so it cannot drift. `fix`/
+   *  `ci-heal` need `REPO_AWARE_VALUE_PATTERNS` (#3960: `GATE_COMMAND`/`ATTRIBUTION` legitimately carry a space). */
   function expectedPrompt(kind, values) {
-    return fillBrief(readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values, BRIEF_REQUIRED_BY_KIND[kind]).prompt;
+    return fillBrief(
+      readFileSync(briefPath(REPO_ROOT, kind), 'utf8'), values, BRIEF_REQUIRED_BY_KIND[kind],
+      undefined, kind === 'fix' || kind === 'ci-heal' ? REPO_AWARE_VALUE_PATTERNS : undefined,
+    ).prompt;
   }
+
+  // #3960 — the repo-aware quintet `readTick` resolves for `we` via the REAL `briefTokensForRepo` (this suite's
+  // own checkout, exactly like every other real-brief-file assertion below). Pinned here once so both `it`s
+  // below build their expected `values` from the SAME source `shapeDispatchRead` actually reads (`raw.repoTokens`),
+  // rather than a second, possibly-drifting hardcoded copy.
+  const WE_TOKENS = (itemNum) => briefTokensForRepo('we', { itemNum });
 
   // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────────────────
   it('a `spawnFixes` entry SPAWNS ONCE, with the fix-agent brief — filled and byte-exact, zero {{…}} residue', async () => {
@@ -1908,12 +1979,18 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     const prompt = spawned[0].argv[spawned[0].argv.length - 1];
     expect(prompt).toBe(expectedPrompt('fix', {
       ITEM_NUM: '2608', PR_NUM: 701, LANE_REF: FAKE_LANE_REF, LANE: 5, SESSION_SLUG: 'fix-701', SCOPE: 'we:scripts/operations/',
+      ...WE_TOKENS('2608'),
     }));
-    // NONE OF THE SIX REQUIRED TOKENS REMAIN — the exact failure #3332's card names: an unfilled token is
-    // reported, never fatal, so a fix agent dispatched before this landed would have received the literal
-    // string `{{PR_NUM}}`. (The brief's OWN prose still carries `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` —
-    // documentation, reported below, same as the delivery brief's #3165 test.)
+    // NONE OF THE ELEVEN REQUIRED TOKENS REMAIN (#3332's original six, plus #3960's REPO/LANE_REPO/GATE_COMMAND/
+    // WE_ROOT/ATTRIBUTION) — the exact failure #3332's card names: an unfilled token is reported, never fatal, so
+    // a fix agent dispatched before this landed would have received the literal string `{{PR_NUM}}`. (The brief's
+    // OWN prose still carries `{{PLACEHOLDERS}}`/`{{LIKE_THIS}}` — documentation, reported below, same as the
+    // delivery brief's #3165 test.)
     for (const name of BRIEF_REQUIRED_BY_KIND.fix) expect(prompt).not.toContain(`{{${name}}}`);
+    // The io shell's `raw.repoTokens` (this suite's own real checkout) reached the brief — `{{ATTRIBUTION}}`
+    // reproduces the pre-#3960 hardcoded `WE #{{ITEM_NUM}}` literal exactly.
+    expect(prompt).toContain('"WE #2608: address review:changes on PR #701');
+    expect(prompt).toContain(`node "${REPO_ROOT}/scripts/lane-pool.mjs" acquire --repo=.`);
     expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
     // criterion 5 (guard half) — picked out of a `fixGuards` list holding a SIBLING PR for the same item, not
     // merely the first entry.
@@ -1931,8 +2008,10 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     expect(prompt).toBe(expectedPrompt('ci-heal', {
       ITEM_NUM: '2638', PR_NUM: 743, LANE_REF: FAKE_LANE_REF, LANE: 6, SESSION_SLUG: 'ci-heal-743',
       SCOPE: 'we:scripts/operations/', REASON: reason,
+      ...WE_TOKENS('2638'),
     }));
     for (const name of BRIEF_REQUIRED_BY_KIND['ci-heal']) expect(prompt).not.toContain(`{{${name}}}`);
+    expect(prompt).toContain('"WE #2638: CI-heal PR #743');
     expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
     expect(run.findings.read.dispatchedGuard).toEqual({ pr: 743, num: '2638', lane: 6, spawnedTick: 5 });
   });
@@ -1992,6 +2071,61 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     expect(run.verdict.dispatching).toBe(false);
     expect(run.verdict.reason).toMatch(/spawnFixes/);
     expect(run.verdict.reason).toMatch(/spawnCiHeals/);
+  });
+});
+
+// #3960 (multi-repo slice 4) — the fix/ci-heal briefs fill REPO/LANE_REPO/GATE_COMMAND/WE_ROOT/ATTRIBUTION
+// from `briefTokensForRepo`. These tests fill the REAL brief files (never a synthetic stub) so a future edit to
+// either brief that drops the `{{WE_ROOT}}` qualifier or re-hardcodes `check:standards` is caught here.
+describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre-#3960 literal exactly', () => {
+  const FIX_BRIEF = readFileSync(briefPath(REPO_ROOT, 'fix'), 'utf8');
+  const CI_HEAL_BRIEF = readFileSync(briefPath(REPO_ROOT, 'ci-heal'), 'utf8');
+  const BASE_FIX_VALUES = {
+    ITEM_NUM: '2608', PR_NUM: 701, LANE_REF: 'lane/2608-x', LANE: 5, SESSION_SLUG: 'fix-701', SCOPE: 'we:scripts/operations/',
+  };
+  const BASE_CI_HEAL_VALUES = {
+    ITEM_NUM: '2638', PR_NUM: 743, LANE_REF: 'lane/2638-x', LANE: 6, SESSION_SLUG: 'ci-heal-743',
+    SCOPE: 'we:scripts/operations/', REASON: 'red-ci',
+  };
+  const WE_PACKAGE_JSON = JSON.stringify({ scripts: { 'test:unit': 'vitest run', 'check:standards': 'node scripts/check-standards.mjs' } });
+  const PLATEAU_PACKAGE_JSON = JSON.stringify({ scripts: { test: 'vitest run' } });
+
+  it('for WE, {{ATTRIBUTION}}/{{GATE_COMMAND}} reproduce the pre-#3960 hardcoded literal exactly (fix brief)', () => {
+    const tokens = briefTokensForRepo('we', { itemNum: '2608', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
+    const { prompt } = fillBrief(FIX_BRIEF, { ...BASE_FIX_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
+    // The exact literal `fix-agent-brief.md` hardcoded before #3960 (`"WE #{{ITEM_NUM}}: address …"`).
+    expect(prompt).toContain('printf \'%s\\n\' "WE #2608: address review:changes on PR #701 — <one-line what you fixed>"');
+    expect(prompt).toContain('npm run test:unit && npm run check:standards');
+    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/lane-pool.mjs" acquire --repo=. --lane=5`);
+    expect(prompt).toContain('gh pr view 701 --json title,body,comments --repo chalbert/web-everything');
+  });
+
+  it('for WE, the ci-heal brief\'s {{ATTRIBUTION}} reproduces the pre-#3960 hardcoded literal exactly', () => {
+    const tokens = briefTokensForRepo('we', { itemNum: '2638', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
+    const { prompt } = fillBrief(CI_HEAL_BRIEF, { ...BASE_CI_HEAL_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS);
+    expect(prompt).toContain('printf \'%s\\n\' "WE #2638: CI-heal PR #743 — rebase onto main + repair the failing check"');
+    expect(prompt).toContain('npm run test:unit && npm run check:standards');
+  });
+
+  it('for plateau-app, every tool call is qualified with the WE checkout root, never the plateau checkout', () => {
+    const tokens = briefTokensForRepo('plateau-app', {
+      itemNum: '2608', home: '/home/test', checkoutExists: () => true, readPackageJson: () => PLATEAU_PACKAGE_JSON,
+    });
+    expect(tokens.REPO).toBe('chalbert/plateau-app');
+    expect(tokens.LANE_REPO).toBe('/home/test/workspace/plateau-app');
+    expect(tokens.GATE_COMMAND).toBe('npm test');
+    const { prompt, unknownTokens } = fillBrief(FIX_BRIEF, { ...BASE_FIX_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
+    for (const name of BRIEF_REQUIRED_BY_KIND.fix) expect(prompt).not.toContain(`{{${name}}}`);
+    expect(unknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
+    // Every tool this brief runs is qualified with WE_ROOT — the tools live only there, never in the plateau
+    // checkout `{{LANE_REPO}}` names.
+    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/lane-pool.mjs" acquire --repo=/home/test/workspace/plateau-app`);
+    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/conveyor/rearm-review.mjs" 701 --repo=chalbert/plateau-app`);
+    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/operations/completion-cli.mjs" report --repo=chalbert/plateau-app`);
+    expect(prompt).not.toContain('node "/home/test/workspace/plateau-app/scripts');
+    // The plateau gate runs, not WE's hardcoded `check:standards`.
+    expect(prompt).toContain('npm test          # this repo\'s own gate');
+    expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: address review:changes on PR #701 — <one-line what you fixed>"');
   });
 });
 
@@ -2459,6 +2593,31 @@ describe('findItem — carries `openBlockers` through, where it used to be dropp
       { num: '3037', slug: 'declare-dispatch', scope: ['we:scripts/operations/'] },
     ]);
     expect(it_.openBlockers).toEqual([]);
+  });
+});
+
+// ── #xdx3ifb multi-repo slice 3: `findItem` also matches a renamed card's `bornAs` ────────────────────────────
+describe('findItem — falls back to `bornAs` when `num` doesn\'t match (#xdx3ifb)', () => {
+  // Live shape: WE PR #2518's card `x3izqob` was JIT-renumbered to `#3945` at land (#2288) while its
+  // still-open impl-repo branch (`lane/x3izqob-...`) kept naming the pre-rename hash — the fix daemon's own
+  // `laneRefItemNum` extraction can only ever produce that hash, never the new number it has no way to learn.
+  const renamed = { num: '3945', bornAs: 'x3izqob', slug: 'review-human-advisory-gap', scope: ['we:scripts/conveyor/reconcile-pass.mjs'] };
+
+  it('resolves a hash key against the renamed card\'s `bornAs` when no item\'s `num` matches it', () => {
+    const it_ = findItem('x3izqob', () => [renamed]);
+    expect(it_).not.toBeNull();
+    expect(it_.num).toBe('3945');
+    expect(it_.scope).toEqual(['we:scripts/conveyor/reconcile-pass.mjs']);
+  });
+
+  it('still prefers a direct `num` match over `bornAs` when both are present (no ambiguity introduced)', () => {
+    const it_ = findItem('3945', () => [renamed, { num: 'x3izqob', slug: 'stale-provisional-twin', scope: [] }]);
+    expect(it_.num).toBe('3945');
+    expect(it_.slug).toBe('review-human-advisory-gap');
+  });
+
+  it('still returns null for a hash with no `num` OR `bornAs` match anywhere (a genuinely unknown key)', () => {
+    expect(findItem('xnotreal', () => [renamed])).toBeNull();
   });
 });
 
