@@ -12,12 +12,17 @@
  * `held` test uses a sink that behaves as that guard does and asserts the module passes it through unchanged.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 import { DISPATCH_EFFECT } from '../dispatch-lane.mjs';
 import { briefPath, REPO_ROOT } from '../dispatch-lane-io.mjs';
-import { dispatchCiHeal } from '../ci-heal-pr-dispatch.mjs';
+import { dispatchCiHeal, runReconcileCiHealDispatch } from '../ci-heal-pr-dispatch.mjs';
+import { readUnsupported } from '../../conveyor/unsupported-repo.mjs';
+
+const FRESH = () => ({ fresh: true, behind: 0 });
 
 const TEMPLATE = 'heal #{{ITEM_NUM}} pr={{PR_NUM}} ref={{LANE_REF}} lane={{LANE}} slug={{SESSION_SLUG}} scope={{SCOPE}} why={{REASON}}';
 
@@ -116,5 +121,178 @@ describe('dispatchCiHeal (#3852)', () => {
       expect(calls[0].prompt).not.toContain(`{{${name}}}`);
     }
     expect(calls[0].prompt).toContain('lane/2638-some-slug');
+  });
+
+  // #3967 multi-repo slice 7 — BEFORE this slice, `repo` was never threaded into `sessionSlugFor`, so a
+  // frontierui/plateau-app heal session minted the SAME bare `ci-heal-<pr>` name a WE one would — the exact
+  // bug `reconcile-core.mjs#bindAgents`'s own repo-tagged name-bind (added by this same slice) could never
+  // match, meaning a genuinely in-flight sibling-repo heal would have been re-planned every tick.
+  // Hermetic: `checkoutExists`/`readPackageJson` injected so this never touches the real filesystem — a CI
+  // runner carries no `$HOME/workspace/plateau-app` clone at all (mirrors `reconcile-fix-dispatch.test.mjs`'s
+  // own sibling-repo `dispatchFix` tests exactly).
+  const PLATEAU_FS = { home: '/home/test', checkoutExists: () => true, readPackageJson: () => JSON.stringify({ scripts: { test: 'vitest run' } }) };
+
+  it('#3967 — a sibling-repo dispatch mints a REPO-TAGGED session slug (`ci-heal-pa-<pr>`), never the bare WE one', async () => {
+    const { calls, sinks } = recordingSink();
+    const out = await dispatchCiHeal({ ...PLANNED, repo: 'plateau-app' }, { readBrief: () => TEMPLATE, sinks, ...PLATEAU_FS });
+    expect(out.sessionSlug).toBe('ci-heal-pa-743');
+    expect(calls[0].sessionSlug).toBe('ci-heal-pa-743');
+  });
+
+  it('#3967 — same PR number in two different repos mints distinct session slugs — never a WE/plateau-app collision', async () => {
+    const we = recordingSink();
+    const pa = recordingSink();
+    const weOut = await dispatchCiHeal(PLANNED, { readBrief: () => TEMPLATE, sinks: we.sinks });
+    const paOut = await dispatchCiHeal({ ...PLANNED, repo: 'plateau-app' }, { readBrief: () => TEMPLATE, sinks: pa.sinks, ...PLATEAU_FS });
+    expect(weOut.sessionSlug).toBe('ci-heal-743');
+    expect(paOut.sessionSlug).toBe('ci-heal-pa-743');
+    expect(weOut.sessionSlug).not.toBe(paOut.sessionSlug);
+  });
+});
+
+// ── runReconcileCiHealDispatch — THE WHOLE PASS (#3967 multi-repo slice 7) ───────────────────────────────────────
+// Mirrors `reconcile-fix-dispatch.test.mjs`'s own `runReconcileFixDispatch — repo capability gate` block: same
+// composition (read the reconcile plan → capability-gate → lane → dispatch), same durable `unsupported-repo`
+// ledger, one dispatch kind over.
+describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo slice 7)', () => {
+  it('a repo whose profile has `ciHeal:false` refuses every planned ci-heal `unsupported-repo`, never touching a lane or dispatch sink', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-heal-refusals-'));
+    const unsupportedPath = join(dir, 'rows.json');
+    const calls = [];
+    try {
+      const options = {
+        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }, { kind: 'fix', prNumber: 51 }], refusals: [] }),
+        pickFreeLanes: () => { calls.push('pool'); return [2]; },
+        dispatch: () => { calls.push('dispatch'); },
+        resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
+        // Real constellation repos now ALL have `ciHeal:true` (this slice's own point) — inject a profile
+        // resolver reporting it off, exercising the branch for whatever repo the constellation grows next.
+        resolveProfile: () => ({ capabilities: { fix: true, ciHeal: false }, lanePoolRepo: '/nonexistent' }),
+        checkStaleness: FRESH,
+      };
+      const result = await runReconcileCiHealDispatch(options);
+      expect(result.dispatched).toEqual([]);
+      expect(result.refusals).toEqual([{ kind: 'unsupported-repo', repo: 'plateau-app', prNumber: 50, action: 'ci-heal', why: expect.any(String) }]);
+      expect(calls).toEqual([]); // never touched the lane pool or a dispatch sink — only `fix` was in the plan's non-ci-heal row
+      expect(readUnsupported({ path: unsupportedPath })).toHaveLength(1);
+      await expect(runReconcileCiHealDispatch({ repo: 'unknown/repo' })).rejects.toThrow(/not a constellation repo/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('preserves a repo\'s already-recorded `fix` unsupported row when it (re)records its own `ci-heal` rows', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-heal-preserve-'));
+    const unsupportedPath = join(dir, 'rows.json');
+    const { recordUnsupported } = await import('../../conveyor/unsupported-repo.mjs');
+    try {
+      recordUnsupported({ repo: 'plateau-app', rows: [{ action: 'fix', prNumber: 9 }], path: unsupportedPath });
+      await runReconcileCiHealDispatch({
+        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }], refusals: [] }),
+        resolveProfile: () => ({ capabilities: { fix: true, ciHeal: false }, lanePoolRepo: '/nonexistent' }),
+        checkStaleness: FRESH,
+      });
+      const rows = readUnsupported({ path: unsupportedPath });
+      expect(rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({ action: 'fix', prNumber: 9 }),
+        expect.objectContaining({ action: 'ci-heal', prNumber: 50 }),
+      ]));
+      // Now flip the SAME repo's capability on — its `ci-heal` row clears, the `fix` row survives untouched.
+      await runReconcileCiHealDispatch({
+        root: '/repo', repo: 'chalbert/plateau-app', unsupportedPath,
+        reconcile: () => ({ dispatch: [], refusals: [] }),
+        resolveProfile: () => ({ capabilities: { fix: true, ciHeal: true }, lanePoolRepo: '/nonexistent' }),
+        pickFreeLanes: () => [],
+        checkStaleness: FRESH,
+      });
+      expect(readUnsupported({ path: unsupportedPath })).toEqual([expect.objectContaining({ action: 'fix', prNumber: 9 })]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  // ── THE PROOF (operator rule: "make sure the agent that fix bugs actually test it so we know it works") ──────
+  // A REAL dry-run against BOTH plateau-app and frontierui's REAL profile (`resolveProfile` NOT injected — this
+  // is `repo-profile.mjs`'s own `repoProfile`, which this slice flipped `ciHeal` to `true` for both), with an
+  // injected no-op `dispatch` and a synthetic red-CI reconcile reading. Before this slice, EITHER repo hit the
+  // wholesale `unsupported-repo` refusal every time; after it, the SAME entry is planned and dispatched.
+  for (const [slug, key, tag] of [['chalbert/plateau-app', 'plateau-app', 'pa'], ['chalbert/frontierui', 'frontierui', 'fui']]) {
+    it(`#3967 — REAL profile, ${key}: a red-CI PR is dispatched \`ci-heal\` into ${key}'s OWN lane pool, never refused unsupported-repo`, async () => {
+      const dispatchCalls = [];
+      const result = await runReconcileCiHealDispatch({
+        root: '/repo', repo: slug,
+        reconcile: () => ({
+          dispatch: [{ kind: 'ci-heal', prNumber: 202, headRefName: 'lane/some-branch', attempts: 0 }],
+          refusals: [],
+        }),
+        resolveWorkUnit: () => ({ itemNum: null, scope: [`${tag === 'pa' ? 'plateau' : 'fui'}:src/x.ts`] }),
+        pickFreeLanes: () => [7],
+        dispatch: async (planned, opts) => {
+          dispatchCalls.push({ planned, opts });
+          return { agentId: null, sessionSlug: `ci-heal-${tag}-${planned.pr}`, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] };
+        },
+        checkStaleness: FRESH,
+      });
+      // PLANNED, not refused unsupported-repo: this is the exact assertion the refusal-gate test above proves
+      // the OPPOSITE of when `ciHeal` is off.
+      expect(result.refusals).toEqual([]);
+      expect(dispatchCalls).toEqual([{
+        planned: expect.objectContaining({ pr: 202, lane: 7, reason: 'red-ci' }),
+        opts: expect.objectContaining({ repo: key }),
+      }]);
+      expect(result.dispatched).toEqual([{
+        agentId: null, sessionSlug: `ci-heal-${tag}-202`, pr: 202, itemNum: null, lane: 7, unknownTokens: [],
+      }]);
+    });
+  }
+
+  it('a `held` dispatch answer is reported as a `held` refusal, not thrown or silently dropped', async () => {
+    const result = await runReconcileCiHealDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({ dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }], refusals: [] }),
+      resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
+      pickFreeLanes: () => [3],
+      dispatch: async () => ({ held: true, reason: 'pr 50 already has a ci-heal in flight' }),
+      checkStaleness: FRESH,
+    });
+    expect(result.dispatched).toEqual([]);
+    expect(result.refusals).toEqual([{ pr: 50, kind: 'held', why: 'pr 50 already has a ci-heal in flight' }]);
+  });
+
+  it('a thrown dispatch is caught per-entry as `dispatch-failed`, never aborting the whole pass', async () => {
+    const result = await runReconcileCiHealDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({
+        dispatch: [
+          { kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' },
+          { kind: 'ci-heal', prNumber: 51, headRefName: 'lane/y' },
+        ],
+        refusals: [],
+      }),
+      resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
+      pickFreeLanes: () => [3, 4],
+      dispatch: async (planned) => {
+        if (planned.pr === 50) throw new Error('spawn failed');
+        return { agentId: 'agent-1', sessionSlug: `ci-heal-pa-${planned.pr}`, pr: planned.pr, itemNum: null, lane: planned.lane, unknownTokens: [] };
+      },
+      checkStaleness: FRESH,
+    });
+    expect(result.refusals).toEqual([{ pr: 50, kind: 'dispatch-failed', why: 'spawn failed' }]);
+    expect(result.dispatched).toEqual([{ agentId: 'agent-1', sessionSlug: 'ci-heal-pa-51', pr: 51, itemNum: null, lane: 4, unknownTokens: [] }]);
+  });
+
+  it('no free lane refuses `no-lane` for the entries beyond the pool, never a partial dispatch attempt', async () => {
+    const dispatchCalls = [];
+    const result = await runReconcileCiHealDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({
+        dispatch: [{ kind: 'ci-heal', prNumber: 50, headRefName: 'lane/x' }],
+        refusals: [],
+      }),
+      resolveWorkUnit: () => ({ itemNum: null, scope: [] }),
+      pickFreeLanes: () => [],
+      dispatch: async (planned) => { dispatchCalls.push(planned); return {}; },
+      checkStaleness: FRESH,
+    });
+    expect(dispatchCalls).toEqual([]);
+    expect(result.refusals).toEqual([{ pr: 50, kind: 'no-lane', why: expect.stringContaining('PR #50') }]);
   });
 });

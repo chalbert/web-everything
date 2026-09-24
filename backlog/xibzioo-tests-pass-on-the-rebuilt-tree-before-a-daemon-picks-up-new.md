@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "3383"
 status: open
-blockedBy: ["xlqampw"]
+blockedBy: ["4002"]
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-23"
 tags: []

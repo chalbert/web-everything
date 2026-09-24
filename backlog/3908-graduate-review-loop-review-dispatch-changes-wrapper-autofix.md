@@ -5,18 +5,20 @@ size: 5
 parent: "3443"
 status: open
 blockedBy: ["3906", "3904", "3907"]
-scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs", "we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/advisory-round-count.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs"]
+scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs", "we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/advisory-round-count.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs", "we:scripts/operations/__tests__/action-ground-truth.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
 
 # Graduate review loop: review-dispatch changes, wrapper, autofix and reconcile-fix-dispatch from lane/mechanical-dispatcher to main
 
-Ports 8 files (we:scripts/operations/review-dispatch.mjs, we:scripts/operations/review-dispatch-wrapper.mjs, we:scripts/conveyor/autofix-review-findings.mjs, we:scripts/conveyor/fix-autofix-gate.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs, we:scripts/conveyor/reconcile-core.mjs, we:scripts/conveyor/reconcile-pass.mjs, we:scripts/conveyor/advisory-round-count.mjs) plus their tests. On the critical path. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-dispatch.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot ff1618065 of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports 8 files (we:scripts/operations/review-dispatch.mjs, we:scripts/operations/review-dispatch-wrapper.mjs, we:scripts/conveyor/autofix-review-findings.mjs, we:scripts/conveyor/fix-autofix-gate.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs, we:scripts/conveyor/reconcile-core.mjs, we:scripts/conveyor/reconcile-pass.mjs, we:scripts/conveyor/advisory-round-count.mjs) plus their tests. On the critical path. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-dispatch.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/advisory-round-count.test.mjs we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs we:scripts/conveyor/__tests__/reconcile-core.test.mjs we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs we:scripts/operations/__tests__/review-dispatch.test.mjs we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs we:scripts/operations/__tests__/action-ground-truth.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
+2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
+3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
 
 ### Merge notes for #3908 (2026-09-22)
 
@@ -134,3 +136,51 @@ Trial merges ran in the scratch dir with `git merge-file -p main base branch`. B
 ### Landing order note (designer, 2026-09-22)
 
 This slice makes the mechanical review path the default for `we:scripts/operations/review-dispatch.mjs`, which blocks for the whole review. Main's current `we:skills-src/conveyor/runner.mjs` calls that CLI with a blocking exec and no heartbeat until #3487 lands. **Between this slice landing and #3487 landing, the conveyor runner must not run continuously on main** (pause it, or land the two back to back). #3487 carries the same note.
+
+### Addendum: snapshot moved to 600acc14f (2026-09-23)
+
+`we:` prefixes below are repo-relative paths. Base `ca7e68b71`, main = `origin/main`, branch = `600acc14f`,
+matching the existing note's setup.
+
+**`we:scripts/operations/review-dispatch.mjs`** — **9 conflicts**, the SAME count as the existing note, but
+this is coincidence, not stability: conflict #1 (imports, old resolution "keep both … repoKeyForSlug/
+CONSTELLATION_REPOS/repoProfile + action-dispatch/action-store/action-record/tick-mutex") and conflict #9
+(the CLI, old resolution "take the branch's `dispatchReviewCli` whole") are now each substantially LARGER,
+absorbing a big new branch feature — **Rule 7 of #3690 (#3887)**:
+- New imports to union in at conflict #1: `independentReviewDepthFor` (from `we:scripts/lib/dispatch-contracts.mjs`,
+  #3897's scope), `SUPERVISION_LEVELS` (from `we:scripts/lib/provider-routing.mjs`, #3897's scope),
+  `FLOOR_MAX_FINDINGS`/`recordFloorRun` (from `we:scripts/lib/jury-core.mjs`, this card's own scope), `driveRun`
+  (from `we:scripts/operations/cli-adapter.mjs`), and `startRun`/`createRegistry`/`createFileRunStore`/`newRunId`/`fileItemOperation`/
+  `FILE_ITEM_OP`/`createFileItemReader`/`createFileItemSinks` (the declared `file-item` operation's own pieces —
+  all already on main).
+- New exported functions (added to the file body, outside any conflict region — these merge clean):
+  `reviewSeatRoutes(...)` now takes a `supervision = SUPERVISION_LEVELS.FULL` param and, at `spot-check`
+  depth, returns a single `floorSeatRoute(...)` instead of the mandatory-lens fan-out; `fileFloorFindingFollowUp(...)`
+  drives the declared `file-item` operation (registry → `startRun` → `driveRun`) to file the `#3313`
+  "every review owes a follow-up" card for a floor finding; `runFloorPass(...)` ties the two together.
+- **Open question to verify before landing, not resolvable from a text diff alone**: `runFloorPass` is
+  DEFINED but has **no caller anywhere else in this file** at `600acc14f` (confirmed by grep — `reviewSeatRoutes`'s
+  own call site inside `dispatchReview`, `routing: reviewSeatRoutes({ scorecards: readScorecards(root) })`,
+  never passes `supervision`, so it stays at the `FULL` default and the floor path is never reached from here).
+  Either the branch wires supervision-aware review from elsewhere this diff doesn't touch, or #3887's floor
+  pass ships as an unwired primitive on the prototype and needs its own activation card. Confirm which before
+  writing this into #3908's worker steps as "done" — a faithful, no-behaviour-change port is safe either way,
+  but the card's Done-when should say explicitly whether the floor pass is reachable after this lands.
+- The other 7 conflicts (dispatch-lane-io import block, REVIEW_BRIEF_PLACEHOLDERS/TOOL_FREE_ONLY_JUDGE_PROVIDERS,
+  `dispatchReview` JSDoc/destructure, the Codex JSDoc, the spawn+return block) are unchanged in nature and
+  resolution from the existing note, just shifted.
+
+**`we:scripts/operations/__tests__/review-dispatch.test.mjs`** — **10 conflicts** (the existing note only listed
+this file in worker step 7 as "port the branch's test diffs", with no count). Not individually triaged here
+given the size, but expect most of it to be new `#3887`/floor-pass test additions plus the same #3846/#3704
+seat-routing tests the old note's other four test files already describe as "keep both, appended blocks."
+Recommend triaging this file's conflicts alongside the `runFloorPass` wiring question above, since its own
+test fixtures may answer whether `supervision` is meant to reach `reviewSeatRoutes` from a real call site yet.
+
+**Worker steps (add to the existing list)**
+9'. Before finalizing conflict #1 and #9 resolutions, union in the `#3887` imports/exports described above.
+10. Confirm (against the branch's own test suite and #3690's slice plan) whether `runFloorPass`/the
+    `supervision`-aware `reviewSeatRoutes` call is wired to a real caller on the prototype, or ships unwired;
+    record the answer in this card's Done-when rather than assuming either way.
+
+- Moved here from #3901 (2026-09-24): `we:scripts/operations/__tests__/action-ground-truth.test.mjs`, which imports `we:scripts/operations/review-dispatch-wrapper.mjs`, a module this slice ports.

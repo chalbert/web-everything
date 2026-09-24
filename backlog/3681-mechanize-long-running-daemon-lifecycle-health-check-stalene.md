@@ -117,7 +117,7 @@ agent/command state — *"if it can reload and reconnect agent and command it co
 **What runs now.**
 
 - **Shared self-sync helper: `we:scripts/lib/daemon-self-sync.mjs`** (#3954, then #2533 timeouts). Its header
-  calls it "xv6fciw (narrow slice of decision #3681)". `decideSelfSync` (`:39`) is pure: merge only when fetched,
+  calls it "3954 (narrow slice of decision #3681)". `decideSelfSync` (`:39`) is pure: merge only when fetched,
   behind, on `main` and clean; every failed probe fails closed (`fetch-failed`, `count-failed`, `head-failed`,
   `status-failed`). `selfSyncCheckout` (`:66`) fetches `origin/main`, then runs a real `git merge` (not a
   fast-forward, because the clone usually carries extra commits) and runs `git merge --abort` on any failure.

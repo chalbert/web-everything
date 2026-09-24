@@ -2,8 +2,8 @@
 kind: task
 parent: "3383"
 status: open
-blockedBy: ["xdpemd4", "xlqampw"]
-scope: ["we:scripts/lib/poc-branches.json", "we:backlog/xii6vye-graduate-lane-daemon-poc-to-main.md"]
+blockedBy: ["3998", "4002"]
+scope: ["we:scripts/lib/poc-branches.json", "we:backlog/3999-graduate-lane-daemon-poc-to-main.md"]
 dateOpened: "2026-09-23"
 tags: []
 ---

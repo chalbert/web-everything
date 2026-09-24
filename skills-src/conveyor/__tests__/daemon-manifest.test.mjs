@@ -20,10 +20,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
 
-  it('has exactly the 5 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep) plus 4 passes × 3 repos = 17 total', () => {
+  it('has exactly the 5 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep) plus 5 passes × 3 repos = 20 total (epic #3383 stuck-pr-watch added)', () => {
     expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
       'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep',
-      ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch']
+      ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch']
         .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
     ].sort());
   });
@@ -64,8 +64,8 @@ describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
     expect(DAEMON_MANIFEST['merge-orphan-sweep'].args.some((a) => a.startsWith('--label'))).toBe(false);
   });
 
-  it('the 4 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {
-    for (const passName of ['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch']) {
+  it('the 5 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {
+    for (const passName of ['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch']) {
       for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
         const entry = DAEMON_MANIFEST[`${passName}-${key}`];
         expect(entry, `${passName}-${key}`).toBeDefined();
@@ -76,6 +76,15 @@ describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
 
   it('lane-pool-health-watch is wired for plateau-app specifically (live-caught 2026-09-22: PR #167 had no lane-pool coverage)', () => {
     expect(DAEMON_MANIFEST['lane-pool-health-watch-plateau-app'].args).toContain('--repo=chalbert/plateau-app');
+  });
+
+  it('epic #3383 stuck-pr-watch runs `sweep` against the real script, per repo, at the shared cadence', () => {
+    for (const key of REPO_KEYS) {
+      const e = DAEMON_MANIFEST[`stuck-pr-watch-${key}`];
+      expect(e.script).toBe('scripts/conveyor/stuck-pr-watch.mjs');
+      expect(e.args[0]).toBe('sweep');
+      expect(existsSync(join(REPO_ROOT, e.script))).toBe(true);
+    }
   });
 
   it('poc-branch-sync is deliberately absent — it does not exist as a script on main (a false premise in #3873\'s own scope, corrected here rather than invented)', () => {

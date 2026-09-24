@@ -60,6 +60,7 @@ import { prDeliveredItem, readFrontmatterField, idTokenOf } from '../backlog-str
 import { LEASE_FILENAME } from '../lib/lane-lease.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from '../lib/bounded-child.mjs';
 
 const WE_SLUG = CONSTELLATION_REPOS.we.slug;
 
@@ -325,7 +326,8 @@ function writeEdits(dir, release) {
   const failed = [];
   for (const r of release) {
     try {
-      execFileSync('node', [join(dir, 'scripts', 'backlog.mjs'), r.verb, r.id], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      // #x5n4zn3 — was bare (no timeout).
+      execFileSync('node', [join(dir, 'scripts', 'backlog.mjs'), r.verb, r.id], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
       applied.push(r);
       log(`  ${r.verb === 'settle' ? 'settled' : 'released'} #${r.id} → open`);
     } catch (e) {
@@ -336,11 +338,28 @@ function writeEdits(dir, release) {
   return { applied, failed };
 }
 
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+// #x5n4zn3 — was bare (no timeout): git add/commit + `lane-pool.mjs acquire`/`open-pr` all shell through here.
+const run = (cmd, args, cwd, { timeoutMs = resolveChildTimeoutMs() } = {}) => execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, killSignal: 'SIGKILL' });
+
+/**
+ * Acquire the lane this pass writes in. The acquire installs deps (`npm ci` under lane-pool's own
+ * `NPM_INSTALL_TIMEOUT_MS`), so it gets the acquire-sized budget, never the generic 5-minute default: a tighter
+ * outer timeout would SIGKILL a slow-but-healthy install, leak the lease it already wrote, and abort the whole
+ * pass (#x5n4zn3 review). `runFn` is injectable for tests.
+ */
+export function acquireLane(runFn = run) {
+  const args = [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'acquire', '--purpose=orphan-claim-release', '--json'];
+  return JSON.parse(runFn('node', args, REPO_ROOT, { timeoutMs: resolveLaneAcquireTimeoutMs() }));
+}
+
+// #x5n4zn3 — a real full-gate `run.mjs verify` run: generous (matches the established `VERIFY_TIMEOUT_MS`
+// convention `we:scripts/operations/verify-io.mjs`/`we:scripts/conveyor/verify-dispatch.mjs` already use for
+// the SAME command), never unbounded.
+const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Full apply: acquire a lane, write, commit, verify, open ONE parked PR, always release the lane. */
 function applyViaLane(sig, minAgeHours) {
-  const acq = JSON.parse(run('node', [join(REPO_ROOT, 'scripts', 'lane-pool.mjs'), 'acquire', '--purpose=orphan-claim-release', '--json'], REPO_ROOT));
+  const acq = acquireLane();
   const lane = acq.path;
   log(`  acquired lane-${acq.lane} → ${lane}`);
   try {
@@ -352,7 +371,7 @@ function applyViaLane(sig, minAgeHours) {
     const msg = `backlog: release ${applied.length} orphaned claim(s) to open (#3913)\n\n${applied.map((a) => `- #${a.id} (${a.verb})`).join('\n')}\n`;
     run('git', ['commit', '-m', msg], lane);
     // Foreground verify — the lane-verify marker is what pr-land's finish-guard requires.
-    execFileSync('node', [join(lane, 'scripts', 'operations', 'run.mjs'), 'verify', `--checkout=${lane}`], { cwd: lane, stdio: ['ignore', 'inherit', 'inherit'] });
+    execFileSync('node', [join(lane, 'scripts', 'operations', 'run.mjs'), 'verify', `--checkout=${lane}`], { cwd: lane, stdio: ['ignore', 'inherit', 'inherit'], timeout: VERIFY_TIMEOUT_MS, killSignal: 'SIGKILL' });
     const bodyFile = join(lane, '.git', 'orphan-claim-release-body.md');
     writeFileSync(bodyFile, renderPrBody(applied, { minAgeHours }));
     const ref = `${RUN_REF_PREFIX}${Date.now().toString(36)}`;

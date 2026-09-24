@@ -5302,9 +5302,11 @@ Forks 3 and 4 reverse the build and are multi-part. Five rules:
    which authors a declared size (or, for a task, a declared estimate in its own field, distinct from story
    points so the burndown is not double-counted) — real, reviewed evidence beats a constant. The operator may
    instead set `default-size` (a settable fallback, an explicit ratified act, not a code constant); any
-   `default-size` below the `13` band must not be enabled until #3784 lands its promotion-threshold fixes —
-   today the placeholder thresholds promote automatically, so a low `default-size` would delegate on an
-   unmeasured number. `fix` and `ci-heal` dispatches, which pass no
+   `default-size` below the `13` band required #3784's promotion-threshold fixes to land first — the
+   placeholder thresholds promoted automatically before that, so a low `default-size` would have delegated
+   on an unmeasured number. **#3784 landed 2026-09-23** (the checked-in promotion record, failing closed,
+   plus the enforcement flip), so this precondition is now satisfied; the constraint is recorded here for
+   history, not as a live blocker. `fix` and `ci-heal` dispatches, which pass no
    size at all, are never held by this block: their size comes from the ordered fallback chain
    `card-size` → `measured-diff` → `assumed`, itself a settable option. Every dispatch that used a fallback
    records `sized: false` and where the number came from, so an assumed size is never mistaken for a declared

@@ -84,6 +84,20 @@ export function isLaneAcquirable(info, nowMs, ttlMs) {
 }
 
 /**
+ * #xn432dz — does the LEASE ALONE already make `isLaneAcquirable` false, whatever the tree holds? True iff the
+ * marker is LIVE (present and not stale — a reserved lease is never stale, so it always disqualifies). This is
+ * the cheap file-read gate a picker runs BEFORE paying for `git status` / `rev-list` on a lane: when it returns
+ * true, `isLaneAcquirable({ exists: true, lease, dirtyOrAhead: <anything> }, nowMs, ttlMs)` is false for EVERY
+ * possible `dirtyOrAhead`, so skipping the git probe cannot change the verdict. When it returns false the
+ * caller must still run the probe — a missing/stale lease says nothing about un-pushed work (#2267).
+ * Observed 2026-09-23: 14 concurrent `list --acquirable` scans ran git in all ~129 lanes (most of them leased)
+ * and pinned fseventsd at ~100% CPU.
+ */
+export function leaseDisqualifiesAcquire(lease, nowMs, ttlMs) {
+  return !!lease && !isLeaseStale(lease, nowMs, ttlMs);
+}
+
+/**
  * The lowest-index acquirable lane, or null if the pool is fully held/busy. Deterministic (index order) so
  * concurrent acquirers converge on the same candidate and the atomic O_EXCL create picks exactly one winner.
  *

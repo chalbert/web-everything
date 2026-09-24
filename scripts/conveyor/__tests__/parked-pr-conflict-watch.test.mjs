@@ -28,8 +28,17 @@ import {
   isAppendOnlyStatuteConflict,
   defaultListPrPatches,
   defaultListPrComments,
+  parseHunkOldRanges,
+  hunkRangesOverlap,
+  doesConflictOverlapMainEdits,
+  findWatcherStandDownComment,
+  buildSupersedeStandDownComment,
+  defaultListMainStatutePatchesSinceMergeBase,
+  COMPARE_FILES_CAP,
 } from '../parked-pr-conflict-watch.mjs';
-import { STAND_DOWN_MARKER } from '../stand-down.mjs';
+import {
+  STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
+} from '../stand-down.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
 // `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
@@ -776,7 +785,7 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPos
     expect(calls).toEqual([['node', [
       expect.stringMatching(/\/scripts\/conveyor\/rearm-review\.mjs$/), '1920',
       '--actor=parked-pr-conflict-watch (conflict resolved)', '--repo=o/n',
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }]]);
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: 300_000, killSignal: 'SIGKILL' }]]);
   });
 
   it('shells reconcile-finding.mjs with a --body-file, --agent and --repo', () => {
@@ -798,6 +807,404 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPos
     expect(capturedArgv[1]).toBe('1921');
     expect(capturedArgv).toContain('--reason=conflict');
     expect(capturedArgv).toContain('--repo=o/n');
+    // Single-sourced from stand-down.mjs — never re-typed here (see WATCHER_STAND_DOWN_ACTOR's own docblock).
+    expect(capturedArgv).toContain(`--actor=${WATCHER_STAND_DOWN_ACTOR}`);
+  });
+});
+
+// ── #xu2krte Fork 2 — the review-human statute-amendment exception ─────────────────────────────────────────────
+// PR chalbert/web-everything#2549: `review:human` + `merge-status:conflicting`, amends clause 4(a) of the
+// delivery-mode statute (removes existing text — NOT append-only), so the append-only exception (#2531) cannot
+// apply. Before this fork, ANY non-append-only statute-tier conflict stood down forever, human or not. This fork
+// asks one more question first: did `main` independently touch the SAME hunk since the merge base? If not, a
+// human reviews the result regardless (`review:human` never clears), so the git-level conflict can be resolved
+// mechanically instead of parked forever.
+const PR_HUNK_10_13 = '@@ -10,3 +10,3 @@\n-old clause text\n+new clause text\n context line\n';
+const MAIN_HUNK_NONOVERLAPPING = '@@ -50,2 +50,3 @@\n context\n+an unrelated new line main added\n';
+const MAIN_HUNK_OVERLAPPING = '@@ -11,1 +11,1 @@\n-old clause text (main\'s own edit)\n+main\'s replacement\n';
+
+describe('parseHunkOldRanges', () => {
+  it('parses one hunk header into its old-file [start, end) range', () => {
+    expect(parseHunkOldRanges('@@ -10,3 +10,3 @@\n-a\n+b\n')).toEqual([[10, 13]]);
+  });
+
+  it('defaults an omitted length to 1', () => {
+    expect(parseHunkOldRanges('@@ -5 +5,2 @@\n')).toEqual([[5, 6]]);
+  });
+
+  it('collects every hunk header in a multi-hunk patch', () => {
+    expect(parseHunkOldRanges('@@ -1,2 +1,2 @@\n context\n@@ -20,1 +20,1 @@\n-x\n+y\n')).toEqual([[1, 3], [20, 21]]);
+  });
+
+  it('a non-string or hunk-less patch yields no ranges', () => {
+    expect(parseHunkOldRanges(undefined)).toEqual([]);
+    expect(parseHunkOldRanges('no hunk headers here')).toEqual([]);
+  });
+});
+
+describe('hunkRangesOverlap', () => {
+  it('true when two ranges intersect', () => {
+    expect(hunkRangesOverlap([[10, 13]], [[11, 12]])).toBe(true);
+  });
+
+  it('false when ranges are disjoint, even when adjacent', () => {
+    expect(hunkRangesOverlap([[10, 13]], [[13, 15]])).toBe(false);
+    expect(hunkRangesOverlap([[10, 13]], [[50, 52]])).toBe(false);
+  });
+
+  it('false for two empty range lists', () => {
+    expect(hunkRangesOverlap([], [])).toBe(false);
+  });
+});
+
+describe('doesConflictOverlapMainEdits — the TRUE semantic-clash test', () => {
+  it('false: main never touched this file since the merge base — no clash possible', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }, {})).toBe(false);
+  });
+
+  it('false: main touched the SAME file but a DIFFERENT hunk region — proximity, not a real clash', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 },
+      { 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING })).toBe(false);
+  });
+
+  it('true: main independently touched the SAME hunk region — a genuine competing edit', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 },
+      { 'docs/agent/platform-decisions.md': MAIN_HUNK_OVERLAPPING })).toBe(true);
+  });
+
+  it('fails CLOSED (true) when main touched the file but the PR patch could not be recovered', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      {}, { 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING })).toBe(true);
+  });
+
+  // Review finding 2 — a file PRESENT in main's comparison diff whose patch GitHub omitted (binary, or a diff too
+  // large to render: the jq `.patch // ""` yields ''), or whose patch carries no parseable hunk header, is a
+  // REAL main edit we cannot see. It must fail closed, never read as "main never touched this file".
+  it('fails CLOSED (true) when main touched the file but its patch text is empty (GitHub omitted .patch)', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }, { 'docs/agent/platform-decisions.md': '' })).toBe(true);
+  });
+
+  it('fails CLOSED (true) when main\'s patch for the file is not a string at all', () => {
+    for (const bad of [null, undefined, 42]) {
+      expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+        { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }, { 'docs/agent/platform-decisions.md': bad })).toBe(true);
+    }
+  });
+
+  it('fails CLOSED (true) when main\'s patch has no parseable @@ hunk header', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': PR_HUNK_10_13 },
+      { 'docs/agent/platform-decisions.md': 'Binary files differ\n' })).toBe(true);
+  });
+
+  it('fails CLOSED (true) when the PR\'s own patch has no parseable @@ hunk header', () => {
+    expect(doesConflictOverlapMainEdits(['docs/agent/platform-decisions.md'],
+      { 'docs/agent/platform-decisions.md': 'Binary files differ\n' },
+      { 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING })).toBe(true);
+  });
+
+  it('empty statute-tier file list never clashes', () => {
+    expect(doesConflictOverlapMainEdits([], { a: PR_HUNK_10_13 }, { a: MAIN_HUNK_OVERLAPPING })).toBe(false);
+  });
+});
+
+describe('defaultListMainStatutePatchesSinceMergeBase — argv shape + failure modes (exec injected, no real gh call)', () => {
+  it('chains pulls/{n} → compare/{base}...{head} → compare/{mergeBase}...{base}, three plain gh api calls', () => {
+    const calls = [];
+    const exec = (cmd, argv) => {
+      calls.push(argv);
+      if (argv[3].endsWith('/pulls/2549')) return 'main\tabc123\n';
+      if (argv[3].includes('/compare/main...abc123')) return 'deadbeef\n';
+      if (argv[3].includes('/compare/deadbeef...main')) return 'docs/agent/platform-decisions.md\t@@ -10,3 +10,3 @@\\n-a\\n+b\\n';
+      throw new Error(`unexpected argv ${argv[3]}`);
+    };
+    const out = defaultListMainStatutePatchesSinceMergeBase({ number: 2549, repo: 'o/n', exec });
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual(['api', '--method', 'GET', 'repos/o/n/pulls/2549', '--jq', '[.base.ref, .head.sha] | @tsv']);
+    expect(calls[1]).toEqual(['api', '--method', 'GET', 'repos/o/n/compare/main...abc123', '--jq', '.merge_base_commit.sha // ""']);
+    expect(calls[2]).toEqual(['api', '--method', 'GET', 'repos/o/n/compare/deadbeef...main', '--jq', '.files[]? | [.filename, (.patch // "")] | @tsv']);
+    expect(out).toEqual({ 'docs/agent/platform-decisions.md': '@@ -10,3 +10,3 @@\n-a\n+b\n' });
+  });
+
+  it('throws (fails closed) when the base ref / head sha cannot be resolved', () => {
+    const exec = () => '\t\n';
+    expect(() => defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec })).toThrow();
+  });
+
+  it('throws (fails closed) when no merge base can be resolved', () => {
+    let call = 0;
+    const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : '\n'; };
+    expect(() => defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec })).toThrow();
+  });
+
+  // Review finding 2, same category — GitHub's compare API lists at most 300 changed files and silently drops
+  // the rest. A file main DID change past that cap would be absent from the map and read as untouched.
+  it('throws (fails closed) when main\'s comparison file list hits the compare API\'s file cap', () => {
+    const rows = Array.from({ length: COMPARE_FILES_CAP }, (_, i) => `f${i}.md\t@@ -1 +1 @@\\n-a\\n+b`).join('\n');
+    let call = 0;
+    const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : call === 2 ? 'deadbeef\n' : `${rows}\n`; };
+    expect(() => defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec })).toThrow(/cap/);
+  });
+
+  it('keeps an empty patch as an EMPTY STRING entry (a touched file), never dropping the key', () => {
+    let call = 0;
+    const exec = () => { call += 1; return call === 1 ? 'main\tabc123\n' : call === 2 ? 'deadbeef\n' : 'docs/agent/platform-decisions.md\t\n'; };
+    expect(defaultListMainStatutePatchesSinceMergeBase({ number: 1, repo: 'o/n', exec }))
+      .toEqual({ 'docs/agent/platform-decisions.md': '' });
+  });
+});
+
+describe('findWatcherStandDownComment', () => {
+  it('finds a stand-down comment posted by the watch itself', () => {
+    const body = buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' });
+    expect(findWatcherStandDownComment([{ body }])).toEqual({ body, createdAt: null });
+  });
+
+  it('null: a fix agent\'s own judgment stand-down does not match', () => {
+    const body = buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' });
+    expect(findWatcherStandDownComment([{ body }])).toBeNull();
+  });
+
+  it('null: no comments at all', () => {
+    expect(findWatcherStandDownComment([])).toBeNull();
+    expect(findWatcherStandDownComment(undefined)).toBeNull();
+  });
+});
+
+describe('buildSupersedeStandDownComment', () => {
+  it('says the earlier stand-down is superseded and explains why it could not be deleted', () => {
+    const body = buildSupersedeStandDownComment({ num: 2549 });
+    expect(body).toMatch(/superseded/i);
+    expect(body).toMatch(/review:human.*never cleared|never cleared.*review:human/i);
+    expect(body).toMatch(/could not safely delete/i);
+  });
+});
+
+describe('watchParkedPrConflicts — #xu2krte Fork 2 review-human statute amendment (fresh detection)', () => {
+  const basePr = (over = {}) => ({
+    number: 2549, mergeable: 'CONFLICTING', headRefName: 'lane/3681-ratify-daemon-lifecycle',
+    labels: [{ name: 'review:human' }], files: [{ path: 'docs/agent/platform-decisions.md' }], ...over,
+  });
+  const fakeProvider = () => {
+    const calls = [];
+    return { calls, ensureLabel: (...a) => calls.push(['ensureLabel', ...a.slice(0, 2)]), setLabels: (...a) => calls.push(['setLabels', ...a]), postComment: (...a) => calls.push(['postComment', ...a]) };
+  };
+
+  it('review:human + non-append-only + NOT overlapping main → routes to the fixer, not stand-down', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [basePr()], provider,
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (review-human statute amendment)');
+    expect(routed).toEqual([['finding', { pr: basePr(), repo: 'o/n', reviewHumanFixable: true }]]);
+    // The comment says the conflict-only mechanical resolution, never the stand-down "judgment call" wording.
+    const commentCall = provider.calls.find((c) => c[0] === 'postComment');
+    expect(commentCall[3]).toMatch(/resolve the conflict only|being resolved mechanically/i);
+    expect(commentCall[3]).not.toMatch(/left as a \*\*judgment call/i);
+  });
+
+  it('review:human + non-append-only + DOES overlap main → still stands down (a true competing edit)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [basePr()], provider,
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_OVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', { pr: basePr(), repo: 'o/n' }]]);
+  });
+
+  it('NO review:human (only review:pending) → unchanged: still stands down even with non-overlapping hunks', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const pr = basePr({ labels: [{ name: 'review:pending' }] });
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider,
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      // A caller with no review:human never even reaches listMainStatutePatches — assert that directly.
+      listMainStatutePatches: () => { throw new Error('must not be called without review:human'); },
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([['stand-down', { pr, repo: 'o/n' }]]);
+  });
+
+  it('append-only still wins over the review-human exception when a PR is both (append-only is cheaper/broader)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const appendOnlyPatch = '@@ -20,0 +21,3 @@\n+### New Rule\n+body\n+more body\n ---\n';
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [basePr()], provider,
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': appendOnlyPatch }),
+      listMainStatutePatches: () => { throw new Error('must not be called — append-only short-circuits first'); },
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (append-only statute)');
+  });
+});
+
+describe('watchParkedPrConflicts — #xu2krte Fork 2 recheck of an ALREADY stood-down parked PR (live PR #2549 shape)', () => {
+  const watcherMarkerComment = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }) };
+  const humanJudgmentComment = { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) };
+  const alreadyLabelledPr = (over = {}) => ({
+    number: 2549, mergeable: 'CONFLICTING', headRefName: 'lane/3681-ratify-daemon-lifecycle',
+    labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }], ...over,
+  });
+  const fakeProvider = () => {
+    const calls = [];
+    return { calls, ensureLabel: () => {}, setLabels: () => {}, postComment: (...a) => calls.push(['postComment', ...a]) };
+  };
+
+  it('a watcher-marked, already-labelled PR that NOW qualifies (no overlap) supersedes the marker and dispatches', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment],
+      listPrFiles: () => ['docs/agent/platform-decisions.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results).toEqual([{
+      num: 2549, isConflicting: true, add: null, remove: [], newlyDetected: false, commented: false,
+      supersededStandDown: true, routedTo: 'reconcile-finding (review-human statute amendment, marker superseded)',
+    }]);
+    expect(routed).toEqual([['finding', { pr: alreadyLabelledPr(), repo: 'o/n', appendOnlyStatute: false, reviewHumanFixable: true }]]);
+    expect(provider.calls).toEqual([['postComment', 'o/n', 2549, expect.stringMatching(/superseded/i)]]);
+  });
+
+  // Live on chalbert/web-everything#2549 (2026-09-24): with no durable "already superseded" read, every sweep
+  // (~2 min) re-posted the supersede comment AND a fresh review:changes finding. The supersede comment IS the
+  // durable record, so once one follows the watcher's marker the recheck is done.
+  it('a watcher marker ALREADY followed by a supersede comment is not re-superseded or re-dispatched', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment, { body: buildSupersedeStandDownComment({ num: 2549 }) }],
+      listPrFiles: () => { throw new Error('must not re-classify an already-superseded marker'); },
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results).toEqual([]);
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('a NEW watcher stand-down posted after an old supersede is re-checked (only the latest marker counts)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment, { body: buildSupersedeStandDownComment({ num: 2549 }) }, watcherMarkerComment],
+      listPrFiles: () => ['docs/agent/platform-decisions.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].supersededStandDown).toBe(true);
+    expect(routed.map(([k]) => k)).toEqual(['finding']);
+  });
+
+  it('posts the finding BEFORE the supersede, and no supersede at all when the finding fails', () => {
+    const run = (postFinding) => {
+      const order = [];
+      const provider = { ensureLabel: () => {}, setLabels: () => {}, postComment: () => order.push('supersede') };
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+        listPrComments: () => [watcherMarkerComment],
+        listPrFiles: () => ['docs/agent/platform-decisions.md'],
+        listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+        listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+        postFinding: () => postFinding(order),
+        postStandDown: () => order.push('stand-down'),
+      });
+      return { order, results };
+    };
+    expect(run((order) => order.push('finding')).order).toEqual(['finding', 'supersede']);
+    const failed = run(() => { throw new Error('gh timeout'); });
+    expect(failed.order).toEqual([]); // no supersede → the next sweep retries
+    expect(failed.results[0].error).toMatch(/gh timeout/);
+  });
+
+  it('the supersede comment it posts starts with the single-sourced SUPERSEDE_STAND_DOWN_MARKER', () => {
+    expect(buildSupersedeStandDownComment({ num: 2549 }).startsWith(SUPERSEDE_STAND_DOWN_MARKER)).toBe(true);
+  });
+
+  it('a watcher-marked PR that STILL overlaps main leaves the stand-down exactly alone — no re-post, no dispatch', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [watcherMarkerComment],
+      listPrFiles: () => ['docs/agent/platform-decisions.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_OVERLAPPING }),
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results[0].routedTo).toBe('stand-down (unchanged)');
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('an already-labelled PR with NO watcher marker (e.g. already dispatched, or a fix agent\'s OWN stand-down) is left alone', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], provider,
+      listPrComments: () => [humanJudgmentComment],
+      listPrFiles: () => { throw new Error('must not fetch files when no watcher marker is present'); },
+      postFinding: (o) => routed.push(['finding', o]),
+      postStandDown: (o) => routed.push(['stand-down', o]),
+    });
+    expect(results).toEqual([]);
+    expect(routed).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('never re-checks a queued (not parked) PR through this path — the grace path already owns that population', () => {
+    const provider = fakeProvider();
+    const listPrFilesCalls = [];
+    const pr = alreadyLabelledPr({ labels: [{ name: 'review:accepted' }, { name: CONFLICT_LABEL }] });
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider,
+      labelAgeMs: () => 0, // grace not yet due
+      listPrFiles: () => { listPrFilesCalls.push(1); return []; },
+    });
+    expect(results).toEqual([]);
+    expect(listPrFilesCalls).toEqual([]);
+  });
+
+  it('a real dry run reports the same routing decision without writing anything', () => {
+    const provider = fakeProvider();
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [alreadyLabelledPr()], dryRun: true, provider,
+      listPrComments: () => [watcherMarkerComment],
+      listPrFiles: () => ['docs/agent/platform-decisions.md'],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': PR_HUNK_10_13 }),
+      listMainStatutePatches: () => ({ 'docs/agent/platform-decisions.md': MAIN_HUNK_NONOVERLAPPING }),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (review-human statute amendment, marker superseded)');
+    expect(results[0].supersededStandDown).toBe(true);
+    expect(provider.calls).toEqual([]);
   });
 });
 

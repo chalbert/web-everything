@@ -108,6 +108,12 @@ function buildTriple(group, { thresholds, promotionsOk, promotionEntries, select
   const cleanStreak = routed.cleanStreak;
   const hasInformative = routed.hasInformativeTrial;
   const mostRecentVetoed = routed.mostRecentVetoed;
+  // The bar `cleanStreak` is actually checked against: cold-start `minCleanStreak`, or the higher post-miss
+  // `minCleanStreak + k` once a confirmed miss is on record (#3897 ports #3889 rule 5). Read from the
+  // router's own structured field — never re-derived here (rule 1: no second copy of its predicates).
+  const requiredCleanStreak = typeof routed.requiredCleanStreak === 'number'
+    ? routed.requiredCleanStreak
+    : thresholds.minCleanStreak;
 
   const promotion = promotionsOk ? findPromotion(promotionEntries, provider, model, taskType) : null;
   const promoted = promotion !== null && evidenceLevel === 'spot-check';
@@ -117,7 +123,7 @@ function buildTriple(group, { thresholds, promotionsOk, promotionEntries, select
   let state;
   if (countedTrials === 0) state = 'unverified';
   else if (mostRecentVetoed) state = 'vetoed';
-  else if (cleanStreak < thresholds.minCleanStreak) state = 'accruing';
+  else if (cleanStreak < requiredCleanStreak) state = 'accruing';
   else if (thresholds.requireInformativeTrial && !hasInformative) state = 'needs-positive-control';
   else state = promoted ? 'promoted' : 'awaiting-promotion';
 
@@ -132,7 +138,7 @@ function buildTriple(group, { thresholds, promotionsOk, promotionEntries, select
     promotion,
     effectiveLevel,
     state,
-    owed: owedFor(state, { minCleanStreak: thresholds.minCleanStreak, cleanStreak }),
+    owed: owedFor(state, { minCleanStreak: requiredCleanStreak, cleanStreak }),
     lastTrialAt,
     trialList,
   };

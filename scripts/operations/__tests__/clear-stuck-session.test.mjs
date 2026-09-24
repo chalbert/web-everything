@@ -277,6 +277,16 @@ describe('scanPsForSession', () => {
   it('null (not false) when the probe itself cannot run', () => {
     expect(scanPsForSession('x-y-z', { exec: () => { throw new Error('ps: command not found'); } })).toBeNull();
   });
+  it('false when the ONLY hit is this operation\'s own invocation, not a real session process — the always-live-process bug', () => {
+    // measured on 2026-09-23: `node scripts/operations/run.mjs clear-stuck-session --session=<id>` is itself a
+    // `ps aux` row carrying the full session id (as `--session=<id>`, the operation's own input flag), which a
+    // bare substring match always found — reporting every session live-process, unconditionally. A real live
+    // Claude Code session's argv carries the id as `--resume=<id>`/`--resume <id>` or `--session-id <id>`
+    // (`clear-stuck-session-io-real.test.mjs`'s own live-fire measurement), never as `--session=<id>`.
+    const selfArgvLine = 'nicolasgilbert 12345 0.0 0.1 4271234 12345 ?? S 6:55PM 0:01.23 '
+      + 'node scripts/operations/run.mjs clear-stuck-session --session=08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f --json';
+    expect(scanPsForSession('08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f', { exec: () => selfArgvLine })).toBe(false);
+  });
 });
 
 describe('resolvePidAlive', () => {
@@ -286,7 +296,7 @@ describe('resolvePidAlive', () => {
     expect(resolvePidAlive({ pid: 4242 }, { fullSessionId: 'irrelevant', isPidAlive, exec })).toBe(true);
   });
   it('falls back to the ps-aux scan when the row has no pid at all (the known-stuck shape)', () => {
-    const exec = () => '... 08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f ...';
+    const exec = () => '... --resume=08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f ...';
     expect(resolvePidAlive({}, { fullSessionId: '08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f', isPidAlive: () => { throw new Error('no pid'); }, exec })).toBe(true);
     expect(resolvePidAlive({}, { fullSessionId: '08f5fdf9-bf30-4484-9ca4-d2dabe8f1f7f', isPidAlive: () => { throw new Error('no pid'); }, exec: () => 'nothing here' })).toBe(false);
   });

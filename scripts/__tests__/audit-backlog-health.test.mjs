@@ -8,6 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { missingDoneWhenProof, forkLeansOnUnruled, PROSE_PREREQ, ANY_REF } from '../audit-backlog-health.mjs';
 
 // #3522: exercise the live extractors so G1/D2 cannot silently lose short or long ids.
@@ -164,4 +166,15 @@ describe('forkLeansOnUnruled — G8', () => {
     const body = '## Fork 1 — a vs b\n\nDefault (a), matching #3512 attributes.\n';
     expect(forkLeansOnUnruled(body, new Set(), (r) => r === '3512', ranges, norm)).toEqual(['3512']);
   });
+});
+
+// #x7xv2xt — importing the module must not run the audit. The script body used to run at import time, so this
+// very test file paid for a full audit (the backlog read plus git history walks, ~10 min on a loaded host) and
+// rewrote the report. A plain import in a fresh process must print nothing and return quickly.
+describe('import has no side effects', () => {
+  it('importing the module prints no audit summary', () => {
+    const url = pathToFileURL('scripts/audit-backlog-health.mjs').href;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(url)}); console.log('imported');`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    expect(out.trim()).toBe('imported');
+  }, 30_000);
 });

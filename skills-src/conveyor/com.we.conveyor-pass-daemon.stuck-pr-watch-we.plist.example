@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  EXAMPLE ONLY — NOT INSTALLED, NOT LOADED, INERT.
+
+  This file is a reference for what a launchd LaunchAgent for `skills-src/conveyor/pass-daemon.mjs
+  --pass=stuck-pr-watch-we` would look like (epic #3383's stuck-PR watch), mirrored from
+  `com.we.conveyor-pass-daemon.merge-orphan-sweep.plist.example` in this same directory — see that file's own
+  header for the full explanation of why an `.example` file has zero effect on the machine until a human
+  deliberately installs it.
+
+  WHAT THIS WATCHER DOES. Runs `node scripts/conveyor/stuck-pr-watch.mjs sweep --repo=chalbert/web-everything`
+  on an interval: catches an open WE PR that has had no progress (no new commit, label event, or comment) for
+  longer than its review stage's own expected time, with nothing live already working it, and dispatches ONE
+  diagnosis-only inspection agent per stuck episode. `skills-src/conveyor/daemon-manifest.mjs` registers THREE
+  entries for this same pass — `stuck-pr-watch-we`, `stuck-pr-watch-frontierui`, `stuck-pr-watch-plateau-app` —
+  one per constellation repo; this file is the WE one, and the other two are byte-identical except for the
+  `Label`, the `--pass=` argument, and the log filename.
+
+  `pass-daemon.mjs` resolves `--pass=stuck-pr-watch-we` through `daemon-manifest.mjs`'s closed allowlist — it
+  never takes a raw script path from this plist, so the actual command + args + interval are reviewed IN CODE
+  (that file), not duplicated here. This plist only owns the OS-level residency (RunAtLoad/KeepAlive) and the
+  working directory / log destination, exactly like every other pass-daemon watcher already running under
+  launchd.
+
+  To actually install it (a deliberate, separate human decision — never a side effect of this daemon-manifest
+  entry landing):
+    1. Copy to ~/Library/LaunchAgents/com.we.conveyor-pass-daemon.stuck-pr-watch-we.plist
+    2. Fill in the real `node` path (see `which node`) and confirm WorkingDirectory
+    3. `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.we.conveyor-pass-daemon.stuck-pr-watch-we.plist`
+    4. Repeat for the sibling repos with `--pass=stuck-pr-watch-frontierui` / `--pass=stuck-pr-watch-plateau-app`.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.we.conveyor-pass-daemon.stuck-pr-watch-we</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/YOU/workspace/webeverything/skills-src/conveyor/pass-daemon.mjs</string>
+    <string>--pass=stuck-pr-watch-we</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/YOU/workspace/webeverything</string>
+  <!-- RunAtLoad + KeepAlive: residency survives crash, logout/login, reboot, and sleep by construction — same
+       shape as every other pass-daemon watcher. ThrottleInterval guards against launchd itself relaunching
+       faster than pass-daemon.mjs's own per-pass lease/backoff would. -->
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/YOU/workspace/webeverything/.conveyor/pass-daemon.stuck-pr-watch-we.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/workspace/webeverything/.conveyor/pass-daemon.stuck-pr-watch-we.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

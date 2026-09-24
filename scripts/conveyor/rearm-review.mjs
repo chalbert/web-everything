@@ -23,6 +23,7 @@
  */
 import { resolve } from 'node:path';
 import { decideSetLabel, runReviewLabelCli, presentRemoveLabels } from '../review-set-label.mjs';
+import { CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 
 // we:scripts/conveyor/rearm-review.mjs — re-export the shared narrowing helper on this module's surface so the
 // fix-agent brief's entrypoint and the pinned tests keep importing it from here (it is single-sourced next door).
@@ -84,6 +85,15 @@ export function decideRearm({ currentLabels = [] } = {}) {
 // imports this module). The standard main check used across the conveyor scripts.
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
+  // #xkmu3gv — `--round=conflict` selects the MECHANICAL conflict-resolution comment/marker
+  // (`CONFLICT_FIX_COMMENT_MARKER`, its own smaller `we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ROUND_CAP`,
+  // #xkmu3gv) instead of the ordinary rearm marker. THE LABEL SWAP ITSELF IS IDENTICAL EITHER WAY — the SAME
+  // `review:changes → review:pending` (never `review:accepted`, never removes `review:human`) the shared pure
+  // `decideSetLabel({ to: 'rearm' })` decides; only which durable floor this completed round counts against, and
+  // the comment text explaining why, differs. See `conflict-fix-round-count.mjs`'s own header for why a
+  // mechanical conflict-resolution round needs its own cap rather than sharing `countRearmComments`'s.
+  const roundArg = (process.argv.find((a) => a.startsWith('--round=')) || '').slice('--round='.length);
+  const isConflictRound = roundArg === 'conflict';
   // we:scripts/conveyor/rearm-review.mjs — the fix-agent re-arm CLI: the shared harness with the three deltas
   // this caller supplies (the comment body, the default --actor, the optional --repo fallback). The re-arm
   // swap + its refusal are the shared pure `decideSetLabel({ to: 'rearm' })` — this file adds no invariant.
@@ -91,19 +101,29 @@ if (IS_CLI) {
     fixedTo: 'rearm',
     defaultActor: 'conveyor fix agent',
     repoOptional: true, // the fix agent runs inside its WE lane clone, so a missing --repo derives from cwd.
-    usage: 'usage: rearm-review.mjs <pr> [--repo=<owner/name>] [--actor=<name>]  (pr must be a positive integer)',
+    usage: 'usage: rearm-review.mjs <pr> [--repo=<owner/name>] [--actor=<name>] [--round=conflict]  (pr must be a positive integer)',
     // The DURABLE re-arm comment — a readable record that the bounce was repaired and re-armed (not a silent
-    // flip), AND the durable tally `countRearmComments` reads back to survive a restart (#2643). Its first line
-    // MUST be `REARM_COMMENT_MARKER` (single-sourced) so posting and counting can never drift.
-    buildComment: ({ actor, decision }) => [
-      REARM_COMMENT_MARKER,
-      '',
-      `The \`review:changes\` bounce was repaired and re-pushed by ${actor}; the PR is re-armed \`review:pending\`` +
-        ` (an independent re-review is owed).${decision.keepsHuman ? ' `review:human` is kept — a gate-self edit stays human-ceremony-only.' : ''}`,
-      '',
-      'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts.',
-    ].join('\n'),
-    successResult: ({ pr, labels }) => ({ ok: true, pr, rearmed: true, labels }),
+    // flip), AND the durable tally the matching counter reads back to survive a restart (#2643). Its first line
+    // MUST be the matching marker (single-sourced) so posting and counting can never drift.
+    buildComment: isConflictRound
+      ? ({ actor, decision }) => [
+          CONFLICT_FIX_COMMENT_MARKER,
+          '',
+          `A mechanical conflict-resolution round (no other edits) was applied by ${actor}; the PR is re-armed` +
+            ` \`review:pending\` (an independent re-review is owed).${decision.keepsHuman ? ' `review:human` is kept — a gate-self edit stays human-ceremony-only.' : ''}`,
+          '',
+          'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts. ' +
+            'This round is counted against its OWN, smaller conflict-fix cap (#xkmu3gv), never the ordinary negotiation cap.',
+        ].join('\n')
+      : ({ actor, decision }) => [
+          REARM_COMMENT_MARKER,
+          '',
+          `The \`review:changes\` bounce was repaired and re-pushed by ${actor}; the PR is re-armed \`review:pending\`` +
+            ` (an independent re-review is owed).${decision.keepsHuman ? ' `review:human` is kept — a gate-self edit stays human-ceremony-only.' : ''}`,
+          '',
+          'The fix agent did NOT clear the review — a human `/review` (or the drain AI-review convergence pass) re-verdicts.',
+        ].join('\n'),
+    successResult: ({ pr, labels }) => ({ ok: true, pr, rearmed: true, labels, round: isConflictRound ? 'conflict' : 'ordinary' }),
     refusalResult: ({ pr, decision }) => ({ ok: false, pr, reason: decision.reason }),
   });
 }

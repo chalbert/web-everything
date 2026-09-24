@@ -1190,6 +1190,7 @@ describe('the watchdog shares NONE of the driver\'s own decision logic', () => {
     // watchdog's dependency surface without a test telling them. Adding a module is fine; adding one silently
     // is not. (`import-graph.mjs`'s own header recommends exactly this shape.)
     expect(importGraph(ENTRY).files.map((f) => f.split('/').pop()).sort()).toEqual([
+      'bounded-child.mjs',          // #x5n4zn3 — branch-sync.mjs's gitRun budget (resolveChildTimeoutMs) only
       'branch-sync.mjs',            // gitRun / notifyDesktop / decideEscalation / defaultAppendLog (#3472)
       'driver-mode.mjs',            // the launch-posture sidecar's GRAMMAR — bounded vs resident, path+parse only
       'driver-watchdog.mjs',

@@ -44,13 +44,19 @@ import { runGhSync } from './gh-throttle.mjs';
 
 /** The `--json` fields the label arc reads about a PR. Named once so a second adapter supplies the same shape
  *  rather than guessing at it, and so a stub in a test cannot drift from what the real one returns. */
-export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt', 'title']);
+export const PR_STATE_FIELDS = Object.freeze(['labels', 'headRefOid', 'headRefName', 'state', 'body', 'createdAt', 'title', 'comments']);
 // `title` supplies delegation trial descriptions on this same call, with no extra hop.
 // `createdAt` (#3067) rides the SAME call — one more json field, no extra hop, the pattern #2844 used for
 // `body` and #2953 for `state`. It is what turns a MISSING `authored-by-actor` stamp from an assumption into a
 // checkable comparison: a PR opened after `STAMP_REGIME_START` and now lacking a stamp had one STRIPPED, while
 // an older one simply never had it. Without this field `decideClearerIndependence` cannot tell the two apart
 // and tolerates both as `unknown-author` — the tolerance #3067 exists to bound.
+// `comments` (#x9krtkb) rides the SAME call too, for the ONE target that needs to read them back: `restamp`
+// must know whether the acceptance it is carrying across a drain-authored rebase was a HUMAN clearance
+// (`parseLatestHumanClearedSha` in `we:scripts/lib/review-escalation.mjs`), and there is no seam to fetch them
+// separately from the pure decider below. Before this the restamp path had NO visibility into the PR's own
+// comments at all — it could not have carried the `cleared-human` marker forward even if it tried. Every OTHER
+// target ignores the field; one more json key on an existing `gh pr view` call costs nothing extra callers pay.
 
 /**
  * The argv a `gh` adapter runs for each operation. PURE, and exported SEPARATELY from the adapter so a test can

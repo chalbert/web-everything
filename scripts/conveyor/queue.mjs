@@ -33,6 +33,7 @@ import {
 import { readField } from '../backlog/frontmatter.mjs';
 import { idFromName, normalizeId } from '../backlog/id.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 const GRN = '\x1b[32m';
 const DIM = '\x1b[2m';
@@ -95,8 +96,11 @@ function kindOf(num) {
 function readinessOf(num) {
   if (process.env.CONVEYOR_NO_READY_CHECK) return { checked: false, ready: false };
   try {
+    // #x5n4zn3 — was bare (no timeout); best-effort readiness check, so a bound here just means "checked: false"
+    // instead of blocking the add.
     const out = execFileSync('node', [BACKLOG_CLI, 'build-queue', '--json'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     const q = JSON.parse(out);
     const rows = Array.isArray(q?.queue) ? q.queue : [];
