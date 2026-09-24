@@ -1,4 +1,5 @@
 ---
+bornAs: xuctzoz
 kind: story
 size: 3
 parent: "3383"
@@ -19,11 +20,11 @@ PR #2542's O(lanes×heads) `git cherry` loop in `we:scripts/lane-pool.mjs` was m
 real `we:scripts/readiness/dispatch-plan.mjs`/`we:scripts/readiness/conveyor-state.mjs` CLIs with no
 pool-root override, so they shelled the REAL `we:scripts/lane-pool.mjs list --acquirable`/`status
 --json` against the real `~/workspace/.lanes` pool. 13 concurrent lane suites hammered it at once —
-load average 70-88, drain/review/tests stalled over an hour. A concurrent sibling item (#x7xv2xt,
+load average 70-88, drain/review/tests stalled over an hour. A concurrent sibling item (#3991,
 already landed) fixed those two specific tests at the source (fixture mode / `--free-lanes` /
 `--no-lane-pool`, plus `we:scripts/lib/bounded-child.mjs`'s timeout+reaper for
 `we:scripts/readiness/dispatch-plan.mjs`'s own spawns). This item adds the STRUCTURAL BACKSTOP
-#x7xv2xt didn't: `guardedPoolRoot` (throws when `VITEST` is set and no `LANE_POOL_ROOT` override / no
+#3991 didn't: `guardedPoolRoot` (throws when `VITEST` is set and no `LANE_POOL_ROOT` override / no
 explicit opt-out was given), which `we:scripts/lane-pool.mjs` now resolves through instead of the bare
 `defaultPoolRoot` — so a FUTURE test that forgets the fixture-mode flags still fails loudly instead of
 quietly hammering the shared pool.

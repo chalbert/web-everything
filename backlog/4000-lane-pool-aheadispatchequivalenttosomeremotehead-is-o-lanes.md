@@ -1,4 +1,5 @@
 ---
+bornAs: xjyn3fg
 kind: task
 parent: "3383"
 status: resolved
@@ -37,4 +38,4 @@ lanes and the already-fixed litter-allowlist behavior are unchanged.
    the real pool right now and each pays one real `git cherry` against a large, actively-diverging monorepo
    history — a real, bounded cost, not a residual unbounded factor.
 3. Read-only, against the live plateau-app pool: the acquirable set (1,2,4,6,7,9,10,11,12,14) is unchanged
-   from #3383/xddtgll's own verification (confirmed again here, ~4s).
+   from #3383/3986's own verification (confirmed again here, ~4s).

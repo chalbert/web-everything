@@ -1,4 +1,5 @@
 ---
+bornAs: x5n4zn3
 kind: story
 size: 3
 parent: "3383"
@@ -17,7 +18,7 @@ because nothing spawned by `we:scripts/lane-pool.mjs`/`we:scripts/readiness/conv
 `we:scripts/readiness/dispatch-plan.mjs` had a per-call timeout — a runaway `git cherry` loop just ran
 until it finished. Existing evidence this class of hang recurs: the drain's own top-level 45-minute
 PASS cap (a coarse backstop, not a per-step one) and observed `spawnSync claude ETIMEDOUT` failures
-from delegated-model calls. A sibling item (#x7xv2xt, already landed) built the mechanism —
+from delegated-model calls. A sibling item (#3991, already landed) built the mechanism —
 `we:scripts/lib/bounded-child.mjs` (`runBounded` + `installChildReaper`: hard timeout, own process
 group, dies with its parent) — and wired it into `we:scripts/readiness/dispatch-plan.mjs`'s own
 collector calls only. This item is the ROLLOUT: wire the same `we:scripts/lib/bounded-child.mjs` into

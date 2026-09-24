@@ -1,4 +1,5 @@
 ---
+bornAs: xt962ct
 kind: story
 size: 5
 parent: "3383"

@@ -1,9 +1,10 @@
 ---
+bornAs: x1sd02j
 kind: story
 size: 3
 parent: "3383"
 status: open
-blockedBy: ["xdk2nt2"]
+blockedBy: ["3996"]
 dateOpened: "2026-09-23"
 tags: []
 ---

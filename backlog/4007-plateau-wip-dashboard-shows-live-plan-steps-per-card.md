@@ -1,10 +1,11 @@
 ---
+bornAs: xnkllzn
 kind: story
 size: 3
 parent: "3383"
 status: open
 locus: plateau-app
-blockedBy: ["xuk0e6i"]
+blockedBy: ["4006"]
 dateOpened: "2026-09-23"
 tags: []
 ---
