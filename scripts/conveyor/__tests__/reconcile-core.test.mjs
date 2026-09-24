@@ -31,7 +31,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, CI_HEAL_ROUND_CAP,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
@@ -1296,5 +1296,59 @@ describe('markSelfReportedDone + assessLiveness — self-reported completion (xp
     const pr = pr1563({ number: 2513, labels: lbl('review:pending'), comments: [] });
     const plan = planReconcile({ prs: [pr], agents: [listed], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
+  });
+});
+
+// ── #3383 continuation — a session whose OWN transcript went stale is finished too, self-report or not ───────
+describe('markHungSessions + assessLiveness — hung-transcript detection (epic #3383 continuation, live 2026-09-24)', () => {
+  const T0 = Date.parse('2026-09-24T18:40:37.475Z'); // review-2599's real startedAt/updatedAt, measured live.
+  // The live shape: `claude agents` still says `working` (review-2582's real state) or `blocked` (the other
+  // five), with NO completion record ever reaching `status: done` — the exact gap this axis exists to close.
+  const workingRow = { name: 'review-2582', state: 'working', status: 'idle', startedAt: T0, pid: 4242, cwd: '/lanes/lane-9', sessionId: 's-2582' };
+  const hungFor = (info) => (a, nowMs, thresholdMs) => (a?.name === 'review-2582' ? { hung: true, reason: info?.reason ?? 'stale-no-activity', ageMs: nowMs - T0 } : { hung: false, reason: 'fresh', ageMs: 0 });
+
+  it('THE LIVE CASE: a `working` row whose transcript is confirmed stale → hung, so the PR is re-dispatched', () => {
+    const now = T0 + 45 * 60_000; // 45 minutes of transcript silence
+    const [a] = markHungSessions([workingRow], hungFor(), now, 30 * 60_000);
+    expect(a.hung).toBe(true);
+    expect(a.hungReason).toBeTruthy();
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('overrides a LIVE pid — the whole point of this axis is to disprove liveness the listing still asserts', () => {
+    const now = T0 + 45 * 60_000;
+    const [a] = markHungSessions([workingRow], hungFor(), now, 30 * 60_000);
+    // pidAlive is still true on the row; assessLiveness must not read it as live-process once hung is set.
+    expect(assessLiveness([{ agent: { ...a, pidAlive: true }, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('a resolver that answers not-hung, throws, or is absent leaves the row untouched', () => {
+    const now = T0 + 45 * 60_000;
+    expect(markHungSessions([workingRow], () => ({ hung: false }), now, 30 * 60_000)[0]).toBe(workingRow);
+    expect(markHungSessions([workingRow], () => { throw new Error('unreadable transcript'); }, now, 30 * 60_000)[0]).toBe(workingRow);
+    expect(markHungSessions([workingRow], () => null, now, 30 * 60_000)[0]).toBe(workingRow);
+  });
+
+  it('a row already `state: done` or `selfReportedDone` is never re-classified — no double work', () => {
+    const done = { ...workingRow, state: 'done' };
+    const selfReported = { ...workingRow, state: 'blocked', selfReportedDone: true };
+    const alwaysHung = () => ({ hung: true, reason: 'stale-no-activity' });
+    expect(markHungSessions([done], alwaysHung, T0 + 999_999, 30 * 60_000)[0]).toBe(done);
+    expect(markHungSessions([selfReported], alwaysHung, T0 + 999_999, 30 * 60_000)[0]).toBe(selfReported);
+  });
+
+  it('end to end: a review:pending PR bound only to a hung `working` reviewer is owed a review again', () => {
+    const pr = pr1563({ number: 2582, labels: lbl('review:pending'), comments: [] });
+    const now = T0 + 45 * 60_000;
+    const agents = markHungSessions([workingRow], hungFor(), now, 30 * 60_000);
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2582 })]);
+  });
+
+  it('the same PR with the RAW listing (never marked hung) stays refused as live-process — the bug this fixes', () => {
+    const pr = pr1563({ number: 2582, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
   });
 });

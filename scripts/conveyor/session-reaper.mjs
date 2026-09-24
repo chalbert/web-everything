@@ -114,6 +114,7 @@ import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
+import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -226,6 +227,22 @@ export function sessionTarget(name) {
  * rows. Omitting every new option (or passing a non-function `groundTruthFor`) makes this byte-identical to
  * the pre-#3383 function — every addition here is strictly additive.
  *
+ * AXIS 0 — HUNG-TRANSCRIPT DETECTION (epic #3383 continuation), checked FIRST, BEFORE even the
+ * `neverReapWorking`/`state:'working'` guard below, and it is the ONLY axis in this function allowed to run
+ * ahead of that guard. Every axis below it treats `neverReapWorking` as authoritative because the signal it
+ * is weighing (a completion record, ground truth, an idle timer) says nothing about whether the LISTING's own
+ * `state: 'working'` is honest — so a daemon that wants "trust the listing over everything else" gets exactly
+ * that. Hung-detection exists for the OPPOSITE reason: its entire premise is that `state: 'working'` CAN BE
+ * WRONG — a session can crash or hang without ever telling the CLI to update its own state — and the way it
+ * proves that is by reading the session's OWN transcript file directly (see
+ * `we:scripts/conveyor/hung-session.mjs`), independent of anything the listing or the agent chooses to report.
+ * Letting `neverReapWorking` veto THIS axis would mean the one daemon mode built to distrust a stale listing
+ * is precisely the mode where a session the listing is WRONG about can never be reaped — the exact live
+ * failure (chalbert/web-everything `review-2582`, state `working`, dead) this axis exists to close. Injected
+ * as `hungFor(session)`, mirroring `completionFor`/`groundTruthFor`'s own try/catch-to-null discipline in the
+ * caller — never called for a session missing `cwd`/`sessionId`, and any read failure answers "not hung",
+ * never a guess.
+ *
  * @param {object|null} session
  * @param {((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null} [groundTruthFor]
  * @param {{
@@ -234,13 +251,23 @@ export function sessionTarget(name) {
  *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
  *   idleThresholdMs?: number,
  *   now?: number,
+ *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
-  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now() } = opts || {};
+  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(), hungFor = null } = opts || {};
   const base = classifySessionReap(session, { allowedCwd });
   if (base.reap || base.reason !== 'not-terminal') return base;
+
+  // Axis 0 — hung-transcript detection. See doc above for why this runs BEFORE `neverReapWorking` below, and
+  // why that override is safe: it is independently confirming the listing's `state` is wrong, not ignoring it.
+  if (typeof hungFor === 'function') {
+    let info = null;
+    try { info = hungFor(session); } catch { info = null; }
+    if (info && info.hung === true) return { reap: true, reason: `hung-transcript:${info.reason || 'stale'}` };
+  }
+
   if (neverReapWorking && session?.state === 'working') return base; // strictly-stricter mode — see doc above
 
   // Axis 1 — the session's own completion record (see doc above for why this is tried first).
@@ -288,6 +315,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   completionFor?: ((name:string) => ({done:boolean}|null))|null,
  *   idleThresholdMs?: number,
  *   now?: number,
+ *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -435,6 +463,26 @@ export function makeCompletionResolver({ dir } = {}) {
 }
 
 /**
+ * Build a `hungFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth} (epic
+ * #3383 continuation): reads the session's OWN transcript-staleness verdict via
+ * `we:scripts/conveyor/hung-session.mjs#readHungInfo` — the SAME shared detector `reconcile-core.mjs`'s
+ * `markHungSessions` uses, so this daemon and the reconciler can never disagree about what "hung" means.
+ * `thresholdMs` defaults to `resolveHungThresholdMs()` (`WE_HUNG_TRANSCRIPT_MINUTES`, default 30 min), read
+ * ONCE here in the IO shell, never inside the pure classifier.
+ * @param {{thresholdMs?:number, now?:()=>number}} [io]
+ * @returns {(session:object) => ({hung:boolean, reason?:string}|null)}
+ */
+export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now = Date.now } = {}) {
+  return function hungFor(session) {
+    try {
+      return readHungInfo(session, now(), thresholdMs);
+    } catch {
+      return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
  * The idle-timeout backstop's default threshold (6 hours) — see {@link classifySessionReapWithGroundTruth}'s
  * "Axis 3" doc for exactly when this applies (a `blocked` session, name+cwd already confirmed spawned by THIS
  * checkout, that neither the completion-record nor the backlog/PR axis could confirm either way). Generous on
@@ -529,6 +577,7 @@ function parseFlags(argv) {
  *   dryRun?: boolean,
  *   stop?: Function,
  *   log?: (msg:string) => void,
+ *   hungFor?: ((session:object) => object|null)|null,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
@@ -546,6 +595,7 @@ export function runSessionReaperPass({
   dryRun = false,
   stop = stopSessionWithRetry,
   log: logFn = log,
+  hungFor = makeHungResolver(),
 } = {}) {
   let sessions;
   try {
@@ -568,7 +618,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -644,8 +694,14 @@ function main(argv) {
   // `--idle-hours=<n>` enables the idle-timeout backstop (axis 3) — `0`/omitted keeps it off, matching the
   // pure core's own default.
   const idleThresholdMs = flags['idle-hours'] !== undefined ? Number(flags['idle-hours']) * 60 * 60 * 1000 : 0;
+  // `--no-hung-detection` is the same kind of rollback escape hatch, for the newer (epic #3383 continuation)
+  // hung-transcript axis — default ON, since (unlike the idle backstop) this axis is meant to actually run.
+  // `--hung-minutes=<n>` overrides `WE_HUNG_TRANSCRIPT_MINUTES` for this one invocation.
+  const hungFor = flags['no-hung-detection']
+    ? null
+    : makeHungResolver(flags['hung-minutes'] !== undefined ? { thresholdMs: Number(flags['hung-minutes']) * 60 * 1000 } : {});
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor });
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
