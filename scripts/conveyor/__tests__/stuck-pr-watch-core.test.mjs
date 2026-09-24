@@ -88,7 +88,8 @@ describe('isNeverStuckPr — the three exclusions', () => {
     expect(isNeverStuckPr({ labels: [PENDING], isDraft: true })).toBe(true);
   });
   it('a stood-down PR is never stuck', () => {
-    const comments = [{ body: buildStandDownComment({ reason: 'gate-red' }) }];
+    // #3383 — a trusted author is now required for the stand-down marker to count.
+    const comments = [{ body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'web-everything' } }];
     expect(isNeverStuckPr({ labels: [CHANGES], comments })).toBe(true);
   });
   it('an ordinary PR is not excluded', () => {

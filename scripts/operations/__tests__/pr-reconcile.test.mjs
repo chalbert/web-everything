@@ -11,7 +11,9 @@ const row = (number = 1, extra = {}) => ({
   number, title: 'fixture', state: 'OPEN', headRefOid: `sha${number}`,
   mergeable: 'MERGEABLE', labels: [], ...extra,
 });
-const comment = (body, createdAt = '2026-09-01T00:00:00Z') => ({ body, createdAt, url: 'https://example.com/comment' });
+// #3383 — every marker reader now requires a TRUSTED author (`we:scripts/lib/marker-authorship.mjs`); these
+// fixtures represent legitimate automation-posted comments unless a test says otherwise.
+const comment = (body, createdAt = '2026-09-01T00:00:00Z') => ({ body, createdAt, url: 'https://example.com/comment', author: { login: 'web-everything' } });
 const check = (name = 'test', conclusion = 'success') => ({ name, status: 'completed', conclusion });
 
 function fixture({ rows = [row()], comments = {}, checks = {} } = {}) {

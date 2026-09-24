@@ -369,7 +369,8 @@ describe('shapePrs — gh pr list → the in-flight PR shape', () => {
     const pr = shapePrs([
       { number: 2223, headRefName: 'lane/3383-x', labels: [{ name: 'review:changes' }], comments: [
         { body: 'ordinary comment' },
-        { body: '🛑 conveyor fix — stood down, human judgment needed\n\nfoo' },
+        // #3383 — a trusted author is now required for this to count.
+        { body: '🛑 conveyor fix — stood down, human judgment needed\n\nfoo', author: { login: 'web-everything' } },
       ] },
     ])[0];
     expect(pr.stoodDown).toBe(true);
