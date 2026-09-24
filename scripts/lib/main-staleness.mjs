@@ -123,6 +123,24 @@ export function staleRemedy(st, base) {
   }
 }
 
+/** The stable substring embedded in {@link assertMainNotStale}'s own thrown refusal message — the ONE marker a
+ *  downstream caller that only ever sees the error's flattened first-line string (e.g. a `forEachRepo`
+ *  per-repo `{repo, error}` capture, which keeps `String(e.message).split('\n')[0]` and discards the Error
+ *  object itself, or any `.code` it might have carried) can match on to recognize "this specific tick failure
+ *  IS the stale-main refusal", as opposed to any other tick failure (a `gh` outage, a rate limit, a genuine
+ *  bug) that lands in the exact same `refusals`/`failed` bucket. Used at BOTH the throw site below and by
+ *  {@link isStaleMainRefusalMessage}, so a future wording change can never silently break detection — there is
+ *  only one place this string is written. (#3383 bug 1 — the fix-dispatch and review daemons need this to
+ *  react to a mid-tick stale refusal immediately instead of wasting the rest of the tick.) */
+export const STALE_MAIN_REFUSAL_MARKER = 'STALE code from this checkout';
+
+/** Does this tick-failure message look like {@link assertMainNotStale}'s own refusal? See
+ *  {@link STALE_MAIN_REFUSAL_MARKER}. Accepts anything falsy/non-string as "no" (a null/undefined `why`/
+ *  `error` field is common on the non-error branches of the same shape). */
+export function isStaleMainRefusalMessage(message) {
+  return typeof message === 'string' && message.includes(STALE_MAIN_REFUSAL_MARKER);
+}
+
 /**
  * ASSERT the calling checkout is not behind `origin/<base>` — refuse LOUDLY rather than silently act on stale
  * code from this checkout's own import path (#3439). A checkout that is merely BEHIND (no local commits ahead)
@@ -149,7 +167,7 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main', label 
   if (st && st.action === 'warn') {
     throw new Error(
       `${label}: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
-      + 'dispatch a review that would run STALE code from this checkout\'s own import path (#3439). '
+      + `dispatch a review that would run ${STALE_MAIN_REFUSAL_MARKER}'s own import path (#3439). `
       + staleRemedy(st, base),
     );
   }
