@@ -15,4 +15,6 @@ Found by the #3867 prep skeptic. we:scripts/review-set-label.mjs:1030 logs a ses
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `node --check` passes for `we:scripts/review-set-label.mjs`, `we:scripts/conveyor/delegation-trial-gate.mjs`, `we:scripts/lib/provider-routing.mjs`, and every declared file exists on main.
+2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
+3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
