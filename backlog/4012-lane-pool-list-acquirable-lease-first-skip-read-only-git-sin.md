@@ -1,4 +1,5 @@
 ---
+bornAs: xn432dz
 kind: story
 size: 5
 status: resolved
@@ -25,6 +26,6 @@ Observed live 2026-09-23: fseventsd pinned at ~100% CPU / ~25% RAM. Root cause: 
 - Lease-first in `laneAcquirableInfo` (list/provision) and `cmdAcquire`'s `infoFor` auto-pick via the pure `leaseDisqualifiesAcquire` (we:scripts/lib/lane-lease.mjs).
 - `GIT_OPTIONAL_LOCKS=0` on a subcommand allowlist of read-only git calls in the `git`/`tryGit` wrapper.
 - `list --acquirable` single-flight (atomic mkdir lock under the pool dir) + result cache (`--cache-ttl-ms` / `LANE_POOL_LIST_CACHE_TTL_MS`, default 30s, 0 disables; lease-marker fingerprint invalidation; provision/refresh invalidate), `--no-cache`, `--limit=N`, `--scan-timeout-ms` / `LANE_POOL_LIST_SCAN_TIMEOUT_MS` (default 120s).
-- The `git cherry` per-remote-head fan-out (the coordinator's follow-up) landed separately on main as #xjyn3fg while this was in flight; this item keeps that fix unchanged and does not touch it.
+- The `git cherry` per-remote-head fan-out (the coordinator's follow-up) landed separately on main as #4000 while this was in flight; this item keeps that fix unchanged and does not touch it.
 - Live measurement on the real 118-lane pool (with 9 old-code scans still running): fresh scan 43s, cached re-call under 1s.
 
