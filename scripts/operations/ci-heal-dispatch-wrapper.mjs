@@ -402,6 +402,11 @@ export function buildCiHealAgentEnv({
 
 const CI_HEAL_AGENT_PROVIDER = {
   name: 'claude-restricted-ci-heal',
+  // #3850 Fork 2 — the CANONICAL executed vendor (`DELIVERY_VENDOR_PROVIDERS`'s own vocabulary,
+  // `we:scripts/lib/dispatch-contracts.mjs`), never `name` (which is wrapper-specific, e.g.
+  // `claude-restricted-ci-heal`). `dispatchCiHeal` reads this and stamps it into `ciHealMark`'s durable
+  // comment — see that call site's own comment for why a ci-heal records this in a COMMENT, never a label.
+  vendor: 'claude',
   async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item, reason } = {},
     {
@@ -442,6 +447,8 @@ const CI_HEAL_AGENT_PROVIDER = {
  */
 const CI_HEAL_CODEX_PROVIDER = {
   name: 'codex',
+  // #3850 Fork 2 — see `CI_HEAL_AGENT_PROVIDER.vendor`'s own comment.
+  vendor: 'codex',
   async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item, reason } = {},
     {
@@ -578,13 +585,27 @@ export async function runCiHealAgentToCompletion(
  *
  * `--actor` names the wrapper rather than defaulting to "conveyor CI-heal agent": the agent no longer drives
  * this arc, and a comment that said it did would be the stale-note class #3640 had to correct elsewhere.
+ *
+ * `executedVendor` (#3850 Fork 2, we:backlog/3850-…md) — the REAL vendor that just ran this heal
+ * (`dispatchCiHeal`'s own `provider.vendor`, never `routed`/a prediction). Passed through as `--vendor=` so
+ * `ci-heal-mark.mjs#buildCiHealComment` can stamp it into the durable comment — a COMMENT, per this file's own
+ * hardest rule (never a label; see this function's own docblock). This is the DATA half of Fork 2's land-seam
+ * mechanism for `ci-heal`: since a ci-heal can never write a review label itself, a delegated-executor hold
+ * cannot be enforced from inside this wrapper — it has to be read back from the PR's own history by whatever
+ * decides the PR's mergeability. `ci-heal-mark.mjs#parseCiHealExecutedVendor` is that reader, tested against
+ * this exact comment shape. NOT YET WIRED into the drain's own merge decision (`merge-ai-prs.mjs` /
+ * `decideReviewGate`) — see this repo's own `#3493` precedent for the identical shape (a new gate predicate
+ * built and tested, its real call-site value deliberately held back until a real, live-reachable writer
+ * exists) — filed as its own fast-follow rather than silently wired blind into a 4,000-line production gate
+ * this build did not audit end-to-end.
  */
-export function ciHealMark({ pr, repo, reason }, { run: runFn = run } = {}) {
+export function ciHealMark({ pr, repo, reason, executedVendor = 'claude' }, { run: runFn = run } = {}) {
   const args = [
     'scripts/conveyor/ci-heal-mark.mjs', String(pr), `--repo=${repo}`,
     '--actor=the #3642 mechanical CI-heal wrapper',
   ];
   if (reason && CI_HEAL_REASONS.includes(reason)) args.push(`--reason=${reason}`);
+  if (executedVendor && executedVendor !== 'claude') args.push(`--vendor=${executedVendor}`);
   runFn('node', args);
 }
 
@@ -837,7 +858,8 @@ export async function dispatchCiHeal(
   // and the lease refuses if someone else advanced the ref since the fetch above — a safety net against
   // clobbering a concurrent human `/finish`. (`fix-agent-ci-brief.md` step 6's own rule.)
   pushLaneRef({ lanePath, laneRef: target.headRefName, forceWithLease: true }, { run: runFn });
-  ciHealMark({ pr: planned.pr, repo: planned.repo, reason: planned.reason }, { run: runFn });
+  // #3850 Fork 2 — `provider.vendor` is the REAL executed vendor (see `ciHealMark`'s own docblock).
+  ciHealMark({ pr: planned.pr, repo: planned.repo, reason: planned.reason, executedVendor: provider.vendor ?? 'claude' }, { run: runFn });
 
   reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 'ci-healed', label: rebased.status } }, { run: runFn });
   releaseAllPools(planned.sessionSlug, { run: runFn });

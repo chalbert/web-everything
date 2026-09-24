@@ -341,6 +341,13 @@ export function buildFixAgentEnv({
 
 const FIX_AGENT_PROVIDER = {
   name: 'claude-restricted-fix',
+  // #3850 Fork 2 — the CANONICAL executed vendor, same vocabulary/reasoning as
+  // `deliver-item-wrapper.mjs#CLAUDE_RESTRICTED_PROVIDER.vendor`'s own comment. `dispatchFix` needs NO new
+  // logic keyed on this field (see `rearmReview`'s own call site below for why: a `fix` dispatch only ever
+  // targets a PR that ALREADY carries `review:changes`/`review:human`, so the existing, vendor-agnostic
+  // `review:changes → review:pending` re-arm already gives every fix push — delegated or not — Fork 2's
+  // land-seam hold). Kept for parity/audit with the sibling `build`/`ci-heal` providers.
+  vendor: 'claude',
   async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
     {
@@ -391,6 +398,8 @@ const FIX_AGENT_PROVIDER = {
  */
 const FIX_CODEX_PROVIDER = {
   name: 'codex',
+  // #3850 Fork 2 — see `FIX_AGENT_PROVIDER.vendor`'s own comment.
+  vendor: 'codex',
   async spawn(
     { sessionId, prompt, resumeSessionId = null, lanePath, sessionSlug, pr, item } = {},
     {
@@ -829,6 +838,15 @@ export async function dispatchFix(
   }
 
   pushLaneRef({ lanePath, laneRef: target.headRefName }, { run: runFn });
+  // #3850 Fork 2 — NO `executedVendor` check needed HERE, unlike `deliver-item-wrapper.mjs#decideParkMode`.
+  // `resolveFixTarget` (this file's own read, above) only ever resolves a `fix` dispatch against a PR that
+  // ALREADY carries `review:changes` (a reviewer bounce) or `review:human` (an advisory finding on a gate-self
+  // PR) — a `fix` never fires on a `label-on-green` PR with no review hold at all. So `rearmReview`'s existing,
+  // vendor-agnostic swap (`review:changes → review:pending`, never `review:accepted`, never clearing
+  // `review:human`) ALREADY gives every fix push — Claude-executed or delegated — an independent re-review
+  // before it can land: Fork 2's land-seam hold, by construction, with no new code. `provider.vendor` still
+  // rides through to `ciHealMark`'s own sibling data-recording pattern would be redundant here (there is
+  // nothing this comment does not already re-arm), so it is deliberately NOT threaded into this call.
   rearmReview({ pr: planned.pr, repo: planned.repo }, { run: runFn });
 
   reportDone({ sessionSlug: planned.sessionSlug, classified: { outcome: 're-armed', label: null } }, { run: runFn });

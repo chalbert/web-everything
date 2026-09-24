@@ -1717,6 +1717,97 @@ describe('decideParkMode (#3627 gap 4 — the real scoreEscalation rubric)', () 
   });
 });
 
+// ================================================================================================
+// #3850 Fork 2 (RATIFIED, (a)) — a `full` route whose ACTUAL executed vendor is not Claude may not land on
+// `label-on-green` alone, whatever its escalation score. `executedVendor` is `decideParkMode`'s new, additive
+// (default `'claude'`) param; every case above (which never passes it) proves the default changes nothing.
+// ================================================================================================
+describe('decideParkMode (#3850 Fork 2 — the land-seam hold on a delegated executed vendor)', () => {
+  const noVerdict = { verdict: 'land', dismissed: [] };
+  const cleanRun = vi.fn((cmd, args) => {
+    if (args.includes('merge-base')) return 'abc123\n';
+    if (args.includes('diff')) return '2\t1\treports/2026-09-09-note.md\n';
+    throw new Error(`unexpected: ${cmd} ${args}`);
+  });
+
+  it('a Claude-executed clean diff still gets label-on-green — explicit executedVendor="claude" changes nothing', () => {
+    const result = decideParkMode(
+      {
+        report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-note.md'],
+        lanePath: '/lanes/lane-1', executedVendor: 'claude',
+      },
+      { run: cleanRun },
+    );
+    expect(result.mode).toBe('label-on-green');
+    expect(result.label).toBe('ready-to-merge');
+  });
+
+  it('a non-Claude-executed clean diff is FORCED to park review:pending instead of label-on-green', () => {
+    const result = decideParkMode(
+      {
+        report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-note.md'],
+        lanePath: '/lanes/lane-1', executedVendor: 'codex',
+      },
+      { run: cleanRun },
+    );
+    expect(result.mode).toBe('park');
+    expect(result.label).toBe('review:pending');
+    expect(result.reason).toMatch(/#3850 Fork 2/);
+    expect(result.reason).toMatch(/codex/);
+  });
+
+  it('a non-Claude executor never DOWNGRADES an existing statute/human-judgment/escalate park — those still return review:human, unaffected by executedVendor', () => {
+    const result = decideParkMode({
+      report: { outcome: 'done' }, convergeVerdict: noVerdict,
+      filesTouched: ['docs/agent/platform-decisions.md'], executedVendor: 'codex',
+    });
+    expect(result).toEqual({ mode: 'park', label: 'review:human', reason: 'statute/policy-core path touched' });
+  });
+
+  it('a non-Claude executor never DOWNGRADES the real scoreEscalation rubric\'s own review:pending — same label, real reason', () => {
+    const bigRun = vi.fn((cmd, args) => {
+      if (args.includes('merge-base')) return 'abc123\n';
+      if (args.includes('diff')) return '300\t200\treports/2026-09-09-big.md\n';
+      throw new Error(`unexpected: ${cmd} ${args}`);
+    });
+    const result = decideParkMode(
+      {
+        report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-big.md'],
+        lanePath: '/lanes/lane-1', executedVendor: 'codex',
+      },
+      { run: bigRun },
+    );
+    expect(result.mode).toBe('park');
+    expect(result.label).toBe('review:pending');
+    // The REAL rubric reason, not the Fork 2 reason — scoreEscalation already forced this park.
+    expect(result.reason).toMatch(/scoreEscalation/);
+  });
+
+  it('omitting executedVendor entirely defaults to "claude" — byte-identical to every pre-#3850 caller', () => {
+    const result = decideParkMode(
+      { report: { outcome: 'done' }, convergeVerdict: noVerdict, filesTouched: ['reports/2026-09-09-note.md'], lanePath: '/lanes/lane-1' },
+      { run: cleanRun },
+    );
+    expect(result.mode).toBe('label-on-green');
+  });
+});
+
+// ================================================================================================
+// #3850 Fork 2 — `deliverItem`'s own two registered providers each carry a `vendor` field in
+// `DELIVERY_VENDOR_PROVIDERS`'s canonical vocabulary (never their own `name`, which is not that vocabulary —
+// `CLAUDE_RESTRICTED_PROVIDER.name` is `'claude-restricted'`, not `'claude'`). This is the ACTUAL evidence
+// `decideParkMode`'s `executedVendor` reads at the real call site inside `deliverItem` — see that call site's
+// own `#3850 Fork 2` comment.
+// ================================================================================================
+describe('DELIVERY_AGENT_PROVIDERS (#3850 Fork 2 — each provider names its own canonical vendor)', () => {
+  it('CLAUDE_RESTRICTED_PROVIDER vendor is "claude"', () => {
+    expect(DELIVERY_AGENT_PROVIDERS['claude-restricted'].vendor).toBe('claude');
+  });
+  it('CODEX_PROVIDER vendor is "codex"', () => {
+    expect(DELIVERY_AGENT_PROVIDERS.codex.vendor).toBe('codex');
+  });
+});
+
 /**
  * #3627 bug 13 — a REALISTIC `run.mjs open-pr --json` stdout, never the flat `{pr, url}` shape a prior test
  * (and a prior fix attempt) wrongly assumed. The real shape is the FULL run-outcome envelope
@@ -2314,5 +2405,28 @@ describe('deliverItem (#3627 bug 13 — the success-path result string names the
     );
     expect(result.result).toContain('PR #4321');
     expect(result.result).not.toContain('undefined');
+  });
+
+  // #3850 Fork 2 — END-TO-END through the REAL `deliverItem`, not just `decideParkMode` in isolation: proves
+  // the real spawned `provider.vendor` actually reaches the park decision and shows up in the real PR outcome.
+  it('a Claude-executed delivery (provider.vendor="claude", the real registered CLAUDE_RESTRICTED_PROVIDER shape) opens label-on-green (ready-to-merge)', async () => {
+    const result = await deliverItem(
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { spawn: vi.fn(), vendor: 'claude' },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+    // `deliverItem`'s own `finish()` returns only `{item, result}` — `result` is the human-readable outcome
+    // string `PR #<n> (<park label>)` (see its own `finish(\`PR #${prResult.pr} (${parkDecision.label})\`, …)`
+    // call), so the park mode this test proves is read off THAT string, not a `.park` field that does not exist.
+    expect(result.result).toBe('PR #4321 (ready-to-merge)');
+  });
+
+  it('a non-Claude-executed delivery (provider.vendor="codex", the real registered CODEX_PROVIDER shape) is FORCED to review:pending — never lands unreviewed on label-on-green', async () => {
+    const result = await deliverItem(
+      { item: '9999', lane: 7, scope: [], sessionSlug: 'conveyor-9999', attemptTag: '' },
+      { spawn: vi.fn(), vendor: 'codex' },
+      { newSessionId: () => 'uuid-fixed' },
+    );
+    expect(result.result).toBe('PR #4321 (review:pending)');
   });
 });

@@ -393,7 +393,13 @@ export async function deliverItem(launch, provider = CLAUDE_RESTRICTED_PROVIDER,
     // ---- 5. Map outcome + convergeVerdict + statute-touch to a park mode, via the EXISTING deterministic
     // rubric (`review-escalation.mjs`) — REAL import, SKETCH call (the real `scoreEscalation` signature takes
     // more inputs — diff stats, dismissed-finding counts — than sketched here). -------------------------------
-    const parkDecision = decideParkMode({ report, convergeVerdict, filesTouched: report.filesTouched, lanePath: gate.lanePath });
+    // #3850 Fork 2 — `provider.vendor` is the REAL executed vendor: `provider` is the object that actually
+    // spawned this turn (`runAgentToCompletion` above), never a prediction. Falls back to `'claude'` for a
+    // provider object that predates this field (defence-in-depth only — every registered provider sets it).
+    const parkDecision = decideParkMode({
+      report, convergeVerdict, filesTouched: report.filesTouched, lanePath: gate.lanePath,
+      executedVendor: provider.vendor ?? 'claude',
+    });
 
     // ---- 6. Open the PR through the SAME canonical producer the live brief already uses — REAL CLI surface,
     // verbatim from the live brief's own step 8. `openPr` is a PURE function of its params (no hidden
@@ -718,6 +724,11 @@ function persistDeliverySpawnFailure(sessionSlug, error, opts = {}) {
 
 const CLAUDE_RESTRICTED_PROVIDER = {
   name: 'claude-restricted',
+  // #3850 Fork 2 — the CANONICAL vendor this provider actually spawns, in `DELIVERY_VENDOR_PROVIDERS`'s own
+  // vocabulary (`we:scripts/lib/dispatch-contracts.mjs`, `#agent-vendor-registry`). `decideParkMode` reads
+  // this — never `name` (which varies per wrapper: `claude-restricted`, `claude-restricted-fix`, …) — to
+  // decide whether the PR that spawned it needs Fork 2's land-seam hold.
+  vendor: 'claude',
   // `io` is injectable ONLY so a test can assert what this spawns without touching the real filesystem or a
   // real `claude` process — mirrors this file's existing `{ run: runFn = run }` pattern (e.g.
   // `runGateWithOneRetry`, `runConvergeEdit`). Real call sites (`runAgentToCompletion`,
@@ -829,6 +840,8 @@ const CLAUDE_RESTRICTED_PROVIDER = {
  */
 const CODEX_PROVIDER = {
   name: 'codex',
+  // #3850 Fork 2 — see `CLAUDE_RESTRICTED_PROVIDER.vendor`'s own comment; this is the non-Claude side.
+  vendor: 'codex',
   // Same `(request, io?)` shape as `CLAUDE_RESTRICTED_PROVIDER.spawn` — `io` exists ONLY so a test can assert
   // what this spawns without a real `codex` process or a real filesystem.
   async spawn(
@@ -1765,8 +1778,18 @@ export function computeLaneDiffStats(lanePath, { run: runFn = run, baseRef = 'or
  * On top of all three, the FULL rubric now runs for real: diff stats read off the lane
  * ({@link computeLaneDiffStats}) plus the round's dismissed-finding count feed `scoreEscalation`, and
  * `producerReviewLabel` — the same function `pr-land.mjs` itself uses — turns its verdict into a label.
+ *
+ * #3850 Fork 2 (RATIFIED, (a); we:backlog/3850-…md) — ONE MORE forcing reason, checked last (after every
+ * existing park reason, so a statute/human-judgment/escalate/score park is unchanged): a `full` route whose
+ * ACTUAL executed vendor is not Claude may not land on `label-on-green` alone, whatever its escalation score
+ * — "the PR of a `full` route opens parked `review:pending`… whatever its escalation score" (the card's own
+ * ratified text). `executedVendor` is read from the REAL provider that just spawned (`deliverItem`'s own
+ * `provider.vendor` — see `CLAUDE_RESTRICTED_PROVIDER`/`CODEX_PROVIDER`'s own comments), never from `routed`
+ * (the criteria's recommendation): a `deliveryAgent:` marker that forces Codex despite a Claude-routed
+ * criteria pick still spawns `provider.vendor === 'codex'` here, so it is still bound. Defaults to `'claude'`
+ * so every existing caller (every test that does not pass it) is byte-identical — this is additive-only.
  */
-export function decideParkMode({ report, convergeVerdict, filesTouched, lanePath, crossRepo = false }, { run: runFn = run } = {}) {
+export function decideParkMode({ report, convergeVerdict, filesTouched, lanePath, crossRepo = false, executedVendor = 'claude' }, { run: runFn = run } = {}) {
   const touchesStatute = (filesTouched || []).some((f) => isStatutePath(f) || isPolicyCorePath(f));
   if (touchesStatute) return { mode: 'park', label: 'review:human', reason: 'statute/policy-core path touched' };
   if (report.outcome === 'needs-human-judgment') return { mode: 'park', label: 'review:human', reason: report.reason };
@@ -1780,6 +1803,15 @@ export function decideParkMode({ report, convergeVerdict, filesTouched, lanePath
   const scoreLabel = producerReviewLabel(score);
   if (scoreLabel) {
     return { mode: 'park', label: scoreLabel, reason: `scoreEscalation: ${score.reasons.join('; ') || 'escalated'}`, score };
+  }
+  if (executedVendor !== 'claude') {
+    return {
+      mode: 'park',
+      label: 'review:pending',
+      reason: `#3850 Fork 2 — executed vendor is \`${executedVendor}\`, not Claude (a delegated run); a full `
+        + 'route\'s PR may not land on label-on-green alone until an independent review accepts it',
+      score,
+    };
   }
   return { mode: 'label-on-green', label: 'ready-to-merge', reason: null, score };
 }

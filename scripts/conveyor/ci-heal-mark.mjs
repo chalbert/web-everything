@@ -53,20 +53,73 @@ export function countCiHealComments(comments) {
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#buildCiHealComment — the durable comment body a completed heal posts. Its
  * FIRST line MUST be {@link CI_HEAL_COMMENT_MARKER} (single-sourced) so posting and counting can never drift. Pure.
- * @param {{ actor?:string, reason?:string }} o
+ *
+ * `executedVendor` (#3850 Fork 2, we:backlog/3850-…md) — the REAL vendor that ran this heal, in
+ * `DELIVERY_VENDOR_PROVIDERS`'s own vocabulary (`we:scripts/lib/dispatch-contracts.mjs`). Defaults to
+ * `'claude'` (native, unmarked — every pre-#3850 comment reads this way, which is the correct, non-disruptive
+ * default for history that predates this field). A non-Claude vendor gets its OWN line, machine-readable by
+ * {@link parseCiHealExecutedVendor} below, because a `ci-heal` can NEVER write a review label itself (this
+ * file's own hardest rule) — the durable comment is the only place this fact can be recorded for a later
+ * reader to bind a land-seam hold on.
+ * @param {{ actor?:string, reason?:string, executedVendor?:string }} o
  * @returns {string}
  */
-export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '' } = {}) {
+export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = '', executedVendor = 'claude' } = {}) {
   const why = reason === 'behind' ? 'the branch had fallen BEHIND `main`'
     : reason === 'red-ci' ? 'a required check had gone red after open'
     : 'a required check regressed after open';
-  return [
+  const lines = [
     CI_HEAL_COMMENT_MARKER,
     '',
     `${why}; ${actor} rebased onto current \`main\`, repaired the failing check, and re-pushed HEAD.`,
     'Only the CI axis was repaired — the review gate (`review:human` / `review:pending`) was NOT touched. A human ' +
       '`/review` (or the drain AI-review) still verdicts as before; the drain lands it once green and reviewed.',
-  ].join('\n');
+  ];
+  if (executedVendor && executedVendor !== 'claude') {
+    lines.push(
+      '',
+      `${EXECUTED_VENDOR_MARKER_PREFIX}${executedVendor}`,
+      '(#3850 Fork 2 — a delegated run; the land seam owes this PR an independent review before it merges, ' +
+        'even though this CI-heal changed no review label.)',
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#EXECUTED_VENDOR_MARKER_PREFIX — the stable line prefix
+ * {@link buildCiHealComment} stamps the executed vendor behind, and {@link parseCiHealExecutedVendor} matches
+ * to read it back. Single-sourced so the two can never drift, exactly like {@link CI_HEAL_COMMENT_MARKER}.
+ */
+export const EXECUTED_VENDOR_MARKER_PREFIX = 'Executed by: ';
+
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#parseCiHealExecutedVendor — #3850 Fork 2's READ HALF: given a PR's
+ * comments (`gh pr view <pr> --json comments`'s own shape, or a bare-string array — same tolerance as
+ * {@link countCiHealComments}), recover the executed vendor of the MOST RECENT completed CI-heal. Pure.
+ *
+ * Reads the LAST matching comment (a PR can be healed more than once; only the latest push's vendor matters
+ * for a land-time decision — an earlier heal's vendor says nothing about the CURRENT head). A comment with no
+ * {@link EXECUTED_VENDOR_MARKER_PREFIX} line (every heal before #3850, or a Claude-executed one — see
+ * {@link buildCiHealComment}, which omits the line entirely for `'claude'`) reads as `'claude'`: the safe,
+ * non-disruptive default for history this field predates.
+ *
+ * NOT YET CALLED FROM THE DRAIN'S OWN MERGE DECISION — see `ci-heal-dispatch-wrapper.mjs#ciHealMark`'s own
+ * docblock for why the real wiring (into `merge-ai-prs.mjs` / `decideReviewGate`) is a deliberately deferred
+ * fast-follow, not silently skipped.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {string} the executed vendor of the most recent CI-heal comment, or `'claude'` if none is found.
+ */
+export function parseCiHealExecutedVendor(comments) {
+  if (!Array.isArray(comments)) return 'claude';
+  let vendor = 'claude';
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(CI_HEAL_COMMENT_MARKER)) continue;
+    const line = body.split('\n').find((l) => l.startsWith(EXECUTED_VENDOR_MARKER_PREFIX));
+    vendor = line ? line.slice(EXECUTED_VENDOR_MARKER_PREFIX.length).trim() || 'claude' : 'claude';
+  }
+  return vendor;
 }
 
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
@@ -88,11 +141,12 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>]  (pr must be a positive integer)');
+    fail('usage: ci-heal-mark.mjs <pr> [--repo=<owner/name>] [--reason=<red-ci|behind>] [--actor=<name>] [--vendor=<vendor>]  (pr must be a positive integer)');
   }
   const body = buildCiHealComment({
     actor: typeof flags.actor === 'string' ? flags.actor : undefined,
     reason: typeof flags.reason === 'string' ? flags.reason : undefined,
+    executedVendor: typeof flags.vendor === 'string' ? flags.vendor : undefined,
   });
   const args = ['pr', 'comment', String(pr), '--body', body];
   if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`); // the heal agent runs in its WE lane clone; a missing --repo derives from cwd.

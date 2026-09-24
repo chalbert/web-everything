@@ -348,6 +348,29 @@ describe('dispatchFix', () => {
     expect(run.mock.calls.some((c) => c[1]?.[1] === 'release')).toBe(true);
   });
 
+  // #3850 Fork 2 — a `fix` only ever targets a PR that ALREADY carries `review:changes`/`review:human` (this
+  // file's own `resolveFixTarget`), so the existing, vendor-agnostic re-arm already gives Fork 2's land-seam
+  // hold for EVERY fix push — no `executedVendor` branch needed. Proven end-to-end, both vendors, same verdict.
+  it('#3850 Fork 2 — a Claude-executed fix (provider.vendor="claude") re-arms review:pending, same as every existing case', async () => {
+    const run = fakeRun();
+    const provider = fakeProvider('fixed');
+    provider.vendor = 'claude';
+    const result = await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything', item: '3629' }, provider, { run, newSessionId: () => 'sess-1' });
+    expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+  });
+
+  it('#3850 Fork 2 — a non-Claude-executed fix (provider.vendor="codex") ALSO re-arms review:pending — the land-seam hold applies to a delegated fix too, by the same existing mechanism', async () => {
+    const run = fakeRun();
+    const provider = fakeProvider('fixed');
+    provider.vendor = 'codex';
+    const result = await dispatchFix({ pr: 2108, repo: 'chalbert/web-everything', item: '3629' }, provider, { run, newSessionId: () => 'sess-1' });
+    expect(result.result).toBe('PR #2108 (re-armed review:pending)');
+    // NEVER `review:accepted`, NEVER a fresh label-on-green — the re-arm call is byte-identical regardless of
+    // vendor, which IS the point: `fix` never had a "no hold" branch for Fork 2 to have to close.
+    const rearmCall = run.mock.calls.find((c) => c[1]?.[0] === 'scripts/conveyor/rearm-review.mjs');
+    expect(rearmCall[1]).toEqual(['scripts/conveyor/rearm-review.mjs', '2108', '--repo=chalbert/web-everything']);
+  });
+
   it('reports started BEFORE resolving the PR target (the durable trace exists even if gh itself fails)', async () => {
     const order = [];
     const run = vi.fn((cmd, args = []) => {
@@ -673,6 +696,11 @@ describe('FIX_AGENT_PROVIDERS registry / resolveFixAgentProvider (#3383)', () =>
     expect(FIX_AGENT_PROVIDERS['claude-restricted'].name).toBe('claude-restricted-fix');
     expect(FIX_AGENT_PROVIDERS.codex.name).toBe('codex');
     expect(typeof FIX_AGENT_PROVIDERS.codex.spawn).toBe('function');
+  });
+
+  it('#3850 Fork 2 — each provider names its own canonical executed vendor', () => {
+    expect(FIX_AGENT_PROVIDERS['claude-restricted'].vendor).toBe('claude');
+    expect(FIX_AGENT_PROVIDERS.codex.vendor).toBe('codex');
   });
 
   it('resolves by name, defaults to claude-restricted, and refuses an unknown name by NAME', () => {

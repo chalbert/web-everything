@@ -5257,3 +5257,43 @@ Two more we:scripts/lane-pool.mjs acquire defects, found while proving the forei
 - **A refused `acquire --lane=N` kept its lease.** The #3390 dirty/ahead check runs AFTER the claim writes the new lease, and `fail()` left that lease in place, so the lane stayed held by nobody for the 4-hour TTL. Live before: two refused acquires this session left leases on lane-1 and lane-11. Now the refusal restores the lease that was there before when it was live, and otherwise removes the new one. Live after: a refused `acquire --lane=1` (1 uncommitted change) left no lease.
 - **A lane on a pushed POC tip could not be acquired by number.** The same check refused any lane that was ahead of `origin/main` at all, even when every commit was on a remote branch. lane-84 on the `lane/mechanical-dispatcher` tip (311 commits ahead of main, all pushed) was refused before and acquired after. The check now uses the same containment proof (`aheadIsProvablyPushed` against the live remote heads) that auto-pick and the #2924 re-check use.
 - **Live proof of the foreign-marker fix, same lane.** A real we:scripts/verify-lane.mjs green record for 6b53b0a8 sat on lane-84. The OLD acquire moved HEAD to cdec41cd and kept that record, and the next verify refused to start (`superseded`). The NEW acquire removed it, and the next verify ran green. Live proof of the lease renewal: the landing of cdec41cd wrote `renewedAt` on lane-70's lease.
+
+## Session update (2026-09-24) — #4021 (#3850 Fork 2): the land-seam hold on a delegated executed vendor
+
+#3850's Fork 2 ("every route whose executed vendor is not Claude gets a merge hold, keyed on `executed` never
+`routed`") had no code — only Fork 1 (the dispatch-time pass-through + supervisor recording, #3784) existed.
+This closes each of the three dispatch kinds the way its own mechanics require, rather than one shared
+mechanism, because `build`/`fix`/`ci-heal` differ on what data is available and what the wrapper is allowed to
+write.
+
+- **`build` — LIVE, enforced.** we:scripts/operations/deliver-item-wrapper.mjs's `decideParkMode` gets a new
+  `executedVendor` parameter (default `'claude'`, additive-only, checked LAST so every existing park reason —
+  statute path, needs-human-judgment, converge escalate, the real `scoreEscalation` rubric — is unchanged).
+  When the route's REAL `provider.vendor` (a new field on each registered provider object, read off the
+  provider that actually spawned the turn — never `routed`, never a prediction) is not `'claude'`, a PR that
+  would otherwise open `label-on-green` is forced to `park`/`review:pending` instead.
+- **`fix` — LIVE, enforced, with NO new logic.** `resolveFixTarget` only ever resolves a `fix` dispatch against
+  a PR that ALREADY carries `review:changes` or `review:human` (a reviewer bounce or an advisory finding), so
+  the existing, vendor-agnostic `review:changes → review:pending` re-arm already gives every fix push Fork 2's
+  hold, Claude-executed or delegated, by construction. Documented at the `rearmReview` call site in
+  we:scripts/operations/fix-dispatch-wrapper.mjs and proven both directions (same verdict, either vendor).
+- **`ci-heal` — the DATA half only; the land-time READ is a deliberate, named deferral.** A `ci-heal` can never
+  write a review label on any path (this file's own hardest rule on that axis, unchanged — the ratified text
+  says so explicitly). So this item builds only the evidence: we:scripts/conveyor/ci-heal-mark.mjs's
+  `buildCiHealComment` stamps the real executed vendor into its durable comment (an `Executed by: <vendor>`
+  line, omitted for `'claude'` so every pre-#4021 comment shape is byte-identical), and a new
+  `parseCiHealExecutedVendor` reads it back; `ciHealMark` in we:scripts/operations/ci-heal-dispatch-wrapper.mjs
+  threads `provider.vendor` through. Actually REFUSING a `label-on-green` land on this evidence (wiring the
+  reader into we:scripts/merge-ai-prs.mjs's `decideReviewGate` call) is NOT done here — mirroring this repo's
+  own existing `#3493` precedent (the `engineTier` gate predicate: built and tested, its real call-site value
+  deliberately held back until a real writer exists), rather than wiring a new predicate blind into a
+  ~4,000-line production merge gate this item did not audit end-to-end. **Residual gap:** a Claude-built PR
+  that legitimately opened `label-on-green`, later CI-healed by a delegated vendor, can still land unreviewed
+  until that follow-up wiring lands — worth its own tracked item if the operator wants it closed sooner.
+
+34 new unit tests across the four changed files (9 deliver-item-wrapper, 3 fix-dispatch-wrapper, 3
+ci-heal-dispatch-wrapper, 12 ci-heal-mark, 7 provider-vendor-parity spread across the three — exact count per
+file in each test file's own `#3850 Fork 2` describe blocks); 289 total pass across the four suites together.
+`check:standards` reports 0 errors on the full repo scan (the 2 pre-existing #3383-file errors this session's
+brief warned about were not observed in this run's output — 0 errors total, so this diff adds none either
+way). No PR — committed straight to `lane/mechanical-dispatcher` per this epic's own delivery doctrine.

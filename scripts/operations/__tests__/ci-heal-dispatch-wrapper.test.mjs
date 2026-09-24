@@ -228,6 +228,31 @@ describe('the hand-back — a healed CI run is NEVER a re-arm', () => {
     expect(CI_HEAL_REASONS).toEqual(['red-ci', 'behind']);
   });
 
+  // #3850 Fork 2 — a `ci-heal` can never write a review label (this describe block's own name), so the
+  // executed vendor rides in the durable comment instead. `ciHealMark`'s own default keeps the omitted-flag
+  // shape the two tests above already pin.
+  it('ciHealMark omits --vendor entirely for the default/Claude-executed case — byte-identical to the pre-#3850 call', () => {
+    const run = vi.fn();
+    ciHealMark({ pr: 743, repo: 'a/b', reason: 'red-ci' }, { run });
+    expect(run.mock.calls[0][1]).not.toEqual(expect.arrayContaining([expect.stringMatching(/^--vendor=/)]));
+    ciHealMark({ pr: 743, repo: 'a/b', reason: 'red-ci', executedVendor: 'claude' }, { run });
+    expect(run.mock.calls[1][1]).not.toEqual(expect.arrayContaining([expect.stringMatching(/^--vendor=/)]));
+  });
+
+  it('ciHealMark passes --vendor=codex through to ci-heal-mark.mjs for a non-Claude-executed heal', () => {
+    const run = vi.fn();
+    ciHealMark({ pr: 743, repo: 'a/b', reason: 'red-ci', executedVendor: 'codex' }, { run });
+    expect(run).toHaveBeenCalledWith('node', [
+      'scripts/conveyor/ci-heal-mark.mjs', '743', '--repo=a/b',
+      '--actor=the #3642 mechanical CI-heal wrapper', '--reason=red-ci', '--vendor=codex',
+    ]);
+  });
+
+  it('CI_HEAL_AGENT_PROVIDERS each name their own canonical #3850 Fork 2 vendor', () => {
+    expect(CI_HEAL_AGENT_PROVIDERS['claude-restricted'].vendor).toBe('claude');
+    expect(CI_HEAL_AGENT_PROVIDERS.codex.vendor).toBe('codex');
+  });
+
   it('pushLaneRef takes `--force-with-lease` for this kind, and stays a plain push for `fix`', () => {
     const run = vi.fn();
     pushLaneRef({ lanePath: '/lane', laneRef: 'lane/2638-foo', forceWithLease: true }, { run });
@@ -333,6 +358,22 @@ describe('dispatchCiHeal — the whole arc', () => {
     expect(cmds).toContainEqual(expect.stringContaining('scripts/conveyor/ci-heal-mark.mjs 743'));
     expect(cmds).toContainEqual(expect.stringContaining('completion-cli.mjs report --session=ci-heal-743 --status=done --outcome=ci-healed'));
     expect(cmds).toContainEqual(expect.stringContaining('scripts/lane-pool.mjs release'));
+  });
+
+  // #3850 Fork 2 — END-TO-END through the REAL `dispatchCiHeal`: a delegated (`vendor: 'codex'`) provider's
+  // own executed vendor reaches the durable comment `ciHealMark` posts, never a review label (still asserted
+  // absent by the very next test below).
+  it('#3850 Fork 2 — a non-Claude-executed (provider.vendor="codex") heal threads --vendor=codex through to ci-heal-mark.mjs', async () => {
+    const run = fakeRun();
+    const provider = fakeProvider('fixed');
+    provider.vendor = 'codex';
+    await dispatchCiHeal(
+      { pr: 743, repo: 'chalbert/web-everything', item: '2638', reason: 'red-ci' },
+      provider,
+      { run, newSessionId: () => 'sess-1' },
+    );
+    const cmds = shelled(run);
+    expect(cmds).toContainEqual(expect.stringContaining('scripts/conveyor/ci-heal-mark.mjs 743 --repo=chalbert/web-everything --actor=the #3642 mechanical CI-heal wrapper --reason=red-ci --vendor=codex'));
   });
 
   it('NO PATH EVER TOUCHES A REVIEW LABEL — the hardest rule on this axis, asserted as absence', async () => {
