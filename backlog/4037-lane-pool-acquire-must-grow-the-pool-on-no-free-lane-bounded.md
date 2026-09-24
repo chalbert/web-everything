@@ -1,4 +1,5 @@
 ---
+bornAs: xq46pq0
 kind: story
 size: 3
 status: resolved
