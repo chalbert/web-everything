@@ -3,10 +3,11 @@ bornAs: xm24wzq
 kind: story
 size: 5
 parent: "3443"
-status: active
+status: resolved
 scope: ["we:scripts/operations/__tests__/command-redact.test.mjs", "we:scripts/operations/command-redact.mjs", "we:scripts/operations/telemetry-cli.mjs", "we:scripts/operations/telemetry-store.mjs", "we:scripts/operations/telemetry.mjs"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
