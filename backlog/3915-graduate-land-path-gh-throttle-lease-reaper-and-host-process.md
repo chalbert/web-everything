@@ -5,7 +5,7 @@ size: 5
 parent: "3443"
 status: open
 blockedBy: ["3895"]
-scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs", "we:scripts/lib/forge-land-provider.mjs", "we:scripts/lib/__tests__/forge-land-provider.test.mjs", "we:scripts/pr-land.mjs", "we:scripts/__tests__/pr-land.test.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs", "we:scripts/operations/host-process-sample.mjs", "we:scripts/operations/__tests__/host-process-sample.test.mjs"]
+scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs", "we:scripts/lib/forge-land-provider.mjs", "we:scripts/lib/__tests__/forge-land-provider.test.mjs", "we:scripts/pr-land.mjs", "we:scripts/__tests__/pr-land.test.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/__tests__/lease-reaper.test.mjs", "we:scripts/operations/host-process-sample.mjs", "we:scripts/operations/__tests__/host-process-sample.test.mjs", "we:scripts/operations/__tests__/telemetry.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -49,3 +49,7 @@ Ports we:scripts/lib/gh-throttle.mjs, we:scripts/lib/forge-land-provider.mjs, we
 - `we:scripts/pr-land.mjs` — clean direct 3-way (main `d622b4d80` `admittedArgv`, `497de6f49`, `f48582572`).
 - `we:scripts/conveyor/lease-reaper.mjs` + test — clean direct 3-way (main `f211888d0` multi-repo).
 - `we:scripts/lib/forge-land-provider.mjs` (+test), `we:scripts/__tests__/pr-land.test.mjs`, `we:scripts/operations/host-process-sample.mjs` (+test) — main untouched / new; apply as-is.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry.test.mjs` here from #3895 — it imports a module this card owns.

@@ -4,8 +4,8 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3906", "3904", "3907"]
-scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs", "we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/advisory-round-count.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs", "we:scripts/operations/__tests__/action-ground-truth.test.mjs"]
+blockedBy: ["3906", "3904", "3907", "3905"]
+scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/autofix-review-findings.test.mjs", "we:scripts/conveyor/__tests__/fix-autofix-gate.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/advisory-round-count.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs", "we:scripts/operations/__tests__/action-ground-truth.test.mjs", "we:scripts/operations/__tests__/telemetry-wiring.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -184,3 +184,8 @@ test fixtures may answer whether `supervision` is meant to reach `reviewSeatRout
     record the answer in this card's Done-when rather than assuming either way.
 
 - Moved here from #3901 (2026-09-24): `we:scripts/operations/__tests__/action-ground-truth.test.mjs`, which imports `we:scripts/operations/review-dispatch-wrapper.mjs`, a module this slice ports.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check added blockedBy #3905 — the moved-in `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` also imports a module #3905 owns.
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` here from #3895 — it imports a module this card owns.

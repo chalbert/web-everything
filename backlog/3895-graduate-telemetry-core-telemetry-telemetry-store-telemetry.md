@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-scope: ["we:scripts/operations/__tests__/command-redact.test.mjs", "we:scripts/operations/__tests__/telemetry-wiring.test.mjs", "we:scripts/operations/__tests__/telemetry.test.mjs", "we:scripts/operations/command-redact.mjs", "we:scripts/operations/telemetry-cli.mjs", "we:scripts/operations/telemetry-store.mjs", "we:scripts/operations/telemetry.mjs"]
+scope: ["we:scripts/operations/__tests__/command-redact.test.mjs", "we:scripts/operations/command-redact.mjs", "we:scripts/operations/telemetry-cli.mjs", "we:scripts/operations/telemetry-store.mjs", "we:scripts/operations/telemetry.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -18,3 +18,8 @@ Ports 4 files (we:scripts/operations/command-redact.mjs, we:scripts/operations/t
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/command-redact.test.mjs we:scripts/operations/__tests__/telemetry-wiring.test.mjs we:scripts/operations/__tests__/telemetry.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
 2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
 3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
+
+## Graduation import check
+
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry.test.mjs` to #3915 — it imports a module #3915 owns.
+- 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` to #3908 — it imports a module #3908 owns.
