@@ -105,7 +105,13 @@ export function buildAdvisoryFixComment({ actor = 'conveyor fix agent' } = {}) {
  * A PR with NO advisory note at all (should not reach this function via `reconcile-core.mjs`'s own
  * `ADVISORY_LABELS.CHANGES`-gated call site, but a caller passing a bare/malformed thread is not unreasonable)
  * returns `false` — nothing to address is not "addressed".
- * @param {Array<{body?:string}|string>|null|undefined} comments
+ *
+ * The fix-mark must be SELF-AUTHORED (`stand-down.mjs#isSelfAuthored`, the same check its sibling
+ * {@link isAdvisoryMechanismStandDownSuperseded} applies). A `true` here routes the PR to a review dispatch that
+ * is EXEMPT from `NEGOTIATION_ROUND_CAP`, so a forged mark (anyone who can comment) re-posted every tick would
+ * otherwise keep the PR cycling through cap-exempt reviews forever, never reaching `cap-exhausted` and never
+ * escalating to a human (PR #2607 review). A bare string or a non-automation author fails closed.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean, author?:{login?:string}}|string>|null|undefined} comments
  * @returns {boolean}
  */
 export function isLatestAdvisoryFindingAddressed(comments) {
@@ -118,7 +124,8 @@ export function isLatestAdvisoryFindingAddressed(comments) {
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < comments.length; j += 1) {
     const body = typeof comments[j] === 'string' ? comments[j] : comments[j]?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER)) return true;
+    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER)
+      && isSelfAuthored(comments[j])) return true;
   }
   return false;
 }

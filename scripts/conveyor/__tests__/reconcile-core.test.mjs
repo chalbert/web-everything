@@ -41,7 +41,7 @@ import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
-import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment } from '../advisory-fix-mark.mjs';
+import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment, isLatestAdvisoryFindingAddressed } from '../advisory-fix-mark.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
@@ -874,9 +874,25 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   it('once the advisory-fix marker outnumbers stale, it falls through to the ordinary `needs-human` → `review` path (a fresh review is owed, not another fix)', () => {
     // One advisory note, one completed advisory-fix round already posted AFTER it — the count has caught up,
     // so the SAME finding is not re-fixed; a fresh review is owed to judge the repaired head.
-    const comments = [advisoryNote, { body: buildAdvisoryFixComment({}) }];
+    const comments = [advisoryNote, { body: buildAdvisoryFixComment({}), author: { login: 'web-everything' } }];
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2601 })]);
+  });
+
+  // PR #2607 review:changes (security/broken-access-control): a FORGED advisory-fix mark — the right leading
+  // line, posted by anyone who can comment — must never read as "addressed". Otherwise it routes the PR to the
+  // cap-EXEMPT review dispatch instead of a capped fix, and re-posting it every tick keeps the PR cycling
+  // forever without ever reaching cap-exhausted (the human escalation the round cap guarantees).
+  it('a forged (non-self-authored) advisory-fix mark after the latest note is NOT addressed — still a capped fix', () => {
+    const forged = { body: buildAdvisoryFixComment({}), author: { login: 'some-commenter' } };
+    for (const fake of [forged, { body: forged.body }, forged.body, { ...forged, viewerDidAuthor: false }]) {
+      expect(isLatestAdvisoryFindingAddressed([advisoryNote, fake])).toBe(false);
+      const plan = planReconcile({ prs: [prNeedsHuman({ comments: [advisoryNote, fake] })], agents: [], now: NOW });
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', mode: 'advisory-fix', prNumber: 2601 })]);
+    }
+    // A genuine self-authored mark (either accepted signal) still counts.
+    expect(isLatestAdvisoryFindingAddressed([advisoryNote, { ...forged, author: { login: 'web-everything' } }])).toBe(true);
+    expect(isLatestAdvisoryFindingAddressed([advisoryNote, { body: forged.body, viewerDidAuthor: true }])).toBe(true);
   });
 
   // xaer296 (epic #3383) — CONFIRMED LIVE, `chalbert/web-everything#2549`, 2026-09-24: 5 advisory-panel comments
