@@ -109,16 +109,41 @@ export function selfSyncCheckout({ root, base = 'main', run = gitRun, timeoutMs 
 export const DAEMON_SELF_SYNC_BRANCH_ENV = 'DAEMON_SELF_SYNC_BRANCH';
 
 /**
+ * PURE: is `name` a plain branch name that is safe to splice into a git argv? The POC branch comes from an
+ * env var or caller option — external input — so a value like `--upload-pack=<cmd>` would otherwise be parsed
+ * by `git fetch` as an OPTION and run `<cmd>` (PR #2554 review, confirmed exploitable). Deliberately stricter
+ * than `git check-ref-format`: a conservative character allow-list (letters, digits, `.`, `_`, `-`, `/`) plus
+ * git's own structural rules — no leading `-`, no empty/`.`-leading path component, no `..`, no `//`, no
+ * leading/trailing `/`, no trailing `.` or `.lock` component.
+ * @param {unknown} name
+ * @returns {boolean}
+ */
+export function isSafeBranchName(name) {
+  if (typeof name !== 'string' || !name) return false;
+  if (!/^[A-Za-z0-9._/-]+$/.test(name)) return false;
+  if (name.startsWith('-') || name.endsWith('.') || name.includes('..')) return false;
+  return name.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'));
+}
+
+/** Throw unless {@link isSafeBranchName} accepts `name` — the fail-closed gate every POC entry point shares. */
+function assertSafeBranchName(name, source) {
+  if (!isSafeBranchName(name)) throw new TypeError(`daemon-self-sync: ${source} ${JSON.stringify(name)} is not a safe branch name — refusing to pass it to git`);
+  return name;
+}
+
+/**
  * Resolve the POC branch a clone should track, from an explicit option or {@link DAEMON_SELF_SYNC_BRANCH_ENV}.
- * Blank/whitespace-only counts as unset — the default (`main`-only) path. PURE.
+ * Blank/whitespace-only counts as unset — the default (`main`-only) path. A non-blank value that fails
+ * {@link isSafeBranchName} THROWS rather than falling back to `main`: a mis-set POC branch is an operator error
+ * to surface loudly, never a silent mode change. PURE.
  * @param {{pocBranch?:string, env?:NodeJS.ProcessEnv}} [o]
  * @returns {string|null}
  */
 export function resolvePocSyncBranch({ pocBranch, env = process.env } = {}) {
   const explicit = typeof pocBranch === 'string' ? pocBranch.trim() : '';
-  if (explicit) return explicit;
+  if (explicit) return assertSafeBranchName(explicit, 'pocBranch');
   const fromEnv = typeof env?.[DAEMON_SELF_SYNC_BRANCH_ENV] === 'string' ? env[DAEMON_SELF_SYNC_BRANCH_ENV].trim() : '';
-  return fromEnv || null;
+  return fromEnv ? assertSafeBranchName(fromEnv, DAEMON_SELF_SYNC_BRANCH_ENV) : null;
 }
 
 /**
@@ -172,9 +197,12 @@ export function decidePocSelfSync({ dirty, onBranch, main, poc }) {
  */
 export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitRun, timeoutMs = 60_000 }) {
   if (!pocBranch) throw new TypeError('selfSyncCheckoutPoc requires a pocBranch');
+  assertSafeBranchName(pocBranch, 'pocBranch');
+  assertSafeBranchName(base, 'base');
   const git = (args) => run(args, { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
-  const fetchedMain = git(['fetch', 'origin', base, '--quiet']).status === 0;
-  const fetchedPoc = git(['fetch', 'origin', pocBranch, '--quiet']).status === 0;
+  // `--` ends option parsing: defense in depth on top of the name check, so a ref is never read as a flag.
+  const fetchedMain = git(['fetch', '--quiet', '--', 'origin', base]).status === 0;
+  const fetchedPoc = git(['fetch', '--quiet', '--', 'origin', pocBranch]).status === 0;
   const count = (range) => {
     const r = git(['rev-list', '--count', range]);
     const out = String(r.stdout ?? '').trim();
@@ -195,6 +223,9 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
   });
   if (decision.action !== 'merge') return { merged: false, commits: 0, reason: decision.reason };
 
+  // `commits` is a DECISION-TIME estimate (behindMain + behindPoc, both measured against the pre-merge HEAD),
+  // not an exact post-merge count: when origin/<pocBranch> already contains commits origin/main is also ahead
+  // by, those are counted twice. It only feeds the restart log line — never depend on it for precision.
   let commits = 0;
   let mergedAny = false;
   let conflicted = false;

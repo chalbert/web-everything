@@ -4,13 +4,14 @@
  *   REAL temporary git repos so the actual fetch/merge/abort commands are proven, not only mocked.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   decideSelfSync, selfSyncCheckout, withSelfSync,
   DAEMON_SELF_SYNC_BRANCH_ENV, resolvePocSyncBranch, decidePocSelfSync, selfSyncCheckoutPoc,
+  isSafeBranchName,
 } from '../daemon-self-sync.mjs';
 
 describe('decideSelfSync — pure', () => {
@@ -453,5 +454,43 @@ describe('selfSyncCheckoutPoc — REAL git (temp repos, two upstreams)', () => {
     expect(r.merged).toBe(false);
     expect(git(d, 'rev-parse', 'HEAD').trim()).toBe(headBefore);
     expect(git(d, 'status', '--porcelain').trim()).toBe('');
+  });
+
+  it('a leading-dash pocBranch is REFUSED before any git runs — never parsed as a git option (argv injection)', () => {
+    const d = join(dir, 'daemon');
+    const marker = join(dir, 'pwned');
+    const evil = `--upload-pack=touch ${marker};`;
+    expect(() => selfSyncCheckoutPoc({ root: d, base: 'main', pocBranch: evil, run: realRun })).toThrow(/not a safe branch name/);
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
+describe('isSafeBranchName — pure (argv-injection guard for an external branch string)', () => {
+  it.each(['main', 'lane/daemon-poc', 'lane/xii6vye-daemon-poc-graduation', 'feature/a.b_c-1'])('accepts %s', (n) => expect(isSafeBranchName(n)).toBe(true));
+  it.each([
+    '', '-x', '--upload-pack=touch /tmp/pwned;', 'a b', 'a;b', 'a$(x)', 'a..b', 'a//b', '/a', 'a/', '.a', 'a/.b',
+    'a.lock', 'a/b.lock', 'a@{1}', '@', 'a~1', 'a^', 'a:b', 'a?', 'a*', 'a[', 'a\\b', 'a.', 'a\nb', null, undefined, 42,
+  ])('rejects %j', (n) => expect(isSafeBranchName(n)).toBe(false));
+});
+
+describe('POC-mode branch validation — every entry point fails closed', () => {
+  it('resolvePocSyncBranch throws on an unsafe explicit option', () => expect(() => resolvePocSyncBranch({ pocBranch: '--upload-pack=x', env: {} })).toThrow(/not a safe branch name/));
+  it('resolvePocSyncBranch throws on an unsafe env value', () => expect(() => resolvePocSyncBranch({ env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: '-evil' } })).toThrow(/not a safe branch name/));
+  it('withSelfSync refuses to build (no git ever runs) when the env names an unsafe branch', () => {
+    const syncPoc = vi.fn(); const sync = vi.fn();
+    expect(() => withSelfSync({ tickOnce: vi.fn() }, {
+      root: '/x', onRestart: vi.fn(), sync, syncPoc, log: { error: vi.fn() },
+      env: { [DAEMON_SELF_SYNC_BRANCH_ENV]: '--upload-pack=touch /tmp/pwned;' },
+    })).toThrow(/not a safe branch name/);
+    expect(syncPoc).not.toHaveBeenCalled();
+  });
+  it('selfSyncCheckoutPoc fetches with a `--` separator so even a ref is never read as an option', () => {
+    const calls = [];
+    const run = (args) => { calls.push(args); return { status: 0, stdout: args[0] === 'symbolic-ref' ? 'lane/daemon-poc\n' : args[0] === 'rev-list' ? '0\n' : '' }; };
+    selfSyncCheckoutPoc({ root: '/x', pocBranch: 'lane/daemon-poc', run });
+    const fetches = calls.filter((a) => a[0] === 'fetch');
+    expect(fetches).toHaveLength(2);
+    for (const f of fetches) expect(f.indexOf('--')).toBeGreaterThan(-1);
+    for (const f of fetches) expect(f.indexOf('--')).toBeLessThan(f.indexOf('origin'));
   });
 });
