@@ -63,6 +63,7 @@ import { REVIEW_LABELS, REVIEW_HOLD_LABELS, hasReviewLabel } from '../lib/review
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { scopePrsToQueue } from './queue-scope.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -312,19 +313,24 @@ export function defaultPostFinding({
  * neglect ({@link isNeglectedPr}), and posts a finding for each neglected PR. Never throws on a per-PR read/
  * write failure — one bad `gh`/`reconcile-finding.mjs` call must not stop the sweep from checking the rest
  * (mirrors both sibling watches' own best-effort contract).
+ * `queueScope` (epic #3383) — see {@link ./queue-scope.mjs}. DEFAULT OFF ⇒ `scopePrsToQueue` is the IDENTITY
+ * function and this sweep stays repo-wide. The filter sits before the per-PR label-timeline fetch, so a
+ * scoped checkout never pays for an out-of-scope PR's `gh` call at all.
  * @param {{repo?:string|null, now?:number, thresholdHours?:number, env?:NodeJS.ProcessEnv, listPrs?:Function,
- *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean}} [o]
+ *   listAgents?:Function, listLabelEvents?:Function, postFinding?:Function, dryRun?:boolean,
+ *   queueScope?:object}} [o]
  * @returns {Array<{pr:number, holdLabel:string, parkedHours:number|null, neglected:boolean, posted:boolean, error?:string}>}
  */
 export function watchNeglectedPrs({
   repo = null, now = Date.now(), thresholdHours, env = process.env,
   listPrs = defaultListParkedPrs, listAgents = defaultListAllAgents,
   listLabelEvents = defaultListLabelEvents, postFinding = defaultPostFinding, dryRun = false,
+  queueScope = {},
 } = {}) {
   const threshold = thresholdHours ?? neglectThresholdHours(env);
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`parked-pr-progress-watch: --repo ${repo} is not a constellation repo`);
-  const prs = listPrs({ repo });
+  const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-progress-watch', ...queueScope });
   const candidates = prs.filter(isParkedCandidate);
   const results = [];
   if (!candidates.length) return results;
