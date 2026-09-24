@@ -186,9 +186,19 @@ describe('graduation-progress-report-io: promotions and probation sources', () =
     });
   });
 
-  it('confirms the two registry files do not exist on main yet (grounds the `absent` default)', () => {
+  it('confirms the promotions registry does not exist on main yet (grounds the `absent` default)', () => {
     expect(createPromotionsReader()().source).toBe('absent');
-    expect(createProbationReader()().source).toBe('absent');
+  });
+
+  // #3893 ported `we:scripts/lib/model-probation.json` onto main (it previously read `absent`, per this
+  // file's own prior assertion) — the live read now grounds `ok` instead, over the two real seeded rows.
+  it('reports `ok` for the real, now-ported probation registry on main', () => {
+    const real = createProbationReader()();
+    expect(real.source).toBe('ok');
+    expect(real.entries.map(({ provider, model }) => ({ provider, model }))).toEqual([
+      { provider: 'codex', model: 'gpt-6-astra' },
+      { provider: 'antigravity', model: 'gemini-3.1-pro' },
+    ]);
   });
 });
 
