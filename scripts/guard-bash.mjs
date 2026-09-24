@@ -138,6 +138,14 @@
  *     `lane-pool acquire`/`verify-lane`/`open-pr` ITSELF. That collision is why this arm did not exist before
  *     #3642 and why the wrapper's stamp had to move first.
  *
+ *   • xxna58l (#3383) — a session's DIRECT (unqueued) `vitest run`/`playwright test`/`eleventy` invocation,
+ *     which skips the #3461 heavy-command admission queue entirely. Steered to the wrapped npm script
+ *     (`test:unit`, `test:integration`/`test:e2e`/`test:smoke`/`test:a11y`/`test:interaction`, `build`) that
+ *     already routes through `node scripts/readiness/heavy-admission.mjs run`. A targeted `vitest run` of up
+ *     to `RAW_VITEST_TARGETED_FILE_LIMIT` (2) explicit test files stays allowed directly — measured at ~1-2s
+ *     locally, well under the cost the queue exists to cap; playwright has no comparable fast mode, so every
+ *     direct `playwright test` is denied. No override — the wrapped script is behaviourally identical.
+ *
  * Every deny above is ALL-OR-NOTHING — PreToolUse refuses the tool CALL, so a refusal aimed at one segment of
  * a chain discards every other segment with it. #3311 makes that visible rather than changing it: the CLI
  * appends a COLLATERAL notice naming the state-producing steps (heredocs, file writes, git mutations) that
@@ -1934,6 +1942,99 @@ export function usageReportSecretReadReason(segment, dispatchKind) {
   return `a mechanically-dispatched ${dispatchKind} agent may not reference the usage-report tool's external admin-key location (${dir}, or its Keychain service \`${USAGE_REPORT_KEYCHAIN_SERVICE}\`) at all (#3383) — that key must never reach a dispatched agent's process. There is no override.`;
 }
 
+// ── xxna58l (#3383) — a session's direct raw invocation of a heavy command that SKIPS the #3461 admission
+// queue entirely: the eleventy site build, a playwright run, or a raw `vitest run` of the whole suite. Each
+// has a wrapped npm script that already routes through `heavy-admission.mjs run` (`build`, `test:unit`,
+// `test:integration`/`test:e2e`/`test:smoke`/`test:a11y`/`test:interaction`) — this arm's job is to steer a
+// session toward that wrapped script, not to reimplement the queue itself. Anchored on the ACTUAL RUNNER at
+// command position (`canonicalCommand`'s npx/wrapper peel, same as every other arm here) — never a bare
+// substring test, or the wrapped script's own `-- vitest run …` tail (which legitimately contains this text
+// as an ARGUMENT, not a command) would be denied too.
+//
+// THE TARGETED-VITEST EXCEPTION AND ITS THRESHOLD (xxna58l's own ask: "decide the threshold from measured
+// timings and record it"). Measured locally while building this arm: a single-file `vitest run` against
+// `scripts/readiness/__tests__/heavy-admission.test.mjs` (54-63 unit tests, no real I/O) completed in
+// ~1.6s wall-clock end-to-end (`Duration 1.62s` — transform/collect/environment/test all included). A
+// one-or-two-file targeted run stays in that same sub-few-second band; the queue exists for the WHOLE suite
+// (observed 25-40 minutes under load, #3383's own finding) and for playwright/eleventy, neither of which has
+// a comparably cheap targeted mode. Gating a quick fix-and-recheck loop behind the same queue as a 40-minute
+// full run would only add latency with no contention benefit, so `RAW_VITEST_TARGETED_FILE_LIMIT` (2) is the
+// line: at or under it, run directly; over it (or the whole suite, i.e. zero named files), route through
+// `npm run test:unit`.
+const VITEST_RUN_HEAD = /^vitest\s+run\b(.*)$/s;
+const PLAYWRIGHT_TEST_HEAD = /^playwright\s+test\b/;
+const ELEVENTY_HEAD = /^(?:@11ty\/)?eleventy\b/;
+
+/** The most explicit test-file targets a direct `vitest run …` may name and still skip the queue — see the
+ *  measured-timing rationale in the comment above. */
+export const RAW_VITEST_TARGETED_FILE_LIMIT = 2;
+
+/** How many explicit (non-flag) file targets a `vitest run` invocation's tail names. Pure, deliberately
+ *  approximate: a flag's separately-worded VALUE is not distinguished from a file target (no vitest flag in
+ *  ordinary use here takes one), so the one possible skew UNDER-counts flags as targets, which only ever
+ *  WIDENS what counts as "too many" — it can deny a borderline case, never let a real whole-suite run through
+ *  by miscounting down to the allowed range. */
+export function vitestRunFileTargetCount(tail) {
+  return shellTokens(String(tail || '')).map((t) => t.text).filter((t) => t && !t.startsWith('-')).length;
+}
+
+/**
+ * Does a direct (unqueued) invocation of vitest/playwright/eleventy skip the #3461 admission queue? Pure,
+ * unit-tested. Returns a reason naming the wrapped npm script to use instead, or null when the segment is not
+ * one of these three runners, or (vitest only) is a targeted run at or under
+ * {@link RAW_VITEST_TARGETED_FILE_LIMIT}. `eleventy --version`/`--help`/`--dryrun` (no write at all — reuses
+ * the SAME `ELEVENTY_NO_WRITE_FLAG` the tree-write arm already defines, one source of truth) and
+ * `--serve`/`--watch` (a long-running dev server with no wrapped equivalent — wrapping it would hold an
+ * admission slot for the whole dev session, the same reason `test`'s vitest watch mode is left unwrapped in
+ * package.json) are both exempt.
+ *
+ * THE ELEVENTY CHECK IS SKIPPED AT PRIMARY CWD (`primaryCwd: true`) — deliberately, not an oversight. A raw
+ * `eleventy` invocation at primary cwd is ALREADY denied by the older, more specific #2749/#2788 tree-write
+ * arm (`isTreeWritingBuildRun`/`primaryTreeWriteReason`), whose own message explains the PRIMARY-tree-safety
+ * reason and is extensively pinned by the `#2788 r3: equivalent spellings decide identically` regression
+ * corpus (dozens of eleventy spellings — subshells, `bash -c`, runner exec/dlx forms — each asserted to
+ * produce that exact message at primary cwd). Firing this arm's DIFFERENT message there would silently
+ * change what that whole corpus asserts for no behavioral gain (the command is denied either way). At a LANE
+ * cwd the tree-write arm never fires at all (#2335 — a lane build is legitimate), which is exactly the gap
+ * THIS arm exists to close: a raw eleventy call in a lane previously skipped the host-wide #3461 queue with
+ * zero guard coverage. Vitest/playwright have no such competing arm, so they are NOT cwd-gated — the queue
+ * concern is identical at primary and in a lane for those.
+ */
+export function rawHeavyCommandReason(segment, { primaryCwd = false } = {}) {
+  const s = String(segment || '').trim();
+  if (!s) return null;
+  const cmd = s.replace(/^(?:\w+=\S+\s+)*(?:sudo\s+)?/, '');
+  const canon = canonicalCommand(s);
+  const heads = canon && canon !== cmd ? [cmd, canon] : [cmd];
+
+  for (const h of heads) {
+    const vitestMatch = h.match(VITEST_RUN_HEAD);
+    if (vitestMatch) {
+      const targets = vitestRunFileTargetCount(vitestMatch[1]);
+      if (targets > 0 && targets <= RAW_VITEST_TARGETED_FILE_LIMIT) return null; // targeted — allowed directly
+      return `a direct \`vitest run\` of ${targets === 0 ? 'the WHOLE suite' : `${targets} files (over the ${RAW_VITEST_TARGETED_FILE_LIMIT}-file targeted limit)`} skips the #3461 heavy-command admission queue (xxna58l, #3383) — with several lanes contending for one host, an unqueued full run is exactly the load spike the queue exists to cap. Use the wrapped script instead: \`npm run test:unit\` (routes through \`node scripts/readiness/heavy-admission.mjs run\`). A targeted run of ${RAW_VITEST_TARGETED_FILE_LIMIT} or fewer explicit test files stays allowed directly, e.g. \`npx vitest run path/to/one.test.mjs\`.`;
+    }
+    if (PLAYWRIGHT_TEST_HEAD.test(h)) {
+      return 'a direct `playwright test` run skips the #3461 heavy-command admission queue (xxna58l, #3383). Use the wrapped script instead — `npm run test:integration` / `test:e2e` / `test:smoke` / `test:a11y` / `test:interaction`, whichever matches what you need (each already routes through `node scripts/readiness/heavy-admission.mjs run`). No targeted-run exception here: playwright has no fast single-spec mode cheap enough to justify skipping the queue.';
+    }
+    const eleventyMatch = primaryCwd ? null : h.match(ELEVENTY_HEAD);
+    if (eleventyMatch) {
+      const args = h.slice(eleventyMatch[0].length);
+      // Same three-way precedence `isTreeWritingBuildRun` already uses for this exact runner: `--serve`/
+      // `--watch` always write (and are exempt from THIS arm regardless, see the function doc); a no-write
+      // flag (`--version`/`--help`/`--dryrun`) writes nothing; otherwise an `--output=<scratch>` (the
+      // `build:check` shape) writes nothing either — anything else is a real site-build write.
+      const writesSite = ELEVENTY_WRITES_FLAG.test(args)
+        ? false // long-running dev server — exempt from the QUEUE arm (see function doc), even though it DOES write
+        : ELEVENTY_NO_WRITE_FLAG.test(args)
+          ? false
+          : !(() => { const out = (h.match(OUTPUT_FLAG) || [])[1]; return out && isScratch(out); })();
+      if (writesSite) return 'a direct `eleventy` run (the site build) skips the #3461 heavy-command admission queue (xxna58l, #3383). Use the wrapped script instead: `npm run build` (routes through `node scripts/readiness/heavy-admission.mjs run`).';
+    }
+  }
+  return null;
+}
+
 export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
   const s = segment.trim();
   if (!s) return null;
@@ -1942,6 +2043,11 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // context (unlike the arms below, which are gated on primaryCwd or a specific WE_DISPATCH_KIND value).
   const usageSecret = usageReportSecretReadReason(s, dispatchKind);
   if (usageSecret) return usageSecret;
+
+  // xxna58l (#3383) — a raw, unqueued vitest/playwright/eleventy invocation. Checked next: cheap, unconditional
+  // (no cwd/lease gating), and independent of everything below it.
+  const rawHeavy = rawHeavyCommandReason(s, { primaryCwd });
+  if (rawHeavy) return rawHeavy;
 
   // #2302 — a backlog item-mutation (claim/resolve/scaffold/…) run from the PRIMARY checkout stamps the item on
   // primary and bypasses lane isolation (found working #2095: a primary `claim` flipped open→active, reverted +
