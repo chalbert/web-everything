@@ -80,6 +80,7 @@
 // no module-scope side effects (its CLI is behind an `IS_CLI` guard) and does not import this file, so there is
 // no cycle and no daemon-startup cost: importing it measures the same ~50ms as importing this file alone.
 import { latestRequiredCheck } from '../merge-ai-prs.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** The review labels that mark an OPEN PR as PARKED for human review — the main session runs /review to clear
  *  them. The drain daemon applies `review:human`/`review:pending` on escalation; `review:changes` is included
@@ -272,9 +273,12 @@ export async function watchPr({ pollOnce, sleep, now, intervalMs, deadlineMs, fi
 function releaseSessionAcrossPools(execFileSync, session, log) {
   const lanePoolCli = new URL('../lane-pool.mjs', import.meta.url);
   try {
+    // #x5n4zn3 — was bare (no timeout): a real `lane-pool.mjs release` call.
     const out = execFileSync('node', [fileURLToPath(lanePoolCli), 'release', '--all-pools', `--session=${session}`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: resolveChildTimeoutMs(),
+      killSignal: 'SIGKILL',
     });
     log(`  ● auto-released lease(s) for session "${session}" across pools on merge`);
     if (out && out.trim()) log(out.trim());
@@ -340,7 +344,10 @@ export function deriveChildRefFromSession(slug) {
  */
 export function resolveEpicOnLand(execFileSync, childRef, log, paths = defaultOnLandPaths()) {
   const { weRoot, backlogCli, pushCli } = paths;
-  const run = (cmd, args) => execFileSync(cmd, args, { cwd: weRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // #x5n4zn3 — was bare (no timeout). This runs git/node commands against the SHARED primary checkout
+  // (commit + gated publish of an epic-resolve splice on the last child's land) — generous, but bounded, so a
+  // hung step here fails this one on-land pass rather than the whole drain.
+  const run = (cmd, args) => execFileSync(cmd, args, { cwd: weRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
   // 1. sync local main. If the ff-only pull FAILS (a dirty/diverged primary tree), ABORT the whole pass — do
   //    NOT proceed. Acting on an un-synced tree risks writing a resolve commit on a `main` that is BEHIND
   //    origin, which then can't ff-publish and strands a diverging commit on the shared checkout. Skipping is
@@ -395,7 +402,8 @@ async function main(argv) {
   const pollOnce = async () => {
     const args = ['pr', 'view', String(prNumber), '--json', 'state,mergedAt,labels,statusCheckRollup,reviewDecision'];
     if (typeof flags.repo === 'string') args.push('--repo', flags.repo);
-    const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // #x5n4zn3 — was bare (no timeout).
+    const out = execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
     return JSON.parse(out);
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -412,7 +420,8 @@ async function main(argv) {
   const fireFastDrain = flags['no-fast-drain'] ? null : async () => {
     const args = [mergeCli, `--only=${prNumber}`, '--label=ready-to-merge'];
     if (typeof flags.repo === 'string') args.push(`--only-repo=${flags.repo}`);
-    execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // #x5n4zn3 — was bare (no timeout).
+    execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   };
 
   log(`watching PR #${prNumber} (poll ${intervalMs / 1000}s · deadline ${deadlineMs / 60_000}min${fireFastDrain ? ' · event-driven land ON' : ''}) …`);

@@ -27,6 +27,8 @@ import {
   DEFAULT_BACKDOWN_THRESHOLDS,
   PROVEN_TASK_ENVELOPES,
   THIN_TRIAL_THRESHOLD,
+  workerTierFor,
+  DISPATCH_MACHINERY_PATHS,
 } from '../provider-routing.mjs';
 
 // ── Fixture Scorecard Helpers ──────────────────────────────────────────────────
@@ -42,6 +44,9 @@ function makeRecord({
   taskDescription = 'Test delegation task',
   pr = null,
   handle = null,
+  subjectClass = 'work-agent',
+  informative = false,
+  rootCause = null,
 } = {}) {
   return {
     v: 1,
@@ -55,7 +60,9 @@ function makeRecord({
     taskDescription,
     pr,
     handle,
-    subjectClass: 'work-agent',
+    subjectClass,
+    informative,
+    rootCause,
     dispatchKind: 'session-delegation',
   };
 }
@@ -301,8 +308,9 @@ describe('selectProvider — cascade branches', () => {
     expect(res.reasoning).toContain('too thin');
   });
 
-  // Branch 4: Claude Haiku
-  it('branch 4 (haiku): recommends claude haiku for trivial single-file doc-fix with concrete testable criteria', () => {
+  // Branch 4: #3857 — the model-tier table never outputs Haiku; a trivial single-file doc-fix is Sonnet,
+  // the table's default, not a special Haiku carve-out.
+  it('branch 4 (sonnet): a trivial single-file doc-fix defaults to sonnet, never haiku (#3857)', () => {
     const task = { description: 'Fix typo in documentation comment', taskType: 'doc-fix' };
     const context = {
       filesTouched: ['docs/reference.md'],
@@ -312,8 +320,8 @@ describe('selectProvider — cascade branches', () => {
 
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
-    expect(res.reasoning).toContain('haiku');
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.reasoning).toContain("standard's default");
   });
 
   // Branch 4: Claude Sonnet
@@ -351,8 +359,9 @@ describe('selectProvider — cascade branches', () => {
     expect(res.reasoning).toContain('opus');
   });
 
-  // Branch 4: Claude Opus (Triage Research)
-  it('branch 4 (opus): recommends claude opus for triage-research tasks', () => {
+  // Branch 4: #3857 — triage-research no longer forces Opus by taskType alone (the table has no such
+  // row); it defaults to Sonnet like everything else not on the table's four raise-only rows.
+  it('branch 4 (sonnet): triage-research no longer forces opus by taskType alone (#3857)', () => {
     const task = {
       description: 'Investigate flaky WebWorker state synchronization under load',
       taskType: 'triage-research',
@@ -365,8 +374,8 @@ describe('selectProvider — cascade branches', () => {
 
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
-    expect(res.reasoning).toContain('triage-research');
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+    expect(res.reasoning).toContain("standard's default");
   });
 
   // Statute-tier path override
@@ -385,7 +394,7 @@ describe('selectProvider — cascade branches', () => {
     const res = selectProvider(task, context);
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
     expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
-    expect(res.reasoning).toContain('statute-tier');
+    expect(res.reasoning).toContain('rewording statute or rule text');
   });
 
   // Thin history on judgment-requiring task forces Claude, not Both
@@ -452,19 +461,22 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     expect(JSON.stringify(selectProvider(task, context))).toBe(JSON.stringify(res));
   });
 
+  // #3857 — file-count, LOC and acceptanceTestable:false no longer force Opus on their own; none of
+  // these three cases matches a table row (no statute path, no prepare-decision/architectural-decision,
+  // no security tag, no dispatch-machinery path), so each stays at the Sonnet default.
   it.each([
     { filesTouched: Array.from({ length: 9 }, (_, i) => `scripts/module-${i}.mjs`), estimatedSize: 180 },
     { filesTouched: ['scripts/module.mjs'], estimatedSize: 501 },
     { filesTouched: ['scripts/module.mjs'], estimatedSize: 180, acceptanceTestable: false },
-  ])('offers Opus by default for effort sizing/caution: %j', (context) => {
+  ])('stays Sonnet for effort sizing/caution that is no longer a table row (#3857): %j', (context) => {
     const res = selectProvider({ taskType: 'bugfix' }, context);
 
     expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
     expect(res.alternateBackend).toEqual({
       tool: 'scripts/gemini-direct-task.mjs',
-      cliModel: 'claude-opus-4-6-thinking',
-      reason: expect.stringContaining('claude-opus-4-6-thinking'),
+      cliModel: 'claude-sonnet-4-6',
+      reason: expect.stringContaining('claude-sonnet-4-6'),
     });
     expect(res.auditTrail).toHaveLength(5);
     expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'offered' });
@@ -480,7 +492,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       filesTouched: ['scripts/cli-opts.mjs', 'scripts/run-opts.mjs'],
       estimatedSize: 280,
       scorecards: [
-        makeRecord({ provider: 'antigravity', outcome: 'reworked', findings: 'Earlier review finding' }),
+        makeRecord({ provider: 'antigravity', outcome: 'reworked', findings: 'Earlier review finding', informative: true }),
         makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', scoredAt: '2026-09-15T03:00:00.000Z', verifiedBy: 'other', ...failure }),
         makeRecord({ provider: 'antigravity', scoredAt: '2026-09-15T02:00:00.000Z' }),
         makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T04:00:00.000Z' }),
@@ -509,7 +521,7 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
       model: 'claude-sonnet-4-6',
       scorecards: { records: [
         makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'other' }),
-        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', findings: 'Unresolved build crash' }),
+        makeRecord({ provider: 'antigravity', model: 'claude-sonnet-4-6', outcome: 'rejected', findings: 'Unresolved build crash', informative: true }),
         makeRecord({ provider: 'gemini', scoredAt: '2026-09-15T03:00:00.000Z', outcome: 'rejected' }),
       ] },
     };
@@ -542,16 +554,16 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: false }));
   });
 
-  it.each(['architectural-decision', 'triage-research'])('requires native Opus for %s regardless of Antigravity history', (taskType) => {
+  it('requires native Opus for architectural-decision regardless of Antigravity history', () => {
     for (const trial of [
       { outcome: 'landed', findings: null },
       { outcome: 'reworked', findings: 'Unresolved build failure' },
     ]) {
-      const res = selectProvider({ taskType }, {
+      const res = selectProvider({ taskType: 'architectural-decision' }, {
         filesTouched: ['scripts/module.mjs'],
         estimatedSize: 20,
         quotaStrained: true,
-        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType, ...trial })],
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType: 'architectural-decision', ...trial })],
       });
       expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
       expect(res.claudeTier).toBe(CLAUDE_TIERS.OPUS);
@@ -561,26 +573,26 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
     }
   });
 
-  it('returns null and audits why Haiku has no alternate', () => {
-    const task = { description: 'Fix typo in documentation comment', taskType: 'doc-fix' };
-    const context = {
-      filesTouched: ['docs/reference.md'],
-      estimatedSize: 5,
-      scorecards: [],
-    };
-    const res = selectProvider(task, context);
-
-    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
-    expect(res.claudeTier).toBe(CLAUDE_TIERS.HAIKU);
-    expect(res.alternateBackend).toBeNull();
-    expect(res.auditTrail).toHaveLength(5);
-    expect(res).toEqual(selectProvider(task, { ...context, quotaStrained: true }));
-    expect(res.auditTrail.at(-1)).toEqual({
-      criterion: 'agy-alternate-backend',
-      result: 'not-applicable',
-      dataConsulted: "claudeTier='haiku', taskType='doc-fix', statute=false, latestAntigravityTrial=none",
-      reasoning: expect.stringContaining('Haiku has no agy-hosted equivalent'),
-    });
+  // #3857 — triage-research no longer earns Opus from the model-tier table (no row names it), but
+  // `forcedNativeIdentity` is a SEPARATE axis (this Step 3.5 gate, unchanged by #3857) that still forces
+  // native Claude identity/tools for triage-research regardless of tier or Antigravity history.
+  it('requires native identity for triage-research regardless of Antigravity history, though the tier is now Sonnet (#3857)', () => {
+    for (const trial of [
+      { outcome: 'landed', findings: null },
+      { outcome: 'reworked', findings: 'Unresolved build failure' },
+    ]) {
+      const res = selectProvider({ taskType: 'triage-research' }, {
+        filesTouched: ['scripts/module.mjs'],
+        estimatedSize: 20,
+        quotaStrained: true,
+        scorecards: [makeRecord({ provider: 'antigravity', model: 'claude-opus-4-6-thinking', taskType: 'triage-research', ...trial })],
+      });
+      expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+      expect(res.claudeTier).toBe(CLAUDE_TIERS.SONNET);
+      expect(res.alternateBackend).toBeNull();
+      expect(res.auditTrail).toHaveLength(5);
+      expect(res.auditTrail.at(-1)).toMatchObject({ criterion: 'agy-alternate-backend', result: 'forced-native' });
+    }
   });
 
   it('leaves Gemini, Codex and Both return objects untouched by quota strain', () => {
@@ -613,15 +625,19 @@ describe('selectProvider — default Antigravity alternate backend (agy Claude r
 });
 
 describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
-  it('counts explanatory landed accepts toward the clean streak without a hard veto', () => {
+  it('counts explanatory landed accepts toward the clean streak without a hard veto (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
     const records = [
-      makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' }),
-      ...[1, 2, 3].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked',
+        findings: 'Independent review caught a dropped merge-parent change', informative: true,
+        rootCause: 'Merge-base cache in the adapter went stale after a rebase; diagnosis recorded before any post-miss trial counted.',
+      }),
+      ...[1, 2, 3, 4, 5, 6].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
       ...[2291, 2292].map((pr, index) => makeRecord({
         ...triple,
         pr,
-        scoredAt: `2026-09-15T0${index + 4}:00:00.000Z`,
+        scoredAt: `2026-09-15T0${index + 7}:00:00.000Z`,
         outcome: 'landed',
         verifiedBy: 'independent-claude',
         findings: 'Independent claude -p process verified via 3-way diff against both merge parents plus two real vitest runs (34/34 targeted, 1822/1822 broader operations suite) before any push. Verdict ACCEPT; pushed to origin/lane/op-runner-activity.',
@@ -630,11 +646,14 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // 8 clean trials = minCleanStreak(5) + default k(3) — the post-miss bar, not the cold-start bar.
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('clean');
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')?.result).toBe('post-miss');
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')?.result).toBe('pass');
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'pass',
-      dataConsulted: expect.stringContaining('streak=5, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=8, threshold=8'),
     });
   });
 
@@ -647,10 +666,13 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // The undefined-outcome record is itself an unclean verified record, so it is also a confirmed miss
+    // (#3889, rule 5): the post-miss bar (minCleanStreak 5 + default k 3 = 8) applies to the displayed
+    // threshold, on top of the pre-existing hard veto that already forces 'full' here.
     expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'fail',
-      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=0, threshold=8'),
     });
   });
 
@@ -678,6 +700,77 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
   });
 
+  it('a verified rejected record with real findings but informative:false does NOT satisfy the requirement (#3888, rule 4)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'rejected',
+        findings: 'Unresolved build crash', informative: false, verifiedBy: 'independent-claude',
+      }),
+      ...[1, 2, 3, 4, 5].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'fail',
+      dataConsulted: 'hasInformativeTrial=false, required=true',
+    });
+  });
+
+  it('a verified landed record with informative:true DOES satisfy the requirement (#3888, rule 4)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+    const records = [
+      makeRecord({
+        ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'landed',
+        informative: true, verifiedBy: 'independent-claude',
+      }),
+      ...[1, 2, 3, 4, 5].map((hour) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${hour}:00:00.000Z` })),
+    ];
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')).toMatchObject({
+      result: 'pass',
+      dataConsulted: 'hasInformativeTrial=true, required=true',
+    });
+  });
+
+  it('returns full supervision with the "no informative trial" reason when every row is explicitly informative:false, even with rejected/reworked findings (#3888, rule 4; rootCause added #3889, rule 5)', () => {
+    const records = [
+      // Precede the trailing clean streak so they don't reset it, but would have counted as the
+      // positive control under the old outcome+findings inference this rule replaces. A rootCause note is
+      // recorded on the miss so the post-miss bar (rule 5) is clearable, isolating the assertion to the
+      // informative-trial requirement this test targets.
+      makeRecord({ scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'caught bug', informative: false, rootCause: 'Diagnosed: a race in the worker pool caused the dropped update.' }),
+      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'rejected', findings: 'caught another bug', informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', findings: null, informative: false }),
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', findings: null, informative: false }),
+    ];
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, {
+      minCleanStreak: 5,
+      requireInformativeTrial: true,
+    });
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.reasoning).toContain('no informative trial');
+    expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')?.result).toBe('fail');
+  });
+
   it.each([
     { outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change' },
     { outcome: 'rejected', findings: 'Independent review caught a dropped merge-parent change' },
@@ -692,11 +785,13 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
 
     const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
 
+    // The veto-firing record is itself the (only) confirmed miss on record, so the displayed threshold is
+    // also the post-miss bar (minCleanStreak 5 + default k 3 = 8; #3889, rule 5).
     expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('veto-fired');
     expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
       result: 'fail',
-      dataConsulted: expect.stringContaining('streak=0, threshold=5'),
+      dataConsulted: expect.stringContaining('streak=0, threshold=8'),
     });
   });
 
@@ -711,8 +806,9 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
   });
 
   it('streak-not-yet-met case -> returns full supervision', () => {
+    // Cold-start triple (no miss ever recorded): the bar stays minCleanStreak, unaffected by the
+    // post-miss elevation (#3889, rule 5) — see Done-when #3's dedicated cold-start regression test below.
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', outcome: 'reworked', findings: 'caught bug' }), // informative
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }), // clean 3
@@ -742,14 +838,21 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     expect(res.auditTrail.find((a) => a.criterion === 'informative-trial-requirement')?.result).toBe('fail');
   });
 
-  it('streak-met-and-informative case -> returns spot-check supervision', () => {
+  it('streak-met-and-informative case -> returns spot-check supervision (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'Independent review caught quoting bug' }), // informative
+      makeRecord({
+        scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked',
+        findings: 'Independent review caught quoting bug', informative: true,
+        rootCause: 'Shell-quoting for embedded newlines was never escaped for this adapter; fixed and diagnosed.',
+      }), // informative + confirmed miss, root-caused
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', findings: null }), // clean 2
       makeRecord({ scoredAt: '2026-09-15T03:00:00.000Z', findings: null }), // clean 3
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', findings: null }), // clean 4
       makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', findings: null }), // clean 5
+      makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', findings: null }), // clean 6
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', findings: null }), // clean 7
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', findings: null }), // clean 8 (minCleanStreak 5 + default k 3)
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, {
@@ -758,7 +861,7 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     expect(res.reasoning).toContain('Spot-check supervision approved');
-    expect(res.auditTrail.every((a) => a.result === 'clean' || a.result === 'pass')).toBe(true);
+    expect(res.auditTrail.every((a) => a.result === 'clean' || a.result === 'pass' || a.result === 'post-miss')).toBe(true);
   });
 
   it('most-recent-record-is-reworked case -> returns full supervision (hard veto) even with long prior streak', () => {
@@ -780,9 +883,12 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
     expect(res.auditTrail.find((a) => a.criterion === 'most-recent-trial-veto')?.result).toBe('veto-fired');
   });
 
-  it('an other-verified record in the middle of a streak neither breaks nor extends it', () => {
+  it('an other-verified record in the middle of a streak neither breaks nor extends it (#3889, rule 5: post-miss bar + rootCause on record)', () => {
     const records = [
-      makeRecord({ scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding' }), // informative
+      makeRecord({
+        scoredAt: '2026-09-15T00:30:00.000Z', outcome: 'reworked', findings: 'prior finding', informative: true,
+        rootCause: 'Prior finding root-caused: a stale cache key collided across two unrelated task runs.',
+      }), // informative + confirmed miss, root-caused
       makeRecord({ scoredAt: '2026-09-15T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 1
       makeRecord({ scoredAt: '2026-09-15T02:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 2
       // 'other'-verified trial in the middle (e.g. smoke test)
@@ -790,12 +896,102 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       makeRecord({ scoredAt: '2026-09-15T04:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 3
       makeRecord({ scoredAt: '2026-09-15T05:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 4
       makeRecord({ scoredAt: '2026-09-15T06:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 5
+      makeRecord({ scoredAt: '2026-09-15T07:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 6
+      makeRecord({ scoredAt: '2026-09-15T08:00:00.000Z', verifiedBy: 'independent-claude', findings: null }), // clean 7
+      makeRecord({ scoredAt: '2026-09-15T09:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }), // clean 8 (minCleanStreak 5 + default k 3)
     ];
 
     const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, { minCleanStreak: 5 });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
     const streakEntry = res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak');
-    expect(streakEntry?.dataConsulted).toContain('streak=5');
+    expect(streakEntry?.dataConsulted).toContain('streak=8');
+  });
+
+  describe('post-miss re-graduation (platform-decisions.md#delegation-trial-record-graduation, rule 5; #3889)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'conflict-resolution' };
+
+    it('(2a) after a confirmed miss with NO rootCause on record, no number of later clean trials reaches spot-check — the reason names the missing note', () => {
+      // 20 trailing clean trials — far more than any plausible minCleanStreak + k — still never clears
+      // without a rootCause note in its own field.
+      const records = [
+        makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
+        ...Array.from({ length: 20 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T${String(i).padStart(2, '0')}:00:00.000Z` })),
+      ];
+
+      const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+      expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(res.reasoning).toContain('no root-cause note');
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+        result: 'fail',
+        dataConsulted: 'hasConfirmedMiss=true, hasRootCause=false',
+      });
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')?.result).toBe('post-miss');
+    });
+
+    it('(2b) with a rootCause on record, minCleanStreak clean trials still return full and minCleanStreak + k return spot-check', () => {
+      const missRow = { ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true, rootCause: 'Root cause: merge-base cache used a stale ref after a force-push.' };
+      const thresholds = { minCleanStreak: 5, k: 3 };
+
+      const atMinCleanStreak = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, [
+        makeRecord(missRow),
+        ...Array.from({ length: 5 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ], thresholds);
+      expect(atMinCleanStreak.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(atMinCleanStreak.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+        result: 'fail',
+        dataConsulted: expect.stringContaining('streak=5, threshold=8'),
+      });
+
+      const atPostMissBar = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, [
+        makeRecord(missRow),
+        ...Array.from({ length: 8 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ], thresholds);
+      expect(atPostMissBar.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+      expect(atPostMissBar.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+        result: 'pass',
+        dataConsulted: expect.stringContaining('streak=8, threshold=8'),
+      });
+    });
+
+    it('(2c) a rootCause written into a later row\'s findings instead of the field does not clear the miss', () => {
+      const records = [
+        makeRecord({ ...triple, scoredAt: '2026-09-15T00:00:00.000Z', outcome: 'reworked', findings: 'Independent review caught a dropped merge-parent change', informative: true }),
+        // The diagnosis text lands in `findings`, never in `rootCause` — this must NOT count.
+        makeRecord({ ...triple, scoredAt: '2026-09-15T01:00:00.000Z', findings: 'Root cause: merge-base cache used a stale ref after a force-push.' }),
+        ...Array.from({ length: 8 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-16T0${i}:00:00.000Z` })),
+      ];
+
+      const res = selectSupervisionLevel(triple.provider, triple.model, triple.taskType, records);
+
+      expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+      expect(res.reasoning).toContain('no root-cause note');
+      expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+        result: 'fail',
+        dataConsulted: 'hasConfirmedMiss=true, hasRootCause=false',
+      });
+    });
+  });
+
+  it('(3) cold-start triple with no miss ever recorded is completely unaffected — still graduates at exactly minCleanStreak, no rootCause required (#3889, rule 5)', () => {
+    const triple = { provider: 'antigravity', model: 'gemini-3.8-flash-low', taskType: 'doc-fix' };
+    const records = Array.from({ length: 5 }, (_, i) => makeRecord({ ...triple, scoredAt: `2026-09-15T0${i}:00:00.000Z`, taskType: 'doc-fix', informative: true }));
+
+    const res = selectSupervisionLevel(triple.provider, triple.model, 'doc-fix', records, { minCleanStreak: 5 });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-bar-selection')).toMatchObject({
+      result: 'cold-start',
+      dataConsulted: expect.stringContaining('requiredCleanStreak=5 (minCleanStreak=5)'),
+    });
+    expect(res.auditTrail.find((a) => a.criterion === 'post-miss-root-cause-requirement')).toMatchObject({
+      result: 'pass',
+      dataConsulted: 'hasConfirmedMiss=false, hasRootCause=false',
+    });
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({
+      result: 'pass',
+      dataConsulted: expect.stringContaining('streak=5, threshold=5'),
+    });
   });
 
   it('handles empty scorecards gracefully, defaulting to full supervision', () => {
@@ -816,6 +1012,41 @@ describe('selectSupervisionLevel — progressive backdown plan (#3690)', () => {
       requireInformativeTrial: false,
     });
     expect(res.level).toBe(SUPERVISION_LEVELS.SPOT_CHECK);
+  });
+
+  it('#3801 Fork 3: a reviewer-subject row never counts toward a work triple with the same provider/model/subject', () => {
+    // Same provider, model AND subject string ('bugfix') as a work triple, but a review-lens subjectClass.
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({ scoredAt: `2026-09-15T0${hour}:00:00.000Z`, findings: null, subjectClass: 'review-lens' })
+    );
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'bugfix', records, { minCleanStreak: 5, requireInformativeTrial: false });
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({ result: 'fail', dataConsulted: expect.stringContaining('streak=0') });
+  });
+
+  it('#3801 Fork 3: a work row never counts toward a review-lens subject with the same provider/model/subject', () => {
+    // Same provider, model AND subject string as the review-lens query, but subjectClass defaults to work-agent.
+    const records = [1, 2, 3, 4, 5].map((hour) =>
+      makeRecord({ scoredAt: `2026-09-15T0${hour}:00:00.000Z`, taskType: 'design-review', findings: null })
+    );
+
+    const res = selectSupervisionLevel('codex', 'gpt-6-astra', 'design-review', records, { minCleanStreak: 5, requireInformativeTrial: false }, 'review-lens');
+
+    expect(res.level).toBe(SUPERVISION_LEVELS.FULL);
+    expect(res.auditTrail.find((a) => a.criterion === 'trailing-clean-streak')).toMatchObject({ result: 'fail', dataConsulted: expect.stringContaining('streak=0') });
+  });
+
+  it('#3801 Fork 3: a review-lens subject with no graduated candidate resolves to Claude at full', () => {
+    // The router already accepts any subject string generically; a lens subject with no scorecard history
+    // resolves exactly like an unseen work task type — Claude, fully supervised.
+    const res = selectProvider({ taskType: 'design-review' }, { filesTouched: ['scripts/lib/example.mjs'], estimatedSize: 30, scorecards: [] });
+
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+
+    const supervision = selectSupervisionLevel('claude', res.model, 'design-review', [], {}, 'review-lens');
+    expect(supervision.level).toBe(SUPERVISION_LEVELS.FULL);
   });
 });
 
@@ -945,11 +1176,12 @@ describe('selectProvider — explorationHint (model-capability-ratings)', () => 
 });
 
 describe('selectSupervisionLevel — architectural separation from model-capability-ratings', () => {
-  it('retains its five declared parameters and identical behavior on identical evidence', () => {
-    // JavaScript .length stops before the first default: backdownThresholds = {}.
+  it('retains its six declared parameters and identical behavior on identical evidence', () => {
+    // JavaScript .length stops before the first default: backdownThresholds = {}. subjectClass follows it
+    // (also defaulted, #3801 Fork 3) and so is likewise excluded from .length.
     expect(selectSupervisionLevel.length).toBe(4);
     expect(selectSupervisionLevel.toString().split('\n')[0]).toBe(
-      'function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}) {'
+      "function selectSupervisionLevel(provider, model, taskType, scorecards, backdownThresholds = {}, subjectClass = 'work-agent') {"
     );
     const scorecards = [makeRecord()];
     const thresholds = { minCleanStreak: 1, requireInformativeTrial: false };
@@ -982,5 +1214,70 @@ describe('selectSupervisionLevel — architectural separation from model-capabil
     expect(span).toBe(`export ${selectSupervisionLevel.toString()}`);
     expect(span).not.toContain('model-capability-ratings');
     expect(span).not.toMatch(/isUsableForExploration|getExplorationHint|capabilityRatings|capabilityCategory|explorationHint|THIN_TRIAL_THRESHOLD|forcedNativeIdentity|latestAntigravityTrial|agyAlternateResult/);
+  });
+});
+
+// ── #3857 — the model-tier table (workerTierFor) ────────────────────────────────────────────────────────────
+
+describe('workerTierFor — the checked-in model-tier table (#3857)', () => {
+  it('defaults to sonnet when nothing matches a row', () => {
+    expect(workerTierFor({ kind: 'build', taskType: 'build-new-feature', scopePaths: ['scripts/foo.mjs'], tags: [] }))
+      .toEqual({ tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" });
+    expect(workerTierFor({})).toEqual({ tier: CLAUDE_TIERS.SONNET, reason: "the standard's default" });
+  });
+
+  it('kind prepare-decision, or taskType architectural-decision, is opus: preparing a decision\'s forks is judgment', () => {
+    expect(workerTierFor({ kind: 'prepare-decision' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'prepare-decision' }).reason).toBe("preparing a decision's forks is judgment");
+    expect(workerTierFor({ kind: 'build', taskType: 'architectural-decision' }).tier).toBe(CLAUDE_TIERS.OPUS);
+  });
+
+  it('a scope path under docs/agent/, or kind statute-wording, is opus: rewording statute or rule text', () => {
+    expect(workerTierFor({ kind: 'build', scopePaths: ['docs/agent/platform-decisions.md'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'build', scopePaths: ['docs/agent/platform-decisions.md'] }).reason).toBe('rewording statute or rule text');
+    expect(workerTierFor({ kind: 'statute-wording' }).tier).toBe(CLAUDE_TIERS.OPUS);
+  });
+
+  it('kind security-fix, or a security tag, is opus: a security-critical fix', () => {
+    expect(workerTierFor({ kind: 'security-fix' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'security-fix' }).reason).toBe('a security-critical fix');
+    expect(workerTierFor({ kind: 'fix', tags: ['security'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor({ kind: 'fix', tags: ['other-tag'] }).tier).toBe(CLAUDE_TIERS.SONNET);
+  });
+
+  it('a scope path in DISPATCH_MACHINERY_PATHS, or kind dispatch-machinery, is opus: wide-blast-radius dispatch machinery', () => {
+    for (const p of DISPATCH_MACHINERY_PATHS) {
+      expect(workerTierFor({ kind: 'build', scopePaths: [p] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    }
+    expect(workerTierFor({ kind: 'build', scopePaths: DISPATCH_MACHINERY_PATHS }).reason).toBe('wide-blast-radius dispatch machinery');
+    expect(workerTierFor({ kind: 'dispatch-machinery' }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(DISPATCH_MACHINERY_PATHS).toEqual([
+      'scripts/operations/dispatch-lane-io.mjs',
+      'scripts/operations/dispatch-task.mjs',
+      'scripts/lib/dispatch-contracts.mjs',
+      'scripts/lib/provider-routing.mjs',
+      'scripts/conveyor/tick-core.mjs',
+    ]);
+  });
+
+  it('never outputs haiku, and the output set is exactly sonnet and opus', () => {
+    const cases = [
+      {}, { kind: 'build' }, { kind: 'prepare' }, { kind: 'fix' }, { kind: 'ci-heal' }, { kind: 'investigate' },
+      { kind: 'prepare-decision' }, { kind: 'security-fix' }, { kind: 'statute-wording' }, { kind: 'dispatch-machinery' },
+      { taskType: 'architectural-decision' }, { taskType: 'doc-fix' }, { scopePaths: ['docs/agent/x.md'] },
+      { tags: ['security'] },
+    ];
+    const tiers = new Set(cases.map((c) => workerTierFor(c).tier));
+    for (const t of tiers) expect([CLAUDE_TIERS.SONNET, CLAUDE_TIERS.OPUS]).toContain(t);
+    expect(tiers.has(CLAUDE_TIERS.HAIKU)).toBe(false);
+  });
+
+  it('is raise-only: a matching row can only move sonnet up to opus, and PURE (identical input -> identical output)', () => {
+    const base = { kind: 'build', taskType: 'build-new-feature', scopePaths: ['scripts/foo.mjs'], tags: [] };
+    expect(workerTierFor(base).tier).toBe(CLAUDE_TIERS.SONNET);
+    expect(workerTierFor({ ...base, scopePaths: ['docs/agent/x.md'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    // Never sonnet again once a row matches opus for the same underlying facts plus more.
+    expect(workerTierFor({ ...base, scopePaths: ['docs/agent/x.md', 'scripts/foo.mjs'] }).tier).toBe(CLAUDE_TIERS.OPUS);
+    expect(workerTierFor(base)).toEqual(workerTierFor({ ...base }));
   });
 });

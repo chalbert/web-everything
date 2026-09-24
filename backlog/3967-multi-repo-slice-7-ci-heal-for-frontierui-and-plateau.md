@@ -3,10 +3,12 @@ bornAs: xd6j3hn
 kind: story
 size: 5
 parent: "3963"
-status: open
+status: resolved
 blockedBy: ["3966", "3965"]
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 

@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { withFakeGh } from '../../conveyor/__tests__/helpers/fake-gh.mjs';
+import { withNodeSpy } from '../../conveyor/__tests__/helpers/node-spy.mjs';
 import { withFakeClaude } from './helpers/fake-claude.mjs';
 import { planTick } from '../../conveyor/tick-core.mjs';
 import {
@@ -130,17 +131,33 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       scope: ['we:scripts/fixture-thing.mjs'], dateOpened: '2026-01-01', tags: [],
     }, 'An open, build-ready fixture item');
 
-    const env = { ...process.env, ...fakeGh.env };
+    // #x7xv2xt — a `node` spy first on PATH records every script conveyor-state shells, so the test can prove
+    // `--backlog-dir` kept it off the real lane pool (it used to run `lane-pool.mjs status` + a per-lane scan).
+    const nodeSpy = withNodeSpy();
+    const env = {
+      ...process.env, ...fakeGh.env,
+      PATH: `${nodeSpy.env.PATH.split(':')[0]}:${fakeGh.env.PATH}`, NODE_SPY_LOG: nodeSpy.env.NODE_SPY_LOG,
+    };
     const bq = JSON.parse(execFileSync(
       'node', [BACKLOG_CLI, 'build-queue', '--json', `--backlog-dir=${backlogDir}`],
       { encoding: 'utf8', env },
     ));
     expect(bq.queue.map((r) => String(r.num))).toEqual([NUM]);
 
-    const state = JSON.parse(execFileSync(
-      'node', [STATE_CLI, '--json', `--backlog-dir=${backlogDir}`, '--repo=fixture-org/fixture-repo'],
-      { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
-    ));
+    const spyMark = nodeSpy.scripts().length;
+    let state;
+    try {
+      state = JSON.parse(execFileSync(
+        process.execPath, [STATE_CLI, '--json', `--backlog-dir=${backlogDir}`, '--repo=fixture-org/fixture-repo'],
+        { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
+      ));
+      const started = nodeSpy.scripts().slice(spyMark);
+      expect(started.some((p) => p.endsWith('backlog.mjs'))).toBe(true); // the spy is on the children's path
+      expect(started.filter((p) => /lane-pool\.mjs$|scope-lease-collect\.mjs$/.test(p))).toEqual([]);
+      expect(state.lanePool).toBe('skipped');
+    } finally {
+      nodeSpy.cleanup();
+    }
 
     // `plan.launch` HAND-BUILT, standing in for the whole of `dispatch-plan.mjs`'s decision — see the file
     // header's "WHAT IS SIDESTEPPED" section. `planTick` itself is the REAL, exported core.

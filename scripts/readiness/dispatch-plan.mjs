@@ -530,11 +530,32 @@ export function clearedNotReady(clearedEntries, readyRows, norm, observe = null)
     });
 }
 
+/** Env twin of `--free-lanes=` (#x7xv2xt). The flag wins when both are set. */
+export const FREE_LANES_ENV = 'WE_DISPATCH_FREE_LANES';
+
+/**
+ * Parse an explicit free-lane list (`--free-lanes=3,1,7` / `WE_DISPATCH_FREE_LANES`) — #x7xv2xt. Returns `null`
+ * when no list was given (the shell then reads the real pool), or the lane ids ascending. An empty string is a
+ * real answer: "no free lanes". Non-integer tokens are dropped.
+ *
+ * @param {string|boolean|undefined|null} raw
+ * @returns {number[]|null}
+ */
+export function parseFreeLanes(raw) {
+  if (raw == null || raw === false) return null;
+  if (raw === true) return [];
+  return String(raw).split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^\d+$/.test(s))
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
 // ── IO SHELL (runs only as a CLI — owns all child_process; keeps the pure core import-clean) ──────────────────
 
 // Lazily required so importing the pure core pulls in NO node built-ins beyond scope-lease.mjs.
 async function main(argv) {
-  const { execFileSync } = await import('node:child_process');
+  const { runBounded, installChildReaper, resolveChildTimeoutMs } = await import('../lib/bounded-child.mjs');
   const { fileURLToPath } = await import('node:url');
   const { dirname, join } = await import('node:path');
 
@@ -553,16 +574,30 @@ async function main(argv) {
   const log = (m) => process.stderr.write(m + '\n');
   const fail = (m) => { process.stderr.write(`✗ ${m}\n`); process.exit(1); };
 
-  const runJson = (cmd, args, what) => {
+  // #x7xv2xt — every child call is bounded by a timeout, runs in its own process group, and dies with this
+  // process (exit, signal, or this process being orphaned). It used to be a bare `execFileSync` with no timeout,
+  // which left test-spawned runs scanning the real lane pool for an hour after vitest had died.
+  installChildReaper({ log });
+  const childTimeoutMs = resolveChildTimeoutMs(process.env);
+  const runJson = async (cmd, args, what) => {
     let out;
     try {
-      out = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      out = await runBounded(cmd, args, { timeoutMs: childTimeoutMs });
     } catch (e) {
       fail(`${what} failed: ${String(e.message || e).split('\n')[0]}`);
     }
     try { return JSON.parse(out); }
     catch (e) { fail(`could not parse ${what} JSON: ${String(e.message || e).split('\n')[0]}`); }
   };
+
+  // #x7xv2xt — FIXTURE MODE never touches the real lane pool. `--backlog-dir` means "a synthetic corpus", so the
+  // shared pool (`lane-pool.mjs list --acquirable`, `scope-lease-collect.mjs`) is off-limits: free lanes come
+  // from `--free-lanes=` / `WE_DISPATCH_FREE_LANES` (none given → no free lanes) and the lease set is empty. An
+  // explicit free-lane list without `--backlog-dir` replaces only the pool's free-lane read. With neither, the
+  // behavior is exactly what it was.
+  const fixtureMode = typeof flags['backlog-dir'] === 'string';
+  const freeLanesFlag = flags['free-lanes'] !== undefined ? flags['free-lanes'] : process.env[FREE_LANES_ENV];
+  const freeLanesOverride = parseFreeLanes(freeLanesFlag);
 
   // Compare scopes on a repo-RELATIVE basis: strip a leading `<key>:` repo qualifier (a token with no slash
   // before the colon) from every entry so a lease's `we:scripts/x` / `web-everything.git:scripts/x` and an
@@ -591,7 +626,7 @@ async function main(argv) {
     bqArgs.push(`--backlog-dir=${flags['backlog-dir']}`);
     process.env.WE_BACKLOG_DIR = flags['backlog-dir'];
   }
-  const bq = runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
+  const bq = await runJson('node', [BACKLOG_CLI, ...bqArgs], 'backlog build-queue');
   const bqRows = Array.isArray(bq?.queue) ? bq.queue : [];
   const selection = new Map();
   const observeSelection = (num, gate) => {
@@ -670,22 +705,29 @@ async function main(argv) {
   }
 
   // 2. THE ACTIVE LEASES — reuse the live scope-lease collector. Each lease's held scope = predicted ∪ observed.
-  const picture = runJson('node', [SCOPE_COLLECT_CLI, '--json'], 'scope-lease-collect');
+  //    Fixture mode (#x7xv2xt) skips it: a synthetic corpus has no real leases.
+  const picture = fixtureMode ? { leases: [] } : await runJson('node', [SCOPE_COLLECT_CLI, '--json'], 'scope-lease-collect');
   const leases = (Array.isArray(picture?.leases) ? picture.leases : []).map((l) => ({
     lane: l.lane,
     scope: toRepoRelative([...(l.predicted || []), ...(l.observed || [])]),
   }));
 
   // 3. THE FREE LANES — reuse the pool's own acquirable picker. `list --acquirable --json` = the free lane
-  //    dirs; the lane id is the trailing `lane-<n>`. Their COUNT is the free-slot count.
-  const paths = runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
-  const freeLanes = (Array.isArray(paths) ? paths : [])
-    .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
-    .filter((n) => n != null)
-    // Ascending lane order is a SHELL contract: the pure core assigns launches to freeLanes in the order
-    // given, so sorting here makes the plan's lane assignment deterministic regardless of how `lane-pool
-    // list --acquirable` happens to order its output (removes the dependency on the pool's listing stability).
-    .sort((a, b) => a - b);
+  //    dirs; the lane id is the trailing `lane-<n>`. Their COUNT is the free-slot count. An explicit list, or
+  //    fixture mode, replaces the pool read entirely (#x7xv2xt).
+  let freeLanes;
+  if (freeLanesOverride !== null) freeLanes = freeLanesOverride;
+  else if (fixtureMode) freeLanes = [];
+  else {
+    const paths = await runJson('node', [LANE_POOL_CLI, 'list', '--acquirable', '--json'], 'lane-pool list');
+    freeLanes = (Array.isArray(paths) ? paths : [])
+      .map((p) => { const m = /lane-(\d+)\/?$/.exec(String(p)); return m ? Number(m[1]) : null; })
+      .filter((n) => n != null)
+      // Ascending lane order is a SHELL contract: the pure core assigns launches to freeLanes in the order
+      // given, so sorting here makes the plan's lane assignment deterministic regardless of how `lane-pool
+      // list --acquirable` happens to order its output (removes the dependency on the pool's listing stability).
+      .sort((a, b) => a - b);
+  }
 
   // 3.5 BRANCH-DRIFT CEILING (#3464) — read the latest `branch-drift.mjs check` verdict for the watched
   //     long-lived dispatched-work branch. FAIL-OPEN on any error (module missing, no report yet, git failure)
@@ -695,7 +737,6 @@ async function main(argv) {
   let driftGraduationItem = null;
   if (!flags['no-drift-check']) {
     try {
-      const { execFileSync: execSync } = await import('node:child_process');
       const DRIFT_CLI = join(HERE, '..', 'conveyor', 'branch-drift.mjs');
       const branch = typeof flags['drift-branch'] === 'string' ? flags['drift-branch'] : DEFAULT_DRIFT_BRANCH;
       const target = typeof flags['drift-target'] === 'string' ? flags['drift-target'] : DEFAULT_DRIFT_TARGET;
@@ -704,7 +745,7 @@ async function main(argv) {
       // nothing carrying unreconciled drift, so there is nothing to hold on. Skip rather than shelling out
       // with a `null` branch name and relying on the fail-open catch to clean it up.
       if (!branch) throw new Error('no POC branch registered and no --drift-branch given — nothing to check');
-      const out = execSync('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const out = await runBounded('node', [DRIFT_CLI, 'check', `--branch=${branch}`, `--target=${target}`, '--json'], { timeoutMs: childTimeoutMs });
       const verdict = JSON.parse(out);
       if (verdict?.status === 'blocked') {
         driftBlockedScope = scope;
@@ -752,6 +793,14 @@ async function main(argv) {
     num: normNum(entry.num),
     ready: !notReadyKeys.has(normNum(entry.num)),
   }));
+  // #x7xv2xt — say where the pool inputs came from whenever they did NOT come from the real pool, so a caller
+  // (and the fixture harness test) can see it. Absent on a normal run, which keeps that output unchanged.
+  if (fixtureMode || freeLanesOverride !== null) {
+    plan.lanePool = {
+      freeLanes: freeLanesOverride !== null ? 'explicit' : 'fixture-empty',
+      leases: fixtureMode ? 'fixture-empty' : 'lane-pool',
+    };
+  }
   if (flags.json) {
     // Drain synchronously before exit — `process.stdout.write` is async to a pipe and the `process.exit(0)`
     // below would drop the unflushed tail, truncating this JSON for an `execFileSync`/pipe consumer (exactly

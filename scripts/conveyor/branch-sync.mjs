@@ -53,6 +53,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { backoffMs, retryDecision } from './infra-blocked.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // ── TUNING (exported so a caller/test can override) ────────────────────────────────────────────────────────
 
@@ -117,7 +118,10 @@ const firstLine = (s) => String(s || '').split('\n').find((l) => l.trim()) || ''
  *  function below takes, so tests can inject a fake. */
 export function gitRun(args, cwd) {
   try {
-    const stdout = execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // #x5n4zn3 — was bare (no timeout at all). Reuses `we:scripts/lib/bounded-child.mjs`'s shared budget
+    // constant so a hung git (the class of hang #3383 filed this whole rollout for) fails THIS one call, never
+    // the whole watchdog/branch-sync pass that calls it in a loop.
+    const stdout = execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
     return { ok: true, stdout, stderr: '' };
   } catch (e) {
     return { ok: false, stdout: e.stdout != null ? String(e.stdout) : '', stderr: e.stderr != null ? String(e.stderr) : String(e.message || e) };

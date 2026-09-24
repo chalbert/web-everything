@@ -47,6 +47,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.
 // #3568 — the pure decision core only, reused rather than re-derived (the SAME `isLeaseStale`
 // `we:scripts/lane-pool.mjs` itself calls). See `defaultIsLeasedNow` below.
 import { LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -172,7 +173,9 @@ export function defaultListLaneStatus({ exec = execFileSync, repo = null, root =
   const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'status', '--json'];
   const repoPath = resolveLanePoolRepoPath(repo);
   if (repoPath) argv.push(`--repo=${repoPath}`);
-  const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout): the exact `lane-pool.mjs status`-shaped hang class #3383 filed this
+  // rollout for.
+  const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '{}'));
   return { repo: parsed.repo, root: parsed.root, lanes: Array.isArray(parsed.lanes) ? parsed.lanes : [] };
 }
@@ -187,7 +190,8 @@ export function defaultListLaneStatus({ exec = execFileSync, repo = null, root =
  */
 export function defaultReadPorcelain(dir, exec = execFileSync) {
   try {
-    return exec('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // #x5n4zn3 — was bare (no timeout); called per-lane, so a single stuck lane must not stall the whole sweep.
+    return exec('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   } catch {
     return null;
   }

@@ -108,19 +108,30 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 // `#2117`/`#2298` incident this closes.
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
-import { countStandDownComments, STAND_DOWN_MARKER } from './stand-down.mjs';
+import { countTerminalStandDowns, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
 import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 
 /**
- * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the only two things this pass ever asks for. Frozen,
+ * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
  * because the list being SHORT is the design: the pass decides that work is owed and who owes it, and it runs
  * nothing itself. `fix` re-dispatches the fix-agent brief at a bounced PR; `review` calls the independent-review
- * operation (#3279). A CI-heal is deliberately NOT here — `planTick` already plans those, and a second planner
- * for the same job is the drift this file's phase-borrowing rule exists to prevent.
+ * operation (#3279); `ci-heal` re-dispatches the CI-heal brief at a red-CI PR (multi-repo slice 7,
+ * `we:backlog/3967-*.md`).
+ *
+ * `ci-heal` WAS deliberately absent here (`planTick` already planned those) — see `we:scripts/conveyor/
+ * tick-core.mjs#planCiHealSpawns`. That path stayed exactly as it is: it heals a WE PR THIS SESSION'S OWN
+ * `launchedNums` remembers launching, session-ephemeral bookkeeping that a restart wipes. This pass closes the
+ * gap that leaves — a red PR opened by hand, one a sibling process launched, or a restart-orphaned one, in ANY
+ * constellation repo — the SAME genuinely-different-population reasoning `reconcile-fix-dispatch.mjs`'s own
+ * docblock gives for `fix` (multi-repo slice 5, `#x33jgwt`). The two paths are not a duplicate mechanism for
+ * the two reasons `bindAgents`/`assessLiveness` below now enforce: a `ci-heal-<pr>` session name binds here
+ * exactly like `fix-<pr>` already did, so a heal `planTick` already launched refuses `live-process` rather than
+ * being re-planned, and the cap is the SAME durable floor (`countCiHealComments`) either path would read off
+ * the PR, never two independent counters.
  */
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review']);
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -154,11 +165,13 @@ export const REFUSAL_KINDS = Object.freeze([
  * we:scripts/conveyor/reconcile-core.mjs#BOOKKEEPING_MARKERS — the durable conveyor marker comments, which are
  * this loop's OWN bookkeeping and must never be mistaken for a reviewer's finding. A PR whose only comments are
  * three re-arm markers has had zero findings raised on it, and dispatching a fixer at it is exactly the
- * invent-work failure refusal 2 exists to prevent. Single-sourced from the three files that POST them so this
- * list cannot drift from what is actually on a PR.
+ * invent-work failure refusal 2 exists to prevent. Single-sourced from the files that POST them so this
+ * list cannot drift from what is actually on a PR. The parked-PR conflict watch's supersede comment
+ * (`SUPERSEDE_STAND_DOWN_MARKER`, #xu2krte Fork 2) is bookkeeping too — it says a stand-down no longer holds,
+ * it raises no finding.
  */
 export const BOOKKEEPING_MARKERS = Object.freeze([
-  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER,
+  REARM_COMMENT_MARKER, CI_HEAL_COMMENT_MARKER, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
 ]);
 
 /**
@@ -179,9 +192,18 @@ export const BOOKKEEPING_MARKERS = Object.freeze([
  */
 const OWED = Object.freeze({ bounced: 'fix', 'needs-review': 'review', 'needs-human': 'review' });
 const OWED_ELSEWHERE = Object.freeze({
-  'ci-red': 'a required check is failing — the conveyor tick plans CI-heals, this pass does not',
   conflicted: 'the branch needs a rebase before it can merge',
 });
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#CI_HEAL_ROUND_CAP — the durable CI-heal attempt cap `ci-red` binds on
+ * (multi-repo slice 7). Mirrors `we:scripts/conveyor/tick-core.mjs#DEFAULT_CI_HEAL_RETRY_CAP` (3) exactly —
+ * DUPLICATED, not imported, because `tick-core.mjs` already imports THIS module (its own `planCiHealSpawns`
+ * path, see {@link DISPATCH_KINDS}'s docblock), so importing back would be circular. Both floors move together
+ * by hand if the retry policy ever changes; `reconcile-core.test.mjs` and `tick-core.test.mjs` each pin their
+ * own copy's value so a drift between them fails loud in CI rather than silently diverging.
+ */
+export const CI_HEAL_ROUND_CAP = 3;
 
 /** Narrow a raw `gh` label array (`[{name}]`, or bare strings) to the names it carries. Pure. */
 const labelNames = (labels) => (Array.isArray(labels) ? labels : [])
@@ -305,10 +327,18 @@ export function bindAgents(pr, agents, repo = 'we') {
 
   const prNumber = Number(pr?.number);
   if (Number.isInteger(prNumber) && prNumber > 0) {
-    // #3438 — BOTH name-based slugs, unioned the same way path 1 and path 2 already are: a PR can legitimately
-    // have a live review agent OR a live fix agent bound to it by name, and this pass must refuse dispatching
-    // whichever kind is already running.
-    const slugs = [reviewSessionSlug(prNumber, repo), sessionSlugFor(prNumber, 'fix', null, '', repo)];
+    // #3438/#3967 — every name-based slug this pass can dispatch, unioned the same way path 1 and path 2
+    // already are: a PR can legitimately have a live review, fix, OR ci-heal agent bound to it by name, and
+    // this pass must refuse dispatching whichever kind is already running. `ci-heal` (multi-repo slice 7) reads
+    // the SAME slug `we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal` mints
+    // (`sessionSlugFor(itemNum, 'ci-heal', pr, ...)`, which resolves to `pr` here exactly as `fix` already does
+    // — see `sessionSlugFor`'s own `PR_KINDS` fallback), so a heal already in flight — dispatched by THIS pass
+    // or by `planTick`'s own WE-only path — is never re-planned on the next tick.
+    const slugs = [
+      reviewSessionSlug(prNumber, repo),
+      sessionSlugFor(prNumber, 'fix', null, '', repo),
+      sessionSlugFor(prNumber, 'ci-heal', null, '', repo),
+    ];
     for (const a of list) {
       if (a && slugs.includes(String(a.name ?? ''))) {
         bound.set(a, { agent: a, cwd: String(a.cwd ?? ''), sha });
@@ -468,9 +498,15 @@ export function assessLiveness(bound) {
  *   so the plan for a given input is stable over time — a `stood-down` PR returns an identical result a week on.
  * @param {number} [o.roundCap] - the attempt cap; defaults to `NEGOTIATION_ROUND_CAP` (5), single-sourced from
  *   `we:scripts/lib/jury-core.mjs` rather than re-declared here.
+ * @param {number} [o.ciHealCap] - the `ci-red` attempt cap (multi-repo slice 7); defaults to
+ *   {@link CI_HEAL_ROUND_CAP} (3). Deliberately its OWN cap, not `roundCap`: a CI-heal round and a fix/review
+ *   negotiation round are different work (a rebase-and-repair vs. a finding-and-fix), so binding them to one
+ *   shared counter would let a PR burn through one cap doing the other kind of work.
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
-export function planReconcile({ repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
+export function planReconcile({
+  repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
+} = {}) {
   const dispatch = [];
   const refusals = [];
   const notes = [];
@@ -496,7 +532,14 @@ export function planReconcile({ repo = 'we', prs = [], agents = [], durableCount
 
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
-    const stoodDown = countStandDownComments(pr?.comments);
+    //
+    // `countTerminalStandDowns`, NOT the raw `countStandDownComments` — #xu2krte Fork 2 (review-human statute
+    // amendment). It excludes ONLY a parked-PR conflict watch stand-down that the watch ITSELF later superseded,
+    // with both comments self-authored (GitHub's `viewerDidAuthor`, not a body substring anyone could forge) —
+    // `we:scripts/conveyor/stand-down.mjs#isStandDownSuperseded`. A watcher stand-down that was never superseded
+    // is current and stays terminal. A fix agent's OWN needs-judgment/gate-red/lane-ref-gone escalation, or a
+    // human's `/finish` stand-down, is never excluded.
+    const stoodDown = countTerminalStandDowns(pr?.comments);
     if (stoodDown > 0) {
       refuse('stood-down', {
         standDowns: stoodDown,
@@ -535,6 +578,32 @@ export function planReconcile({ repo = 'we', prs = [], agents = [], durableCount
     });
     const check = reduceCheckState(pr?.statusCheckRollup);
     const withPhase = { phase, check: check.state, labels: labelNames(pr?.labels) };
+
+    // ── `ci-red` (multi-repo slice 7) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table,
+    // because it needs neither of that table's two remaining checks: REFUSAL 2 ("no findings, no fixer") does
+    // not apply — a red required check IS the finding, there is no reviewer thread to count — and the cap is
+    // its OWN durable floor ({@link countCiHealComments}, one marker comment per completed heal, #2666), never
+    // `roundCap`'s rearm/advisory counters (see {@link CI_HEAL_ROUND_CAP}'s own docblock for why the two caps
+    // stay separate). Capability (does THIS repo's profile allow a CI-heal at all?) is deliberately NOT checked
+    // here, for the same reason `fix` is never capability-checked in this file either: this pass decides what
+    // is owed from the PR alone, and leaves "can this repo's worker actually do it" to the dispatcher that
+    // reads this plan (`we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`, mirroring
+    // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own capability gate for `fix`).
+    if (phase === 'ci-red') {
+      const ciHealAttempts = countCiHealComments(pr?.comments);
+      if (ciHealAttempts >= ciHealCap) {
+        refuse('cap-exhausted', {
+          ...withPhase, attempts: ciHealAttempts, cap: ciHealCap,
+          why: `the PR's own durable CI-heal count is ${ciHealAttempts} against a cap of ${ciHealCap} — auto-heal is exhausted here and a person must take it`,
+        });
+      } else {
+        dispatch.push({
+          ...base, ...withPhase, kind: 'ci-heal', attempts: ciHealAttempts,
+          why: `a required check is failing, nothing live is working it, and ${ciHealAttempts} of ${ciHealCap} CI-heal attempts are spent`,
+        });
+      }
+      continue;
+    }
 
     if (!OWED[phase]) {
       if (OWED_ELSEWHERE[phase]) refuse('owed-elsewhere', { ...withPhase, why: OWED_ELSEWHERE[phase] });
@@ -601,9 +670,10 @@ export function planReconcile({ repo = 'we', prs = [], agents = [], durableCount
  *
  * EVERY PR THIS PASS HAS AN OPINION ABOUT, EXCEPT `nothing-owed`. `nothing-owed` is the ONLY refusal kind that
  * genuinely means "reviewed and queued, already landed, or a signal-free PR unrelated to this loop" — see
- * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for `needs-human`, `ci-red`, and
- * `conflicted` phases alike, which are real conveyor-dispatched PRs stuck on something this pass does not run
- * (a human clear, a CI-heal, a rebase) — NOT unrelated PRs. Before this function existed,
+ * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for a `needs-human`/`conflicted` phase
+ * alike (`ci-red` moved OFF this table at multi-repo slice 7 — it is a real `dispatch` entry, `kind:'ci-heal'`,
+ * now, not a refusal), which are real conveyor-dispatched PRs stuck on something this pass does not run (a
+ * human clear, a rebase) — NOT unrelated PRs. Before this function existed,
  * `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded `owed-elsewhere` wholesale on the mistaken
  * premise that it "covers every unrelated human PR" — confirmed live 2026-09-05 on PR #1920: its `needs-human`
  * refusal (kind `owed-elsewhere`) was excluded from every tick's refresh sweep, so its stale

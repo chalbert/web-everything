@@ -4,8 +4,8 @@
  * #xtw2rap). All graduation arithmetic stays in the declaration; this file only classifies each source as
  * `ok` | `absent` | `invalid` before handing it across the io boundary.
  *
- * `we:scripts/lib/dispatch-supervision-promotions.json` (rule 6, #3784) and `we:scripts/lib/
- * model-probation.json` (#3893) do not exist on `main` yet. A missing file reads `absent`; a file that
+ * `we:scripts/lib/dispatch-supervision-promotions.json` (rule 6, #3784) does not exist on `main` yet;
+ * `we:scripts/lib/model-probation.json` (#3893) was ported and does. A missing file reads `absent`; a file that
  * exists but fails to parse, or whose shape does not validate, reads `invalid`. Both fail CLOSED: neither
  * source ever promotes a triple or names a probation role when it is anything but `ok` (rule 6's own stated
  * default — "with no such act, a triple stays at full" — generalised to probation for the same reason: a

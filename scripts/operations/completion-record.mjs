@@ -27,8 +27,10 @@ export const COMPLETION_RECORD_VERSION = 1;
 /** The two states a record moves through — see the file header. */
 export const COMPLETION_STATUSES = Object.freeze(['started', 'done']);
 
-/** The two dispatched-agent kinds this record shape serves today (`we:backlog/3436-*.md`'s own two briefs). */
-export const COMPLETION_KINDS = Object.freeze(['review', 'fix']);
+/** The dispatched-agent kinds this record shape serves (`we:backlog/3436-*.md`'s own two briefs, plus
+ *  `inspect` — the diagnosis-only stuck-PR inspection agent, epic #3383 — added the same way this file's own
+ *  header already anticipated a third kind: no shape change, just one more name in the enum). */
+export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'inspect']);
 
 /** Session slugs are used as filenames, so the character set is closed — no separators, no traversal. */
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

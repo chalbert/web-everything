@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
   decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd,
@@ -14,14 +14,23 @@ import {
   isVerificationRun, isBackgrounded, backgroundedVerificationReason, dispatchedAgentVerificationReason,
   isHeavyRawRun, isAdmittedWrapperRun,
   isDirectTaskInvocation, backgroundedDirectTaskReason,
+  usageReportSecretReadReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
   nestedCommandStrings, fileWriteTargets, collateralStepsNotice, mergeBreakGlassUsed,
+  rawHeavyCommandReason, vitestRunFileTargetCount, RAW_VITEST_TARGETED_FILE_LIMIT,
 } from '../guard-bash.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// xxna58l (#3383) — the raw-heavy-command arm (a raw eleventy/vitest/playwright invocation reached directly,
+// or through this file's own nested-command extraction) denies a raw command for an UNRELATED reason (it
+// skips the #3461 admission queue) than every arm that predates it. Older corpora asserting "always allowed"
+// or "untouched in a lane" for a raw command never anticipated this new denial, so both this predicate and the
+// exclusion pattern it powers are shared module-wide rather than re-derived per describe block.
+const isRawHeavyVerdict = (verdict) => /heavy-command admission queue/.test(String(verdict || ''));
 
 describe('guard-bash — backgrounded direct tasks are denied (#3383)', () => {
   it('isDirectTaskInvocation matches either exact script operand, not a mention or a different script', () => {
@@ -158,7 +167,14 @@ describe('guard-bash — the raw heavy spellings join the verification set (xaip
     expect(dispatchedAgentVerificationReason(c, 'build')).toBeNull();
   });
   it('an interactive session is never denied a foreground raw run, but may not background it (raw or wrapped)', () => {
+    // xxna58l (#3383) — a subset of RAW is now ALSO denied in the foreground, for the unrelated reason that it
+    // skips the #3461 admission queue entirely (a raw whole-suite `vitest run`, or any raw `playwright test`
+    // — see the dedicated xxna58l describe block below). That is a NEW, deliberate exception to this test's
+    // own "foreground raw run is never denied" invariant, not a regression in it — xaipsbs never had to
+    // consider that a raw run could ALSO bypass the capacity cap. Excluded here via `decide()`'s own verdict,
+    // never a hand-maintained list.
     for (const c of RAW) {
+      if (isRawHeavyVerdict(decide(c))) continue;
       expect(decide(c)).toBeNull();
       expect(dispatchedAgentVerificationReason(c, null)).toBeNull();
       expect(backgroundedVerificationReason(c, true)).toMatch(/never backgrounded/);
@@ -167,8 +183,128 @@ describe('guard-bash — the raw heavy spellings join the verification set (xaip
     expect(backgroundedVerificationReason('node scripts/readiness/heavy-admission.mjs run -- npx vitest run', true)).toMatch(/never backgrounded/);
     expect(decide('node scripts/readiness/heavy-admission.mjs run -- npx vitest run')).toBeNull();
   });
+  it('xxna58l (#3383): the RAW entries it denies in the foreground are denied for the admission-queue reason specifically, and backgrounding them is STILL separately refused too', () => {
+    const nowDeniedInForeground = RAW.filter((c) => isRawHeavyVerdict(decide(c)));
+    expect(nowDeniedInForeground).toEqual([
+      'npx vitest run', 'npx --yes vitest run', './node_modules/.bin/vitest run',
+      'npx playwright test', 'npx playwright test tests/a11y',
+    ]);
+    for (const c of nowDeniedInForeground) {
+      expect(decide(c)).toMatch(/heavy-admission\.mjs run/);
+      expect(backgroundedVerificationReason(c, true)).toMatch(/never backgrounded/); // still ALSO true
+    }
+  });
   it('a mention is still allowed when backgrounded — it is not a run', () => {
     for (const c of NOT) expect(backgroundedVerificationReason(c, true)).toBeNull();
+  });
+});
+
+describe('guard-bash — a dispatched agent may never reference the usage-report external admin-key location (#3383)', () => {
+  it('denies a Bash segment naming the external secret directory, for ANY dispatch kind', () => {
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', 'build')).toMatch(/usage-report tool's external admin-key location/);
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', 'delivery')).toMatch(/#3383/);
+    expect(usageReportSecretReadReason('ls -la ~/.we-usage-report', 'fix')).toMatch(/#3383/);
+  });
+  it('denies a Bash segment naming the resolved absolute secret directory too, not just the ~/ spelling', () => {
+    const abs = `${homedir()}/.we-usage-report/.env`;
+    expect(usageReportSecretReadReason(`cat ${abs}`, 'build')).toMatch(/#3383/);
+  });
+  it('denies a Bash segment querying the Keychain service by name', () => {
+    expect(usageReportSecretReadReason("security find-generic-password -s we-usage-report -a anthropic-admin-key -w", 'build'))
+      .toMatch(/#3383/);
+  });
+  it('never fires for an interactive (non-dispatched) session — the operator is the sanctioned caller of that tool', () => {
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', null)).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', undefined)).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.we-usage-report/.env', '')).toBeNull();
+    expect(usageReportSecretReadReason('node scripts/usage-report/usage-report.mjs', null)).toBeNull();
+  });
+  it('never fires for an unrelated command, dispatched or not', () => {
+    expect(usageReportSecretReadReason('npm run check:standards', 'build')).toBeNull();
+    expect(usageReportSecretReadReason('cat ~/.other-tool/.env', 'build')).toBeNull();
+  });
+  // PR #2570 review — every spelling below still resolves to the real secret (macOS APFS is case-insensitive;
+  // the shell removes quotes/backslashes and expands globs/variables before `cat` ever sees the path), and each
+  // one returned null before this block existed.
+  it.each([
+    ['case flip (APFS resolves it to the same file)', 'cat ~/.WE-USAGE-REPORT/.env'],
+    ['case flip, absolute spelling', `cat ${homedir()}/.We-Usage-Report/.env`],
+    ['case flip on the Keychain service name', 'security find-generic-password -s WE-USAGE-REPORT -w'],
+    ['backslash-escaped hyphen', 'cat ~/.we\\-usage\\-report/.env'],
+    ['quote-split name', "cat ~/.we'-usage'-report/.env"],
+    ['variable-split name', 'cat ~/.${P1}-${P2}/.env'],
+    ['variable-split name under $HOME', 'cat $HOME/.${P1}-report/.env'],
+    ['whole component held in a variable', 'cat "$HOME/$D/.env"'],
+    ['command-substituted (e.g. base64-decoded) name', 'cat ~/.$(echo d2UtdXNhZ2UtcmVwb3J0 | base64 -d)/.env'],
+    ['glob under $HOME', 'cat $HOME/.w*-usage-report/.env'],
+    ['glob under ${HOME}', 'ls ${HOME}/.we-usage-*'],
+    ['character-class glob', 'cat ~/.[w]e-usage-report/.env'],
+    ['glob outside a home-rooted path (after `cd ~`)', 'cat .we-us?ge-rep*/.env'],
+    ['brace expansion', 'cat ~/.we-usage-{report,x}/.env'],
+    ['glob split by a quoted literal', "cat ~/.we'-'usage-rep*/.env"],
+    ['empty first component', 'cat ~//$D/.env'],
+    ['dot first component', 'cat ~/./$D/.env'],
+    ['expansion after `..`', 'cat ~/x/../$D/.env'],
+    ['parameter-expansion HOME', 'cat ${HOME%/}/.$D/.env'],
+    ['default-valued HOME', 'cat ${HOME:-/x}/.$D/.env'],
+    ['Keychain service name in a variable', 'security find-generic-password -s "$S" -w'],
+    ['Keychain service name built from a variable', 'security find-generic-password -s ${A}-report -w'],
+    ['Keychain dump', 'security dump-keychain -d'],
+    ['leading `]` in a bracket class', 'cat ~/.[]w]e-usage-report/.env'],
+    ['POSIX character class', 'cat ~/.we-usage-rep[[:alpha:]]rt/.env'],
+    ['sequence brace', 'cat ~/.we-usage-r{e..e}port/.env'],
+  ])('denies an obfuscated spelling of the secret location — %s', (_label, cmd) => {
+    expect(usageReportSecretReadReason(cmd, 'build'), cmd).toMatch(/#3383/);
+    expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).toMatch(/#3383/);
+  });
+  it('does not over-block ordinary home-rooted or globbed commands a dispatched agent legitimately runs', () => {
+    for (const cmd of [
+      'ls ~/.claude/jobs',
+      'cat $HOME/.npmrc',
+      'ls scripts/*.mjs',
+      'cat ./.env.example',
+      'ls .github/*',
+      'echo $HOME',
+      'node scripts/usage-report/usage-report.mjs --help',
+      // quoted regexes are never globbed by the shell, so `.*` inside them is not a dotfile glob
+      "rg 'import .* from' src",
+      "grep -E 'TODO: .*' -r scripts",
+      "rg -n 'describe\\(.*'",
+      "grep -oE '(.*)' x",
+      "find . -type f -not -path '*/.*'",
+      "sed 's/.*//' f",
+      'rg "a.*b" src',
+      'echo \\.\\*',
+      'security find-generic-password -s other-tool -w',
+      // a `~` inside a word is not a home root; a dotfile glob below some other dir cannot reach home
+      'git show HEAD~1:src/$F',
+      'git diff HEAD~2/$x',
+      'cp -r src/.* dst',
+    ]) {
+      expect(usageReportSecretReadReason(cmd, 'build'), cmd).toBeNull();
+      expect(String(decide(cmd, { dispatchKind: 'build' }) ?? ''), cmd).not.toMatch(/#3383/);
+    }
+  });
+  it('stays linear on hostile wildcard runs (the hook runs on every dispatched Bash call)', () => {
+    for (const cmd of [
+      `cat ~/.${'*'.repeat(3000)}x`,
+      `cat .${'*a'.repeat(1500)}x`,
+      `cat .${'?*'.repeat(1500)}x`,
+      `cat .${'{a,b}'.repeat(40)}x`,
+      `.{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}[${'[:'.repeat(110)} `.repeat(40),
+      `.[${'[:'.repeat(120)} `.repeat(400),
+      '~'.repeat(100000),
+      '${HOME'.repeat(16666),
+    ]) {
+      const start = performance.now();
+      usageReportSecretReadReason(cmd, 'build');
+      expect(performance.now() - start, cmd.slice(0, 20)).toBeLessThan(250);
+    }
+  });
+  it('is wired into reason()/decide() so a real dispatched Bash call is actually denied end to end', () => {
+    expect(reason('cat ~/.we-usage-report/.env', { dispatchKind: 'build' })).toMatch(/#3383/);
+    expect(decide('cat ~/.we-usage-report/.env', { dispatchKind: 'delivery' })).toMatch(/#3383/);
+    expect(decide('cat ~/.we-usage-report/.env')).toBeNull(); // no dispatchKind ⇒ interactive session ⇒ allowed
   });
 });
 
@@ -1579,18 +1715,34 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
     ],
   };
 
+  // xxna58l (#3383) — the raw-heavy-command arm (a raw eleventy/vitest invocation, reached directly or
+  // through this file's own nested-command extraction: `yarn dlx eleventy`, `sh -c "eleventy"`, `npm exec
+  // --package=vitest vitest run`, …) is NOT cwd-gated the way the older tree-write arm is: it denies the SAME
+  // command in a lane too, for an unrelated reason (it skips the #3461 admission queue, never primary-tree
+  // safety). That is an intentional, ADDITIONAL invariant this corpus never encoded (it predates xxna58l), not
+  // a regression in the one it already asserts — so a row this NEW arm reaches is excluded from "untouched in
+  // a lane"/"never denied at primary" below, derived from `decide()`'s own verdict (never a hand-maintained
+  // list, so it can't silently drift from what the arm actually catches). `isRawHeavyVerdict` is defined once,
+  // module-wide, above.
+
   for (const [family, cmds] of Object.entries(MUST_DENY)) {
     it(`MUST DENY at primary cwd — ${family}`, () => {
       const allowed = cmds.filter((c) => !at(c));
       expect(allowed).toEqual([]);
-      // …and every one of them is untouched in a lane clone (the arm keys on WHERE the write lands).
-      expect(cmds.filter((c) => decide(c, { primaryCwd: false }))).toEqual([]);
+      // …and every one of them is untouched in a lane clone (the arm keys on WHERE the write lands) — except
+      // a row xxna58l's raw-heavy-command arm ALSO denies in a lane (see comment above).
+      const stillUntouchedInLane = cmds.filter((c) => !isRawHeavyVerdict(decide(c, { primaryCwd: false })));
+      expect(stillUntouchedInLane.filter((c) => decide(c, { primaryCwd: false }))).toEqual([]);
     });
   }
 
   for (const [family, cmds] of Object.entries(MUST_ALLOW)) {
     it(`MUST NEVER DENY at primary cwd — ${family}`, () => {
-      expect(cmds.filter((c) => at(c))).toEqual([]);
+      // …except a row xxna58l's raw-heavy-command arm denies for its own, unrelated reason (see comment
+      // above) — this family only ever asserted immunity from the tree-write arm, never from every arm ever
+      // added afterward.
+      const stillNeverDenied = cmds.filter((c) => !isRawHeavyVerdict(at(c)));
+      expect(stillNeverDenied.filter((c) => at(c))).toEqual([]);
     });
   }
 
@@ -2590,6 +2742,14 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
   });
 
   it('denies `pr-land.mjs` for a delivery-agent session', () => {
+    // The `--require-verified` flag is NOT what this case asserts — the deny keys on the script path alone and
+    // is flag-independent. It is spelled out because #3321's caller sweep (`we:scripts/__tests__/lane-verify.test.mjs`)
+    // harvests EVERY flagged pr-land.mjs command string any tracked file ships and requires each one to
+    // declare its verification posture. That sweep has exactly one exclusion (pr-land's own --help banner) and
+    // says in-file that the exclusion must be re-argued, never silently widened — so a deny FIXTURE carries the
+    // posture too rather than becoming exclusion number two. `--no-require-verified` is the sweep's own
+    // sanctioned flag arm (its mutation probe injects exactly that spelling), and it is the honest one for a
+    // fixture: this string is INPUT TO A DENY PREDICATE, never executed, so no verification is skipped by it.
     expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=1234', { dispatchKind: 'delivery' })).toMatch(/pr-land\.mjs/);
   });
 
@@ -2619,7 +2779,7 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
       'node scripts/backlog.mjs claim 1234 --session=x',
       'gh pr view 1234',
       'node scripts/operations/run.mjs open-pr --ref=lane/1234-x',
-      'node scripts/pr-land.mjs --no-require-verified --pr=1234',
+      'node scripts/pr-land.mjs --no-require-verified --pr=1234', // flag spelled out for #3321's sweep — see above
       'node scripts/conveyor/learnings-drop.mjs --kind=friction',
       'node scripts/converge-cli.mjs init --lane=/lane-3',
       'node scripts/verify-lane.mjs request',
@@ -2661,6 +2821,60 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
     expect(decide('git status && git add -- scripts/x.mjs && git commit -m "build item #1234"', { dispatchKind: 'delivery' })).toBeNull();
     // the identical commands, no dispatchKind at all (interactive) — untouched
     expect(decide('node scripts/lane-pool.mjs acquire --lane=3')).toBeNull();
+  });
+});
+
+// PR #2570 review — the `repair` (#3640), `decision-authoring` (#3644) and `scope-authoring` (#3642) deny
+// tables had no test passing their dispatchKind, so disabling any of them left every test green. Each kind is
+// driven through EVERY arm it owns (one command per arm), through decide() as well as reason(), and each is
+// checked to stay scoped to its own kind.
+const LIFECYCLE_ARMS = {
+  'lane-pool': ['node scripts/lane-pool.mjs acquire --lane=3', /lane-pool\.mjs/],
+  'backlog claim': ['node scripts/backlog.mjs claim 1234 --session=x', /backlog\.mjs claim/],
+  'backlog release': ['node scripts/backlog.mjs release 1234 --session=x', /backlog\.mjs release/],
+  'gh pr': ['gh pr view 1234', /gh pr/],
+  'open-pr.mjs': ['node scripts/operations/open-pr.mjs', /open-pr/],
+  'run.mjs open-pr': ['node scripts/operations/run.mjs open-pr --ref=lane/1234-x', /open-pr/],
+  // flag spelled out for #3321's pr-land caller sweep — see the delivery block above
+  'pr-land': ['node scripts/pr-land.mjs --no-require-verified --pr=1234', /pr-land\.mjs/],
+  'learnings-drop': ['node scripts/conveyor/learnings-drop.mjs --kind=friction', /learnings-drop\.mjs/],
+  'converge-cli': ['node scripts/converge-cli.mjs init --lane=/lane-3', /converge-cli\.mjs/],
+  'verify-lane request': ['node scripts/verify-lane.mjs request', /verify-lane\.mjs/],
+  'verify-lane check': ['node scripts/verify-lane.mjs check', /verify-lane\.mjs/],
+  'review-core-cli': ['node scripts/review-core-cli.mjs invite --file=x.json', /review-core-cli\.mjs/],
+};
+const KIND_ONLY_ARMS = {
+  'decision-authoring': {
+    'backlog prepare-stamp': ['node scripts/backlog.mjs prepare-stamp 1234', /prepare-stamp/],
+    'backlog prepare-hold': ['node scripts/backlog.mjs prepare-hold 1234', /prepare-hold/],
+    'backlog prepare-release': ['node scripts/backlog.mjs prepare-release 1234', /prepare-release/],
+    'backlog resolve': ['node scripts/backlog.mjs resolve 1234', /backlog\.mjs resolve/],
+  },
+  'scope-authoring': {
+    'backlog resolve': ['node scripts/backlog.mjs resolve 1234', /backlog\.mjs resolve/],
+    'git commit': ['git commit -m "scope: predict #1234"', /git commit/],
+  },
+};
+describe.each([
+  ['repair', /repair \(fix \/ ci-heal\) agent/],
+  ['decision-authoring', /decision-authoring agent/],
+  ['scope-authoring', /scope-authoring agent/],
+])('guard-bash — a %s wrapper agent may never run the mechanical lifecycle commands itself', (kind, whoRe) => {
+  const arms = Object.entries({ ...LIFECYCLE_ARMS, ...(KIND_ONLY_ARMS[kind] || {}) });
+  it.each(arms)('denies %s — via reason() and decide(), naming the kind', (_arm, [cmd, armRe]) => {
+    const r = reason(cmd, { dispatchKind: kind });
+    expect(r, cmd).toMatch(armRe);
+    expect(r, cmd).toMatch(whoRe);
+    expect(String(decide(`git status && ${cmd}`, { dispatchKind: kind })), cmd).toMatch(whoRe);
+  });
+  it.each(arms)('never fires for an interactive session — %s', (_arm, [cmd]) => {
+    expect(String(reason(cmd, {}) ?? '')).not.toMatch(whoRe);
+    expect(String(reason(cmd, { dispatchKind: 'build' }) ?? '')).not.toMatch(whoRe);
+  });
+  it('does NOT over-block ordinary read/test/git commands', () => {
+    const ordinary = ['git status', 'git diff', 'git add scripts/x.mjs', 'node --test scripts/x.test.mjs', 'gh issue view 1'];
+    if (kind !== 'scope-authoring') ordinary.push('git commit -m "x"');
+    for (const cmd of ordinary) expect(reason(cmd, { dispatchKind: kind }), cmd).toBeNull();
   });
 });
 
@@ -2794,4 +3008,250 @@ describe('guard-bash — a perl script naming a corpus path must be provably rea
     'perl - /tmp/x.md',
     "perl - /tmp/x.md <<'X'\nopen(F,\">\",shift)\nX",
   ])('allows provably read-only corpus code and scratch stdin: %s', allowed);
+});
+
+describe('rawHeavyCommandReason — a direct vitest/playwright/eleventy run skips the #3461 admission queue (xxna58l, #3383)', () => {
+  it('vitestRunFileTargetCount counts non-flag tokens only', () => {
+    expect(vitestRunFileTargetCount('')).toBe(0);
+    expect(vitestRunFileTargetCount(' --coverage')).toBe(0);
+    expect(vitestRunFileTargetCount(' a.test.mjs')).toBe(1);
+    expect(vitestRunFileTargetCount(' a.test.mjs b.test.mjs')).toBe(2);
+    expect(vitestRunFileTargetCount(' --coverage a.test.mjs b.test.mjs')).toBe(2);
+    expect(vitestRunFileTargetCount(' a.test.mjs b.test.mjs c.test.mjs')).toBe(3);
+    expect(RAW_VITEST_TARGETED_FILE_LIMIT).toBe(2);
+  });
+
+  it('denies a raw whole-suite `vitest run` (no files named), bare or via npx', () => {
+    expect(rawHeavyCommandReason('vitest run')).toMatch(/WHOLE suite/);
+    expect(rawHeavyCommandReason('npx vitest run')).toMatch(/npm run test:unit/);
+    expect(rawHeavyCommandReason('npx vitest run --coverage')).toMatch(/WHOLE suite/); // a flag alone names no file
+  });
+
+  it('allows a targeted run of 1 or 2 explicit test files, bare or via npx, flags or not', () => {
+    expect(rawHeavyCommandReason('npx vitest run scripts/foo.test.mjs')).toBeNull();
+    expect(rawHeavyCommandReason('vitest run scripts/foo.test.mjs scripts/bar.test.mjs')).toBeNull();
+    expect(rawHeavyCommandReason('npx vitest run --coverage scripts/foo.test.mjs')).toBeNull();
+  });
+
+  it('denies a run naming MORE than the targeted-file limit', () => {
+    expect(rawHeavyCommandReason('npx vitest run a.test.mjs b.test.mjs c.test.mjs')).toMatch(/3 files \(over the 2-file targeted limit\)/);
+  });
+
+  it('never flags the WRAPPED form — `vitest run` appearing only as the heavy-admission wrapper\'s own argument, not as the command', () => {
+    expect(rawHeavyCommandReason('node scripts/readiness/heavy-admission.mjs run -- vitest run')).toBeNull();
+    expect(rawHeavyCommandReason('node scripts/readiness/heavy-admission.mjs run -- npx vitest run scripts/foo.test.mjs')).toBeNull();
+    expect(rawHeavyCommandReason('npm run test:unit')).toBeNull();
+  });
+
+  it('denies a direct `playwright test` run with no targeted-run exception', () => {
+    expect(rawHeavyCommandReason('playwright test')).toMatch(/test:integration.*test:e2e.*test:smoke.*test:a11y.*test:interaction/s);
+    expect(rawHeavyCommandReason('npx playwright test --project=chromium')).toMatch(/heavy-admission\.mjs run/);
+    expect(rawHeavyCommandReason('npx playwright test --project=chromium tests/smoke/one.spec.ts')).not.toBeNull(); // no file-count exception
+    expect(rawHeavyCommandReason('npm run test:smoke')).toBeNull(); // the wrapped script itself is unaffected
+  });
+
+  it('denies a direct `eleventy` site-build run, bare or via npx', () => {
+    expect(rawHeavyCommandReason('eleventy')).toMatch(/npm run build/);
+    expect(rawHeavyCommandReason('npx @11ty/eleventy')).toMatch(/npm run build/);
+    expect(rawHeavyCommandReason('npm run build')).toBeNull(); // the wrapped script itself is unaffected
+  });
+
+  it('exempts eleventy flags that write nothing (--version/--help/--dryrun) — reuses the existing tree-write arm\'s own no-write allowlist', () => {
+    expect(rawHeavyCommandReason('eleventy --version')).toBeNull();
+    expect(rawHeavyCommandReason('eleventy --help')).toBeNull();
+    expect(rawHeavyCommandReason('eleventy --dryrun')).toBeNull();
+  });
+
+  it('exempts eleventy --serve/--watch — a long-running dev server with no wrapped equivalent (wrapping it would hold an admission slot for the whole session, like vitest watch mode)', () => {
+    expect(rawHeavyCommandReason('eleventy --serve --port=8080')).toBeNull();
+    expect(rawHeavyCommandReason('eleventy --watch')).toBeNull();
+  });
+
+  it('is null for an unrelated command, and for a mere MENTION rather than an invocation', () => {
+    expect(rawHeavyCommandReason('git status')).toBeNull();
+    expect(rawHeavyCommandReason('echo "run vitest run later"')).toBeNull();
+    expect(rawHeavyCommandReason('grep -r "playwright test" docs/')).toBeNull();
+  });
+
+  it('reaches decide() and reason() — the real enforcement points', () => {
+    expect(String(decide('npx vitest run'))).toMatch(/npm run test:unit/);
+    expect(String(reason('npx playwright test'))).toMatch(/heavy-admission\.mjs run/);
+    expect(decide('npx vitest run scripts/foo.test.mjs')).toBeNull();
+    // chained: the deny fires even alongside an otherwise-benign command
+    expect(String(decide('git status && npx vitest run'))).toMatch(/WHOLE suite/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #xu2pp2m — THE DELIVERY LIFECYCLE TABLE MUST NOT BE "GENERALIZED TO EVERY DISPATCHED AGENT".
+//
+// WHY THIS BLOCK EXISTS. That generalization has now been proposed once, on a reading that is superficially
+// very plausible: `deliver-item-wrapper.mjs` is still unwired, so nothing stamps `'delivery'` in production
+// and the table above is, today, dead code. The conclusion drawn from that — "so widen the gate to the kinds
+// that ARE stamped (build/prepare/prepare-decision/investigate/fix/ci-heal) and it will finally fire" — is
+// wrong, and wrong in a way that would break every dispatched agent's FIRST STEP.
+//
+// The table is not "what a dispatched agent may not do". It is "what the delivery WRAPPER does on the agent's
+// behalf" — and the other six launch kinds have no wrapper owning their lifecycle; their briefs tell the agent
+// to do these things itself. Each command below is therefore asserted ALLOWED under the live kinds, with the
+// brief and step that requires it named, so a future widening goes RED here with the reason attached rather
+// than shipping and denying step 1 of every dispatch.
+//
+// (The complementary half — `npm run check:standards` IS already denied for all these kinds, by the #3105 arm
+// — is asserted at the top of this file and is why `we:skills-src/conveyor/*-brief.md` all use
+// `verify-lane request` + poll instead.)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('#xu2pp2m — the lifecycle denylist stays delivery-scoped because the live briefs need those commands', () => {
+  /** `we:scripts/operations/dispatch-lane.mjs#LAUNCH_KINDS` — the kinds `dispatch-lane-io.mjs` actually stamps. */
+  const LIVE_LAUNCH_KINDS = ['build', 'prepare', 'prepare-decision', 'investigate', 'fix', 'ci-heal'];
+
+  /** command → the brief step that requires it, so a red test says WHY rather than only WHAT. */
+  const REQUIRED_BY_LIVE_BRIEFS = [
+    ['node scripts/lane-pool.mjs acquire --lane=3 --purpose=conveyor-delivery', 'step 1 of ALL SIX briefs — acquire the lane clone'],
+    ['node scripts/verify-lane.mjs request', 'the SANCTIONED gate path (#3105) every brief now uses'],
+    ['node scripts/verify-lane.mjs check --json', 'the poll half of that same sanctioned gate path'],
+    ['node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x', 'the learnings step in five of the six briefs'],
+    ['gh pr view 1234 --json title,body,comments', 'fix-agent-brief.md step 2 — read the finding being repaired'],
+    ['gh pr checks 1234', 'fix-agent-ci-brief.md step 2 — find which required check is red'],
+    ['node scripts/operations/run.mjs open-pr --ref=lane/1234-x --sha=HEAD --base=main', 'how build/prepare/investigate open their PR at all'],
+  ];
+
+  for (const kind of LIVE_LAUNCH_KINDS) {
+    it(`allows every command a \`${kind}\` brief requires of the agent itself`, () => {
+      for (const [cmd, why] of REQUIRED_BY_LIVE_BRIEFS) {
+        expect(decide(cmd, { dispatchKind: kind }), `${cmd} — ${why}`).toBeNull();
+      }
+    });
+  }
+
+  it('and the SAME commands are still denied for `delivery`, where a wrapper genuinely owns them', () => {
+    // The scoping is the ruling, so both directions are asserted together: widening the gate and narrowing it
+    // are each a real change, and neither should be possible without one of these two going red.
+    for (const [cmd] of REQUIRED_BY_LIVE_BRIEFS) {
+      expect(decide(cmd, { dispatchKind: 'delivery' }), cmd).not.toBeNull();
+    }
+  });
+
+  it('…and for `decision-authoring`, the SECOND wrapper-owned kind (#3644) — same move, same reason', () => {
+    // `prepare-decision-wrapper.mjs` stamps `decision-authoring`, NOT the launch kind `prepare-decision`, for
+    // exactly the reason the loop above exists: the launch kind is still stamped on the FALLBACK path
+    // (`WE_PREPARE_DECISION_DISPATCH_MODE=agent`), whose agent runs the full prose brief and needs every one
+    // of these. Two kind values, two contracts, both correct at once.
+    for (const [cmd] of REQUIRED_BY_LIVE_BRIEFS) {
+      expect(decide(cmd, { dispatchKind: 'decision-authoring' }), cmd).not.toBeNull();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// #3644 — the DECISION-AUTHORING agent's own Bash session (`--restricted`, spawned by
+// `we:scripts/operations/prepare-decision-wrapper.mjs`'s `CLAUDE_RESTRICTED_PREPARE_PROVIDER`) may never run
+// any of the mechanical lifecycle commands its own wrapper drives end to end — the same table the `'delivery'`
+// block above carries, plus this kind's own four backlog verbs.
+//
+// WHY THIS IS A SEPARATE KIND VALUE AND NOT `'prepare-decision'` is the load-bearing design point, and both
+// halves are asserted here: denied under `decision-authoring`, ALLOWED under `prepare-decision` (which the
+// `#xu2pp2m` block above also holds, from the other direction).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('guard-bash — a decision-authoring agent may never run the mechanical lifecycle commands itself (#3644)', () => {
+  const K = { dispatchKind: 'decision-authoring' };
+
+  it('denies `lane-pool.mjs` (any subcommand)', () => {
+    expect(reason('node scripts/lane-pool.mjs acquire --lane=6 --purpose=conveyor-prepare-decision', K)).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs status --json', K)).toMatch(/lane-pool\.mjs/);
+    expect(reason('node scripts/lane-pool.mjs release --lane=6', K)).toMatch(/lane-pool\.mjs/);
+  });
+
+  it('denies `prepare-stamp` — the flag that makes readiness call a decision `✓ ready to ratify`', () => {
+    // THE most important arm on this page: the wrapper stamps only after reading a `done` report, so an agent
+    // stamping its own in-progress authoring is a false "ready" the next ratify turn would trust.
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2568', K)).toMatch(/prepare-stamp/);
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2568', K)).toMatch(/ready to ratify/);
+  });
+
+  it('denies `prepare-hold` and `prepare-release` — the wrapper takes and drops the hold', () => {
+    expect(reason('node scripts/backlog.mjs prepare-hold 2568 --session=x', K)).toMatch(/prepare-hold/);
+    expect(reason('node scripts/backlog.mjs prepare-release 2568 --session=x', K)).toMatch(/prepare-release/);
+  });
+
+  it('denies `backlog.mjs resolve` — a PREPARED decision is still OPEN, and resolving is the ratify turn\'s job', () => {
+    const why = reason('node scripts/backlog.mjs resolve 2568', K);
+    expect(why).toMatch(/resolve/);
+    expect(why).toMatch(/still OPEN/);
+  });
+
+  it('denies `backlog.mjs claim` and `release` — this arc HOLDS its decision, it never CLAIMS it', () => {
+    expect(reason('node scripts/backlog.mjs claim 2568 --session=x', K)).toMatch(/backlog\.mjs claim/);
+    expect(reason('node scripts/backlog.mjs release 2568 --session=x', K)).toMatch(/backlog\.mjs release/);
+  });
+
+  it('denies `gh pr`, `run.mjs open-pr`/`open-pr.mjs` and `pr-land.mjs`', () => {
+    expect(reason('gh pr view 2140', K)).toMatch(/gh pr/);
+    expect(reason('gh pr create --title=x --body=y', K)).toMatch(/gh pr/);
+    expect(reason('node scripts/operations/run.mjs open-pr --ref=lane/2568-prepare-x --sha=HEAD --base=main', K)).toMatch(/open-pr/);
+    expect(reason('node scripts/operations/open-pr.mjs', K)).toMatch(/open-pr/);
+    // The flag is spelled out for #3321's caller sweep, exactly as the delivery block above explains: this
+    // string is INPUT TO A DENY PREDICATE and is never executed, so no verification is skipped by it.
+    expect(reason('node scripts/pr-land.mjs --no-require-verified --pr=2140', K)).toMatch(/pr-land\.mjs/);
+  });
+
+  it('denies `learnings-drop.mjs`, `converge-cli.mjs`, `review-core-cli.mjs` and `verify-lane.mjs` in EVERY mode', () => {
+    expect(reason('node scripts/conveyor/learnings-drop.mjs --kind=friction --summary=x --area=y --suggestion=z', K)).toMatch(/learnings-drop\.mjs/);
+    expect(reason('node scripts/converge-cli.mjs init --lane=/lane-6 --state=/lane-6/.converge-state.json', K)).toMatch(/converge-cli\.mjs/);
+    expect(reason('node scripts/review-core-cli.mjs invite --file=x.json --json', K)).toMatch(/review-core-cli\.mjs/);
+    // Including `request`/`check` — unlike the #3105 build/fix/ci-heal carve-out, this agent never runs the
+    // gate at all, in any form; the wrapper runs it outside the agent's own turn.
+    expect(reason('node scripts/verify-lane.mjs --json', K)).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs request', K)).toMatch(/verify-lane\.mjs/);
+    expect(reason('node scripts/verify-lane.mjs check --json', K)).toMatch(/verify-lane\.mjs/);
+  });
+
+  it('touches NOTHING for any other session — interactive, or any other dispatch kind', () => {
+    const commands = [
+      'node scripts/lane-pool.mjs acquire --lane=6',
+      'node scripts/backlog.mjs prepare-hold 2568',
+      'node scripts/backlog.mjs prepare-stamp 2568',
+      'node scripts/backlog.mjs prepare-release 2568',
+      'node scripts/backlog.mjs resolve 2568',
+      'gh pr view 2140',
+      'node scripts/operations/run.mjs open-pr --ref=lane/2568-prepare-x',
+      'node scripts/converge-cli.mjs init --lane=/lane-6',
+      'node scripts/verify-lane.mjs request',
+    ];
+    for (const cmd of commands) {
+      expect(reason(cmd, {}), cmd).toBeNull();
+      expect(reason(cmd), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: null }), cmd).toBeNull();
+      // The FALLBACK-path agent, which runs the prose brief and does its own lifecycle.
+      expect(reason(cmd, { dispatchKind: 'prepare-decision' }), cmd).toBeNull();
+      expect(reason(cmd, { dispatchKind: 'build' }), cmd).toBeNull();
+    }
+  });
+
+  it('does NOT over-block the ordinary authoring work this agent exists to do', () => {
+    const ordinary = [
+      'git status',
+      'git diff',
+      'git add backlog/2568-a-decision.md src/_data/researchTopics.json',
+      'git commit -F /lane-6/.msg.txt -- backlog/2568-a-decision.md',
+      'node scripts/operations/delivery-report-cli.mjs report --session=$PREPARE_SESSION --item=$PREPARE_ITEM --status=started',
+      'printenv LANE',
+      'cat src/_data/researchTopics.json',
+    ];
+    for (const cmd of ordinary) {
+      expect(reason(cmd, K), cmd).toBeNull();
+    }
+  });
+
+  it('reaches decide() — the real enforcement point, not just the pure per-segment predicate', () => {
+    expect(String(decide('node scripts/backlog.mjs prepare-stamp 2568', K))).toMatch(/prepare-stamp/);
+    // chained: the deny fires even alongside an otherwise-benign command
+    expect(String(decide('git status && node scripts/backlog.mjs resolve 2568', K))).toMatch(/resolve/);
+    // an ordinary, undenied chain still passes clean under the same dispatchKind
+    expect(decide('git status && git add -- backlog/2568-a.md && git commit -F /lane-6/.msg.txt -- backlog/2568-a.md', K)).toBeNull();
+    // the identical command with no dispatchKind at all (interactive) — untouched
+    expect(decide('node scripts/backlog.mjs prepare-stamp 2568')).toBeNull();
+  });
 });

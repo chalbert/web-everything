@@ -3,10 +3,13 @@ bornAs: x784irf
 kind: story
 size: 8
 parent: "3383"
-status: open
+status: resolved
 blockedBy: ["3850", "3840", "3848", "3838", "3845", "3846", "3888", "3889", "3887"]
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-supervision-promotions.json", "we:scripts/conveyor/log-delegation-trial.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
+graduatedTo: none
 relatedTo: ["3690", "3717", "3783", "3801", "3843", "3850"]
 tags: [dispatch, delegation, supervision, graduation]
 ---
@@ -210,3 +213,21 @@ The two message strings are user-visible, so a test may assert them; reword them
    ratified act.
 8. **Executable (#3843's carried constraint)** — the `defaultSize < 13` refusal that #3843's loader raises with
    a reason naming this card is removed, and a test that asserted it is updated in the same diff.
+
+> **Verified done, 2026-09-23.** Built and committed to `lane/mechanical-dispatcher` at `4f357472d`
+> (tracker note `346d625da`). All 8 Done-when criteria met and tested. Full `npm run test:unit`:
+> 16,503 passed, 2 pre-existing failures unchanged (confirmed via `git stash`). `check:standards`:
+> 2 pre-existing unrelated errors, 0 added.
+>
+> **Real gap found and fixed within this card's own scope:** verifying that #3850 actually prevents
+> enforcement from freezing the dispatcher, found #3850 was ratified but its code was never built —
+> `record.supervisor` was never set anywhere, so flipping enforcement would have held every
+> `full`-supervision dispatch at spawn. Confirmed empirically (existing build/fix/ci-heal tests failed
+> `dispatching: false` the moment the default flipped) before fixing it. Implemented #3850 Fork 1 as
+> ratified: every routed record now names a supervisor (the land-seam PR review), so a well-formed
+> dispatch is never held at spawn. **#3850 Fork 2 (forcing `review:pending`/a merge hold on delegated
+> routes) remains unbuilt** — filed separately (bornAs `4021`), since it was never tracked as its
+> own item before.
+>
+> Resolved here as `graduatedTo: none` — the code is not yet on `main`; it reaches `main` through
+> #3443.

@@ -181,6 +181,14 @@ export default defineConfig({
       // #3383 — same tier: real throwaway origin/reference/filler clones, real `git cherry`/`ls-remote`, real
       // spawned `lane-pool.mjs` CLI invocations (list/provision/acquire).
       'scripts/__tests__/lane-pool-squash-merge-and-litter-acquirable.test.mjs',
+      // #3383-perf — same tier, plus a real PATH-shimmed git-spawn-counting wrapper (like its #2920 sibling).
+      'scripts/__tests__/lane-pool-ahead-patch-equivalent-bounded-spawn.test.mjs',
+      // #xn432dz — same tier: real throwaway origin/pool, a PATH git shim, real spawned (incl. concurrent)
+      // `lane-pool.mjs list --acquirable` children proving the lease-first skip, cache and single-flight lock.
+      'scripts/__tests__/lane-pool-list-cache.test.mjs',
+      // #x5n4zn3 — same tier: real throwaway origin/reference/pool, a PATH git shim (this one deliberately
+      // HANGS, ignoring SIGTERM), a real spawned `lane-pool.mjs status` child.
+      'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',
@@ -190,6 +198,8 @@ export default defineConfig({
       // #xu2krte — a real `withRealRepo` git-conflict fixture plus a real (fake, cost-nothing) `claude` CLI
       // spawn/list/stop round trip; same tier as the two files immediately above it.
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
+      // #x5n4zn3 — same tier: a real spawned node driver + a real hanging `gh` shim on `PATH`.
+      'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
     ],
   },
   resolve: {

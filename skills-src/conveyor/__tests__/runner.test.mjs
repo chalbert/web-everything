@@ -13,12 +13,14 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
+import { spawnSync, spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { readLockEntry } from '../../../scripts/readiness/file-locks.mjs';
+import { readLockEntry, reserve as reserveLockDirect } from '../../../scripts/readiness/file-locks.mjs';
 import {
   RUNNER_LEASE_PATH,
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned, runnerLeaseStatus,
+  probeRunnerLeaseLiveness,
 } from '../runner-lock.mjs';
 import {
   carryForward, shouldStop, tickSurface, runLoop, driveConveyor, DEFAULT_TICK_INTERVAL_MS,
@@ -119,6 +121,101 @@ describe('runner singleton lease — two runners never both drive', () => {
     expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe('A');
     expect(heartbeatRunnerLease(root, 'A', { nowMs: T0 + 1 * MIN })).toBe(true);
     expect(releaseRunnerLeaseIfOwned(root, 'A')).toBe(true);
+  });
+});
+
+// ── (1b) #3952 — dead-lease reclaim: a force-killed (SIGKILL, e.g. `launchctl kickstart -k` mid-tick)
+//         daemon's lease no longer blocks every restart for the full TTL. REAL child processes throughout
+//         (never a mocked pid) — a real `process.kill(pid, 0)` is exactly what the fix calls. ───────────────
+
+describe('acquireRunnerLease — #3952 dead-lease fast reclaim (real processes, never mocked)', () => {
+  let root;
+  let liveChild;
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'runner-lock-reclaim-')); });
+  afterEach(() => {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ }
+    if (liveChild) { try { liveChild.kill('SIGKILL'); } catch { /* already gone */ } liveChild = null; }
+  });
+
+  /** A real pid that is now provably dead: spawn a child that exits immediately, then wait (spawnSync
+   *  blocks until it exits) — so by the time the pid comes back, `kill(pid, 0)` is guaranteed ESRCH, no
+   *  race against the child still shutting down. */
+  function deadPid() {
+    const res = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+    return res.pid;
+  }
+
+  /** A real pid that stays alive for the test — killed in afterEach. */
+  function livePid() {
+    liveChild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+    return liveChild.pid;
+  }
+
+  it('BEFORE (red without the fix): a lease owned by a dead local pid still blocks acquire inside the TTL', () => {
+    // Sanity/regression proof of the OLD behavior this fix changes: `reserve` called with a hardcoded
+    // 'unknown' pidLiveness (what acquireRunnerLease did pre-#3952) refuses a dead-pid lease exactly like a
+    // live one — the bug. This exercises the SAME primitive (`reserve`) the parent commit's
+    // `acquireRunnerLease` called, with the pre-fix argument, to prove the bug was real, not assumed.
+    const pid = deadPid();
+    const owner = `${hostname()}:${pid}:reconcile-fix-dispatch-daemon`;
+    acquireRunnerLease(root, owner, { pid, nowMs: Date.parse('2026-09-23T00:00:00.000Z') });
+    expect(readLockEntry(root, RUNNER_LEASE_PATH)).toMatchObject({ owner, pid });
+
+    // Directly reproduce the PRE-FIX call shape (`reserve(..., 'unknown', ...)` — never the fast path),
+    // against the SAME real dead pid and the SAME lock dir `acquireRunnerLease` just wrote.
+    const staleResult = reserveLockDirect(
+      root, RUNNER_LEASE_PATH, 'RELAUNCH', Date.parse('2026-09-23T00:05:00.000Z'), '2026-09-23T00:05:00.000Z',
+      process.pid, 'unknown', 15,
+    );
+    expect(staleResult).toMatchObject({ ok: false, reason: 'held', heldBy: owner }); // the bug: refused for the full TTL
+  });
+
+  it('AFTER (green): a real dead-on-this-host owner is reclaimed immediately, well inside the TTL', () => {
+    const pid = deadPid();
+    const owner = `${hostname()}:${pid}:reconcile-fix-dispatch-daemon`;
+    const t0 = Date.parse('2026-09-23T00:00:00.000Z');
+    acquireRunnerLease(root, owner, { pid, nowMs: t0, leaseMinutes: 15 });
+    expect(readLockEntry(root, RUNNER_LEASE_PATH)).toMatchObject({ owner, pid });
+
+    // Only 30s later — nowhere near the 15-min TTL — a relaunch reclaims at once via the fixed pid probe.
+    const relaunchOwner = `${hostname()}:${process.pid}:reconcile-fix-dispatch-daemon`;
+    const result = acquireRunnerLease(root, relaunchOwner, { pid: process.pid, nowMs: t0 + 30_000, leaseMinutes: 15 });
+    expect(result).toMatchObject({ ok: true, reason: 'pid-dead', heldBy: relaunchOwner });
+    expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe(relaunchOwner);
+  });
+
+  it('a lease held by a LIVE pid is still refused (no early reclaim) even on the same host', () => {
+    const pid = livePid();
+    const owner = `${hostname()}:${pid}:reconcile-fix-dispatch-daemon`;
+    const t0 = Date.parse('2026-09-23T00:00:00.000Z');
+    acquireRunnerLease(root, owner, { pid, nowMs: t0, leaseMinutes: 15 });
+
+    const relaunchOwner = `${hostname()}:${process.pid}:reconcile-fix-dispatch-daemon`;
+    const result = acquireRunnerLease(root, relaunchOwner, { pid: process.pid, nowMs: t0 + 30_000, leaseMinutes: 15 });
+    expect(result).toMatchObject({ ok: false, reason: 'held', heldBy: owner });
+    expect(readLockEntry(root, RUNNER_LEASE_PATH).owner).toBe(owner); // untouched
+  });
+
+  it('a lease recorded for a DIFFERENT host is NEVER fast-reclaimed, even if this host happens to have a live process at that pid', () => {
+    // Use OUR OWN real, live pid, but attribute it to a fictitious foreign host — proves the host check,
+    // not just the liveness probe: a live match on pid alone must never be enough.
+    const owner = `some-other-mac.local:${process.pid}:reconcile-fix-dispatch-daemon`;
+    const t0 = Date.parse('2026-09-23T00:00:00.000Z');
+    acquireRunnerLease(root, owner, { pid: process.pid, nowMs: t0, leaseMinutes: 15 });
+
+    const relaunchOwner = `${hostname()}:${process.pid + 1}:reconcile-fix-dispatch-daemon`;
+    const result = acquireRunnerLease(root, relaunchOwner, { pid: process.pid + 1, nowMs: t0 + 30_000, leaseMinutes: 15 });
+    expect(result).toMatchObject({ ok: false, reason: 'held', heldBy: owner }); // TTL-only; not fast-reclaimed
+  });
+
+  it('probeRunnerLeaseLiveness — dead/alive/unknown/foreign-host verdicts directly', () => {
+    const deadP = deadPid();
+    const liveP = livePid();
+    expect(probeRunnerLeaseLiveness({ owner: `${hostname()}:${deadP}:k`, pid: deadP })).toBe('dead');
+    expect(probeRunnerLeaseLiveness({ owner: `${hostname()}:${liveP}:k`, pid: liveP })).toBe('alive');
+    expect(probeRunnerLeaseLiveness({ owner: `other-host:${deadP}:k`, pid: deadP })).toBe('unknown');
+    expect(probeRunnerLeaseLiveness(null)).toBe('unknown');
+    expect(probeRunnerLeaseLiveness({ owner: `${hostname()}:x:k`, pid: null })).toBe('unknown');
   });
 });
 

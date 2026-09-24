@@ -29,6 +29,12 @@ const stage = (root) => {
   // The queue also reads its STOOD DOWN section off `../conveyor/stand-down.mjs` (we:backlog/x6cjgz5) — stage it
   // too, or the staged copy fails to import and `main()` never runs.
   copyFileSync(join(dirname(LEAF), '../conveyor/stand-down.mjs'), join(root, 'conveyor/stand-down.mjs'));
+  // …and its STUCK — INSPECTED section off `../conveyor/stuck-pr-dispatch-marker.mjs` (epic #3383) — same
+  // reason: an unstaged import fails the copy silently and `main()` never runs.
+  copyFileSync(join(dirname(LEAF), '../conveyor/stuck-pr-dispatch-marker.mjs'), join(root, 'conveyor/stuck-pr-dispatch-marker.mjs'));
+  // #x5n4zn3 — `stand-down.mjs` now imports `../lib/bounded-child.mjs` (the shared per-child timeout budget its
+  // own `gh` call reuses) — stage it too, same reason as every other transitive dependency above.
+  copyFileSync(join(dirname(LEAF), 'bounded-child.mjs'), join(root, 'lib/bounded-child.mjs'));
 };
 
 let dir;

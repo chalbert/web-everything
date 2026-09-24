@@ -240,3 +240,21 @@ How each slice (a child of this item) graduates, per the statute
   - **New critical path:** #3897 → #3902 → #3906 → #3903 → #3904 → #3908 → #3487.
   - **Landing rule.** Between #3908 and #3487, the conveyor runner must not run continuously on main.
   - **Behaviour change to expect.** #3907 turns the advisory Codex and Antigravity judge seats on by default for main reviews, whenever the model-probation registry marks them as probation or trusted.
+
+- **2026-09-23 (snapshot moved to `600acc14f`; #3857 probed live; wave A ready).**
+  - **Snapshot move.** The graduation snapshot moves from `ff1618065` to the prototype tip `600acc14f`, 14 commits
+    later. Those commits are #3857's model-tier table, #3783's concurrent-baseline harness, and rules 4, 5 and 7
+    of #3690. Merge-note addenda were re-run at the new snapshot on #3897, #3906, #3907 and #3908.
+    - `we:scripts/operations/dispatch-lane-io.mjs` rose from 7 to 10 conflicts, and
+      `we:scripts/operations/dispatch-lane.mjs` from 5 to 6.
+    - `we:scripts/conveyor/concurrent-baseline-comparison.mjs` and `we:scripts/conveyor/log-delegation-trial.mjs`
+      join #3897.
+  - **#3857 probed live, from a throwaway clone of `600acc14f`.** Done-when 5:
+    - A real `we:scripts/operations/run.mjs dispatch-task` with no env model recorded
+      `workerModel: { source: 'table', tier: 'sonnet', name: 'claude-sonnet-5' }`, and the started session's
+      transcript shows `claude-sonnet-5`.
+    - A second call with `WE_DISPATCH_AGENT_ARGS='["--model","opus"]'` and no reason was refused ("a hand-set
+      --model … with no --modelReason is refused") and started no session.
+    - First attempt: an untrusted clone folder made `claude --bg` fail ("Workspace not trusted"). That is the
+      #3748 class, not a #3857 defect, and it left one stale in-flight run record, `probe-3857-sonnet`.
+    - #3857's own card is claimed by another session, so its status flip is left to that session.

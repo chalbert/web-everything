@@ -31,11 +31,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, CI_HEAL_ROUND_CAP,
 } from '../reconcile-core.mjs';
-import { STAND_DOWN_MARKER } from '../stand-down.mjs';
+import {
+  STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
+} from '../stand-down.mjs';
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
+import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
@@ -56,6 +59,7 @@ const FRESH_MTIME = NOW - 30_000;         // written 30 s ago.
 const lbl = (...names) => names.map((name) => ({ name }));
 const greenRollup = [{ name: 'gate', status: 'completed', conclusion: 'success' }];
 const pendingRollup = [{ name: 'gate', status: 'in_progress', conclusion: null }];
+const redRollup = [{ name: 'gate', status: 'completed', conclusion: 'failure' }];
 const finding = (text = 'the cap is not derived from the PR; derive it from the comment thread') =>
   ({ body: `🔁 human review — changes requested\n\n${text}` });
 
@@ -179,6 +183,60 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
     const plan = planReconcile({ prs: [quoted], agents: [], durableCounts: {}, now: NOW });
     expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
     expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
+  });
+
+  // #xu2krte Fork 2 (review-human statute amendment) — PR chalbert/web-everything#2549's shape: the parked-PR
+  // conflict watch itself stood a PR down at conflict-detection time (`reason=conflict`, its own actor string),
+  // which is a ROUTING artifact the SAME watch re-derives every sweep, never a fix agent's own judgment call.
+  // That must not block this gate forever the way an actual escalation does.
+  // `viewerDidAuthor` is GitHub's own per-comment provenance flag from `gh pr view/list --json comments` — true
+  // only for a comment the conveyor's own authenticated identity wrote.
+  const watcherMarker = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }), viewerDidAuthor: true };
+  const supersede = { body: `${SUPERSEDE_STAND_DOWN_MARKER}\n\nrouted to a fix agent`, viewerDidAuthor: true };
+
+  it('#xu2krte Fork 2 — a watcher stand-down the watch ITSELF later superseded is not terminal', () => {
+    const watcherStoodDown = pr1563({ comments: [finding(), watcherMarker, supersede] });
+    const plan = planReconcile({ prs: [watcherStoodDown], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
+    expect(plan.dispatch.map((d) => d.kind)).toEqual(['fix']);
+  });
+
+  it('review finding 1 — a CURRENT (never superseded) watcher stand-down + an unrelated finding stays stood-down', () => {
+    const stillValid = pr1563({ comments: [watcherMarker, finding()] });
+    const plan = planReconcile({ prs: [stillValid], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
+  });
+
+  it('review finding 3 — a FORGED watcher-actor stand-down (not self-authored) cannot escape the terminal gate', () => {
+    const forged = pr1563({ comments: [finding(), { body: watcherMarker.body }, supersede] });
+    const plan = planReconcile({ prs: [forged], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
+  });
+
+  it('the supersede comment is conveyor bookkeeping, never counted as a reviewer finding', () => {
+    const onlyBookkeeping = pr1563({ comments: [watcherMarker, supersede] });
+    const plan = planReconcile({ prs: [onlyBookkeeping], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(countFindings([watcherMarker, supersede])).toBe(0);
+  });
+
+  it('a fix agent\'s OWN judgment stand-down (not the watch) stays exactly as terminal as before', () => {
+    const humanNeeded = pr1563({
+      comments: [finding(), { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) }],
+    });
+    const plan = planReconcile({ prs: [humanNeeded], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].kind).toBe('stood-down');
+    expect(plan.dispatch).toHaveLength(0);
+  });
+
+  it('a human\'s own /finish stand-down (default actor) stays exactly as terminal as before', () => {
+    const humanFinish = pr1563({ comments: [finding(), { body: buildStandDownComment({ reason: 'gate-red' }) }] });
+    const plan = planReconcile({ prs: [humanFinish], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals[0].kind).toBe('stood-down');
+    expect(plan.dispatch).toHaveLength(0);
   });
 });
 
@@ -553,6 +611,106 @@ describe('case 5c — refusal 4, name-based bind: a fix session the cwd/oid rule
   it('a `fix-<pr>` session for a DIFFERENT PR does not bind — the slug is PR-specific, same as the review slug', () => {
     const agents = [{ sessionId: 's-other', cwd: '/x', pid: 1, pidAlive: true, name: sessionSlugFor(9999, 'fix') }];
     expect(bindAgents(pr1563(), agents)).toEqual([]);
+  });
+});
+
+// ── CASE 5d — REFUSAL 4, NAME-BASED BIND FOR A CI-HEAL SESSION (#3967 multi-repo slice 7) ───────────────────────
+// Mirrors case 5c exactly, one dispatch kind over: a CI-heal agent rebases in its acquired lane before it
+// re-pushes, so its lane HEAD diverges from the still-red PR's `headRefOid` right when it starts real work —
+// the SAME #3437 blind spot, recurring for `kind:'ci-heal'` unless `bindAgents` also matches `ci-heal-<pr>`.
+describe('case 5d — refusal 4, name-based bind: a ci-heal session the cwd/oid rule cannot catch (#3967)', () => {
+  const prRed = (over = {}) => pr1563({
+    number: 2601, labels: [], statusCheckRollup: redRollup, comments: [], ...over,
+  });
+
+  it('bindAgents matches a live ci-heal session on NAME alone — cwd/oid deliberately NOT matching', () => {
+    const agents = [{
+      sessionId: 's-heal', cwd: '/lanes/lane-9', pid: 6161, pidAlive: true,
+      laneHeadOid: 'cafebabe'.repeat(4), // the heal agent's OWN post-rebase lane HEAD, never the PR's headRefOid.
+      name: sessionSlugFor(2601, 'ci-heal'),
+    }];
+    const bound = bindAgents(prRed(), agents);
+    expect(bound).toHaveLength(1);
+    expect(bound[0].agent.sessionId).toBe('s-heal');
+    expect(bound[0].agent.laneHeadOid).not.toBe(bound[0].sha);
+  });
+
+  it('THE FIX: a red-CI PR fed through planReconcile TWICE with a live ci-heal session dispatches exactly ONCE', () => {
+    const round1 = planReconcile({ prs: [prRed()], agents: [], now: NOW });
+    expect(round1.dispatch).toHaveLength(1);
+    expect(round1.dispatch[0]).toMatchObject({ kind: 'ci-heal', prNumber: 2601 });
+
+    const agents = [{
+      sessionId: 's-heal', cwd: '/lanes/lane-9', pid: 6161, pidAlive: true,
+      laneHeadOid: 'cafebabe'.repeat(4), name: sessionSlugFor(2601, 'ci-heal'),
+    }];
+    const round2 = planReconcile({ prs: [prRed()], agents, now: NOW });
+    expect(round2.dispatch).toHaveLength(0);
+    expect(round2.refusals).toMatchObject([{ kind: 'live-process', prNumber: 2601, pid: 6161 }]);
+  });
+
+  it('a `ci-heal-<pr>` session for a DIFFERENT PR does not bind — the slug is PR-specific', () => {
+    const agents = [{ sessionId: 's-other', cwd: '/x', pid: 1, pidAlive: true, name: sessionSlugFor(9999, 'ci-heal') }];
+    expect(bindAgents(prRed(), agents)).toEqual([]);
+  });
+});
+
+// ── CASE 5e — CI-HEAL DISPATCH AND ITS OWN DURABLE CAP (#3967 multi-repo slice 7) ───────────────────────────────
+// `ci-red` used to be a wholesale `owed-elsewhere` refusal ("the conveyor tick plans CI-heals, this pass does
+// not") — the WE-only, session-ephemeral `planTick`/`planCiHealSpawns` path. This pass now plans a durable,
+// repo-agnostic `ci-heal` dispatch instead, capped by `countCiHealComments` (the SAME restart-surviving marker
+// count `we:scripts/conveyor/ci-heal-mark.mjs` already defines for the tick's own path) — never `roundCap`'s
+// rearm/advisory counters, and never the reviewer-`findings` check (a red check needs no reviewer thread).
+describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, not `roundCap` (#3967)', () => {
+  const prRed = (over = {}) => pr1563({
+    number: 2602, labels: [], statusCheckRollup: redRollup, comments: [], ...over,
+  });
+
+  it('a red-CI PR with nothing live and zero prior heals is dispatched `ci-heal`, not refused `owed-elsewhere`', () => {
+    const plan = planReconcile({ prs: [prRed()], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2602, attempts: 0 })]);
+  });
+
+  it('a red-CI PR is dispatched regardless of `review:changes` findings — the reviewer-findings check never applies to ci-heal', () => {
+    // Would hit REFUSAL 2 (`no-findings`) under the fix/review table; ci-heal has no such gate.
+    const plan = planReconcile({ prs: [prRed({ comments: [] })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2602 })]);
+  });
+
+  it(`the durable heal-mark count is read from the PR's OWN comments — ${CI_HEAL_ROUND_CAP - 1} prior heals still dispatches`, () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP - 1 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }) }));
+    expect(comments[0].body.startsWith(CI_HEAL_COMMENT_MARKER)).toBe(true);
+    const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', attempts: CI_HEAL_ROUND_CAP - 1 })]);
+  });
+
+  it(`AT the cap (${CI_HEAL_ROUND_CAP} durable heal-mark comments) the PR is refused \`cap-exhausted\`, never re-dispatched`, () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }) }));
+    const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2602, attempts: CI_HEAL_ROUND_CAP, cap: CI_HEAL_ROUND_CAP })]);
+  });
+
+  it('a caller-supplied `ciHealCap` overrides the default — one prior heal already exhausts a cap of 1', () => {
+    const comments = [{ body: buildCiHealComment({ reason: 'red-ci' }) }];
+    const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW, ciHealCap: 1 });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1 })]);
+  });
+
+  it('a REARM/advisory comment count never leaks into the ci-heal cap — the two caps are independent floors', () => {
+    // `roundCap` defaults to `NEGOTIATION_ROUND_CAP` (5); flood the thread with REARM markers (the fix/review
+    // cap's own source) and confirm ci-heal is still owed at attempts:0 — it reads its OWN marker, not this one.
+    const comments = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', attempts: 0 })]);
+  });
+
+  it('DISPATCH_KINDS includes `ci-heal` — every dispatch this pass ever returns has a named kind', () => {
+    expect(DISPATCH_KINDS).toContain('ci-heal');
+    const plan = planReconcile({ prs: [prRed()], agents: [], now: NOW });
+    for (const d of plan.dispatch) expect(DISPATCH_KINDS).toContain(d.kind);
   });
 });
 

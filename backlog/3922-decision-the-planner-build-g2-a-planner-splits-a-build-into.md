@@ -3,7 +3,7 @@ bornAs: xxxraos
 kind: decision
 parent: "3383"
 status: resolved
-relatedTo: ["3575", "3801", "3717", "3730", "3857", "3784", "3850", "3690", "3783", "3748", "3621", "xdk2nt2", "xt962ct", "xacbhmg", "xk7by6p", "xaw0di9", "xvcz3nk", "x1sd02j", "xuk0e6i", "xnkllzn", "xhv61c9", "x3htf2e", "xaa7c2w", "xzce0e8"]
+relatedTo: ["3575", "3801", "3717", "3730", "3857", "3784", "3850", "3690", "3783", "3748", "3621", "3996", "4003", "4004", "4001", "3994", "4008", "3997", "4006", "4007", "4011", "4009", "3993", "4010"]
 relatedReport: reports/2026-09-22-planner-build-g2-prep.md
 scope: ["we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/operations/dispatch-task.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/deliver-item-wrapper.mjs"]
 dateOpened: "2026-09-22"
@@ -697,18 +697,18 @@ amendments and two independent skeptic rounds folded in. Codified as
   tripwires and a 30-day review after `planBuild: on`.
 
 Children filed (all `parent: 3383`):
-1. `xdk2nt2` — plan schema and routing inputs.
-2. `xt962ct` — separate planner and checker roles.
-3. `xacbhmg` — plan runner in shadow mode (`blockedBy` 1, 2).
-4. `xk7by6p` — step lanes from the shared pool.
-5. `xaw0di9` — step operations and permissions.
-6. `xvcz3nk` — step execution with verdict-before-commit (`blockedBy` 3, 4, 5).
-7. `x1sd02j` — exploration as one router rule (`blockedBy` 1).
-8. `xuk0e6i` — live step status record (`blockedBy` 3); `xnkllzn` — the Plateau WIP dashboard view (`blockedBy` it).
-9. `xhv61c9` — probation metrics and entry (`blockedBy` 3 and the probation decision).
-10. `x3htf2e` — later: concurrent-baseline trials (`blockedBy` #3783, 6).
-11. `xaa7c2w` — decision: permission profiles for all agent work.
-12. `xzce0e8` — decision: one probation system for any new system or ruling.
+1. `3996` — plan schema and routing inputs.
+2. `4003` — separate planner and checker roles.
+3. `4004` — plan runner in shadow mode (`blockedBy` 1, 2).
+4. `4001` — step lanes from the shared pool.
+5. `3994` — step operations and permissions.
+6. `4008` — step execution with verdict-before-commit (`blockedBy` 3, 4, 5).
+7. `3997` — exploration as one router rule (`blockedBy` 1).
+8. `4006` — live step status record (`blockedBy` 3); `4007` — the Plateau WIP dashboard view (`blockedBy` it).
+9. `4011` — probation metrics and entry (`blockedBy` 3 and the probation decision).
+10. `4009` — later: concurrent-baseline trials (`blockedBy` #3783, 6).
+11. `3993` — decision: permission profiles for all agent work.
+12. `4010` — decision: one probation system for any new system or ruling.
 
 ## Done when
 

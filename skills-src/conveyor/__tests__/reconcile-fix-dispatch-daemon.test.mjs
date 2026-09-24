@@ -7,9 +7,32 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS,
-  runReconcileFixDispatchAllRepos, FIX_DISPATCH_DAEMON_REPOS,
+  runReconcileFixDispatchAllRepos, FIX_DISPATCH_DAEMON_REPOS, hasStaleMainRefusal,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
+import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
+
+// #3383 bug 1 — wired into withSelfSync's `hasStaleRefusal` option in main(); tested here in isolation
+// (pure, no IO) against the exact shape `runReconcileFixDispatchAllRepos` returns.
+describe('hasStaleMainRefusal', () => {
+  it('true when a repo tick-failed with the real assertMainNotStale refusal message', () => {
+    let message = null;
+    try { assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 5, dirty: false })); }
+    catch (e) { message = e.message; }
+    expect(hasStaleMainRefusal({ refusals: [{ repo: 'chalbert/frontierui', kind: 'tick-failed', why: message }] })).toBe(true);
+  });
+  it('false for an ordinary, unrelated tick failure', () => {
+    expect(hasStaleMainRefusal({ refusals: [{ repo: 'x', kind: 'tick-failed', why: 'gh: rate limited' }] })).toBe(false);
+  });
+  it('false for a non-tick-failed refusal (an ordinary per-PR dispatch refusal is not a whole-repo tick failure)', () => {
+    expect(hasStaleMainRefusal({ refusals: [{ repo: 'x', kind: 'no-scope', why: 'STALE code from this checkout — false shape, not tick-failed' }] })).toBe(false);
+  });
+  it('false with no refusals, or a missing/malformed result', () => {
+    expect(hasStaleMainRefusal({ refusals: [] })).toBe(false);
+    expect(hasStaleMainRefusal({})).toBe(false);
+    expect(hasStaleMainRefusal(undefined)).toBe(false);
+  });
+});
 
 describe('runDaemonLoop — the pure control flow', () => {
   it('requires a tickOnce effect', async () => {

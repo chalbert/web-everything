@@ -47,6 +47,7 @@ import { join, dirname, resolve } from 'node:path';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // ── TUNING (exported so a caller/test can override) ─────────────────────────────────────────────────────────
 
@@ -190,7 +191,8 @@ export const CI_QUEUE_ROOT = resolve(HERE, '..', '..');
 export function defaultListRuns({ exec = execFileSyncThrottled, repo = null, limit = DEFAULT_SAMPLE_LIMIT } = {}) {
   const argv = ['run', 'list', '--limit', String(limit), '--json', 'databaseId,status,createdAt,startedAt'];
   if (repo) argv.push('--repo', repo);
-  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
+  // #x5n4zn3 — was bare (no timeout).
+  const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   const parsed = JSON.parse(String(out || '[]'));
   return Array.isArray(parsed) ? parsed : [];
 }

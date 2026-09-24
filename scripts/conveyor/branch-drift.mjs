@@ -47,6 +47,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
 import { driftDefaults } from '../lib/poc-branches.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** Default long-lived branch this cadence watches (#3464's own subject) and its integration target. Both
  *  overridable (`--branch=` / `--target=`, or `WE_BRANCH_DRIFT_BRANCH` / `WE_BRANCH_DRIFT_TARGET`) so this stays
@@ -125,7 +126,10 @@ function parseFlags(argv) {
 }
 
 function sh(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+  // #x5n4zn3 — was bare (no timeout); shared by every git call this file makes, including a real `git fetch`/
+  // `git push`. Reuses `we:scripts/lib/bounded-child.mjs`'s shared budget so a hung one fails THIS watch, not
+  // the whole daemon cadence it runs under.
+  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL', ...opts });
 }
 
 function maxBehindFromFlags(flags) {

@@ -4,7 +4,10 @@
  *   here and unit-tested without a real repo.
  */
 import { describe, it, expect } from 'vitest';
-import { classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy } from '../main-staleness.mjs';
+import {
+  classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy,
+  isStaleMainRefusalMessage, STALE_MAIN_REFUSAL_MARKER,
+} from '../main-staleness.mjs';
 
 describe('classifyStaleness', () => {
   it('behind 0 → fresh', () => {
@@ -178,6 +181,31 @@ describe('assertMainNotStale', () => {
   it('a non-default base flows through both the thrown message and staleRemedy', () => {
     expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 2, dirty: false }), { base: 'lane/mechanical-dispatcher', label: 'infra-blocked' }))
       .toThrow(/infra-blocked: the dispatching checkout is 1 commit\(s\) behind origin\/lane\/mechanical-dispatcher.*DIVERGED \(2 local commit\(s\) ahead of origin\/lane\/mechanical-dispatcher\)/s);
+  });
+});
+
+// #3383 bug 1 — a downstream forEachRepo caller only ever keeps the flattened first-line message (the Error
+// object and any .code are discarded), so recognizing "this tick failure IS the stale-main refusal" (as
+// opposed to any other tick failure landing in the same bucket) has to work off that string alone.
+describe('isStaleMainRefusalMessage (#3383 bug 1)', () => {
+  it('recognizes the real message assertMainNotStale throws, for every reason', () => {
+    for (const reason of ['dirty', 'diverged', 'not-on-base', 'ff-failed']) {
+      let message = null;
+      try {
+        assertMainNotStale('/repo', () => ({ action: 'warn', reason, behind: 2, ahead: reason === 'diverged' ? 3 : 0, dirty: reason === 'dirty' }));
+      } catch (e) { message = e.message; }
+      expect(message).not.toBeNull();
+      expect(message).toContain(STALE_MAIN_REFUSAL_MARKER);
+      expect(isStaleMainRefusalMessage(message)).toBe(true);
+    }
+  });
+  it('an ordinary, unrelated tick failure is NOT mistaken for the stale-main refusal', () => {
+    expect(isStaleMainRefusalMessage('gh: rate limited')).toBe(false);
+    expect(isStaleMainRefusalMessage('ENOTFOUND api.github.com')).toBe(false);
+  });
+  it('is false for anything non-string (a missing/undefined why field is common on the non-error shapes)', () => {
+    expect(isStaleMainRefusalMessage(undefined)).toBe(false);
+    expect(isStaleMainRefusalMessage(null)).toBe(false);
   });
 });
 
