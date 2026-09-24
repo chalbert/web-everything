@@ -41,6 +41,7 @@ import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 
 /** This daemon's own lease key — distinct from the Dispatcher's default sentinel and from the Verify
  *  daemon's own key (#3878), so none of the three ever contend on the same lock dir (#3877). */
@@ -129,6 +130,20 @@ export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_RE
   return { repos: perRepo, dispatched, refusals };
 }
 
+/**
+ * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one repo?
+ * (see `runReconcileFixDispatchAllRepos`: a whole-repo tick failure — including the stale-main refusal thrown
+ * near the top of `runReconcileFixDispatch` — lands in `refusals` as `{repo, prNumber:null, kind:'tick-failed',
+ * why:<message>}`.) Wired into `withSelfSync`'s `hasStaleRefusal` option so the daemon re-syncs immediately
+ * instead of wasting the full interval on a race it will otherwise keep losing. Pure — takes the tick result,
+ * no IO of its own.
+ * @param {{refusals?:Array<{kind?:string, why?:string}>}} tickResult
+ * @returns {boolean}
+ */
+export function hasStaleMainRefusal(tickResult) {
+  return (tickResult?.refusals ?? []).some((r) => r && r.kind === 'tick-failed' && isStaleMainRefusalMessage(r.why));
+}
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real dispatch pass) ─────────────────────────────
 
 // #3870 LIVE-CAUGHT BUG: `.unref()`-ing this timer told Node it was fine to exit before it fired — with
@@ -186,7 +201,9 @@ async function main() {
     process.exit(0);
   };
   const { stoppedReason } = await runDaemonLoop(
-    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), { root: selfRoot, onRestart: restartOntoNewCode }),
+    withSelfSync(withGithubAppAuth(buildCliDaemonEffects({ owner })), {
+      root: selfRoot, onRestart: restartOntoNewCode, hasStaleRefusal: hasStaleMainRefusal,
+    }),
   );
   if (!stopping) {
     console.error(`reconcile-fix-dispatch-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);

@@ -12,11 +12,13 @@ tags: []
 
 # Graduate dispatch path: dispatch-lane changes, dispatch providers and registry, dispatch-task from lane/mechanical-dispatcher to main
 
-Ports 14 files (we:scripts/operations/dispatch-lane.mjs, we:scripts/operations/dispatch-lane-io.mjs, we:scripts/operations/dispatch-provider-registry.mjs, we:scripts/operations/dispatch-providers/build.mjs, we:scripts/operations/dispatch-providers/ci-heal.mjs, we:scripts/operations/dispatch-providers/fix.mjs, we:scripts/operations/dispatch-providers/prepare.mjs, we:scripts/operations/dispatch-providers/prepare-decision.mjs, we:scripts/operations/dispatch-task.mjs, we:scripts/operations/dispatch-task-io.mjs, we:scripts/operations/effect-executor.mjs, we:scripts/operations/run-record.mjs, we:scripts/operations/run-store.mjs, we:scripts/operator/dispatch.mjs) plus their tests. On the critical path. we:scripts/operations/dispatch-lane-io.mjs is imported by ~25 modules and main also changed it: diff-merge. Main also changed these files, so each gets a diff-merge: we:scripts/operations/dispatch-lane-io.mjs, we:scripts/operations/dispatch-lane.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot ff1618065 of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports 14 files (we:scripts/operations/dispatch-lane.mjs, we:scripts/operations/dispatch-lane-io.mjs, we:scripts/operations/dispatch-provider-registry.mjs, we:scripts/operations/dispatch-providers/build.mjs, we:scripts/operations/dispatch-providers/ci-heal.mjs, we:scripts/operations/dispatch-providers/fix.mjs, we:scripts/operations/dispatch-providers/prepare.mjs, we:scripts/operations/dispatch-providers/prepare-decision.mjs, we:scripts/operations/dispatch-task.mjs, we:scripts/operations/dispatch-task-io.mjs, we:scripts/operations/effect-executor.mjs, we:scripts/operations/run-record.mjs, we:scripts/operations/run-store.mjs, we:scripts/operator/dispatch.mjs) plus their tests. On the critical path. we:scripts/operations/dispatch-lane-io.mjs is imported by ~25 modules and main also changed it: diff-merge. Main also changed these files, so each gets a diff-merge: we:scripts/operations/dispatch-lane-io.mjs, we:scripts/operations/dispatch-lane.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/__tests__/dispatch-routing-table.test.mjs we:scripts/lib/__tests__/dispatch-supervisor.test.mjs we:scripts/operations/__tests__/dispatch-abort.test.mjs we:scripts/operations/__tests__/dispatch-crosses-processes.test.mjs we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs we:scripts/operations/__tests__/dispatch-lane-ci-heal-wiring.test.mjs we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs we:scripts/operations/__tests__/dispatch-lane-fix-wiring.test.mjs we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs we:scripts/operations/__tests__/dispatch-lane-marker-freshen.test.mjs we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs we:scripts/operations/__tests__/dispatch-lane.test.mjs we:scripts/operations/__tests__/dispatch-provider-registry.test.mjs we:scripts/operations/__tests__/dispatch-sinks-root-hermeticity.test.mjs we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs we:scripts/operations/__tests__/dispatch-task.test.mjs we:scripts/operations/__tests__/run-store.test.mjs we:scripts/operations/dispatch-providers/__tests__/ci-heal-dispatch-routing.test.mjs we:scripts/operations/__tests__/inflight-fail-closed.test.mjs we:scripts/operations/__tests__/http-adapter.test.mjs we:scripts/operations/__tests__/delivery-agent-marker.test.mjs we:scripts/operations/__tests__/wake-cli.test.mjs we:scripts/operations/__tests__/explore.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
+2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
+3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
 
 ### Merge notes for #3906 (2026-09-22)
 
@@ -88,3 +90,71 @@ Merge base `ca7e68b71`. Conflict counts are from `git merge-tree` (the real 3-wa
 - **Order fixed:** this slice now lands before #3903 (no longer blocked by it) and owns `we:scripts/operations/delivery-agent-marker.mjs`, `we:scripts/operations/wake.mjs` and `we:scripts/operations/explore-io.mjs`.
 - Session-id: take the branch's throw in `defaultClaudeProvider`; keep main's argv without `--session-id` (main's tests enforce it; no behaviour effect).
 - `we:scripts/operations/runner-activity-io.mjs` (main-only) changes ONLY to follow the run-store root move (`resolveRunsDir()`), so main's activity report keeps seeing dispatches.
+
+### Addendum: snapshot moved to 600acc14f (2026-09-23)
+
+Re-ran the trial merges at the new prototype tip (base `ca7e68b71` for both files, per the existing note).
+`we:` prefixes below are repo-relative paths.
+
+**`we:scripts/operations/dispatch-lane-io.mjs`** — **10 conflicts**, up from the note's 7 (real merge-tree) /
+6 (single-base). One old conflict is GONE (the `findItem` `...size` spread at old ~L859 now merges clean —
+main has independently converged on the same shape), but a bigger, genuinely NEW source of conflict appeared:
+main has grown its OWN unrelated feature, **`we:x8mpubm` (a `gh`-App-token `--settings` env shim)**, touching
+the exact same functions the branch's **#3857 model-tier table** touches:
+- `createDispatchSinks(...)` gained a `resolveSettingsEnv = resolveGhShimSettingsEnv` parameter (main) that
+  now sits where the branch adds `freshenCheckout = () => {}` — keep BOTH params.
+- Inside the dispatch effect, main's plain `provider({...settingsEnv: resolveSettingsEnv()})` call must be
+  merged into the branch's `guardedDispatch(...)`-wrapped call, keeping `settingsEnv` (main) AND `table`/
+  `modelReason` (branch, #3857) in the same `provider()` call.
+- `defaultClaudeProvider`'s `buildAgentArgv(...)` call must pass BOTH `settingsEnv: request.settingsEnv ?? null`
+  (main) and `table`/`modelReason` (branch).
+- `buildAgentArgv`'s own signature must become a UNION: `{ sessionId, payload, extraArgs=[], systemPromptFile=null,
+  resumeSessionId=null, settingsEnv=null, table=null, modelReason=null }` — main and branch each independently
+  turned this into a multi-line destructure with a new trailing param, so this is a real merge, not a
+  take-one-side resolution. The return array itself (the `--settings`/`modelArgs` spreads) auto-merged clean in
+  the trial — only the signature/JSDoc/body-comment region needs hand merging.
+- The three OLD docblock conflicts (`THE HANDLE …`, `PROVEN AGAINST …`, the provider-port paragraph) are
+  unchanged in nature/resolution, just shifted ~90 lines down.
+- **Worker step 5 in the existing note ("branch throw + `WE_DISPATCH_KIND`... make docblocks agree") is now
+  INCOMPLETE** — it must also fold in the `x8mpubm` settingsEnv threading through the same three call sites,
+  which the old note never saw because main added it after 2026-09-22.
+
+**`we:scripts/operations/dispatch-lane.mjs`** — **6 conflicts**, up from 5[4]. The two old-ruling conflicts
+(`sessionSlugFor` → keep main's `mintSessionSlug`; not-cleared `holdReason` → keep main's `raw.admission?.held`)
+and the `LAUNCH_KINDS`-block conflict are unchanged in nature. Two are now bigger UNIONS because main did its
+own **#3960 (multi-repo slice 4)** work on the same constants since the old snapshot:
+- `BRIEF_PLACEHOLDERS`: union main's 5 new repo-aware tokens (`REPO`, `LANE_REPO`, `GATE_COMMAND`, `WE_ROOT`,
+  `ATTRIBUTION`) with branch's 2 (`ATTRIBUTION_KIND`, `ATTRIBUTION_NUM`) — not just "add branch's tokens" as
+  the old note said.
+- `BRIEF_REQUIRED_BY_KIND`: `fix` needs BOTH main's 5 repo-aware tokens AND branch's 2 attribution tokens;
+  `ci-heal` needs only main's 5 (branch never touched `ci-heal`'s list).
+- **New conflict**: the `fillBrief(...)` call itself — main added a 5th argument
+  (`repairsExistingPr ? REPO_AWARE_VALUE_PATTERNS : undefined`, #3960) at the exact call site the branch's
+  #3717 taskType/routing/supervision-gate block (a ~90-line addition) is inserted right after. Keep main's
+  5-arg `fillBrief` call, then the branch's block unchanged.
+
+**`we:scripts/operations/__tests__/dispatch-lane.test.mjs`** — **2 conflicts** (not previously counted). One is
+a trivial `vitest` import (`vi` unused on branch — drop it, keep branch's clean import). The other is the
+`expectedPrompt('fix', {...})` fixture in the fix-dispatch test: must union main's `WE_TOKENS('2608')` spread
+(the #3960 five) with branch's `ATTRIBUTION_KIND: 'WE', ATTRIBUTION_NUM: '2608'` literals — confirms the same
+union both `we:scripts/operations/dispatch-lane.mjs` conflicts above need.
+
+**New add-only files in this card's scope, unaffected (still missing on main, 0-conflict copies from `600acc14f`):**
+- `we:scripts/operations/dispatch-task.mjs` — gained a `modelReason` input + read (#3857), forwarded to the spawn.
+- `we:scripts/operations/dispatch-task-io.mjs` — gained `readItemRoutingFacts(item, io)` (best-effort `scope:`/
+  `tags:` lookup for a `--item`-carrying brief, via `we:scripts/operations/resolve-io.mjs#resolveBacklogFile`/
+  `readScopeList`, already on main) and now imports `workerTierFor` (`we:scripts/lib/provider-routing.mjs`) and
+  `resolveWorkerModel` (`we:scripts/operations/dispatch-lane-io.mjs`). No new npm dependency (`gray-matter` is already used
+  elsewhere on main, e.g. `we:scripts/backlog.mjs`).
+- `we:scripts/operations/__tests__/dispatch-task.test.mjs`, `we:scripts/lib/__tests__/dispatch-supervisor.test.mjs`,
+  `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` — still missing on main, straight adds.
+
+**Worker steps (revise)**
+5'. When hand-merging `we:scripts/operations/dispatch-lane-io.mjs`, ALSO fold in the `x8mpubm` `settingsEnv`
+    threading (see above) into `createDispatchSinks`, `defaultClaudeProvider`, and `buildAgentArgv`'s signature —
+    not just the throw/`WE_DISPATCH_KIND`/argv resolution the original step 5 named.
+4'. When hand-merging `we:scripts/operations/dispatch-lane.mjs`, union `BRIEF_PLACEHOLDERS`/
+    `BRIEF_REQUIRED_BY_KIND.fix` (main's 5 `#3960` tokens + branch's 2 `ATTRIBUTION_*` tokens) and keep main's
+    now-5-argument `fillBrief(...)` call ahead of the branch's `#3717` routing block.
+9'. Port `we:scripts/operations/__tests__/dispatch-lane.test.mjs`'s branch diff too (2 conflicts, above) —
+    not previously listed as needing a diff-port.

@@ -12,11 +12,13 @@ tags: []
 
 # Graduate judge spawns and review-pr changes (incl. antigravity-judge-spawn) from lane/mechanical-dispatcher to main
 
-Ports 17 files (we:scripts/lib/antigravity-judge-spawn.mjs, we:scripts/lib/codex-judge-spawn.mjs, we:scripts/lib/judge-spawn.mjs, we:scripts/lib/judge-panel.mjs, we:scripts/lib/jury-core.mjs, we:scripts/lib/review-core.mjs, we:scripts/lib/review-escalation.mjs, we:scripts/lib/review-render.mjs, we:scripts/operations/review-pr.mjs, we:scripts/operations/review-pr-io.mjs, we:scripts/operations/record-verdict-io.mjs, we:scripts/operations/review-loop-cli.mjs, we:scripts/operations/cli-adapter.mjs, we:scripts/merge-ai-prs.mjs, we:scripts/lib/model-capability-ratings.mjs, we:scripts/lib/model-capability-ratings.json, we:skills-src/review/review-agent-brief.md) plus their tests. we:scripts/operations/review-pr.mjs, we:scripts/operations/cli-adapter.mjs and we:scripts/lib/codex-judge-spawn.mjs were also changed on main: diff-merge. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-pr.mjs, we:scripts/operations/cli-adapter.mjs, we:scripts/lib/codex-judge-spawn.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot ff1618065 of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. HOLD: do not dispatch until the operator confirms agent routing works (2026-09-22). Filed with --queue=false.
+Ports 17 files (we:scripts/lib/antigravity-judge-spawn.mjs, we:scripts/lib/codex-judge-spawn.mjs, we:scripts/lib/judge-spawn.mjs, we:scripts/lib/judge-panel.mjs, we:scripts/lib/jury-core.mjs, we:scripts/lib/review-core.mjs, we:scripts/lib/review-escalation.mjs, we:scripts/lib/review-render.mjs, we:scripts/operations/review-pr.mjs, we:scripts/operations/review-pr-io.mjs, we:scripts/operations/record-verdict-io.mjs, we:scripts/operations/review-loop-cli.mjs, we:scripts/operations/cli-adapter.mjs, we:scripts/merge-ai-prs.mjs, we:scripts/lib/model-capability-ratings.mjs, we:scripts/lib/model-capability-ratings.json, we:skills-src/review/review-agent-brief.md) plus their tests. we:scripts/operations/review-pr.mjs, we:scripts/operations/cli-adapter.mjs and we:scripts/lib/codex-judge-spawn.mjs were also changed on main: diff-merge. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-pr.mjs, we:scripts/operations/cli-adapter.mjs, we:scripts/lib/codex-judge-spawn.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/antigravity-judge-spawn.integration.test.mjs we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs we:scripts/lib/__tests__/codex-judge-spawn.test.mjs we:scripts/lib/__tests__/judge-panel.test.mjs we:scripts/lib/__tests__/judge-spawn.test.mjs we:scripts/lib/__tests__/review-core.test.mjs we:scripts/lib/__tests__/review-escalation.test.mjs we:scripts/operations/__tests__/review-loop-cli.test.mjs we:scripts/operations/__tests__/review-pr-io.test.mjs we:scripts/operations/__tests__/review-pr.test.mjs we:scripts/operations/__tests__/judge-provider-port.test.mjs we:scripts/operations/__tests__/judge-provider-selection.test.mjs we:scripts/operations/__tests__/juror-flags.test.mjs we:scripts/operations/__tests__/record-verdict-cli.test.mjs we:scripts/lib/__tests__/codex-model-routing.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
+2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
+3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
 
 ### Merge notes for #3907 (2026-09-22)
 
@@ -130,3 +132,30 @@ Nothing was edited in any checkout. Trial merges are in the scratchpad under `me
 
 - Also owns `we:scripts/lib/__tests__/codex-model-routing.test.mjs` (moved from #3897), hence the new blocker #3902.
 - **Behaviour change the operator was told about:** a faithful port turns the Codex and Antigravity advisory seats on by default for main's reviews whenever the model-probation registry marks them probation or trusted.
+
+### Addendum: snapshot moved to 600acc14f (2026-09-23)
+
+`we:` prefixes below are repo-relative paths.
+
+**`we:scripts/lib/jury-core.mjs`** — still **0 conflicts**, still safe to "copy as-is" exactly as the existing
+note says. One nuance worth recording: this file is NOT branch-only in the sense of "doesn't exist on main" —
+it's a long-lived main file (created 2026-07-24) that main simply has not touched since the merge base
+`ca7e68b71` (`git diff ca7e68b71 origin/main -- we:scripts/lib/jury-core.mjs` is empty), so a straight copy of
+the branch's file is byte-safe. New branch content on top of the old note's snapshot:
+- **Rule 7 of #3690 (#3887)**: `FLOOR_MAX_FINDINGS = 3` and `recordFloorRun({findings, jurorCount, rounds,
+  tokens, wallTimeMs})` — records one floor-depth (`spot-check`) independent-pass run's verdict AND cost.
+  Deliberately NOT a `VERDICTS` member (floor runs are structurally non-blocking, per `#3313`). Consumed by
+  `we:scripts/operations/review-dispatch.mjs` (#3908's scope) via the `we:scripts/lib/dispatch-contracts.mjs`
+  (#3897's scope) `independentReviewDepthFor` contract — see #3897's own addendum for that half.
+
+**`we:scripts/lib/__tests__/jury-core.test.mjs`** — still **0 conflicts** (confirmed: `git diff ca7e68b71
+origin/main -- <file>` is also empty, base == main). Straight copy, same as its module.
+
+**`we:scripts/operations/__tests__/helpers/fake-claude.mjs`** — still **1 conflict**, same region and same
+resolution as the existing note (the `--bg` id-generation block: `generated-N` vs a real `randomUUID()`).
+New branch content merges CLEAN, outside the conflict: a `--model`/`-m` flag-recording arm (tagged `#3857`)
+was added to the shim's argv parser, since `we:scripts/operations/dispatch-lane-io.mjs#buildAgentArgv` (this
+card's dependency, #3906's scope) can now inject `--model` for the model-tier table. No action needed beyond
+the existing resolution.
+
+No worker-step changes — the existing note's steps 1–9 still apply as written for these three files.

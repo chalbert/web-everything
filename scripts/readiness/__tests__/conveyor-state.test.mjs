@@ -713,7 +713,9 @@ describe('assembleConveyorState — the whole tick picture', () => {
 describe('CLI --json flush — the full payload round-trips through an execFileSync pipe (no truncation)', () => {
   const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'conveyor-state.mjs');
   it('emits complete, parseable JSON with every top-level section present', () => {
-    const out = execFileSync('node', [CLI, '--json'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    // `--no-lane-pool` (#x7xv2xt): the payload size comes from the build queue, not the lanes, so there is no
+    // reason for a unit test to scan every real lane (`lane-pool status` + a per-lane git walk).
+    const out = execFileSync('node', [CLI, '--json', '--no-lane-pool'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
     // The whole payload arrived (a truncated tail would make this throw — the bug this pins).
     const state = JSON.parse(out);
     for (const key of ['queue', 'clearedNotReady', 'unshaped', 'lanes', 'freeSlots', 'prs', 'daemon', 'idle', 'health']) {

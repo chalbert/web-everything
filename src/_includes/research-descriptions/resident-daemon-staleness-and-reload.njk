@@ -77,4 +77,16 @@
   operation, the running revision published in each daemon&rsquo;s heartbeat record) and per-daemon differences fall out as one mechanism with per-daemon parameters, not separate forks.
   Full grounding: <code>reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md</code>.
 </p>
+<h2>Update — 2026-09-23 evening: self-sync is live</h2>
+<p>
+  Hours after this synthesis, the operator asked for staleness to be handled automatically, and the review,
+  fix-dispatch and drain daemons began merging <code>origin/main</code> into their own clones before each tick and
+  restarting on the new code. That reverses points 2 and 4 above. The re-prepared item now recommends: a daemon is
+  stale when the branch heads its clone was built from have moved since it booted (checked by every daemon, with a
+  5-minute restart floor); daemons move their own dedicated clone automatically, under a primary-checkout guard, a
+  per-clone lock and a fixed state root, by rebuilding it rather than merging on top; and a daemon may run
+  not-yet-merged prototype code only by explicit per-clone opt-in, never where it reviews or lands pull requests,
+  behind a test gate and a rollback that lives outside the daemon. Grounding:
+  the evening addendum in <code>reports/2026-09-23-daemon-lifecycle-staleness-reload-prep.md</code>.
+</p>
 {% endraw %}

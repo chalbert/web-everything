@@ -37,6 +37,18 @@
  *   this SAME primitive, under its own sentinel key, rather than contending with the Dispatcher's lease or
  *   forking this file. Two different keys are two independent lock dirs under the same {@link RUNNER_LOCK_ROOT}
  *   — unrelated leases, never a shared critical section.
+ *
+ * #3952 — DEAD-LEASE FAST RECLAIM. A `launchctl kickstart -k` mid-tick SIGKILLs a daemon that cannot run
+ *   its release handler, leaving its lease dir holding the dead pid; every relaunch inside the TTL then
+ *   exits "a live instance already holds the lease" naming a pid that is provably gone, staying down for
+ *   up to the full {@link RUNNER_LEASE_MINUTES} window until a human clears it by hand. {@link
+ *   acquireRunnerLease} now probes the CURRENT holder's pid ({@link probeRunnerLeaseLiveness}) before
+ *   calling `reserve`: a same-host owner whose pid is confirmed dead (`kill(pid, 0)` → ESRCH) is reclaimed
+ *   at once, same as {@link ../../scripts/readiness/heavy-admission.mjs}'s slot leases and
+ *   {@link ../../scripts/readiness/file-locks-cli.mjs}'s `reserve` command already do on their own leases —
+ *   never a fork of that fast path, the SAME layered-never-primary rule threaded to a third caller. A
+ *   different host, an ambiguous errno (EPERM), or a live pid is never fast-reclaimed — only the TTL floor
+ *   applies then, unchanged.
  */
 
 import { mkdirSync } from 'node:fs';
@@ -70,15 +82,45 @@ function ensureRoot(lockRoot) { try { mkdirSync(lockRoot, { recursive: true }); 
 const nowIsoFrom = (nowMs) => new Date(nowMs).toISOString();
 
 /**
+ * #3952 — same-host, same-machine PID-liveness verdict for a runner lease's CURRENT holder. Mirrors the
+ * layered, NEVER-primary fast path already wired for heavy-admission.mjs's slots
+ * (`probeSlotHolderLiveness`) and file-locks-cli.mjs's `reserve` command (`probePidLiveness`): `kill(pid, 0)`
+ * throws ESRCH when no such process exists → provably 'dead' (the pure `reclaimDecision` in file-locks.mjs
+ * then reclaims immediately, without waiting out the TTL); succeeds → 'alive' (the kernel reuses pids, so
+ * this does NOT prove it's the SAME process — never accelerates a reclaim); any other errno (e.g. EPERM) is
+ * ambiguous → 'unknown' (TTL-only).
+ *
+ * A lease recorded for a DIFFERENT host is NEVER fast-reclaimed: `RUNNER_LOCK_ROOT` is a machine-global
+ * home-dir path, but a pid number only means something on the host that minted it — the same pid could be a
+ * live, unrelated process on THIS host while the real (different-host) owner is alive too. `makeOwner` bakes
+ * `hostname()` into the owner string precisely so this can tell the two cases apart; only an owner whose
+ * host segment equals THIS host's `hostname()` is ever probed.
+ * @param {{owner:string, pid:number|null}|null} entry  the CURRENT lock entry (or null/absent)
+ * @param {string} [currentHost]  this host's name (injectable for tests)
+ * @returns {'dead'|'alive'|'unknown'}
+ */
+export function probeRunnerLeaseLiveness(entry, currentHost = hostname()) {
+  if (!entry || !Number.isInteger(entry.pid) || entry.pid <= 0) return 'unknown';
+  const ownerHost = typeof entry.owner === 'string' ? entry.owner.split(':')[0] : null;
+  if (ownerHost !== currentHost) return 'unknown'; // a different host is NEVER fast-reclaimed
+  try { process.kill(entry.pid, 0); return 'alive'; }
+  catch (e) { return e && e.code === 'ESRCH' ? 'dead' : 'unknown'; }
+}
+
+/**
  * Acquire the singleton runner lease for `owner`. `ok:true` ⇒ THIS process may run the conveyor loop (it won
- * the lease, or reclaimed a STALE one via the TTL). `ok:false, reason:'held'` ⇒ a LIVE runner already holds it
- * — the caller must NO-OP and exit (a second runner launch never double-drives). Thin over file-locks
- * `reserve` (atomic win, or reclaim-a-dead-holder via the TTL). Injectable clock keeps it unit-testable.
+ * the lease, reclaimed a STALE one via the TTL, or fast-reclaimed a provably-dead same-host holder — #3952).
+ * `ok:false, reason:'held'` ⇒ a LIVE runner already holds it — the caller must NO-OP and exit (a second
+ * runner launch never double-drives). Thin over file-locks `reserve`: this function's only addition is
+ * probing the current holder's pid liveness ({@link probeRunnerLeaseLiveness}) before calling it, so a
+ * dead-on-this-host holder no longer waits out the full TTL. Injectable clock keeps it unit-testable.
  * @returns {{ ok: boolean, reason: string, heldBy: string|null }}
  */
 export function acquireRunnerLease(lockRoot = RUNNER_LOCK_ROOT, owner = runnerOwner(), { pid = process.pid, leaseMinutes = RUNNER_LEASE_MINUTES, nowMs = Date.now(), key = RUNNER_LEASE_PATH } = {}) {
   ensureRoot(lockRoot);
-  return reserve(lockRoot, key, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
+  const current = readLockEntry(lockRoot, key);
+  const pidLiveness = current && current.owner !== owner ? probeRunnerLeaseLiveness(current) : 'unknown';
+  return reserve(lockRoot, key, owner, nowMs, nowIsoFrom(nowMs), pid, pidLiveness, leaseMinutes);
 }
 
 /** Refresh the runner lease heartbeat (a live runner extends its lease each tick). No-op returning `false` if

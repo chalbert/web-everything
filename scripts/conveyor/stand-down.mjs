@@ -33,6 +33,7 @@
  */
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /**
  * we:scripts/conveyor/stand-down.mjs#STAND_DOWN_MARKER — the stable FIRST LINE of the durable stand-down comment.
@@ -190,7 +191,8 @@ if (IS_CLI) {
   const args = ['pr', 'comment', String(pr), '--body', body];
   if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`); // the fix agent runs in its WE lane clone; a missing --repo derives from cwd.
   try {
-    execFileSync('gh', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+    // #x5n4zn3 — was bare (no timeout).
+    execFileSync('gh', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   } catch (e) {
     fail(`could not post stand-down comment on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
   }

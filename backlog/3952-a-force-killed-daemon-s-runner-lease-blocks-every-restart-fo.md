@@ -2,9 +2,11 @@
 bornAs: xiuw0u4
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/runner-lock.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-23"
+dateResolved: "2026-09-23"
 tags: []
 ---
 
@@ -14,4 +16,9 @@ Live-caught twice on 2026-09-23 restarting the review daemon. A daemon tick runs
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:skills-src/conveyor/__tests__/runner.test.mjs -t "3952"` fails at the
+   parent commit (`acquireRunnerLease` refuses a same-host lease owned by a provably-dead real pid, `{ok:
+   false, reason:'held'}`) and passes after `acquireRunnerLease` probes the current holder's pid liveness
+   (`probeRunnerLeaseLiveness`, we:skills-src/conveyor/runner-lock.mjs) and fast-reclaims it (`{ok:true,
+   reason:'pid-dead'}`), while a lease held by a genuinely live pid, or one recorded for a different host,
+   is still refused unchanged.

@@ -23,13 +23,14 @@ describe('repoProfile', () => {
     frontierui: {
       slug: 'chalbert/frontierui', slugTag: 'fui', lanePoolRepo: `${HOME}/workspace/frontierui`,
       scopePrefixes: ['fui', 'frontierui'], canonicalPrefix: 'fui',
-      // #x33jgwt multi-repo slice 5 — `fix` turns on for the couple-repos; `ciHeal` stays off (slice 7).
-      capabilities: { review: true, fix: true, ciHeal: false, build: 'couple' },
+      // #x33jgwt multi-repo slice 5 turned `fix` on for the couple-repos; #3967 multi-repo slice 7 turns
+      // `ciHeal` on the same way, independently, as its own capability.
+      capabilities: { review: true, fix: true, ciHeal: true, build: 'couple' },
     },
     'plateau-app': {
       slug: 'chalbert/plateau-app', slugTag: 'pa', lanePoolRepo: `${HOME}/workspace/plateau-app`,
       scopePrefixes: ['plateau', 'plateau-app'], canonicalPrefix: 'plateau',
-      capabilities: { review: true, fix: true, ciHeal: false, build: 'couple' },
+      capabilities: { review: true, fix: true, ciHeal: true, build: 'couple' },
     },
   };
 

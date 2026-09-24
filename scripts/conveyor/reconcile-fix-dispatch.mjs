@@ -77,6 +77,7 @@ import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
@@ -293,8 +294,10 @@ export function fetchPrDiffPaths(pr, { exec = execFileSyncThrottled, root = REPO
   try {
     const argv = ['pr', 'diff', String(pr), '--name-only'];
     if (repo) argv.push('--repo', repo);
+    // #x5n4zn3 — was bare (no timeout).
     const out = exec('gh', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, cwd: root,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
   } catch {
@@ -370,8 +373,11 @@ export function freeLaneNumbers({ exec = execFileSync, root = REPO_ROOT, lanePoo
   try {
     const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'list', '--acquirable', '--json'];
     if (lanePoolRepo) argv.push(`--repo=${lanePoolRepo}`);
+    // #x5n4zn3 — was bare (no timeout): this is literally the 2026-09-23 incident's own call shape
+    // (`lane-pool.mjs list --acquirable`), the exact hang that filed this whole rollout.
     const out = exec('node', argv, {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     const paths = JSON.parse(String(out || '[]'));
     return (Array.isArray(paths) ? paths : [])
@@ -692,10 +698,16 @@ export function dispatchFix(planned, {
  *     this constellation ever grows (with `fix` genuinely off) is refused for the right reason, not silently
  *     let through because it happens to resolve to *some* profile.
  *   - `!profile.capabilities.ciHeal` → independently of the above, any `ci-heal` entry in the SAME
- *     `reconcile-pass` reading is recorded `unsupported-repo` too (CI-heal is its own stage, its own future
- *     slice — #3958). This file dispatches no `ci-heal` itself either way; recording the refusal here (rather
- *     than dropping the entry silently) preserves the exact visibility the pre-slice-5 blanket branch gave every
- *     non-WE repo's ci-heal population, now scoped to its own capability instead of riding on `fix`'s.
+ *     `reconcile-pass` reading is recorded `unsupported-repo` too (CI-heal was its own stage, held off `fix`'s
+ *     switch, until multi-repo slice 7, `we:backlog/3967-*.md`, turned it on for frontierui/plateau-app too —
+ *     both now resolve `ciHeal: true` in `repo-profile.mjs`, so a real call takes this branch only via an
+ *     injected `resolveProfile` reporting it off, same as the `fix` branch above). This file dispatches no
+ *     `ci-heal` itself EITHER WAY — that is `we:scripts/operations/ci-heal-pr-dispatch.mjs
+ *     #runReconcileCiHealDispatch`'s own job, reading this SAME `reconcile-pass` output — so when the
+ *     capability is on, a `ci-heal` entry is simply absent from both `dispatched` and `refusals` here (that
+ *     other file is where it is acted on, or refused). Recording the refusal HERE only when the capability is
+ *     off preserves the exact visibility the pre-slice-5 blanket branch gave every non-WE repo's ci-heal
+ *     population, now scoped to its own capability instead of riding on `fix`'s.
  * Both checks read the SAME `profile`, computed once, never re-derived per entry or per kind.
  * @param {object} [o]
  * @param {Function} [o.reconcile] - injectable, defaults to the real {@link runReconcilePass}.

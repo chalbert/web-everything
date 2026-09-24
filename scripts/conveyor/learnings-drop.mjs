@@ -226,7 +226,8 @@ export function validateEntry(entry) {
 // ── path resolution ─────────────────────────────────────────────────────────────────────────────
 function repoRoot() {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    // #x5n4zn3 — was bare (no timeout); a purely-local read, short budget.
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15_000, killSignal: 'SIGKILL' }).trim();
   } catch {
     return process.cwd();
   }

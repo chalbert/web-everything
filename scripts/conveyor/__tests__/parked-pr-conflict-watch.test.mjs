@@ -27,7 +27,9 @@ import {
   isAppendOnlyStatuteChange,
   isAppendOnlyStatuteConflict,
   defaultListPrPatches,
+  defaultListPrComments,
 } from '../parked-pr-conflict-watch.mjs';
+import { STAND_DOWN_MARKER } from '../stand-down.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
 // `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
@@ -774,7 +776,7 @@ describe('defaultPostConflictFinding / defaultPostConflictStandDown / defaultPos
     expect(calls).toEqual([['node', [
       expect.stringMatching(/\/scripts\/conveyor\/rearm-review\.mjs$/), '1920',
       '--actor=parked-pr-conflict-watch (conflict resolved)', '--repo=o/n',
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 }]]);
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: 300_000, killSignal: 'SIGKILL' }]]);
   });
 
   it('shells reconcile-finding.mjs with a --body-file, --agent and --repo', () => {
@@ -879,6 +881,24 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(provider.calls).toEqual([]); // no second label write, no second comment
   });
 
+  // #3383 — dry-run used to bail out of the whole grace branch before computing anything (the SAME line that
+  // handles the ordinary post-grace-not-yet-elapsed bail also caught this), so `--dry-run` could never surface
+  // what a real sweep would actually do to a queued, grace-expired PR — exactly the blind spot that let #2505
+  // sit unrouted with no visibility. The read-only classification (age, files, patches) now runs in BOTH modes;
+  // only the write calls are gated.
+  it('dry-run reports the grace-expired routing decision instead of skipping the branch, and makes no writes', () => {
+    const provider = fakeProvider(); const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider, dryRun: true,
+      postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS + 1000, listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([]); // no write called
+    expect(provider.calls).toEqual([]);
+  });
+
   it('grace elapsed but label age unknown → waits (never bounces on a guess)', () => {
     const routed = [];
     const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('ready-to-merge', CONFLICT_LABEL) }];
@@ -889,7 +909,7 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(routed).toEqual([]);
   });
 
-  it('statute-tier: handed to a human at first sighting, and NEVER re-posted by the grace path', () => {
+  it('statute-tier: handed to a human at first sighting, and NEVER re-posted by the grace path once the marker is on the PR', () => {
     const routed = [];
     const statuteFiles = [{ path: 'docs/agent/platform-decisions.md' }];
     const first = watchParkedPrConflicts({
@@ -897,10 +917,15 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
       provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
     });
     expect(first[0].routedTo).toBe('stand-down');
+    // #3383 — idempotency now comes from READING the marker back off the PR's own comments (`listPrComments` +
+    // `countStandDownComments`), not from a bare "isStatuteTier implies already handled" assumption (that
+    // assumption is exactly what left #2505 stuck: a QUEUED PR that is NOT statute-tier at detection is deferred
+    // to the drain, never handed to a human, so it can reach this grace path statute-tier for the FIRST time).
     const later = watchParkedPrConflicts({
       repo: 'o/n', listPrs: () => [{ number: 2505, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }],
       provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
       labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
+      listPrComments: () => [{ body: STAND_DOWN_MARKER }],
     });
     expect(later).toEqual([]);
     expect(routed).toEqual(['sd']);
@@ -1064,6 +1089,34 @@ describe('watchParkedPrConflicts — the append-only statute exception (#3383)',
     const comment = provider.calls.find((c) => c[0] === 'postComment')?.[3];
     expect(comment).toMatch(/dispatched now .* no drain grace period/);
     expect(comment).not.toMatch(/drain gets the first try|still conflicting in \d+ minutes/);
+  });
+
+  // #3383 — the live bug (PR #2505, chalbert/web-everything): a queued/approved PR that was NOT statute-tier
+  // at detection (so it was correctly deferred to the drain, `routedTo: 'deferred-to-drain'`, never handed to a
+  // human) is later re-checked, past the drain's grace window, and turns out to touch a statute-tier file whose
+  // only change is an append-only new `### ` section. The grace path used to short-circuit on
+  // `if (isStatuteTier) continue`, on the FALSE assumption that a statute-tier conflict was always already
+  // handed to a human at detection — leaving this exact PR unrouted forever, with no label change, no comment,
+  // no dispatch. This test reproduces that shape end to end and pins the fixed routing.
+  it('#3383 — a queued PR that reaches statute-tier only at grace-expiry, append-only, is dispatched to the fixer (not silently dropped)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      // Already labelled by an earlier sweep (that earlier sweep saw it as non-statute-tier and deferred it),
+      // still queued/approved, still conflicting.
+      number: 2505, mergeable: 'CONFLICTING', labels: [{ name: 'review:accepted' }, { name: CONFLICT_LABEL }],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number, o.appendOnlyStatute]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS + 1000, // grace has elapsed
+      listPrFiles: () => [{ path: 'docs/agent/platform-decisions.md' }],
+      listPrPatches: () => ({ 'docs/agent/platform-decisions.md': goodPatch }),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding (append-only statute, after drain grace)');
+    expect(routed).toEqual([['finding', 2505, true]]);
+    expect(provider.calls).toEqual([]); // no second label write, no second comment — the bounce IS the action
   });
 
   it('an ordinary non-statute conflict never pays for a patch fetch (listPrPatches uncalled)', () => {

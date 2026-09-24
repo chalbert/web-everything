@@ -26,7 +26,7 @@ Pure core (no fs, no clock) that turns claude-otel-collector records into the us
 2. Exact expected totals: per-day by family, `byModel` and `byRole` each sum to `totalUsd` exactly (to the cent).
 3. `cacheHitPct = 100 * cacheRead / (cacheRead + cacheCreation + input)` (0-100, one decimal — matching the
    plateau-app mock's `${cacheHitPct}%` render and its `< 40` low-cache threshold; corrected post-resolution
-   in xaxks4j after the mock's literal scale was checked), `null` when the denominator is 0.
+   in 3948 after the mock's literal scale was checked), `null` when the denominator is 0.
 4. The output holds no `session.id`, `user.*`, `organization.id` or email value — a test serialises it and greps for the
    fixture's identity strings.
 5. Pure: the module imports no `node:` specifier (asserted by a test reading its import lines); `now` is a parameter.

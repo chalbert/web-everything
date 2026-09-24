@@ -50,6 +50,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // ── PURE CORE (no fs / gh / Date / child_process — the whole state is passed IN) ─────────────────────────────
 
@@ -324,7 +325,8 @@ function main() {
   try {
     const fd = openSync(tmp, 'w');
     try {
-      execFileSync('node', [STATE_CLI, '--json'], { stdio: ['ignore', fd, 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+      // #x5n4zn3 — was bare (no timeout): reads the whole conveyor-state tick picture.
+      execFileSync('node', [STATE_CLI, '--json'], { stdio: ['ignore', fd, 'pipe'], maxBuffer: 64 * 1024 * 1024, timeout: resolveChildTimeoutMs() * 2, killSignal: 'SIGKILL' });
     } finally {
       closeSync(fd);
     }

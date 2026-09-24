@@ -4,7 +4,11 @@
  *   no real timer, no real lease): injected effects, mirroring #3870's own `runDaemonLoop` tests.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS } from '../pass-daemon.mjs';
+import {
+  runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS,
+  PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled,
+} from '../pass-daemon.mjs';
+import { withSelfSync, DAEMON_SELF_SYNC_BRANCH_ENV } from '../../../scripts/lib/daemon-self-sync.mjs';
 
 describe('runPassDaemonLoop — the pure run/sleep control flow', () => {
   it('requires a runPass effect and a positive intervalMs', async () => {
@@ -104,6 +108,53 @@ describe('DEFAULT_HEARTBEAT_INTERVAL_MS — the independent-timer property this 
   it('is meaningfully shorter than a realistic pass interval, so it can beat DURING a long single run', () => {
     expect(DEFAULT_HEARTBEAT_INTERVAL_MS).toBe(30_000);
     expect(DEFAULT_HEARTBEAT_INTERVAL_MS).toBeLessThan(120_000); // the runner's own tick cadence, for scale
+  });
+});
+
+describe('passDaemonSelfSyncEnabled — xdpemd4, opt-in (unset = byte-identical, never self-syncs)', () => {
+  it('unset entirely → disabled — today\'s "never update" behavior, unchanged', () => {
+    expect(passDaemonSelfSyncEnabled({})).toBe(false);
+  });
+  it(`${PASS_DAEMON_SELF_SYNC_ENV}=1 → enabled (plain main-tracking self-sync)`, () => {
+    expect(passDaemonSelfSyncEnabled({ [PASS_DAEMON_SELF_SYNC_ENV]: '1' })).toBe(true);
+  });
+  it('any other value of the plain flag → disabled (only the literal "1" opts in)', () => {
+    expect(passDaemonSelfSyncEnabled({ [PASS_DAEMON_SELF_SYNC_ENV]: 'true' })).toBe(false);
+    expect(passDaemonSelfSyncEnabled({ [PASS_DAEMON_SELF_SYNC_ENV]: '0' })).toBe(false);
+  });
+  it(`${DAEMON_SELF_SYNC_BRANCH_ENV} set (POC mode) ALSO enables self-sync — no second flag needed`, () => {
+    expect(passDaemonSelfSyncEnabled({ [DAEMON_SELF_SYNC_BRANCH_ENV]: 'lane/daemon-poc' })).toBe(true);
+  });
+  it('a blank POC-branch env is treated as unset, same as daemon-self-sync.mjs itself does', () => {
+    expect(passDaemonSelfSyncEnabled({ [DAEMON_SELF_SYNC_BRANCH_ENV]: '   ' })).toBe(false);
+  });
+});
+
+describe('the self-sync wiring pattern main() uses — proven against the real withSelfSync', () => {
+  // main() itself is IO shell (real child process, real lease, real timers) and is not unit-tested directly —
+  // this proves the exact wiring shape it uses (`withSelfSync({ tickOnce: runPass }, { root, onRestart }).tickOnce`
+  // as the loop's `runPass`) behaves correctly: restart-instead-of-run on new code, run-through otherwise.
+  it('when self-sync reports new code, the wrapped tickOnce restarts INSTEAD of running the pass', async () => {
+    const runPass = vi.fn(async () => ({ code: 0 }));
+    const onRestart = vi.fn(() => ({ code: null, signal: null, restarted: true }));
+    const { tickOnce } = withSelfSync(
+      { tickOnce: runPass },
+      { root: '/x', onRestart, sync: () => ({ merged: true, commits: 2, reason: 'merged' }), log: { error: vi.fn() } },
+    );
+    const result = await tickOnce();
+    expect(runPass).not.toHaveBeenCalled();
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ code: null, signal: null, restarted: true });
+  });
+
+  it('up to date → the pass runs exactly as it would with self-sync disabled', async () => {
+    const runPass = vi.fn(async () => ({ code: 0 }));
+    const { tickOnce } = withSelfSync(
+      { tickOnce: runPass },
+      { root: '/x', onRestart: vi.fn(), sync: () => ({ merged: false, commits: 0, reason: 'up-to-date' }) },
+    );
+    await expect(tickOnce()).resolves.toEqual({ code: 0 });
+    expect(runPass).toHaveBeenCalledTimes(1);
   });
 });
 

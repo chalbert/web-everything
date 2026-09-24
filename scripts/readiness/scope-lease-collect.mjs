@@ -73,6 +73,15 @@ import { porcelainFiles } from './claimScope.mjs';
 import { repoKeyFromSlug } from './lane-manifest.mjs';
 import { liveScopePicture } from './scope-lease-live.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
+// #x5n4zn3 — the shared budget policy `we:scripts/lib/bounded-child.mjs` ships (`resolveChildTimeoutMs`, env
+// `WE_CHILD_TIMEOUT_MS`), reused here for its constant only. `tryGit` below is called per-lane, several times
+// per lane (`repoKeyForLane` + `observedForLane`'s merge-base/rev-list×2/diff/status), from a plain `.map()`
+// over every HELD lane in the pool (#x3xz8qp is concurrently adding a spawn-COUNT regression test over exactly
+// this loop) — so, like `we:scripts/lane-pool.mjs`'s own git helper, this stays synchronous and reconciles via
+// Node's native per-call `timeout`/`killSignal` rather than switching to the async `runBounded` primitive,
+// which would force the whole per-lane collection loop to become async for the same "keep the diff to the spawn
+// call sites only" coordination reason recorded there.
+import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 
 // ── PURE CORE (no fs / git / Date / child_process — every dependency is injected) ────────────────────────────
 
@@ -387,7 +396,12 @@ function parseFlags(argv) {
  */
 function tryGit(args, cwd) {
   try {
-    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd();
+    // #x5n4zn3 — was bare (no timeout at all): a stuck `git` (typically its network transport, under
+    // `remote get-url`'s config read this is unlikely, but `merge-base`/`diff`/`status` all still shell a real
+    // process) could hang this ONE lane's read forever, and every caller here treats a `tryGit` failure as
+    // "contributes [] observed, log and move on" — so failing fast on a timeout is strictly an improvement, never
+    // a new failure mode.
+    return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }).trimEnd();
   } catch {
     return null;
   }
@@ -463,7 +477,9 @@ function readPoolStatus(flags) {
   if (typeof flags.name === 'string') args.push(`--name=${flags.name}`);
   let out;
   try {
-    out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    // #x5n4zn3 — generous (a full pool `status` walks every lane, itself now individually git-timeout-bounded
+    // by `we:scripts/lane-pool.mjs`'s own #x5n4zn3 fix), but never unbounded.
+    out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs() * 4, killSignal: 'SIGKILL' });
   } catch (e) {
     fail(`lane-pool status failed: ${String(e.message || e).split('\n')[0]}`);
   }

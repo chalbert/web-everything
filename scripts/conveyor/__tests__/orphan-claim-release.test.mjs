@@ -10,7 +10,9 @@ import { describe, it, expect } from 'vitest';
 import {
   parseCard, cardAgeBasis, cardAgeMs, classifyOrphan, planOrphanRelease, mergedWindowFloorOf,
   leaseNamesItem, sessionNamesItem, openPrNamesItem, cardTokens, renderPrBody, DEFAULT_MIN_AGE_MS, RUN_REF_PREFIX,
+  acquireLane,
 } from '../orphan-claim-release.mjs';
+import { NPM_INSTALL_TIMEOUT_MS, NETWORK_GIT_TIMEOUT_MS, resolveChildTimeoutMs } from '../../lib/bounded-child.mjs';
 
 const NOW = Date.parse('2026-09-22T12:00:00Z');
 
@@ -195,5 +197,33 @@ describe('parseCard / mergedWindowFloorOf / renderPrBody', () => {
     expect(body).toContain('#3467');
     expect(body.trim().endsWith('🤖 Generated with [Claude Code](https://claude.com/claude-code)')).toBe(true);
     expect(RUN_REF_PREFIX).toMatch(/^lane\//);
+  });
+});
+
+// #x5n4zn3 review — `lane-pool.mjs acquire` (no `--no-install`) runs `ensureDeps`' `npm ci` under its OWN
+// `NPM_INSTALL_TIMEOUT_MS` budget. The outer wrapper around that acquire must never be tighter than the work it
+// wraps, or a slow-but-healthy install gets SIGKILLed mid-way, leaking the lease and aborting the pass.
+describe('acquireLane — the outer acquire budget covers lane-pool\'s own npm install budget', () => {
+  it('passes a timeout covering the network fetch + npm install + the generic child budget', () => {
+    const calls = [];
+    const fakeRun = (cmd, args, cwd, opts) => { calls.push({ cmd, args, cwd, opts }); return JSON.stringify({ lane: 3, path: '/x/lane-3', holder: 'h' }); };
+    const acq = acquireLane(fakeRun);
+    expect(acq).toEqual({ lane: 3, path: '/x/lane-3', holder: 'h' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain('acquire');
+    expect(calls[0].args).not.toContain('--no-install'); // deps ARE installed — which is why the budget matters
+    expect(calls[0].opts?.timeoutMs).toBeGreaterThan(NETWORK_GIT_TIMEOUT_MS + NPM_INSTALL_TIMEOUT_MS + resolveChildTimeoutMs());
+  });
+
+  it('stays larger than fetch + install even when WE_CHILD_TIMEOUT_MS is tuned very small', () => {
+    const prev = process.env.WE_CHILD_TIMEOUT_MS;
+    process.env.WE_CHILD_TIMEOUT_MS = '1000';
+    try {
+      const calls = [];
+      acquireLane((cmd, args, cwd, opts) => { calls.push(opts); return '{"lane":1,"path":"/x","holder":"h"}'; });
+      expect(calls[0].timeoutMs).toBeGreaterThan(NETWORK_GIT_TIMEOUT_MS + NPM_INSTALL_TIMEOUT_MS);
+    } finally {
+      if (prev === undefined) delete process.env.WE_CHILD_TIMEOUT_MS; else process.env.WE_CHILD_TIMEOUT_MS = prev;
+    }
   });
 });
