@@ -59,9 +59,22 @@ if (a[0] === 'pr' && a[1] === 'merge') {
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
-  if (fields.includes('commits')) out({ commits: pr._commits || [] });
-  if (fields.includes('files')) out({ files: pr._files || [] });
-  if (fields.includes('body')) out({ body: pr.body || '' });
+  // xvzc4v4 (merge-safety review, bug 1 fix follow-up) — this used to be a chain of early-exiting ifs, each
+  // calling out() (which itself process.exit(0)s) the INSTANT it matched one field. That modeled every past
+  // caller correctly because each one asked for exactly one field group at a time (commits alone, body
+  // alone, headRefOid,comments together, …) — but fetchFreshPrForRevalidation's new combined read
+  // (number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels,
+  // commits — everything classifyPr needs, in ONE gh call) hit the commits check FIRST and returned an
+  // object with ONLY commits — missing number — so fetchFreshPrForRevalidation read that as 'not the right
+  // PR' and returned null, which revalidateForMerge (correctly, per its own fail-closed contract) then
+  // refused to merge on. Every candidate aborted at revalidation, merged stayed empty, and the #2502 headSha
+  // assertions failed on undefined — not a production bug, a test-double gap: a real gh answers every
+  // requested field in one reply, so the shim now ACCUMULATES matching fields into one response object instead
+  // of returning the first match alone, matching real gh for any field combination a caller asks for.
+  const resp = {};
+  if (fields.includes('commits')) resp.commits = pr._commits || [];
+  if (fields.includes('files')) resp.files = pr._files || [];
+  if (fields.includes('body')) resp.body = pr.body || '';
   // #2409 reviewed-SHA staleness read: return the live head plus a reviewed-sha marker comment. When the fixture's
   // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
   // #xmnl36p — _clearedBy adds the durable --to=clear-human attribution comment the operator ceremony writes,
@@ -74,10 +87,21 @@ if (a[0] === 'pr' && a[1] === 'view') {
     const cs = [];
     if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' });
     if (pr._clearedBy) cs.push({ body: '✅ review — \`review:human\` cleared via the sanctioned path\\n\\nCleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
-    out({ headRefOid: pr._headRefOid || '', comments: cs });
+    resp.headRefOid = pr._headRefOid || '';
+    resp.comments = cs;
   }
-  if (fields.includes('comments')) out({ comments: [] });
-  out({});
+  if (fields.includes('comments') && !('comments' in resp)) resp.comments = [];
+  // xvzc4v4 — the rest of what fetchFreshPrForRevalidation asks for in its one combined call, so
+  // revalidateForMerge's classifyPr(freshPr, …) sees a real PR shape instead of failing closed on it.
+  if (fields.includes('number')) resp.number = pr.number;
+  if (fields.includes('title')) resp.title = pr.title || '';
+  if (fields.includes('headRefName')) resp.headRefName = pr.headRefName;
+  if (fields.includes('baseRefName')) resp.baseRefName = pr.baseRefName;
+  if (fields.includes('mergeable')) resp.mergeable = pr.mergeable;
+  if (fields.includes('mergeStateStatus')) resp.mergeStateStatus = pr.mergeStateStatus;
+  if (fields.includes('statusCheckRollup')) resp.statusCheckRollup = pr.statusCheckRollup;
+  if (fields.includes('labels')) resp.labels = pr.labels || [];
+  out(resp);
 }
 // pr edit / pr comment / label create / api … — succeed silently (dry-run shouldn't reach the mutating ones)
 process.stdout.write(''); process.exit(0);
