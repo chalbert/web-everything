@@ -1446,6 +1446,63 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
   });
 });
 
+// ── live-caught 2026-09-25, PR #2647/#2625 — a `stopped` session must free its PR, not freeze it ──────────────
+describe('assessLiveness — `state: stopped` is finished too (PR #2647/#2625, live 2026-09-25)', () => {
+  // The REAL shape measured off the running review daemon's own `claude agents --json --all`: a `stopped` (or
+  // `done`) row carries NO `pid` field at all — only a currently-`working` row does. `enrichAgents` (reconcile-
+  // pass.mjs) then OMITS `pidAlive` entirely (probePid(null) → null → key omitted), so this fixture's `stopped`
+  // row is exactly what `assessLiveness` actually receives in production, not an approximation of it.
+  const stoppedNoPid = {
+    name: 'review-2647', state: 'stopped', kind: 'background', cwd: '/wev-review-daemon',
+    sessionId: 's-2647-old', startedAt: 1_000,
+  };
+
+  it('a SINGLE stopped, pid-less bound session frees the PR (returns null, not liveness-unknown)', () => {
+    expect(assessLiveness([{ agent: stoppedNoPid, cwd: '/c', sha: 'abc' }])).toBeNull();
+  });
+
+  it('the bug this fixes: without the `stopped` check, the identical row reads as liveness-unknown', () => {
+    // Proves the fixture actually exercises the trap this fix closes — a row that is NEITHER `done` nor
+    // otherwise marked finished, with `pidAlive` absent, hits rank 3 on its own.
+    const notDone = String(stoppedNoPid.state).toLowerCase() !== 'done';
+    const noPidAlive = stoppedNoPid.pidAlive === undefined;
+    expect(notDone && noPidAlive).toBe(true);
+  });
+
+  it('several historical rows for the same PR, ALL stopped/done, still free it — bindAgents keeps every one', () => {
+    const rows = [
+      { ...stoppedNoPid, sessionId: 's-1' },
+      { ...stoppedNoPid, sessionId: 's-2' },
+      { ...stoppedNoPid, state: 'done', sessionId: 's-3' },
+    ];
+    const bound = rows.map((agent) => ({ agent, cwd: '/c', sha: 'abc' }));
+    expect(assessLiveness(bound)).toBeNull();
+  });
+
+  it('a genuinely LIVE session among stale `stopped` siblings still wins — stopped never masks a real live one', () => {
+    const live = { ...stoppedNoPid, state: 'working', pid: 555, pidAlive: true, sessionId: 's-live' };
+    const bound = [
+      { agent: { ...stoppedNoPid, sessionId: 's-old' }, cwd: '/c', sha: 'abc' },
+      { agent: live, cwd: '/c', sha: 'abc' },
+    ];
+    expect(assessLiveness(bound)).toMatchObject({ kind: 'live-process' });
+  });
+
+  it('end to end: a review:pending PR bound only to stale `stopped` reviewer sessions is owed a review again', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [stoppedNoPid], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2647 })]);
+  });
+
+  it('the same PR with a `blocked` (never-stopped) sibling still correctly refuses — this fix does not widen ANY other state', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const stillBlocked = { ...stoppedNoPid, state: 'blocked', sessionId: 's-blocked' };
+    const plan = planReconcile({ prs: [pr], agents: [stillBlocked], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'liveness-unknown', prNumber: 2647 });
+  });
+});
+
 // ── #2588/review-loops (epic #3383/#4075) — THE REVIEW LOOPS: zero-findings reviews bypassing the round cap,
 // and no dedup against a head that already carries an accept verdict. Live incident: PR #2588 got `review:changes`
 // at 23:55Z and `review:accepted` at 00:00Z, five minutes apart, from THREE review sessions dispatched inside one

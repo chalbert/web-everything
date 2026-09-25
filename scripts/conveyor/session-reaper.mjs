@@ -122,6 +122,8 @@ import {
 } from '../operations/delivery-report-store.mjs';
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
+import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
 // #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
 // binds `blocked-on-infra` on, imported (never re-declared) so the reaper and the reconciler can never disagree
 // about how long a `blocked-on-infra` outcome stays "not really done yet". No circular import: `reconcile-core.mjs`
@@ -205,8 +207,16 @@ export function sessionTarget(name) {
 
 /** The `outcome` a backstop-written completion record carries — deliberately distinct from every REAL
  *  self-reported outcome (`blocked-on-infra`, a review verdict, …) so a reader can always tell "the dispatched
- *  agent said this itself" apart from "the reaper concluded this on the agent's behalf, after the fact". */
+ *  agent said this itself" apart from "the reaper concluded this on the agent's behalf, after the fact".
+ *  {@link BLOCKED_ON_INFRA_OUTCOME} is the ONE exception — see {@link transcriptShowsIntendedBlockedOnInfra}'s
+ *  own doc for why a backstop write is sometimes minted with that outcome instead of this one. */
 export const UNREPORTED_EXIT_OUTCOME = 'unreported-exit';
+
+/** The SAME literal `reconcile-core.mjs#markSelfReportedDone` and `makeCompletionResolver` (this file, above)
+ *  already match on — re-declared here (never imported; no shared constants module exists for this one string
+ *  today) so {@link planBackstopCompletion}'s own backstop write can mint the SAME value a genuine self-report
+ *  would have, when the transcript shows that is what actually happened. See {@link transcriptShowsIntendedBlockedOnInfra}. */
+export const BLOCKED_ON_INFRA_OUTCOME = 'blocked-on-infra';
 
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
@@ -241,16 +251,106 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
  *   own return shape, or `null` when nothing is on disk yet.
  * @param {() => string} [now] - injectable ISO-8601 clock (mirrors every other pure-ish constructor in this
  *   codebase's completion-record family).
+ * @param {boolean} [blockedOnInfra] - live incident (PR #2647/#2625, 2026-09-25): a session can crash AFTER
+ *   deciding it is blocked on infra but BEFORE the `completion-cli.mjs report --outcome=blocked-on-infra` call
+ *   itself ever runs — its own transcript says one thing, its completion record (or lack of one) says another.
+ *   Writing the generic {@link UNREPORTED_EXIT_OUTCOME} in that case throws away a real, recoverable signal:
+ *   `reconcile-core.mjs#markSelfReportedDone`'s 15-minute infra-retry cool-off only ever keys on the LITERAL
+ *   `blocked-on-infra` outcome, so a session's own stated cause is lost the moment this reaper backstops it
+ *   with the wrong label. `false` (the default) is byte-identical to this function's pre-existing behavior —
+ *   the CALLER ({@link runSessionReaperPass}, via {@link transcriptShowsIntendedBlockedOnInfra}) decides this;
+ *   this function stays pure and takes the verdict as a plain boolean, never touching a transcript itself.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString()) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
-  return applyCompletionUpdate(base, { status: 'done', outcome: UNREPORTED_EXIT_OUTCOME }, now);
+  const outcome = blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME;
+  return applyCompletionUpdate(base, { status: 'done', outcome }, now);
+}
+
+/** How many transcript tail lines / bytes / chars-per-field {@link transcriptShowsIntendedBlockedOnInfra} reads
+ *  — generous relative to `hung-session.mjs`'s own `READ_TAIL_LINES`/`READ_MAX_BYTES` (a crash can leave a
+ *  longer trailing thought than a routine liveness check needs), still a BOUNDED read, never the whole file. */
+const BLOCKED_ON_INFRA_TAIL_LINES = 60;
+const BLOCKED_ON_INFRA_MAX_BYTES = 600_000;
+const BLOCKED_ON_INFRA_FIELD_MAX = 4000;
+
+/** Matches the phrase a review/fix agent brief instructs an agent to self-report verbatim
+ *  (`skills-src/review/review-agent-brief.md`: "report done on infra failure … outcome=blocked-on-infra") —
+ *  case-insensitive, tolerant of a hyphen or a space (`blocked on infra`), since a crashing agent's own final
+ *  words are prose, not guaranteed to be the exact CLI flag spelling. */
+const BLOCKED_ON_INFRA_TEXT_RE = /blocked[- ]on[- ]infra/i;
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#transcriptShowsIntendedBlockedOnInfra — live incident (PR #2647/#2625,
+ * 2026-09-25): a review/fix session can decide it is blocked on infra (state that in its own transcript, or
+ * even attempt the `completion-cli.mjs report --outcome=blocked-on-infra` call) and then crash/exit before that
+ * write durably lands — the SAME crash-before-self-report gap {@link planBackstopCompletion}'s own header
+ * documents for `status: done` generally, specialized here for the ONE outcome that changes downstream
+ * behavior: `reconcile-core.mjs#markSelfReportedDone` holds a `blocked-on-infra` outcome to its 15-minute
+ * cool-off before treating the session as finished, so the PR is retried once the (transient) infra recovers —
+ * a `blocked-on-infra` intent silently downgraded to the generic {@link UNREPORTED_EXIT_OUTCOME} loses that
+ * cool-off/retry behavior entirely, exactly the loss this function exists to prevent.
+ *
+ * READS THE SESSION'S OWN TRANSCRIPT, bounded tail only ({@link BLOCKED_ON_INFRA_TAIL_LINES}/
+ * {@link BLOCKED_ON_INFRA_MAX_BYTES}), reusing `we:skills-src/inspect-agent-health/agent-health.mjs`'s already-
+ * tested `tailLines`/`summarizeEntry` (the SAME pair `hung-session.mjs#readHungInfo` uses — WIDEN, never grow a
+ * private second reader) and `we:scripts/operations/agent-usage-report.mjs#resolveSessionTranscript` for the
+ * path. Scans, NEWEST first, every `text`/`thinking` block for the phrase (a crashing agent's own stated
+ * conclusion) and every `tool_use` block's raw input for the phrase (an attempted-but-never-completed
+ * `completion-cli.mjs report --outcome=blocked-on-infra` call — the input string carries the flag literally).
+ * The FIRST match wins; there is no need to scan past the newest evidence.
+ *
+ * Any failure — no `cwd`/`sessionId` on the row, no transcript found, an unreadable file — answers `false`,
+ * never a guess: this function only ever UPGRADES a backstop write from the generic outcome to the specific
+ * one, so "unknown" must default to the SAME behavior as before this function existed, not to a fabricated
+ * `blocked-on-infra` a reader would then wrongly hold to a cool-off that never actually applied.
+ * @param {{cwd?:string, sessionId?:string}|null|undefined} session
+ * @param {{resolveTranscript?:Function, tailLinesFn?:Function, summarizeEntryFn?:Function}} [io]
+ * @returns {boolean}
+ */
+export function transcriptShowsIntendedBlockedOnInfra(session, {
+  resolveTranscript = resolveSessionTranscript,
+  tailLinesFn = tailLines,
+  summarizeEntryFn = summarizeEntry,
+} = {}) {
+  const cwd = session?.cwd, sessionId = session?.sessionId;
+  if (!cwd || !sessionId) return false;
+  let file;
+  try {
+    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return false; // no transcript found — never guess
+  }
+  let lines;
+  try {
+    ({ lines } = tailLinesFn(file, BLOCKED_ON_INFRA_TAIL_LINES, BLOCKED_ON_INFRA_MAX_BYTES));
+  } catch {
+    return false; // unreadable transcript — never guess
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry;
+    try {
+      entry = summarizeEntryFn(lines[i], BLOCKED_ON_INFRA_FIELD_MAX);
+    } catch {
+      continue; // one unparseable line never aborts the scan
+    }
+    // `entry.kind === 'assistant'` guards the text/thinking match — checked live against a real transcript
+    // (PR #2647's own review-2647 sessions): the injected review-agent BRIEF (a `user`-role entry, the very
+    // first line of every dispatch) quotes this exact phrase as an INSTRUCTION ("report … outcome=blocked-on-
+    // infra"), which would otherwise false-positive on any short-lived crash whose tail still includes it. A
+    // `tool_use` block needs no such guard — only an assistant ever emits one.
+    for (const block of entry?.blocks ?? []) {
+      if (entry.kind === 'assistant' && (block.kind === 'text' || block.kind === 'thinking') && BLOCKED_ON_INFRA_TEXT_RE.test(block.text ?? '')) return true;
+      if (block.kind === 'tool_use' && BLOCKED_ON_INFRA_TEXT_RE.test(block.input ?? '')) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -1023,6 +1123,7 @@ function parseFlags(argv) {
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
+ *   blockedOnInfraFor?: ((session:object) => boolean)|null,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
@@ -1047,6 +1148,10 @@ export function runSessionReaperPass({
   backstopCompletion = true,
   readCompletionRecord = tryReadCompletion,
   writeCompletionRecord = writeCompletion,
+  // Live incident fix (PR #2647/#2625, 2026-09-25) — see {@link transcriptShowsIntendedBlockedOnInfra}'s own
+  // doc. Default ON, same convention as every other axis this epic ships; `null` is the rollback escape hatch
+  // (byte-identical to this file's pre-existing backstop behavior — always `UNREPORTED_EXIT_OUTCOME`).
+  blockedOnInfraFor = transcriptShowsIntendedBlockedOnInfra,
 } = {}) {
   let sessions;
   try {
@@ -1092,7 +1197,11 @@ export function runSessionReaperPass({
     let backstopRecord = null;
     if (backstopCompletion) {
       try {
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name));
+        let blockedOnInfra = false;
+        if (typeof blockedOnInfraFor === 'function') {
+          try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
+        }
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra);
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -1110,8 +1219,11 @@ export function runSessionReaperPass({
     if (dryRun) {
       logFn(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       if (backstopRecord) {
-        logFn(`  would write backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded`);
-        wouldBackstop.push({ name: session.name ?? null, outcome: UNREPORTED_EXIT_OUTCOME });
+        // #2647/#2625 fix — reports the ACTUAL outcome the record would carry, never the hardcoded generic
+        // one: `backstopRecord.outcome` is `BLOCKED_ON_INFRA_OUTCOME` when the transcript showed that was the
+        // session's own intent, {@link UNREPORTED_EXIT_OUTCOME} otherwise — see `planBackstopCompletion`'s doc.
+        logFn(`  would write backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded`);
+        wouldBackstop.push({ name: session.name ?? null, outcome: backstopRecord.outcome });
       }
       continue;
     }
@@ -1119,7 +1231,7 @@ export function runSessionReaperPass({
       try {
         writeCompletionRecord(backstopRecord);
         backstopWritten++;
-        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
+        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
       } catch (e) {
         logFn(`  ⚠ ${session.name}: failed to write backstop completion record: ${String(e?.message || e).split('\n')[0]}`);
       }

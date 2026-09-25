@@ -28,6 +28,8 @@ import {
   makeHungResolver,
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
+  BLOCKED_ON_INFRA_OUTCOME,
+  transcriptShowsIntendedBlockedOnInfra,
   classifyRetention,
   retentionGroundTruthForItem,
   retentionGroundTruthForPr,
@@ -709,6 +711,99 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(planBackstopCompletion({ name: 'my terminal' }, null)).toBeNull();
     expect(planBackstopCompletion({ name: undefined }, null)).toBeNull();
   });
+
+  // Live incident fix (PR #2647/#2625, 2026-09-25): a crashed session's own transcript can show it intended
+  // `blocked-on-infra` even though it never durably self-reported that. The 4th `blockedOnInfra` param lets the
+  // caller (runSessionReaperPass, below) upgrade the backstop outcome to match — see the constant's own doc.
+  it('mints outcome BLOCKED_ON_INFRA_OUTCOME (not the generic one) when the caller says the transcript showed it', () => {
+    const rec = planBackstopCompletion({ name: 'review-2647' }, null, () => '2026-09-25T15:00:00.000Z', true);
+    expect(rec).toMatchObject({ session: 'review-2647', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME });
+  });
+
+  it('defaults to the generic outcome when `blockedOnInfra` is omitted or false — byte-identical to before', () => {
+    const now = () => '2026-09-25T15:00:00.000Z';
+    expect(planBackstopCompletion({ name: 'review-2647' }, null, now)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+    expect(planBackstopCompletion({ name: 'review-2647' }, null, now, false)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+  });
+});
+
+describe('transcriptShowsIntendedBlockedOnInfra — reading the crashed session\'s own last words (PR #2647/#2625, 2026-09-25)', () => {
+  const jsonl = (entries) => entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  const textEntry = (text) => ({ type: 'assistant', timestamp: '2026-09-25T15:00:00Z', message: { content: [{ type: 'text', text }] } });
+  const toolUseEntry = (command) => ({ type: 'assistant', timestamp: '2026-09-25T15:00:00Z', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command } }] } });
+
+  it('true when the newest assistant text states it is blocked on infra', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: [jsonl([textEntry('I am blocked-on-infra, cannot proceed')])].map((s) => s.trim()) }),
+        summarizeEntryFn: (raw) => { const o = JSON.parse(raw); return { kind: o.type, blocks: [{ kind: 'text', text: o.message.content[0].text }] }; },
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('true when the newest tool_use attempted the completion-cli report call, even though it never resolved', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'tool_use', input: 'node scripts/operations/completion-cli.mjs report --status=done --outcome=blocked-on-infra' }] }),
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('tolerates a space instead of a hyphen ("blocked on infra") and is case-insensitive', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'text', text: 'Looks like I am BLOCKED ON INFRA here.' }] }),
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('false when nothing in the tail mentions it', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'text', text: 'Running the tests now.' }] }),
+      },
+    );
+    expect(found).toBe(false);
+  });
+
+  it('a `user`-role entry mentioning the phrase (the injected review-agent BRIEF quotes it as an instruction) is NEVER a match — only the agent\'s own assistant-authored words count', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'user', blocks: [{ kind: 'text', text: 'report done with --outcome=blocked-on-infra if you cannot proceed' }] }),
+      },
+    );
+    expect(found).toBe(false);
+  });
+
+  it('false, never a guess, when the session is missing cwd/sessionId or the transcript is unreadable', () => {
+    expect(transcriptShowsIntendedBlockedOnInfra(null)).toBe(false);
+    expect(transcriptShowsIntendedBlockedOnInfra({ cwd: '/c' })).toBe(false); // no sessionId
+    expect(transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      { resolveTranscript: () => { throw new Error('ENOENT'); } },
+    )).toBe(false);
+    expect(transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      { resolveTranscript: () => '/fake/path.jsonl', tailLinesFn: () => { throw new Error('unreadable'); } },
+    )).toBe(false);
+  });
 });
 
 describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow-up, epic #3383)', () => {
@@ -790,6 +885,68 @@ describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow
     });
     expect(result.backstopWritten).toBe(0);
     expect(result.stopped).toBe(1); // the stop itself still proceeds — the backstop write is a side concern
+  });
+
+  // Live incident fix (PR #2647/#2625, 2026-09-25) — the outcome the backstop write carries actually reflects
+  // what `blockedOnInfraFor` said, end to end through the real dry-run/live paths (not just the pure function).
+  it('writes BLOCKED_ON_INFRA_OUTCOME when the injected transcript resolver says the session intended it', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', cwd: '/wev-review-daemon', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: (session) => session.name === 'review-2647',
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.backstopWritten).toBe(1);
+    expect(written[0]).toMatchObject({ session: 'review-2647', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME });
+  });
+
+  it('dry-run reports the ACTUAL outcome (blocked-on-infra), not the generic one, when the resolver says so', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', cwd: '/wev-review-daemon', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: () => true,
+      dryRun: true,
+      readCompletionRecord: () => null,
+      writeCompletionRecord: () => { throw new Error('dry-run must never write'); },
+      log: () => {},
+    });
+    expect(result.wouldWriteBackstop).toEqual([{ name: 'review-2647', outcome: BLOCKED_ON_INFRA_OUTCOME }]);
+  });
+
+  it('a `blockedOnInfraFor` that throws is treated as false — never crashes the pass, never guesses', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: () => { throw new Error('unreadable'); },
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(written[0]).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+  });
+
+  it('`blockedOnInfraFor: null` is a rollback escape hatch — byte-identical to the pre-fix generic outcome', () => {
+    const written = [];
+    runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: null,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(written[0]).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
   });
 });
 

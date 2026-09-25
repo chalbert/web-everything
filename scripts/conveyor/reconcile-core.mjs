@@ -575,11 +575,30 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * it already trusts `selfReportedDone` — as an upstream fact, not a raw timestamp it would otherwise have to
  * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
  * as `live-process` and free its PR to be reconciled again.
+ *
+ * `state === 'stopped'` is ALSO finished — live-caught 2026-09-25 (PR #2647/#2625, both `chalbert/web-everything`,
+ * both stuck at an informative `review-status:review-stalled`/`reviewing` label with nothing live and nothing
+ * retrying). Root cause, confirmed against a real `claude agents --json --all` listing off the running review
+ * daemon's own checkout: `we:scripts/conveyor/session-reaper.mjs` calls `claude stop` on every `done`/`failed`/
+ * hung session it reaps (its own `TERMINAL_REAP_STATES`/`ALREADY_STOPPED_STATES`), which flips that session's OWN
+ * listed `state` to `'stopped'` — a state THIS function's `isFinished` never checked. `we:scripts/conveyor/
+ * reconcile-pass.mjs#enrichAgents` OMITS `pidAlive` entirely once `pid` itself is no longer on the row (measured:
+ * every `stopped`/`done` row in that same live listing carries no `pid` at all — only a currently-`working` row
+ * does), so an unfiltered `stopped` row reaches rank 3 (`pidAlive !== false`) and returns `liveness-unknown` —
+ * REFUSING a fresh dispatch for a PR whose bound session cannot possibly become live again. `bindAgents` binds
+ * every historical session sharing a PR's `review-<pr>`/`fix-<pr>` name, live or not (no `startedAt` filter), so
+ * ONE such stale `stopped` row is enough to freeze the PR even while every other bound row is cleanly `done`. A
+ * `stopped` session, by session-reaper's own definition (`ALREADY_STOPPED_STATES`), never resumes and never
+ * produces another `state` transition on its own — mirroring that finality here, the same way `done` already is,
+ * is what frees the PR to be reconciled again rather than parking it at `liveness-unknown` forever.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true || agent?.hung === true;
+  const isFinished = (agent) => {
+    const state = String(agent?.state ?? '').toLowerCase();
+    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
+  };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,
