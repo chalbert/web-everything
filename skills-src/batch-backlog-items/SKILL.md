@@ -83,19 +83,22 @@ the per-item chat-rename — a batch labels the session **once**.
    ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
    #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
    item), then **record the verification for the commit you just made** —
-   `node scripts/operations/run.mjs verify --checkout=<lane> --gate="npm run test:unit && npm run check:standards -- --scope=<batch-slug>" --json`
+   `node scripts/operations/run.mjs verify --checkout=<lane> --json`
    — then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --label-on-green` — which opens the PR, <!-- @operation-home-ok: #x2v3kgr — this instruction passes no body file and nothing above writes one, so the home's own #2332 guard would REFUSE it as written; the line needs fixing before it can name `open-pr`, which requires a body for a real open too. -->
    (#3321: `pr-land`'s finish-guard now DEMANDS a fresh green marker by default, and the marker is keyed to HEAD,
-   so a verify run before `resolve`/the commit is already stale by the time you land. **Keep the
-   `--scope=<batch-slug>`** — the marker records a PASS/FAIL verdict, and `verify-lane`'s default gate runs
-   `check:standards` *unscoped*, so a concurrent session's whole-repo error would write a RED marker for your
-   commit and the strict gate would then refuse to land work that is fine. Scoping here is the same #952 demotion
-   the in-locus gate above already relies on, applied to the thing that now blocks the land.)
+   so a verify run before `resolve`/the commit is already stale by the time you land — run `verify` again, right
+   after the commit above, never before it. **Never add a hand-written `--gate=`** — xpnhz4o made `verify-lane`'s
+   DEFAULT gate diff-selected (`vitest related` on the changed files vs `origin/main`, full-suite fallback only
+   for a config/setup/dependency/shared-test-helper change) and its check:standards half is already scoped to
+   `--local --files=<changed>` (#1937), which demotes a concurrent session's whole-repo error to a note the same
+   way the old `--scope=<batch-slug>` override tried to — a hand-written `--gate="npm run test:unit && …"` now
+   only forces the OLD, slower, unscoped full suite back on, and the Bash guard denies a bare full-suite run from
+   an agent session anyway (xpnhz4o).)
    **waits for the required checks, and applies the `ready-to-merge` label ONLY once they are green** (#2199:
    the label means "fully checked, the drain may land", never "a local lint passed"; #2196: the shared transport
-   is the single labelling step — no separate `gh pr edit`). The item's own gate above already ran the FULL
-   suite in-locus, so this is the CI backstop; a PR whose CI ends up red is left unlabelled for you to fix, never
-   handed to the drain.
+   is the single labelling step — no separate `gh pr edit`). The item's own gate above already ran the
+   diff-selected suite in-locus, so this is the CI backstop; a PR whose CI ends up red is left unlabelled for you
+   to fix, never handed to the drain.
    **No commit to `main`, no `git push`, no inline merge** — a separate drain (`/merge`/`/drain`) lands the PRs
    (see *backlog-workflow.md → the lane→PR close-out rule*). Update the ledger (header tracks `cost
    <spent>/<budget>`). The `--select`

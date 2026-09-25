@@ -174,29 +174,92 @@ describe('parallel-execute workflow — #2478/#2216 Finalize label reconcile', (
   });
 });
 
-describe('parallel-execute workflow — #3383 LANE FULL-SUITE GATE routes through heavy-admission', () => {
-  it('runs check:standards and npm test -- run THROUGH the heavy-admission run wrapper, not raw', () => {
-    // The #3383 finding: every parallel lane ran these heavy commands directly, contending unbounded for host
-    // CPU. `heavy-admission.mjs run` is the general-purpose capacity-semaphore wrapper (#3461/#3456) — the lane
-    // gate must invoke the commands THROUGH it, never as a bare `npm run check:standards` / `npm test -- run`.
-    expect(SRC).toMatch(/node scripts\/readiness\/heavy-admission\.mjs run --owner=\${weDir} --lane=\${weNum} -- npm run check:standards/);
-    expect(SRC).toMatch(/node scripts\/readiness\/heavy-admission\.mjs run --owner=\${weDir} --lane=\${weNum} -- npm test -- run/);
-    // the raw (unwrapped) invocations must be gone from step 4's OWN instructions (the ITEM_RESULT_SCHEMA
-    // `gate` field description elsewhere in the file still narrates the pair in prose — scope this to step 4).
-    const gateBlock = SRC.slice(SRC.indexOf('4. LANE FULL-SUITE GATE'), SRC.indexOf('5. RESOLVE'));
-    expect(gateBlock).not.toMatch(/`\s*npm run check:standards`\s*\(whole-repo/);
-    expect(gateBlock).not.toMatch(/^\s*`npm test -- run`\s*\(vitest RUN mode/m);
+describe('parallel-execute workflow — xpnhz4o LANE GATE is diff-selected, never a hand-run full suite', () => {
+  // dd4beb5e5 (2026-09-25) made the LOCAL gate diff-selected everywhere in this repo and the Bash guard now
+  // DENIES a bare full-suite unit run (`npm test` / `npm run test:unit` / a bare `vitest`/`vitest run`, raw or
+  // wrapped through heavy-admission) from an agent session. The lane gate must use the SAME sanctioned call the
+  // fix/ci-heal briefs use (`verify-lane.mjs run`), never its own hand-rolled heavy-admission-wrapped pair.
+  const gateBlock = SRC.slice(SRC.indexOf('4. LANE GATE'), SRC.indexOf('5. RESOLVE'));
+
+  it('runs the diff-selected verify-lane gate for the WE clone', () => {
+    expect(SRC).toMatch(/node scripts\/verify-lane\.mjs run --repo=\./);
+    expect(gateBlock).toMatch(/node scripts\/verify-lane\.mjs run --repo=\./);
   });
 
-  it('explains why this is NOT verify-lane.mjs (sha-keyed marker staleness), so the wrapper choice is documented', () => {
-    expect(SRC).toMatch(/HEAVY-ADMISSION WRAPPER/);
-    expect(SRC).toMatch(/sha-keyed[\s\S]{0,40}\.git\/\.lane-verify[\s\S]{0,40}stale/);
+  it('impl repos run the SAME verify-lane tool against their own clone (#3919), not a bespoke wrapped command', () => {
+    expect(gateBlock).toMatch(/node \$\{weDir\}\/scripts\/verify-lane\.mjs run --repo=\$\{laneDirs\[r\]\}/);
   });
 
-  it('never bare `npm test` in the gate step (watch mode hangs the lane, #2327) — still enforced through the wrapper', () => {
-    const gateBlock = SRC.slice(SRC.indexOf('4. LANE FULL-SUITE GATE'), SRC.indexOf('5. RESOLVE'));
-    expect(gateBlock).toMatch(/npm test -- run/);
-    expect(gateBlock).not.toMatch(/-- npm test`/); // never wraps a bare `npm test` (no ` -- run` tail)
+  it('never instructs a bare or heavy-admission-wrapped full-suite run in the gate step', () => {
+    expect(gateBlock).not.toMatch(/heavy-admission\.mjs run/);
+    expect(gateBlock).not.toMatch(/--\s*npm run check:standards`/);
+    expect(gateBlock).not.toMatch(/--\s*npm test -- run`/);
+    expect(gateBlock).not.toMatch(/`npm run check:standards`/);
+    expect(gateBlock).not.toMatch(/`npm test`/);
+    expect(gateBlock).not.toMatch(/`npm run test:unit`/);
+    expect(gateBlock).not.toMatch(/`vitest run`/);
+  });
+
+  it('explains why this is NOT plain verify-lane.mjs (sha-keyed marker staleness), so the `run`-mode choice is documented', () => {
+    expect(gateBlock).toMatch(/sha-keyed[\s\S]{0,40}\.git\/\.lane-verify[\s\S]{0,40}stale/);
+    expect(gateBlock).toMatch(/records no marker/);
+  });
+
+  it('the #3321 --no-require-verified rationale still cites the ACTUAL gate command, not the old full-suite pair', () => {
+    const markerBlock = SRC.slice(SRC.indexOf('#3321 — WHY EVERY pr-land'), SRC.indexOf('7. OPEN A READY-TO-MERGE PR'));
+    expect(markerBlock).not.toMatch(/npm run check:standards` plus/);
+    expect(markerBlock).not.toMatch(/npm test -- run`, the same pair/);
+    expect(markerBlock).toMatch(/verify-lane\.mjs run --repo=\./);
+  });
+});
+
+describe('parallel-execute workflow — dd4beb5e5 lanes never spawn a subagent or another session', () => {
+  // The #2170 pre-PR independent-review step used to spawn a Task-tool subagent over the lane's own diff before
+  // opening its PR. Operator policy (2026-09-25): the review daemon reviews every PR once it is open, so a lane
+  // spawning its own reviewer is a second, un-independent actor — and a nested Agent/Task call inside a
+  // dispatched lane is exactly the kind of unsupervised sub-session that must never run. The step is REMOVED,
+  // not replaced with a self-review, and the guard rule is wired into every agent this file spawns.
+  it('defines a shared no-full-suite / no-subagent guard constant', () => {
+    expect(SRC).toMatch(/const NO_FULL_SUITE_NO_SUBAGENT_GUARD\s*=/);
+    expect(SRC).toMatch(/NEVER run the full test suite yourself/);
+    expect(SRC).toMatch(/NEVER spawn a subagent/);
+  });
+
+  it('wires NO_FULL_SUITE_NO_SUBAGENT_GUARD into every RETURN_HYGIENE prompt prefix (probe, provision, lane-item, both finalize agents)', () => {
+    const lines = SRC.split('\n');
+    const returnHygieneUseLines = [];
+    lines.forEach((l, i) => {
+      if (/RETURN_HYGIENE/.test(l) && !/^const RETURN_HYGIENE/.test(l.trim()) && !/right after RETURN_HYGIENE/.test(l)) {
+        returnHygieneUseLines.push(i);
+      }
+    });
+    expect(returnHygieneUseLines.length).toBe(5);
+    for (const i of returnHygieneUseLines) {
+      const window = [lines[i], lines[i + 1] || '', lines[i + 2] || ''].join('\n');
+      expect(window).toMatch(/NO_FULL_SUITE_NO_SUBAGENT_GUARD/);
+    }
+  });
+
+  it('has no PRE-PR INDEPENDENT REVIEW step and never instructs spawning a review subagent', () => {
+    expect(SRC).not.toMatch(/PRE-PR INDEPENDENT REVIEW/);
+    expect(SRC).not.toMatch(/SPAWN AN INDEPENDENT REVIEW/);
+    expect(SRC).not.toMatch(/SUBAGENT over it/);
+  });
+
+  it('dropped the now-unfed dismissedFindings field/plumbing from this lane\'s own return + manifest write', () => {
+    // Nothing in THIS workflow feeds a dismissal count any more (the only source was the removed review step) —
+    // the drain's escalation rubric still reads one off any OTHER manifest that supplies it (fix/ci-heal briefs,
+    // solo lanes), so the CLI flag itself stays; this file just never calls it.
+    expect(SRC).not.toMatch(/dismissedFindings/);
+    expect(SRC).not.toMatch(/--dismissed=<count>/);
+    expect(SRC).not.toMatch(/lane-review\.mjs (diff|body)/);
+  });
+
+  it('renumbered the remaining lane steps with no gap (RESOLVE=5, MANIFEST=6, OPEN A READY-TO-MERGE PR=7, RELEASE=8)', () => {
+    expect(SRC).toMatch(/`5\. RESOLVE/);
+    expect(SRC).toMatch(/`6\. WRITE THE MANIFEST/);
+    expect(SRC).toMatch(/`7\. OPEN A READY-TO-MERGE PR PER REPO/);
+    expect(SRC).toMatch(/`8\. RELEASE each lane/);
   });
 });
 
