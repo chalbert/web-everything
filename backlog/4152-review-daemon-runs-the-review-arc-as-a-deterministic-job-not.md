@@ -4,9 +4,10 @@ kind: story
 size: 5
 parent: "3383"
 relatedTo: ["4156", "4154", "3908", "3647", "3970"]
-status: open
+status: resolved
 scope: ["we:scripts/operations/review-job.mjs", "we:scripts/operations/review-job-store.mjs", "we:scripts/operations/__tests__/review-job.test.mjs", "we:skills-src/conveyor/__tests__/review-daemon.test.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:skills-src/review/review-agent-brief.md"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
