@@ -97,8 +97,9 @@ export function assessDaemonEntry(raw, { observedAt, staleAfterMs = DEFAULT_STAL
 
   return {
     ...raw, state, refusing, hasRecentAlerts, recentAlertKinds, headline: headline + alertSuffix,
-    lastTickAt: heartbeatAt ?? tickAt ?? null,
-    lastTickAtSource: heartbeatAt ? 'lease-heartbeat' : tickAt ? 'tick-timestamp' : null,
+    // #4077: the same freshest activity `state` was judged on — never the drain's stale pass-START time.
+    lastTickAt: heartbeatAt ?? activityAt ?? null,
+    lastTickAtSource: heartbeatAt ? 'lease-heartbeat' : activityAt ? (activityAt === tickAt ? 'tick-timestamp' : 'log-activity') : null,
     attempted, succeeded, refused,
   };
 }

@@ -98,7 +98,11 @@ describe('assessDaemonEntry', () => {
       name: 'drain', readable: true, running: true, leaseKey: null, lease: null,
       tick: { found: true, at: STALE_HEARTBEAT, lastActivityAt: FRESH_HEARTBEAT, attempted: 3, succeeded: 2, refused: 0 },
     };
-    expect(assessDaemonEntry(raw, { observedAt: OBSERVED_AT }).state).toBe('alive');
+    const out = assessDaemonEntry(raw, { observedAt: OBSERVED_AT });
+    expect(out.state).toBe('alive');
+    // …and the reported last-tick time is that same fresh activity, not the stale pass start.
+    expect(out.lastTickAt).toBe(FRESH_HEARTBEAT);
+    expect(out.lastTickAtSource).toBe('log-activity');
     const bothStale = { ...raw, tick: { ...raw.tick, lastActivityAt: STALE_HEARTBEAT } };
     expect(assessDaemonEntry(bothStale, { observedAt: OBSERVED_AT }).state).toBe('alive-and-stalled');
   });

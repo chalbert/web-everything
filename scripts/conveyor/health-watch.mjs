@@ -183,6 +183,26 @@ export function probeDaemonStatus({ collect = collectDaemonStatus, assess = asse
   });
 }
 
+/**
+ * Which of these backlog card ids are `status: active` — read from each card file's own frontmatter (the
+ * backlog is the tracker). Missing/unreadable cards are simply not active.
+ * @returns {Set<string>}
+ */
+export function readActiveCards(ids, backlogDir) {
+  const out = new Set();
+  if (!ids.length || !existsSync(backlogDir)) return out;
+  const files = readdirSync(backlogDir);
+  for (const id of new Set(ids.map(String))) {
+    const f = files.find((n) => n.startsWith(`${id}-`) && n.endsWith('.md'));
+    if (!f) continue;
+    try {
+      const head = readFileSync(join(backlogDir, f), 'utf8').slice(0, 2000);
+      if (/^status:\s*active\s*$/m.test(head)) out.add(id);
+    } catch { /* unreadable → not active */ }
+  }
+  return out;
+}
+
 /** Self-sync alerts + rebuild state per daemon clone key. */
 export function probeSelfSync(dir) {
   if (!existsSync(dir)) return [];
@@ -272,7 +292,8 @@ export async function tick(flags = {}) {
   const logsDir = flags['logs-dir'] || defaultLogsDir();
   const probeErrors = {};
   const probes = {};
-  const attempt = (name, fn) => { try { return fn(); } catch (e) { probeErrors[name] = String(e?.message || e).split('\n')[0]; return undefined; } };
+  // A probe's error text is scrubbed at capture: an auth failure can echo a token in its message.
+  const attempt = (name, fn) => { try { return fn(); } catch (e) { probeErrors[name] = scrubText(String(e?.message || e).split('\n')[0]); return undefined; } };
 
   const logs = attempt('daemonLogs', () => probeDaemonLogs(logsDir, prev.cursors || {}));
   if (logs) probes.daemonLogs = logs.samples;
@@ -305,7 +326,9 @@ export async function tick(flags = {}) {
   const notified = new Set(prev.notifiedSilences || []);
   const silenceSig = (x) => `${x.smell}|${x.subject ?? '*'}|${x.card ?? ''}|${x.expiresAt ?? ''}`;
   const silences = readJson(join(dir, 'silences.json'), []).map((x) => ({ ...x, expiredNotified: notified.has(silenceSig(x)) }));
-  const result = runHealthTick({ ...prev, silences, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors });
+  // A silence whose tracking card is still `active` never expires (4065 Fork 3): read those cards' status.
+  const activeCards = readActiveCards(silences.map((x) => x.card).filter(Boolean), flags['backlog-dir'] || join(REPO_ROOT, 'backlog'));
+  const result = runHealthTick({ ...prev, silences, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors, activeCards });
   // Scrubbed ONCE, right here: everything below — the printed section, the returned summary, every file — sees
   // only the redacted state.
   const state = scrubDeep(result.state);
@@ -349,13 +372,14 @@ export async function tick(flags = {}) {
     writeJsonAtomic(join(dir, 'last-tick.json'), state.lastTick);
     if (overrun) { try { unlinkSync(overrunPath); } catch { /* gone */ } }
   }
-  return {
+  // The whole summary goes through the scrub too (the last choke point before stdout).
+  return scrubDeep({
     now: new Date(now).toISOString(), durationMs, mode: config.mode, stateDir: dir, ghSampled: !!probes.prs,
     probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
     plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, reports: written,
     section: renderHealthSection(state, { now, reportDir }),
     skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
-  };
+  });
 }
 
 function parseFlags(argv) {

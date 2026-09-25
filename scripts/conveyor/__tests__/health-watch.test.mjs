@@ -291,3 +291,54 @@ describe('round 2: tick output, silences, partial lines', () => {
     expect(c.samples[0].text).toBe('reconcile-fix-dispatch-daemon: refused no-lane chalbert/frontierui PR #7 — no free lane\n');
   });
 });
+
+// ── review round 3 (PR #2672) regressions ─────────────────────────────────────────────────────────────────────
+
+describe('round 3: probe-error scrub and active-card silences', () => {
+  const base = () => {
+    const lockRoot = join(dir, 'locks'); mkdirSync(lockRoot, { recursive: true });
+    const syncDir = join(dir, 'sync'); mkdirSync(syncDir, { recursive: true });
+    return { 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true };
+  };
+
+  it('a credential in a probe error never reaches state.json, last-tick.json or the returned summary', async () => {
+    const tok = `ghp_${'P'.repeat(36)}`;
+    const badLogs = join(dir, `logs-${tok}`);
+    writeFileSync(badLogs, 'not a directory'); // readdirSync throws ENOTDIR, its message naming this path
+    const stateRoot = join(dir, 'state');
+    const summary = await tick({ ...base(), 'state-root': stateRoot, 'logs-dir': badLogs });
+    expect(Object.keys(summary.probeErrors)).toContain('daemonLogs');
+    const { readFileSync } = await import('node:fs');
+    const hd = healthDir(stateRoot);
+    for (const text of [JSON.stringify(summary), readFileSync(join(hd, 'state.json'), 'utf8'), readFileSync(join(hd, 'last-tick.json'), 'utf8')]) {
+      expect(text).not.toContain(tok);
+    }
+  });
+
+  const runWithSilence = async (status) => {
+    const stateRoot = join(dir, `state-${status}`);
+    const hd = healthDir(stateRoot);
+    mkdirSync(hd, { recursive: true });
+    const logsDir = join(dir, `logs-${status}`); mkdirSync(logsDir, { recursive: true });
+    const backlogDir = join(dir, `backlog-${status}`); mkdirSync(backlogDir, { recursive: true });
+    writeFileSync(join(backlogDir, '9001-some-card.md'), `---\nkind: story\nstatus: ${status}\n---\n# card\n`);
+    writeFileSync(join(hd, 'overrun.json'), JSON.stringify({ at: new Date().toISOString(), killedAfterMs: 180000 }));
+    writeFileSync(join(hd, 'silences.json'), JSON.stringify([{ smell: 'health-tick-overrun', subject: null, card: '9001', expiresAt: Date.now() - 1000 }]));
+    const summary = await tick({ ...base(), 'state-root': stateRoot, 'logs-dir': logsDir, 'backlog-dir': backlogDir });
+    const { readFileSync } = await import('node:fs');
+    return { summary, state: JSON.parse(readFileSync(join(hd, 'state.json'), 'utf8')) };
+  };
+
+  it('an expired silence whose tracking card is still active keeps the episode tracked', async () => {
+    const { summary, state } = await runWithSilence('active');
+    expect(summary.transitions.map((t) => t.type)).toContain('opened');
+    expect(summary.transitions.map((t) => t.type)).not.toContain('silence-expired');
+    expect(state.episodes['health-tick-overrun::health-watch'].tracked).toMatchObject({ card: '9001' });
+  });
+
+  it('once the tracking card is no longer active, the expired silence re-raises the episode', async () => {
+    const { summary, state } = await runWithSilence('resolved');
+    expect(summary.transitions.map((t) => t.type)).toContain('silence-expired');
+    expect(state.episodes['health-tick-overrun::health-watch'].tracked).toBeNull();
+  });
+});
