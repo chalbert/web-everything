@@ -139,6 +139,9 @@ import { parseArgvFlags, reconcileWouldRunFor } from './lib/reconcile-predicate.
 // same ledger `review-set-label.mjs` already writes through for the review seam, never a second format.
 import { buildVerdictRecord, appendVerdict, labelVerdictOf } from './lib/verdict-ledger.mjs';
 import { ensureFreshGithubAppEnv } from './lib/github-app-auth-env.mjs';
+// x2e120n — per-step pass timing ("why so slow", the resident drain daemon's history.jsonl carried only a
+// pass's TOTAL ms, no breakdown). See pass-timings.mjs's own header for the full shape/rationale.
+import { createStepTimer, formatTimingsSummary, PASS_STEP_ORDER } from './lib/pass-timings.mjs';
 export { remoteManifestApiArgs };
 
 // #2414 — the local, machine-scoped FIRST-DRAIN-SIGHTING manifest baseline the land-time tamper gate diffs a
@@ -3566,6 +3569,11 @@ async function runCli() {
   // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
   // emit/exit), so the watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env).
   const sweepOnce = async () => {
+  // x2e120n — this pass's own step timer + wall-clock start. See pass-timings.mjs's header for the full
+  // rationale; the short version: attach `result.timings` + print one unconditional stderr summary line so
+  // "why is a pass slow" has a real breakdown instead of a single opaque `ms`.
+  const __t = createStepTimer();
+  const __passStart = Date.now();
   // #2257 — collect + classify across EVERY repo in the sweep set into ONE global candidate list. PR numbers
   // are per-repo (WE #10 ≠ FUI #10), so each verdict carries its own `repo` + head ref instead of a
   // number-keyed cross-repo map. The single list is what lets the cascade honour cross-repo `blockedBy`.
@@ -3577,7 +3585,7 @@ async function runCli() {
   // #xc7p3q9 (B3) — when the blind context is NEVER collected (`RECONCILE` false: a bare `/merge` sweep or
   // `--no-reconcile-labels`), it is INCOMPLETE by construction — `contextComplete:false` — so the couple gate
   // fails closed (a coupled impl defers rather than orphan-landing past a carrier the gate cannot see).
-  const openPrContext = RECONCILE ? await collectContext() : reduceOpenPrContext({ listings: [], reads: new Map(), reconcileRan: false });
+  const openPrContext = RECONCILE ? await __t.timeAsync('listing', () => collectContext()) : reduceOpenPrContext({ listings: [], reads: new Map(), reconcileRan: false });
   // #xc7p3q9 (R2) — the operator escape hatch symmetric to `--no-review-escalation`: `--assume-complete-context`
   // FORCES the context complete so a genuinely-stuck couple (e.g. a persistent read-noise fail-closed) can land
   // short of editing the script. Prints a LOUD one-line waiver. Off by default; the fail-closed gate stays live.
@@ -3609,7 +3617,7 @@ async function runCli() {
       if (!AS_JSON) process.stderr.write(`  ⚠ ${repo || 'cwd repo'}: default branch unresolved (${String(e.message || e).split('\n')[0]}) — the non-default-base hold is off for it this pass (#3674)\n`);
     }
   };
-  const [listings] = await Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]);
+  const [listings] = await __t.timeAsync('listing', () => Promise.all([mapWithConcurrency(REPOS, REPOS.length, listOne), Promise.all(REPOS.map(resolveDefaultBranch))]));
   const listErr = listings.find((l) => l.err);
   if (listErr) fail('gh-error', `gh pr list${listErr.repo ? ` --repo ${listErr.repo}` : ''} failed (${listErr.err}) — is gh authenticated?`, 4);
   // #2683 — the `--only` target is repo-scoped (see `matchesOnlyTarget`): `--only-repo=<slug>` names the repo;
@@ -3626,7 +3634,7 @@ async function runCli() {
   // downstream is UNCHANGED and stays strictly serial (#2417 explicitly keeps the sole-writer loop serial).
   const sweepFlat = [];
   for (const repo of REPOS) for (const p of (prsByRepo.get(repo) || [])) sweepFlat.push({ repo, p });
-  const sweepReads = await fetchPrReadsCached(sweepFlat, {
+  const sweepReads = await __t.timeAsync('classifyGateReads', () => fetchPrReadsCached(sweepFlat, {
     cache: sweepReadCache,
     keyOf: ({ repo, p }) => prCacheKey(repo, p.number),
     shaOf: ({ p }) => prHeadSha(p),
@@ -3635,8 +3643,9 @@ async function runCli() {
       const [commitsRes, manifestRes] = await Promise.all([fetchPrCommits(repo, p.number), readPrManifest(repo, p.headRefName)]);
       return { commits: commitsRes.commits, manifest: manifestRes.manifest, degraded: commitsRes.degraded || manifestRes.degraded };
     },
-  });
+  }));
   // #2421 (generalizes #2216) — total ci-lifecycle relabel first, per swept repo.
+  const __gateReadsT0 = __t.mark();
   for (const repo of REPOS) reconciledLabels.push(...reconcileCiLifecycleLabels(repo, openPrContext));
   // #xc7p3q9 (Fix 4 / B12) — the narrow→classify→attach→couple-join sequence is now `prepareDrainVerdicts`, the
   // SAME wiring the test suite drives, so a future edit that drops `truncated`/`contextComplete` from the couple
@@ -3660,6 +3669,7 @@ async function runCli() {
     localSlug,
     defaultBranchOf,
   }));
+  __t.add('classifyGateReads', __t.mark() - __gateReadsT0);
   // #2393 — the `stackParents` proof-of-land gate's SECOND proof source: a parent that landed in a PRIOR drain
   // session, read off `origin/main`'s durable `bornAs:<hash>` record (#2392). Computed ONCE per pass over every
   // distinct stackParent hash (numeric ids are already-landed by construction — handled inside planLabelDrain;
@@ -3725,6 +3735,8 @@ async function runCli() {
   // (base vs lane backlog names) and, only on a real collision, rebuild the lane tip with the new item
   // renumbered to a free GAP id — CI re-runs green and it lands on a later pass. Local-repo candidates only
   // (pure git plumbing needs the local clone); best-effort, never fatal. Dry-run annotates without pushing.
+  const __rebaseDropT0 = __t.mark(); // covers BOTH the id-collision heal and the rebase-drop rebuild below — one
+  // git-plumbing phase from the operator's point of view ("rebase-drop-manifest"), even though it's two loops.
   const healed = [];
   if (HEAL_COLLISION) {
     for (const v of verdicts) {
@@ -3869,6 +3881,7 @@ async function runCli() {
       }
     }
   }
+  __t.add('rebaseDropManifest', __t.mark() - __rebaseDropT0);
 
   // #2366 — CONCURRENT-LANDER BACKSTOP. The bare `/merge` orphan sweep never runs the `REVIEW_ESCALATION` pass
   // below (that pass is `--label`-gated), so without this it would happily merge a PR a label-scoped `/drain`
@@ -4504,6 +4517,10 @@ async function runCli() {
       if (plan.staleLandedOpenItems?.length) process.stderr.write(`  ⓘ stale-PR note (#999/xq985wu F2): ${nameStaleHolders(plan.staleLandedOpenItems)} — proven landed but still named by an open PR (edge cleared; the open PR is stale/abandoned/impl-half)\n`);
     }
   } else {
+    // x2e120n — the whole live cascade (replan + per-candidate pre-merge stamps/retarget + the merge itself):
+    // "mergeCascade" is the wall time of this else-branch; "mergeCall" (timed above, inside withLandWriteLock)
+    // is the narrower sub-cost of just the `gh pr merge` round-trips within it.
+    const __mergeCascadeT0 = __t.mark();
     // Cascade: merge every READY candidate in blockedBy order; a merged item leaves the open set, freeing its
     // dependents next pass (mirrors the lane-drain cascade). A merge FAILURE (red/behind) marks the PR `skip`
     // so it keeps blocking its dependents — never land past a broken blocker.
@@ -4612,7 +4629,9 @@ async function runCli() {
           // makes a PR another lander already merged a safe no-op — never a double `gh pr merge`.
           const landLock = withLandWriteLock(() => {
             if (isPrAlreadyMerged(c.repo, c.num)) return { skipped: 'already-merged' };
-            mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' });
+            // x2e120n — the actual `gh pr merge` round-trip, timed on its own (a sub-component of the wider
+            // "mergeCascade" step below, which also covers the pre-merge stamps/retarget for every candidate).
+            __t.time('mergeCall', () => mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' }));
             return { merged: true };
           });
           if (landLock.contended && !AS_JSON) process.stderr.write(`  ⚠ merge-write mutex not acquired (held by ${landLock.heldBy || '?'}) — merged under the per-PR idempotency guard instead (#2683)\n`);
@@ -4667,6 +4686,7 @@ async function runCli() {
     }
     if (deferred.length && !AS_JSON) process.stderr.write(`  · ${deferred.length} deferred (blockedBy an unlanded PR): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
     if (staleLandedOpenItems.length && !AS_JSON) process.stderr.write(`  ⓘ stale-PR note (#999/xq985wu F2): ${nameStaleHolders(staleLandedOpenItems)} — proven landed but still named by an open PR (edge cleared; the open PR is stale/abandoned/impl-half)\n`);
+    __t.add('mergeCascade', __t.mark() - __mergeCascadeT0);
   }
 
   // Sync the LOCAL main checkout to the just-advanced origin/main (a merged PR moved origin, not local) — local
@@ -4680,6 +4700,9 @@ async function runCli() {
   // human, rather than silently leaving main behind. Only when something actually merged. #2257 — the local
   // pull only makes sense for the LOCAL clone's repo, so it fires only when a LOCAL-repo PR merged (a remote-
   // repo merge advanced that repo's origin, which this clone doesn't track).
+  // x2e120n — "postMergeSync": local-checkout pull + the detached-cwd resync + the operator's primary-checkout
+  // ff-sync below, all pure git housekeeping after a land, none of it per-PR (all three run at most once a pass).
+  const __postMergeSyncT0 = __t.mark();
   let localSynced = false;
   const landedLocal = !DRY_RUN && merged.some((m) => isLocalRepo(m.repo));
   if (landedLocal) {
@@ -4732,6 +4755,7 @@ async function runCli() {
       }
     }
   }
+  __t.add('postMergeSync', __t.mark() - __postMergeSyncT0);
 
   // JIT numbering (#2288) — the drain is the sole serial writer to main, so THIS land path (the /pr fast drain
   // + /merge sweep) is also where a provisional (hash-keyed) item gets its real sequential NNN. After a WE
@@ -4747,7 +4771,8 @@ async function runCli() {
     // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Guard it with
     // the TTL-bounded numbering mutex so a concurrent drain/land never mints the same NNN off the same base.
     const numLock = withNumberingLock(() => {
-      const n = numberPendingHashes(process.cwd());
+      const n = __t.time('jitNumbering', () => numberPendingHashes(process.cwd()));
+      const __resolveOnLandT0 = __t.mark(); // x2e120n — everything from here through the resolve loop below
       // #2899 A5 — RESOLVE-ON-LAND for the LABEL lander. This drain single-sourced lane-drain's NUMBERING but
       // never its RESOLVING, so it assigned the NNN and left `status:` untouched — delivered work kept ranking
       // Tier-A agent-ready and was re-packed into batch after batch (observed on #2880 / #2450, each costing a
@@ -4822,9 +4847,10 @@ async function runCli() {
         process.stderr.write(`  ⚠ resolve-on-land FAILED ${failedResolve.map((f) => `#${f.id} (${f.reason})`).join(', ')} — the card is NOT resolved on main; resolve it by hand (#2899)\n`);
       }
       resolveOnLandReport = { resolved: resolvedOnLand, alreadyResolved, deferred: plan.deferred, failed: failedResolve };
+      __t.add('resolveOnLand', __t.mark() - __resolveOnLandT0);
       // #3379 — extracted + injectable (`pushNumberingOnLand`, mirrors `regenDerivedOnLand`): a failed push
       // now returns a `warning`, always (not just `if (!AS_JSON)`), so a --json caller sees it too.
-      const pushResult = pushNumberingOnLand({ exec: execFileSync, shouldPush: n.committed || resolvedOnLand.length > 0 });
+      const pushResult = __t.time('numberingPush', () => pushNumberingOnLand({ exec: execFileSync, shouldPush: n.committed || resolvedOnLand.length > 0 }));
       if (pushResult.pushed) {
         if (!AS_JSON && n.committed) process.stderr.write(`  ✓ JIT-numbered ${n.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
         if (!AS_JSON && resolvedOnLand.length) process.stderr.write(`  ✓ resolved on land ${resolvedOnLand.map((i) => `#${i}`).join(', ')} + pushed to main (#2899/#2748)\n`);
@@ -4857,7 +4883,7 @@ async function runCli() {
   // prior failed land is caught too — the detect is a cheap fs read, so a standing invariant is strictly stronger.
   let duplicateIdsOnMain = [];
   if (!DRY_RUN) {
-    duplicateIdsOnMain = findDuplicateIds(join(process.cwd(), 'backlog'));
+    duplicateIdsOnMain = __t.time('duplicateCheck', () => findDuplicateIds(join(process.cwd(), 'backlog')));
     if (duplicateIdsOnMain.length && !AS_JSON) {
       process.stderr.write(`\n  ✗✗ TRIPWIRE (#2318): duplicate id(s) on main — ${summarizeDuplicates(duplicateIdsOnMain)}. The merge queue stays RED (exit 3) until this is resolved by hand: run \`node scripts/backlog-renumber-collisions.mjs --onto-ref=<pre-dup main sha>\` on main. NOT auto-healed (an unguarded sweep can clobber a surviving edge, #2314); NOT left silent.\n\n`);
     }
@@ -4869,7 +4895,7 @@ async function runCli() {
   let derived = { ran: false, done: [], failed: [], committed: false, pushed: false };
   if (landedLocal) {
     if (!AS_JSON) process.stderr.write(`  ↻ regenerating WE derived artifacts once (${DERIVED_REGEN.map((c) => c.join(' ')).join(', ')})…\n`);
-    derived = regenDerivedOnLand({ exec: execFileSync, cwd: process.cwd(), landed: true, dryRun: DRY_RUN });
+    derived = __t.time('derivedRegen', () => regenDerivedOnLand({ exec: execFileSync, cwd: process.cwd(), landed: true, dryRun: DRY_RUN }));
     if (!AS_JSON) {
       if (derived.committed) process.stderr.write(`  ✓ derived artifacts regenerated + pushed to main (${derived.done.join(', ')})\n`);
       else if (derived.ran && !derived.warning) process.stderr.write(`  · derived regen: no change (inputs unchanged)\n`);
@@ -4880,7 +4906,24 @@ async function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })) };
+  // x2e120n — "why so slow": this pass's per-step timing breakdown. `total` is the REAL measured wall time of
+  // the whole `sweepOnce()` call (never just the sum of the labelled steps below — flag parsing, the drain
+  // lease, and anything else this pass touched outside a labelled step is real time too, and the line must
+  // never imply more coverage than it has). Rides `result.timings` (so a `--json` caller — the resident daemon
+  // included — gets it on stdout); persisting it into `we:.drain-daemon/history.jsonl` itself is a SEPARATE,
+  // plateau-app-side passthrough change (see this PR's own body for why it isn't bundled here).
+  const passTotalMs = Date.now() - __passStart;
+  const timingSteps = __t.snapshot();
+  const timings = { ...timingSteps, total: passTotalMs };
+  // UNCONDITIONAL (never gated on `!AS_JSON` like every other progress line above): the resident daemon always
+  // runs with `--json`, and its child's stderr is the ONLY channel that reaches `we:.drain-daemon/daemon.log` —
+  // gating this the way every other line here is gated would make the summary invisible on the one caller that
+  // most needs it. One line per `sweepOnce()` call (so a `--watch` pass logs one per interval, same as today's
+  // per-pass log cadence). `timingSteps` (never `timings`, which already carries its OWN `total` key) is what
+  // goes to the formatter — it computes+appends the trailing `total=` itself; passing `timings` here would
+  // print `total=` twice (once as an ordinary step, once as the formatter's own).
+  process.stderr.write(`merge-ai-prs · pass timings: ${formatTimingsSummary(timingSteps, { total: passTotalMs, order: PASS_STEP_ORDER })} (considered ${verdicts.length}, merged ${merged.length})\n`);
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
