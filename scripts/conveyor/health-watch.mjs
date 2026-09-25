@@ -27,7 +27,7 @@
  *   node scripts/conveyor/health-watch.mjs silence --smell=ID [--subject=S] --card=NNN [--hours=72]
  *   node scripts/conveyor/health-watch.mjs unsilence --smell=ID [--subject=S]
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, renameSync, openSync, readSync, closeSync, unlinkSync,
 } from 'node:fs';
@@ -36,7 +36,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, MINUTE,
+  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, MINUTE,
 } from './health-watch-core.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { pinnedStateRoot } from './queue-store.mjs';
@@ -279,7 +279,7 @@ export async function tick(flags = {}) {
   const overrunPath = join(dir, 'overrun.json');
   const overrun = readJson(overrunPath, null);
   let lastTickForSmells = prev.lastTick;
-  if (overrun) lastTickForSmells = { ...(prev.lastTick || {}), durationMs: overrun.killedAfterMs };
+  if (overrun) lastTickForSmells = { ...(prev.lastTick || {}), durationMs: overrun.killedAfterMs, killedByWatchdog: true };
 
   const result = runHealthTick({ ...prev, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors });
   const state = result.state;
@@ -295,7 +295,7 @@ export async function tick(flags = {}) {
     let d;
     try { d = { command: [command, ...args].join(' '), code: 0, output: run(command, args, { timeoutMs }) }; }
     catch (e) { d = { command: [command, ...args].join(' '), code: e?.status ?? null, timedOut: e?.code === 'ETIMEDOUT' || e?.signal === 'SIGTERM', output: `${e?.stdout || ''}${e?.stderr || ''}` || String(e?.message || e) }; }
-    d.output = summarizeDiagnosisOutput(d.output);
+    d.output = scrubText(summarizeDiagnosisOutput(d.output)); // scrubbed at capture: every persisted copy is redacted
     ep.diagnosis = d;
     diagnoses.push({ key: p.key, command: d.command, code: d.code });
   }
@@ -314,10 +314,10 @@ export async function tick(flags = {}) {
       if (!ep?.id) continue;
       const md = renderEpisodeReport(ep, { now, smell: smellsById[ep.smell], diagnosis: ep.diagnosis, plan: result.plan, mode: config.mode });
       writeJsonAtomic(join(reportDir, `${ep.id}.md`), md);
-      writeJsonAtomic(join(reportDir, `${ep.id}.json`), ep);
+      writeJsonAtomic(join(reportDir, `${ep.id}.json`), scrubDeep(ep));
       written.push(join(reportDir, `${ep.id}.md`));
     }
-    writeJsonAtomic(statePath, state);
+    writeJsonAtomic(statePath, scrubDeep(state));
     writeJsonAtomic(join(dir, 'last-tick.json'), state.lastTick);
     if (overrun) { try { unlinkSync(overrunPath); } catch { /* gone */ } }
   }
@@ -371,28 +371,48 @@ async function main(argv) {
   }
   if (cmd !== 'tick') { console.error(`health-watch: unknown command "${cmd}" (tick | section | silence | unsilence)`); return 1; }
 
-  const release = flags['dry-run'] ? () => {} : acquireTickLock(dir);
+  // `--in-process` is the watchdog's worker child: its parent already holds the tick lock.
+  const release = flags['dry-run'] || flags['in-process'] ? () => {} : acquireTickLock(dir);
   if (!release) { console.error('health-watch: another tick holds the tick lock — skipping.'); return 0; }
   const budget = (readJson(join(dir, 'config.json'), {}).tickBudgetMs) ?? DEFAULT_HEALTH_CONFIG.tickBudgetMs;
-  const watchdog = setTimeout(() => {
-    try { writeJsonAtomic(join(dir, 'overrun.json'), { at: new Date().toISOString(), killedAfterMs: budget * 3 }); } catch { /* best effort */ }
-    release();
-    console.error(`health-watch: tick exceeded ${budget * 3}ms — killed by its own watchdog.`);
-    process.exit(3);
-  }, budget * 3);
-  watchdog.unref();
-  try {
-    const summary = await tick(flags);
-    if (flags.json) console.log(JSON.stringify(summary, null, 2));
-    else {
-      console.log(`health-watch: tick ${summary.now} in ${summary.durationMs}ms (${summary.mode}); transitions: ${summary.transitions.map((t) => `${t.type} ${t.key}`).join(', ') || 'none'}`);
-      console.log(summary.section.join('\n'));
-    }
-    return 0;
-  } finally {
-    clearTimeout(watchdog);
-    release();
+  if (flags['in-process']) {
+    // The worker: runs the tick itself. Its probes block on synchronous child calls, so no timer in THIS
+    // process could interrupt it — the watchdog lives in the parent (below).
+    try {
+      const summary = await tick(flags);
+      if (flags.json) console.log(JSON.stringify(summary, null, 2));
+      else {
+        console.log(`health-watch: tick ${summary.now} in ${summary.durationMs}ms (${summary.mode}); transitions: ${summary.transitions.map((t) => `${t.type} ${t.key}`).join(', ') || 'none'}`);
+        console.log(summary.section.join('\n'));
+      }
+      return 0;
+    } finally { release(); }
   }
+  try {
+    return await runTickWithWatchdog(argv, { dir, killAfterMs: budget * 3 });
+  } finally { release(); }
+}
+
+/**
+ * The whole-tick watchdog. The tick runs in a CHILD process (`tick --in-process`) and this parent — whose event
+ * loop never blocks — kills it with SIGKILL after `killAfterMs` and records `overrun.json`, which the next tick
+ * turns into the `health-tick-overrun` smell. (An in-process setTimeout cannot do this: the tick's synchronous
+ * execFileSync probes block the very event loop the timer needs.)
+ * @returns {Promise<number>} the exit code: the child's own, or 3 when the watchdog killed it
+ */
+export function runTickWithWatchdog(argv, { dir, killAfterMs, script = fileURLToPath(import.meta.url) }) {
+  return new Promise((resolveExit) => {
+    const child = spawn(process.execPath, [script, ...argv, '--in-process'], { stdio: 'inherit' });
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      try { writeJsonAtomic(join(dir, 'overrun.json'), { at: new Date().toISOString(), killedAfterMs: killAfterMs }); } catch { /* best effort */ }
+      console.error(`health-watch: tick exceeded ${killAfterMs}ms — killed by the watchdog.`);
+      child.kill('SIGKILL');
+    }, killAfterMs);
+    child.on('exit', (code) => { clearTimeout(timer); resolveExit(killed ? 3 : (code ?? 1)); });
+    child.on('error', () => { clearTimeout(timer); resolveExit(1); });
+  });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));

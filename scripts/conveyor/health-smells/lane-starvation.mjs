@@ -28,8 +28,11 @@ export default {
         const k = repoKeyForSlug(e.repo) ?? e.repo;
         if (now - e.at <= this.windowMs) recent[k] = (recent[k] || 0) + 1;
       }
-      for (const t of mem.lastTick?.blocking || []) {
-        if (/no-lane|no acquirable lane/.test(t)) demand.we = (demand.we || 0) + 1;
+      // Current demand = the no-lane refusals in each daemon's LATEST tick, credited to the repo each one names
+      // (never a hardcoded pool — lane-pool-health-watch runs per constellation repo).
+      for (const repo of mem.lastTick?.noLane || []) {
+        const k = repoKeyForSlug(repo) ?? repo;
+        demand[k] = (demand[k] || 0) + 1;
       }
     }
     return lanePools.map((p) => {

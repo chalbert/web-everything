@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   MINUTE, HOUR, DEFAULT_HEALTH_CONFIG, BLOCKING_REFUSALS, parseDaemonLog, tickIsUnproductive, foldDaemonMemory,
   emptyHealthState, stepEpisodes, planActions, scrubText, fmtAge, renderEpisodeReport, renderHealthSection,
-  runHealthTick,
+  runHealthTick, scrubDeep,
 } from '../health-watch-core.mjs';
 import daemonSilent from '../health-smells/daemon-silent.mjs';
 import daemonOwedNoDispatch from '../health-smells/daemon-owed-no-dispatch.mjs';
@@ -606,5 +606,68 @@ describe('daemon-silent on a daemon known only through daemon-status', () => {
   });
   it('skips a daemon with neither a log memory nor a last-activity time', () => {
     expect(daemonSilent.evaluate({ leases: [lease(null)] }, { now: T0, daemons: {} })).toEqual([]);
+  });
+});
+
+// ── review round 1 (PR #2672) regressions ─────────────────────────────────────────────────────────────────────
+
+describe('incremental reads keep tick details that cross a sample boundary', () => {
+  const summary = 'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 2';
+  const details = [
+    'reconcile-fix-dispatch-daemon: refused no-lane chalbert/frontierui PR #7 — no free lane to dispatch a fix agent for PR #7',
+    'reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #8 — dispatch-lane: no value for the brief placeholder {{SCOPE}} — refusing',
+  ].join('\n');
+  const T = Date.parse('2026-09-25T12:00:00.000Z');
+  const sample = (text, i) => ({ name: 'fix', mtimeMs: T + i * 60_000, sizeBytes: 100 * (i + 1), text, bootstrap: false });
+  it('a split summary/details pair folds to the same memory as the unsplit read', () => {
+    const whole = foldDaemonMemory(foldDaemonMemory(undefined, { ...sample('', 0), bootstrap: true }, T), sample(`${summary}\n${details}`, 1), T + 60_000);
+    let split = foldDaemonMemory(undefined, { ...sample('', 0), bootstrap: true }, T);
+    split = foldDaemonMemory(split, sample(summary, 1), T + 60_000);
+    expect(split.lastTick.unproductive).toBe(false); // nothing blocking seen yet
+    split = foldDaemonMemory(split, sample(details, 2), T + 120_000);
+    expect(split.lastTick.unproductive).toBe(true);
+    expect(split.unproductiveTicks).toBe(whole.unproductiveTicks);
+    expect(Object.keys(split.unproductiveReasons).sort()).toEqual(Object.keys(whole.unproductiveReasons).sort());
+    expect(split.lastTick.noLane).toEqual(['chalbert/frontierui']);
+    expect(Object.keys(split.prRefusals).sort()).toEqual(['chalbert/frontierui#7', 'chalbert/web-everything#8']);
+    expect(split.recentTicks.at(-1).u).toBe(1);
+  });
+});
+
+describe('lane-starvation credits demand to the repo each refusal names', () => {
+  it('a no-lane refusal on frontierui breaches the frontierui pool, not we', () => {
+    const now = Date.parse('2026-09-25T12:00:00.000Z');
+    const daemons = { fix: { lastTick: { noLane: ['chalbert/frontierui', 'chalbert/frontierui'] }, noLaneTimes: [] } };
+    const pools = [
+      { repo: 'we', health: { total: 10, leased: 9, acquirable: 1, dirtyUnleased: 0 }, at: now },
+      { repo: 'frontierui', health: { total: 2, leased: 2, acquirable: 0, dirtyUnleased: 0 }, at: now },
+    ];
+    const out = laneStarvation.evaluate({ lanePools: pools }, { now, daemons });
+    expect(out.find((r) => r.subject === 'lane-pool:frontierui')).toMatchObject({ breach: true, measure: expect.objectContaining({ demandNow: 2 }) });
+    expect(out.find((r) => r.subject === 'lane-pool:we')).toMatchObject({ breach: false, measure: expect.objectContaining({ demandNow: 0 }) });
+  });
+});
+
+describe('a smell that throws every tick raises health-tick-overrun after 3 ticks', () => {
+  it('its smell:<id> error streak survives ticks where every IO probe is fine', () => {
+    const broken = { id: 'broken', probes: [], openAfter: 1, closeAfter: 1, severity: 'low', action: 'alert', evaluate() { throw new Error('boom'); } };
+    let state = emptyHealthState();
+    let opened = false;
+    for (let i = 0; i < 3; i += 1) {
+      const r = runHealthTick(state, {}, [broken, healthTickOverrun], Date.parse('2026-09-25T12:00:00.000Z') + i * 300_000, {});
+      state = r.state;
+      opened = opened || r.transitions.some((t) => t.type === 'opened' && t.key === 'health-tick-overrun::health-watch');
+    }
+    expect(state.probeErrors['smell:broken'].count).toBe(3);
+    expect(opened).toBe(true);
+  });
+});
+
+describe('scrubDeep', () => {
+  it('redacts a credential in any nested string, leaving numbers and SHAs alone', () => {
+    const tok = `ghp_${'A'.repeat(36)}`;
+    const out = scrubDeep({ a: [`leaked ${tok} here`], b: { n: 3, sha: '0123456789abcdef0123456789abcdef01234567' } });
+    expect(JSON.stringify(out)).not.toContain(tok);
+    expect(out.b).toEqual({ n: 3, sha: '0123456789abcdef0123456789abcdef01234567' });
   });
 });

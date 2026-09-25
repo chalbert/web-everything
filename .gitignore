@@ -185,3 +185,6 @@ skills-src/drain/review-baseline-state.json
 # gates lane-pool recycling), starving the lane pool (#1153 hit this before). Nobody reads the committed
 # copy as source of truth — every workflow reference re-runs the command. Generate on demand instead.
 audits/backlog-health-audit.md
+# #4077 health watch state (episodes, per-daemon memory, last-tick stamp) — local state under the pinned state
+# root, never committed; the plist example points CONVEYOR_STATE_ROOT at the operator's own checkout.
+.conveyor/health/

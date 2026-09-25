@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
-  probeDaemonStatus, daemonNameForLabel,
+  probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog,
 } from '../health-watch.mjs';
 
 let dir;
@@ -204,4 +204,41 @@ describe('probeDaemonStatus', () => {
     expect(rows[1].lastActivityAt).toBe(Date.parse('2026-09-25T15:37:21.553Z'));
     expect(rows[1].heartbeatAt).toBeNull();
   });
+});
+
+// ── review round 1 (PR #2672) regressions ─────────────────────────────────────────────────────────────────────
+
+describe('persisted state is scrubbed', () => {
+  it('a credential in a refusal line never reaches state.json', async () => {
+    const tok = `ghp_${'Q'.repeat(36)}`;
+    const logsDir = join(dir, 'logs'); mkdirSync(logsDir);
+    const lockRoot = join(dir, 'locks'); mkdirSync(lockRoot);
+    const syncDir = join(dir, 'sync'); mkdirSync(syncDir);
+    const stateRoot = join(dir, 'state');
+    writeFileSync(join(logsDir, 'fix-dispatch-daemon.log'), [
+      'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 1',
+      `reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #9 — auth header token ${tok} rejected`,
+      '',
+    ].join('\n'));
+    const flags = { 'state-root': stateRoot, 'logs-dir': logsDir, 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true };
+    await tick(flags);
+    const { readFileSync } = await import('node:fs');
+    const stateText = readFileSync(join(healthDir(stateRoot), 'state.json'), 'utf8');
+    expect(stateText).toContain('chalbert/web-everything#9');
+    expect(stateText).not.toContain(tok);
+  });
+});
+
+describe('runTickWithWatchdog', () => {
+  it('kills a tick that outlives its budget from OUTSIDE the tick process and records overrun.json', async () => {
+    const stateRoot = join(dir, 'state');
+    const hd = healthDir(stateRoot);
+    mkdirSync(hd, { recursive: true });
+    const hang = join(dir, 'hang.mjs');
+    writeFileSync(hang, 'const end = Date.now() + 10_000; while (Date.now() < end) { /* a synchronous hang */ }\n');
+    const code = await runTickWithWatchdog([], { dir: hd, killAfterMs: 300, script: hang });
+    expect(code).toBe(3);
+    const { readFileSync } = await import('node:fs');
+    expect(JSON.parse(readFileSync(join(hd, 'overrun.json'), 'utf8')).killedAfterMs).toBe(300);
+  }, 15_000);
 });

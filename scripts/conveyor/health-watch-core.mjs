@@ -82,8 +82,12 @@ function countField(text, name) {
  *   intervalMs: number|null, restarts: number, authErrors: number, lines: number }}
  */
 export function parseDaemonLog(text) {
-  const out = { ticks: [], intervalMs: null, restarts: 0, authErrors: 0, lines: 0 };
+  // `lead` collects detail lines that arrive BEFORE this chunk's first tick summary: an incremental read can end
+  // right after a summary line, so its refusal details land at the top of the NEXT chunk. The fold attaches
+  // them to the tick it already counted, instead of dropping them.
+  const out = { ticks: [], lead: { blocking: [], benign: [], noLane: [], prs: [] }, intervalMs: null, restarts: 0, authErrors: 0, lines: 0 };
   let cur = null;
+  let started = false;
   const close = () => { if (cur) { out.ticks.push(cur); cur = null; } };
   for (const raw of String(text ?? '').split('\n')) {
     const line = raw.trimEnd();
@@ -91,7 +95,7 @@ export function parseDaemonLog(text) {
     out.lines += 1;
     if (AUTH_ERROR.test(line)) out.authErrors += 1;
     let m;
-    if ((m = STARTED.exec(line))) { close(); out.intervalMs = Number(m[3]); out.restarts += 1; continue; }
+    if ((m = STARTED.exec(line))) { close(); started = true; out.intervalMs = Number(m[3]); out.restarts += 1; continue; }
     if ((m = TICK_SUMMARY.exec(line))) {
       close();
       const body = m[3];
@@ -113,24 +117,25 @@ export function parseDaemonLog(text) {
         blocking: [`tick failed: ${normalizeReason(m[2])}`], benign: [], noLane: [], prs: [] });
       continue;
     }
-    if (!cur) continue;
+    if (!cur && started) continue; // details after a restart but before its first tick belong to no tick
+    const tgt = cur ?? out.lead;
     if ((m = TICK_FAILED_REPO.exec(line))) {
       const why = /behind origin\/main/.test(m[3]) ? 'stale-checkout: dispatching clone behind origin/main' : normalizeReason(m[3]);
-      cur.blocking.push(`repo tick failed: ${why}`);
+      tgt.blocking.push(`repo tick failed: ${why}`);
       continue;
     }
     if ((m = REFUSED.exec(line))) {
       const kind = m[2];
       const reason = `refused ${kind}: ${normalizeReason(m[5])}`;
-      if (BLOCKING_REFUSALS.has(kind)) cur.blocking.push(reason); else cur.benign.push(reason);
-      if (kind === 'no-lane') cur.noLane.push({ repo: m[3] });
-      cur.prs.push({ pr: `${m[3]}#${m[4]}`, reason });
+      if (BLOCKING_REFUSALS.has(kind)) tgt.blocking.push(reason); else tgt.benign.push(reason);
+      if (kind === 'no-lane') tgt.noLane.push({ repo: m[3] });
+      tgt.prs.push({ pr: `${m[3]}#${m[4]}`, reason });
       continue;
     }
     if ((m = RECONCILE_REFUSED.exec(line))) {
       const kind = m[2];
-      if (BLOCKING_REFUSALS.has(kind)) cur.blocking.push(`reconcile-refused ${kind}`); else cur.benign.push(`reconcile-refused ${kind}`);
-      cur.prs.push({ pr: `${m[3]}#${m[4]}`, reason: `reconcile-refused ${kind}` });
+      if (BLOCKING_REFUSALS.has(kind)) tgt.blocking.push(`reconcile-refused ${kind}`); else tgt.benign.push(`reconcile-refused ${kind}`);
+      tgt.prs.push({ pr: `${m[3]}#${m[4]}`, reason: `reconcile-refused ${kind}` });
     }
   }
   close();
@@ -169,6 +174,27 @@ export function foldDaemonMemory(prev, sample, now) {
   mem.lastSize = sample.sizeBytes;
   mem.bootstrapEstimated = !!sample.bootstrap;
 
+  // Late details for the tick the previous sample already counted (see `lead` in parseDaemonLog).
+  const lead = parsed.lead;
+  if (!sample.bootstrap && mem.lastTick && (lead.blocking.length || lead.benign.length || lead.prs.length)) {
+    const at = mem.lastTick.at ?? mem.lastTickAt ?? now;
+    const wasUnproductive = mem.lastTick.unproductive;
+    mem.lastTick = { ...mem.lastTick, blocking: [...mem.lastTick.blocking, ...lead.blocking].slice(0, 5), noLane: [...(mem.lastTick.noLane || []), ...lead.noLane.map((x) => x.repo)] };
+    for (const nl of lead.noLane) mem.noLaneTimes.push({ at, repo: nl.repo });
+    for (const r of lead.prs) mem.prRefusals[r.pr] = { reason: r.reason, at };
+    const nowUnproductive = tickIsUnproductive({ ...mem.lastTick, blocking: mem.lastTick.blocking });
+    if (nowUnproductive) {
+      if (!wasUnproductive) {
+        mem.lastTick.unproductive = true;
+        if (mem.unproductiveSince == null) { mem.unproductiveSince = at; mem.unproductiveReasons = {}; mem.unproductiveTicks = 0; }
+        mem.unproductiveTicks += 1;
+        const last = mem.recentTicks.at(-1);
+        if (last && last.at === at) mem.recentTicks[mem.recentTicks.length - 1] = { ...last, u: 1, why: last.why ?? lead.blocking[0] ?? null };
+      }
+      for (const r of lead.blocking) mem.unproductiveReasons[r] = (mem.unproductiveReasons[r] || 0) + 1;
+    }
+  }
+
   const n = parsed.ticks.length;
   // Bootstrap: spread the ticks backwards from mtime at the tick interval (an estimate, flagged).
   // Steady state: every tick seen in this sample happened since the last sample — stamp it `now`.
@@ -178,7 +204,7 @@ export function foldDaemonMemory(prev, sample, now) {
     mem.ticksSeen += 1;
     mem.lastTickAt = at;
     mem.lastTickEstimated = !!sample.bootstrap;
-    mem.lastTick = { dispatched: t.dispatched, owed: t.owed, refused: t.refused, blocking: t.blocking.slice(0, 5), unproductive: tickIsUnproductive(t) };
+    mem.lastTick = { at, dispatched: t.dispatched, owed: t.owed, refused: t.refused, wholeFailed: t.wholeFailed, blocking: t.blocking.slice(0, 5), noLane: t.noLane.map((x) => x.repo), unproductive: tickIsUnproductive(t) };
     for (const nl of t.noLane) mem.noLaneTimes.push({ at, repo: nl.repo });
     for (const r of t.prs || []) mem.prRefusals[r.pr] = { reason: r.reason, at };
     mem.recentTicks.push({ at, u: tickIsUnproductive(t) ? 1 : 0, f: t.wholeFailed ? 1 : 0, why: t.blocking[0] ?? null });
@@ -395,6 +421,16 @@ export function summarizeDiagnosisOutput(output, maxChars = 4000) {
   return (lines.join('\n') || text.slice(-maxChars)).slice(0, maxChars);
 }
 
+/** PURE: {@link scrubText} applied to every string (and every object key) in a JSON-able value — what the shell persists (episode
+ *  `.json`, `state.json`) gets the same redaction as the `.md` report. */
+export function scrubDeep(value) {
+  if (typeof value === 'string') return scrubText(value);
+  if (Array.isArray(value)) return value.map(scrubDeep);
+  // Keys too: reason histograms (`unproductiveReasons`) are keyed BY the reason text.
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [scrubText(k), scrubDeep(v)]));
+  return value;
+}
+
 export function fmtAge(ms) {
   if (ms == null || !Number.isFinite(ms)) return '?';
   const m = Math.round(ms / MINUTE);
@@ -473,7 +509,9 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
   for (const s of probes.daemonLogs || []) daemons[s.name] = foldDaemonMemory(daemons[s.name], s, now);
   // Probe-error streaks (smell 15's input).
   const errs = { ...(state.probeErrors || {}) };
-  for (const name of Object.keys(errs)) if (!(name in probeErrors)) delete errs[name];
+  // An IO probe's streak resets when that probe succeeds; a smell's own `smell:<id>` streak resets only when that
+  // smell evaluates cleanly (below) — never here, or a smell that throws every tick would never reach 3.
+  for (const name of Object.keys(errs)) if (!name.startsWith('smell:') && !(name in probeErrors)) delete errs[name];
   for (const [name, msg] of Object.entries(probeErrors)) errs[name] = { count: (errs[name]?.count ?? 0) + 1, last: String(msg).slice(0, 200) };
 
   const ctx = { now, config: cfg, daemons, probeErrors: errs, lastTick: state.lastTick };
@@ -482,7 +520,9 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
     const missing = needs.filter((p) => probes[p] === undefined);
     if (missing.length) return { smell, results: null, skipped: missing };
     try {
-      return { smell, results: smell.evaluate(probes, ctx) };
+      const results = smell.evaluate(probes, ctx);
+      delete errs[`smell:${smell.id}`];
+      return { smell, results };
     } catch (e) {
       errs[`smell:${smell.id}`] = { count: (errs[`smell:${smell.id}`]?.count ?? 0) + 1, last: String(e?.message || e).slice(0, 200) };
       return { smell, results: null, error: String(e?.message || e) };
