@@ -197,6 +197,32 @@ export function filePreservedInMain(dir, relPath, branchRef, localContent, refs 
   return false;
 }
 
+/** A lane sitting on more dirty paths than this skips the cross-branch fallback entirely (see
+ *  {@link lanePreservedFileChecker}). */
+const HEAVY_DIRTY_THRESHOLD = 25;
+
+/**
+ * The ONE per-lane "is this dirty file provably preserved?" predicate — shared by `whoisForLane` below and
+ * `lane-pool.mjs#laneReclaimPreservationProof` (PR #2641 review) so the two re-derivations can never drift on
+ * bounding. Computes the other-refs list ONCE for the lane (skipped outright for a heavily-dirty lane — the
+ * direct `origin/<branch>` check still runs) and spends a LANE-WIDE budget of `maxFallbackShows` fallback
+ * `git show <ref>:<path>` spawns, summed across every file it is asked about. Once spent, remaining files skip
+ * the fallback and are reported unproven — conservative (a lane is simply left un-reclaimed), never wrong.
+ * @returns {(relPath: string) => boolean}
+ */
+export function lanePreservedFileChecker(dir, branchRef, dirtyPaths, { maxFallbackShows = MAX_FALLBACK_SHOWS } = {}) {
+  const otherRefs = dirtyPaths.length && dirtyPaths.length <= HEAVY_DIRTY_THRESHOLD ? otherRemoteRefs(dir, branchRef) : [];
+  let fallbackBudget = maxFallbackShows;
+  return (relPath) => {
+    let local;
+    try { local = readFileSync(join(dir, relPath), 'utf8'); } catch { local = null; }
+    if (local === null) return false;
+    const refsToTry = otherRefs.slice(0, Math.max(0, fallbackBudget));
+    fallbackBudget -= refsToTry.length;
+    return filePreservedInMain(dir, relPath, branchRef, local, refsToTry);
+  };
+}
+
 /** `claude agents --json` - the LIVE session listing (background agents, this host). Best-effort. */
 export function liveAgentSessions({ exec = execFileSync } = {}) {
   try {
@@ -356,28 +382,10 @@ export function whoisForLane({
   const prStateById = prStatesForCards(cardIds, prCache, allPrs);
   const allPrStates = Object.values(prStateById).flat().map((p) => p.state);
 
-  // Computed ONCE for this lane (never per-file — see the docblocks on both functions above) and only when
-  // there is actually dirty content to prove, since it costs a `for-each-ref` call this lane may not need.
-  // A lane sitting on a LOT of dirty paths (heavy, uncommitted WIP) skips the expensive cross-branch fallback
-  // entirely — the direct `origin/<branch>` check still runs, but exhaustively diffing dozens of files against
-  // every stale remote ref is never worth the cost; failing to prove it here is always CONSERVATIVE (the lane
-  // is simply left un-reclaimed, never wrongly reclaimed), never wrong.
-  const HEAVY_DIRTY_THRESHOLD = 25;
-  const otherRefs = dirtyPaths.length && dirtyPaths.length <= HEAVY_DIRTY_THRESHOLD ? otherRemoteRefs(dir, branchRef) : [];
-  // #3383-perf: a LANE-WIDE budget on fallback `git show <ref>:<path>` spawns, summed across every dirty file —
-  // was unbounded (files × refs), the single biggest cost measured live on a lane with several genuinely
-  // orphaned files (up to `otherRefs.length` spawns EACH). Once spent, the remaining files skip the fallback
-  // scan (the cheap direct `origin/<branch>` check inside `filePreservedInMain` still runs for every file) and
-  // are conservatively reported unproven — never wrongly reclaimed, only possibly left for a human/next tick.
-  let fallbackBudget = MAX_FALLBACK_SHOWS;
-  const provenFile = (relPath) => {
-    let local;
-    try { local = readFileSync(join(dir, relPath), 'utf8'); } catch { local = null; }
-    if (local === null) return false;
-    const refsToTry = otherRefs.slice(0, Math.max(0, fallbackBudget));
-    fallbackBudget -= refsToTry.length;
-    return filePreservedInMain(dir, relPath, branchRef, local, refsToTry);
-  };
+  // #3383-perf: the heavy-dirty skip and the LANE-WIDE fallback-spawn budget (was unbounded files × refs, the
+  // single biggest cost measured live) both live in `lanePreservedFileChecker` — shared verbatim with
+  // `lane-pool.mjs reclaim`'s own re-check so the two can never drift on bounding.
+  const provenFile = lanePreservedFileChecker(dir, branchRef, dirtyPaths);
   const unpreservedFiles = dirtyPaths.filter((p) => !provenFile(p));
   const unpreservedCommits = commits.filter((c) => !commitPreserved.get(c.sha));
   const preserved = unpreservedFiles.length === 0 && unpreservedCommits.length === 0;

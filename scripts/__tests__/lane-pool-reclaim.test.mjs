@@ -126,6 +126,45 @@ describe('lane-pool reclaim — AFTER', () => {
     expect(git(['rev-parse', 'HEAD'], dir)).toBe(git(['rev-parse', 'origin/main'], dir));
   });
 
+  // PR #2641 review finding — the DEFINING dead-session shape: the holder acquired, pushed its work, then died
+  // WITHOUT ever calling `release`, so its lease marker is still on disk, merely TTL-expired. Every test above
+  // `release`s first (which deletes the marker), which is why the bare O_EXCL claim never tripped on this.
+  it('a lease present but TTL-expired, never released (a dead session) is reclaimed — the stale marker is taken aside', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=dead', ...poolArgs()]).code).toBe(0);
+    const dir = lanePath(1);
+    writeFileSync(join(dir, 'work.txt'), 'landed via PR\n');
+    git(['add', 'work.txt'], dir);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'land work'], dir);
+    git(['push', '--quiet', 'origin', 'HEAD:refs/heads/lane/9001-test'], dir);
+    // Backdate the (never-released) lease well past its TTL — the session died holding it.
+    const lease = JSON.parse(readFileSync(leaseMarker(1), 'utf8'));
+    lease.acquiredAt = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+    writeFileSync(leaseMarker(1), `${JSON.stringify(lease, null, 2)}\n`);
+
+    const r = runPool(['reclaim', '--lane=1', '--json', ...poolArgs()]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.reclaimed).toBe(true);
+    expect(existsSync(join(dir, 'work.txt'))).toBe(false);
+    expect(existsSync(leaseMarker(1))).toBe(false);
+    expect(git(['rev-parse', 'HEAD'], dir)).toBe(git(['rev-parse', 'origin/main'], dir));
+  });
+
+  it('a stale lease whose lane still holds UNPRESERVED work is refused and the dead lease is left exactly as found', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=dead', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(1), 'orphan.txt'), 'never pushed anywhere\n');
+    const lease = JSON.parse(readFileSync(leaseMarker(1), 'utf8'));
+    lease.acquiredAt = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+    const staleBody = `${JSON.stringify(lease, null, 2)}\n`;
+    writeFileSync(leaseMarker(1), staleBody);
+
+    const r = runPool(['reclaim', '--lane=1', '--json', ...poolArgs()]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).reclaimed).toBe(false);
+    expect(existsSync(join(lanePath(1), 'orphan.txt'))).toBe(true);
+    expect(readFileSync(leaseMarker(1), 'utf8')).toBe(staleBody); // never even claimed — untouched
+  });
+
   it('reclaim never scans a whole pool — it always needs an explicit --lane', () => {
     const r = runPool(['reclaim', '--json', ...poolArgs()]);
     expect(r.code).not.toBe(0);

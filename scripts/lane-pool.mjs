@@ -129,7 +129,7 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 // this file already imports (`lease-reaper.mjs`, `lib/lane-litter.mjs`, …), so this is not the "unsafe to
 // import" shape `we:scripts/operations/operator-queue.mjs`'s own header warns about (that warning is about
 // importing `lane-pool.mjs` itself elsewhere — the OPPOSITE direction from this import).
-import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, otherRemoteRefs, filePreservedInMain } from './lane-whois.mjs';
+import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, lanePreservedFileChecker } from './lane-whois.mjs';
 // #x5n4zn3 — the SAME shared budget policy `we:scripts/lib/bounded-child.mjs`'s async `runBounded` rollout
 // uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
 // / the `WE_CHILD_TIMEOUT_MS` env knob), NOT its async primitive — see the `git`/`gitQuiet` header comment
@@ -2745,15 +2745,10 @@ function laneReclaimPreservationProof(dir, branch) {
   const dirtyPaths = [...trackedModifiedPaths, ...untrackedPaths];
   const commits = aheadCommits(dir, branchRef);
   const commitPreserved = aheadCommitsPreserved(dir, branchRef, commits);
-  // Same heavy-dirty / ref-fallback shape `lane-whois.mjs#whoisForLane` uses — see that file for why this is
-  // conservative (a lane simply left un-reclaimed, never wrongly reclaimed), never wrong.
-  const HEAVY_DIRTY_THRESHOLD = 25;
-  const otherRefs = dirtyPaths.length && dirtyPaths.length <= HEAVY_DIRTY_THRESHOLD ? otherRemoteRefs(dir, branchRef) : [];
-  const provenFile = (relPath) => {
-    let local;
-    try { local = readFileSync(join(dir, relPath), 'utf8'); } catch { local = null; }
-    return local !== null && filePreservedInMain(dir, relPath, branchRef, local, otherRefs);
-  };
+  // The SAME bounded predicate `lane-whois.mjs#whoisForLane` uses — heavy-dirty skip plus its lane-wide
+  // fallback-spawn budget (PR #2641 review: this copy used to run the fallback unbounded, files × refs).
+  // Unproven past the budget is conservative (a lane simply left un-reclaimed, never wrongly reclaimed).
+  const provenFile = lanePreservedFileChecker(dir, branchRef, dirtyPaths);
   const unpreservedFiles = dirtyPaths.filter((p) => !provenFile(p));
   const unpreservedCommits = commits.filter((c) => !commitPreserved.get(c.sha));
   const preserved = unpreservedFiles.length === 0 && unpreservedCommits.length === 0;
@@ -2811,6 +2806,12 @@ function cmdReclaim(repo) {
     session, purpose: 'lane-pool-reclaim', acquiredAt: new Date().toISOString(),
     host: hostname(), pid: process.pid, ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
   }), null, 2)}\n`;
+  // PR #2641 review — a dead session never `release`d, so its TTL-stale marker is usually STILL on disk; the
+  // O_EXCL create below would always hit it. Take it aside first exactly as `claimLaneForRemoval` does: only if
+  // it is still the SAME stale lease judged above (a fresh acquire since then is put back and wins).
+  if (lease && !takeMarkerIf(dir, (moved) => sameLease(moved, lease), n)) {
+    fail(`lane-${n}: its lease changed between the read above and the claim attempt — not reclaimed, safe to retry`);
+  }
   try {
     writeFileSync(file, body, { flag: 'wx' });
   } catch {
@@ -2819,7 +2820,9 @@ function cmdReclaim(repo) {
   // Re-check UNDER the hold — closes the race window between the first read above and this claim.
   const reproof = laneReclaimPreservationProof(dir, repo.branch);
   if (!reproof.preserved) {
-    rmSync(file, { force: true }); // hand the lane back exactly as found — never leave our own claim behind
+    // Hand the lane back with its work intact, dropping only a marker that is still OUR claim (as trim does). A
+    // stale lease taken aside above is not restored — it was already dead, exactly like trim's same path.
+    takeMarkerIf(dir, (moved) => moved?.session === session, n);
     log(`  lane-${n}: NOT reclaimed — work appeared after the initial check (${reproof.reason})`);
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...reproof }, null, 2)}\n`);
     return;
