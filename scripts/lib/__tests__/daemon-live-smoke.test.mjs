@@ -26,7 +26,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import {
   decideSmokeVerdict, resolveSmokeBudgets, SMOKE_BUDGET_ENV, isSmokeGateDisabled, SMOKE_KILL_SWITCH_ENV,
   runLiveSmoke, SMOKE_CHECKS, rollbackToSha, readRejectedSha, recordRejectedSha, clearRejectedSha,
@@ -154,6 +154,46 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       if (cwds.includes(root)) expect({ name: check.name, mayBeTransient: check.mayBeTransient }).toEqual({ name: check.name, mayBeTransient: false });
     }
   });
+  // #4044: skip a tree-code check whose code is untouched since the last live-verified build.
+  describe('changedFiles — tree-code checks whose code is unchanged are skipped, never the gh checks (#4044)', () => {
+    const closureOf = ({ entries }) => ({
+      files: new Set(entries[0] === 'scripts/lane-pool.mjs' ? ['scripts/lane-pool.mjs', 'scripts/lib/lane-pool-paths.mjs'] : ['scripts/conveyor/reconcile-pass.mjs']),
+      complete: true, bareDeps: false, jsonNames: new Set(),
+    });
+    const runChildFor = () => vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const ran = (runChild) => runChild.mock.calls.map(([cmd, args]) => (cmd === 'gh' ? `gh ${args[0]}` : `${args[0]} ${args[1] ?? ''}`.trim()));
+    it('a backlog-only move runs only the gh checks; the rest report skipped + ok', async () => {
+      const runChild = runChildFor();
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['backlog/4143.md'], closureOf });
+      expect(smoke.pass).toBe(true);
+      expect(ran(runChild)).toEqual(['gh api', 'gh pr']);
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run']);
+    });
+    it('a move touching lane-pool code re-runs the lane checks (and only those tree checks)', async () => {
+      const runChild = runChildFor();
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['scripts/lib/lane-pool-paths.mjs'], closureOf });
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run']);
+    });
+    it('an unknown diff (null) or an incomplete closure runs everything, as before', async () => {
+      for (const opts of [{ changedFiles: null, closureOf }, { changedFiles: ['backlog/1.md'], closureOf: () => ({ files: new Set(), complete: false, bareDeps: false, jsonNames: new Set() }) }]) {
+        const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild: runChildFor(), ...opts });
+        expect(smoke.results.some((r) => r.skipped)).toBe(false);
+      }
+    });
+    it('runLiveSmokeWithRetry forwards changedFiles', async () => {
+      const runChild = runChildFor();
+      // Real closure of this repo: a backlog-only change touches none of the three tree scripts.
+      const root = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+      const r = await runLiveSmokeWithRetry({ root, env: {}, runChild, changedFiles: ['backlog/4143.md'] });
+      expect(r.verdict).toBe('pass');
+      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(3);
+    });
+  });
+
   // #4044: the live 08:14 ET alert read only `exited 1: node:internal/modules/cjs/loader:1227` — the stack
   // location, not the error. The gh checks' detail now carries the real error line too.
   it('a crashed gh (node stack) reports the real Error line, not only the stack location (#4044)', async () => {

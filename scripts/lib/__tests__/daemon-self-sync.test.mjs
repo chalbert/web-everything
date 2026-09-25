@@ -184,7 +184,7 @@ describe('withSelfSync — DEFAULT path: rebuild-driven (#4044 Module E)', () =>
     const w = withSelfSync({ tickOnce: tick }, {
       root: '/x', onRestart: vi.fn(), rebuild, acquireRead: () => ({ ok: false, reason: 'writer-active' }), log,
     });
-    await expect(w.tickOnce()).resolves.toEqual({ skipped: true, reason: 'writer-active' });
+    await expect(w.tickOnce()).resolves.toMatchObject({ skipped: true, reason: 'writer-active', repos: [], dispatched: [], failed: [] });
     expect(tick).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('writer-active'));
   });
@@ -205,7 +205,7 @@ describe('withSelfSync — DEFAULT path: rebuild-driven (#4044 Module E)', () =>
       }),
       log: { error: vi.fn() },
     });
-    await expect(w.tickOnce()).resolves.toEqual({ skipped: true, reason: 'quarantine' });
+    await expect(w.tickOnce()).resolves.toMatchObject({ skipped: true, reason: 'quarantine', repos: [], dispatched: [], failed: [] });
     expect(tick).not.toHaveBeenCalled();
     expect(onRestart).not.toHaveBeenCalled();
     expect(releaseRead).toHaveBeenCalledTimes(1); // released even though the tick never ran
@@ -851,5 +851,20 @@ describe('withSelfSync — restart gate wiring (#4044 live bug 2)', () => {
     t += 600_000;
     await expect(w.tickOnce()).resolves.toBe('restarted');
     expect(onRestart).toHaveBeenCalledWith(expect.objectContaining({ reason: 'head-moved', headSha: 'sha-new' }));
+  });
+});
+
+// #4044 live (2026-09-25 ~13:20Z): every skipped tick crashed review-daemon's onTick on `result.repos.map`.
+describe('a skipped tick is an empty tick every real daemon onTick can log (#4044)', () => {
+  it('review-daemon and reconcile-fix-dispatch-daemon onTick accept skippedTick() without throwing', async () => {
+    const { skippedTick } = await import('../daemon-self-sync.mjs');
+    const { buildCliDaemonEffects: reviewEffects } = await import('../../../skills-src/conveyor/review-daemon.mjs');
+    const { buildCliDaemonEffects: fixEffects } = await import('../../../skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs');
+    for (const build of [reviewEffects, fixEffects]) {
+      const log = { error: vi.fn() };
+      const effects = build({ owner: 'test-owner', log });
+      expect(() => effects.onTick(skippedTick('writer-active'), 0)).not.toThrow();
+      expect(() => effects.onTick(skippedTick('quarantine'), 0)).not.toThrow();
+    }
   });
 });

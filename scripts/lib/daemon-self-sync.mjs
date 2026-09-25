@@ -99,9 +99,10 @@
  * gate would defeat the whole point of gating rebuilds in the first place).
  */
 
-import { readFileSync, statSync } from 'node:fs';
-import { dirname, resolve as resolvePath, relative, isAbsolute, basename } from 'node:path';
 import { gitRun } from './main-staleness.mjs';
+import { collectImportClosure, closureHits } from './import-closure.mjs';
+
+export { collectImportClosure };
 import { gateMergedCommit } from './daemon-live-smoke.mjs';
 import { rebuildClone, readRebuildState } from './daemon-rebuild.mjs';
 import { acquireRead as acquireReadLock, releaseRead as releaseReadLock } from './daemon-clone-lock.mjs';
@@ -362,66 +363,6 @@ export function resolveRestartMinIntervalMs(env = process.env) {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_RESTART_MIN_INTERVAL_MS;
 }
 
-const IMPORT_SPEC_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])([^'"\n]+)\1/g;
-const JSON_LITERAL_RE = /['"`]([^'"`\n]*\.json)['"`]/g;
-const NONLITERAL_DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*(?!['"])/;
-
-function resolveRelativeSpec(fromFile, spec, exists) {
-  const base = resolvePath(dirname(fromFile), spec);
-  for (const cand of [base, `${base}.mjs`, `${base}.js`, `${base}.cjs`, `${base}/index.mjs`, `${base}/index.js`]) {
-    if (exists(cand)) return cand;
-  }
-  return null;
-}
-
-/**
- * The daemon's STATIC import closure, walked from its entry file(s) over relative `import`/`export … from`/
- * literal `import('…')` specifiers. Returns repo-relative paths. `complete:false` when a closure file has a
- * NON-literal dynamic `import(expr)` in code (its target can't be known statically) — the caller then falls back
- * to "any code file changed". `bareDeps` = some file imports a package (a `package*.json` change is relevant).
- * `jsonNames` = basenames of `.json` string literals in closure files (a config read at runtime by name).
- * Never throws: an unreadable entry returns `null` (the caller's conservative fallback).
- * @param {{root:string, entries:string[], readFile?:(p:string)=>string, exists?:(p:string)=>boolean}} o
- * @returns {{files:Set<string>, complete:boolean, bareDeps:boolean, jsonNames:Set<string>}|null}
- */
-export function collectImportClosure({
-  root, entries, readFile = (p) => readFileSync(p, 'utf8'),
-  exists = (p) => { try { return statSync(p).isFile(); } catch { return false; } },
-}) {
-  const absRoot = resolvePath(root);
-  const starts = (entries || []).filter(Boolean).map((e) => (isAbsolute(e) ? e : resolvePath(absRoot, e)))
-    .filter((e) => !relative(absRoot, e).startsWith('..') && exists(e));
-  if (!starts.length) return null;
-  const seen = new Set();
-  const jsonNames = new Set();
-  let complete = true;
-  let bareDeps = false;
-  const stack = [...starts];
-  while (stack.length) {
-    const file = stack.pop();
-    if (seen.has(file)) continue;
-    seen.add(file);
-    let src;
-    try { src = readFile(file); } catch { complete = false; continue; }
-    for (const m of src.matchAll(IMPORT_SPEC_RE)) {
-      const spec = m[2];
-      if (spec.startsWith('./') || spec.startsWith('../')) {
-        const hit = resolveRelativeSpec(file, spec, exists);
-        if (hit && !relative(absRoot, hit).startsWith('..')) stack.push(hit);
-      } else if (!spec.startsWith('node:') && /^[@a-z]/i.test(spec) && !/\s/.test(spec)) {
-        bareDeps = true;
-      }
-    }
-    for (const m of src.matchAll(JSON_LITERAL_RE)) jsonNames.add(basename(m[1]));
-    for (const line of src.split('\n')) {
-      const t = line.trim();
-      if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue;
-      if (NONLITERAL_DYNAMIC_IMPORT_RE.test(t.replace(/\/\/.*$/, ''))) { complete = false; break; }
-    }
-  }
-  return { files: new Set([...seen].map((f) => relative(absRoot, f))), complete, bareDeps, jsonNames };
-}
-
 /** Files changed between two commits (`git diff --name-only from to`), or `null` on any git failure. */
 export function changedFilesBetween({ root, from, to, run = gitRun, timeoutMs = 60_000 }) {
   if (!from || !to) return null;
@@ -431,7 +372,6 @@ export function changedFilesBetween({ root, from, to, run = gitRun, timeoutMs = 
 }
 
 const CODE_FILE_RE = /\.(mjs|cjs|js|ts|json)$/;
-const PACKAGE_MANIFEST_RE = /(^|\/)package(-lock)?\.json$/;
 
 /**
  * PURE: does the move from boot sha to HEAD-now need this daemon to restart, and may it restart now?
@@ -452,13 +392,24 @@ export function decideRestart({ changedFiles, closure, uptimeMs, minIntervalMs }
   if (!closure || !closure.complete) {
     relevant = changedFiles.filter((f) => CODE_FILE_RE.test(f) && !/(^|\/)__tests__\//.test(f) && !/\.test\.[mc]?js$/.test(f));
   } else {
-    relevant = changedFiles.filter((f) => closure.files.has(f)
-      || (closure.bareDeps && PACKAGE_MANIFEST_RE.test(f))
-      || (f.endsWith('.json') && closure.jsonNames.has(basename(f))));
+    relevant = closureHits({ closure, changedFiles });
   }
   if (!relevant.length) return { restart: false, reason: 'no-imported-change', relevant };
   if (Number.isFinite(minIntervalMs) && uptimeMs < minIntervalMs) return { restart: false, reason: 'min-interval', relevant };
   return { restart: true, reason: 'imported-change', relevant };
+}
+
+/**
+ * #4044 (live 2026-09-25 ~13:20Z): a skipped tick used to return a bare `{skipped, reason}` into the daemon's
+ * `onTick`, which reads `result.repos.map(...)` — `review-daemon: tick failed (non-fatal): Cannot read properties
+ * of undefined (reading 'map')` on every skip. A skip is now an EMPTY tick in every daemon's result shape (the
+ * union of review-daemon's and reconcile-fix-dispatch-daemon's fields), plus the `skipped`/`reason` markers.
+ * @param {string} reason
+ */
+export function skippedTick(reason) {
+  return {
+    skipped: true, reason, repos: [], dispatched: [], failed: [], refusals: [], reconcileFailed: [], reviewsOwed: 0,
+  };
 }
 
 /**
@@ -602,7 +553,7 @@ export function withSelfSync(effects, {
       const acquired = acquireRead(root, cloneLockOpts());
       if (!acquired.ok) {
         log.error?.(`daemon-self-sync: read lock refused (${acquired.reason}) — skipping this tick, never reading a tree mid-move (#4044)`);
-        return { skipped: true, reason: acquired.reason };
+        return skippedTick(acquired.reason);
       }
       let released = false;
       const releaseOnce = () => {
@@ -618,7 +569,7 @@ export function withSelfSync(effects, {
         if (rebuildState.quarantine) {
           releaseOnce();
           log.error?.('daemon-self-sync: the clone is quarantined (#4044) — skipping this tick, never running children off a rejected tree');
-          return { skipped: true, reason: 'quarantine' };
+          return skippedTick('quarantine');
         }
 
         // #3383 bug 2 (unchanged in spirit) — HEAD moved since THIS process's own boot even though it never

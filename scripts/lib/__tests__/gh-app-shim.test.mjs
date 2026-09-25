@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
   buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, sanitizeSpawnEnv,
-  defaultGhThrottleCliPath,
+  defaultGhThrottleCliPath, checkoutShimDir,
 } from '../gh-app-shim.mjs';
 
 const CONFIGURED_ENV = {
@@ -60,6 +60,27 @@ describe('defaultShimDir / shimGhPath — deterministic, always named literally 
   });
 });
 
+describe('checkoutShimDir — one shim per checkout, never the machine-wide file every dispatcher rewrote (#4044)', () => {
+  it('is deterministic per throttle path, distinct across checkouts, and never the legacy shared dir', () => {
+    const a = checkoutShimDir({ ghThrottleCliPath: '/w/wev-review-daemon/scripts/lib/gh-throttle.mjs', home: '/Users/op' });
+    const b = checkoutShimDir({ ghThrottleCliPath: '/w/.lanes/lane-46/scripts/lib/gh-throttle.mjs', home: '/Users/op' });
+    expect(a).toBe(checkoutShimDir({ ghThrottleCliPath: '/w/wev-review-daemon/scripts/lib/gh-throttle.mjs', home: '/Users/op' }));
+    expect(a).not.toBe(b);
+    expect(a.startsWith('/Users/op/.claude/github-app-token/gh-shim.d/')).toBe(true);
+    expect(a).not.toBe(defaultShimDir('/Users/op'));
+  });
+  it('buildGhShimSettingsEnv writes THIS checkout\'s shim dir by default (a lane dispatch can no longer repoint the daemon\'s gh)', () => {
+    const writeFile = vi.fn();
+    const out = buildGhShimSettingsEnv({
+      env: CONFIGURED_ENV, pathEnv: '/opt/homebrew/bin', exists: (p) => p === '/opt/homebrew/bin/gh',
+      ghThrottleCliPath: '/w/wev-review-daemon/scripts/lib/gh-throttle.mjs', writeFile, chmod: vi.fn(), mkdir: vi.fn(), rename: vi.fn(),
+    });
+    const dir = checkoutShimDir({ ghThrottleCliPath: '/w/wev-review-daemon/scripts/lib/gh-throttle.mjs' });
+    expect(out.PATH).toBe(`${dir}:/opt/homebrew/bin`);
+    expect(writeFile.mock.calls[0][0]).toBe(join(dir, 'gh'));
+  });
+});
+
 describe('resolveRealGhBinary — pure, given exists', () => {
   it('finds the first PATH entry (other than the shim dir itself) with a `gh` file', () => {
     const exists = (p) => p === '/opt/homebrew/bin/gh';
@@ -69,6 +90,14 @@ describe('resolveRealGhBinary — pure, given exists', () => {
   it('NEVER resolves to the shim dir itself, even if a stale `gh` sits there', () => {
     const exists = (p) => p === '/shim/gh' || p === '/opt/homebrew/bin/gh';
     expect(resolveRealGhBinary({ pathEnv: '/shim:/opt/homebrew/bin', shimDir: '/shim', exists })).toBe('/opt/homebrew/bin/gh');
+  });
+
+  it('skips EVERY generated shim dir (another checkout\'s, or the legacy shared one), never baking a shim in as the real gh (#4044)', () => {
+    const exists = (p) => p.endsWith('/gh');
+    expect(resolveRealGhBinary({
+      pathEnv: '/h/.claude/github-app-token/gh-shim.d/abc:/h/.claude/github-app-token/gh-shim:/opt/homebrew/bin',
+      shimDir: '/h/.claude/github-app-token/gh-shim.d/mine', shimRoot: '/h/.claude/github-app-token', exists,
+    })).toBe('/opt/homebrew/bin/gh');
   });
 
   it('returns null when no PATH entry has a real gh — the caller\'s signal to skip shimming entirely', () => {

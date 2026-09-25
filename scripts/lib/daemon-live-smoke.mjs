@@ -79,6 +79,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { runBounded, resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from './bounded-child.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from './gh-app-shim.mjs';
+import { collectImportClosure, closureHits } from './import-closure.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { gitRun } from './main-staleness.mjs';
 
@@ -268,13 +269,35 @@ async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
 // Cost, accepted: a genuinely exhausted pool (after `--wait-ms` gave it 180s to free up) or a gh/network blip
 // inside the reconcile dry-run records a rejection, as every failure did before Module D; it clears as soon as
 // main or the overlay inputs move.
+//
+// `codeEntries` (#4044): the tree scripts a check RUNS. Live 2026-09-25 a full smoke took 209s under the clone's
+// WRITE lock — lane-acquire-release 172s (waiting on a busy pool), lane-pool-list 30s — so on a main that moves
+// every few minutes the clone was locked most of the time and every daemon on it skipped its ticks ("read lock
+// refused (writer-active)", 13:20Z-13:33Z; #2657 never got its advisory). When the rebuild knows the files that
+// changed since the LAST LIVE-VERIFIED build (`changedFiles`), a tree-code check whose script's import closure
+// none of them touch ran this exact code live already and passed — it is reported `skipped` (ok), not re-run.
+// Unknown diff, an incomplete closure, or any touched file ⇒ the check runs, exactly as before. The gh checks
+// (external, ~1s) always run.
 export const SMOKE_CHECKS = Object.freeze([
-  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: false },
-  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: false },
+  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },
+  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },
   { name: 'gh-api-repo', run: checkGhApiRepo, mayBeTransient: true },
   { name: 'gh-pr-list', run: checkGhPrList, mayBeTransient: true },
-  { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false },
+  { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false, codeEntries: ['scripts/conveyor/reconcile-pass.mjs'] },
 ]);
+
+/**
+ * PURE (given `closureOf`): may `check` be skipped because none of `changedFiles` touches the code it runs?
+ * @param {{check:{codeEntries?:string[]}, changedFiles:string[]|null|undefined, root:string, closureOf?:Function}} o
+ * @returns {boolean}
+ */
+export function checkCodeUnchanged({ check, changedFiles, root, closureOf = collectImportClosure }) {
+  if (!Array.isArray(changedFiles) || !check.codeEntries || !check.codeEntries.length) return false;
+  let closure;
+  try { closure = closureOf({ root, entries: check.codeEntries }); } catch { return false; }
+  const hits = closureHits({ closure, changedFiles });
+  return Array.isArray(hits) && hits.length === 0;
+}
 
 /** PURE: does a completed set of check results pass the gate? Every single check must have passed. */
 export function decideSmokeVerdict(results) {
@@ -289,7 +312,7 @@ export function decideSmokeVerdict(results) {
  */
 export async function runLiveSmoke({
   root, env = process.env, repos = Object.values(CONSTELLATION_REPOS).map((r) => r.slug),
-  runChild = runBounded, now = Date.now(),
+  runChild = runBounded, now = Date.now(), changedFiles = null, closureOf = collectImportClosure,
 } = {}) {
   if (isSmokeGateDisabled(env)) return { pass: true, disabled: true, results: [], sessionSlug: null };
   const budgets = resolveSmokeBudgets(env);
@@ -300,6 +323,13 @@ export async function runLiveSmoke({
   for (const check of SMOKE_CHECKS) {
     const startedAt = Date.now();
     let result;
+    if (checkCodeUnchanged({ check, changedFiles, root, closureOf })) {
+      results.push({
+        name: check.name, ms: 0, ok: true, skipped: true, mayBeTransient: check.mayBeTransient !== false,
+        detail: 'code unchanged since the last live-verified build — not re-run (#4044)',
+      });
+      continue;
+    }
     try {
       result = await check.run(ctx);
     } catch (e) {
@@ -403,6 +433,7 @@ export async function runLiveSmokeWithRetry({
   root, env = process.env, runChild = runBounded, sleep = defaultSleep,
   retries = envNonNegInt(env, SMOKE_TRANSIENT_RETRIES_ENV, 2),
   backoffMs = envMs(env, SMOKE_RETRY_BACKOFF_MS_ENV, 15_000),
+  changedFiles = null,
 } = {}) {
   if (isSmokeGateDisabled(env)) return { verdict: 'pass', disabled: true };
   let smoke;
@@ -410,7 +441,7 @@ export async function runLiveSmokeWithRetry({
   let attempts = 0;
   for (;;) {
     attempts += 1;
-    smoke = await runLiveSmoke({ root, env, runChild });
+    smoke = await runLiveSmoke({ root, env, runChild, changedFiles });
     verdict = classifySmokeFailure(smoke.results);
     if (verdict !== 'transient' || attempts > retries) break;
     await sleep(backoffMs);

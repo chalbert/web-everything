@@ -69,6 +69,7 @@
 
 import { existsSync, writeFileSync, chmodSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCachePath, resolveGithubAppEnvConfig } from './github-app-auth-env.mjs';
@@ -89,6 +90,25 @@ export function defaultShimDir(home = homedir()) {
   return `${home}/.claude/github-app-token/gh-shim`;
 }
 
+/**
+ * #4044 — the shim dir a dispatcher from THIS checkout writes and points its sessions at: one per checkout
+ * (keyed by the throttle CLI path it bakes in), under `gh-shim.d/`. The old single shared `gh-shim/gh` was
+ * rewritten by EVERY dispatcher on the machine, each baking in its own checkout's gh-throttle.mjs path — a lane
+ * clone, a scratch clone, a daemon clone mid-rebuild — so any writer's tree vanishing broke gh for everyone
+ * (live 2026-09-25 08:14 + 09:30 ET: the daemon rebuild's smoke rejected main on `cjs/loader:1227`). Per-checkout,
+ * no other writer (including one still on older code, which only ever writes the legacy path) can clobber it.
+ * @param {{ghThrottleCliPath?:string, home?:string}} [o]
+ */
+export function checkoutShimDir({ ghThrottleCliPath = defaultGhThrottleCliPath(), home = homedir() } = {}) {
+  const key = createHash('sha256').update(resolve(ghThrottleCliPath)).digest('hex').slice(0, 16);
+  return join(home, '.claude', 'github-app-token', 'gh-shim.d', key);
+}
+
+/** The root every generated shim dir lives under — never a real `gh` (see {@link resolveRealGhBinary}). */
+function shimRootFor(home = homedir()) {
+  return join(home, '.claude', 'github-app-token');
+}
+
 /** The shim's own file path — always named literally `gh`, since PATH resolution for a bare `gh` command is
  *  the entire mechanism this shadows. */
 export function shimGhPath(dir = defaultShimDir()) {
@@ -103,10 +123,16 @@ export function shimGhPath(dir = defaultShimDir()) {
  * @param {{pathEnv?:string, shimDir?:string, exists?:(p:string)=>boolean}} [o]
  * @returns {string|null}
  */
-export function resolveRealGhBinary({ pathEnv = process.env.PATH || '', shimDir = defaultShimDir(), exists = existsSync } = {}) {
+export function resolveRealGhBinary({
+  pathEnv = process.env.PATH || '', shimDir = defaultShimDir(), exists = existsSync, shimRoot = shimRootFor(),
+} = {}) {
   const resolvedShimDir = resolve(shimDir);
+  const resolvedRoot = resolve(shimRoot);
   for (const dir of pathEnv.split(':').filter(Boolean)) {
     if (resolve(dir) === resolvedShimDir) continue; // never resolve to ourselves
+    // #4044: nor to ANY generated shim (another checkout's per-checkout dir, or the legacy shared one) — a
+    // dispatcher running under a session's shim PATH would otherwise bake that shim in as its "real" gh.
+    if (resolve(dir).startsWith(`${resolvedRoot}/`)) continue;
     const candidate = join(dir, 'gh');
     if (exists(candidate)) return candidate;
   }
@@ -404,10 +430,12 @@ export function sanitizeSpawnEnv(env = process.env) {
  * @returns {Record<string,string>|null}
  */
 export function buildGhShimSettingsEnv({
-  env = process.env, pathEnv = process.env.PATH || '', cachePath = defaultCachePath(), dir = defaultShimDir(),
+  env = process.env, pathEnv = process.env.PATH || '', cachePath = defaultCachePath(), dir: dirOpt,
   ghThrottleCliPath = defaultGhThrottleCliPath(), cwd, exists, writeFile, chmod, mkdir, readFile,
 } = {}) {
   if (!resolveGithubAppEnvConfig(env)) return null; // opt-in — see the module header
+  // #4044: THIS checkout's own shim dir by default — never the one machine-wide file every dispatcher rewrote.
+  const dir = dirOpt ?? checkoutShimDir({ ghThrottleCliPath });
   const realGhPath = resolveRealGhBinary({ pathEnv, shimDir: dir, exists });
   if (!realGhPath) return null;
   const written = ensureGhShim({ dir, realGhPath, cachePath, ghThrottleCliPath, writeFile, chmod, mkdir });

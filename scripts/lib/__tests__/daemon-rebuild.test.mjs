@@ -152,6 +152,35 @@ describe('rebuildClone', () => {
     expect(state.adopted?.head).toBe(result.head);
   });
 
+  // #4044 live: a full smoke took 209s under the write lock (lane acquire 172s on a busy pool); every daemon on
+  // the clone skipped its ticks meanwhile. The rebuild now hands the smoke the files changed since the LAST
+  // LIVE-VERIFIED build, so tree-code checks whose code is untouched are not re-run.
+  it('passes the smoke the files changed since the adopted build — and null when the current head was never verified', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    // First rebuild: HEAD is not a recorded adopted build yet ⇒ full smoke (changedFiles null).
+    advanceMain(originDir, (dir) => writeFile(dir, 'backlog/1.md', 'one\n'));
+    const first = passSmoke();
+    const r1 = await rebuildClone({ root: cloneDir, env, runSmoke: first, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(r1.adopted).toBe(true);
+    expect(first.mock.calls[0][0].changedFiles).toBeNull();
+    // Second rebuild from the adopted head ⇒ exactly the diff.
+    advanceMain(originDir, (dir) => writeFile(dir, 'backlog/2.md', 'two\n'));
+    const second = passSmoke();
+    const r2 = await rebuildClone({ root: cloneDir, env, runSmoke: second, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(r2.adopted).toBe(true);
+    expect(second.mock.calls[0][0].changedFiles).toEqual(['backlog/2.md']);
+  });
+
+  it('a smoke that holds the write lock 60s+ raises a smoke-slow alert with per-check timings', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'x.txt', 'x\n'));
+    let t = 1_000_000;
+    const runSmoke = vi.fn(async () => { t += 209_000; return { verdict: 'pass', attempts: 1, smoke: { results: [{ name: 'lane-acquire-release', ok: true, ms: 171834 }] } }; });
+    const r = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t });
+    const slow = r.alerts.find((a) => a.kind === 'smoke-slow');
+    expect(slow?.detail).toMatchObject({ ms: 209_000, checks: 'lane-acquire-release:171834ms' });
+  });
+
   it('removes an overlay whose content already landed on main in a different (squashed) form', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/squashed', (dir) => writeFile(dir, 'squash.txt', 'same content\n'));

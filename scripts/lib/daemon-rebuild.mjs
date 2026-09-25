@@ -507,6 +507,9 @@ export function isExternalOnlyFailure(failed) {
   return Array.isArray(failed) && failed.length > 0 && failed.every((r) => r && r.mayBeTransient !== false);
 }
 
+/** A live smoke at least this long (it holds the clone's write lock throughout) raises a `smoke-slow` alert. */
+export const SLOW_SMOKE_ALERT_MS = 60_000;
+
 /** Backoff before an external-only rejection is re-smoked: base * 2^(attempts-1), capped. Env-tunable. */
 export function rejectRetryDelayMs(env, attempts) {
   const base = Number(env?.WE_DAEMON_REJECT_RETRY_BASE_MS) || 5 * 60_000;
@@ -779,7 +782,24 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     }
 
     // ── Step 6: live smoke ─────────────────────────────────────────────────────────────────────────────
-    const smokeResult = await runSmoke({ root, env });
+    // #4044: the files changed since the LAST LIVE-VERIFIED build (HEAD before this move, when it is the adopted
+    // one) — lets the smoke skip a tree-code check whose code none of them touch (see daemon-live-smoke.mjs
+    // SMOKE_CHECKS). Unknown (not the adopted head, a smokeOnly re-verify, a failed diff) ⇒ null ⇒ full smoke.
+    let changedFiles = null;
+    if (!smokeOnly && state.adopted?.head && state.adopted.head === prevHead) {
+      const d = git(['diff', '--name-only', prevHead, plan.finalSha]);
+      if (d.status === 0) changedFiles = String(d.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+    }
+    const smokeStartedMs = nowMs();
+    const smokeResult = await runSmoke({ root, env, changedFiles });
+    const smokeMs = nowMs() - smokeStartedMs;
+    // The smoke runs under the WRITE lock, so every daemon on this clone skips its ticks for its whole duration —
+    // a slow one is the answer to "why was the lock held so long", so it is always on the record.
+    if (smokeMs >= SLOW_SMOKE_ALERT_MS) {
+      alert('smoke-slow', {
+        ms: smokeMs, checks: (smokeResult.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
+      });
+    }
     if (smokeResult.verdict === 'pass') {
       state.adopted = {
         head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
