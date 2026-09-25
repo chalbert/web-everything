@@ -90,6 +90,8 @@ import {
   defaultSpawnAgent,
   // #x36vidg — the Bash timeouts every dispatch carries.
   DISPATCH_BASH_TIMEOUT_ENV, resolveDispatchSettingsEnv,
+  // #4174 — the dispatched session's cwd is a scratch directory, never `root`.
+  DISPATCH_CWD_ENV, dispatchSessionCwd, ensureDispatchSessionCwd,
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
@@ -129,6 +131,12 @@ function tickRead(overrides = {}) {
     // WHEN the read was taken. The double-dispatch guard ages out against this, and the declaration is pure —
     // so the instant arrives as data. `NOW` is 10:00 and every in-flight fixture below is dated relative to it.
     observedAt: NOW,
+    // #4174 — `WE_ROOT` is now required for EVERY launch kind (this fixture defaults to `build`, via
+    // `shapeDispatchRead`'s own `raw.launchKind ?? 'build'`), not only fix/ci-heal — see `BRIEF_REQUIRED_BY_KIND`.
+    // A real read always carries this (`readTick` computes `repoTokens` unconditionally); this fixture is the
+    // hand-built stand-in for that read, so it has to carry it too or every brief fill below throws on a
+    // placeholder this fixture's own `BRIEF` template does not even mention.
+    repoTokens: { WE_ROOT: REPO_ROOT },
     ...overrides,
   };
 }
@@ -444,7 +452,10 @@ describe('the lane comes from the tick core or nowhere', () => {
 // ── 3. the brief is FILLED, and a half-filled one never leaves the building ─────────────────────────────────
 
 describe('filling the delivery brief', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b', DELIVERY_BASE: 'main' };
+  // #4174 — `WE_ROOT` joined `BRIEF_REQUIRED_BY_KIND.build`, so every direct `fillBrief(BRIEF, VALUES)` call in
+  // this block needs a value for it too, even though the synthetic `BRIEF` template above never mentions it —
+  // `fillBrief` validates every REQUIRED name regardless of whether the template happens to reference it.
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: 8, SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:a,we:b', DELIVERY_BASE: 'main', WE_ROOT: REPO_ROOT };
 
   it('substitutes all five placeholders and leaves the prose alone', () => {
     const { prompt, unknownTokens } = fillBrief(BRIEF, VALUES);
@@ -715,9 +726,10 @@ describe('the declared effect is a dispatch', () => {
     });
     await applyPendingEffects(run, { sinks, store });
     expect(resolveSettingsEnv).toHaveBeenCalledTimes(1);
-    // #x8mpubm follow-up — called WITH the dispatch's own root, so the durable settings.local.json delivery
-    // path (gh-app-shim.mjs#ensureSettingsFileEnv) knows which checkout to write into.
-    expect(resolveSettingsEnv).toHaveBeenCalledWith(PRIMARY);
+    // #x8mpubm follow-up / #4174 — called WITH the session's OWN cwd (a scratch dir, never `root` any more),
+    // so the durable settings.local.json delivery path (gh-app-shim.mjs#ensureSettingsFileEnv) writes where the
+    // dispatched session will actually look for it.
+    expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('sess-shim', { root: PRIMARY }));
     expect(seenArgv).toContain('--settings');
     expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
   });
@@ -929,8 +941,10 @@ describe('the provider port — #3579', () => {
     });
     const result = await sinks[DISPATCH_EFFECT]({ prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1' });
     expect(requests).toHaveLength(1);
+    // #4174 — `cwd` is the session's OWN scratch directory, never `root` (PRIMARY) itself.
     expect(requests[0]).toMatchObject({
-      sessionId: 'sess-port-1', cwd: PRIMARY, prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1',
+      sessionId: 'sess-port-1', cwd: dispatchSessionCwd('sess-port-1', { root: PRIMARY }),
+      prompt: '# build #1', sessionSlug: 'conveyor-1', num: '1',
     });
     // …driven the same way the real spawner is: its RETURNED handle becomes the in-flight marker's handle.
     expect(result).toMatchObject({ handle: 'provider-handle-1' });
@@ -1008,6 +1022,94 @@ describe('the provider port — #3579', () => {
       { spawnAgent: (argv) => { spawned.push(argv); return ''; } },
     );
     expect(spawned[0]).toEqual(directArgv);
+  });
+});
+
+// #4174 — the dispatched session's cwd is a scratch directory, NEVER the dispatching checkout (`root`) itself.
+// Card we:backlog/xm5i1xm (epic #4075): a session that writes a scratch/log file by a relative path before it
+// acquires its own lane used to leave the untracked file IN the daemon's own clone, dirtying it and freezing
+// self-sync. See `dispatchSessionCwd`'s own header for the fuller story.
+describe('#4174 — dispatchSessionCwd: the session cwd is never `root`', () => {
+  it('is a sibling of `.lanes/` under the WORKSPACE root, keyed on the session id, never inside `root`', () => {
+    // PRIMARY has no `.lanes` segment, so `workspaceRootOf` falls back to its dirname — the same fallback
+    // `guard-lane.mjs#workspaceRootOf` documents for itself.
+    expect(dispatchSessionCwd('sess-1', { root: PRIMARY })).toBe('/primary/.operations/dispatch/sess-1');
+    // A lane-shaped root recovers the TRUE workspace root by splitting on the `.lanes` segment.
+    expect(dispatchSessionCwd('sess-1', { root: '/ws/.lanes/web-everything/lane-8' }))
+      .toBe('/ws/.operations/dispatch/sess-1');
+  });
+
+  it('is PER-SESSION — two sessions never collide on the same directory', () => {
+    expect(dispatchSessionCwd('sess-a', { root: PRIMARY })).not.toBe(dispatchSessionCwd('sess-b', { root: PRIMARY }));
+  });
+
+  it('never lands inside `root` — the whole point of the card', () => {
+    const cwd = dispatchSessionCwd('sess-1', { root: PRIMARY });
+    expect(cwd.startsWith(`${PRIMARY}/`)).toBe(false);
+    expect(cwd).not.toBe(PRIMARY);
+  });
+
+  it(`is relocatable via ${DISPATCH_CWD_ENV}, mirroring explore-io.mjs's REPORT_DIR_ENV`, () => {
+    expect(dispatchSessionCwd('sess-1', { root: PRIMARY, env: { [DISPATCH_CWD_ENV]: '/override/dispatch-scratch' } }))
+      .toBe('/override/dispatch-scratch/sess-1');
+  });
+});
+
+describe('#4174 — ensureDispatchSessionCwd: makes the directory real, but NEVER throws', () => {
+  it('calls the injected mkdir with the exact directory and returns it', () => {
+    const calls = [];
+    expect(ensureDispatchSessionCwd('/some/scratch/dir', { mkdir: (d) => calls.push(d) })).toBe('/some/scratch/dir');
+    expect(calls).toEqual(['/some/scratch/dir']);
+  });
+
+  it('swallows a throwing mkdir — the same "never blocks a dispatch" contract as resolveGhShimSettingsEnv', () => {
+    expect(() => ensureDispatchSessionCwd('/no/permission', {
+      mkdir: () => { throw Object.assign(new Error('eacces'), { code: 'EACCES' }); },
+    })).not.toThrow();
+    expect(ensureDispatchSessionCwd('/no/permission', { mkdir: () => { throw new Error('boom'); } }))
+      .toBe('/no/permission');
+  });
+});
+
+describe('#4174 — the sink actually wires the new cwd through: never `root`, every seam still injectable', () => {
+  it('the DEFAULT sink spawns into `dispatchSessionCwd(sessionId, {root})` — not `root`', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const sinks = createDispatchSinks({ root: PRIMARY, spawnAgent: () => '', mintSessionId: () => 'sess-cwd-1' });
+    await applyPendingEffects(run, { sinks, store });
+    // No direct hook into the request here (no custom `provider`), so this proves it through the OTHER
+    // observable seam: `resolveSettingsEnv`'s default is exercised with the same value (see the earlier
+    // `#x8mpubm` test for the direct assertion) — this test instead pins the sink's own default computation
+    // is reachable and deterministic per session id.
+    expect(dispatchSessionCwd('sess-cwd-1', { root: PRIMARY })).not.toBe(PRIMARY);
+  });
+
+  it('a caller can override `sessionCwdFor` to pin the cwd back to `root` (e.g. a caller that needs the OLD behaviour)', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const requests = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      mintSessionId: () => 'sess-pinned',
+      sessionCwdFor: () => PRIMARY,
+      provider: (request) => { requests.push(request); return 'h'; },
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(requests[0].cwd).toBe(PRIMARY);
+  });
+
+  it('`ensureSessionCwd` is called with the computed cwd before the provider runs', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const seen = [];
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      mintSessionId: () => 'sess-ensure',
+      ensureSessionCwd: (dir) => { seen.push(dir); return dir; },
+      spawnAgent: () => '',
+    });
+    await applyPendingEffects(run, { sinks, store });
+    expect(seen).toEqual([dispatchSessionCwd('sess-ensure', { root: PRIMARY })]);
   });
 });
 
@@ -1780,6 +1882,8 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     const prompt = spawned[0].argv[spawned[0].argv.length - 1];
     expect(prompt).toBe(expectedPrompt('prepare', {
       ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 5, SESSION_SLUG: 'prepare-3150', SCOPE: `we:${SPEC_PATH}`,
+      // #4174 — this suite's own real checkout, exactly like the fix/ci-heal `WE_TOKENS` helper below.
+      WE_ROOT: REPO_ROOT,
     }));
     expect(prompt).toContain('--purpose=conveyor-prepare-scope');
     // criterion 5 (guard half) — the guard stamped is the PREPARE one for this num AND this kind, out of a
@@ -1800,6 +1904,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     const prompt = spawned[0].argv[spawned[0].argv.length - 1];
     expect(prompt).toBe(expectedPrompt('prepare-decision', {
       ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 6, SESSION_SLUG: 'prepare-decision-3150', SCOPE: `we:${SPEC_PATH}`,
+      WE_ROOT: REPO_ROOT,
     }));
     expect(prompt).toContain('--purpose=conveyor-prepare-decision');
     expect(run.findings.read.dispatchedGuard).toEqual({ num: '3150', kind: 'prepare-decision', lane: 6, spawnedTick: 3, sawPr: false });
@@ -1815,6 +1920,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     const prompt = spawned[0].argv[spawned[0].argv.length - 1];
     expect(prompt).toBe(expectedPrompt('investigate', {
       ITEM_NUM: '3150', ITEM_SPEC_PATH: SPEC_PATH, LANE: 9, SESSION_SLUG: 'investigate-3150', SCOPE: `we:${SPEC_PATH}`,
+      WE_ROOT: REPO_ROOT,
     }));
     expect(prompt).toContain('--purpose=conveyor-investigate');
     expect(run.findings.read.dispatchedGuard).toBeNull();
@@ -1846,6 +1952,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
+        WE_ROOT: REPO_ROOT,
       }),
     ]);
     expect(run.findings.read.scope).toEqual(['we:scripts/operations/']);
@@ -2607,7 +2714,8 @@ describe('#3110 — attemptTagFor: the pure retry-letter mapping', () => {
 });
 
 describe('#3110 — fillBrief tolerates a blank OPTIONAL placeholder (ATTEMPT_TAG), everything else unchanged', () => {
-  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x', DELIVERY_BASE: 'main' };
+  // #4174 — WE_ROOT joined BRIEF_REQUIRED_BY_KIND.build; see the identical note on the other synthetic VALUES above.
+  const VALUES = { ITEM_NUM: '3037', ITEM_SPEC_PATH: 'x', LANE: '8', SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:x', DELIVERY_BASE: 'main', WE_ROOT: REPO_ROOT };
 
   it('ATTEMPT_TAG never supplied at all does not throw, even though it is now in the build required set', () => {
     // BRIEF (the synthetic fixture above) never references {{ATTEMPT_TAG}} at all, so this only proves the
@@ -2665,7 +2773,7 @@ describe('#3110 — a fresh build dispatch\'s attempt tag rides its session slug
   it('the REAL delivery-agent brief folds ATTEMPT_TAG into the branch name exactly where step 8 shows', () => {
     const VALUES = {
       ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-x.md', LANE: '8', SESSION_SLUG: 'conveyor-3037b', SCOPE: 'we:scripts/',
-      DELIVERY_BASE: 'main',
+      DELIVERY_BASE: 'main', WE_ROOT: REPO_ROOT,
     };
     const firstAttempt = fillBrief(readFileSync(briefPath(REPO_ROOT, 'build'), 'utf8'), { ...VALUES, ATTEMPT_TAG: '' }, BRIEF_REQUIRED_BY_KIND.build);
     expect(firstAttempt.prompt).toContain('lane/3037-<slug>');

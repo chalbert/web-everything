@@ -55,6 +55,8 @@ async function parkOneDispatch() {
       notes: [],
       bookkeepingSource: 'file',
       observedAt: new Date().toISOString(),
+      // #4174 — WE_ROOT joined BRIEF_REQUIRED_BY_KIND.build; a real `readTick` always carries `repoTokens`.
+      repoTokens: { WE_ROOT: PRIMARY },
     }),
   }));
   const store = createFileRunStore(dir);

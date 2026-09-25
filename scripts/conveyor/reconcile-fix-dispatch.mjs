@@ -81,6 +81,10 @@ import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
   defaultSpawnAgent, DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, findItem, normalizeHandle, parseBackgroundedId,
   resolveGhShimSettingsEnv, resumeSucceeded, REPO_ROOT,
+  // #4174 — the SAME "never spawn into `root` itself" fix `dispatch-lane-io.mjs#createDispatchSinks` applies;
+  // this file is a SEPARATE fresh-dispatch call site (see `dispatchFix`'s own docblock), so it needs the same
+  // two seams wired in here rather than inheriting them for free.
+  dispatchSessionCwd, ensureDispatchSessionCwd,
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
@@ -549,6 +553,11 @@ export function tryResumeFix(planned, {
   acquireClaim = acquireFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
+  // #4174 — the resume TRIGGER is a short synchronous `claude --bg --resume <id>` invocation of its own (a
+  // fresh OS process), so it gets the same "never `root` itself" cwd as `dispatchFix`'s fresh spawn, keyed on
+  // the candidate id being resumed rather than a freshly minted one (nothing else needs to address it).
+  sessionCwdFor = (id) => dispatchSessionCwd(id, { root }),
+  ensureSessionCwd = ensureDispatchSessionCwd,
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more: `runReconcileFixDispatch` is the ONE place that
   // decides whether this repo's `fix` capability is on (`docs/agent/platform-decisions.md#conveyor-multi-repo-
@@ -629,8 +638,12 @@ export function tryResumeFix(planned, {
     payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
     resumeSessionId: candidate,
   });
+  // #4174 — same "never `root` itself" cwd as the fresh-dispatch spawn below; see this function's own new
+  // param comment. The resumed AGENT keeps running in whatever cwd its own session already occupies (its
+  // lane, by the time a resume is attempted) — this only affects where THIS one-shot trigger process starts.
+  const resumeCwd = ensureSessionCwd(sessionCwdFor(candidate));
   let stdout = '';
-  try { stdout = String(spawnAgent(resumeArgv, { cwd: root }) ?? ''); } catch { stdout = ''; }
+  try { stdout = String(spawnAgent(resumeArgv, { cwd: resumeCwd }) ?? ''); } catch { stdout = ''; }
   const printedId = parseBackgroundedId(stdout);
 
   // Hardening (2) — see the docblock above. A bounded retry, not an unbounded poll: each attempt is a
@@ -744,6 +757,10 @@ export function dispatchFix(planned, {
   acquireClaim = acquireFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
+  // #4174 — same two seams `createDispatchSinks` takes: WHERE this session's cwd is (a scratch directory,
+  // never `root` itself) and making that directory real. See `dispatchSessionCwd`'s own header at the io shell.
+  sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
+  ensureSessionCwd = ensureDispatchSessionCwd,
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
   // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
@@ -783,6 +800,9 @@ export function dispatchFix(planned, {
       ...tokens,
     }, BRIEF_REQUIRED_BY_KIND.fix, optionalNames, REPO_AWARE_VALUE_PATTERNS);
     const sessionId = String(mintSessionId());
+    // #4174 — THE FIX: this session's cwd is a scratch directory outside `root`, never `root` itself (see
+    // `dispatchSessionCwd`'s own header at the io shell for why — the identical bug `createDispatchSinks` had).
+    const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
     const argv = buildAgentArgv({
       sessionId,
       payload: { prompt, sessionSlug },
@@ -793,15 +813,15 @@ export function dispatchFix(planned, {
       // #x8mpubm — see `resolveSettingsEnv`'s own param comment above; resolved once, here, for this FRESH
       // dispatch only (never for `tryResumeFix`'s own `buildAgentArgv` call, which must stay a bare
       // `--bg --resume` with no other flag — see that function's docblock). #x8mpubm follow-up (live-caught
-      // 2026-09-24) — `root` is now threaded through so the durable `.claude/settings.local.json` delivery
-      // (`gh-app-shim.mjs#ensureSettingsFileEnv`) writes into the SAME checkout this dispatch starts in,
-      // matching `review-dispatch.mjs#dispatchReview`'s own fix for the identical gap.
-      settingsEnv: resolveSettingsEnv(root),
+      // 2026-09-24) — written into `<sessionCwd>/.claude/settings.local.json` (#4174) — the cwd this dispatch
+      // ACTUALLY starts in, not `root`'s — matching `review-dispatch.mjs#dispatchReview`'s own fix for the
+      // identical gap.
+      settingsEnv: resolveSettingsEnv(sessionCwd),
     });
     // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
     // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
     // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
-    const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+    const stdout = String(spawnAgent(argv, { cwd: sessionCwd }) ?? '');
     // #x0jphk5 — the claim is DELIBERATELY NOT released here on success: see this function's own docblock for
     // why it must outlive this call (the 26+s listing-lag window a fresh spawn is exposed to).
     return {

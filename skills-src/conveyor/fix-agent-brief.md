@@ -81,6 +81,12 @@ node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} 
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**
 (not to `origin/main`), so your clone opens at the exact HEAD the reviewer saw:
 
+> **You started in a scratch directory, not a checkout** — and it holds nothing of `scripts/`, which is why
+> `{{WE_ROOT}}` qualifies every tool call in this brief (see step "cd `$LANE` just left WE's own checkout"
+> below). Never write a file there by a relative path, and never write ANYTHING into `{{WE_ROOT}}` itself (the
+> checkout that dispatched you): either one left dirty by a stray write is how a dispatcher's own clone gets
+> stuck refusing every future dispatch as stale (#4174).
+
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
 LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --lane={{LANE}} --purpose=conveyor-fix \

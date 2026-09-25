@@ -25,6 +25,7 @@ JUDGMENT (predict the touch-set); every script-decidable step around it is a scr
 | `{{ITEM_SPEC_PATH}}` | the item's backlog file — `backlog/{{ITEM_NUM}}-<slug>.md` (the ONLY file you edit) |
 | `{{LANE}}` | the free lane id the skill assigned this prepare (from the free-lane set) — e.g. `4` |
 | `{{SESSION_SLUG}}` | the per-item prepare session slug — `prepare-{{ITEM_NUM}}` (ties `acquire`↔`release`) |
+| `{{WE_ROOT}}` | **#4174** — the absolute WE checkout you are dispatched FROM. You start in a scratch directory outside it (never inside it — see step 1), so this is the only way step 1's `lane-pool.mjs` is findable before you have a lane of your own. |
 
 > **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — the skill substitutes them before
 > spawning you (the table above). `<like-this>` are **agent-runtime values** you produce as you work — the
@@ -51,9 +52,14 @@ the item — you only author its scope.
 
 ### 1. Acquire a lane-pool clone (never edit the primary checkout)
 
+> **You started in a scratch directory, not a checkout.** It holds nothing of `scripts/` — never write a file
+> there by a relative path, and never write ANYTHING into `{{WE_ROOT}}` itself (the checkout that dispatched
+> you): either one left dirty by a stray write is how a dispatcher's own clone gets stuck refusing every future
+> dispatch as stale (#4174). Everything you do belongs in `$LANE`, from the moment it exists.
+
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-prepare-scope \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpose=conveyor-prepare-scope \
   --session={{SESSION_SLUG}} --scope=we:{{ITEM_SPEC_PATH}}) && cd "$LANE"
 ```
 

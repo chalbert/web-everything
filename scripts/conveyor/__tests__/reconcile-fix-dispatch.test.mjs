@@ -13,7 +13,7 @@ import {
   findResumeCandidate, buildResumePrompt, tryResumeFix,
 } from '../reconcile-fix-dispatch.mjs';
 import { CONFLICT_LABEL } from '../parked-pr-conflict-watch.mjs';
-import { DISPATCHED_AGENT_SYSTEM_PROMPT_FILE } from '../../operations/dispatch-lane-io.mjs';
+import { DISPATCHED_AGENT_SYSTEM_PROMPT_FILE, dispatchSessionCwd } from '../../operations/dispatch-lane-io.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
 
 // A `checkStaleness` stub that never touches git — every test below injects one.
@@ -433,7 +433,8 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     );
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].opts).toEqual({ cwd: '/repo' });
+    // #4174 — cwd is a scratch directory outside `root`, never `root` itself.
+    expect(calls[0].opts).toEqual({ cwd: dispatchSessionCwd('11111111-1111-4111-8111-111111111111', { root: '/repo' }) });
     expect(calls[0].argv).toEqual([
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
@@ -467,10 +468,10 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         resolveSettingsEnv,
       },
     );
-    // #x8mpubm follow-up (live-caught 2026-09-24) — `root` must reach the resolver so the durable
-    // `.claude/settings.local.json` delivery (`gh-app-shim.mjs#ensureSettingsFileEnv`) targets the SAME
-    // checkout this dispatch actually starts in.
-    expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
+    // #x8mpubm follow-up / #4174 — the session's OWN cwd (a scratch dir, never `root` any more) must reach the
+    // resolver so the durable `.claude/settings.local.json` delivery (`gh-app-shim.mjs#ensureSettingsFileEnv`)
+    // targets the SAME directory this dispatch actually starts in.
+    expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('sid', { root: '/repo' }));
     expect(calls[0]).toContain('--settings');
     expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
   });

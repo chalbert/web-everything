@@ -59,6 +59,11 @@ then **EXIT WITHOUT MERGING** — and **NEVER touch the review label** (`review:
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**, so
 your clone opens at the exact HEAD that was pushed:
 
+> **You started in a scratch directory, not a checkout** — and it holds nothing of `scripts/`, which is why
+> `{{WE_ROOT}}` qualifies every tool call in this brief. Never write a file there by a relative path, and never
+> write ANYTHING into `{{WE_ROOT}}` itself (the checkout that dispatched you): either one left dirty by a stray
+> write is how a dispatcher's own clone gets stuck refusing every future dispatch as stale (#4174).
+
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
 LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --lane={{LANE}} --purpose=conveyor-ci-heal \

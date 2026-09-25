@@ -22,6 +22,7 @@ import {
   TOOL_FREE_ONLY_JUDGE_PROVIDERS,
 } from '../review-dispatch.mjs';
 import { buildReviewJudgeRequest, DEFAULT_LENS } from '../review-pr.mjs';
+import { dispatchSessionCwd } from '../dispatch-lane-io.mjs';
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
 // below don't hand-duplicate the join.
@@ -67,8 +68,10 @@ describe('reviewSessionSlug', () => {
 });
 
 describe('fillReviewBrief', () => {
+  // #4174 — WE_ROOT joined REVIEW_BRIEF_PLACEHOLDERS; see that export's own comment.
   const values = {
     PR: 1234, REPO: 'chalbert/web-everything', SESSION_SLUG: 'review-1234', JUDGE_PROVIDER: 'claude', LANE_REPO: '.',
+    WE_ROOT: '/repo',
   };
 
   it('substitutes the placeholders the template actually uses, and reports (never refuses) an unrelated '
@@ -104,8 +107,8 @@ describe('fillReviewBrief', () => {
     expect(canonicalReviewPlaceholder('bogus')).toBeNull();
   });
 
-  it('the placeholder roster is exactly PR, REPO, SESSION_SLUG, JUDGE_PROVIDER (#xqa9ttq)', () => {
-    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO']);
+  it('the placeholder roster is exactly PR, REPO, SESSION_SLUG, JUDGE_PROVIDER, LANE_REPO, WE_ROOT (#xqa9ttq / #4174)', () => {
+    expect(REVIEW_BRIEF_PLACEHOLDERS).toEqual(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO', 'WE_ROOT']);
   });
 
   it('refuses a missing JUDGE_PROVIDER value exactly like any other declared placeholder (#xqa9ttq)', () => {
@@ -129,7 +132,8 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].opts).toEqual({ cwd: '/repo' });
+    // #4174 — cwd is a scratch directory outside `root`, never `root` itself.
+    expect(calls[0].opts).toEqual({ cwd: dispatchSessionCwd('11111111-1111-4111-8111-111111111111', { root: '/repo' }) });
     expect(calls[0].argv).toEqual([
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
@@ -166,7 +170,8 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       resolveSettingsEnv,
     });
     expect(resolveSettingsEnv).toHaveBeenCalledTimes(1);
-    expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
+    // #4174 — the session's OWN cwd (a scratch dir, never `root` any more).
+    expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('11111111-1111-4111-8111-111111111111', { root: '/repo' }));
     expect(calls[0].argv).toContain('--settings');
     expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
   });
@@ -606,7 +611,9 @@ it('fills the real brief with the selected repo pool on acquire and release', as
       checkStaleness: FRESH, readBrief: () => template, spawnAgent: () => '', mintSessionId: () => 'session',
     });
     expect(result.sessionSlug).toBe(sessionSlug);
-    expect(result.prompt).toContain(`lane-pool.mjs acquire --repo=${laneRepo}`);
+    // #4174 — the acquire line is now `node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire …`, absolute-path
+    // qualified (the closing quote lands right before `acquire`).
+    expect(result.prompt).toContain(`lane-pool.mjs" acquire --repo=${laneRepo}`);
     expect(result.prompt).toContain(`lane-pool.mjs release --all-pools --session=${sessionSlug}`);
     expect(result.unknownTokens).not.toContain('{{LANE_REPO}}');
   }
@@ -618,5 +625,8 @@ it('refuses a missing foreign checkout before spawning', () => {
   expect(() => planReviewDispatch(options)).toThrow(/unsupported-repo.*plateau-app.*\/missing\/workspace\/plateau-app/);
   expect(() => dispatchReview({ ...options, root: '/repo', checkStaleness: FRESH, spawnAgent: (...args) => calls.push(args) })).toThrow(/unsupported-repo/);
   expect(calls).toEqual([]);
-  expect(() => fillReviewBrief('{{lane-repo}}', { PR: 49, REPO: 'chalbert/plateau-app', SESSION_SLUG: 'review-pa-49', JUDGE_PROVIDER: 'claude', LANE_REPO: '/home/test/workspace/plateau-app' })).toThrow(/MISSPELLED/);
+  expect(() => fillReviewBrief('{{lane-repo}}', {
+    PR: 49, REPO: 'chalbert/plateau-app', SESSION_SLUG: 'review-pa-49', JUDGE_PROVIDER: 'claude',
+    LANE_REPO: '/home/test/workspace/plateau-app', WE_ROOT: '/repo',
+  })).toThrow(/MISSPELLED/);
 });

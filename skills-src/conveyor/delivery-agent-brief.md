@@ -19,6 +19,7 @@
 | `{{SCOPE}}` | the item's predicted `scope:` frontmatter, repo-qualified & comma-joined — e.g. `we:scripts/conveyor,we:.claude/skills/conveyor` |
 | `{{ATTEMPT_TAG}}` | **#3110** — empty on a first attempt, a letter (`b`, `c`, …) on a retry of this same item. Fold it in EXACTLY where step 8 shows, right after `{{ITEM_NUM}}` in the branch name — this is what lets the observer tell your attempt's PR apart from a sibling retry's. Never invent your own retry marker in its place. |
 | `{{DELIVERY_BASE}}` | **#3637** — the branch this item forks from and lands on. `main` for almost everything (then every step below is exactly as written). A **registered POC branch** (e.g. `lane/mechanical-dispatcher`) when the item's `deliveryTarget:` names one — and then step 8 changes: **no PR at all**, see *“If `{{DELIVERY_BASE}}` is not `main`”* there. |
+| `{{WE_ROOT}}` | **#4174** — the absolute WE checkout you are dispatched FROM. You start in a scratch directory outside it (never inside it — see step 1), so this is the only way step 1's `lane-pool.mjs` is findable before you have a lane of your own. |
 
 > **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — the skill substitutes them from the
 > launch entry before spawning you (the table above). `<like-this>` are **agent-runtime values** you produce as
@@ -40,9 +41,14 @@ claim and the resolve ride the PR — step 8), open a PR (`ready-to-merge`, or p
 
 ### 1. Acquire a lane-pool clone (never edit the primary checkout)
 
+> **You started in a scratch directory, not a checkout.** It holds nothing of `scripts/` — never write a file
+> there by a relative path, and never write ANYTHING into `{{WE_ROOT}}` itself (the checkout that dispatched
+> you): either one left dirty by a stray write is how a dispatcher's own clone gets stuck refusing every future
+> dispatch as stale (#4174). Everything you do belongs in `$LANE`, from the moment it exists.
+
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-delivery \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpose=conveyor-delivery \
   --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --base={{DELIVERY_BASE}} --adopt) && cd "$LANE"
 ```
 
