@@ -856,6 +856,30 @@ describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable
   it('REFUSAL_KINDS names owed-ci-rerun — an unnamed refusal is a bug', () => {
     expect(REFUSAL_KINDS).toContain('owed-ci-rerun');
   });
+
+  // we:backlog/xudx8ff-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: PRs #2635/#2636 are BOTH owed-ci-rerun
+  // (their failure falls inside a real main-red window) AND mergeStateStatus: 'DIRTY' (a genuine conflict with
+  // main, confirmed live via `gh pr view --json mergeStateStatus,mergeable`). A mechanical rebase can never
+  // clear a real conflict, so refusing owed-ci-rerun here left them stuck forever — no other pass ever plans a
+  // fixer for a PR this branch refuses. A DIRTY PR must fall through to the ordinary ci-heal path instead.
+  it('#xudx8ff — a DIRTY (conflicting) PR falls through to ci-heal instead of owed-ci-rerun, even inside a real main-red window', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY' })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635, attempts: 0 })]);
+  });
+
+  it('#xudx8ff — a DIRTY PR still respects the ci-heal cap once its own durable attempt count is exhausted', () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY', comments })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2635, cap: CI_HEAL_ROUND_CAP })]);
+  });
 });
 
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
