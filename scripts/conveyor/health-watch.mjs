@@ -39,6 +39,9 @@ import {
   DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, MINUTE,
 } from './health-watch-core.mjs';
 import { SMELLS } from './health-smells/index.mjs';
+import { healthDir, healthSectionLines } from './health-watch-section.mjs';
+
+export { healthDir, healthSectionLines };
 import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
@@ -55,7 +58,6 @@ export const CHILD_TIMEOUT_MS = 30_000;
 
 // ── paths ────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export function healthDir(stateRoot) { return join(stateRoot ?? pinnedStateRoot() ?? REPO_ROOT, '.conveyor', 'health'); }
 export function defaultLogsDir(env = process.env) {
   return env.HEALTH_WATCH_LOGS_DIR || join(homedir(), 'workspace', 'wev-review-daemon', '.conveyor');
 }
@@ -328,14 +330,6 @@ export async function tick(flags = {}) {
     section: renderHealthSection(state, { now, reportDir }),
     skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
   };
-}
-
-/** For the operator queue (wired in a follow-up once #4139 lands): the HEALTH section as lines. */
-export function healthSectionLines({ stateRoot, now = Date.now() } = {}) {
-  const dir = healthDir(stateRoot);
-  const state = readJson(join(dir, 'state.json'), null);
-  const lastTick = readJson(join(dir, 'last-tick.json'), state?.lastTick ?? null);
-  return renderHealthSection({ ...(state || {}), lastTick }, { now, reportDir: join(dir, 'episodes') });
 }
 
 function parseFlags(argv) {

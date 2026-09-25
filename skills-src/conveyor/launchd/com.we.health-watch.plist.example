@@ -14,14 +14,14 @@
 	  2. Replace <app-id>, <installation-id>, <path-to-private-key.pem> with the real GitHub App values (never
 	     commit them). The watch's `gh pr list` then draws on the App's budget, not the operator's.
 	  3. CONVEYOR_STATE_ROOT pins the episode store to the operator's primary checkout (#4052), so
-	     `node scripts/conveyor/health-watch.mjs section` (and, once wired, the operator queue) run from that
+	     `operator-queue.mjs --with-health` (and `health-watch.mjs section`) run from that
 	     checkout read the same store the daemon writes: <root>/.conveyor/health/.
 	  4. HEALTH_WATCH_LOGS_DIR is where the other daemons' launchd logs live (their StandardErrorPath dir).
 	  5. PASS_DAEMON_SELF_SYNC=1 turns self-sync ON explicitly for this pass-daemon (it is opt-in on that runner).
 
 	INSTALL:  cp this file to ~/Library/LaunchAgents/com.we.health-watch.plist (drop `.example`), then
 	          launchctl load ~/Library/LaunchAgents/com.we.health-watch.plist
-	CHECK:    node ~/workspace/webeverything/scripts/conveyor/health-watch.mjs section
+	CHECK:    node ~/workspace/webeverything/scripts/operations/operator-queue.mjs --with-health   (first line = last-tick age)
 	-->
 	<key>EnvironmentVariables</key>
 	<dict>

@@ -671,3 +671,25 @@ describe('scrubDeep', () => {
     expect(out.b).toEqual({ n: 3, sha: '0123456789abcdef0123456789abcdef01234567' });
   });
 });
+
+// 2026-09-25 13:35 ET, live: the review daemon failed every review (`<repo>#N failed (non-fatal): … N commit(s)
+// behind origin/main`) because the rebuild refused to move a DIRTY clone.
+describe('review-daemon per-PR failures and the dirty-clone hold', () => {
+  it('parses `<repo>#N failed (non-fatal)` as a blocking stale-checkout reason tied to the PR', () => {
+    const p = parseDaemonLog([
+      'review-daemon: tick (a, b) — 9 owed, dispatched 0, failed 9',
+      'review-daemon: chalbert/web-everything#2672 failed (non-fatal): review-dispatch: the dispatching checkout is 10 commit(s) behind origin/main — refusing to dispatch a review',
+    ].join('\n'));
+    expect(p.ticks[0].blocking).toContain('stale-checkout: dispatching clone behind origin/main');
+    expect(p.ticks[0].prs).toEqual([{ pr: 'chalbert/web-everything#2672', reason: 'stale-checkout: dispatching clone behind origin/main' }]);
+  });
+  it('a `dirty` rebuild alert holds the clone open until the next adoption', () => {
+    const at = Date.parse('2026-09-25T17:35:18.330Z');
+    const probe = (adoptedAt) => ({ selfSync: [{ cloneKey: 'k', alerts: [{ at, kind: 'dirty', detail: ['M scripts/conveyor/run-scorecards.json'] }], rebuild: { adopted: adoptedAt ? { at: adoptedAt } : null, rejected: null, quarantine: null, inProgress: null } }] });
+    const later = at + 60 * 60_000;
+    const held = cloneStale.evaluate(probe(null), { now: later, daemons: {} })[0];
+    expect(held.breach).toBe(true);
+    expect(held.recommendation).toMatch(/local modifications/);
+    expect(cloneStale.evaluate(probe(at + 5 * 60_000), { now: later, daemons: {} })[0].breach).toBe(false);
+  });
+});

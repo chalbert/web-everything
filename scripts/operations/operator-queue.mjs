@@ -42,6 +42,7 @@ import { readUnsupported } from '../conveyor/unsupported-repo.mjs';
 // `we:scripts/conveyor/stuck-pr-dispatch-marker.mjs`'s own header for the full story.
 import { stuckDispatchEpisodes } from '../conveyor/stuck-pr-dispatch-marker.mjs';
 import { countStandDownComments, standDownComments, standDownReason } from '../conveyor/stand-down.mjs';
+import { healthSectionLines } from '../conveyor/health-watch-section.mjs';
 const hasLabel = (pr, name) => (pr.labels ?? []).some((label) => label.name === name);
 
 /** How many times an UNKNOWN mergeability is re-polled, and the first backoff (doubling each attempt). */
@@ -257,7 +258,11 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
   // this file's own PR-queue `execFileSync('gh', …)` sequence so the shared-mock call-queue tests above are
   // never silently thrown off by an uncounted extra call.
   const backpressure = args.includes('--with-backpressure') ? backpressureRows(prLimitCounts()) : [];
-  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions, backpressure };
+  // #4077 — HEALTH is opt-in via `--with-health`, like the two sections above: it reads the health watch's own
+  // store (`we:scripts/conveyor/health-watch-section.mjs`, no child process). When on, it is the FIRST thing
+  // printed, and its first line is the health watch's last-tick-completed age.
+  const health = args.includes('--with-health') ? healthSectionLines() : null;
+  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions, backpressure, ...(health ? { health } : {}) };
   for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
@@ -307,6 +312,7 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     console.log(JSON.stringify(report, null, 2));
   } else {
     for (const error of report.errors) console.error(`ERROR ${error}`);
+    if (health) console.log(health.join('\n'));
     console.log('NEEDS YOU (review:human + advisory:accepted, all gates pass):');
     console.log(report.ready.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}`).join('\n') || '(none)');
     console.log('PENDING — transient, re-run (GitHub is still computing mergeability; no agent work owed):');

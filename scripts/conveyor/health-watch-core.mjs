@@ -50,6 +50,7 @@ const TICK_SUMMARY = /^([\w.-]+): tick \((.*?)\) — (.*)$/;
 const TICK_FAILED_WHOLE = /^([\w.-]+): tick failed \(non-fatal\): (.*)$/;
 const TICK_FAILED_REPO = /^([\w.-]+): (\S+\/\S+) tick failed \(non-fatal[^)]*\): (.*)$/;
 const REFUSED = /^([\w.-]+): refused ([\w-]+) (\S+\/\S+) PR #(\d+) — (.*)$/;
+const PR_FAILED = /^([\w.-]+): (\S+\/\S+)#(\d+) failed \(non-fatal\): (.*)$/;
 const RECONCILE_REFUSED = /^([\w.-]+): reconcile-refused ([\w-]+) (\S+\/\S+) PR #(\d+)/;
 const STARTED = /^([\w.-]+): started on (\S+), tick every (\d+)ms/;
 const AUTH_ERROR = /Bad credentials|HTTP 401\b|401 Unauthorized|status(?:Code)?[=: ]+401\b/i;
@@ -122,6 +123,13 @@ export function parseDaemonLog(text) {
     if ((m = TICK_FAILED_REPO.exec(line))) {
       const why = /behind origin\/main/.test(m[3]) ? 'stale-checkout: dispatching clone behind origin/main' : normalizeReason(m[3]);
       tgt.blocking.push(`repo tick failed: ${why}`);
+      continue;
+    }
+    if ((m = PR_FAILED.exec(line))) {
+      // The review daemon's per-PR dispatch failure (`review-daemon: <repo>#N failed (non-fatal): …`).
+      const reason = /behind origin\/main/.test(m[4]) ? 'stale-checkout: dispatching clone behind origin/main' : `dispatch failed: ${normalizeReason(m[4])}`;
+      tgt.blocking.push(reason);
+      tgt.prs.push({ pr: `${m[2]}#${m[3]}`, reason });
       continue;
     }
     if ((m = REFUSED.exec(line))) {

@@ -6,8 +6,10 @@
  */
 import { MINUTE, fmtAge } from '../health-watch-core.mjs';
 
-const BAD = new Set(['smoke-rejected', 'clone-held-stale', 'smoke-slow', 'quarantined', 'rebuild-failed']);
-const HOLDING = new Set(['smoke-rejected', 'clone-held-stale', 'quarantined', 'rebuild-failed']);
+// `dirty`: the rebuild refuses to move a clone with local modifications (2026-09-25 13:35 ET: a tracked
+// scorecard file written inside the review daemon's clone held it 10 commits behind main and every review failed).
+const BAD = new Set(['smoke-rejected', 'clone-held-stale', 'smoke-slow', 'quarantined', 'rebuild-failed', 'dirty']);
+const HOLDING = new Set(['smoke-rejected', 'clone-held-stale', 'quarantined', 'rebuild-failed', 'dirty']);
 
 export default {
   id: 'clone-stale',
@@ -43,7 +45,9 @@ export default {
         breach: why.length > 0,
         measure: { lastBadKind: lastBad?.kind ?? null, lastBadAt: lastBad ? new Date(lastBad.at).toISOString() : null, failedSmoke: failed ?? null, adoptedAt: adoptedAt ? new Date(adoptedAt).toISOString() : null, rebuildInProgressMin: inProg ? Math.round((now - inProg) / MINUTE) : null, daemonsRefusingStale: staleDaemons },
         summary: `clone ${c.cloneKey}: ${why.join('; ') || 'healthy'}${failed ? ` (failed smoke: ${failed})` : ''}${staleDaemons.length ? `; refusing as stale: ${staleDaemons.join(', ')}` : ''}.`,
-        recommendation: lastBad?.kind === 'smoke-slow' && !heldUnresolved
+        recommendation: lastBad?.kind === 'dirty'
+          ? `The rebuild will not move clone ${c.cloneKey}: it has local modifications (${[].concat(lastBad.detail ?? []).join(', ').slice(0, 160)}). Something writes tracked files inside a daemon clone — the product fix is pinning that writer's output under the state root (#4052), not cleaning the clone by hand.`
+          : lastBad?.kind === 'smoke-slow' && !heldUnresolved
           ? `The rebuild's smoke gate took ${Math.round((lastBad.detail?.ms ?? 0) / 1000)}s (${String(lastBad.detail?.checks ?? '').slice(0, 160)}) — the slowest check is the product fix; a slow smoke delays every daemon's move to new code.`
           : failed
           ?`The rebuild's smoke gate fails on ${failed} — run that smoke step by hand from the clone to see the error, and fix the tooling it exercises (a shim or dependency), not the clone.`

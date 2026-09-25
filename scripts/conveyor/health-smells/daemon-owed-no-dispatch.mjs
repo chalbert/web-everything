@@ -10,7 +10,7 @@ import { MINUTE, fmtAge } from '../health-watch-core.mjs';
 
 function recommend(daemon, top) {
   if (!top) return `${daemon} is not dispatching; read its log tail for the refusal reason.`;
-  if (/stale-checkout/.test(top)) return `${daemon} refuses because its clone is behind origin/main and the gated rebuild is holding it — see the clone-stale episode; the fix is whatever makes the rebuild's smoke gate pass.`;
+  if (/stale-checkout/.test(top)) return `${daemon} refuses because its clone is behind origin/main and the gated rebuild is holding it — the clone-stale episode names why the rebuild holds it (a rejected smoke, a dirty clone, …) and that is the thing to fix.`;
   if (/\{\{\w+\}\}|placeholder/.test(top)) return `${daemon}'s dispatch brief has an unfilled placeholder (${(top.match(/\{\{\w+\}\}/) || ['?'])[0]}) — a product bug in the dispatch path; file or fix the card that makes that placeholder optional or filled.`;
   if (/no-lane|no acquirable lane/.test(top)) return `${daemon} has no free lane — see the lane-starvation episode (leaked leases or dirty lanes).`;
   if (/^tick failed/.test(top)) return `${daemon}'s tick throws ("${top.replace(/^tick failed: /, '')}") — a code bug in the daemon; find the commit that introduced it.`;
