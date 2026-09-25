@@ -240,6 +240,7 @@ export async function acquireWrite(root, opts = {}) {
     pid = process.pid,
     leaseMinutes = DEFAULT_LEASE_MINUTES,
     probe = defaultProbePidLiveness,
+    onBlocked = null,
   } = opts;
   const { writerRoot, readersRoot } = cloneLockDirs(root, lockRoot);
 
@@ -253,6 +254,7 @@ export async function acquireWrite(root, opts = {}) {
 
   const deadline = startMs + waitMs;
   let lastBlockers = [];
+  let reportedBlocked = false;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const nowMsN = now();
@@ -267,6 +269,11 @@ export async function acquireWrite(root, opts = {}) {
     }
     lastBlockers = blockers;
     if (blockers.length === 0) return { ok: true };
+    // #4044: a wait that blocks this process's own ticks is never silent — report it once, with who and how long.
+    if (typeof onBlocked === 'function' && !reportedBlocked) {
+      reportedBlocked = true;
+      try { onBlocked({ blockers, waitMs }); } catch { /* reporting never breaks the lock */ }
+    }
     if (nowMsN >= deadline) {
       releaseLockDir(writerRoot, WRITER_KEY);
       return { ok: false, reason: 'tick-in-progress', heldBy: lastBlockers[0] || null };

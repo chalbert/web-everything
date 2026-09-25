@@ -6,7 +6,7 @@
  *   two REAL child processes to prove actual cross-process mutual exclusion on the real filesystem (the one
  *   thing no amount of injected fakes can substitute for).
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, symlinkSync, appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -136,6 +136,20 @@ describe('acquireWrite waiting on readers', () => {
     });
     expect(result).toEqual({ ok: true });
     expect(releasedReader).toBe(true);
+  });
+
+  it('reports a blocked wait ONCE via onBlocked (who blocks, how long it may wait) — never a silent wait (#4044)', async () => {
+    const lockRoot = mkTmp('dcl-lockroot-');
+    const clone = mkTmp('dcl-clone-');
+    const clock = { value: 0 };
+    const sleep = async (ms) => { clock.value += ms; };
+    acquireRead(clone, { owner: 'reader-a', lockRoot, nowMs: 0, pid: 333, probe: alwaysAlive });
+    const onBlocked = vi.fn();
+    await acquireWrite(clone, {
+      owner: 'writer-a', lockRoot, waitMs: 5000, pollMs: 1000, now: () => clock.value, sleep, pid: 111, probe: alwaysAlive, onBlocked,
+    });
+    expect(onBlocked).toHaveBeenCalledTimes(1);
+    expect(onBlocked).toHaveBeenCalledWith({ blockers: ['reader-a'], waitMs: 5000 });
   });
 
   it('times out waiting on a live reader → tick-in-progress, and the writer key is released', async () => {

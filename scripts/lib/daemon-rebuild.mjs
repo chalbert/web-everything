@@ -507,6 +507,10 @@ export function isExternalOnlyFailure(failed) {
   return Array.isArray(failed) && failed.length > 0 && failed.every((r) => r && r.mayBeTransient !== false);
 }
 
+/** How long a tick-start rebuild waits for other daemons' ticks (read slots) to drain — env-tunable, see rebuildClone. */
+export const REBUILD_LOCK_WAIT_ENV = 'WE_DAEMON_REBUILD_LOCK_WAIT_MS';
+export const DEFAULT_REBUILD_LOCK_WAIT_MS = 60_000;
+
 /** A live smoke at least this long (it holds the clone's write lock throughout) raises a `smoke-slow` alert. */
 export const SLOW_SMOKE_ALERT_MS = 60_000;
 
@@ -540,18 +544,33 @@ export async function rebuildClone({
   now = () => Date.now(), sleep,
 } = {}) {
   const lockRootFromEnv = env && env.WE_DAEMON_CLONE_LOCK_ROOT;
+  // #4044 (live 2026-09-25 10:28-10:40 ET): the fix daemon's tick-start rebuild waited SILENTLY up to the lock's
+  // 600s default for the review daemon's 10-minute tick to release its read slot — no ticks, no log line. A
+  // rebuild is opportunistic (the next tick retries it), so it now waits at most WE_DAEMON_REBUILD_LOCK_WAIT_MS
+  // (default 60s), says so when it starts waiting, and records the give-up.
+  const waitMs = Number(env?.[REBUILD_LOCK_WAIT_ENV]) > 0 ? Number(env[REBUILD_LOCK_WAIT_ENV]) : DEFAULT_REBUILD_LOCK_WAIT_MS;
   const finalLockOpts = {
     ...(lockRootFromEnv ? { lockRoot: lockRootFromEnv } : {}),
     now,
+    waitMs,
+    onBlocked: ({ blockers, waitMs: w }) => log.error?.(
+      `daemon-rebuild: waiting up to ${Math.round(w / 1000)}s for live reader(s) ${blockers.join(', ')} to finish their tick before moving the clone (#4044)`,
+    ),
     ...(sleep ? { sleep } : {}),
     ...lockOpts,
   };
 
+  const startedMs = now();
   const lockResult = await withWriteLock(root, () => doRebuild({
     root, env, log, run, runSmoke, prState, stateOpts, mainOnly, now,
   }), finalLockOpts);
 
-  if (!lockResult.ok) return { moved: false, reason: lockResult.reason };
+  if (!lockResult.ok) {
+    if (lockResult.reason === 'tick-in-progress') {
+      log.error?.(`daemon-rebuild: gave up after ${Math.round((now() - startedMs) / 1000)}s — reader ${lockResult.heldBy ?? '?'} still ticking; this tick runs on the current tree and the next one retries (#4044)`);
+    }
+    return { moved: false, reason: lockResult.reason, ...(lockResult.heldBy ? { heldBy: lockResult.heldBy } : {}) };
+  }
   return lockResult.value;
 }
 

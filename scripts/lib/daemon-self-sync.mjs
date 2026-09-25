@@ -99,7 +99,7 @@
  * gate would defeat the whole point of gating rebuilds in the first place).
  */
 
-import { gitRun } from './main-staleness.mjs';
+import { gitRun, isCodePath } from './main-staleness.mjs';
 import { collectImportClosure, closureHits } from './import-closure.mjs';
 
 export { collectImportClosure };
@@ -371,7 +371,6 @@ export function changedFilesBetween({ root, from, to, run = gitRun, timeoutMs = 
   return String(r.stdout ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
-const CODE_FILE_RE = /\.(mjs|cjs|js|ts|json)$/;
 
 /**
  * PURE: does the move from boot sha to HEAD-now need this daemon to restart, and may it restart now?
@@ -390,7 +389,7 @@ export function decideRestart({ changedFiles, closure, uptimeMs, minIntervalMs }
   if (changedFiles == null) return { restart: true, reason: 'diff-unknown' };
   let relevant;
   if (!closure || !closure.complete) {
-    relevant = changedFiles.filter((f) => CODE_FILE_RE.test(f) && !/(^|\/)__tests__\//.test(f) && !/\.test\.[mc]?js$/.test(f));
+    relevant = changedFiles.filter(isCodePath);
   } else {
     relevant = closureHits({ closure, changedFiles });
   }

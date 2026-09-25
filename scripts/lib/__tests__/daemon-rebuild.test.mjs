@@ -171,6 +171,27 @@ describe('rebuildClone', () => {
     expect(second.mock.calls[0][0].changedFiles).toEqual(['backlog/2.md']);
   });
 
+  // #4044 live (10:28-10:40 ET): the fix daemon's rebuild waited silently ~10 min on the review daemon's long tick.
+  it('a live reader holding the clone makes the rebuild wait at most 60s by default, logged, then give up', async () => {
+    const { originDir, cloneDir, env, lockDir } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'y.txt', 'y\n'));
+    const { acquireRead } = await import('../daemon-clone-lock.mjs');
+    expect(acquireRead(cloneDir, { owner: 'review-daemon-sim', lockRoot: lockDir, pid: process.pid }).ok).toBe(true);
+    let t = 1_000_000;
+    const log = { error: vi.fn() };
+    const runSmoke = passSmoke();
+    const r = await rebuildClone({
+      root: cloneDir, env, runSmoke, log, prState: async () => null, now: () => t, sleep: async (ms) => { t += ms; },
+      lockOpts: { pollMs: 1000 },
+    });
+    expect(r).toMatchObject({ moved: false, reason: 'tick-in-progress', heldBy: 'review-daemon-sim' });
+    expect(t - 1_000_000).toBeLessThanOrEqual(61_000);
+    expect(runSmoke).not.toHaveBeenCalled();
+    const lines = log.error.mock.calls.map(([m]) => m);
+    expect(lines.some((m) => /waiting up to 60s for live reader\(s\) review-daemon-sim/.test(m))).toBe(true);
+    expect(lines.some((m) => /gave up after 60s/.test(m))).toBe(true);
+  });
+
   it('a smoke that holds the write lock 60s+ raises a smoke-slow alert with per-check timings', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'x.txt', 'x\n'));

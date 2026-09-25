@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
-  classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy,
+  classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy, isCodePath,
   isStaleMainRefusalMessage, STALE_MAIN_REFUSAL_MARKER,
 } from '../main-staleness.mjs';
 
@@ -216,7 +216,7 @@ describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)',
 
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = undefined; });
 
-  function makeBehindClone() {
+  function makeBehindClone(behindFile = 'b.mjs') {
     dir = mkdtempSync(join(tmpdir(), 'main-staleness-managed-'));
     git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
     git(dir, 'clone', '-q', 'origin.git', 'upstream');
@@ -225,7 +225,7 @@ describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)',
     git(up, 'push', '-q', 'origin', 'main');
     const clonePath = join(dir, 'clone');
     git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'clone');
-    commit(up, 'b.txt', 'two\n');
+    commit(up, behindFile, 'two\n');
     git(up, 'push', '-q', 'origin', 'main');
     return clonePath;
   }
@@ -242,6 +242,18 @@ describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)',
     expect(() => withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' })))
       .toThrow(/STALE code from this checkout/);
     expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).not.toBe('0'); // never touched
+  });
+  // #4044 (live 2026-09-25): the fix daemon refused whole repos when its clone was a few backlog-only commits
+  // behind. Commits that change no code file cannot make a checkout's import path stale.
+  it('managed clone behind ONLY in non-code files (backlog/*.md) is not stale — no throw, and the clone is never touched', () => {
+    const clonePath = makeBehindClone('9999-backlog-card.md');
+    const st = withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' }));
+    expect(st).toMatchObject({ fresh: true, behindNonCodeOnly: true, behind: 1 });
+    expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('1'); // only the rebuild moves it
+  });
+  it('isCodePath: modules and JSON are code; markdown and tests are not', () => {
+    expect(['a.mjs', 'x/y.js', 'c.cjs', 'd.ts', 'src/_data/x.json', 'package-lock.json'].every(isCodePath)).toBe(true);
+    expect(['backlog/1.md', 'docs/a.njk', 'scripts/__tests__/a.mjs', 'x/a.test.mjs'].some(isCodePath)).toBe(false);
   });
   it('managed clone: the refusal points at the rebuild\'s clone-held-stale alert, never "rebase or merge by hand"', () => {
     const clonePath = makeBehindClone();
