@@ -144,17 +144,17 @@ export function sleepSyncMs(ms) {
 
 /**
  * Try to acquire the numbering mutex ONCE for `owner`. Thin over file-locks `reserve` (which atomically wins
- * the dir, or reclaims a stale/dead holder). xuqk1vp: probes the CURRENT holder's same-host pid liveness
- * ({@link probeNumberingHolderLiveness}) before calling `reserve`, so a provably-dead holder is reclaimed on
- * the `pid-dead` fast path immediately — not only after the TTL — while a live-but-slow holder is NEVER
- * reclaimed by the TTL alone while its own heartbeat stays fresh (see {@link withNumberingLock}'s in-section
- * heartbeat). Returns `{ ok, reason, heldBy }`.
+ * the dir, or reclaims a stale/dead holder). xuqk1vp: hands `reserve` the same-host pid-liveness PROBE
+ * ({@link probeNumberingHolderLiveness}), so a provably-dead holder is reclaimed on the `pid-dead` fast path
+ * immediately — not only after the TTL — while a live-but-slow holder is NEVER reclaimed by the TTL alone
+ * while its own heartbeat stays fresh (see {@link withNumberingLock}'s in-section heartbeat). The probe runs
+ * inside `reserve`, against the one entry it reads (review #2668): probing here first and passing a verdict
+ * would let a "dead" verdict about an OLD holder reclaim a NEW, live one that took over in between.
+ * Returns `{ ok, reason, heldBy }`.
  */
 export function tryAcquireNumberingLock(lockRoot, owner, { pid = process.pid, leaseMinutes = NUMBERING_LEASE_MINUTES, nowMs = Date.now(), lockPath = NUMBERING_LOCK_PATH } = {}) {
   ensureRoot(lockRoot);
-  const current = readLockEntry(lockRoot, lockPath);
-  const pidLiveness = current ? probeNumberingHolderLiveness(current) : 'unknown';
-  return reserve(lockRoot, lockPath, owner, nowMs, nowIsoFrom(nowMs), pid, pidLiveness, leaseMinutes);
+  return reserve(lockRoot, lockPath, owner, nowMs, nowIsoFrom(nowMs), pid, probeNumberingHolderLiveness, leaseMinutes);
 }
 
 /** Release the numbering mutex, but ONLY if `owner` still holds it (never stomp a reclaimer who seized it
@@ -221,7 +221,10 @@ export function withNumberingLock(fn, {
   if (!held && !runUnlockedOnContention) {
     return { result: undefined, ran: false, held: false, contended: true, heldBy: acq.heldBy ?? null, reason: acq.reason };
   }
-  const doHeartbeat = () => held && heartbeat(lockRoot, lockPath, owner, nowIsoFrom(now()), pid);
+  // Fenced like releaseNumberingLockIfOwned (review #2668): write only while the entry still names `owner`, so a
+  // late heartbeat from a holder whose lease was already reclaimed never re-seats it over the reclaimer.
+  const doHeartbeat = () => held && (readLockEntry(lockRoot, lockPath) || {}).owner === owner
+    && heartbeat(lockRoot, lockPath, owner, nowIsoFrom(now()), pid);
   try {
     return { result: fn(doHeartbeat), ran: true, held, contended: !held, heldBy: acq.heldBy ?? null, reason: acq.reason };
   } finally {

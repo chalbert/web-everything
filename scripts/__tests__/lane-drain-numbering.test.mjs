@@ -14,8 +14,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { numberPendingHashes, landedNumberFor, cardPathInTree, hasPendingHashFiles, numberPendingHashesIfAny } from '../lane-drain.mjs';
+import { numberPendingHashes, landedNumberFor, cardPathInTree, hasPendingHashFiles, numberPendingHashesIfAny, finalizeLand } from '../lane-drain.mjs';
 import { tryAcquireNumberingLock } from '../readiness/drain-lock.mjs';
+
+const DRAIN_CLI = join(process.cwd(), 'scripts/lane-drain.mjs');
 
 const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
 const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
@@ -591,6 +593,73 @@ describe('numberPendingHashesIfAny / hasPendingHashFiles — xb94mt5 (number on 
       // Refused to run — the file is untouched, still hash-named, exactly the safe "retry next pass" state.
       expect(backlogNames().some((n) => n.startsWith('xhash01'))).toBe(true);
       expect(git('status', '--porcelain').trim()).toBe(''); // no partial write, no stray commit
+    } finally {
+      rmSync(lockRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('PRODUCTION PATH (review #2668): a `lane-drain drain` pass with an EMPTY queue still numbers a stranded hash file', () => {
+    // The real CLI entry point, not the helper: no couple is queued, so nothing merges this pass — the sweep
+    // must still find and number the hash a prior failed push left behind. HOME is a throwaway dir so the
+    // drain lease + numbering mutex live in a private lock root, never the machine-global one.
+    write('scripts/pr-land.mjs', '// WE-root marker for the drain sanity check\n');
+    write('backlog/2200-legacy.md', '---\nkind: story\nstatus: resolved\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'scripts', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed (a hash stranded by an earlier failed push)');
+    git('checkout', '-q', '-B', 'main'); // the sweep only runs on `main` — never depend on the host's init.defaultBranch
+    const home = mkdtempSync(join(tmpdir(), 'drain-home-'));
+    try {
+      execFileSync('node', [DRAIN_CLI, 'drain', '--max-idle=0', '--json'], { cwd: repo, encoding: 'utf8', env: { ...process.env, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(backlogNames()).toContain('2201-alpha.md');
+      expect(backlogNames().some((n) => n.startsWith('xhash01'))).toBe(false);
+      expect(git('log', '-1', '--format=%s')).toMatch(/drain: JIT-number xhash01→#2201/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('finalizeLand under a contended numbering lock (review #2668)', () => {
+  const seedLanded = () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\nstatus: resolved\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [{ num: '2200', lane: 'lane/2200-legacy' }] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed (couple merged, still queued)');
+  };
+  const unqueue = (CWD) => writeFileSync(join(CWD, QUEUED_REL), JSON.stringify({ queued: [] }));
+
+  it('still publishes the already-committed unqueue commit, but never numbers unlocked', () => {
+    seedLanded();
+    const lockRoot = mkdtempSync(join(tmpdir(), 'drain-lock-fin-'));
+    try {
+      expect(tryAcquireNumberingLock(lockRoot, 'someone-else:1:numbering', { nowMs: Date.now(), leaseMinutes: 5 }).ok).toBe(true);
+      const published = [];
+      const fin = finalizeLand(repo, '2200', {
+        unqueue, publish: (CWD) => { published.push(git('log', '-1', '--format=%s').trim()); return true; },
+        lockOpts: { lockRoot, waitMs: 0, sleep: () => {} },
+      });
+      expect(fin.unqueued).toBe(true);
+      expect(published).toEqual(['drain: unqueue + cleanup #2200 lane manifest post-land (#2175)']); // unqueue went out this pass
+      expect(fin.pushed).toBe(true);
+      expect(fin.numbered).toEqual({ assigned: [], committed: false });
+      // The strict contract held: nothing was numbered while another holder owned the section.
+      expect(backlogNames().some((n) => n.startsWith('xhash01'))).toBe(true);
+    } finally {
+      rmSync(lockRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('with the lock free, numbers AND publishes in one section (the normal path)', () => {
+    seedLanded();
+    const lockRoot = mkdtempSync(join(tmpdir(), 'drain-lock-fin-'));
+    try {
+      let pubs = 0;
+      const fin = finalizeLand(repo, '2200', { unqueue, publish: () => { pubs++; return true; }, lockOpts: { lockRoot } });
+      expect(fin.numbered.committed).toBe(true);
+      expect(fin.pushed).toBe(true);
+      expect(pubs).toBe(1);
+      expect(backlogNames()).toContain('2201-alpha.md');
     } finally {
       rmSync(lockRoot, { recursive: true, force: true });
     }

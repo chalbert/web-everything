@@ -323,9 +323,6 @@ export function planPostDrain(result) {
   return { deleteManifest: false, reopen: failed };
 }
 
-// Allow importing the pure helpers without running the CLI (the test file imports this module).
-const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (IS_CLI) runCli();
 
 // The drain must run in the WE checkout (it reads WE's queued.json + drives WE's backlog.mjs). Resolve WE's
 // git toplevel from cwd and use it as the anchor for EVERY WE-side call — so the WE land targets the real WE
@@ -933,11 +930,14 @@ function publishMain(CWD) {
 // SUCCESS reconcile (#2175): the couple landed via PR onto ORIGIN/main, so sync local main to it, then UNQUEUE
 // + DELETE the `.lane-manifest.json` it carried, in ONE commit, and publish. Best-effort at every step — a
 // leftover manifest / un-pushed unqueue is recoverable cruft, never a reason to unwind a successful landing.
-function finalizeLand(CWD, num) {
+// `deps` is a test seam only (review #2668): `unqueue`/`publish` replace the backlog.mjs + push-if-green spawns,
+// `lockOpts` points the numbering mutex at a throwaway lock root. Production calls pass nothing.
+const unqueueViaBacklog = (CWD, num) => execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+export function finalizeLand(CWD, num, { unqueue = unqueueViaBacklog, publish = publishMain, lockOpts = {} } = {}) {
   syncMain(CWD); // bring the merged origin/main (incl. the manifest the WE lane commit carried) local
   // Clear the queued marker (the single clear point) + stage the manifest deletion if it's tracked on main.
   let unqueued = false;
-  try { execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); unqueued = true; } catch { unqueued = false; }
+  try { unqueue(CWD, num); unqueued = true; } catch { unqueued = false; }
   let manifestDeleted = false;
   if (quietGit(CWD, ['ls-files', MANIFEST_FILENAME])) manifestDeleted = quietGit(CWD, ['rm', '--quiet', MANIFEST_FILENAME]) != null;
   // Commit ONLY this couple's paths via an explicit `-- <pathspec>` — a bare `git commit` would sweep any
@@ -957,22 +957,30 @@ function finalizeLand(CWD, num) {
   //
   // xuqk1vp — `runUnlockedOnContention: false`: a live holder blocked past the budget means this section NEVER
   // runs unlocked (the old fallback let two writers race main; the #2318 tripwire only ever caught it AFTER the
-  // damage). A refusal defers this pass entirely (`numLock.ran === false` → no numbering, no push here) — safe
-  // because it's a pure no-op vs. today's tree, and #xb94mt5 (drain: number pending hashes on ANY pass that
-  // finds them) is what sweeps up a hash file this pass deferred, on the very next pass, so nothing strands.
+  // damage). A refusal defers the NUMBERING this pass (`numLock.ran === false`) while the already-made unqueue
+  // commit is still published below; #xb94mt5's pending-hash sweep (run at the top of every drain pass) numbers
+  // the deferred hash file on the next pass, so nothing strands.
   // `heartbeat` is threaded through so a genuinely-long section (before #xn6n5gp's linear fix lands, or a slow
   // push) keeps its own lease fresh instead of racing the 5-minute TTL out from under itself.
   const numLock = withNumberingLock((heartbeat) => {
     const numbered = numberPendingHashes(CWD);
     heartbeat(); // refresh — numbering is the long pole; the push below should never find its own lease stale
-    const pushed = (unqueueCommitted || numbered.committed) ? publishMain(CWD) : false;
+    const pushed = (unqueueCommitted || numbered.committed) ? publish(CWD) : false;
     return { numbered, pushed };
-  }, { runUnlockedOnContention: false });
+  }, { ...lockOpts, runUnlockedOnContention: false });
   const fallback = { numbered: { assigned: [], committed: false }, pushed: false };
   const outcome = lockResultOr(numLock, fallback);
   const numbered = outcome.numbered;
   pushed = outcome.pushed;
-  if (!numLock.ran) process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex held by ${numLock.heldBy || '?'} — DEFERRED this pass (#2391/#xuqk1vp), never run unlocked; a later pass (or #xb94mt5's any-pending-hash sweep) numbers+publishes it\n`);
+  if (!numLock.ran) {
+    // Review #2668 — only the NUMBERING is deferred. The unqueue+manifest commit above is already made and mints
+    // no NNN, so publish it now (as the pre-lock code always did); otherwise origin keeps showing the couple
+    // queued until some unrelated later push carries it. Best-effort: a non-ff push just reports pushed:false.
+    // Tradeoff: this push is outside the section, so it can beat the holder's own push (which then fails non-ff
+    // and is retried by the next pass's sweep). The pre-xuqk1vp code had the same exposure; it never mints an NNN.
+    if (unqueueCommitted) pushed = publish(CWD);
+    process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex held by ${numLock.heldBy || '?'} — numbering DEFERRED this pass (#2391/#xuqk1vp), never run unlocked; the next pass's pending-hash sweep numbers it${unqueueCommitted ? ` (unqueue commit published: ${pushed})` : ''}\n`);
+  }
   return { unqueued, manifestDeleted, pushed, numbered };
 }
 
@@ -1153,6 +1161,16 @@ function runWatch({ follow }) {
     if (plan.deferred.length) log(`deferred (waits on unlanded dep): ${plan.deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}`);
     const toDrain = plan.ready.filter((num) => !attempted.has(num)); // never re-attempt a couple in one run
     if (DRY_RUN) { log(`dry-run: would drain ${toDrain.map((n) => '#' + n).join(', ') || 'nothing'} (impl-first/WE-last per couple)`); return 0; }
+    // xb94mt5 (review #2668) — the production caller of the any-pass sweep: number a hash file stranded by an
+    // earlier killed/failed/deferred pass, whether or not anything merges this pass. A cheap `ls-files` no-op
+    // when nothing is pending; never numbers unlocked (a live holder defers it to the next pass).
+    // Only on `main`: on any other branch the pull would fast-forward THAT branch and the numbering commit would
+    // land there, never on the main `publishMain` pushes.
+    const onMain = quietGit(CWD, ['rev-parse', '--abbrev-ref', 'HEAD']) === 'main';
+    if (onMain) syncMain(CWD);
+    const sweep = onMain ? numberPendingHashesIfAny(CWD) : { attempted: false };
+    if (sweep.deferred) log(`pending-hash sweep deferred — numbering mutex held by ${sweep.heldBy || '?'}; retrying next pass`);
+    else if (sweep.attempted && sweep.numbered.committed) log(`pending-hash sweep numbered ${sweep.numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} (published: ${sweep.pushed})`);
     let landedThisPass = 0;
     for (const num of toDrain) {
       // #2453 — heartbeat PER COUPLE, not just at the top of the pass: a one-shot sweep with several queued
@@ -1233,3 +1251,10 @@ function runWatch({ follow }) {
   // (it plans, never drains) — its plan is in the JSON.
   process.exit(DRY_RUN || fullyDrained ? 0 : 2);
 }
+
+// Allow importing the pure helpers without running the CLI (the test file imports this module). Kept LAST (review
+// #2668): the CLI runs synchronously, so invoking it any earlier leaves the module-level constants declared below
+// that point (QUEUED_REL, LEDGER_REL, …) in their temporal dead zone — `finalizeLand`/`numberPendingHashes` then
+// threw `Cannot access 'LEDGER_REL' before initialization` on every real CLI numbering path.
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) runCli();

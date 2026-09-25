@@ -257,7 +257,8 @@ function lockDirAgeMs(lockRoot, path) {
  * to win the dir; if it already exists, read the entry + the caller-probed `pidLiveness`, and reclaim
  * (release + re-acquire) when {@link reclaimDecision} says so, else report it BLOCKED. Returns the
  * outcome the lane acts on. `pidLiveness` defaults to `'unknown'` (TTL-only reclaim) unless the caller
- * probed same-machine liveness.
+ * probed same-machine liveness. Pass a probe function instead of a verdict to have it judged against the
+ * entry this call reads (no stale double-read window).
  * @param {boolean} [requireOwnProcess]  opt-in (default `false`, so every EXISTING caller is unaffected):
  *   when `true`, the "already mine" reentrancy fast path additionally requires the held entry's `pid` to
  *   match THIS call's own `pid` — see {@link reclaimDecision}'s `requesterPid`. Set this only where `owner`
@@ -284,7 +285,10 @@ export function reserve(lockRoot, path, owner, nowMs, nowIso, pid = null, pidLiv
     }
     if (age < ENTRYLESS_LOCK_DIR_GRACE_MS) return { ok: false, reason: 'initializing', heldBy: null };
   }
-  const d = reclaimDecision(current, nowMs, owner, pidLiveness, leaseMinutes, requireOwnProcess ? pid : null);
+  // `pidLiveness` may be a probe `(entry) => 'dead'|'alive'|'unknown'`, run against THIS read — so the verdict
+  // always describes the holder being judged, never one a caller read earlier and lost the lock from (#2668).
+  const liveness = typeof pidLiveness === 'function' ? (current ? pidLiveness(current) : 'unknown') : pidLiveness;
+  const d = reclaimDecision(current, nowMs, owner, liveness, leaseMinutes, requireOwnProcess ? pid : null);
   if (!d.acquirable) return { ok: false, reason: d.reason, heldBy: d.heldBy };
   if (d.reason === 'own') { heartbeat(lockRoot, path, owner, nowIso, pid, meta); return { ok: true, reason: 'own', heldBy: owner }; }
   // reclaim a stale/dead owner: drop its dir then re-win atomically (another reclaimer may race — EEXIST

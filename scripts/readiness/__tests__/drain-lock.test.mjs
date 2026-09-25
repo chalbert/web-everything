@@ -138,6 +138,22 @@ describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () =
     expect(r).toMatchObject({ held: true, reason: 'lease-expired', result: 'ok' });
   });
 
+  it('a heartbeat AFTER the lock was reclaimed away is a no-op — it never re-seats the stale holder over the reclaimer (review #2668)', () => {
+    let clock = T0;
+    let reclaim = null;
+    let lateBeat = null;
+    withNumberingLock((heartbeat) => {
+      // A's section stalls past its 5-min lease without heartbeating; B legitimately reclaims via the TTL.
+      clock = T0 + 6 * MIN;
+      reclaim = tryAcquireNumberingLock(root, 'B', { nowMs: clock, leaseMinutes: 5 });
+      // A then heartbeats — an ordinary mid-section call. It must NOT overwrite B's entry.
+      lateBeat = heartbeat();
+    }, { lockRoot: root, owner: 'A', leaseMinutes: 5, now: () => clock });
+    expect(reclaim).toMatchObject({ ok: true, reason: 'lease-expired' });
+    expect(lateBeat).toBe(false);
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('B'); // B still owns it; A's release skipped too
+  });
+
   it('releaseNumberingLockIfOwned never stomps a reclaimer that seized the section', () => {
     tryAcquireNumberingLock(root, 'A', { nowMs: T0, leaseMinutes: 5 });
     tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 6 * MIN, leaseMinutes: 5 }); // B reclaims A's stale lock
