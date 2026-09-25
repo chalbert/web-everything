@@ -6,21 +6,35 @@
  *   `runReconcileFixDispatch` on its own interval, standalone, instead of as one of runner.mjs's own
  *   sequential mechanical passes.
  *
- * WHY THIS PASS, FIRST. Confirmed by direct read (see #3860's split analysis,
- * reports/2026-09-22-backlog-split-analysis.md): `runReconcileFixDispatch` already fences its own
- * resume-or-dispatch decision per PR through `we:scripts/operations/action-store.mjs`'s durable, atomic
- * (`fs.openSync(path,'wx')`) per-resource claim ledger — independent of the tick mutex, independent of any
- * runner-lock lease. That means running TWO copies of this daemon at once is SAFE by construction (the
- * ledger refuses the second claim); a keyed runner-lock lease below is taken anyway, but purely as an
- * efficiency measure (never launch a second copy that would just watch every claim get refused), not a
- * correctness requirement — unlike the Verify daemon (#3878), which genuinely needs its own lease before it
- * is safe to run standalone at all.
+ * WHY THIS PASS, FIRST — AND A CORRECTION (#x0jphk5, 2026-09-25). This paragraph previously claimed, by
+ * direct read (see #3860's split analysis, reports/2026-09-22-backlog-split-analysis.md), that
+ * `runReconcileFixDispatch` already fenced its own resume-or-dispatch decision per PR through
+ * `we:scripts/operations/action-store.mjs`'s durable, atomic per-resource claim ledger. THAT WAS FALSE ON
+ * `main`: no `scripts/conveyor/action-store.mjs` exists at all, `action-store.mjs` (at
+ * `we:scripts/operations/action-store.mjs`) was never imported by the fix-dispatch path, and
+ * `reconcile-fix-dispatch.mjs`'s own header said the opposite in plain words ("NAME-BASED LIVENESS, NOT A
+ * SEPARATE LEDGER"). The only real guard was a session-name match against a `claude agents --json --all`
+ * listing measured (`we:scripts/operations/dispatch-lane-io.mjs`) to lag the CLI's real state by 26+ SECONDS —
+ * so running TWO copies of this daemon (or this daemon alongside `runner.mjs`'s own mechanical pass, see
+ * ROLLING CUTOVER below) was NOT safe by construction; a second dispatcher reading that stale listing within
+ * the lag window could double-dispatch the same `fix-<pr>`.
+ *
+ * FIXED, NOT JUST DOCUMENTED: `reconcile-fix-dispatch.mjs`'s `dispatchFix`, `tryResumeFix`, and
+ * `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s `dispatchCiHeal` now each take a REAL atomic
+ * `(repo, pr, headRefOid)` claim — `we:scripts/conveyor/fix-dispatch-claim.mjs`, an `O_EXCL` file under the
+ * shared coordination sidecar with a TTL-bounded dead-holder reclaim, reusing
+ * `we:scripts/readiness/file-locks.mjs`'s existing lock primitives — before ever spawning or resuming. With
+ * that in place, running TWO copies of this daemon at once (or this daemon alongside the mechanical pass) IS
+ * now safe: the second dispatcher inside the listing-lag window is refused (`held`) rather than merely
+ * unaware. The keyed runner-lock lease below is still taken, purely as an efficiency measure (never launch a
+ * second copy that would just watch every claim get refused), not a correctness requirement — unlike the
+ * Verify daemon (#3878), which genuinely needs its own lease before it is safe to run standalone at all.
  *
  * ROLLING CUTOVER (per #3860's plan): this daemon runs ALONGSIDE runner.mjs's own
- * `reconcile-fix-dispatch.mjs` mechanical pass for a bake period — both are safe to run concurrently for the
- * same reason a second copy of just this daemon would be. Dropping the pass from runner.mjs's own
- * `makeCliMechanicalPasses` list is a separate, later step once this daemon has baked; this item does not
- * do it.
+ * `reconcile-fix-dispatch.mjs` mechanical pass for a bake period — safe to run concurrently now for the real
+ * reason above (the claim), not the ledger this header used to (wrongly) describe. Dropping the pass from
+ * runner.mjs's own `makeCliMechanicalPasses` list is a separate, later step once this daemon has baked; this
+ * item does not do it.
  *
  * PURE-CORE / IO-SHELL SPLIT (mirrored from runner.mjs's own header): {@link runDaemonLoop} has no
  * `setTimeout`/`setInterval`, no real lease, no real dispatch — every effect (stepping one tick, sleeping,

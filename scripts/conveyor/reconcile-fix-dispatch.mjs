@@ -40,13 +40,26 @@
  * as any other dispatch already can (`we:skills-src/conveyor/delivery-agent-brief.md`'s own step 1: "If that lane
  * lost its race to a sibling, `acquire` fails loud — report it and exit").
  *
- * DOUBLE-DISPATCH GUARD: NAME-BASED LIVENESS, NOT A SEPARATE LEDGER. This file keeps no bookkeeping of its own
- * between passes (deliberately — see `reconcile-pass.mjs`'s own "session-ephemeral" argument against folding into
- * the tick). The guard against re-dispatching a fix that is already running is `reconcile-core.mjs#bindAgents`'s
- * OWN liveness read: it now recognizes a live `fix-<pr>` session by name (#3438, mirroring the `review-<pr>`
- * name-bind #3437 already added) and refuses (`live-process`) before `planReconcile` ever returns a `kind:'fix'`
- * dispatch entry for that PR again. This is exactly `review-dispatch.mjs`'s own safety net — it carries no
- * separate in-flight ledger either.
+ * DOUBLE-DISPATCH GUARD: NAME-BASED LIVENESS, PLUS A REAL PER-(REPO, PR, HEAD-SHA) CLAIM (#x0jphk5). This file
+ * keeps no bookkeeping of its own between PASSES (deliberately — see `reconcile-pass.mjs`'s own
+ * "session-ephemeral" argument against folding into the tick): the guard against re-dispatching a fix whose
+ * session has had time to become visible is still `reconcile-core.mjs#bindAgents`'s OWN liveness read (it
+ * recognizes a live `fix-<pr>` session by name, #3438, mirroring the `review-<pr>` name-bind #3437) refusing
+ * (`live-process`) before `planReconcile` ever returns a `kind:'fix'` dispatch entry for that PR again — exactly
+ * `review-dispatch.mjs`'s own safety net.
+ *
+ * THAT NAME-BASED GUARD ALONE IS NOT ENOUGH, THOUGH (#x0jphk5, corrected 2026-09-25 — this docblock previously
+ * (and `reconcile-fix-dispatch-daemon.mjs`'s own header, independently) claimed a durable `action-store.mjs`
+ * claim ledger already fenced this decision; FALSE — no such import exists in this file, or ever did). The
+ * liveness read is a `claude agents --json --all` listing measured (`dispatch-lane-io.mjs`) to lag the CLI's
+ * real state by 26+ SECONDS, so a SECOND dispatcher (the daemon plus `runner.mjs`'s own mechanical pass,
+ * deliberately run side by side for a bake period; or a restarted daemon racing a still-live prior instance)
+ * reading that same stale listing within the lag window could see "nothing live" and dispatch again. {@link
+ * ../conveyor/fix-dispatch-claim.mjs} closes that gap: {@link dispatchFix}, {@link tryResumeFix} and
+ * `we:scripts/operations/ci-heal-pr-dispatch.mjs#dispatchCiHeal` each take an atomic, TTL-bounded claim on
+ * `(repo, pr, headRefOid)` — an `O_EXCL` file under the shared coordination sidecar, reusing
+ * `we:scripts/readiness/file-locks.mjs`'s existing lock primitives rather than a new mechanism — before ever
+ * spawning or resuming, so a second dispatcher inside the lag window is refused (`held`), not merely unaware.
  *
  * A ONE-SHOT PASS, LIKE ITS SIBLINGS. Read `reconcile-pass.mjs`'s plan, dispatch every `kind:'fix'` entry it
  * offers, report, exit. Wired into `we:skills-src/conveyor/runner.mjs`'s mechanical passes (#3438) alongside
@@ -74,11 +87,15 @@ import { assertMainNotStale } from '../operations/review-dispatch.mjs';
 import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
+import {
+  acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchClaimOwner,
+} from './fix-dispatch-claim.mjs';
 import { runReconcilePass, resolveLaneHead } from './reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from './unsupported-repo.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
@@ -526,6 +543,12 @@ export function tryResumeFix(planned, {
   stop = stopSession,
   resolveHead = resolveLaneHead,
   wait = defaultConfirmWait,
+  // #x0jphk5 — injectable claim seam (defaults to the real `fix-dispatch-claim.mjs` primitives), mirrored
+  // verbatim in {@link dispatchFix} below so a test can point both at the same in-memory/tmp lock root.
+  claimOwner = fixDispatchClaimOwner(),
+  acquireClaim = acquireFixDispatchClaim,
+  releaseClaim = releaseFixDispatchClaim,
+  claimRoot,
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more: `runReconcileFixDispatch` is the ONE place that
   // decides whether this repo's `fix` capability is on (`docs/agent/platform-decisions.md#conveyor-multi-repo-
@@ -580,6 +603,28 @@ export function tryResumeFix(planned, {
     };
   }
 
+  // #x0jphk5 — TAKE THE CLAIM before ever issuing `--resume`. Ownership is confirmed above (both HEAD-sha and
+  // name), so what remains is a genuine race: two dispatchers reading the same stale listing could BOTH reach
+  // this point for the SAME candidate and both fire `--resume <id>` at once. The claim is released in every
+  // outcome below (this attempt is bounded and synchronous — see hardening (2)'s own retry budget — so the
+  // claim only needs to outlive THIS call, unlike `dispatchFix`'s claim, which protects a freshly spawned
+  // session across the 26+s listing-lag window a fresh dispatch is actually exposed to).
+  const claim = acquireClaim({
+    repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+  });
+  if (!claim.ok) {
+    return {
+      resumed: false,
+      resumeAttempt: {
+        attempted: false, candidate, forked: false,
+        refused: 'claimed-elsewhere',
+        why: `a fix dispatch for PR #${planned.pr} is already claimed (${claim.reason}, held by `
+          + `${JSON.stringify(claim.heldBy)}) — refusing to race a concurrent resume attempt`,
+      },
+    };
+  }
+  const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+
   const resumeArgv = buildAgentArgv({
     payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
     resumeSessionId: candidate,
@@ -599,6 +644,10 @@ export function tryResumeFix(planned, {
     wait(RESUME_CONFIRM_WAIT_MS);
   }
   if (outcome.resumed) {
+    // #x0jphk5 — release now: the resumed session already existed before this call (it was CONFIRMED listed
+    // and owned above), so `bindAgents`'s own name-based liveness already protects it from here on; this
+    // claim's only job was to fence the resume ATTEMPT itself against a concurrent sibling, which just ended.
+    releaseOurClaim();
     return {
       resumed: true,
       result: {
@@ -615,6 +664,9 @@ export function tryResumeFix(planned, {
   // here rather than being read for a verdict — see `resumeSucceeded`'s own docblock for why no fallback acts
   // on it.
   if (printedId) { try { stop({ handle: printedId }); } catch { /* best-effort cleanup only */ } }
+  // #x0jphk5 — release: nothing came of this attempt (or its outcome is unidentifiable and was just stopped),
+  // so the caller's own fresh-dispatch fallback (`dispatchFix`) must be free to take this SAME claim itself.
+  releaseOurClaim();
   return {
     resumed: false,
     resumeAttempt: {
@@ -649,11 +701,21 @@ export function tryResumeFix(planned, {
  * remedy had never been wired into. The delivery-side file is the right one here (not the review twin): a fix
  * agent IS a `dispatch-lane`-shaped delivery agent — it acquires a lane, works an item, pushes to a PR.
  *
- * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number}} planned
+ * #x0jphk5 — TAKES THE `(repo, pr, headRefOid)` CLAIM BEFORE EVER BUILDING THE ARGV, and — unlike
+ * {@link tryResumeFix}'s own claim, released as soon as that bounded call ends — LEAVES IT HELD on a
+ * successful spawn: a fresh session takes up to 26+ seconds to become visible in `claude agents --json --all`
+ * (`dispatch-lane-io.mjs`'s own measurement), and that listing lag is exactly the gap a second dispatcher could
+ * otherwise slip through. The claim self-expires via TTL (see `fix-dispatch-claim.mjs`'s own header for why
+ * PID-liveness is deliberately never used to reclaim it early) if nothing releases it sooner. A failure BEFORE
+ * a session actually starts (no repo profile, a brief-fill error, `spawnAgent` throwing) releases the claim in
+ * a `catch` before rethrowing, so a legitimate retry for the same PR is never blocked by our own failed
+ * attempt.
+ *
+ * @param {{itemNum:string, pr:number, laneRef:string, scope:string[], lane:number, headRefOid?:string|null}} planned
  * @param {object} [o]
  * @param {object|null} [o.resumeAttempt] - carried forward from a prior {@link tryResumeFix} call for this same
  *   entry, purely for reporting on the returned result (this function never attempts a resume itself).
- * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object}}
+ * @returns {{sessionId:string, sessionSlug:string, pr:number, itemNum:string, lane:number, unknownTokens:string[], resumed:false, resumeAttempt?:object} | {held:true, reason:string, heldBy:string|null, pr:number, itemNum:string, lane:number}}
  */
 export function dispatchFix(planned, {
   repo = 'we',
@@ -677,57 +739,82 @@ export function dispatchFix(planned, {
   home,
   checkoutExists,
   readPackageJson,
+  // #x0jphk5 — injectable claim seam, mirroring {@link tryResumeFix}'s own (see that function's own comment).
+  claimOwner = fixDispatchClaimOwner(),
+  acquireClaim = acquireFixDispatchClaim,
+  releaseClaim = releaseFixDispatchClaim,
+  claimRoot,
 } = {}) {
   // #x33jgwt multi-repo slice 5 — no repo gate HERE any more (see {@link tryResumeFix}'s own docblock for why):
   // `runReconcileFixDispatch` already refused a repo whose profile lacks the `fix` capability before this ever
   // runs. `briefTokensForRepo` still fails closed (`null`) for a genuinely unknown/unresolvable profile below.
   assertNotALaneCheckout(root);
 
-  const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
-  // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
-  // token computation itself is repo-generic, so slice 5's capability gate (moved up to
-  // `runReconcileFixDispatch`) needed no change here at all.
-  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
-  if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the fix brief`);
-  // #xmtbdgs multi-repo slice 6 — an item-less PR (`planned.itemNum === null`) has no real number to fill
-  // `{{ITEM_NUM}}` with; `''` is the honest value (never a fabricated number), and `ITEM_NUM` is allowed to
-  // resolve blank ONLY for this population (`tokens.ATTRIBUTION` is already `PR #<n>` in this case —
-  // `briefTokensForRepo` computed that from the same `itemNum: null` above, with zero extra logic needed here).
-  const optionalNames = planned.itemNum ? undefined : [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'];
-  const { prompt, unknownTokens } = fillBrief(readBrief(root), {
-    ITEM_NUM: planned.itemNum ?? '',
-    PR_NUM: planned.pr,
-    LANE_REF: planned.laneRef,
-    LANE: planned.lane,
-    SESSION_SLUG: sessionSlug,
-    SCOPE: planned.scope.join(','),
-    ...tokens,
-  }, BRIEF_REQUIRED_BY_KIND.fix, optionalNames, REPO_AWARE_VALUE_PATTERNS);
-  const sessionId = String(mintSessionId());
-  const argv = buildAgentArgv({
-    sessionId,
-    payload: { prompt, sessionSlug },
-    // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
-    // unfilled template and self-aborts (3/3 live).
-    systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-    extraArgs,
-    // #x8mpubm — see `resolveSettingsEnv`'s own param comment above; resolved once, here, for this FRESH
-    // dispatch only (never for `tryResumeFix`'s own `buildAgentArgv` call, which must stay a bare
-    // `--bg --resume` with no other flag — see that function's docblock). #x8mpubm follow-up (live-caught
-    // 2026-09-24) — `root` is now threaded through so the durable `.claude/settings.local.json` delivery
-    // (`gh-app-shim.mjs#ensureSettingsFileEnv`) writes into the SAME checkout this dispatch starts in,
-    // matching `review-dispatch.mjs#dispatchReview`'s own fix for the identical gap.
-    settingsEnv: resolveSettingsEnv(root),
+  // #x0jphk5 — see this function's own docblock: acquire BEFORE building anything, refuse loud (never throw)
+  // when another dispatcher already holds this exact `(repo, pr, headRefOid)`.
+  const claim = acquireClaim({
+    repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
   });
-  // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
-  // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
-  // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
-  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
-  return {
-    sessionId, agentId: parseBackgroundedId(stdout),
-    sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
-    resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
-  };
+  if (!claim.ok) {
+    return {
+      held: true, reason: claim.reason, heldBy: claim.heldBy,
+      pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane,
+    };
+  }
+  try {
+    const sessionSlug = sessionSlugFor(planned.itemNum, 'fix', planned.pr, '', repo);
+    // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here). The
+    // token computation itself is repo-generic, so slice 5's capability gate (moved up to
+    // `runReconcileFixDispatch`) needed no change here at all.
+    const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
+    if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the fix brief`);
+    // #xmtbdgs multi-repo slice 6 — an item-less PR (`planned.itemNum === null`) has no real number to fill
+    // `{{ITEM_NUM}}` with; `''` is the honest value (never a fabricated number), and `ITEM_NUM` is allowed to
+    // resolve blank ONLY for this population (`tokens.ATTRIBUTION` is already `PR #<n>` in this case —
+    // `briefTokensForRepo` computed that from the same `itemNum: null` above, with zero extra logic needed here).
+    const optionalNames = planned.itemNum ? undefined : [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'];
+    const { prompt, unknownTokens } = fillBrief(readBrief(root), {
+      ITEM_NUM: planned.itemNum ?? '',
+      PR_NUM: planned.pr,
+      LANE_REF: planned.laneRef,
+      LANE: planned.lane,
+      SESSION_SLUG: sessionSlug,
+      SCOPE: planned.scope.join(','),
+      ...tokens,
+    }, BRIEF_REQUIRED_BY_KIND.fix, optionalNames, REPO_AWARE_VALUE_PATTERNS);
+    const sessionId = String(mintSessionId());
+    const argv = buildAgentArgv({
+      sessionId,
+      payload: { prompt, sessionSlug },
+      // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
+      // unfilled template and self-aborts (3/3 live).
+      systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+      extraArgs,
+      // #x8mpubm — see `resolveSettingsEnv`'s own param comment above; resolved once, here, for this FRESH
+      // dispatch only (never for `tryResumeFix`'s own `buildAgentArgv` call, which must stay a bare
+      // `--bg --resume` with no other flag — see that function's docblock). #x8mpubm follow-up (live-caught
+      // 2026-09-24) — `root` is now threaded through so the durable `.claude/settings.local.json` delivery
+      // (`gh-app-shim.mjs#ensureSettingsFileEnv`) writes into the SAME checkout this dispatch starts in,
+      // matching `review-dispatch.mjs#dispatchReview`'s own fix for the identical gap.
+      settingsEnv: resolveSettingsEnv(root),
+    });
+    // #3331 — READ THE REAL ID BACK OFF STDOUT, exactly as the resume branch above already does. `claude --bg`
+    // discards `--session-id` and assigns its own, so the minted uuid addresses nothing; `agentId` is what
+    // `claude agents`/`logs`/`stop` take. `sessionId` stays on the result for callers that already read it.
+    const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+    // #x0jphk5 — the claim is DELIBERATELY NOT released here on success: see this function's own docblock for
+    // why it must outlive this call (the 26+s listing-lag window a fresh spawn is exposed to).
+    return {
+      sessionId, agentId: parseBackgroundedId(stdout),
+      sessionSlug, pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens,
+      resumed: false, ...(resumeAttempt ? { resumeAttempt } : {}),
+    };
+  } catch (e) {
+    // #x0jphk5 — nothing was actually spawned: release so a legitimate retry for this same PR is never blocked
+    // by our own failed attempt.
+    releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+    throw e;
+  }
 }
 
 /**
@@ -887,13 +974,71 @@ export function runReconcileFixDispatch({
     }
     const lane = lanes.shift();
     try {
-      dispatched.push(dispatch({ ...entry, lane }, { root, repo: repoKey, extraArgs: agentArgsFromEnv(), resumeAttempt }));
+      const result = dispatch({ ...entry, lane }, { root, repo: repoKey, extraArgs: agentArgsFromEnv(), resumeAttempt });
+      if (result?.held) {
+        // #x0jphk5 — a `(repo, pr, headRefOid)` claim already held elsewhere: nothing was spawned, so the lane
+        // this iteration popped went unused — return it to the pool for the NEXT entry, exactly as a
+        // `tryResumeFix` success already leaves it untouched (this function's own docblock, "#xazl9u3").
+        lanes.unshift(lane);
+        refusals.push({
+          pr: entry.pr, kind: 'held',
+          why: `a fix dispatch for PR #${entry.pr} is already claimed (${result.reason}, held by `
+            + `${JSON.stringify(result.heldBy)})`,
+        });
+        continue;
+      }
+      dispatched.push(result);
     } catch (e) {
       refusals.push({ pr: entry.pr, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
     }
   }
 
   return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planFixDispatchClaimStatus — #x0jphk5 READ-ONLY DRY RUN. Reads
+ * the exact SAME plan {@link runReconcileFixDispatch} would dispatch against (reused, not re-derived), but
+ * never spawns, resumes, acquires, or releases anything — for each planned `fix` entry it only asks
+ * {@link ../conveyor/fix-dispatch-claim.mjs#readFixDispatchClaim} whether that PR's `(repo, pr, headRefOid)`
+ * claim is currently free or already held, and by whom. This is the live introspection this item's own proof
+ * needs (a `--dry-run` before/after showing a claim taken, then refused for a duplicate, with zero side
+ * effects on the real system) and a genuine standing tool: an operator — or a future health-daemon check — can
+ * ask "is a fix about to be double-dispatched?" without risking a real dispatch itself.
+ * @param {object} [o] — the same read-only inputs `runReconcileFixDispatch` itself takes (`repo`, `root`,
+ *   `findItemFn`, `loadItems`, `reconcile`, the scope resolvers, `resolveProfile`, `checkStaleness`, `prsFile`).
+ * @param {Function} [o.readClaim] - injectable, defaults to the real {@link readFixDispatchClaim}.
+ * @param {string} [o.claimRoot] - injectable claim-lock root, defaults to the real pinned coordination sidecar.
+ * @returns {{repo:string, entries:Array<{pr:number, itemNum:string|null, headRefOid:string|null, claim:(object|null)}>}}
+ */
+export function planFixDispatchClaimStatus({
+  root = REPO_ROOT,
+  repo = null,
+  findItemFn = findItem,
+  loadItems = () => defaultLoadItems(root),
+  reconcile = runReconcilePass,
+  resolveFallbackScope = (pr) => fetchPrDiffScope(pr, { root, repo }),
+  fetchItemlessDiffPaths = (pr) => fetchPrDiffPaths(pr, { root, repo }),
+  resolveCardScopeAtRef = (path, ref) => fetchCardScopeAtRef(path, ref, { root, repo }),
+  resolveProfile = repoProfile,
+  checkStaleness,
+  prsFile,
+  readClaim = readFixDispatchClaim,
+  claimRoot,
+} = {}) {
+  const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
+  assertMainNotStale(root, checkStaleness);
+  const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
+  const dispatchEntries = Array.isArray(reconciled.dispatch) ? reconciled.dispatch : [];
+  const profile = resolveProfile(repoKey);
+  if (!profile?.capabilities?.fix) return { repo: repoKey, entries: [] };
+  const { planned } = planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, resolveFallbackScope, repoKey, fetchItemlessDiffPaths, resolveCardScopeAtRef);
+  const entries = planned.map((entry) => ({
+    pr: entry.pr, itemNum: entry.itemNum, headRefOid: entry.headRefOid,
+    claim: readClaim({ repo: repoKey, pr: entry.pr, headSha: entry.headRefOid, lockRoot: claimRoot }),
+  }));
+  return { repo: repoKey, entries };
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -905,28 +1050,54 @@ if (IS_CLI) {
     if (eq === -1) flags[a.slice(2)] = true;
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
-  let result;
-  try {
-    result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
-  } catch (e) {
-    process.stderr.write(`✗ reconcile-fix-dispatch failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
-    process.exit(1);
-  }
-  if (flags.json) {
-    process.stdout.write(JSON.stringify(result) + '\n');
-  } else {
-    const lines = [`reconcile-fix-dispatch — ${result.dispatched.length} dispatched, ${result.refusals.length} refusal(s)`];
-    for (const d of result.dispatched) {
-      const laneInfo = d.resumed ? 'no lane (resumed)' : `lane-${d.lane}`;
-      // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
-      // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
-      const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
-      // #xmtbdgs multi-repo slice 6 — `d.itemNum` is `null` for an item-less PR; print "no backlog item"
-      // rather than a literal "item #null".
-      const itemLabel = d.itemNum ? `item #${d.itemNum}` : 'no backlog item';
-      lines.push(`  → fix    PR #${d.pr} (${itemLabel}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
+  if (flags['dry-run']) {
+    // #x0jphk5 — read-only: reports claim status, never dispatches/resumes/acquires/releases anything.
+    let status;
+    try {
+      status = planFixDispatchClaimStatus({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
+    } catch (e) {
+      process.stderr.write(`✗ reconcile-fix-dispatch --dry-run failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
+      process.exit(1);
     }
-    for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
-    process.stdout.write(lines.join('\n') + '\n');
+    if (flags.json) {
+      // #3061 — this write sits ahead of the `else` branch's own `process.exit(1)` below in this same CLI
+      // block, so `stdout-flush-scan.mjs`'s proximity scan reads it as followed by an exit; drain it
+      // synchronously (remedy (b), `write-all-sync.mjs`) rather than risk truncation under a capturing parent.
+      writeLineSync(1, JSON.stringify(status));
+    } else {
+      const lines = [`reconcile-fix-dispatch --dry-run — ${status.entries.length} PR(s) planned for repo "${status.repo}"`];
+      for (const e of status.entries) {
+        const itemLabel = e.itemNum ? `item #${e.itemNum}` : 'no backlog item';
+        lines.push(e.claim
+          ? `  ⚠ PR #${e.pr} (${itemLabel}) — claim ALREADY HELD by ${e.claim.owner} (since ${e.claim.heartbeatAt}) — a real dispatch attempt right now would be REFUSED`
+          : `  ✓ PR #${e.pr} (${itemLabel}) — claim free — a real dispatch attempt right now would proceed`);
+      }
+      writeLineSync(1, lines.join('\n'));
+    }
+  } else {
+    let result;
+    try {
+      result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
+    } catch (e) {
+      process.stderr.write(`✗ reconcile-fix-dispatch failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
+      process.exit(1);
+    }
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(result) + '\n');
+    } else {
+      const lines = [`reconcile-fix-dispatch — ${result.dispatched.length} dispatched, ${result.refusals.length} refusal(s)`];
+      for (const d of result.dispatched) {
+        const laneInfo = d.resumed ? 'no lane (resumed)' : `lane-${d.lane}`;
+        // #3331 — report the ADDRESSABLE id (`claude logs/stop` take it) when we have one; a resume reports the
+        // session it continued, and an unparseable spawn falls back to the slug, which `claude agents` carries.
+        const who = d.agentId ? `agent ${d.agentId}` : (d.resumed ? `session ${d.sessionId}` : 'agent (id unread)');
+        // #xmtbdgs multi-repo slice 6 — `d.itemNum` is `null` for an item-less PR; print "no backlog item"
+        // rather than a literal "item #null".
+        const itemLabel = d.itemNum ? `item #${d.itemNum}` : 'no backlog item';
+        lines.push(`  → fix    PR #${d.pr} (${itemLabel}) — ${who} (${d.sessionSlug}), ${laneInfo}`);
+      }
+      for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.prNumber ?? r.pr} — ${r.why}`);
+      process.stdout.write(lines.join('\n') + '\n');
+    }
   }
 }

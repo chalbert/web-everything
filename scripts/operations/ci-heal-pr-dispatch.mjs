@@ -6,8 +6,16 @@
  * `fix-agent-ci-brief.md` (`BRIEF_REQUIRED_BY_KIND['ci-heal']`, the same tokens `dispatch-lane.mjs` fills) and hands
  * one effect payload to the SAME sink the tick uses (`dispatch-lane-io.mjs#createDispatchSinks`), so the provider
  * registry decides what runs: the detached `ci-heal-run.mjs` wrapper by default, or the `claude --bg` brief when
- * `WE_CI_HEAL_DISPATCH_MODE=agent`. The action record guard (`guardedDispatch`) keys on the PR, so a second call for
- * the same PR is `held`, never a double dispatch.
+ * `WE_CI_HEAL_DISPATCH_MODE=agent`.
+ *
+ * CORRECTION (#x0jphk5, 2026-09-25): this paragraph previously said "the action record guard (`guardedDispatch`)
+ * keys on the PR, so a second call for the same PR is `held`, never a double dispatch" — FALSE on `main`.
+ * `createDispatchSinks` (`dispatch-lane-io.mjs`) never wires `guardedDispatch`/an action store at all; the
+ * `actions`/`repo` this file passes it below are silently ignored there today (that wiring is a SEPARATE,
+ * not-yet-landed effort — `we:backlog/3906-*.md`). What actually guards a second call for the same PR now is a
+ * REAL atomic `(repo, pr, headRefOid)` claim {@link dispatchCiHeal} takes itself — `we:scripts/conveyor/
+ * fix-dispatch-claim.mjs`, an `O_EXCL` file under the shared coordination sidecar with TTL-bounded dead-holder
+ * reclaim, reusing `we:scripts/readiness/file-locks.mjs`'s existing lock primitives — never `guardedDispatch`.
  *
  * WHAT IT ADDED OVER THE TICK PATH, BEFORE THIS SLICE HAD A CALLER: the tick plans ci-heal solely for PRs its own
  * bookkeeping launched (`tick-core.mjs#planCiHealSpawns`, `launchedNums`, session-ephemeral), so a red PR opened by
@@ -41,12 +49,15 @@ import { freeLaneNumbers, fetchPrDiffPaths } from '../conveyor/reconcile-fix-dis
 import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from '../conveyor/unsupported-repo.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
+import {
+  acquireFixDispatchClaim, releaseFixDispatchClaim, fixDispatchClaimOwner,
+} from '../conveyor/fix-dispatch-claim.mjs';
 
 /**
- * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string, repo?:string}} planned - a `planFixesFromReconcile`
+ * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string, repo?:string, headRefOid?:string|null}} planned - a `planFixesFromReconcile`
  *   entry (the same planner every repair row uses) plus a lane number and the ci-heal reason (`red-ci` unless told otherwise).
  * @param {object} [o]
- * @returns {Promise<{agentId:(string|null), sessionSlug:string, pr:number, itemNum:(string|null), lane:number, unknownTokens:string[]} | {held:true, reason:string}>}
+ * @returns {Promise<{agentId:(string|null), sessionSlug:string, pr:number, itemNum:(string|null), lane:number, unknownTokens:string[]} | {held:true, reason:string, heldBy?:string|null}>}
  */
 export async function dispatchCiHeal(planned, {
   root = REPO_ROOT, actions, repo = planned.repo ?? 'we', extraArgs = [],
@@ -60,24 +71,49 @@ export async function dispatchCiHeal(planned, {
   home,
   checkoutExists,
   readPackageJson,
+  // #x0jphk5 — injectable claim seam, mirroring `reconcile-fix-dispatch.mjs#dispatchFix`'s own (see this file's
+  // own corrected header for why this replaces the `guardedDispatch` this docblock used to (wrongly) describe).
+  claimOwner = fixDispatchClaimOwner(),
+  acquireClaim = acquireFixDispatchClaim,
+  releaseClaim = releaseFixDispatchClaim,
+  claimRoot,
 } = {}) {
-  // #3967 multi-repo slice 7 — `repo` THREADED THROUGH, matching `reconcile-core.mjs#bindAgents`'s own
-  // repo-tagged `ci-heal-<pr>` slug (see this file's own docblock for the double-dispatch this fixes).
-  const sessionSlug = sessionSlugFor(planned.itemNum, 'ci-heal', planned.pr, '', repo);
-  const reason = planned.reason ?? 'red-ci';
-  // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here).
-  const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
-  if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the ci-heal brief`);
-  const { prompt, unknownTokens } = fillBrief(readBrief(root), {
-    ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
-    SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
-  }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'], REPO_AWARE_VALUE_PATTERNS);
-  const out = await sinks[DISPATCH_EFFECT]({
-    launchKind: 'ci-heal', prompt, sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
-    pr: planned.pr, reason, repo,
-  });
-  if (out?.held) return out;
-  return { agentId: out?.handle ?? null, sessionSlug, pr: planned.pr, itemNum: planned.itemNum ?? null, lane: planned.lane, unknownTokens };
+  // #x0jphk5 — acquire BEFORE building anything below; refuse loud (never throw) when another dispatcher
+  // already holds this exact `(repo, pr, headRefOid)`.
+  const claim = acquireClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+  if (!claim.ok) {
+    return { held: true, reason: claim.reason, heldBy: claim.heldBy };
+  }
+  const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+  try {
+    // #3967 multi-repo slice 7 — `repo` THREADED THROUGH, matching `reconcile-core.mjs#bindAgents`'s own
+    // repo-tagged `ci-heal-<pr>` slug (see this file's own docblock for the double-dispatch this fixes).
+    const sessionSlug = sessionSlugFor(planned.itemNum, 'ci-heal', planned.pr, '', repo);
+    const reason = planned.reason ?? 'red-ci';
+    // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here).
+    const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
+    if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the ci-heal brief`);
+    const { prompt, unknownTokens } = fillBrief(readBrief(root), {
+      ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
+      SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
+    }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'], REPO_AWARE_VALUE_PATTERNS);
+    const out = await sinks[DISPATCH_EFFECT]({
+      launchKind: 'ci-heal', prompt, sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
+      pr: planned.pr, reason, repo,
+    });
+    if (out?.held) {
+      // #x0jphk5 — the SINK's own (separate, unrelated) guard refused it: nothing was spawned under OUR claim
+      // either, so release it rather than leaving it to expire on the TTL.
+      releaseOurClaim();
+      return out;
+    }
+    // #x0jphk5 — deliberately NOT released here: see `dispatchFix`'s own docblock (`reconcile-fix-dispatch.mjs`)
+    // for why a claim on a successful spawn must outlive this call.
+    return { agentId: out?.handle ?? null, sessionSlug, pr: planned.pr, itemNum: planned.itemNum ?? null, lane: planned.lane, unknownTokens };
+  } catch (e) {
+    releaseOurClaim();
+    throw e;
+  }
 }
 
 /**
@@ -167,6 +203,11 @@ export async function runReconcileCiHealDispatch({
     const planned = {
       itemNum: unit?.itemNum ?? null, pr: entry.prNumber, laneRef: entry.headRefName,
       scope: Array.isArray(unit?.scope) ? unit.scope : [], reason: 'red-ci',
+      // #x0jphk5 — carried through so `dispatchCiHeal` can key its `(repo, pr, headRefOid)` claim; dropped
+      // before this slice, even though `reconcile-core.mjs`'s own `base` object already carries it on every
+      // entry (see this function's own docblock — "a CI-heal entry carries neither on `reconcile-core.mjs`'s
+      // own `dispatch` row" was true of item/scope, never of `headRefOid`).
+      headRefOid: entry.headRefOid ?? null,
     };
 
     if (lanes.length === 0) {
@@ -178,7 +219,14 @@ export async function runReconcileCiHealDispatch({
       // eslint-disable-next-line no-await-in-loop -- sequential by design: this repo's own lane pool is popped
       // one at a time, so two entries in the same pass can never race for the same lane number.
       const result = await dispatch(planned, { root, repo: repoKey, extraArgs: agentArgsFromEnv() });
-      if (result?.held) { refusals.push({ pr: entry.prNumber, kind: 'held', why: result.reason ?? `a CI-heal for PR #${entry.prNumber} is already in flight` }); continue; }
+      if (result?.held) {
+        // #x0jphk5 — nothing was spawned, so the lane this iteration popped went unused — return it to the
+        // pool for the NEXT entry (mirrors `runReconcileFixDispatch`'s identical fix, `reconcile-fix-
+        // dispatch.mjs`).
+        lanes.unshift(planned.lane);
+        refusals.push({ pr: entry.prNumber, kind: 'held', why: result.reason ?? `a CI-heal for PR #${entry.prNumber} is already in flight` });
+        continue;
+      }
       dispatched.push(result);
     } catch (e) {
       refusals.push({ pr: entry.prNumber, kind: 'dispatch-failed', why: String((e && e.message) || e).split('\n')[0] });
