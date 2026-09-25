@@ -48,6 +48,13 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../lib/constellation-repos.
 // `we:scripts/lane-pool.mjs` itself calls). See `defaultIsLeasedNow` below.
 import { LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+// #4122 — publish the FREE-LANE LIST this pass already has the ingredients for (see {@link writeFreeLaneListForTick}
+// below): `we:scripts/lane-pool.mjs acquire` reads it as a fast pre-filter instead of paying for its own
+// full-pool scan on the common path (live incident, 2026-09-25: acquire measured 240s / list 66s under load,
+// against acquire's 180s wait, while 30+ lanes sat free). This file already shells the exact `list
+// --acquirable` scan the list is built from (`defaultListAcquirable` below) — publishing it here is additive,
+// no extra git/gh calls.
+import { buildFreeLaneList, resolveFreeLaneListPath, writeFreeLaneListAtomic } from '../lib/free-lane-list.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -147,6 +154,25 @@ export function summarizeHealth(lanes, plan, reaped = [], acquirableLaneNumbers 
   return { total: existing.length, leased, acquirable, dirtyUnleased };
 }
 
+/**
+ * #4122 — the rows {@link buildFreeLaneList} needs, derived from this SAME tick's already-computed facts: the
+ * live `lanes` snapshot (for each acquirable lane's `path`/`head`/`branch`) cross-referenced against
+ * `acquirableLaneNumbers` — the REAL `list --acquirable` verdict, never the plan-only estimate (see
+ * `summarizeHealth`'s own docblock for why the two can diverge: a live-caught false-positive rate of 14 vs 3
+ * on the real pool). Pure. `acquirableLaneNumbers === null` (the real read was unavailable this tick) always
+ * yields an EMPTY list — publishing a plan-only guess as the free-lane list would let `acquire` skip its own
+ * scan on exactly the unsound answer #3383 already found and fixed for this file's own health report.
+ * @param {Array<{lane:number, path:string, exists?:boolean, leased?:boolean, head?:string, branch?:string}>} lanes
+ * @param {Set<number>|null} acquirableLaneNumbers
+ * @returns {Array<{lane:number, path:string, head:(string|null), branch:(string|null)}>}
+ */
+export function freeLaneRows(lanes, acquirableLaneNumbers) {
+  if (!acquirableLaneNumbers) return [];
+  return (Array.isArray(lanes) ? lanes : [])
+    .filter((l) => l && l.exists !== false && !l.leased && acquirableLaneNumbers.has(l.lane))
+    .map((l) => ({ lane: l.lane, path: l.path, head: l.head ?? null, branch: l.branch ?? null }));
+}
+
 // ── IO SHELL (subprocess/git only past this point — the CLI, gated on the main-module check) ────────────────
 
 /**
@@ -218,6 +244,30 @@ export function defaultListAcquirable({ exec = execFileSync, repo = null, root =
     const paths = JSON.parse(String(out || '[]'));
     if (!Array.isArray(paths)) return null;
     return new Set(paths.map((p) => Number(String(p).match(/lane-(\d+)$/)?.[1])).filter((n) => Number.isInteger(n)));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #4122 — publish this tick's {@link freeLaneRows} as the free-lane list `we:scripts/lane-pool.mjs acquire`
+ * reads (via `we:scripts/lib/free-lane-list.mjs`). `write`/`resolvePath`/`build` are injectable so a test can
+ * assert on the object written without touching a real file. Best-effort, like every other write in this
+ * file's IO shell: any failure (an unwritable path, a bad `CONVEYOR_STATE_ROOT`) returns `null` — "not
+ * published this tick" — never throws, so one bad write never fails the whole health-watch pass.
+ * @param {{repoName:string, poolDir:string, rows:Array<object>, writtenAt?:number,
+ *   build?:Function, resolvePath?:Function, write?:Function}} o
+ * @returns {{path:string, count:number}|null}
+ */
+export function defaultWriteFreeLaneList({
+  repoName, poolDir, rows, writtenAt = Date.now(),
+  build = buildFreeLaneList, resolvePath = resolveFreeLaneListPath, write = writeFreeLaneListAtomic,
+} = {}) {
+  try {
+    const list = build({ repoName, poolDir, writtenAt, lanes: rows });
+    const path = resolvePath({ repoName, poolDir });
+    write(path, list);
+    return { path, count: list.lanes.length };
   } catch {
     return null;
   }
@@ -402,6 +452,7 @@ export function watchLanePoolHealth({
   reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
   listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
+  writeFreeLaneList = defaultWriteFreeLaneList,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -428,6 +479,19 @@ export function watchLanePoolHealth({
   // diverge from what `acquire`'s own auto-pick would actually do. `null` (real read unavailable this tick)
   // degrades to the pre-#3383 plan-only answer.
   const acquirableLaneNumbers = listAcquirable({ repo, root });
+  // #4122 — publish the free-lane list from this SAME real eligibility read, never the plan-only estimate
+  // (see `freeLaneRows`'s own docblock). NOT gated on `--dry-run`: publishing this sidecar is a bookkeeping
+  // write, not a pool-lane mutation (the same distinction `we:scripts/lane-pool.mjs`'s own
+  // `.list-acquirable-cache.json` already draws — that cache is written on every `list --acquirable`, dry-run
+  // or not), so a `--dry-run` health-watch pass (litter-reap/trim/reclaim all skipped) still refreshes the one
+  // artifact `acquire` actually depends on. Skipped only when `acquirableLaneNumbers` is `null` (this tick's
+  // real read failed) — the PREVIOUS list, if any, is left exactly as it was: a slightly-stale-but-sound file
+  // beats one just overwritten with an unsound guess. `acquire`'s own freshness check (`isFreeLaneListFresh`)
+  // is what retires a list nobody has refreshed in a while — this function only ever decides whether THIS
+  // tick may write.
+  const freeLaneList = acquirableLaneNumbers
+    ? writeFreeLaneList({ repoName: status.repo, poolDir: status.root, rows: freeLaneRows(lanes, acquirableLaneNumbers) })
+    : null;
   // #3383 gap 2 — run whois + reclaim LAST: a lane litter-reap or trim just acted on is a different lane from
   // any whois would call finished-reclaimable (whois only ever recommends resetting a lane with real ahead/
   // dirty content — litter-only or already-clean lanes are `lane-whois.mjs`'s own trivial "nothing to lose"
@@ -439,7 +503,7 @@ export function watchLanePoolHealth({
     const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun });
     reclaim = { verdicts: whois, outcomes };
   }
-  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim, reclaim };
+  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim, reclaim, freeLaneList };
 }
 
 /**
@@ -471,10 +535,18 @@ if (IS_CLI) {
     if (result.disabled) {
       process.stderr.write(`  lane-pool-health-watch: disabled (${DISABLE_ENV_VAR} set)\n`);
     } else {
-      const { health, plan, reaped, trim, reclaim } = result;
+      const { health, plan, reaped, trim, reclaim, freeLaneList } = result;
       process.stderr.write(
         `  pool health: ${health.acquirable} acquirable · ${health.dirtyUnleased} dirty(unleased) · ` +
           `${health.leased} leased · ${health.total} total\n`,
+      );
+      // #4122 — `null` covers three different ticks (dry-run, real-read-unavailable, a write failure); this
+      // report line does not need to tell them apart (each already logs its own signal above/below), only
+      // whether `acquire` has a fresh list to read after this tick.
+      process.stderr.write(
+        freeLaneList
+          ? `  free-lane list: published ${freeLaneList.count} lane(s) → ${freeLaneList.path}\n`
+          : '  free-lane list: not published this tick (no real eligibility read this tick, or a write failure)\n',
       );
       for (const p of plan) {
         if (p.action === 'reap') {
