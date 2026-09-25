@@ -3875,6 +3875,17 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    changes."* A directory-keyed (never basename-keyed) in-daemon tripwire that DEFERS a self-source PR so THIS
    daemon's pass is never the one to land it remains a sound belt-and-braces implementation detail, but the
    binding rule is the graduated-committee-with-independence above, not any single guard.
+   (amended 2026-09-24 by 4043, operator: *"B"*.) **Independence covers the code as well as the actor: a PR is
+   never judged by a checkout that contains that PR's own unmerged changes.** A review daemon running a live
+   overlay ([#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 5) dispatches the
+   review of any PR whose changed files overlap an active overlay's changed files (both vs `origin/main`;
+   path-based, so a rebase, amend or rename cannot dodge it) from a dedicated `main`-only checkout, through the
+   same graduated committee. When that checkout is missing, stale or dirty, it **fails closed** to
+   `review:human` and alerts; the fallback is a tooling failure to fix, never the routine path. The label writer
+   (`we:scripts/review-set-label.mjs --to=accepted`) refuses from an overlapping checkout, so a mis-routed review
+   cannot clear either. Rejected: routine human review of overlay PRs (contradicts the operator's words above),
+   skipping the PR while its overlay is live (deadlocks — the overlay drops only once `main` has it), and
+   accepting the risk (reopens the #809 hole).
 
 **Lineage:** #2501 (ratified 2026-07-27, operator; bornAs 2501; prep
 `we:reports/2026-07-14-plateau-loop-self-hosting-boundary.md`, research `/research/plateau-loop-self-hosting-boundary/`).
@@ -5037,6 +5048,33 @@ that reads the supervision level; turning such a gate on is separately-scoped wo
 [#calibration-veto-clearing](#calibration-veto-clearing) (`#3673`). Full reasoning:
 [#3690](/backlog/3690-track-and-consider-graduating-session-initiated-codex-delega/).
 
+### No borrowed evidence toward a supervision bar — family, sibling task types and benchmarks lend no credit {#supervision-no-borrowed-evidence}
+
+**Ratified 2026-09-24 by the operator (Nicolas Gilbert), Fork 1 (a) approved as prepared; Forks 2–3 moot
+(`#3734`).** Reaffirms [#delegation-trial-record-graduation](#delegation-trial-record-graduation)'s "trust
+never carries across triples" and [#model-probation-graduation-criteria](#model-probation-graduation-criteria)
+clause 4 against a proposed *capped prior*, meaning virtual clean trials credited to a trust tuple from
+evidence outside it. Three rules:
+
+1. **Only the exact tuple's own record counts toward its bar.** No credit flows from the same model on another
+   task type, the same weights on another host, an adjacent release of a vendor line, or a vendor name.
+   Risk tier and role authority vary the bar uniformly for every identity, never by identity. Ground: the task
+   type is the tuple's operational design domain, and a safety case does not carry across domains.
+2. **A benchmark never counts toward a bar.** It stays an advisory `explorationHint` tiebreak in
+   `selectProvider`; the "MUST NEVER INFLUENCE `selectSupervisionLevel`" header of
+   `we:scripts/lib/model-capability-ratings.mjs` stands. A project may still use any signal to *tighten* a bar.
+3. **Reopen only on a back-test, through an ordinary batched finding.** Once the store holds at least five
+   tuples, across at least two models, that graduated on their own data after a same-relation lender had
+   already graduated, and a replay shows lender-derived credit would never have advanced a tuple that later
+   recorded a miss, a capped low-risk credit may be proposed again. The counts are placeholders for that
+   finding to set. Any credit then admitted must be a `selectSupervisionLevel` argument, never a scorecard
+   row, since `evaluateProviderFitness` reads the rows as fitness to be handed work.
+
+**Lineage:** ratified via `#3734` (2026-09-24), under epic `#3383`, grounded in
+`/research/supervision-graduation-borrowed-evidence/` and
+`we:reports/2026-09-21-supervision-prior-grounding.md`. Full reasoning:
+[#3734](/backlog/3734-may-agent-family-and-benchmark-data-act-as-a-capped-prior-to/).
+
 ### An agent vendor registers by one descriptor module in one explicit static index; a descriptor declares mechanics only; a marked vendor that cannot run a kind is refused for `build` and repaired-around for `fix`/`ci-heal`, recorded apart from routing {#agent-vendor-registry}
 
 **Ratified 2026-09-21 by the operator (Nicolas Gilbert), all four forks approved as prepared, no
@@ -5524,9 +5562,10 @@ clauses:
 6. **What runs is visible, and hangs are caught from outside.** Each daemon publishes its boot input heads and
    active overlays in its heartbeat or lease record, read by `runner-activity`. Every child call a tick makes
    has a timeout, and a check outside the daemon alerts when its heartbeat stops moving.
-7. **Left open.** How [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3 (a
-   daemon never approves its own daemon-code change) applies to a review daemon running an overlay whose
-   graduation PR it would review was not ruled. Clause 3 stands unamended until decision card 4043 rules it.
+7. **Overlay graduation review (ruled 2026-09-24 by 4043).** A review daemon running an overlay never reviews
+   that overlay's PR from its own clone: overlapping PRs are reviewed from a `main`-only checkout, failing
+   closed to `review:human` — see the amendment to
+   [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 3.
 
 **Lineage:** #3681 (ratified 2026-09-23; first prepared the morning of 2026-09-23, re-prepared the same evening
 in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch framing of 3992 and the
