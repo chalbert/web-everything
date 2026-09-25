@@ -83,6 +83,21 @@ describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-sel
     expect(test.command.split(' && ')[0]).toBe("npx vitest related 'scripts/a.mjs' --run --passWithNoTests");
   });
 
+  it('PR #2680 review — a diff of ONLY deleted non-source files never emits a target-less `vitest related` (a false red)', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['docs/obsolete.md'], { deleted: ['docs/obsolete.md'] }), env: {} });
+    expect(decision.mode).toBe('shrink');
+    expect(decision.targets).toEqual([]);
+    expect(command).not.toMatch(/vitest related\s+--run/);
+    expect(command.split(' && ')[0]).toMatch(/^echo .*vitest half skipped/);
+  });
+
+  it('PR #2680 review — reference discovery greps every vitest test suffix (jsx / cts included)', () => {
+    let seen = null;
+    const git = fakeGit(['scripts/tool.mjs']);
+    resolveDefaultGate({ runGit: (args) => { if (args[0] === 'grep') seen = args; return git(args); }, env: {} });
+    for (const spec of ['*.test.ts', '*.test.tsx', '*.test.jsx', '*.test.mjs', '*.test.cjs', '*.test.cts']) expect(seen).toContain(spec);
+  });
+
   it('a backlog/ card selects for vitest but keeps check:standards UNSCOPED (the #1937/#3395 margin), and never greps ~140 fixture tests for `backlog`', () => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['backlog/100-example.md'], { grepHits: { backlog: ['x.test.mjs'] } }), env: {} });
     expect(decision.mode).toBe('shrink');

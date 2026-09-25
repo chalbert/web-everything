@@ -61,6 +61,9 @@
 import { SELECTION_FLAG, pinnedMergeBase, decideLocalSelection, referencedTestNeedles } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
 
+/** The pathspecs `testsNaming` greps — every vitest test-file suffix (PR #2680 review: one list, pinned by a test). */
+export const VITEST_TEST_PATHSPECS = Object.freeze(['*.test.ts', '*.test.tsx', '*.test.js', '*.test.jsx', '*.test.mjs', '*.test.cjs', '*.test.mts', '*.test.cts']);
+
 /** Above this many `vitest related` targets the local gate runs the full suite instead (argv size; little saving). */
 export const MAX_RELATED_TARGETS = 300;
 
@@ -162,7 +165,11 @@ export function resolveDefaultGate({ base = 'origin/main', runGit, env = process
     }
     const decision = { ...local, changedFiles, referencedTests, targets };
     // `--passWithNoTests`: a diff whose files no test reaches (docs, a backlog card) is a pass, not a failure.
-    const vitestCmd = `npx vitest related ${targets.map(shellQuote).join(' ')} --run --passWithNoTests`;
+    // PR #2680 review — a diff of ONLY deleted non-source files leaves no target, and `vitest related` with no
+    // positional file is an error (a false red); there is nothing for vitest to run, so say so and skip it.
+    const vitestCmd = targets.length
+      ? `npx vitest related ${targets.map(shellQuote).join(' ')} --run --passWithNoTests`
+      : `echo ${shellQuote('verify-lane: no remaining changed file for vitest to relate — vitest half skipped (deletions only)')}`;
     return { ...composeGate({ vitestCmd, checkStandardsCmd, scripts }), decision };
   }
   return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision: { ...local, changedFiles, referencedTests: [], targets: [] } };
@@ -195,7 +202,9 @@ export function testsNaming(needles, runGit) {
   if (!needles.length) return [];
   const args = ['grep', '-l', '-F'];
   for (const n of needles) args.push('-e', n);
-  args.push('--', '*.test.ts', '*.test.tsx', '*.test.js', '*.test.mjs', '*.test.cjs', '*.test.mts');
+  // Every vitest test-file suffix (`*.test.*`, incl. jsx/cts). `*.spec.*` is deliberately absent: in this
+  // constellation `.spec.*` files are Playwright specs, which vitest's own `include` never runs.
+  args.push('--', ...VITEST_TEST_PATHSPECS);
   try {
     return String(runGit(args)).split('\n').map((s) => s.trim()).filter(Boolean).sort();
   } catch {

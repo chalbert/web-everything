@@ -2229,7 +2229,17 @@ export function vitestRunFileTargetCount(tail) {
     // operator and its target is the next word — and neither is the separately-worded VALUE of a flag that takes
     // one (`--root <dir>`, `-t <name>`). Counting them pushed a one-file run over the limit.
     if (op) { i += 1; continue; }
-    if (t.startsWith('-')) { if (VITEST_VALUE_FLAGS.has(t)) i += 1; continue; }
+    if (t.startsWith('-')) {
+      if (VITEST_VALUE_FLAGS.has(t)) { i += 1; continue; }
+      // PR #2680 review — the value-flag list can never be complete, so also treat the word after an UNKNOWN
+      // `--flag` (no `=`) as its value when that word cannot be a file target anyway: a number / boolean, or the
+      // value of a dotted option (`--typecheck.tsconfig x.json`). Errs toward "not a target" (a deny).
+      const next = toks[i + 1];
+      if (next && !next.op && next.text && !next.text.startsWith('-') && !t.includes('=')
+        && (t.startsWith('--') && t.slice(2).includes('.') || /^(?:\d+(?:\.\d+)?%?|true|false)$/.test(next.text))) i += 1;
+      continue;
+    }
+    if (/^(?:\d+(?:\.\d+)?|true|false)$/.test(t)) continue;
     // xpnhz4o review — `.`, `./`, `..`, `*`, `**` filter NOTHING (vitest substring-matches every path), so they
     // are not a target: `npx vitest run .` is the whole suite and must count as zero.
     if (/^[./*]+$/.test(t)) continue;
@@ -2241,7 +2251,8 @@ export function vitestRunFileTargetCount(tail) {
 /** The vitest flags whose value may be a separate word. A value written `--flag=value` is one token and needs no entry. */
 const VITEST_VALUE_FLAGS = new Set(['--root', '-r', '--dir', '--config', '-c', '--testNamePattern', '-t', '--reporter', '--project', '--outputFile', '--environment', '--shard', '--pool',
   // xpnhz4o review — a missing value flag let its VALUE read as a file target (`vitest run --exclude x/**`).
-  '--exclude', '--testTimeout', '--hookTimeout', '--maxWorkers', '--minWorkers', '--retry', '--bail', '--mode', '--sequence.seed', '--browser.name', '--coverage.provider', '--coverage.reporter']);
+  '--exclude', '--testTimeout', '--hookTimeout', '--maxWorkers', '--minWorkers', '--retry', '--bail', '--mode', '--sequence.seed', '--browser.name', '--coverage.provider', '--coverage.reporter',
+  '--maxConcurrency', '--slowTestThreshold', '--teardownTimeout']);
 
 /**
  * Does a direct (unqueued) invocation of vitest/playwright/eleventy skip the #3461 admission queue? Pure,
@@ -2340,7 +2351,13 @@ export function isFullSuiteHead(head, depth = 0) {
     const k = w[3] === '--' ? 4 : 3;
     return k < words.length && isFullSuiteHead(canonicalCommand(h.slice(words[k].start)), depth + 1);
   }
-  if (RUNNER_NAMES.has(w[0]) && !MULTI_SCRIPT_RUNNERS.has(w[0])) {
+  // PR #2680 review — `run-s test:unit` / `npm-run-all --parallel lint test:unit` run the same whole suite; a
+  // multi-script runner cannot forward a file target to one of its scripts, so any full-suite name is a deny.
+  if (MULTI_SCRIPT_RUNNERS.has(w[0])) {
+    const inv = runnerInvocation(h);
+    return !!(inv && Array.isArray(inv.names) && inv.names.some((n) => FULL_SUITE_SCRIPTS.has(n)));
+  }
+  if (RUNNER_NAMES.has(w[0])) {
     let idx = -1;
     if (w[0] === 'npm' && ['test', 't', 'tst'].includes(w[1])) { idx = 1; w[1] = 'test'; }
     else {

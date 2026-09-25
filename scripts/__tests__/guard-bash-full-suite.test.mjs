@@ -35,6 +35,16 @@ describe('xpnhz4o — a bare full-suite run is denied, naming the selected gate'
     'npx vitest run --exclude tests/slow/**',
     'npm run test:unit -- -t foo',
     'npx vitest --run',
+    // PR #2680 review — multi-script runners and unknown value flags
+    'run-s test:unit',
+    'npx run-p test:unit',
+    'npm-run-all --parallel lint test:unit',
+    'node scripts/readiness/heavy-admission.mjs run -- run-s test:unit',
+    'npx vitest run --maxConcurrency 5',
+    'npx vitest run --isolate false',
+    'npx vitest run --slowTestThreshold 500',
+    'npx vitest run --typecheck.tsconfig tsconfig.test.json',
+    'npx vitest run --someNewFlag 3',
   ])('denies %j', (cmd) => {
     const r = decide(cmd, {});
     expect(r).toMatch(/bare FULL-SUITE unit run/);
@@ -50,6 +60,9 @@ describe('xpnhz4o — a bare full-suite run is denied, naming the selected gate'
     'npm run test:unit -- scripts/__tests__/a.test.mjs',
     'node scripts/readiness/heavy-admission.mjs run -- npx vitest run a.test.mjs b.test.mjs c.test.mjs',
     'npx vitest --version',
+    'npx vitest run guard-bash',
+    'npx vitest run --maxConcurrency 5 scripts/__tests__/a.test.mjs',
+    'run-s lint build:check',
     'npm run test:integration',
     'npm run check:standards',
     'echo "npm run test:unit"',
