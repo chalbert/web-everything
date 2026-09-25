@@ -228,6 +228,16 @@ export async function planRebuild({
 
 // ── findUnsafeLocalState — pure over an injected git(args) runner ──────────────────────────────────────────
 
+/** `git ls-files --others --exclude-standard -z` — every untracked, non-ignored path in the tree, NUL-separated
+ *  so a filename with an embedded newline can never split into two entries. A failed call returns `null`, which
+ *  {@link findUnsafeLocalState} treats as `status-failed` (fail closed): without the list, the collision check
+ *  before `reset --hard` could not protect an untracked file from being overwritten. */
+function collectUntrackedPaths(git) {
+  const r = git(['ls-files', '--others', '--exclude-standard', '-z']);
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? '').split('\0').filter(Boolean);
+}
+
 /**
  * PURE: is `root`'s current tree safe for {@link rebuildClone} to move with `git reset --hard`? Fail-closed at
  * every read — an unreadable `status` refuses outright, since we cannot then trust anything else. Precedence
@@ -235,21 +245,38 @@ export async function planRebuild({
  * `MERGE_HEAD` — which itself also shows up as "dirty" porcelain output — is reported as the MORE specific
  * `merge-in-progress` rather than the generic `dirty`): `status-failed` > `merge-in-progress` > `dirty` >
  * `local-commits` > safe.
+ *
+ * UNTRACKED FILES ARE NEVER PART OF THIS SAFETY VERDICT. `git reset --hard` moves tracked content only and
+ * never deletes an untracked, non-ignored file sitting in the working tree (`git clean` does that, and this
+ * module never calls it — see file header), so the dirty-tree check below reads `--untracked-files=no`: an
+ * untracked file must never by itself freeze a rebuild (2026-09-24 freeze: a live daemon clone read as
+ * permanently dirty because of an untracked `.conveyor/unsupported-repo.json` sidecar its own process had just
+ * written). Every untracked, non-ignored path ({@link collectUntrackedPaths}) is still collected and returned
+ * as `untracked` on EVERY result (safe or not) — {@link doRebuild} uses it, after the plan is computed and
+ * just before its one `reset --hard`, to refuse with `untracked-collision` if the incoming tree actually has
+ * content at one of those paths (the one case a `reset --hard` WOULD silently overwrite something); every
+ * other kept untracked path is only reported (`untracked-kept`), never deleted.
  * @param {{git:(args:string[])=>{status:number,stdout:string,stderr:string}}} o
- * @returns {{safe:boolean, reason?:string, detail?:Array<string>|string}}
+ * @returns {{safe:boolean, reason?:string, detail?:Array<string>|string, untracked:Array<string>}}
  */
 export function findUnsafeLocalState({ git, knownInputs = [] }) {
-  const status = git(['status', '--porcelain', '--untracked-files=normal']);
-  if (status.status !== 0) return { safe: false, reason: 'status-failed' };
+  const listed = collectUntrackedPaths(git);
+  if (listed === null) return { safe: false, reason: 'status-failed', detail: 'ls-files --others failed', untracked: [] };
+  const untracked = listed;
+
+  const status = git(['status', '--porcelain', '--untracked-files=no']);
+  if (status.status !== 0) return { safe: false, reason: 'status-failed', untracked };
 
   const mergeHead = git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
   if (mergeHead.status === 0 && String(mergeHead.stdout ?? '').trim()) {
-    return { safe: false, reason: 'merge-in-progress' };
+    return { safe: false, reason: 'merge-in-progress', untracked };
   }
 
   const dirtyOut = String(status.stdout ?? '').trim();
   if (dirtyOut) {
-    return { safe: false, reason: 'dirty', detail: dirtyOut.split('\n').map((l) => l.trim()).filter(Boolean) };
+    return {
+      safe: false, reason: 'dirty', detail: dirtyOut.split('\n').map((l) => l.trim()).filter(Boolean), untracked,
+    };
   }
 
   // `knownInputs`: shas this clone was previously BUILT from (the last adopted head + its overlay tips). An
@@ -259,9 +286,13 @@ export function findUnsafeLocalState({ git, knownInputs = [] }) {
   const known = knownInputs.filter((sha) => typeof sha === 'string' && /^[0-9a-f]{7,64}$/.test(sha)
     && git(['cat-file', '-e', `${sha}^{commit}`]).status === 0);
   const revList = git(['rev-list', '--no-merges', 'HEAD', '--not', '--remotes=origin', ...known]);
-  if (revList.status !== 0) return { safe: false, reason: 'status-failed', detail: 'rev-list --no-merges failed' };
+  if (revList.status !== 0) {
+    return {
+      safe: false, reason: 'status-failed', detail: 'rev-list --no-merges failed', untracked,
+    };
+  }
   const localShas = String(revList.stdout ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
-  if (localShas.length === 0) return { safe: true };
+  if (localShas.length === 0) return { safe: true, untracked };
 
   // Drop any that are upstream-equivalent (same patch already on origin/main under a different sha, e.g.
   // rebased-and-pushed-elsewhere) — a failed cherry is fail-closed the OTHER way here: keep every candidate
@@ -275,8 +306,10 @@ export function findUnsafeLocalState({ git, knownInputs = [] }) {
     );
     remaining = localShas.filter((sha) => !equivalent.has(sha));
   }
-  if (remaining.length === 0) return { safe: true };
-  return { safe: false, reason: 'local-commits', detail: remaining };
+  if (remaining.length === 0) return { safe: true, untracked };
+  return {
+    safe: false, reason: 'local-commits', detail: remaining, untracked,
+  };
 }
 
 // ── fetch helper shared by rebuildClone and dryRunRebuild ───────────────────────────────────────────────────
@@ -569,6 +602,20 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     return finish({ moved: false, reason: 'still-rejected', plan });
   }
 
+  // ── Step 4.5: untracked-collision guard — a `reset --hard` keeps untracked files, but SILENTLY OVERWRITES
+  //    one if the incoming tree has real content at that same path. Check every untracked path from Step 1's
+  //    `unsafe.untracked` against the target tree; anything not present there is harmless and only reported.
+  if (unsafe.untracked.length > 0) {
+    const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
+    if (colliding.length > 0) {
+      alert('untracked-collision', { paths: colliding });
+      return finish({
+        moved: false, reason: 'untracked-collision', untracked: colliding, plan,
+      });
+    }
+    alert('untracked-kept', { paths: unsafe.untracked });
+  }
+
   // ── Step 5: move the tree (the ONLY `reset --hard` in this module) ──────────────────────────────────
   state.inProgress = { pid: process.pid, host: hostname(), prevHead, target: plan.finalSha, startedAt: nowIso() };
   writeState();
@@ -677,6 +724,7 @@ export async function dryRunRebuild({
 
   let scratchDir = null;
   let plan = { ok: false, reason: 'no-origin-url' };
+  let untrackedCollision = [];
   try {
     if (url && head) {
       scratchDir = mkdtempSync(join(tmpdir(), 'we-daemon-rebuild-dryrun-'));
@@ -710,6 +758,15 @@ export async function dryRunRebuild({
             prState: prState || ((pr) => defaultPrState({ pr, root })),
             mainOnly: false,
           });
+
+          // Same untracked-collision check `doRebuild` runs before its real `reset --hard` (see
+          // findUnsafeLocalState's header) — computed here against the scratch repo, which shares `root`'s
+          // objects via the alternates file above, so `cat-file -e <finalSha>:<path>` needs no extra fetch.
+          if (plan.ok && unsafe.untracked.length > 0) {
+            untrackedCollision = unsafe.untracked.filter(
+              (p) => scratchGit(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0,
+            );
+          }
         }
       }
     }
@@ -721,13 +778,14 @@ export async function dryRunRebuild({
 
   let wouldDo = 'refuse';
   if (unsafe.safe && onMain === true && plan.ok) {
-    if (plan.finalSha === head) wouldDo = 'nothing';
+    if (untrackedCollision.length > 0) wouldDo = 'refuse';
+    else if (plan.finalSha === head) wouldDo = 'nothing';
     else if (stillRejected) wouldDo = 'nothing (still-rejected)';
     else wouldDo = 'rebuild-and-smoke';
   }
 
   return {
-    dryRun: true, head, onMain, unsafe, plan, wouldDo, overlayFile, overlays, state, stillRejected,
+    dryRun: true, head, onMain, unsafe, plan, wouldDo, overlayFile, overlays, state, stillRejected, untrackedCollision,
   };
 }
 

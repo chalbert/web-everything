@@ -52,6 +52,12 @@ error-summary/**/*.d.ts
 commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
 .claude/lane-ports.json
+# Nothing under .conveyor/ is ever tracked — it is all daemon/session state. A daemon clone must never
+# read dirty from its own state (2026-09-24 freeze: an untracked `.conveyor/unsupported-repo.json` made a
+# live daemon clone's tree look dirty and its rebuild/self-sync refused). This directory-wide rule is kept
+# alongside the older individual `.conveyor/*` entries below rather than replacing them, since those carry
+# their own incident history.
+.conveyor/
 # Delivery-agent learnings drop-box (#2614) — transient per-session capture (like claims.json). Agents
 # append generalized-lesson entries during a session; the /closing-session sweep consumes it at close. Never
 # committed — it holds pre-vetting, pre-dedup entries that the sweep + red-team curate before anything lands.

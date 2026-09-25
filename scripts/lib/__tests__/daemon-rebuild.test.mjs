@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync, statSync, existsSync, utimesSync,
+  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, utimesSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -230,9 +230,9 @@ describe('rebuildClone', () => {
     expect(existsSync(join(cloneDir, 'd.txt'))).toBe(false);
   });
 
-  it('refuses a dirty tree without touching anything', async () => {
+  it('refuses a dirty tree (uncommitted change to a TRACKED file) without touching anything', async () => {
     const { cloneDir, env } = makeFixture();
-    writeFile(cloneDir, 'uncommitted.txt', 'oops\n');
+    writeFile(cloneDir, 'README.md', 'oops uncommitted edit\n'); // README.md is tracked (see makeFixture)
     const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
     const runSmoke = passSmoke();
@@ -244,7 +244,49 @@ describe('rebuildClone', () => {
     expect(result.reason).toBe('dirty');
     expect(runSmoke).not.toHaveBeenCalled();
     expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
-    expect(existsSync(join(cloneDir, 'uncommitted.txt'))).toBe(true);
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('oops uncommitted edit\n');
+  });
+
+  it('an untracked, non-ignored file never blocks the rebuild — it adopts and the file survives untouched', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/clean-stray', (dir) => writeFile(dir, 'stray-overlay.txt', 'hello\n'));
+    addOverlay(cloneDir, { ref: 'lane/clean-stray' }, { env });
+    writeFile(cloneDir, 'stray.txt', 'untracked and harmless\n');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.adopted).toBe(true);
+    expect(result.reason).not.toBe('dirty');
+    expect(result.reason).not.toBe('untracked-collision');
+    expect(existsSync(join(cloneDir, 'stray.txt'))).toBe(true);
+    expect(readFileSync(join(cloneDir, 'stray.txt'), 'utf8')).toBe('untracked and harmless\n');
+    expect(result.alerts.some((a) => a.kind === 'untracked-kept'
+      && a.detail?.paths?.includes('stray.txt'))).toBe(true);
+  });
+
+  it('an untracked file colliding with a path the new main adds refuses with untracked-collision', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    advanceMain(originDir, (dir) => writeFile(dir, 'newfile.txt', 'from main\n'));
+    writeFile(cloneDir, 'newfile.txt', 'local untracked content\n');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('untracked-collision');
+    expect(result.untracked).toEqual(['newfile.txt']);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readFileSync(join(cloneDir, 'newfile.txt'), 'utf8')).toBe('local untracked content\n');
+    expect(result.alerts.some((a) => a.kind === 'untracked-collision'
+      && a.detail?.paths?.includes('newfile.txt'))).toBe(true);
   });
 
   it('refuses a local unpushed commit', async () => {
@@ -502,7 +544,13 @@ describe('findUnsafeLocalState / planRebuild (pure core)', () => {
 
   it('findUnsafeLocalState reports safe on a clean tree with nothing local', () => {
     const { cloneDir } = makeFixture();
-    expect(findUnsafeLocalState({ git: gitFor(cloneDir) })).toEqual({ safe: true });
+    expect(findUnsafeLocalState({ git: gitFor(cloneDir) })).toEqual({ safe: true, untracked: [] });
+  });
+
+  it('findUnsafeLocalState reports untracked paths without them affecting safe', () => {
+    const { cloneDir } = makeFixture();
+    writeFile(cloneDir, 'loose.txt', 'x\n');
+    expect(findUnsafeLocalState({ git: gitFor(cloneDir) })).toEqual({ safe: true, untracked: ['loose.txt'] });
   });
 
   it('planRebuild reports main-unresolved when mainRef does not exist', async () => {
