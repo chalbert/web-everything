@@ -3,9 +3,10 @@ bornAs: xpc3krl
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/__tests__/main-staleness.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs", "we:scripts/operations/__tests__/route-pr-outcome-io-live.test.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/lib/main-staleness.mjs", "we:vitest.setup.ts", "we:vitest.config.ts", "we:vitest.integration.config.ts", "we:vitest.soak.config.ts"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
