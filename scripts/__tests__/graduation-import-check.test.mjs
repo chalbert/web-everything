@@ -768,6 +768,73 @@ describe('planEdits', () => {
     expect(edits.get('3906').notes[0]).toMatch(/moved .*deliver-item-run\.mjs.* here from #3903/);
   });
 
+  it('REVIEW FINDING (PR #2671): two cards both cycling on the SAME single-owner dependency move it to ONE owner only — the second moveIn is dropped, never a duplicate co-owner', () => {
+    // T is blockedBy both A and B; A's and B's impl files both need T's x.mjs. Each finding independently sees
+    // wouldCycle(A,T) / wouldCycle(B,T) and proposes moving x.mjs into itself. Applying both would remove it from
+    // T once but add it to A AND B — and the next run's computeSharedFiles would then treat that accident as an
+    // intentional multi-owner SHARED file and stop scanning it (masking x.mjs's own imports of y.mjs, still T's).
+    const cardsById = new Map([
+      ['A', card({ id: 'A' })],
+      ['B', card({ id: 'B' })],
+      ['T', card({ id: 'T', blockedBy: ['A', 'B'], scope: ['we:x.mjs', 'we:y.mjs'] })],
+    ]);
+    const results = [
+      { ownerId: 'A', file: 'we:a-impl.mjs', classifications: [{ specifier: './x.mjs', repoPath: 'x.mjs', kind: 'later', ownerId: 'T' }] },
+      { ownerId: 'B', file: 'we:b-impl.mjs', classifications: [{ specifier: './x.mjs', repoPath: 'x.mjs', kind: 'later', ownerId: 'T' }] },
+    ];
+    const findings = buildFindings({ cardsById, mainPaths: new Set(), results });
+    const edits = planEdits(findings, '2026-09-25', { cardsById });
+    const owners = [...edits].filter(([, e]) => e.addScope.includes('we:x.mjs')).map(([id]) => id);
+    expect(owners).toEqual(['A']); // first proposal wins; B does not ALSO gain it
+    expect(edits.get('T').removeScope).toEqual(['we:x.mjs']);
+    expect(edits.get('B')?.notes ?? []).toEqual([]); // nothing half-applied on the dropped side
+    expect(edits.get('T').notes.some((n) => /to #B/.test(n))).toBe(false);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.mjs', from: 'T', to: 'B', keptAt: 'A' }]);
+
+    // Applied, the scopes leave x.mjs single-owned — so a re-run still scans it (never mis-flagged SHARED).
+    const after = new Map([...cardsById].map(([id, c]) => {
+      const e = edits.get(id) ?? { removeScope: [], addScope: [] };
+      return [id, { ...c, scope: [...c.scope.filter((s) => !e.removeScope.includes(s)), ...e.addScope] }];
+    }));
+    expect(computeSharedFiles(after).has('we:x.mjs')).toBe(false);
+  });
+
+  it('the same path moved to the SAME owner by two findings is not a conflict (nothing dropped)', () => {
+    const findings = [
+      { ownerId: 'A', file: 'we:a1.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+      { ownerId: 'A', file: 'we:a2.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('A').addScope).toEqual(['we:x.mjs']);
+    expect(edits.droppedMoves).toEqual([]);
+  });
+
+  it('a test-file move and a moveIn of the SAME path to different owners also keep only the first', () => {
+    const findings = [
+      { ownerId: 'T', file: 'we:x.test.mjs', isTest: true, later: [{ ownerId: 'A' }], unowned: [], fix: { kind: 'move', target: 'A', addBlockedBy: [], cycleWarnings: [] } },
+      { ownerId: 'B', file: 'we:b-impl.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.test.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('A').addScope).toEqual(['we:x.test.mjs']);
+    expect(edits.get('B')?.addScope ?? []).toEqual([]);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.test.mjs', from: 'T', to: 'B', keptAt: 'A' }]);
+  });
+
+  it('a test-file move that LOSES to an earlier moveIn drops its residual blockedBy and addToScope too — nothing written for a move that never happened', () => {
+    const findings = [
+      { ownerId: 'B', file: 'we:b-impl.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.test.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+      {
+        ownerId: 'T', file: 'we:x.test.mjs', isTest: true, later: [{ ownerId: 'A' }], unowned: [{}],
+        fix: { kind: 'move', target: 'A', addBlockedBy: ['C'], cycleWarnings: [], addToScope: { owner: 'A', paths: ['we:ghost.mjs'] } },
+      },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('B').addScope).toEqual(['we:x.test.mjs']);
+    expect(edits.has('A')).toBe(false); // no scope, no blockedBy C, no ghost.mjs, no notes
+    expect(edits.has('C')).toBe(false);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.test.mjs', from: 'T', to: 'A', keptAt: 'B' }]);
+  });
+
   it('plans an add-to-scope: appends the unowned path to the owning card, with a note', () => {
     const findings = [{
       ownerId: '3862', file: 'we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs', isTest: true,

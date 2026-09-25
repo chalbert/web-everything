@@ -706,16 +706,39 @@ export function createCycleGuard(cardsById) {
  * existing caller/test's behaviour byte-for-byte. A dropped edge is recorded on the returned Map as a non-
  * enumerable-looking but perfectly ordinary extra property, `.droppedEdges` (`{from, to}[]`), always `[]` when
  * `cardsById` is omitted — read it, never assume every proposed edge landed.
+ *
+ * Scope MOVES get the same batch-level treatment, always (no `cardsById` needed): each finding proposes its
+ * move(s) independently, so two findings can each relocate the SAME single-owner file to DIFFERENT cards —
+ * e.g. T `blockedBy` both A and B, and A's and B's impl files both need T's `x.mjs`, so each `moveIn`s it.
+ * Applying both would remove it from T once but add it to A AND B, and the next run's `computeSharedFiles`
+ * would then read that accident as an intentional multi-owner SHARED file and stop scanning it — silently
+ * masking its own dependencies. So the FIRST move of a path this batch wins; a later one to a different card
+ * is dropped (no scope change, no notes) and recorded on `.droppedMoves` (`{path, from, to, keptAt}[]`). The
+ * next run reconsiders it against the updated graph (B then sees `x.mjs` under A, an ordinary dependency).
+ * A repeat move of the same path to the SAME card is simply a no-op.
  * @param {Array<object>} findings  from {@link buildFindings}
  * @param {string} today  `YYYY-MM-DD`
  * @param {{cardsById?:Map<string,object>}} [opts]
- * @returns {Map<string, {removeScope:string[], addScope:string[], addBlockedBy:string[], notes:string[]}> & {droppedEdges: Array<{from:string,to:string}>}}
+ * @returns {Map<string, {removeScope:string[], addScope:string[], addBlockedBy:string[], notes:string[]}> & {droppedEdges: Array<{from:string,to:string}>, droppedMoves: Array<{path:string,from:string,to:string,keptAt:string}>}}
  */
 export function planEdits(findings, today, { cardsById } = {}) {
   const edits = new Map();
   const droppedEdges = [];
+  const droppedMoves = [];
   edits.droppedEdges = droppedEdges;
+  edits.droppedMoves = droppedMoves;
   const tryAddEdge = cardsById ? createCycleGuard(cardsById) : () => true;
+  const movedTo = new Map(); // we:path -> the card this batch already moved it into
+  /** `'new'` = apply this move; `'repeat'` = already moved to this same card (no-op); `'dropped'` = another
+   *  card already took it this batch — skip the move AND everything that assumes it happened. */
+  const claimMove = (path, from, to) => {
+    const key = withWe(path);
+    const keptAt = movedTo.get(key);
+    if (keptAt === undefined) { movedTo.set(key, to); return 'new'; }
+    if (keptAt === to) return 'repeat';
+    droppedMoves.push({ path: key, from, to, keptAt });
+    return 'dropped';
+  };
   const get = (id) => {
     if (!edits.has(id)) edits.set(id, { removeScope: [], addScope: [], addBlockedBy: [], notes: [] });
     return edits.get(id);
@@ -723,7 +746,11 @@ export function planEdits(findings, today, { cardsById } = {}) {
   for (const f of findings) {
     if (f.fix.kind === 'move') {
       const target = f.fix.target;
-      if (target !== f.ownerId) {
+      const claim = target === f.ownerId ? 'stays' : claimMove(f.file, f.ownerId, target);
+      // A dropped move never reached `target`, so neither its residual blockedBy edges nor its `addToScope`
+      // (which follows the file to `target`) apply — skip the whole finding; the next run reconsiders it.
+      if (claim === 'dropped') continue;
+      if (claim === 'new') {
         get(f.ownerId).removeScope.push(f.file);
         get(target).addScope.push(f.file);
         get(f.ownerId).notes.push(`- ${today}: graduation-import-check moved \`${f.file}\` to #${target} — it imports a module #${target} owns.`);
@@ -751,6 +778,7 @@ export function planEdits(findings, today, { cardsById } = {}) {
       // reaches it as a `blocker` on its next scan (the very edge that made a `blockedBy` fix cycle here).
       for (const mv of f.fix.moveIn ?? []) {
         const p = withWe(mv.path);
+        if (claimMove(p, mv.fromOwnerId, f.ownerId) !== 'new') continue;
         get(mv.fromOwnerId).removeScope.push(p);
         get(f.ownerId).addScope.push(p);
         get(mv.fromOwnerId).notes.push(`- ${today}: graduation-import-check moved \`${p}\` to #${f.ownerId} — #${f.ownerId}'s \`${f.file}\` needs it directly, and this card already (transitively) depends on #${f.ownerId}, so a blockedBy edge the other way would cycle.`);
@@ -971,6 +999,9 @@ function run() {
     const edits = planEdits(findings, localToday(), { cardsById });
     for (const { from, to } of edits.droppedEdges) {
       warnings.push(`--apply: dropped blockedBy #${to} on #${from} — would cycle once combined with another edge THIS SAME RUN also added; re-run to reconsider it against the updated graph`);
+    }
+    for (const { path, from, to, keptAt } of edits.droppedMoves) {
+      warnings.push(`--apply: dropped moving \`${path}\` from #${from} to #${to} — THIS SAME RUN already moved it to #${keptAt} (one owner only); re-run to reconsider it against the updated graph`);
     }
     for (const [id, edit] of edits) {
       const f = files.get(id);
