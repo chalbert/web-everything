@@ -10,8 +10,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildCandidates, sweepCiRedRecovery, refreshOntoMain, formatReport,
-  HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments, countHungCiCommentsByJob,
-  cancelAndRerunHungRun, cancelHungRun, describeExecError, sweepHungCiRecovery, formatHungReport,
+  HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments, countHungCiCommentsByJob, bodyHasExactLine,
+  cancelAndRerunHungRun, cancelHungRun, describeExecError, redactTokenShapes, sweepHungCiRecovery, formatHungReport,
 } from '../ci-red-recovery-watch.mjs';
 
 const failingCheck = (completedAt) => ({ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', completedAt });
@@ -336,6 +336,38 @@ describe('ci-red-recovery-watch — countHungCiCommentsByJob', () => {
     expect(countHungCiCommentsByJob(null)).toBe(0);
     expect(countHungCiCommentsByJob([])).toBe(0);
   });
+
+  // ADVERSARIAL-REVIEW-CAUGHT, live 2026-09-25 (PR #2693's own round-1 review): a bare substring match let a
+  // job name that is a text-PREFIX of a sibling job's name inherit that sibling's hung-attempt history — the
+  // EXACT pair this PR's own p95 comment names, "test" and "test-shard (1)", reproduced here directly.
+  it('never lets job "test" falsely match a marker for the DIFFERENT, sibling job "test-shard (1)" (prefix collision)', () => {
+    const comments = [
+      { body: buildHungCiComment({ headSha: 'sha-1', jobName: 'test-shard (1)' }), author: { login: 'web-everything' } },
+    ];
+    expect(countHungCiCommentsByJob(comments, 'test')).toBe(0);
+    // the reverse direction (a marker for "test" must not count toward "test-shard (1)" either) — same bug class.
+    const reverseComments = [
+      { body: buildHungCiComment({ headSha: 'sha-1', jobName: 'test' }), author: { login: 'web-everything' } },
+    ];
+    expect(countHungCiCommentsByJob(reverseComments, 'test-shard (1)')).toBe(0);
+    // the SAME job name, verbatim, still counts — the fix must not become so strict it breaks the real case.
+    expect(countHungCiCommentsByJob(comments, 'test-shard (1)')).toBe(1);
+  });
+});
+
+describe('ci-red-recovery-watch — bodyHasExactLine', () => {
+  it('matches a line bounded by newlines, string-start, or string-end — never a bare substring', () => {
+    expect(bodyHasExactLine('a\njob: test\nb', 'job: test')).toBe(true);
+    expect(bodyHasExactLine('job: test', 'job: test')).toBe(true); // whole string, no surrounding newlines
+    expect(bodyHasExactLine('a\njob: test-shard (1)\nb', 'job: test')).toBe(false); // prefix, not a whole line
+    expect(bodyHasExactLine('a\nxjob: test\nb', 'job: test')).toBe(false); // not at line start either
+  });
+
+  it('a non-string body or empty/non-string line never matches', () => {
+    expect(bodyHasExactLine(null, 'job: test')).toBe(false);
+    expect(bodyHasExactLine('job: test', '')).toBe(false);
+    expect(bodyHasExactLine('job: test', null)).toBe(false);
+  });
 });
 
 describe('ci-red-recovery-watch — cancelHungRun', () => {
@@ -382,6 +414,29 @@ describe('ci-red-recovery-watch — describeExecError', () => {
     const described = describeExecError(e);
     expect(described.length).toBe(501); // 500 chars + the trailing ellipsis
     expect(described.endsWith('…')).toBe(true);
+  });
+
+  // ADVERSARIAL-REVIEW-CAUGHT, live 2026-09-25 (PR #2693's own round-1 review, security/information-exposure):
+  // this error text is posted VERBATIM to a public PR comment (buildHungCiComment) — a token shape must never
+  // reach it, even though the low-likelihood source is `gh`'s own stderr, not user input.
+  it('redacts a GitHub token shape before it can reach a public PR comment', () => {
+    const e = new Error('Command failed');
+    e.stderr = 'HttpError: bad credentials using token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    expect(describeExecError(e)).toBe('HttpError: bad credentials using token ghp_<redacted>');
+    expect(describeExecError(e)).not.toContain('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  });
+});
+
+describe('ci-red-recovery-watch — redactTokenShapes', () => {
+  it('redacts every GitHub token prefix shape, leaving the rest of the text untouched', () => {
+    expect(redactTokenShapes('token ghs_abc123XYZ here')).toBe('token ghs_<redacted> here');
+    expect(redactTokenShapes('a github_pat_ABC123_xyz value')).toBe('a github_pat_<redacted> value');
+    expect(redactTokenShapes('no secret here')).toBe('no secret here');
+  });
+
+  it('handles null/undefined/non-string input without throwing', () => {
+    expect(redactTokenShapes(null)).toBe('');
+    expect(redactTokenShapes(undefined)).toBe('');
   });
 });
 

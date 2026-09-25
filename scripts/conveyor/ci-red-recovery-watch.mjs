@@ -234,13 +234,29 @@ export function buildHungCiComment({
  *   every trusted hung-recovery marker on the PR regardless of sha (used only when the caller has no sha yet).
  * @returns {number}
  */
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#bodyHasExactLine — does `body` contain `line` as a WHOLE LINE
+ * (bounded by string-start/newline on one side and newline/string-end on the other), never merely as a
+ * substring? LIVE 2026-09-25, adversarial-review-caught (PR #2693): the original `countHungCiComments`/
+ * `countHungCiCommentsByJob` used a bare `body.includes(needle)`, so job name `"test"` matched INSIDE
+ * `"job: test-shard (1)"` (confirmed: `'job: test-shard (1)'.includes('job: test')` → `true`) — a job whose
+ * name is a text-prefix of a sibling job's name (exactly the `"test"` / `"test-shard (1)"` pair this same PR's
+ * own p95 comment names) would inherit the OTHER job's hung-attempt history, denying it its own first
+ * legitimate retry. Anchoring the match to a full line closes this for both the `sha:` and `job:` marker
+ * fields — never re-derived per call site. PURE.
+ * @param {string} body
+ * @param {string} line - the exact line to look for, WITHOUT a trailing newline.
+ * @returns {boolean}
+ */
+export function bodyHasExactLine(body, line) {
+  if (typeof body !== 'string' || typeof line !== 'string' || !line) return false;
+  return body.split('\n').some((l) => l === line);
+}
+
 export function countHungCiComments(comments, headSha = null) {
   if (!Array.isArray(comments)) return 0;
   const scoped = headSha
-    ? comments.filter((c) => {
-      const body = typeof c === 'string' ? c : c?.body;
-      return typeof body === 'string' && body.includes(`sha: ${headSha}`);
-    })
+    ? comments.filter((c) => bodyHasExactLine(typeof c === 'string' ? c : c?.body, `sha: ${headSha}`))
     : comments;
   return countTrustedLeadingMarker(scoped, HUNG_CI_COMMENT_MARKER);
 }
@@ -251,7 +267,10 @@ export function countHungCiComments(comments, headSha = null) {
  * `we:scripts/conveyor/main-red-recovery.mjs#planHungCiRecoveries` escalates on (xd1sfms follow-up, live
  * 2026-09-25: #2636's `test-shard (1)` hung on TWO different shas in a row). Deliberately NOT scoped by sha,
  * unlike {@link countHungCiComments} — a rebase/refresh changes the sha but never explains away the SAME shard
- * hanging again; scoping by sha here would reset the very signal this function exists to keep. PURE.
+ * hanging again; scoping by sha here would reset the very signal this function exists to keep. Matches the
+ * `job:` line EXACTLY ({@link bodyHasExactLine}) — see that helper's own docblock for the live adversarial-
+ * review finding a bare substring match let through (`"test"` falsely matching inside `"test-shard (1)"`).
+ * PURE.
  * @param {Array<{body?:string}|string>|null|undefined} comments
  * @param {string|null} jobName - when given, only a marker whose body names THIS job counts; omitted counts
  *   every trusted hung-recovery marker on the PR regardless of job (used only when the caller has no job yet).
@@ -260,10 +279,7 @@ export function countHungCiComments(comments, headSha = null) {
 export function countHungCiCommentsByJob(comments, jobName = null) {
   if (!Array.isArray(comments)) return 0;
   const scoped = jobName
-    ? comments.filter((c) => {
-      const body = typeof c === 'string' ? c : c?.body;
-      return typeof body === 'string' && body.includes(`job: ${jobName}`);
-    })
+    ? comments.filter((c) => bodyHasExactLine(typeof c === 'string' ? c : c?.body, `job: ${jobName}`))
     : comments;
   return countTrustedLeadingMarker(scoped, HUNG_CI_COMMENT_MARKER);
 }
@@ -332,9 +348,25 @@ export function defaultSleepSync(ms) {
  * @param {*} e
  * @returns {string}
  */
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#redactTokenShapes — strip a GitHub token shape out of text
+ * before it can reach a PUBLIC surface (a PR comment). Adversarial-review-caught, live 2026-09-25 (PR #2693's
+ * own round-1 review, security/information-exposure): `describeExecError` started forwarding raw `gh` stderr
+ * (capped at 500 chars) verbatim into a public comment — reasonable per this card's own goal ("real stderr
+ * surfaces on the PR"), but with no redaction safety net for the low-likelihood case that stderr ever echoes
+ * more than plain API error text (a proxy layer, a future `gh` regression). Mirrors the SAME pattern
+ * `we:scripts/lib/daemon-rebuild.mjs`'s own (private) `redactDetail` already uses for its alerts log — never
+ * re-derived as a different shape, just re-applied here since that function isn't exported. PURE.
+ * @param {string} text
+ * @returns {string}
+ */
+export function redactTokenShapes(text) {
+  return String(text ?? '').replace(/\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '$1<redacted>');
+}
+
 export function describeExecError(e) {
   const stderr = typeof e?.stderr === 'string' ? e.stderr.trim() : (Buffer.isBuffer(e?.stderr) ? e.stderr.toString('utf8').trim() : '');
-  const raw = stderr || String((e && e.message) || e);
+  const raw = redactTokenShapes(stderr || String((e && e.message) || e));
   return raw.length > 500 ? `${raw.slice(0, 500)}…` : raw;
 }
 
@@ -426,10 +458,7 @@ export function sweepHungCiRecovery({
     // about how many times THIS sha's own retries have already failed (that is `hungAttemptsForSha`'s job).
     // Excluding this candidate's OWN current sha from the job count keeps the two signals independent: a sha
     // that has failed twice in a row against ITSELF trips `hung-cap-exhausted`, never a false `repeat-hang`.
-    const otherShaComments = comments.filter((cm) => {
-      const body = typeof cm === 'string' ? cm : cm?.body;
-      return typeof body === 'string' && !body.includes(`sha: ${c.headSha}`);
-    });
+    const otherShaComments = comments.filter((cm) => !bodyHasExactLine(typeof cm === 'string' ? cm : cm?.body, `sha: ${c.headSha}`));
     return {
       ...c,
       hungAttemptsForSha: countHungCiComments(comments, c.headSha),
