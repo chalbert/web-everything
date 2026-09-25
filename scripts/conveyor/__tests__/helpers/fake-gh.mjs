@@ -785,6 +785,12 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
       return withRepo(repo, (repoState) => setChecksPure(repoState, number, checks));
     },
 
+    /** #4075 — seed `gh run list` rows (`{databaseId, headBranch, conclusion, status, createdAt, updatedAt,
+     *  workflowName}`) for a repo; replaces any previous set. */
+    setRuns(repo, runs) {
+      return withRepo(repo, (repoState) => { repoState.runs = runs.map((r) => ({ ...r })); return repoState.runs; });
+    },
+
     closePr(repo, number) {
       return withRepo(repo, (repoState) => closePrPure(repoState, number, { actor }));
     },
@@ -825,6 +831,10 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
     },
 
     /** Arm a fault for the next `times` calls whose verb matches (e.g. `'pr list'`, `'pr edit'`, `'api'`).
+     *  `kind: 'network'` (#4075 soak harness gap, break `sticky-smoke-rejection`) fails the call with Go-style
+     *  net/http stderr text (`error connecting to api.github.com` / `dial tcp ...: i/o timeout`) — what a REAL
+     *  `gh` (a Go binary) prints on a genuine network fault, distinct from the HTTP_* fixtures the other kinds
+     *  use — see `fake-gh-shim.mjs`'s own `GO_NETWORK_ERROR` comment.
      *  `kind: 'push-to-main'` (#3383, scenario A2 — origin advancing MID-TICK, deterministically, from INSIDE
      *  the daemon's own tick) is not a failure at all: the matching call still answers normally, but the shim
      *  first runs a real `git` push of `files`/`message` onto `branch` (default `main`) of `repo`'s own origin

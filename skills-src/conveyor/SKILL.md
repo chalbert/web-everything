@@ -897,6 +897,31 @@ node scripts/conveyor/status-artifact.mjs > /tmp/conveyor-status.html   # from t
 
 ---
 
+## Daemon soak harness — every daemon bug fix adds its real-world case (#4075)
+
+The resident daemons (review, fix-dispatch, the pass daemons) kept breaking live in ways their unit tests never
+saw — seven breaks on 2026-09-25, all green in tests: runtime state files dirtying the daemon clone, the shared gh
+shim pointing into a clone mid-rebuild, a ci-heal crash on an empty scope, a lane acquire timing out under load,
+a silent lock wait, a skipped tick crashing `onTick`, a sticky smoke rejection. They lived in the seams between
+processes, which only a long run of the real daemons shows.
+
+`we:scripts/conveyor/soak/` is that long run: the REAL review and fix daemons, the real rebuild/self-sync and live
+smoke gate, a throwaway daemon clone of a real bare remote with main moving, a fake GitHub with PRs in varied
+states, and fake sessions that run the real state writers and sometimes crash, hang or leave junk. After EVERY
+tick it checks: the clone is git-clean, at most one main move behind and never lagging, the tick finished inside
+its bound, `tickOnce` and `onTick` did not throw, no stale-refusal streak, owed work got dispatched.
+
+- `npm run test:soak` — the 50-tick soak plus one regression scenario per live break. CI runs it (job
+  `daemon-soak`) on every PR touching `we:skills-src/conveyor/`, `we:scripts/conveyor/`, `we:scripts/lib/daemon-*`,
+  `we:scripts/lib/gh-app-shim.mjs`, `we:scripts/lib/main-staleness.mjs`, `we:scripts/lane-pool*`,
+  `we:scripts/review-set-label.mjs` or `we:scripts/operations/*dispatch*`.
+- `node scripts/conveyor/soak/run.mjs soak|break <id>|list` — the same runs from a shell, one report line per tick.
+- **THE RULE: every daemon bug fix adds its real-world case** as a scenario in `we:scripts/conveyor/soak/breaks/`
+  and proves it with `node scripts/conveyor/soak/red-green.mjs --break=<id>` (RED on the tree before the fix,
+  GREEN with it). The fix-agent brief carries the same rule. A break whose fix is not yet on the tree under test
+  runs as a titled expected-fail (its card named), never a silent skip, and turns into a required pass by itself
+  when the fix lands.
+
 ## The split, restated (why this skill is safe to keep thin)
 
 Per #deterministic-core-thin-judgment (#2607) and its child #conveyor-orchestration-mechanics-not-per-lane-agent
