@@ -243,6 +243,38 @@ export function deliveredItemNumsFromPr(headRefName = '', title = '', { body = '
   return [...nums].map((n) => n.padStart(3, '0')).filter((n) => !disclaimed.has(n));
 }
 
+// #3916 review round 1 — a citation cue word; paired with a `#NNN` item reference it marks a quoted span as
+// someone else's words being cited, not this PR's own voice.
+const CITATION_CUE = /\b(?:precedent|cf\.?|citing|cited|quoting|quoted|characteri[sz]ation)\b/i;
+const CITATION_WINDOW = 120;
+
+/**
+ * Remove every quoted span (straight `"…"` or curly `“…”`) that reads as an ATTRIBUTED citation: the text around
+ * it (outside the quote, same line, within `CITATION_WINDOW` chars either side) carries BOTH a citation cue word
+ * AND a `#NNN` item reference — the live #2594 shape, `"already landed, no code change" precedent in #3443's own
+ * Progress log`. Any other quoted span is kept verbatim, so a PR quoting its own disclaimer still trips guard 8.
+ * Requiring both signals keeps a self-quote followed by an unrelated `see #NNN` or `as cited above` inside the
+ * guard. The `#NNN` must name ANOTHER item — a ref to one of `ownIds` (the ids this PR's own ref/title carry)
+ * never counts, so `Closes #4200. "No code changes" as cited in the card.` on #4200's PR still trips guard 8.
+ * Residual (accepted): a self-quote beside a cue AND another item's ref (`"No code changes" (cf. #1613)`) is
+ * indistinguishable by pattern from the live citation shape. Pure.
+ */
+function stripCitedQuotes(text, ownIds = new Set()) {
+  return text.replace(/"[^"\n]*"|“[^”\n]*”/g, (m, off, s) => {
+    const lineStart = s.lastIndexOf('\n', off - 1) + 1;
+    const nl = s.indexOf('\n', off + m.length);
+    const lineEnd = nl === -1 ? s.length : nl;
+    const ctx = `${s.slice(Math.max(lineStart, off - CITATION_WINDOW), off)} ${s.slice(off + m.length, Math.min(lineEnd, off + m.length + CITATION_WINDOW))}`;
+    const citesOther = [...ctx.matchAll(/#(\d{2,5})\b/g)].some((r) => !ownIds.has(r[1].replace(/^0+/, '')));
+    return CITATION_CUE.test(ctx) && citesOther ? '' : m;
+  });
+}
+
+/** Every 2–5 digit id token in a PR's own ref/title, leading zeros dropped — the ids a citation must NOT be. */
+function ownIdsOf(ref, title) {
+  return new Set([...`${ref} ${title}`.matchAll(/(?<!\d)(\d{2,5})(?!\d)/g)].map((m) => m[1].replace(/^0+/, '')));
+}
+
 /**
  * The whole-PR exclusions every delivery extractor applies before reading ids (#3473 guards 7/8 + the #3441
  * annotation guard). Pure; inert under the default `{ body: '', changedFiles: null }`.
@@ -259,10 +291,10 @@ function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
   // of a DIFFERENT, narrower deviation: `"already landed, no code change" precedent in #3443's own Progress
   // log`. That is a quoted reference to someone else's disclaimer, not this PR's own claim about itself — PR
   // #1599's `No code behaviour changes — …` and #1613's `No code changes — …` (this guard's real, intended
-  // catches) both state the disclaimer unquoted, in the PR's own voice. Strip double-quoted spans before
-  // testing so a cited precedent can never trip the blanket guard; inert for #1599/#1613 (still unquoted).
-  const bodyForGuard8 = String(body || '').replace(/"[^"]*"/g, '');
-  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(bodyForGuard8)) return true;
+  // catches) both state the disclaimer unquoted, in the PR's own voice. Strip a quoted span before testing
+  // ONLY when it reads as an attributed citation (see `stripCitedQuotes`) — never any quoted text, or a PR
+  // that quotes its OWN disclaimer (`"No code changes here"`) would evade the guard (#3916 review round 1).
+  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(stripCitedQuotes(String(body || ''), ownIdsOf(ref, title)))) return true;
   return isAnnotationPr({ headRefName: ref, title }); // scope-authoring / prepare-decision — not a build
 }
 

@@ -176,6 +176,20 @@ describe('#3916 — commitSubjectDeliversItem: the STRICT, git-ground-truth auto
     expect(commitSubjectDeliversItem('Graduate the port (#3916)', '')).toBe(false);
     expect(commitSubjectDeliversItem(undefined, undefined)).toBe(false);
   });
+
+  // #3916 review round 1 — the id comes from a raw backlog FILENAME (untrusted input to a regex compiler, the
+  // same #2899 reasoning `prDeliveredItem` already applies). A non-id token is rejected, never compiled.
+  it('rejects a malformed card id instead of throwing (`(evil-x.md` → id `(evil`)', () => {
+    expect(() => commitSubjectDeliversItem('Ship it (#(evil)', '(evil')).not.toThrow();
+    expect(commitSubjectDeliversItem('Ship it (#(evil)', '(evil')).toBe(false);
+    expect(commitSubjectDeliversItem('Ship it (#1234)', '.*')).toBe(false);
+    expect(commitSubjectDeliversItem('Ship it (#12a)', '12a')).toBe(false);
+  });
+
+  it('still accepts both real id shapes (numeric and provisional hash)', () => {
+    expect(commitSubjectDeliversItem('Ship it (#x9k9bg5)', 'x9k9bg5')).toBe(true);
+    expect(commitSubjectDeliversItem('Ship it (#0042)', '0042')).toBe(true);
+  });
 });
 
 describe('#3916 — autoResolvableStrandings: the strict AUTO-RESOLVE subset, never a guess', () => {
@@ -219,5 +233,12 @@ describe('#3916 — autoResolvableStrandings: the strict AUTO-RESOLVE subset, ne
   it('tolerates junk input', () => {
     expect(autoResolvableStrandings()).toEqual([]);
     expect(autoResolvableStrandings([null, undefined], null)).toEqual([]);
+  });
+
+  it('a non-conforming backlog filename never crashes the whole run (#3916 review round 1)', () => {
+    const cards = [card('(evil-x', 'kind: story\nstatus: active'), card('9999-x', 'kind: story\nstatus: active')];
+    expect(autoResolvableStrandings(cards, ['Ship it (#9999)'])).toEqual([
+      { id: '9999', status: 'active', via: 'commit-subject "Ship it (#9999)"' },
+    ]);
   });
 });
