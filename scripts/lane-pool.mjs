@@ -129,6 +129,7 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 import {
   resolveChildTimeoutMs, NPM_INSTALL_TIMEOUT_MS, NETWORK_GIT_TIMEOUT_MS as SHARED_NETWORK_GIT_TIMEOUT_MS,
 } from './lib/bounded-child.mjs';
+import { VERIFY_FILENAME, keepMarkerAfterReset, readVerifyMarker } from './lib/lane-verify.mjs';
 
 // #2560 — `--scope=a,b,c` → a normalized, repo-qualified array (empty when the flag is absent/blank).
 const parseScopeFlag = (v) => (typeof v === 'string' && v ? normScope(v.split(',')) : []);
@@ -1401,6 +1402,30 @@ function reapDeadLeasesInPool(repo, nowMs, ttlMs) {
   return reaped;
 }
 
+/**
+ * #3383 — after an acquire's reset, drop the previous holder's verify marker unless it is for the commit the reset
+ * landed on ({@link keepMarkerAfterReset}). Without this a new holder's first `verify-lane.mjs` run refused to start
+ * over a stranger's terminal record. Best-effort: a failure here never fails the acquire.
+ */
+function clearForeignVerifyMarker(dir) {
+  try {
+    const gitDir = join(dir, '.git');
+    const head = git(['rev-parse', 'HEAD'], dir);
+    if (!keepMarkerAfterReset(readVerifyMarker(gitDir), head)) rmSync(join(gitDir, VERIFY_FILENAME), { force: true });
+  } catch { /* advisory */ }
+}
+
+/**
+ * #3383 — undo a claim that the acquire then refused: put back the lease that was there before when it was a live one
+ * (a holder re-acquiring its own lane keeps its hold), otherwise remove the lease the claim just wrote.
+ */
+function restoreLeaseAfterRefusedClaim(dir, preExisting) {
+  try {
+    if (preExisting && !isLeaseStale(preExisting, Date.now(), ttlMsFromFlags())) writeFileSync(LEASE_MARKER(dir), JSON.stringify(preExisting, null, 2) + '\n');
+    else rmSync(LEASE_MARKER(dir), { force: true });
+  } catch { /* the refusal still stands; a stale lease ages out on its own */ }
+}
+
 function cmdAcquire(repo) {
   // #2386 — `--base` and `--no-reset` are mutually exclusive: `--base=<ref>` means "reset this clone to <ref>",
   // and `--no-reset` skips the reset entirely. Honoring both would skip the reset yet still report the base as
@@ -1505,6 +1530,9 @@ function cmdAcquire(repo) {
       // genuinely ahead still needs `--force`.
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
       if (dirty || ahead > 0) {
+        // #3383 — a refusal hands the lane back: the claim above already wrote OUR lease, and leaving it would hold
+        // a lane nobody is using until its TTL (found live 2026-09-24: two refused acquires held lane-1 and lane-11).
+        restoreLeaseAfterRefusedClaim(dir, preExisting);
         fail(
           `lane-${n} has ${uncommitted} uncommitted change(s) and is ${ahead} commit(s) ahead of origin/${repo.branch} ` +
             `— acquire --lane=${n} would destroy that work via its reset-to-origin step. Use --force to reclaim it ` +
@@ -1705,6 +1733,7 @@ function cmdAcquire(repo) {
     git(['checkout', '-B', repo.branch, baseRef, '--quiet', '--force'], dir);
     git(['clean', '-fd', '--quiet'], dir);
     unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
+    clearForeignVerifyMarker(dir);
   }
   writeLaneEnv(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);

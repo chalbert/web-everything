@@ -20,6 +20,7 @@ import {
   verifyGateDecision,
   normalizeVerifyRecord,
   resolveVerifyOptions,
+  keepMarkerAfterReset,
 } from '../lib/lane-verify.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -737,5 +738,15 @@ describe('#3321 — every pr-land COMMAND STRING the tracked file set ships decl
 describe('the marker filename is the never-tracked in-.git convention', () => {
   it('VERIFY_FILENAME matches the .lane-lease sibling convention', () => {
     expect(VERIFY_FILENAME).toBe('.lane-verify');
+  });
+});
+
+describe('keepMarkerAfterReset — an acquire drops the previous holder\'s verify record (#3383)', () => {
+  it('keeps only a record for the commit the reset landed on', () => {
+    expect(keepMarkerAfterReset({ sha: 'abc', status: 'green' }, 'abc')).toBe(true);
+    expect(keepMarkerAfterReset({ sha: 'old', status: 'green' }, 'abc')).toBe(false);
+    expect(keepMarkerAfterReset({ sha: 'old', status: 'red' }, 'abc')).toBe(false);
+    expect(keepMarkerAfterReset({ corrupt: true }, 'abc')).toBe(false);
+    expect(keepMarkerAfterReset(null, 'abc')).toBe(false);
   });
 });

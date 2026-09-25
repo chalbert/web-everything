@@ -13,7 +13,7 @@ import {
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBornAs,
   duplicateBacklogNums,
-  strandedHashesOnMain,
+  strandedHashesOnMain, STRANDED_HASH_GRACE_SECONDS,
   handNumberedNewItems,
   extractPlaywrightContainerTags,
   validatePlaywrightContainerPin, PLAYWRIGHT_CONTAINER_PIN_REQUIRED_FILES,
@@ -242,9 +242,9 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
       expect(warnings[0]).not.toMatch(/number-stranded/);
     });
 
-    it('a hash-led file committed 1s inside the grace boundary (179s, < default 180s) → still WARNING', () => {
+    it('a hash-led file committed 1s inside the grace boundary (< default STRANDED_HASH_GRACE_SECONDS) → still WARNING', () => {
       const { errors, warnings } = strandedHashesOnMain([path], {
-        commitTimeFor: () => NOW - 179,
+        commitTimeFor: () => NOW - (STRANDED_HASH_GRACE_SECONDS - 1),
         now: () => NOW,
       });
       expect(errors).toEqual([]);
@@ -257,11 +257,16 @@ describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detect
     // WARNING) disagree, so flipping the operator reddens this test.
     it('a hash-led file committed EXACTLY at the grace boundary (age === graceWindowSeconds) → ERROR, not a warning (the window is a half-open "< grace", not "<= grace")', () => {
       const { errors, warnings } = strandedHashesOnMain([path], {
-        commitTimeFor: () => NOW - 180,
+        commitTimeFor: () => NOW - STRANDED_HASH_GRACE_SECONDS,
         now: () => NOW,
       });
       expect(warnings).toEqual([]);
       expect(errors).toHaveLength(1);
+    });
+
+    it('a hash-led file the drain has not numbered yet at the real measured lag (1029 s) → WARNING, not an error (#3383)', () => {
+      const { errors } = strandedHashesOnMain([path], { commitTimeFor: () => NOW - 1029, now: () => NOW });
+      expect(errors).toEqual([]);
     });
 
     it('a hash-led file committed 1 hour ago (long past the drain\'s window) → ERROR, remedy intact', () => {

@@ -2619,7 +2619,10 @@ export function duplicateBornAs(items = []) {
  *   false — a primary checkout keeps the hard error.
  * @returns {{errors: string[], warnings: string[]}} one message per stranded hash, routed by recency.
  */
-export const STRANDED_HASH_GRACE_SECONDS = 180; // ~2.5x the measured 7-73s drain numbering-commit lag
+// 1800, not 180 (#3383, 2026-09-24): the drain's numbering commit now lands 469-1029 s after the merge (8 real lands
+// measured on origin/main that day), not the 7-73 s the 180 was sized from, so every gate run in the ~10 minutes
+// after ANY hash-card merge went red on a hash the drain was about to number. 1800 is ~1.75x the slowest measured lag.
+export const STRANDED_HASH_GRACE_SECONDS = 1800;
 
 export function strandedHashesOnMain(mainBacklogPaths = [], {
   commitTimeFor = () => null,
