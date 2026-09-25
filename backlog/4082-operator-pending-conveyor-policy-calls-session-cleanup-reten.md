@@ -2,9 +2,11 @@
 bornAs: xwysd8b
 kind: decision
 parent: "4075"
-status: active
+status: resolved
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
+codifiedIn: "docs/agent/platform-decisions.md#conveyor-session-lifecycle-policy"
 preparedDate: "2026-09-24"
 preparedAgainstSha: "069777614be672823ba0777cd4952d075cf2f8ae"
 relatedReport: reports/2026-09-24-conveyor-operator-policy-calls.md
@@ -199,10 +201,17 @@ A new anchor `#conveyor-session-lifecycle-policy` in `we:docs/agent/platform-dec
 
 | Child | Scope (predicted) |
 | --- | --- |
-| Retention sweep for finished sessions (Fork 1) | `we:scripts/conveyor/session-reaper.mjs`, `we:scripts/operations/run-store.mjs` |
-| Per-kind no-outcome window + ceiling (Fork 2) | `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/session-reaper.mjs` |
-| Stamp the spawning chat on chat-spawned background sessions (cleanup scope) | `we:scripts/conveyor/`, `we:.claude/settings.json` (a SessionStart hook) |
-| Fork 3: add "resume is single-owner" to #3366 | card edit only |
+| Retention sweep for finished sessions (Fork 1) → x2ij3r2 | `we:scripts/conveyor/session-reaper.mjs`, `we:scripts/operations/run-store.mjs` |
+| Per-kind no-outcome window + ceiling (Fork 2) → xgkl5ha | `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/session-reaper.mjs` |
+| Stamp the spawning chat on chat-spawned background sessions (cleanup scope) → xltlavt | `we:scripts/conveyor/session-reaper.mjs`, `we:.claude/settings.json` (a SessionStart hook) |
+| Fork 3: "resume is single-owner" → added to #3366 as Done-when 6 | card edit only |
+
+## Ruling (2026-09-24)
+
+Ratified by the operator ("ok fork are ok" · "I ratify"). All three forks as prepared. Amendment: Fork 1
+retention has no upper limit (user setting, "never" valid). The bot-login / API-key question was dropped as
+out of scope. Codified as
+[#conveyor-session-lifecycle-policy](/docs/agent/platform-decisions/#conveyor-session-lifecycle-policy).
 
 ### Review jury (provisional — pre-registered #2638)
 
