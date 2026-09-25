@@ -72,6 +72,10 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-list-cache.test.mjs',
       'scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs',
       'scripts/__tests__/lane-pool-acquire-scan-wait-decouple.test.mjs',
+      // #xj2k2pp — same tier: real throwaway origin/pool, a PATH git shim (a per-call sleep), real spawned
+      // CONCURRENT `lane-pool.mjs acquire` children proving the shared-scan LOCK WAIT is bounded by the
+      // caller's own --wait-ms (distinct from the scan's own budget, its sibling above).
+      'scripts/__tests__/lane-pool-acquire-lock-contention.test.mjs',
       'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',
       'scripts/__tests__/lane-pool-trim.test.mjs',
       'scripts/__tests__/lane-pool-acquirable-growth-cap.test.mjs',

@@ -201,6 +201,11 @@ export default defineConfig({
       // sleep), real spawned CONCURRENT `lane-pool.mjs acquire` children proving the scan's own timeout is
       // independent of any one caller's --wait-ms.
       'scripts/__tests__/lane-pool-acquire-scan-wait-decouple.test.mjs',
+      // #xj2k2pp — same tier: real throwaway origin/pool, a PATH git shim (a per-call sleep), real spawned
+      // CONCURRENT `lane-pool.mjs acquire` children proving the shared-scan LOCK WAIT (as opposed to the
+      // scan's own budget, its `lane-pool-acquire-scan-wait-decouple.test.mjs` sibling above) is bounded by
+      // the caller's own --wait-ms.
+      'scripts/__tests__/lane-pool-acquire-lock-contention.test.mjs',
       // #x5n4zn3 — same tier: real throwaway origin/reference/pool, a PATH git shim (this one deliberately
       // HANGS, ignoring SIGTERM), a real spawned `lane-pool.mjs status` child.
       'scripts/__tests__/lane-pool-hung-git-bounded.test.mjs',

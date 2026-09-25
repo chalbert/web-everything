@@ -1799,6 +1799,14 @@ function cmdAcquire(repo) {
     // claim "all held/dirty", and (b) growth-on-empty (below) must refuse to fire on it — cloning MORE
     // capacity on top of an already-overloaded scan would only make the NEXT scan slower still.
     let sawScanTimeout = false;
+    // #xj2k2pp — this call gave up WAITING for a DIFFERENT caller's in-flight shared scan/lock because ITS OWN
+    // --wait-ms elapsed first (`acquirableListCached`'s new `callerDeadlineMs` bound) — a third fact, distinct
+    // from both `sawScanTimeout` (the scan itself never finished at all) and a completed scan finding nothing
+    // ("all held/dirty"): the shared scan may well be fine and about to answer for whoever ELSE is waiting on
+    // it, it just didn't answer inside THIS caller's own budget. Mirrors `sawScanTimeout`'s fail-SAFE-STOP
+    // (never fail-safe-GROW) rationale below — an unanswered lock is no more evidence of a starved pool than an
+    // unfinished scan is.
+    let sawLockContention = false;
     // #3407 — a candidate excluded because it FAILED TO PROVISION (below) is a different fact from "the scan
     // found nothing" or "every lane is genuinely held/dirty": growth-on-empty exists for the latter two, never
     // as a rescue for the former (that would silently widen this fix's own scope into the SEPARATE
@@ -1867,17 +1875,29 @@ function cmdAcquire(repo) {
           // reach a second one from the SAME scan snapshot, exactly the fall-through those tests pin. Fixing
           // that needs `scanAcquirable` itself to accept an exclusion set, left for a follow-up card rather than
           // risking it in the fix this incident is actually blocked on.
-          candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: listScanTimeoutMs(), cacheTtlMs: listCacheTtlMs() });
+          // #xj2k2pp — `callerDeadlineMs: deadline` is THIS call's own `--wait-ms` deadline (computed above,
+          // `nowMs + waitMs` — `nowMs` when `--wait-ms` is omitted, reproducing today's instant-fail exactly).
+          // It only bounds how long THIS call may sit out a DIFFERENT caller's in-flight scan/lock — never the
+          // scan's own `scanTimeoutMs` budget when this call is the one actually running it.
+          candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: listScanTimeoutMs(), cacheTtlMs: listCacheTtlMs(), callerDeadlineMs: deadline });
           sawScanTimeout = false;
+          sawLockContention = false;
         } catch (e) {
-          // A scan that overran ITS OWN budget is not a hard failure here (unlike `list --acquirable` itself)
-          // — it just means "no proven candidate yet, and we don't know why"; fall through to the same
-          // wait/retry/fail-at-deadline handling as "found nothing free" below, so a slow tick self-heals on
-          // the next one. `sawScanTimeout` (above) is what lets the eventual message/growth-refusal tell this
-          // apart from a completed scan that genuinely found nothing.
-          if (!e || !e.scanTimeout) throw e;
-          candidateDirs = [];
-          sawScanTimeout = true;
+          // A scan that overran ITS OWN budget, or a lock-wait THIS caller gave up on at its own deadline, is
+          // not a hard failure here (unlike `list --acquirable` itself) — each just means "no proven candidate
+          // yet, and here is why not"; fall through to the same wait/retry/fail-at-deadline handling as "found
+          // nothing free" below, so a slow tick self-heals on the next one. `sawScanTimeout`/`sawLockContention`
+          // (above) are what let the eventual message/growth-refusal tell these apart from a completed scan
+          // that genuinely found nothing.
+          if (e && e.lockContention) {
+            candidateDirs = [];
+            sawLockContention = true;
+          } else if (e && e.scanTimeout) {
+            candidateDirs = [];
+            sawScanTimeout = true;
+          } else {
+            throw e;
+          }
         }
       }
       const pickable = candidateDirs
@@ -1932,12 +1952,14 @@ function cmdAcquire(repo) {
       // #3383 — before failing outright, let the pool GROW A LITTLE rather than block every dispatch on a
       // human running `provision` by hand. Bounded two ways, mirroring #4025's provision --acquirable guards
       // exactly: a small per-call cap on brand-new clones (reaching it just means "ask again"), and a hard
-      // ceiling well above the trim target that growth may never cross. Growth refuses to fire on EITHER of
-      // two fail-SAFE-STOP (never fail-safe-GROW) signals, mirroring #4025's own rationale: `sawScanTimeout`
-      // (the last scan never proved anything either way) and a fresh, dedicated, ONE-TIME live remote-
-      // reachability probe taken only here (never on the hot scan path above) — a network/remote outage must
-      // never be misread as "genuinely starved, so clone more".
-      if (!grownOnce && !sawScanTimeout && !sawProvisionFailure) {
+      // ceiling well above the trim target that growth may never cross. Growth refuses to fire on ANY of
+      // three fail-SAFE-STOP (never fail-safe-GROW) signals, mirroring #4025's own rationale: `sawScanTimeout`
+      // (the last scan never proved anything either way), `sawLockContention` (#xj2k2pp — this call gave up on
+      // a DIFFERENT caller's lock at its own deadline, which says nothing about the pool's real capacity
+      // either), and a fresh, dedicated, ONE-TIME live remote-reachability probe taken only here (never on the
+      // hot scan path above) — a network/remote outage must never be misread as "genuinely starved, so clone
+      // more".
+      if (!grownOnce && !sawScanTimeout && !sawLockContention && !sawProvisionFailure) {
         grownOnce = true;
         // Probe the exact URL growth will clone from (`provisionLane` → `repo.originUrl`, resolved against the
         // same process cwd the clone uses) — never from inside an existing lane: a vanished/corrupted `lanes[0]`
@@ -1953,20 +1975,29 @@ function cmdAcquire(repo) {
           continue;
         }
       }
-      // #3383 bug 3b — say WHICH happened: a scan that never finished (never proven "all held/dirty" at
-      // all) gets its own message, distinct from a completed scan that genuinely found nothing acquirable.
+      // #3383 bug 3b / #xj2k2pp — say WHICH happened: a scan that never finished (never proven "all held/dirty"
+      // at all), THIS call giving up on a DIFFERENT caller's lock at its own deadline, and a completed scan
+      // that genuinely found nothing acquirable are three distinct facts, each with its own message — never
+      // collapsed into one another.
       emitAcquirePollCount(); // #xj4tewd — before fail() exits the process, so a debug-mode caller still sees it
       fail(
         sawScanTimeout
           ? `no free lane in pool "${repo.name}" — the acquirability scan itself did not finish within the ` +
               `wait window (raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS, or investigate a hung ` +
               `git — #xn432dz); this is NOT necessarily because all ${lanes.length} lane(s) are held/dirty`
-          : sawProvisionFailure
-            // #3407 — every candidate this call tried was claimed but then failed to PROVISION (a network
-            // blip, #2924's re-verify, a bad --base, an npm hiccup) — a different fact from "held/dirty", so
-            // it gets its own message; each such lane already had its lease released (see the loop above).
-            ? `no free lane in pool "${repo.name}" — every candidate this call tried was claimed but failed to provision (see the warnings above); each was released — investigate the underlying failure, or retry`
-            : `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`,
+          : sawLockContention
+            // #xj2k2pp — a DIFFERENT caller held the shared scan lock for longer than THIS call's own
+            // --wait-ms; the shared scan itself may be fine (or may finish right after this call gives up) —
+            // this is lock CONTENTION, not evidence every lane is held/dirty, and not the scan itself hanging.
+            ? `no lane within ${waitMs}ms in pool "${repo.name}" — a different acquire's shared acquirability ` +
+                `scan was still running when this call's --wait-ms elapsed (lock contention); this is NOT ` +
+                `necessarily because all ${lanes.length} lane(s) are held/dirty — retry, or raise --wait-ms`
+            : sawProvisionFailure
+              // #3407 — every candidate this call tried was claimed but then failed to PROVISION (a network
+              // blip, #2924's re-verify, a bad --base, an npm hiccup) — a different fact from "held/dirty", so
+              // it gets its own message; each such lane already had its lease released (see the loop above).
+              ? `no free lane in pool "${repo.name}" — every candidate this call tried was claimed but failed to provision (see the warnings above); each was released — investigate the underlying failure, or retry`
+              : `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`,
       );
     }
     emitAcquirePollCount(); // #xj4tewd — success path (the loop exited via `break`, not `fail`)
@@ -2498,7 +2529,18 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
 // Single-flight wrapper: cache hit ⇒ no scan; else take the lock and scan, or wait (bounded) for the holder's
 // result. Waiting is bounded by the scan timeout + grace — past that the lock is stale by definition and taken
 // over, so a waiter can never outlive a holder that is itself bounded.
-function acquirableListCached(repo, { limit, scanTimeoutMs, cacheTtlMs }) {
+//
+// #xj2k2pp — `callerDeadlineMs` (optional: an absolute `Date.now()`-comparable deadline, the CALLING acquire's
+// own `--wait-ms` bound) additionally bounds ONLY this function's "sit out someone ELSE's lock" branch below —
+// never the scan's own `scanTimeoutMs` budget (that stays exactly as `lane-pool-acquire-scan-wait-decouple.
+// test.mjs` pins: a genuinely longer-lived sibling caller sharing the SAME lock still gets the full scan; this
+// caller shrinking that shared budget to ITS OWN smaller wait-ms would truncate the answer out from under that
+// sibling too). Soak-scale live evidence (14 lanes / 5 callers, card xj2k2pp): with no such bound, a caller
+// whose OWN `--wait-ms` had long elapsed still sat in the `sleepSyncMs` loop below until either the lock
+// holder's scan actually finished or the lock's OWN (far larger) staleness grace elapsed — 3.4x its wait in the
+// worst observed case. `null` (the default, e.g. `list --acquirable`'s own direct callers) reproduces the
+// prior behavior exactly: no caller-side bound, only the scan/lock's own.
+function acquirableListCached(repo, { limit, scanTimeoutMs, cacheTtlMs, callerDeadlineMs = null }) {
   const slice = (paths) => (limit !== null ? paths.slice(0, limit) : paths);
   const hit = readListCache(repo, Date.now(), cacheTtlMs);
   if (hit) return slice(hit);
@@ -2523,6 +2565,17 @@ function acquirableListCached(repo, { limit, scanTimeoutMs, cacheTtlMs }) {
       } finally {
         releaseListLock(repo);
       }
+    }
+    // #xj2k2pp — checked BEFORE the poll sleep, and every iteration: this caller does not own the lock, so
+    // every ms spent here is spent waiting on SOMEONE ELSE's scan. That is LOCK CONTENTION, a distinct,
+    // reportable reason from "a completed scan found nothing" or "the scan itself hung" — never silently
+    // absorbed into either. Thrown, not returned, so `cmdAcquire`'s poll loop treats it exactly like the
+    // existing `scanTimeout` signal (candidate list empty this round, deadline re-checked, growth refused).
+    if (callerDeadlineMs !== null && Date.now() >= callerDeadlineMs) {
+      throw Object.assign(
+        new Error('gave up waiting for the shared acquirability-scan lock: this call\'s own --wait-ms elapsed while a different holder\'s scan was still running (lock contention)'),
+        { lockContention: true },
+      );
     }
     sleepSyncMs(LIST_LOCK_POLL_MS);
     const fresh = readListCache(repo, Date.now(), cacheTtlMs);
