@@ -20,12 +20,23 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
 
-  it('has exactly the 6 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep + lease-reaper) plus 6 passes × 3 repos = 24 total (we:backlog/x5uqim1-*.md added ci-red-recovery-watch)', () => {
+  it('has exactly the 7 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep + lease-reaper, #4077 health-watch) plus 6 passes × 3 repos = 25 total (we:backlog/x5uqim1-*.md added ci-red-recovery-watch)', () => {
     expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
-      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep', 'lease-reaper',
+      'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep', 'lease-reaper', 'health-watch',
       ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch', 'ci-red-recovery-watch']
         .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
     ].sort());
+  });
+
+  // #4077 — the health watch: ONE host-wide entry (never per-repo), its `tick` subcommand, a 5-minute cadence,
+  // against a script that exists.
+  it('health-watch is one host-wide 5-minute `tick` entry against a script that exists', () => {
+    const e = DAEMON_MANIFEST['health-watch'];
+    expect(e.script).toBe('scripts/conveyor/health-watch.mjs');
+    expect(e.args).toEqual(['tick']);
+    expect(e.intervalMs).toBe(5 * 60 * 1000);
+    expect(existsSync(join(REPO_ROOT, e.script))).toBe(true);
+    for (const key of REPO_KEYS) expect(DAEMON_MANIFEST[`health-watch-${key}`]).toBeUndefined();
   });
 
   // we:backlog/x5uqim1-*.md (#4075/#3383) — the CI-red-recovery watcher runs `--apply` (a real `gh run rerun`

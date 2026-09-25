@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  latestDrainLogStamp,
   isDaemonLabel, classifyDaemonSpec, leaseKeyForClassification, passDaemonLeaseKeyMirror,
   parseFixDispatchTick, parseReviewDaemonTick, parseMergeOrphanSweepTick, lastMeaningfulLine,
   normalizeDrainLastPass, countCommitsBehindOrigin, cloneOverlayKey, readOverlaysForClone,
@@ -422,5 +423,22 @@ describe('collectDaemonStatus — full injected join', () => {
   it('a missing LaunchAgents dir reads as zero daemons, never throws', () => {
     const read = collectDaemonStatus({ env: {}, exec: noExec, readdir: () => { throw new Error('ENOENT'); }, launchAgentsDir: '/nope' });
     expect(read.daemons).toEqual([]);
+  });
+});
+
+// #4077 — the drain daemon's log IS timestamped; its newest stamp is the liveness signal `lastPass.at` misses.
+describe('latestDrainLogStamp', () => {
+  it('returns the newest `[drain-daemon] <ISO>` stamp, ignoring other lines', () => {
+    const text = [
+      '[drain-daemon] 2026-09-25T15:16:28.986Z pass at 2026-09-25T15:15:18.510Z: considered 2, merged 1 (#2662)',
+      'some child output',
+      '[drain-daemon] 2026-09-25T15:39:42.225Z pass at 2026-09-25T15:38:23.954Z: considered 3, merged 2 (#2665, #2667)',
+      '[drain-daemon] 2026-09-25T15:37:21.553Z pass at 2026-09-25T15:17:31.332Z: considered 2, merged 1 (#2666)',
+    ].join('\n');
+    expect(latestDrainLogStamp(text)).toBe('2026-09-25T15:39:42.225Z');
+  });
+  it('is null on a log with no stamp', () => {
+    expect(latestDrainLogStamp('nothing here\n')).toBeNull();
+    expect(latestDrainLogStamp(undefined)).toBeNull();
   });
 });
