@@ -752,7 +752,8 @@ describe('#3329 `observed` satisfies NOTHING that `accepted` satisfies', () => {
     // `decideReviewGate` (`we:scripts/lib/review-escalation.mjs`) is what actually decides whether the drain
     // lands a PR today, and it reads ONLY labels. An `observed` row mirrors no label, so the gate cannot see
     // it however many rows exist — the PR parks exactly as it would with an empty ledger.
-    expect(decideReviewGate({ escalate: true, labels: LBL(REVIEW_LABELS.accepted) }).action).toBe('merge');
+    // xvzc4v4: a matching accepted/head SHA — the SHA-coverage gate is a separate concern from this test.
+    expect(decideReviewGate({ escalate: true, labels: LBL(REVIEW_LABELS.accepted), acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
     expect(decideReviewGate({ escalate: true, labels: [] }).action).toBe('park');
     expect(verdictLabel(VERDICTS.OBSERVED)).toBeNull();
   });

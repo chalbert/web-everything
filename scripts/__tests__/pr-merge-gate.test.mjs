@@ -27,6 +27,28 @@ describe('pr-merge-gate — buildGateMergeArgs (mirrors the merge-ai-prs inline 
     expect(mergeMethodFlag(undefined)).toBe('--merge');
     expect(buildGateMergeArgs({ pr: 1, method: 'squash' })).not.toContain('--auto');
   });
+
+  // xvzc4v4 (merge-safety review, bug 1) — the merge was not tied to the reviewed/checked commit: `gh pr merge`
+  // carried no `--match-head-commit`, so a push (or a `review:changes`) landing between the pass-start decision
+  // and this call was invisible. `gh` itself refuses the merge server-side if the live head no longer matches.
+  it('threads --match-head-commit <sha> when a sha is given (bug 1 fix)', () => {
+    expect(buildGateMergeArgs({ pr: 12, matchHeadCommit: 'abc1234' }))
+      .toEqual(['pr', 'merge', '12', '--merge', '--delete-branch', '--match-head-commit', 'abc1234']);
+  });
+  it('threads --match-head-commit AFTER --repo when both are given', () => {
+    expect(buildGateMergeArgs({ pr: 7, repo: 'chalbert/frontierui', matchHeadCommit: 'deadbeef' }))
+      .toEqual(['pr', 'merge', '7', '--repo', 'chalbert/frontierui', '--merge', '--delete-branch', '--match-head-commit', 'deadbeef']);
+  });
+  it('omits --match-head-commit when none is given — byte-identical to the pre-fix argv (no regression)', () => {
+    expect(buildGateMergeArgs({ pr: 12 })).toEqual(['pr', 'merge', '12', '--merge', '--delete-branch']);
+    expect(buildGateMergeArgs({ pr: 12, matchHeadCommit: null })).toEqual(['pr', 'merge', '12', '--merge', '--delete-branch']);
+    expect(buildGateMergeArgs({ pr: 12, matchHeadCommit: '' })).toEqual(['pr', 'merge', '12', '--merge', '--delete-branch']);
+  });
+  it('mergePr threads matchHeadCommit through to the gh argv it shells', () => {
+    const { exec, calls } = fakeExec();
+    mergePr({ pr: 5, repo: null, method: 'merge', matchHeadCommit: 'cafef00d', caller: 'drain', exec, env: {} });
+    expect(calls[0].args).toEqual(['pr', 'merge', '5', '--merge', '--delete-branch', '--match-head-commit', 'cafef00d']);
+  });
 });
 
 describe('pr-merge-gate — mergePr caller invariant (#2290)', () => {

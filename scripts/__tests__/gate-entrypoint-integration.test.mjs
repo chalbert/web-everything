@@ -54,14 +54,37 @@ if (a[0] === 'pr' && a[1] === 'edit' && a.includes('--body')) {
 // entrypoint records the failed-bucket headSha too. Every other PR's merge succeeds silently (falls to the catchall).
 if (a[0] === 'pr' && a[1] === 'merge') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2]));
+  // xvzc4v4 advisory fix — record every merge argv (only when a log path is set) so a test can assert the exact
+  // --match-head-commit the drain pinned the merge to.
+  if (process.env.GATE_MERGE_LOG) fs.appendFileSync(process.env.GATE_MERGE_LOG, JSON.stringify(a) + '\\n');
+  // xvzc4v4 advisory fix — the merge LANDS server-side but gh still exits non-zero (a branch-delete failure or a
+  // network drop after the merge response): later 'state' reads report MERGED, via a marker file by the fixture.
+  if (pr && pr._mergeFailButLands) { fs.writeFileSync(process.env.GATE_FIXTURE + '.merged-' + pr.number, ''); process.stderr.write('forced post-merge gh failure\\n'); process.exit(1); }
   if (pr && pr._mergeFail) { process.stderr.write('forced merge failure\\n'); process.exit(1); }
 }
 if (a[0] === 'pr' && a[1] === 'list') out(fx.prs);
 if (a[0] === 'pr' && a[1] === 'view') {
   const pr = fx.prs.find((p) => String(p.number) === String(a[2])) || {};
-  if (fields.includes('commits')) out({ commits: pr._commits || [] });
-  if (fields.includes('files')) out({ files: pr._files || [] });
-  if (fields.includes('body')) out({ body: pr.body || '' });
+  const fieldList = fields.split(',');
+  // xvzc4v4 advisory fix — the drain's pre-merge FRESH read is the one 'pr view' asking for mergeStateStatus;
+  // _freshReadFail fails exactly that read, leaving every other read (the state probe, comments, …) working.
+  if (pr._freshReadFail && fieldList.includes('mergeStateStatus')) { process.stderr.write('forced fresh-read failure\\n'); process.exit(1); }
+  // xvzc4v4 (merge-safety review, bug 1 fix follow-up) — this used to be a chain of early-exiting ifs, each
+  // calling out() (which itself process.exit(0)s) the INSTANT it matched one field. That modeled every past
+  // caller correctly because each one asked for exactly one field group at a time (commits alone, body
+  // alone, headRefOid,comments together, …) — but fetchFreshPrForRevalidation's new combined read
+  // (number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels,
+  // commits — everything classifyPr needs, in ONE gh call) hit the commits check FIRST and returned an
+  // object with ONLY commits — missing number — so fetchFreshPrForRevalidation read that as 'not the right
+  // PR' and returned null, which revalidateForMerge (correctly, per its own fail-closed contract) then
+  // refused to merge on. Every candidate aborted at revalidation, merged stayed empty, and the #2502 headSha
+  // assertions failed on undefined — not a production bug, a test-double gap: a real gh answers every
+  // requested field in one reply, so the shim now ACCUMULATES matching fields into one response object instead
+  // of returning the first match alone, matching real gh for any field combination a caller asks for.
+  const resp = {};
+  if (fields.includes('commits')) resp.commits = pr._commits || [];
+  if (fields.includes('files')) resp.files = pr._files || [];
+  if (fields.includes('body')) resp.body = pr.body || '';
   // #2409 reviewed-SHA staleness read: return the live head plus a reviewed-sha marker comment. When the fixture's
   // _reviewedSha differs from _headRefOid the accept is STALE (re-park); no marker → gate fails open.
   // #xmnl36p — _clearedBy adds the durable --to=clear-human attribution comment the operator ceremony writes,
@@ -74,10 +97,26 @@ if (a[0] === 'pr' && a[1] === 'view') {
     const cs = [];
     if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' });
     if (pr._clearedBy) cs.push({ body: '✅ review — \`review:human\` cleared via the sanctioned path\\n\\nCleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
-    out({ headRefOid: pr._headRefOid || '', comments: cs });
+    // xvzc4v4 advisory fix — with no explicit _headRefOid the live head IS the tip commit (as on real GitHub);
+    // a fixture sets _headRefOid to something else to model a push landing after the pass-start commits read.
+    const tip = (pr._commits || [])[(pr._commits || []).length - 1];
+    resp.headRefOid = pr._headRefOid || (tip && tip.oid) || '';
+    resp.comments = cs;
   }
-  if (fields.includes('comments')) out({ comments: [] });
-  out({});
+  if (fieldList.includes('state')) resp.state = (pr._state === 'MERGED' || fs.existsSync(process.env.GATE_FIXTURE + '.merged-' + pr.number)) ? 'MERGED' : 'OPEN';
+  if (fieldList.includes('mergedAt')) resp.mergedAt = resp.state === 'MERGED' ? '2026-09-25T00:00:00Z' : null;
+  if (fields.includes('comments') && !('comments' in resp)) resp.comments = [];
+  // xvzc4v4 — the rest of what fetchFreshPrForRevalidation asks for in its one combined call, so
+  // revalidateForMerge's classifyPr(freshPr, …) sees a real PR shape instead of failing closed on it.
+  if (fields.includes('number')) resp.number = pr.number;
+  if (fields.includes('title')) resp.title = pr.title || '';
+  if (fields.includes('headRefName')) resp.headRefName = pr.headRefName;
+  if (fields.includes('baseRefName')) resp.baseRefName = pr.baseRefName;
+  if (fields.includes('mergeable')) resp.mergeable = pr.mergeable;
+  if (fields.includes('mergeStateStatus')) resp.mergeStateStatus = pr.mergeStateStatus;
+  if (fields.includes('statusCheckRollup')) resp.statusCheckRollup = pr.statusCheckRollup;
+  if (fields.includes('labels')) resp.labels = pr.labels || [];
+  out(resp);
 }
 // pr edit / pr comment / label create / api … — succeed silently (dry-run shouldn't reach the mutating ones)
 process.stdout.write(''); process.exit(0);
@@ -269,6 +308,94 @@ describe('the real drain entrypoint consults the gate before merging', () => {
       result = JSON.parse(String(e.stdout).trim().split('\n').filter(Boolean).pop());
     }
     expect(result.failed.find((x) => Number(x.num) === 912)?.headSha).toBe('sha-failed-912');
+  });
+
+  // xvzc4v4 advisory fix — REAL-EXECUTION coverage of the pre-merge revalidation and the already-merged recovery
+  // paths. The source-text tests in merge-ai-prs-merge-trace-post-confirm.test.mjs regex-match those branches;
+  // they could not see that the catch branch called a `const` declared inside the sibling `try` block (a
+  // ReferenceError that crashed the whole pass). These drive the real entrypoint through each branch instead.
+  const shaCommitsX = (oid) => [{ authors: [{ name: 'Claude', email: 'noreply@anthropic.com' }], oid }];
+  const liveLeaf = (number, extra) => ({ number, title: `leaf ${number}`, body: 'a real summary', headRefName: `lane/x${number}`, baseRefName: 'main',
+    mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: GREEN, labels: [{ name: 'ready-to-merge' }],
+    _commits: shaCommitsX(`sha-${number}`), _files: [{ path: `backlog/x${number}.md`, additions: 1, deletions: 0 }], ...extra });
+  /** Non-dry-run drain that tolerates a non-zero exit and records every `gh pr merge` argv. */
+  function runDrainLiveRecordingMerges(fixture) {
+    const fxPath = join(workDir, `fixture-${fixture._id}.json`);
+    const mergeLog = join(workDir, `merges-${fixture._id}.log`);
+    const commentLog = join(workDir, `comments-${fixture._id}.log`);
+    writeFileSync(fxPath, JSON.stringify(fixture));
+    writeFileSync(mergeLog, '');
+    writeFileSync(commentLog, '');
+    let stdout;
+    try {
+      stdout = execFileSync('node', [SCRIPT, '--label=ready-to-merge', '--no-reconcile-labels', '--no-drain-lease', '--this-repo', '--json'], {
+        cwd: workDir,
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath, GATE_MERGE_LOG: mergeLog, GATE_COMMENT_LOG: commentLog },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) { stdout = String(e.stdout || ''); }
+    const line = stdout.trim().split('\n').filter(Boolean).pop();
+    const readLog = (p) => readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    return { result: line ? JSON.parse(line) : null, merges: readLog(mergeLog), comments: readLog(commentLog) };
+  }
+  /** The #2412 merge-trace comments the drain posted for PR `num`. */
+  const traceCommentsFor = (comments, num) => comments.filter((c) => Number(c.num) === num && /Merge trace/.test(c.body));
+
+  it('xvzc4v4: the merge is pinned (--match-head-commit) to the head SHA the pass-start decision judged', () => {
+    const { result, merges } = runDrainLiveRecordingMerges({ _id: 'pin-head', prs: [liveLeaf(921)] });
+    expect(nums(result.merged)).toContain(921);
+    expect(merges).toHaveLength(1);
+    const argv = merges[0];
+    expect(argv[argv.indexOf('--match-head-commit') + 1]).toBe('sha-921');
+  });
+
+  it('xvzc4v4: the pin is the LISTING head, not the commits-read tip (a capped commits read cannot strand the PR)', () => {
+    const { result, merges } = runDrainLiveRecordingMerges({ _id: 'pin-listed', prs: [liveLeaf(927, { headRefOid: 'sha-927-real-head', _headRefOid: 'sha-927-real-head' })] });
+    expect(nums(result.merged)).toContain(927);
+    const argv = merges[0];
+    expect(argv[argv.indexOf('--match-head-commit') + 1]).toBe('sha-927-real-head');
+  });
+
+  it('xvzc4v4: a push after the pass-start read (live head ≠ judged head) is refused, never merged', () => {
+    const { result, merges } = runDrainLiveRecordingMerges({ _id: 'head-moved', prs: [liveLeaf(922, { _headRefOid: 'sha-922-pushed-later' })] });
+    expect(merges).toHaveLength(0);
+    expect(nums(result.merged)).not.toContain(922);
+    expect(result.revalidationAborted.find((x) => Number(x.num) === 922)?.reason).toMatch(/head moved/);
+  });
+
+  it('xvzc4v4: gh pr merge exits non-zero but the PR DID land — the pass completes and records it merged (no crash)', () => {
+    const { result } = runDrainLiveRecordingMerges({ _id: 'lands-despite-error', prs: [liveLeaf(923, { _mergeFailButLands: true }), liveLeaf(924)] });
+    expect(result).not.toBeNull(); // the pass produced its JSON result instead of dying on a ReferenceError
+    expect(nums(result.merged)).toContain(923);
+    expect(nums(result.merged)).toContain(924); // the rest of the pass still ran
+    expect(nums(result.failed)).not.toContain(923);
+  });
+
+  it('xvzc4v4: a candidate merged out-of-band whose fresh re-read fails still gets its follow-up (recorded merged)', () => {
+    const { result, merges, comments } = runDrainLiveRecordingMerges({ _id: 'merged-oob-read-fail', prs: [liveLeaf(925, { _freshReadFail: true, _state: 'MERGED' })] });
+    expect(merges).toHaveLength(0);
+    expect(nums(result.merged)).toContain(925);
+    expect(nums(result.revalidationAborted || [])).not.toContain(925);
+    // …and its merge-trace comment, like every other already-merged path (a no-op stub used to swallow it here).
+    const traces = traceCommentsFor(comments, 925);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].body).toMatch(/landed head `sha-925`/);
+  });
+
+  it('xvzc4v4: the confirmed-merge paths each post exactly one merge trace naming the pinned head', () => {
+    const { comments } = runDrainLiveRecordingMerges({ _id: 'trace-paths', prs: [liveLeaf(928), liveLeaf(929, { _mergeFailButLands: true })] });
+    expect(traceCommentsFor(comments, 928)).toHaveLength(1);
+    expect(traceCommentsFor(comments, 928)[0].body).toMatch(/landed head `sha-928`/);
+    expect(traceCommentsFor(comments, 929)).toHaveLength(1);
+    expect(traceCommentsFor(comments, 929)[0].body).toMatch(/landed head `sha-929`/);
+  });
+
+  it('xvzc4v4: a failed fresh re-read on a still-OPEN PR fails closed (not merged, reported)', () => {
+    const { result, merges } = runDrainLiveRecordingMerges({ _id: 'read-fail-open', prs: [liveLeaf(926, { _freshReadFail: true })] });
+    expect(merges).toHaveLength(0);
+    expect(nums(result.merged)).not.toContain(926);
+    expect(nums(result.revalidationAborted)).toContain(926);
   });
 
   it('bare /merge sweep: the #2366 backstop refuses a PR already carrying review:pending, but lands a clean one', () => {

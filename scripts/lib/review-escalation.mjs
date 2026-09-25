@@ -1579,9 +1579,15 @@ export function parseReviewedContribution(comments) {
  * #2409 — does a `review:accepted` verdict still cover the PR's LIVE head? Pure. The acceptance only vouches
  * for the tree the reviewer looked at; a commit that rode in AFTER accept is NOT covered (this is exactly the
  * PR #368 hole — a second, unrelated commit honoured under an accept that named only the first).
- *   • Either SHA unknown (no recorded reviewed SHA, or the head couldn't be read) → `{ covers: true }` — fails
- *     OPEN, so this gate NEVER mass-re-parks accepts made before it shipped, and never blocks on a fetch miss.
- *     (Mirrors the sibling manifest-baseline gate's fail-open-on-missing posture.)
+ *   • xvzc4v4 (merge-safety review, bug 3) — Either SHA unknown (no recorded reviewed SHA, or the head couldn't
+ *     be read) → `{ covers: false, staleVerified: false, reason }`. FAILS CLOSED, not open: this used to return
+ *     `{ covers: true }` on the theory that a missing/unreadable SHA should never mass-re-park pre-gate accepts
+ *     or block on a transient fetch miss — but that theory means an accept with NO recorded SHA (or a `gh` read
+ *     that failed outright, a strictly more basic failure than the `headReadFailed`-flagged tier below, which
+ *     already fails closed) waved an UNVERIFIED head straight through to merge with no comparison ever
+ *     attempted. `staleVerified: false` (the same "unproven, not proven-stale" tier `headReadFailed` uses below)
+ *     still refuses the merge but does not gratuitously revoke a recorded human `review:human` clearance on a
+ *     mere inability to check (see `decideReviewGate`'s `suppressRehold`) — the merge is parked either way.
  *   • SHAs match (prefix-compare, tolerant of abbreviation) → `{ covers: true }`.
  *   • Head advanced past the reviewed SHA → `{ covers: false, reason }` — a STALE acceptance; the drain
  *     refuses the auto-land and re-parks for a fresh look.
@@ -1606,7 +1612,18 @@ export function acceptanceCoversHead({
 } = {}) {
   const a = typeof acceptedSha === 'string' ? acceptedSha.trim().toLowerCase() : '';
   const h = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
-  if (!a || !h) return { covers: true, reason: '' };
+  // xvzc4v4 (merge-safety review, bug 3) — fail CLOSED, not open. Missing/unreadable is not "known to still
+  // cover" — it is "never checked". See the JSDoc above for why `staleVerified: false` (not `true`) is correct
+  // here: this is an UNPROVEN head, not a PROVEN-stale one, so it parks without revoking a recorded clearance.
+  if (!a || !h) {
+    return {
+      covers: false,
+      staleVerified: false,
+      reason: !h
+        ? "the PR's live head SHA could not be read this pass — cannot confirm review:accepted still covers it; failing closed"
+        : 'review:accepted carries no recorded reviewed SHA to compare against — cannot confirm what tree was reviewed; failing closed',
+    };
+  }
   const n = Math.min(a.length, h.length);
   if (n >= 7 && (a.startsWith(h) || h.startsWith(a))) return { covers: true, reason: '' };
   // #x169fqe — THE CONTENT-EQUIVALENCE ESCAPE, and the ONLY one. The head moved, so the SHA test above has
