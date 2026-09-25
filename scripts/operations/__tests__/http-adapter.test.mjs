@@ -52,6 +52,8 @@ import { SCAFFOLD_OP } from '../scaffold.mjs';
 import { FILE_ITEM_OP } from '../file-item.mjs';
 import { CLEAR_STUCK_SESSION_OP } from '../clear-stuck-session.mjs';
 import { DOCKET_REFRESH_OP } from '../docket-refresh.mjs';
+import { RESTART_RUNNER_OP } from '../restart-runner.mjs';
+import { PRIORITY_SYNC_OP } from '../priority-sync.mjs';
 import { EXPLORE_OP } from '../explore.mjs';
 import { OPEN_PR_OP } from '../open-pr.mjs';
 import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
@@ -392,6 +394,16 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // lives in `docket-refresh-io.mjs`, behind the injected `readFacts` reader and the sink `../run.mjs`
     // wires through.
     [DOCKET_REFRESH_OP]: 'docket-refresh.mjs',
+    // #3383 (graduated under #3892) — the SAFE conveyor restart. Three of its six steps are effects, so it is
+    // emphatically NOT read-only; listed here for map coverage. The declaring module reaching nothing that can
+    // act matters MORE here than anywhere else on this list: this operation's verbs are SIGNAL A PROCESS and
+    // SPAWN ONE, and every one of them lives in `restart-runner-io.mjs` behind the three sinks `../run.mjs`
+    // wires through. Its own suite pins that graph property directly.
+    [RESTART_RUNNER_OP]: 'restart-runner.mjs',
+    // #3383 (graduated under #3892) — `priority-sync`'s `apply` step is an effect (it rewrites the tracker
+    // card's section), so it is NOT read-only; listed for map coverage. Its declaring module is itself a leaf
+    // (asserted in `priority-sync.test.mjs`).
+    [PRIORITY_SYNC_OP]: 'priority-sync.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {
