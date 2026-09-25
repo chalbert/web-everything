@@ -3,9 +3,10 @@ bornAs: xpe1s8f
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: active
 scope: ["we:skills-src/conveyor/verify-daemon.mjs", "we:scripts/conveyor/verify-dispatch.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 

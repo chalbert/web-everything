@@ -65,19 +65,32 @@ export const VERIFY_DAEMON_LEASE_KEY = '<conveyor:verify-daemon-lease>';
  *  standing alone, there is no reason to run this pass faster or slower. */
 export const DEFAULT_INTERVAL_MS = 120_000;
 
+/** #4130 (epic #3383 audit finding V1). How often the INDEPENDENT heartbeat timer fires, regardless of
+ *  whether a tick (a full `runVerifyDispatch` sweep, itself possibly awaiting a 20+ minute gate — see the
+ *  file header) is mid-flight. Deliberately far below both this daemon's own `DEFAULT_INTERVAL_MS` and the
+ *  15-minute runner-lock TTL — it exists precisely to keep beating DURING a long gate run, not just between
+ *  ticks (mirrors `pass-daemon.mjs`'s own constant of the same name and value). */
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
+
 // ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
 
 /**
  * The daemon's whole control flow — IDENTICAL in shape to #3870's own `runDaemonLoop` (see that file's header
  * for why it is duplicated here rather than imported). Ticks `tickOnce` forever (or until `maxTicks`/
  * `shouldStop`), isolating a single tick's failure (logged via `onTickError`, never fatal) so a transient
- * `verify-lane.mjs`/gate hiccup degrades to "try again next tick", not a dead daemon. Stops immediately
- * (before sleeping) if a tick's own heartbeat reports the lease was lost — continuing to dispatch gate runs
- * without the lease would reopen exactly the double-dispatch risk this daemon exists to close.
+ * `verify-lane.mjs`/gate hiccup degrades to "try again next tick", not a dead daemon.
+ *
+ * #4130: `isAlive` (mirrors `pass-daemon.mjs#runPassDaemonLoop`) replaces the old `heartbeat` effect. The OLD
+ * shape awaited a heartbeat call itself only after `tickOnce` resolved — for a 20+ minute gate against a
+ * 15-minute lease TTL, that meant the lease could lapse mid-gate with nothing beating it (this item's whole
+ * finding). The heartbeat now beats on its OWN real timer, independent of this loop's await chain (see
+ * {@link startIndependentHeartbeat} and `main()` below); this loop just SAMPLES that timer's latest verdict
+ * (sync, no await) after each tick, before sleeping — continuing to dispatch gate runs once the lease is
+ * already known lost would reopen exactly the double-dispatch risk this daemon exists to close.
  * @param {{
  *   tickOnce: () => Promise<object>|object,
  *   sleep: (ms:number) => Promise<void>,
- *   heartbeat?: () => Promise<boolean>|boolean,
+ *   isAlive?: () => boolean,
  *   onTick?: (result:object, tick:number) => void,
  *   onTickError?: (error:Error, tick:number) => void,
  *   intervalMs?: number,
@@ -86,7 +99,7 @@ export const DEFAULT_INTERVAL_MS = 120_000;
  * @returns {Promise<{ticks:number, stoppedReason:string}>}
  */
 export async function runDaemonLoop({
-  tickOnce, sleep, heartbeat = () => true, onTick = () => {}, onTickError = () => {},
+  tickOnce, sleep, isAlive = () => true, onTick = () => {}, onTickError = () => {},
   intervalMs = DEFAULT_INTERVAL_MS, maxTicks = Infinity,
 }) {
   if (typeof tickOnce !== 'function') throw new TypeError('runDaemonLoop requires a tickOnce effect');
@@ -98,8 +111,7 @@ export async function runDaemonLoop({
     } catch (error) {
       onTickError(error, tick);
     }
-    const alive = await heartbeat();
-    if (!alive) return { ticks: tick + 1, stoppedReason: 'lease-lost' };
+    if (!isAlive()) return { ticks: tick + 1, stoppedReason: 'lease-lost' };
     if (tick + 1 >= maxTicks) return { ticks: tick + 1, stoppedReason: 'max-ticks' };
     await sleep(intervalMs);
     tick += 1;
@@ -132,15 +144,58 @@ export async function runVerifyTick({ runVerify = runVerifyDispatch } = {}) {
 // — do NOT add `.unref()` to this function.
 export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
+/**
+ * #4130 — THE INDEPENDENT HEARTBEAT: a real `setInterval`, started BESIDE (never inside) `runDaemonLoop`'s own
+ * await chain, so it keeps beating the lease throughout a tick no matter how long that tick blocks (mirrors
+ * `pass-daemon.mjs#main`'s own inline heartbeat timer, factored out here into a reusable function since this
+ * item's own "Done when" — a stubbed 20-minute gate against a real 15-minute lease — wants it exercised
+ * directly, with a fake `heartbeat` effect, rather than only indirectly through a full `main()` run).
+ * Deliberately `.unref()`'d — unlike the daemon LOOP's own sleep timer (which must stay ref'd to keep the
+ * process alive between ticks, see `realSleep`'s own comment), this timer is a side-channel signal, never
+ * itself a reason for the process to keep running.
+ * @param {{
+ *   lockRoot?: string,
+ *   owner: string,
+ *   key?: string,
+ *   intervalMs?: number,
+ *   heartbeat?: (o:{key:string}) => boolean,
+ *   onLost?: () => void,
+ * }} o
+ * @returns {{isAlive: () => boolean, stop: () => void}}
+ */
+export function startIndependentHeartbeat({
+  lockRoot = RUNNER_LOCK_ROOT, owner, key = VERIFY_DAEMON_LEASE_KEY,
+  intervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS, heartbeat = (o) => heartbeatRunnerLease(lockRoot, owner, o),
+  onLost = () => {},
+} = {}) {
+  if (!owner) throw new TypeError('startIndependentHeartbeat requires an owner');
+  let alive = true;
+  const timer = setInterval(() => {
+    const ok = heartbeat({ key });
+    if (!ok) {
+      alive = false;
+      clearInterval(timer);
+      onLost();
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return {
+    isAlive: () => alive,
+    stop: () => clearInterval(timer),
+  };
+}
+
 /** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runVerifyTick} (which itself calls
- *  the real `runVerifyDispatch`), a real interval sleep, and a real keyed lease heartbeat. Kept as its own
- *  factory (mirroring `buildCliDaemonEffects` in the sibling daemons) so `main()` stays a thin wire-up. */
-export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
+ *  the real `runVerifyDispatch`), a real interval sleep, and the `isAlive` sampler backed by `main()`'s own
+ *  {@link startIndependentHeartbeat} timer (#4130 — no longer built in here, since the heartbeat must run on
+ *  its own clock, independent of this factory's caller). Kept as its own factory (mirroring
+ *  `buildCliDaemonEffects` in the sibling daemons) so `main()` stays a thin wire-up. */
+export function buildCliDaemonEffects({ intervalMs = DEFAULT_INTERVAL_MS, isAlive = () => true, log = console } = {}) {
   return {
     intervalMs,
     tickOnce: () => runVerifyTick({}),
     sleep: realSleep,
-    heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY }),
+    isAlive,
     onTick: (result) => {
       const { dispatched = [], failures = [] } = result || {};
       log.error(`verify-daemon: tick — dispatched ${dispatched.length}, failed ${failures.length}`);
@@ -163,20 +218,28 @@ async function main() {
     console.error(`verify-daemon: a live instance already holds the lease (${acquired.heldBy}) — exiting.`);
     return;
   }
+  // #4130 — started BEFORE the loop, on its own real timer: this is what keeps the lease fresh throughout a
+  // single long gate tick, not just between ticks (see startIndependentHeartbeat's own header).
+  const { isAlive, stop: stopHeartbeat } = startIndependentHeartbeat({
+    owner,
+    onLost: () => console.error(`verify-daemon: lease lost mid-run — will stop after the current tick.`),
+  });
   let stopping = false;
   const shutdown = (signal) => {
     if (stopping) return;
     stopping = true;
     console.error(`verify-daemon: ${signal} — releasing the lease and exiting.`);
+    stopHeartbeat();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY });
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
-  console.error(`verify-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms.`);
-  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ owner }));
+  console.error(`verify-daemon: started on ${hostname()}:${process.pid}, tick every ${DEFAULT_INTERVAL_MS}ms, heartbeat every ${DEFAULT_HEARTBEAT_INTERVAL_MS}ms.`);
+  const { stoppedReason } = await runDaemonLoop(buildCliDaemonEffects({ isAlive }));
   if (!stopping) {
     console.error(`verify-daemon: loop stopped (${stoppedReason}) — releasing the lease and exiting.`);
+    stopHeartbeat();
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key: VERIFY_DAEMON_LEASE_KEY });
   }
 }
