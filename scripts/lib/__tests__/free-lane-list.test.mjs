@@ -5,7 +5,7 @@
  *   acquire's 180s wait, while 30+ lanes sat free) and why the list is a HINT, never trusted alone.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, symlinkSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -142,6 +142,28 @@ describe('read/write IO shell', () => {
     expect(readFreeLaneList(path)).toEqual(list);
     // no leftover temp file
     expect(readFileSync(path, 'utf8').endsWith('\n')).toBe(true);
+  });
+  it('writeFreeLaneListAtomic never follows a symlink pre-planted at its temp name — it skips to a fresh name', () => {
+    const path = join(dir, 'free-lanes.json');
+    const victim = join(dir, 'victim.txt');
+    writeFileSync(victim, 'untouched\n');
+    const planted = `${path}.planted.tmp`;
+    symlinkSync(victim, planted);
+    const list = buildFreeLaneList({ repoName: 'we', poolDir: dir, writtenAt: T0, lanes: [{ lane: 2, path: join(dir, 'lane-2') }] });
+    writeFreeLaneListAtomic(path, list, { tmpPathFor: (p, attempt) => (attempt === 0 ? planted : `${p}.fresh.tmp`) });
+    expect(readFileSync(victim, 'utf8')).toBe('untouched\n'); // the symlink's target was never written
+    expect(lstatSync(path).isSymbolicLink()).toBe(false); // the published list is a real file, not the planted link
+    expect(readFreeLaneList(path)).toEqual(list);
+  });
+  it('writeFreeLaneListAtomic throws (never writes through) when every temp name is already taken', () => {
+    const path = join(dir, 'free-lanes.json');
+    const victim = join(dir, 'victim.txt');
+    writeFileSync(victim, 'untouched\n');
+    symlinkSync(victim, `${path}.planted.tmp`);
+    const list = buildFreeLaneList({ repoName: 'we', poolDir: dir, writtenAt: T0, lanes: [] });
+    expect(() => writeFreeLaneListAtomic(path, list, { tmpPathFor: (p) => `${p}.planted.tmp`, maxAttempts: 3 })).toThrow(/exclusive temp file/);
+    expect(readFileSync(victim, 'utf8')).toBe('untouched\n');
+    expect(existsSync(path)).toBe(false);
   });
   it('readFreeLaneList degrades to null on a corrupt file rather than throwing', () => {
     mkdirSync(dir, { recursive: true });

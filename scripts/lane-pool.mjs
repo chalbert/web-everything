@@ -1893,8 +1893,15 @@ function cmdAcquire(repo) {
       // #4122 — a free-list round that claimed NOTHING (every listed candidate was already taken by someone
       // else) gets exactly ONE pass: mark it exhausted now, before the sleep/retry branch below clears
       // `excluded` — otherwise the next poll tick would recompute the SAME candidates from the SAME static
-      // list and retry the identical dead ends until `--wait-ms` ran out, never reaching the scan at all.
-      if (usingFreeList && pick === null) freeListExhausted = true;
+      // list and retry the identical dead ends until `--wait-ms` ran out, never reaching the scan at all. Then
+      // go STRAIGHT to the scan in this same call (no sleep, no deadline gate, `excluded` kept) — with the
+      // default `--wait-ms=0` the deadline has already passed, so falling into the wait/grow/fail branch below
+      // would skip the scan entirely and either fail with a false "all held/dirty" or needlessly grow the pool
+      // while unlisted lanes sit free (PR #2679 review). Runs at most once: `freeListExhausted` is now sticky.
+      if (usingFreeList && pick === null) {
+        freeListExhausted = true;
+        continue;
+      }
       if (pick !== null) {
         // #3407 fix item 2 — provision THIS candidate right here, inside the picking loop, so a failure falls
         // through to the NEXT candidate instead of failing the whole command: the claim above already won

@@ -8,7 +8,9 @@
  *   invocation's cwd (mirrors `lane-pool-list-cache.test.mjs`'s own harness), and assert:
  *   - a FRESH list naming a genuinely free lane is used, with far fewer lane git calls than a full scan;
  *   - a STALE list (older than `--free-list-max-age-ms`) is never consulted — acquire falls back to the scan
- *     and still succeeds, even when the stale list's only entry is bogus;
+ *     and picks the scan's lowest free lane, never the stale list's higher-numbered one;
+ *   - an EXHAUSTED fresh list (every listed lane taken) falls through to the scan in the SAME call, even with
+ *     no `--wait-ms` and growth capped — never a false "all held/dirty" failure or a needless pool growth;
  *   - a lane the list named that went BUSY (leased by someone else) between the list being written and this
  *     acquire call is skipped — the claim fails, the lane is excluded, and a different lane is returned; never
  *     a double-claim;
@@ -107,17 +109,30 @@ describe('#4122 acquire consumes the free-lane list', () => {
     expect(laneGitCalls().length).toBeLessThan(15);
   });
 
-  it('a STALE list is never consulted — acquire falls back to the scan and still succeeds, even with a bogus-only stale entry', () => {
+  it('a STALE list is never consulted — acquire falls back to the scan and picks the scan\'s lowest free lane', () => {
     provision(5);
-    // Lane 999 does not exist — if the staleness check were skipped, `tryClaimLane` would ENOENT and this
-    // candidate would be silently excluded; the real assertion is that acquire ends up on a REAL lane via the
-    // scan, never hanging or failing because it trusted a stale answer.
-    writeFreeList({ lanes: [999], writtenAt: Date.now() - 60 * 60_000 }); // 1h old, way past the 10min default
+    // The stale list names a REAL, genuinely free, higher-numbered lane (4). Were the staleness check bypassed,
+    // acquire would claim lane 4 straight off the list; the scan instead picks the lowest free lane (1) — so
+    // this assertion reddens the moment freshness stops being enforced.
+    writeFreeList({ lanes: [4], writtenAt: Date.now() - 60 * 60_000 }); // 1h old, way past the 10min default
     const r = runPool(['acquire', ...REPO(), '--session=stale-caller', '--json']);
     expect(r.code, r.err).toBe(0);
-    const lane = JSON.parse(r.out).lane;
-    expect(lane).toBeGreaterThanOrEqual(1);
-    expect(lane).toBeLessThanOrEqual(5);
+    expect(JSON.parse(r.out).lane).toBe(1);
+  });
+
+  it('an EXHAUSTED fresh list (every listed lane already taken) falls through to the scan in the SAME call, with no --wait-ms and no growth', () => {
+    provision(5);
+    writeFreeList({ lanes: [1] });
+    // The only listed lane gets leased by someone else after the list was published — the list is now
+    // exhausted, but lanes 2-5 are genuinely free and unlisted.
+    expect(runPool(['acquire', '--lane=1', ...REPO(), '--no-reset', '--session=foreign-holder']).code).toBe(0);
+    // Default acquire (no --wait-ms) with growth capped at the current pool size: the only way to succeed is
+    // the scan fallback running in this very call.
+    const r = runPool(['acquire', ...REPO(), '--session=exhausted-caller', '--hard-max=5', '--json']);
+    expect(r.code, r.err).toBe(0);
+    expect(JSON.parse(r.out).lane).toBe(2);
+    // And the pool was never grown to get there.
+    expect(existsSync(lanePath(6))).toBe(false);
   });
 
   it('a lane the list named goes BUSY before acquire runs — it is skipped, never double-claimed, and a different lane is returned', () => {
@@ -145,12 +160,11 @@ describe('#4122 acquire consumes the free-lane list', () => {
 
   it('--no-free-list opts out even when a fresh, valid list is sitting right there', () => {
     provision(4);
-    writeFreeList({ lanes: [1] });
+    // A fresh list naming a genuinely free, higher-numbered lane (3): consuming it would return 3; the scan
+    // returns its lowest free lane (1) — so this reddens if the flag stops being honored.
+    writeFreeList({ lanes: [3] });
     const r = runPool(['acquire', ...REPO(), '--session=opt-out-caller', '--no-free-list', '--json']);
     expect(r.code, r.err).toBe(0);
-    // Still succeeds via the ordinary scan path — the point is the flag is honored, not which lane wins.
-    const lane = JSON.parse(r.out).lane;
-    expect(lane).toBeGreaterThanOrEqual(1);
-    expect(lane).toBeLessThanOrEqual(4);
+    expect(JSON.parse(r.out).lane).toBe(1);
   });
 });

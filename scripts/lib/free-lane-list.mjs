@@ -34,8 +34,9 @@
  * `.list-acquirable-cache.json`), so an operator with no pinned root still gets a working file with zero
  * config. One file PER POOL (WE / frontierui / plateau-app each write their own), keyed by `repoName`.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { pinnedStateRoot } from '../conveyor/queue-store.mjs';
 
 // ── PURE CORE (no fs / clock / process — every input is injected) ──────────────────────────────────────────
@@ -178,14 +179,38 @@ export function readFreeLaneList(path) {
 /**
  * Write the list ATOMICALLY: a temp file in the SAME directory, then `rename` into place, so a concurrent
  * `acquire` reading mid-write never sees partial JSON (which would parse-fail to `null` anyway — see
- * {@link parseFreeLaneList} — but the temp+rename avoids even that transient miss). Mirrors
- * `we:scripts/conveyor/queue-store.mjs#writeQueueFile` / `we:scripts/lane-pool.mjs#writeListCache` exactly.
+ * {@link parseFreeLaneList} — but the temp+rename avoids even that transient miss). Same temp+rename shape as
+ * `we:scripts/conveyor/queue-store.mjs#writeQueueFile` / `we:scripts/lane-pool.mjs#writeListCache`, hardened
+ * with the exclusive temp create below (those two still use a plain `writeFileSync` on a predictable name).
+ *
+ * The temp file is created EXCLUSIVELY (`wx` — O_CREAT|O_EXCL, which also refuses to follow a symlink planted
+ * at that name) under an unguessable name, retrying under a fresh name on `EEXIST`: a plain `writeFileSync` on
+ * a predictable `<path>.<pid>.<ms>.tmp` would follow a pre-placed symlink and overwrite its target (PR #2679
+ * security review).
  * @param {string} path
  * @param {ReturnType<typeof buildFreeLaneList>} list
+ * @param {{ tmpPathFor?: (path: string, attempt: number) => string, maxAttempts?: number }} [opts] test seams
  */
-export function writeFreeLaneListAtomic(path, list) {
+export function writeFreeLaneListAtomic(path, list, { tmpPathFor = defaultTmpPathFor, maxAttempts = 5 } = {}) {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, serializeFreeLaneList(list));
-  renameSync(tmp, path);
+  const text = serializeFreeLaneList(list);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const tmp = tmpPathFor(path, attempt);
+    try {
+      writeFileSync(tmp, text, { flag: 'wx' });
+    } catch (e) {
+      if (e && e.code === 'EEXIST') continue; // something already sits at that name — never touch it, pick another
+      throw e;
+    }
+    try {
+      renameSync(tmp, path);
+    } catch (e) {
+      rmSync(tmp, { force: true }); // never leave our own exclusive temp file behind
+      throw e;
+    }
+    return;
+  }
+  throw new Error(`writeFreeLaneListAtomic: could not create an exclusive temp file next to ${path} after ${maxAttempts} attempts`);
 }
+
+const defaultTmpPathFor = (path) => `${path}.${process.pid}.${Date.now()}.${randomBytes(8).toString('hex')}.tmp`;
