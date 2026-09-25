@@ -36,7 +36,9 @@
  * `gh` provide, then hands them to that pure core.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import {
+  existsSync, readFileSync, readdirSync, realpathSync, mkdirSync, writeFileSync as fsWriteFileSync,
+} from 'node:fs';
 import { join, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -44,16 +46,48 @@ import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
 import { readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
-import { guessCardIds, classifyLaneVerdict, holderPresumedAlive } from './lib/lane-whois-core.mjs';
+import { guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard } from './lib/lane-whois-core.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 
 const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
 
-/** Read-only `git`. Never throws - a probe failure just means "unknown", never a crash. */
-function tryGit(dir, args) {
+// ── SPEED (#3383 follow-up — see we:backlog for the "bound the whole-pool scan" story). Every subprocess this
+// file spawns is now hard-timed: an UNBOUNDED `execFileSync` here is exactly the hang class
+// `we:scripts/lib/bounded-child.mjs`'s own header names ("a single stuck lane must not stall the whole sweep") —
+// this file used to have NONE. Env-overridable so a slow/loaded host can raise them without a code change.
+const GIT_TIMEOUT_MS = Number(process.env.WE_LANE_WHOIS_GIT_TIMEOUT_MS) || 15_000;
+const GH_TIMEOUT_MS = Number(process.env.WE_LANE_WHOIS_GH_TIMEOUT_MS) || 30_000;
+/** Cap on `git branch -r --contains <sha>` probes PER LANE (each scans every ref) — a lane hundreds of commits
+ *  ahead used to run one of these per commit; now it stops once its own budget is spent and the remaining
+ *  commits are reported conservatively unpreserved (never wrongly reclaimed — same "fails closed" contract the
+ *  rest of this file already documents). */
+const MAX_CONTAINS_PROBES = Number(process.env.WE_LANE_WHOIS_MAX_CONTAINS_PROBES) || 15;
+/** Cap on OTHER remote refs tried per lane's cross-branch preservation fallback (was 100 — the real cost driver
+ *  measured live: a lane with several genuinely-orphaned dirty files times up to 100 `git show` spawns EACH). */
+const MAX_OTHER_REFS = Number(process.env.WE_LANE_WHOIS_MAX_REFS) || 20;
+/** Hard ceiling on TOTAL `git show <ref>:<path>` fallback spawns for one lane, summed across every dirty file —
+ *  bounds the worst case (many dirty files, none matching origin directly) to a fixed cost regardless of how
+ *  many files or refs exist. Once spent, remaining files are reported unpreserved without further spawns
+ *  (conservative — a lane is simply left un-reclaimed, never wrongly reclaimed). */
+const MAX_FALLBACK_SHOWS = Number(process.env.WE_LANE_WHOIS_MAX_FALLBACK_SHOWS) || 40;
+/** How many PRs one batched `gh pr list --state all` call fetches (see {@link fetchAllPrs}'s own docblock for
+ *  why this replaces one `gh pr list --search <id>` call PER card id). */
+const PR_LIST_LIMIT = Number(process.env.WE_LANE_WHOIS_PR_LIST_LIMIT) || 500;
+/** How long a cached `gh pr list` fetch stays fresh before a run re-fetches — amortizes the one network call
+ *  across the health-watch daemon's own repeat ticks (#3383 gap 2), not just within one process's lifetime. */
+const PR_CACHE_TTL_MS = Number(process.env.WE_LANE_WHOIS_PR_CACHE_TTL_MS) || 60_000;
+
+/** Read-only `git`. Never throws - a probe failure just means "unknown", never a crash. Hard-timed (see above)
+ *  so one wedged lane (corrupt object DB, an fsmonitor hook that hangs, an NFS-mounted clone gone stale) can
+ *  never stall the whole pool sweep — the same failure shape a `null` return already handles everywhere else
+ *  in this file. */
+function tryGit(dir, args, opts = {}) {
   try {
-    return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\n+$/, '');
+    return execFileSync('git', args, {
+      cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+    }).replace(/\n+$/, '');
   } catch {
     return null;
   }
@@ -85,30 +119,50 @@ export function gitStatusSummary(dir) {
   return { trackedModifiedPaths, untrackedPaths };
 }
 
-/** Every local commit ahead of `origin/<branch>`, oldest first, with its subject. Read-only (`rev-list`/`log`). */
+/** Field separator for the batched sha+subject read below — a byte that can never appear in a commit subject
+ *  (git itself uses `\x1f`/`%x1f` for exactly this in its own `--format` docs). */
+const LOG_FIELD_SEP = '\x1f';
+
+/**
+ * Every local commit ahead of `origin/<branch>`, oldest first, with its subject. #3383-perf: ONE `git log` call
+ * (sha+subject in a single `--format`), never `rev-list` (shas) followed by one `log -1` PER COMMIT — a lane
+ * sitting on hundreds of unpushed commits (live-observed: 148 on one real lane) used to cost that many spawns
+ * just to list subjects.
+ */
 export function aheadCommits(dir, branchRef) {
-  const shas = tryGit(dir, ['rev-list', '--reverse', `${branchRef}..HEAD`]);
-  if (!shas) return [];
-  return shas.split('\n').filter(Boolean).map((sha) => ({
-    sha,
-    subject: tryGit(dir, ['log', '-1', '--format=%s', sha]) || '',
-  }));
+  const out = tryGit(dir, ['log', '--reverse', `--format=%H${LOG_FIELD_SEP}%s`, `${branchRef}..HEAD`]);
+  if (!out) return [];
+  return out.split('\n').filter(Boolean).map((line) => {
+    const i = line.indexOf(LOG_FIELD_SEP);
+    return i === -1 ? { sha: line, subject: '' } : { sha: line.slice(0, i), subject: line.slice(i + 1) };
+  });
 }
 
 /**
  * Preservation proof for ahead commits: patch-equivalent already in `origin/<branch>` (`git cherry`, '-' =
  * equivalent) OR the sha is contained in ANY remote-tracking branch (provably pushed somewhere, even if not
  * yet merged). Returns `Map<sha, boolean>`.
+ *
+ * #3383-perf: `git branch -r --contains <sha>` scans EVERY ref in the clone, so one lane with N un-equivalent
+ * ahead commits used to cost N of them — unbounded, and the dominant cost on any lane with a lot of genuinely
+ * orphaned/unpushed work (exactly the lanes this proof matters most for). Bounded to
+ * {@link MAX_CONTAINS_PROBES} PER LANE: once spent, remaining commits are reported unpreserved without a
+ * further spawn — conservative, never a false "preserved", and the verdict only ever needed to know
+ * "is there at least one unpreserved commit", so this never trades away correctness, only extra confirming
+ * spawns once the answer is already "no" for the caller's purposes.
  */
-export function aheadCommitsPreserved(dir, branchRef, commits) {
+export function aheadCommitsPreserved(dir, branchRef, commits, maxProbes = MAX_CONTAINS_PROBES) {
   const result = new Map();
   if (!commits.length) return result;
   const cherry = tryGit(dir, ['cherry', branchRef, 'HEAD']) || '';
   const equivalent = new Set(
     cherry.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2).trim()),
   );
+  let probes = 0;
   for (const { sha } of commits) {
     if (equivalent.has(sha)) { result.set(sha, true); continue; }
+    if (probes >= maxProbes) { result.set(sha, false); continue; }
+    probes += 1;
     const containing = tryGit(dir, ['branch', '-r', '--contains', sha]);
     result.set(sha, !!(containing && containing.trim()));
   }
@@ -121,7 +175,7 @@ export function aheadCommitsPreserved(dir, branchRef, commits) {
  * is read ONCE PER LANE (not once per dirty file — see {@link filePreservedInMain}'s caller), so the bound
  * only matters for the fallback scan's own cost, never for how many times `for-each-ref` itself runs.
  */
-export function otherRemoteRefs(dir, branchRef, max = 100) {
+export function otherRemoteRefs(dir, branchRef, max = MAX_OTHER_REFS) {
   const skip = `/${branchRef.split('/').pop()}`;
   return (tryGit(dir, ['for-each-ref', '--format=%(refname)', 'refs/remotes']) || '')
     .split('\n').filter(Boolean).filter((ref) => !ref.endsWith(skip)).slice(0, max);
@@ -181,20 +235,72 @@ function backlogStatusesForCards(dir, branchRef, cardIds, listingCache) {
   return out;
 }
 
-/** `gh pr list --search <card>` per card, throttled + cached across the whole run (never one call per lane). */
-function prStatesForCards(cardIds, prCache, { exec = execFileSync, ghRepo } = {}) {
+/**
+ * On-disk cache path for {@link fetchAllPrs}'s fetch — a sibling of the lease markers, under the pool dir
+ * itself (never inside a lane, which `reclaim`/`trim` may reset or trash). Best-effort: this file existing,
+ * being fresh, or being writable are all optional — a cache miss just means "fetch again", never a crash.
+ */
+function prListCachePath(poolDir) {
+  return join(poolDir, '.whois-pr-cache.json');
+}
+
+/**
+ * ONE `gh pr list --state all --json …` call for the WHOLE run (and, via an on-disk cache, amortized across
+ * REPEAT runs too — #3383 gap 2's health-watch daemon calls this every tick). #3383-perf: this is the direct
+ * replacement for the old `prStatesForCards`, which called `gh pr list --search <id>` once PER DISTINCT card
+ * id — measured as the single largest wall-clock cost against the real ~68-lane WE pool (dozens of network
+ * round-trips, each hundreds of ms, run serially). Matching a card id against the fetched list is now
+ * {@link prsMatchingCard} (pure, in `lane-whois-core.mjs`) — no further `gh` calls at all.
+ *
+ * STATED LIMITATION: `--limit` bounds how many PRs come back (most-recent-first, GitHub's own default list
+ * order) — a card whose only PR is older than that window won't be found via this axis (the CARD-STATUS axis,
+ * read straight off `backlog/*.md` frontmatter, is unaffected and often still resolves the verdict on its own).
+ * The old `--search`-per-id approach had its own, differently-shaped window (GitHub search's relevance ranking
+ * and its own result cap) — this trades that for one bounded, one-shot call instead of N.
+ */
+export function fetchAllPrs({
+  ghRepo, exec = execFileSync, poolDir = null, nowMs = Date.now(), cacheTtlMs = PR_CACHE_TTL_MS,
+} = {}) {
+  const cachePath = poolDir ? prListCachePath(poolDir) : null;
+  if (cachePath) {
+    try {
+      const cached = JSON.parse(readFileSync(cachePath, 'utf8'));
+      if (cached && cached.ghRepo === (ghRepo || null) && Number.isFinite(cached.fetchedAtMs)
+        && nowMs - cached.fetchedAtMs < cacheTtlMs && Array.isArray(cached.prs)) {
+        return cached.prs;
+      }
+    } catch { /* absent/corrupt/stale — fetch fresh below */ }
+  }
+  let prs = [];
+  try {
+    const args = ['pr', 'list', '--state', 'all', '--json', 'number,state,title,headRefName,body', '--limit', String(PR_LIST_LIMIT)];
+    if (ghRepo) args.splice(2, 0, '--repo', ghRepo);
+    // maxBuffer: 500 PRs' worth of `body` text easily clears Node's 1MB default and fails CLOSED with ENOBUFS
+    // (caught below, degrading to "no PR evidence" — live-caught during this item's own before/after proof: a
+    // silent 0-result fetch that made every card/PR-backed verdict look like `unknown-work` instead of its real
+    // answer). 32MB matches this file's other large batched reads (`batchPatchIds`-shaped calls elsewhere).
+    const raw = execFileSyncThrottled('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: GH_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, exec });
+    const parsed = JSON.parse(raw);
+    prs = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    prs = []; // no `gh`, no network, no auth — degrade to "no PR evidence found", never crash the whole report
+  }
+  if (cachePath) {
+    try {
+      mkdirSync(poolDir, { recursive: true });
+      fsWriteFileSync(cachePath, JSON.stringify({ ghRepo: ghRepo || null, fetchedAtMs: nowMs, prs }), 'utf8');
+    } catch { /* best-effort — a cache write failure never fails the run */ }
+  }
+  return prs;
+}
+
+/** In-process match against the ONE fetched PR list (see {@link fetchAllPrs}) — cached per run so a card id
+ *  guessed on more than one lane is matched once, not once per lane. */
+function prStatesForCards(cardIds, prCache, allPrs) {
   const out = {};
   for (const id of cardIds) {
     if (prCache.has(id)) { out[id] = prCache.get(id); continue; }
-    let states = [];
-    try {
-      const args = ['pr', 'list', '--state', 'all', '--search', id, '--json', 'number,state'];
-      if (ghRepo) args.splice(2, 0, '--repo', ghRepo);
-      const raw = execFileSyncThrottled('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000, exec });
-      states = JSON.parse(raw).map((pr) => ({ number: pr.number, state: pr.state }));
-    } catch {
-      states = [];
-    }
+    const states = prsMatchingCard(allPrs, id);
     prCache.set(id, states);
     out[id] = states;
   }
@@ -216,7 +322,7 @@ export function listLaneNumbers(poolDir) {
  * whole-tree scan (so N lanes cost exactly one grep pass, never N).
  */
 export function whoisForLane({
-  poolDir, laneNum, branchRef, ghRepo, transcriptTouches, agents, nowMs, ttlMs, listingCache, prCache,
+  poolDir, laneNum, branchRef, ghRepo, transcriptTouches, agents, nowMs, ttlMs, listingCache, prCache, allPrs = [],
 }) {
   const dir = join(poolDir, `lane-${laneNum}`);
   if (!existsSync(dir)) return { lane: laneNum, path: dir, exists: false };
@@ -247,7 +353,7 @@ export function whoisForLane({
   const cardStatusById = backlogStatusesForCards(dir, branchRef, cardIds, listingCache);
   const cardStatuses = Object.values(cardStatusById).filter((s) => s != null);
 
-  const prStateById = prStatesForCards(cardIds, prCache, { ghRepo });
+  const prStateById = prStatesForCards(cardIds, prCache, allPrs);
   const allPrStates = Object.values(prStateById).flat().map((p) => p.state);
 
   // Computed ONCE for this lane (never per-file — see the docblocks on both functions above) and only when
@@ -258,10 +364,19 @@ export function whoisForLane({
   // is simply left un-reclaimed, never wrongly reclaimed), never wrong.
   const HEAVY_DIRTY_THRESHOLD = 25;
   const otherRefs = dirtyPaths.length && dirtyPaths.length <= HEAVY_DIRTY_THRESHOLD ? otherRemoteRefs(dir, branchRef) : [];
+  // #3383-perf: a LANE-WIDE budget on fallback `git show <ref>:<path>` spawns, summed across every dirty file —
+  // was unbounded (files × refs), the single biggest cost measured live on a lane with several genuinely
+  // orphaned files (up to `otherRefs.length` spawns EACH). Once spent, the remaining files skip the fallback
+  // scan (the cheap direct `origin/<branch>` check inside `filePreservedInMain` still runs for every file) and
+  // are conservatively reported unproven — never wrongly reclaimed, only possibly left for a human/next tick.
+  let fallbackBudget = MAX_FALLBACK_SHOWS;
   const provenFile = (relPath) => {
     let local;
     try { local = readFileSync(join(dir, relPath), 'utf8'); } catch { local = null; }
-    return local !== null && filePreservedInMain(dir, relPath, branchRef, local, otherRefs);
+    if (local === null) return false;
+    const refsToTry = otherRefs.slice(0, Math.max(0, fallbackBudget));
+    fallbackBudget -= refsToTry.length;
+    return filePreservedInMain(dir, relPath, branchRef, local, refsToTry);
   };
   const unpreservedFiles = dirtyPaths.filter((p) => !provenFile(p));
   const unpreservedCommits = commits.filter((c) => !commitPreserved.get(c.sha));
@@ -343,13 +458,14 @@ export function whois({
   const lanePaths = Object.fromEntries(lanes.map((n) => [String(n), join(poolDir, `lane-${n}`)]));
   const touchesByLane = scanLaneTranscripts(projectsRoot, lanePaths, { exec });
   const agents = liveAgentSessions({ exec });
+  const allPrs = fetchAllPrs({ ghRepo, exec, poolDir, nowMs });
   const listingCache = new Map();
   const prCache = new Map();
   const ttlMs = ttlMinutes * 60_000;
   const rows = lanes.map((n) => whoisForLane({
     poolDir, laneNum: n, branchRef, ghRepo,
     transcriptTouches: touchesByLane.get(String(n)) || [],
-    agents, nowMs, ttlMs, listingCache, prCache,
+    agents, nowMs, ttlMs, listingCache, prCache, allPrs,
   }));
   return { poolDir, branch: branchRef, lanes: rows };
 }
