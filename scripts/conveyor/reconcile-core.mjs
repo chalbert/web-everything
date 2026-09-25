@@ -125,6 +125,15 @@ import {
 } from './advisory-fix-mark.mjs';
 import { CONFLICT_LABEL } from './conflict-label.mjs';
 import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
+// we:backlog/x5uqim1-*.md (parent #4075, epic #3383) — LIVE INCIDENT 2026-09-25: a `ci-red` PR whose required
+// check failed only because `origin/main`'s own CI was red at that moment must never be handed to `ci-heal`,
+// which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
+// (see its own docblock for the full incident and the two facts it needs); this file only calls it.
+import { isPrCiFailureOwedRerun } from './main-red-recovery.mjs';
+// #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
+// second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
+// `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
+import { parseReviewedSha } from '../lib/review-escalation.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
@@ -166,12 +175,30 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          rather than re-deriving a second one — never a manual `~/.claude/jobs/<id>/` move.
  *   `owed-elsewhere`     — real work is owed, by a job this pass does not run (a human clear, a CI heal, a
  *                          rebase). Named rather than dropped, so the PR is visible in the report.
+ *   `owed-ci-rerun`      — we:backlog/x5uqim1-*.md (#4075/#3383): the required check failed while `main`'s OWN
+ *                          CI was red (`we:scripts/conveyor/main-red-recovery.mjs#isPrCiFailureOwedRerun`) and
+ *                          this PR's head has not yet been refreshed onto the now-recovered `main`. Owed a
+ *                          mechanical rebase onto `main` (`we:scripts/conveyor/ci-red-recovery-watch.mjs`, via
+ *                          the SAME proven `we:scripts/lib/rebase-drop-manifest.mjs` plumbing the drain itself
+ *                          uses), NEVER a `ci-heal` — a ci-heal agent dispatched here would misdiagnose `main`'s
+ *                          own breakage as a defect in code that was never broken. NAMED `owed-ci-rerun` for the
+ *                          population it covers (a red-`main`-caused CI failure), not the literal mechanism —
+ *                          see the leaf's own file header for why a REBASE, not a rerun of the same stale
+ *                          commit, is what actually resolves it. Once the head already contains `main`'s
+ *                          current tip and is STILL red, this refusal no longer fires and the PR falls through
+ *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
+ *   `already-reviewed-head` — #2588/review-loops (epic #3383/#4075): the PR's CURRENT head already carries a
+ *                          `reviewed-sha` accept marker (`we:scripts/lib/review-escalation.mjs#parseReviewedSha`).
+ *                          A review already ran against this exact commit; dispatching another risks a second,
+ *                          contradicting verdict landing on a commit nobody has touched since (the live #2588
+ *                          incident this refusal closes: 3 review sessions in 16 minutes on one head, "changes"
+ *                          then "accepted" 5 minutes apart).
  */
 export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
-  'owed-elsewhere', 'nothing-owed',
+  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head',
 ]);
 
 /**
@@ -548,11 +575,30 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * it already trusts `selfReportedDone` — as an upstream fact, not a raw timestamp it would otherwise have to
  * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
  * as `live-process` and free its PR to be reconciled again.
+ *
+ * `state === 'stopped'` is ALSO finished — live-caught 2026-09-25 (PR #2647/#2625, both `chalbert/web-everything`,
+ * both stuck at an informative `review-status:review-stalled`/`reviewing` label with nothing live and nothing
+ * retrying). Root cause, confirmed against a real `claude agents --json --all` listing off the running review
+ * daemon's own checkout: `we:scripts/conveyor/session-reaper.mjs` calls `claude stop` on every `done`/`failed`/
+ * hung session it reaps (its own `TERMINAL_REAP_STATES`/`ALREADY_STOPPED_STATES`), which flips that session's OWN
+ * listed `state` to `'stopped'` — a state THIS function's `isFinished` never checked. `we:scripts/conveyor/
+ * reconcile-pass.mjs#enrichAgents` OMITS `pidAlive` entirely once `pid` itself is no longer on the row (measured:
+ * every `stopped`/`done` row in that same live listing carries no `pid` at all — only a currently-`working` row
+ * does), so an unfiltered `stopped` row reaches rank 3 (`pidAlive !== false`) and returns `liveness-unknown` —
+ * REFUSING a fresh dispatch for a PR whose bound session cannot possibly become live again. `bindAgents` binds
+ * every historical session sharing a PR's `review-<pr>`/`fix-<pr>` name, live or not (no `startedAt` filter), so
+ * ONE such stale `stopped` row is enough to freeze the PR even while every other bound row is cleanly `done`. A
+ * `stopped` session, by session-reaper's own definition (`ALREADY_STOPPED_STATES`), never resumes and never
+ * produces another `state` transition on its own — mirroring that finality here, the same way `done` already is,
+ * is what frees the PR to be reconciled again rather than parking it at `liveness-unknown` forever.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true || agent?.hung === true;
+  const isFinished = (agent) => {
+    const state = String(agent?.state ?? '').toLowerCase();
+    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
+  };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,
@@ -631,11 +677,17 @@ export function assessLiveness(bound) {
  *   PR whose `baseRefName` differs from this is STACKED (built on another lane/PR) — see the STACKED-BASE
  *   CONFLICT branch below for why that population needs its own dispatch rather than the generic
  *   `owed-elsewhere` refusal.
+ * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows] - we:backlog/x5uqim1-*.md: the repo's
+ *   `main`'s own red-CI windows (`we:scripts/conveyor/main-red-recovery.mjs#computeMainRedWindows`), read by
+ *   the IO shell from `gh run list --branch <defaultBranch>` ONLY when at least one PR is `ci-red` (never paid
+ *   for otherwise). Defaults to `[]` — a caller that never reads `main`'s own history sees byte-identical
+ *   behaviour to before this param existed (every `ci-red` PR falls straight through to the `ci-heal` path).
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
 export function planReconcile({
   repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
   conflictFixCap = CONFLICT_FIX_ROUND_CAP, advisoryFixCap = ADVISORY_FIX_ROUND_CAP, defaultBranch = 'main',
+  mainRedWindows = [],
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -661,6 +713,15 @@ export function planReconcile({
       // the row" reason `transcriptMtimeMs` does. `reconcile-fix-dispatch.mjs` reads the `authored-by-actor`
       // stamp off it, ONLY for a `fix` dispatch that also carries the `merge-status:conflicting` label.
       body: typeof pr?.body === 'string' ? pr.body : null,
+      // we:backlog/x5uqim1-*.md — the two facts `isPrCiFailureOwedRerun` needs, injected by the IO shell ONLY
+      // for a PR whose required check is currently failing (reconcile-pass.mjs never pays for these reads on a
+      // PR with nothing red). EVIDENCE ONLY here; the `ci-red` branch below is the one decision that reads them.
+      // `aheadByOnMain` is `main`'s own current tip's `ahead_by` against this PR's head (0 once it already
+      // contains that tip) — REPLACES an earlier `requiredCheckAttempt` design, corrected mid-build: see
+      // `main-red-recovery.mjs`'s own file header for why a GitHub Actions rerun of the same stale commit does
+      // not actually resolve a red-main-caused failure, live-measured on this exact incident.
+      requiredCheckCompletedAt: pr?.requiredCheckCompletedAt ?? null,
+      aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
 
@@ -733,6 +794,38 @@ export function planReconcile({
     // reads this plan (`we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`, mirroring
     // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own capability gate for `fix`).
     if (phase === 'ci-red') {
+      // we:backlog/x9wz0ir-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: PRs #2635/#2636 are BOTH `owed-ci-
+      // rerun` (their required check failed inside one of `main`'s own red windows) AND `mergeStateStatus:
+      // 'DIRTY'` (real conflicts with `main`, confirmed live via `gh pr view --json mergeStateStatus,mergeable`
+      // → `DIRTY`/`CONFLICTING` for both). `owed-ci-rerun`'s whole premise is "a MECHANICAL rebase onto main
+      // clears this" (`ci-red-recovery-watch.mjs#planMainRedRebases`'s own `rebase-onto-main` dispatch, via
+      // `rebaseDropManifest`) — that premise is FALSE for a DIRTY PR: a no-checkout rebase cannot resolve a
+      // real conflict, so refusing `owed-ci-rerun` here left these two PRs stuck forever (no rebase watch can
+      // ever clear them, and this refusal pre-empted the only OTHER path — `ci-heal`, which DOES rebase/merge
+      // main AND resolve the conflict — from ever being planned for them). `merge === 'DIRTY'` is read straight
+      // off `pr.mergeStateStatus`, the SAME field `classifyPr` above already reads for the `conflicted` phase;
+      // it just never gets there for a PR whose checks are ALSO failing, since `classifyPr`'s `ci-red` check
+      // runs first (see that function's own precedence). Skipping `owed-ci-rerun` for a DIRTY PR falls straight
+      // through to the ordinary `ci-heal` cap-check/dispatch below — the correct owner once a mechanical rebase
+      // cannot possibly succeed.
+      const mergeDirty = String(pr?.mergeStateStatus ?? '').toUpperCase() === 'DIRTY';
+      // we:backlog/x5uqim1-*.md — LIVE INCIDENT 2026-09-25 (see `main-red-recovery.mjs`'s own header for the
+      // full measured shape): a required check that failed only because `main`'s own CI was red at that moment
+      // is not this PR's own defect. Checked BEFORE the `ci-heal` cap below (and skips it entirely) — this is
+      // not one more round spent against that cap, it is a DIFFERENT job this pass does not run itself
+      // (`we:scripts/conveyor/ci-red-recovery-watch.mjs` does), the same "owed elsewhere, never dispatched
+      // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
+      if (!mergeDirty && isPrCiFailureOwedRerun({
+        requiredCheckCompletedAt: base.requiredCheckCompletedAt,
+        aheadBy: base.aheadByOnMain,
+        mainRedWindows,
+      })) {
+        refuse('owed-ci-rerun', {
+          ...withPhase,
+          why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
+        });
+        continue;
+      }
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
         refuse('cap-exhausted', {
@@ -908,8 +1001,50 @@ export function planReconcile({
       continue;
     }
 
+    // ── ONE REVIEW PER HEAD COMMIT (#2588/review-loops, epic #3383/#4075). Live-caught 2026-09-24: PR #2588 got
+    // a `review:changes` verdict at 23:55Z and a `review:accepted` verdict at 00:00Z, five minutes apart, from
+    // THREE separate review sessions dispatched within one 16-minute window — all reviewing the SAME head,
+    // because the liveness read this pass relies on (REFUSAL 4, see this file's own header) had a gap a session
+    // could fall through: a review session can finish and post its verdict to GitHub before `claude agents
+    // --json` and this pass's next tick agree it is gone, so a fresh review got dispatched for a commit that
+    // had, in fact, already been reviewed. This refusal is a SECOND, INDEPENDENT gate — it does not trust
+    // liveness at all, only the PR's own durable record of what has already happened to its CURRENT head.
+    //
+    // `parseReviewedSha` recovers the head sha the LATEST accept-shaped verdict (`accepted`/`clear-human`/
+    // `restamp` — never a bounce) covered, stamped by `we:scripts/review-set-label.mjs#buildVerdictComment`
+    // (`stampsAcceptance`). When it equals this PR's CURRENT `headRefOid`, this exact commit has already been
+    // reviewed and accepted — dispatching another review for it risks exactly the #2588 shape, a second verdict
+    // landing on a commit nobody has touched since the first one. This is silent (never refuses) for a PR that
+    // has only ever been BOUNCED, on purpose: a `review:changes` verdict stamps no `reviewed-sha` marker (it is
+    // not an acceptance), so a real, unaddressed finding still gets its round through the ordinary paths below,
+    // completely unaffected by this guard.
+    if (OWED[phase] === 'review') {
+      const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
+      const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
+      if (headSha && reviewedSha && reviewedSha === headSha) {
+        refuse('already-reviewed-head', {
+          ...withPhase, headSha, reviewedSha,
+          why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +
+            ' review — dispatching another review for a commit nobody has touched since risks a second,' +
+            ' contradicting verdict landing on it (#2588)',
+        });
+        continue;
+      }
+    }
+
+    // ── THE CAP, from the PR and ONLY from the PR — computed HERE, before REFUSAL 2, because the zero-findings
+    // review branch immediately below needs the REAL count too (#2588/review-loops, epic #3383/#4075). See the
+    // fuller note ahead of its other use, a few lines down.
+    const attempts = Math.max(
+      Number(counts[prNumber]) || 0,
+      countRearmComments(pr?.comments),
+      countAdvisoryComments(pr?.comments),
+    );
+
     // ── REFUSAL 2 — no findings, no fixer. A fix agent handed a PR with nothing to fix invents work. When a
-    // review is what the phase asks for, the review still goes out: "nothing to FIX" is not "nothing to do".
+    // review is what the phase asks for, the review still goes out: "nothing to FIX" is not "nothing to do" —
+    // UNLESS that review population has itself exhausted the round cap (#2588/review-loops, epic #3383/#4075;
+    // see the note on the `dispatch.push` below for the incident this closes).
     const findings = countFindings(pr?.comments);
     if (findings === 0) {
       refuse('no-findings', {
@@ -917,7 +1052,27 @@ export function planReconcile({
         why: 'no reviewer finding on this PR — a fix agent would invent work. A review, not a fix, is what an unreviewed PR is owed.',
       });
       if (OWED[phase] === 'review') {
-        dispatch.push({ ...base, ...withPhase, kind: 'review', findings: 0, attempts: 0, why: 'parked for an independent review and no finding has been raised yet — a review is owed (#3279 runs it)' });
+        // #2588/review-loops (epic #3383/#4075) — THE BUG: this branch used to dispatch with `attempts: 0`
+        // HARDCODED, no matter how many times it had already run, so a PR stuck re-reading `needs-review`/
+        // `needs-human` with zero findings every tick (a review session that crashes or never posts a verdict
+        // is exactly this shape) re-dispatched a fresh review agent FOREVER — the round cap never even saw a
+        // number to compare. It now reads the SAME durable `attempts` REFUSAL 3 binds on below, so this
+        // population hits `cap-exhausted` exactly like every other one once it is genuinely stuck, instead of
+        // looping forever.
+        if (attempts >= roundCap) {
+          refuse('cap-exhausted', {
+            ...withPhase, attempts, cap: roundCap, findings: 0,
+            why: `no reviewer finding has ever landed on this PR, but its own durable attempt count is ${attempts}` +
+              ` against a cap of ${roundCap} — a review keeps being dispatched with nothing to show for it, and a` +
+              ' person must take it',
+          });
+        } else {
+          dispatch.push({
+            ...base, ...withPhase, kind: 'review', findings: 0, attempts,
+            why: `parked for an independent review and no finding has been raised yet — a review is owed` +
+              ` (#3279 runs it); ${attempts} of ${roundCap} attempts are spent`,
+          });
+        }
       }
       continue;
     }
@@ -973,11 +1128,9 @@ export function planReconcile({
     // (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) — counting THAT recovers the real round
     // count. Kept as a `Math.max` alongside the rearm count, never a replacement: a PR can carry BOTH kinds of
     // history, and the cap must bind on whichever count is higher, never reset by reading only one of the two.
-    const attempts = Math.max(
-      Number(counts[prNumber]) || 0,
-      countRearmComments(pr?.comments),
-      countAdvisoryComments(pr?.comments),
-    );
+    // `attempts` itself is computed ABOVE, ahead of REFUSAL 2 (#2588/review-loops, epic #3383/#4075) — the SAME
+    // value, not a second derivation, so the zero-findings review branch and this one can never disagree about
+    // how many attempts a PR has spent.
     if (attempts >= roundCap) {
       refuse('cap-exhausted', {
         ...withPhase, attempts, cap: roundCap,

@@ -129,15 +129,41 @@ export function serializeQueue(queue) {
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const QUEUE_ROOT = resolve(HERE, '..', '..');
 
-/** The session sidecar path: `<root>/.conveyor/queue.json` (root defaults to the SCRIPT-location repo root). */
-export function queuePath(root = QUEUE_ROOT) {
+/** #4052 (Ruling #3681 Fork 4 condition (iii)) — the env var that PINS every daemon state file this module
+ *  (and {@link ../run-scorecard-store.mjs}) resolves to a single operator-chosen root, instead of each
+ *  daemon's OWN clone (found by script location, {@link QUEUE_ROOT}). WHY: a daemon clone gets rebuilt fresh
+ *  from `origin/main` on a schedule (#3681 Fork 4 sub-fork) — a state file living inside that tree is wiped
+ *  or forked by the rebuild, and a dispatcher started from a DIFFERENT clone than the operator's own reads a
+ *  different, empty `.conveyor/queue.json` than the one the operator just cleared work in (the concrete bug
+ *  #4052 was filed for). Pointing every daemon's clone at the SAME pinned root (in practice, the operator's
+ *  own primary checkout, which no daemon ever rebuilds — see the Fork 4(i) primary guard) makes them all
+ *  read/write the one physical file instead of N divergent copies. */
+export const STATE_ROOT_ENV = 'CONVEYOR_STATE_ROOT';
+
+/**
+ * The pinned daemon state root from {@link STATE_ROOT_ENV}, or `null` when unset. PURE (besides the `env`
+ * read) — every caller combines this with ITS OWN default (today's script-location path) so leaving the
+ * variable unset is BYTE-IDENTICAL to before this existed (#4052 requirement: today's location stays the
+ * default so nothing already running breaks).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string|null}
+ */
+export function pinnedStateRoot(env = process.env) {
+  const v = env?.[STATE_ROOT_ENV];
+  return v && String(v).trim() ? resolve(String(v).trim()) : null;
+}
+
+/** The session sidecar path: `<root>/.conveyor/queue.json`. `root` defaults to {@link pinnedStateRoot} when
+ *  `CONVEYOR_STATE_ROOT` is set, else the SCRIPT-location repo root ({@link QUEUE_ROOT}) — today's location. */
+export function queuePath(root = pinnedStateRoot() ?? QUEUE_ROOT) {
   return join(root, '.conveyor', 'queue.json');
 }
 
 /**
  * The canonical sidecar path every consumer (CLI + readiness shells) resolves to — the single source of truth
  * so the writer and readers can NEVER diverge. An explicit `CONVEYOR_QUEUE_FILE` env override wins (used by
- * tests + any caller that wants an out-of-tree sidecar); otherwise it is the script-location {@link queuePath}.
+ * tests + any caller that wants an out-of-tree sidecar, full-path-precise); otherwise `CONVEYOR_STATE_ROOT`
+ * (#4052) picks the root the default {@link queuePath} nests under; unset, it is the script-location default.
  */
 export function resolveQueuePath() {
   const env = process.env.CONVEYOR_QUEUE_FILE;

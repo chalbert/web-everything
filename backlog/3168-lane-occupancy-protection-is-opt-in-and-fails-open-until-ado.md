@@ -1,8 +1,10 @@
 ---
 bornAs: x0jb8ew
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-08-17"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 

@@ -3,10 +3,12 @@ bornAs: xgacnhr
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3901", "3893", "3897", "3902"]
 scope: ["we:scripts/lib/__tests__/antigravity-judge-spawn.integration.test.mjs", "we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs", "we:scripts/lib/__tests__/codex-judge-spawn.test.mjs", "we:scripts/lib/__tests__/judge-panel.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs", "we:scripts/lib/__tests__/review-core.test.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/antigravity-judge-spawn.mjs", "we:scripts/lib/codex-judge-spawn.mjs", "we:scripts/lib/judge-panel.mjs", "we:scripts/lib/judge-spawn.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/review-core.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/lib/review-render.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:scripts/operations/__tests__/review-pr-io.test.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/record-verdict-io.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/operations/review-pr-io.mjs", "we:scripts/operations/review-pr.mjs", "we:skills-src/review/review-agent-brief.md", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/juror-flags.test.mjs", "we:scripts/operations/__tests__/record-verdict-cli.test.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt", "we:scripts/lib/__tests__/codex-model-routing.test.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
@@ -159,3 +161,11 @@ card's dependency, #3906's scope) can now inject `--model` for the model-tier ta
 the existing resolution.
 
 No worker-step changes — the existing note's steps 1–9 still apply as written for these three files.
+
+### Port notes (2026-09-25)
+
+- Ported from `600acc14f`. The 3-way merges used base `ca7e68b71`. Two groups used the #3704 twin `f968bcefd` as base instead, which gives fewer and smaller conflicts: the add/add files (we:scripts/lib/codex-judge-spawn.mjs, its test, and we:scripts/operations/__tests__/judge-provider-selection.test.mjs), and four twin-born files (we:scripts/operations/review-pr.mjs, we:skills-src/review/review-agent-brief.md, we:scripts/operations/__tests__/review-pr.test.mjs, we:scripts/operations/__tests__/juror-flags.test.mjs).
+- The two semantic fixes from the merge notes are applied. `ADVISORY_SEAT_STEPS` keeps seats 3, 4 and 5 out of `verdictAdmitted`. `advise` builds its effects as note, then awaiting-clear, then label.
+- we:scripts/operations/run.mjs also takes the branch's `cwd` threading into the review-pr reader (#3629). The ported we:scripts/operations/__tests__/review-pr-io.test.mjs pins it, and the ported review-loop-cli already passes `cwd`.
+- Three main-side asserts in we:scripts/operations/__tests__/judge-provider-selection.test.mjs expected a Codex request to reach the spawn with no `model`. The branch's `CODEX_MODEL` default plus main's `stripForCodex` now give it the pinned Codex model, never the Claude name. The merge notes predicted this.
+- **Follow-up owed (not fixed here, to keep the port faithful):** on resume, we:scripts/operations/record-verdict-io.mjs still reads seats 4 and 5 from the env (`correctnessAdvisoryFromEnv`/`antigravityReviewFromEnv`). They need `…FromRun` readers like seat 3's `codexAdvisoryFromRun`. Not filed from this lane, because the lane may only edit this card.

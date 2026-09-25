@@ -335,6 +335,34 @@ describe('runLiveSmoke — injected runChild', () => {
     expect(result.pass).toBe(false);
   });
 
+  // #4139 — live incident (backlog card 4061, row 1): a stray `lane-999999` reached the REAL shared
+  // `~/workspace/.lanes/web-everything` pool from a supposedly-isolated test world. Root cause traced to this
+  // exact gap: `checkLanePoolList`/`checkLaneAcquireRelease` never forwarded the `env` passed into
+  // `runLiveSmoke` to their `runChild` (real `runBounded`/`spawn`) calls, so a caller (the daemon-scenario
+  // simulator, `we:scripts/conveyor/__tests__/sim/`) that constructs an isolated env with its OWN private
+  // `LANE_POOL_ROOT` had it silently dropped for the two lane-pool checks — those two children then inherited
+  // whatever ambient env `spawn` falls back to instead, re-targeting the real pool. RED before the fix: `env`
+  // was simply absent from the options object these two checks passed to `runChild`.
+  it('the lane-pool checks (list + acquire/release) forward the CALLER-SUPPLIED env, never silently drop it', async () => {
+    const marker = { LANE_POOL_ROOT: '/private/isolated-pool-for-this-world-only', WE_SIM_MARKER: 'yes' };
+    const seenEnvs = [];
+    const runChild = vi.fn(async (cmd, args, opts) => {
+      const isLanePool = cmd === 'node' && args[0] === 'scripts/lane-pool.mjs';
+      if (isLanePool) seenEnvs.push(opts?.env);
+      if (isLanePool && args[1] === 'list') return '[]';
+      if (isLanePool && args[1] === 'acquire') return JSON.stringify({ lane: 5 });
+      return '';
+    });
+    const result = await runLiveSmoke({ root: '/x', env: marker, runChild });
+    expect(result.results.find((r) => r.name === 'lane-pool-list').ok).toBe(true);
+    expect(result.results.find((r) => r.name === 'lane-acquire-release').ok).toBe(true);
+    // Every lane-pool child call (list, acquire, release) must have received the EXACT caller env — not
+    // `undefined` (ambient fallback) and not some other derived object (e.g. `ghChildEnv`, which is for the
+    // gh checks only, never lane-pool's).
+    expect(seenEnvs).toHaveLength(3);
+    for (const seen of seenEnvs) expect(seen).toBe(marker);
+  });
+
   it('a check that THROWS is caught and recorded as a failure, not an uncaught rejection', async () => {
     const runChild = vi.fn(async () => { throw new Error('spawn ENOENT'); });
     const result = await runLiveSmoke({ root: '/x', env: {}, runChild });

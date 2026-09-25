@@ -25,6 +25,7 @@ import {
   resolveCollectorRoot, resolveHostRoot, neededCollectorDayKeys, parseJsonlLines, dropPartialFirstLine,
   readTailBytes, readCollectorDay, readHostToday, extractSamplesByName, listRollups,
   extractHourlySamplesFromRollup, readHazardFacts, createTelemetrySummaryReader, utcDayKey, scanFileForMetric,
+  scanFileForRecordsByName, readDeliveryTelemetryRecords, DELIVERY_METRIC_NAMES_FOR_DAEMON_REPORT,
 } from '../telemetry-summary-io.mjs';
 import { PLAN_WEEK_RENEWAL } from '../../lib/telemetry-summary.mjs';
 
@@ -174,6 +175,85 @@ describe('scanFileForMetric — bounded MEMORY, whole-file, for `machine.todayHo
     // A chunk size that splits `line1` itself, mid-object.
     const out = scanFileForMetric(path, 'host.cpu.busy_pct', { chunkBytes: 30 });
     expect(out).toEqual([{ timestamp: '2026-09-23T00:00:00Z', value: 1 }, { timestamp: '2026-09-23T01:00:00Z', value: 2 }]);
+  });
+});
+
+describe('scanFileForRecordsByName — FULL records (not just {timestamp,value}), for backlog #4071', () => {
+  it('returns the whole record for every metric matching one of the wanted names', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'delivery.jsonl');
+    const workerEvent = JSON.stringify({
+      event: 'metric', name: 'dispatch.worker.event', kind: 'sampler', value: 1, timestamp: '2026-09-25T00:00:00Z',
+      attributes: { session_id: 'sess-a', name: 'review-2625' },
+    });
+    const throttleEvent = JSON.stringify({
+      event: 'metric', name: 'gh.throttle.rate_limited', kind: 'review', value: 1, timestamp: '2026-09-25T00:00:01Z',
+      attributes: { op: 'pr view' },
+    });
+    const ignored = JSON.stringify({ event: 'metric', name: 'host.cpu.busy_pct', value: 5, timestamp: '2026-09-25T00:00:02Z' });
+    writeFileSync(path, `${workerEvent}\n${throttleEvent}\n${ignored}\n`);
+
+    const out = scanFileForRecordsByName(path, ['dispatch.worker.event', 'gh.throttle.rate_limited']);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual(JSON.parse(workerEvent));
+    expect(out[1]).toEqual(JSON.parse(throttleEvent));
+  });
+
+  it('accepts a single name string, not only an array', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'delivery.jsonl');
+    const rec = { event: 'metric', name: 'gh.throttle.exhausted', kind: 'fix', value: 1, timestamp: '2026-09-25T00:00:00Z' };
+    writeFileSync(path, `${JSON.stringify(rec)}\n`);
+    expect(scanFileForRecordsByName(path, 'gh.throttle.exhausted')).toEqual([rec]);
+  });
+
+  it('skips a torn line and a non-metric event rather than throwing', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'torn.jsonl');
+    const good = { event: 'metric', name: 'dispatch.worker.event', value: 1, timestamp: '2026-09-25T00:00:00Z' };
+    writeFileSync(path, `${JSON.stringify(good)}\n{"event":"metric","name":"dispatch.worker.event","value":2,"time`);
+    expect(scanFileForRecordsByName(path, 'dispatch.worker.event')).toEqual([good]);
+  });
+
+  it('a chunk boundary landing mid-line still parses correctly', () => {
+    const dir = makeTmpDir();
+    const path = join(dir, 'boundary.jsonl');
+    const r1 = { event: 'metric', name: 'dispatch.worker.event', value: 1, timestamp: '2026-09-25T00:00:00Z' };
+    const r2 = { event: 'metric', name: 'dispatch.worker.event', value: 2, timestamp: '2026-09-25T01:00:00Z' };
+    writeFileSync(path, `${JSON.stringify(r1)}\n${JSON.stringify(r2)}\n`);
+    const out = scanFileForRecordsByName(path, 'dispatch.worker.event', { chunkBytes: 20 });
+    expect(out).toEqual([r1, r2]);
+  });
+});
+
+describe('readDeliveryTelemetryRecords — per-day-key reads under a root, for backlog #4071', () => {
+  it('reads every wanted record across the given day keys', () => {
+    const dir = makeTmpDir();
+    const rec1 = { event: 'metric', name: 'dispatch.worker.event', value: 1, timestamp: '2026-09-24T00:00:00Z' };
+    const rec2 = { event: 'metric', name: 'gh.throttle.backoff_ms', kind: 'review', value: 500, timestamp: '2026-09-25T00:00:00Z' };
+    writeFileSync(join(dir, '2026-09-24.jsonl'), `${JSON.stringify(rec1)}\n`);
+    writeFileSync(join(dir, '2026-09-25.jsonl'), `${JSON.stringify(rec2)}\n`);
+    const out = readDeliveryTelemetryRecords(dir, ['2026-09-24', '2026-09-25']);
+    expect(out).toEqual([rec1, rec2]);
+  });
+
+  it('silently skips a day with no raw file (rolled over to .jsonl.gz, or never written)', () => {
+    const dir = makeTmpDir();
+    expect(readDeliveryTelemetryRecords(dir, ['2026-01-01', '2026-01-02'])).toEqual([]);
+  });
+
+  it('is stable with an empty or non-array dayKeys', () => {
+    const dir = makeTmpDir();
+    expect(readDeliveryTelemetryRecords(dir, [])).toEqual([]);
+    expect(readDeliveryTelemetryRecords(dir, undefined)).toEqual([]);
+  });
+});
+
+describe('DELIVERY_METRIC_NAMES_FOR_DAEMON_REPORT — the closed metric-name set backlog #4071 reads', () => {
+  it('names the worker-join metric and every gh.throttle.* kind', () => {
+    expect(DELIVERY_METRIC_NAMES_FOR_DAEMON_REPORT).toEqual([
+      'dispatch.worker.event', 'gh.throttle.rate_limited', 'gh.throttle.backoff_ms', 'gh.throttle.exhausted',
+    ]);
   });
 });
 

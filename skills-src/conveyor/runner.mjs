@@ -289,6 +289,7 @@ export const MECHANICAL_PASS_NAMES = Object.freeze([
   'lane-pool-health-watch',
   'operator-notify',
   'reconcile-fix-dispatch',
+  'ci-heal-pr-dispatch',
   'ci-queue-watch',
   'parked-pr-conflict-watch',
   'advisory-label-sweep',
@@ -352,6 +353,12 @@ export function makeCliMechanicalPasses({
           prsArgs = [`--prs-file=${prsFile}`];
         } catch (e) { warn('open-pr-fetch', key, e); }
         if (!skip('reconcile-fix-dispatch')) run('conveyor/reconcile-fix-dispatch.mjs', prsArgs, key, slug);
+        // xs5b4fj — the SAME reconcile-pass.mjs plan `reconcile-fix-dispatch.mjs` just read above also carries
+        // `kind:'ci-heal'` entries (a red required check, nothing live working it); `operations/
+        // ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch` is the ONLY code that ever acts on one, and until
+        // this line nothing in the tree ever called it — every ci-heal-owed PR (live-confirmed: chalbert/
+        // web-everything #2635, #2636) sat forever with a correct plan and no dispatcher reading it.
+        if (!skip('ci-heal-pr-dispatch')) run('operations/ci-heal-pr-dispatch.mjs', prsArgs, key, slug);
         if (!skip('ci-queue-watch')) run('conveyor/ci-queue-watch.mjs', ['sweep'], key, slug);
         // Already runs as its own pass-daemon watcher (skills-src/conveyor/pass-daemon.mjs) — a resident
         // Dispatcher must skip this to avoid double-running it.

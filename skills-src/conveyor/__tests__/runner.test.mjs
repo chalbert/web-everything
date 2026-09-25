@@ -616,6 +616,7 @@ describe('makeCliMechanicalPasses — invokes the exact set of mechanical passes
       'node /scripts/conveyor/lane-pool-health-watch.mjs --repo=chalbert/web-everything',
       'node /scripts/operations/operator-notify.mjs --once --repo=chalbert/web-everything',
       'node /scripts/conveyor/reconcile-fix-dispatch.mjs --repo=chalbert/web-everything',
+      'node /scripts/operations/ci-heal-pr-dispatch.mjs --repo=chalbert/web-everything',
       'node /scripts/conveyor/ci-queue-watch.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/parked-pr-conflict-watch.mjs sweep --repo=chalbert/web-everything',
       'node /scripts/conveyor/advisory-label-sweep.mjs sweep --repo=chalbert/web-everything',
@@ -696,7 +697,7 @@ describe('one open-PR snapshot per mechanical tick', () => {
     const fetches = calls.filter(([cmd, ...args]) => cmd === 'gh' && args[0] === 'pr' && args[1] === 'list');
     expect(fetches).toEqual([['gh', 'pr', 'list', '--state', 'open', '--limit', '200', '--json', OPEN_PR_LIST_FIELDS, '--repo', 'chalbert/web-everything']]);
     const consumed = consumerCalls(calls);
-    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()] && !script.endsWith('/reconcile-fix-dispatch.mjs'))) {
+    for (const call of calls.filter(([cmd, script]) => cmd === 'node' && !consumers[script.split('/').pop()] && !script.endsWith('/reconcile-fix-dispatch.mjs') && !script.endsWith('/ci-heal-pr-dispatch.mjs'))) {
       expect(call.some((a) => a.startsWith('--prs-file='))).toBe(false);
     }
     expect(consumed.map((c) => c[1].split('/').pop())).toEqual(Object.keys(consumers));
@@ -796,6 +797,7 @@ describe('makeCliMechanicalPasses — skipPasses omits exactly the named pass(es
     const paths = await runWithSkip(new Set());
     expect(paths).toEqual(expect.arrayContaining([
       '/scripts/conveyor/reconcile-fix-dispatch.mjs',
+      '/scripts/operations/ci-heal-pr-dispatch.mjs',
       '/scripts/conveyor/parked-pr-conflict-watch.mjs',
       '/scripts/conveyor/lane-pool-health-watch.mjs',
       '/scripts/conveyor/reconcile-pass.mjs',
@@ -808,6 +810,13 @@ describe('makeCliMechanicalPasses — skipPasses omits exactly the named pass(es
     const paths = await runWithSkip(new Set(['reconcile-fix-dispatch']));
     expect(paths).not.toContain('/scripts/conveyor/reconcile-fix-dispatch.mjs');
     expect(paths).toContain('/scripts/conveyor/parked-pr-conflict-watch.mjs');
+    expect(paths).toContain('/scripts/conveyor/reconcile-pass.mjs');
+  });
+
+  it('skipping "ci-heal-pr-dispatch" omits only that one script', async () => {
+    const paths = await runWithSkip(new Set(['ci-heal-pr-dispatch']));
+    expect(paths).not.toContain('/scripts/operations/ci-heal-pr-dispatch.mjs');
+    expect(paths).toContain('/scripts/conveyor/reconcile-fix-dispatch.mjs');
     expect(paths).toContain('/scripts/conveyor/reconcile-pass.mjs');
   });
 

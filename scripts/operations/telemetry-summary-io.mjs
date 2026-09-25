@@ -251,6 +251,88 @@ export function scanFileForMetric(path, metricName, { chunkBytes = DEFAULT_SCAN_
   return out;
 }
 
+/**
+ * Every FULL metric record (not just `{timestamp,value}`) whose `name` is one of `names`, scanning `path`
+ * start to end in the SAME fixed-size-chunk, bounded-memory discipline as {@link scanFileForMetric} — needed
+ * here because backlog #4071's per-daemon cost report (`we:scripts/lib/telemetry.mjs#summarizeCostByDaemon`)
+ * reads a `dispatch.worker.event`/`gh.throttle.*` record's `attributes` (session id, worker name, dispatch
+ * kind), which {@link scanFileForMetric} deliberately does not keep.
+ * @param {string} path
+ * @param {string[]|string} names
+ * @param {{chunkBytes?: number}} [o]
+ * @returns {object[]}
+ */
+export function scanFileForRecordsByName(path, names, { chunkBytes = DEFAULT_SCAN_CHUNK_BYTES } = {}) {
+  const wanted = new Set(Array.isArray(names) ? names : [names]);
+  const out = [];
+  const takeIfMatch = (line) => {
+    if (!line) return;
+    let matched = false;
+    for (const n of wanted) { if (line.includes(`"name":"${n}"`)) { matched = true; break; } }
+    if (!matched) return;
+    let rec;
+    try { rec = JSON.parse(line); } catch { return; } // torn line — skip, never throw
+    if (rec && rec.event === 'metric' && wanted.has(rec.name)) out.push(rec);
+  };
+
+  const fd = openSync(path, 'r');
+  try {
+    const { size } = fstatSync(fd);
+    const buf = Buffer.alloc(chunkBytes);
+    let pos = 0;
+    let leftover = '';
+    while (pos < size) {
+      const len = Math.min(chunkBytes, size - pos);
+      const n = readSync(fd, buf, 0, len, pos);
+      if (n <= 0) break; // defensive — a short read here would otherwise spin forever
+      pos += n;
+      const chunkText = leftover + buf.toString('utf8', 0, n);
+      const lastNl = chunkText.lastIndexOf('\n');
+      if (lastNl < 0) { leftover = chunkText; continue; } // no complete line in this chunk yet
+      for (const line of chunkText.slice(0, lastNl).split('\n')) takeIfMatch(line);
+      leftover = chunkText.slice(lastNl + 1);
+    }
+    takeIfMatch(leftover); // the true EOF tail — a torn line here is tolerated by `takeIfMatch` itself
+  } finally {
+    closeSync(fd);
+  }
+  return out;
+}
+
+/**
+ * The delivery-telemetry metric names backlog #4071's per-daemon report needs — `dispatch.worker.event` (the
+ * session-id ↔ worker-name join, see `we:scripts/lib/telemetry.mjs`'s own header for the join proof) and
+ * every `gh.throttle.*` name (the only gh-call signal the schema carries a `kind` on today).
+ */
+export const DELIVERY_METRIC_NAMES_FOR_DAEMON_REPORT = Object.freeze([
+  'dispatch.worker.event', 'gh.throttle.rate_limited', 'gh.throttle.backoff_ms', 'gh.throttle.exhausted',
+]);
+
+/**
+ * Read every wanted delivery-telemetry record across `dayKeys`' RAW (uncompressed) day files under `root` —
+ * a day already rolled over to `<day>.jsonl.gz` (see `we:scripts/conveyor/host-sampler-episodes.mjs`'s own
+ * rollover) is silently skipped, never an error: its raw `dispatch.worker.event` samples are gone, so that
+ * day's daemon attribution honestly degrades to `'unattributed'` rather than this reader failing outright.
+ * @param {string} root - `resolveHostRoot()`'s directory (the delivery-telemetry store's own root — see
+ *   `we:scripts/operations/telemetry-store.mjs#TELEMETRY_ROOT`, identical directory).
+ * @param {string[]} dayKeys - UTC day keys (`neededCollectorDayKeys`'s own shape).
+ * @param {number} [chunkBytes]
+ * @returns {object[]}
+ */
+export function readDeliveryTelemetryRecords(root, dayKeys, chunkBytes = DEFAULT_SCAN_CHUNK_BYTES) {
+  let out = [];
+  for (const dk of Array.isArray(dayKeys) ? dayKeys : []) {
+    const p = join(root, `${dk}.jsonl`);
+    if (!existsSync(p)) continue; // missing, or rolled over to `.jsonl.gz` — honest skip, not a failure
+    try {
+      out = out.concat(scanFileForRecordsByName(p, DELIVERY_METRIC_NAMES_FOR_DAEMON_REPORT, { chunkBytes }));
+    } catch {
+      // an unreadable day must not sink the whole report — the same tolerance every other reader here gives.
+    }
+  }
+  return out;
+}
+
 // ── host-sampler rollups (closed days) ──────────────────────────────────────────────────────────────────
 
 /** Every `<day>.rollup.json` under `root`, parsed, newest day first. Skips a file that fails to parse rather
@@ -419,6 +501,15 @@ export function createTelemetrySummaryReader({
 
     const hazard = readHazardFacts();
 
+    // ── delivery telemetry (backlog #4071 — per-daemon cost) ────────────────────────────────────────────
+    // Same day-key range the usage read above already computed (plan week + previous week + last10, UTC
+    // day files) — the per-daemon report covers exactly the days the usage snapshot itself covers, no wider.
+    // `hostMissing`/`!existsSync(hostRoot)` already means "no store at all"; a report over an empty array is
+    // the correct degrade, not a second failure mode to invent.
+    const deliveryEvents = hostMissing
+      ? []
+      : readDeliveryTelemetryRecords(hostRoot, neededCollectorDayKeys(nowDate, renewal, timezone), tailBytes);
+
     return {
       now: nowDate,
       timezone,
@@ -433,6 +524,7 @@ export function createTelemetrySummaryReader({
         rollups: { lastAtMs: rollupsLastAtMs, missing: rollupsMissing, root: hostRoot },
       },
       hazard,
+      delivery: { events: deliveryEvents },
     };
   };
 }

@@ -2415,6 +2415,26 @@ describe('the write arc and its #2964 ordering', () => {
 
 });
 
+describe('publishDelegationTrialCommit — CONVEYOR_STATE_ROOT skip (#4052)', () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    if (savedEnv.CONVEYOR_STATE_ROOT === undefined) delete process.env.CONVEYOR_STATE_ROOT;
+    else process.env.CONVEYOR_STATE_ROOT = savedEnv.CONVEYOR_STATE_ROOT;
+  });
+
+  it('skips cleanly (no git touched) once the scorecard store is pinned outside the repo', () => {
+    process.env.CONVEYOR_STATE_ROOT = '/tmp/some-pinned-operator-root';
+    const result = publishDelegationTrialCommit({
+      provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', pr: 1, cwd: '/definitely/not/a/real/git/repo',
+    });
+    expect(result).toEqual({
+      committed: false,
+      pushed: false,
+      reason: 'scorecard store is pinned outside the repo (CONVEYOR_STATE_ROOT) — nothing to commit',
+    });
+  });
+});
+
 /**
  * `restamp` (#x5e2ldj) — CARRY an acceptance across a head the drain itself moved.
  *

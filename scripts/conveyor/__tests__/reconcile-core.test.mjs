@@ -47,6 +47,7 @@ import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
 import { reviewSessionSlug } from '../review-session-slug.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
+import { buildReviewedShaMarker } from '../../lib/review-escalation.mjs';
 
 // ── fixtures — measured shapes, 2026-08-26 ───────────────────────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-26T17:34:00Z');
@@ -809,6 +810,78 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
   });
 });
 
+// we:backlog/x5uqim1-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: a `ci-red` PR whose required check failed
+// only because `origin/main`'s own CI was red at that moment must refuse `owed-ci-rerun`, never dispatch
+// `ci-heal` — a heal agent would "repair" code that was never broken. Fixture shapes measured live off
+// `chalbert/web-everything`: PR #2635 (33 commits behind main, never refreshed, failed inside main's real
+// 01:30:55Z–02:31:25Z red window) and PR #2596 (`ahead_by: 0` — the operator's own manual branch refresh, still
+// red) — see `main-red-recovery.test.mjs` for the same real window, and that module's own file header for why a
+// rebase onto main (not a `gh run rerun`) is the real mechanism.
+describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {
+  const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
+  const prRedAttributable = (over = {}) => pr1563({
+    number: 2635, labels: [], statusCheckRollup: redRollup, comments: [],
+    requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33,
+    ...over,
+  });
+
+  it('refuses owed-ci-rerun (never ci-heal) for a main-red failure whose head is still behind main', () => {
+    const plan = planReconcile({ prs: [prRedAttributable()], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2635, phase: 'ci-red' })]);
+  });
+
+  it('falls through to the ordinary ci-heal path once the head already contains main\'s tip and is still red (PR #2596\'s real shape)', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ number: 2596, requiredCheckCompletedAt: '2026-09-25T02:02:29Z', aheadByOnMain: 0 })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2596, attempts: 0 })]);
+  });
+
+  it('a ci-red PR outside every red-main window still gets ci-heal, unaffected (PR #2636\'s real shape)', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ number: 2636, requiredCheckCompletedAt: '2026-09-25T08:03:45Z', aheadByOnMain: 33 })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2636 })]);
+  });
+
+  it('no mainRedWindows supplied at all (byte-identical to before this item) never blocks ci-heal', () => {
+    const plan = planReconcile({ prs: [prRedAttributable()], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635 })]);
+  });
+
+  it('REFUSAL_KINDS names owed-ci-rerun — an unnamed refusal is a bug', () => {
+    expect(REFUSAL_KINDS).toContain('owed-ci-rerun');
+  });
+
+  // we:backlog/xudx8ff-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: PRs #2635/#2636 are BOTH owed-ci-rerun
+  // (their failure falls inside a real main-red window) AND mergeStateStatus: 'DIRTY' (a genuine conflict with
+  // main, confirmed live via `gh pr view --json mergeStateStatus,mergeable`). A mechanical rebase can never
+  // clear a real conflict, so refusing owed-ci-rerun here left them stuck forever — no other pass ever plans a
+  // fixer for a PR this branch refuses. A DIRTY PR must fall through to the ordinary ci-heal path instead.
+  it('#xudx8ff — a DIRTY (conflicting) PR falls through to ci-heal instead of owed-ci-rerun, even inside a real main-red window', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY' })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635, attempts: 0 })]);
+  });
+
+  it('#xudx8ff — a DIRTY PR still respects the ci-heal cap once its own durable attempt count is exhausted', () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY', comments })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2635, cap: CI_HEAL_ROUND_CAP })]);
+  });
+});
+
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
   // `chalbert/web-everything#2549`, shape measured live 2026-09-24: `bounced` (review:changes present, wins
   // `classifyPr`'s precedence over `review:human`), ALSO carrying `merge-status:conflicting` (the mechanical
@@ -1370,5 +1443,150 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── live-caught 2026-09-25, PR #2647/#2625 — a `stopped` session must free its PR, not freeze it ──────────────
+describe('assessLiveness — `state: stopped` is finished too (PR #2647/#2625, live 2026-09-25)', () => {
+  // The REAL shape measured off the running review daemon's own `claude agents --json --all`: a `stopped` (or
+  // `done`) row carries NO `pid` field at all — only a currently-`working` row does. `enrichAgents` (reconcile-
+  // pass.mjs) then OMITS `pidAlive` entirely (probePid(null) → null → key omitted), so this fixture's `stopped`
+  // row is exactly what `assessLiveness` actually receives in production, not an approximation of it.
+  const stoppedNoPid = {
+    name: 'review-2647', state: 'stopped', kind: 'background', cwd: '/wev-review-daemon',
+    sessionId: 's-2647-old', startedAt: 1_000,
+  };
+
+  it('a SINGLE stopped, pid-less bound session frees the PR (returns null, not liveness-unknown)', () => {
+    expect(assessLiveness([{ agent: stoppedNoPid, cwd: '/c', sha: 'abc' }])).toBeNull();
+  });
+
+  it('the bug this fixes: without the `stopped` check, the identical row reads as liveness-unknown', () => {
+    // Proves the fixture actually exercises the trap this fix closes — a row that is NEITHER `done` nor
+    // otherwise marked finished, with `pidAlive` absent, hits rank 3 on its own.
+    const notDone = String(stoppedNoPid.state).toLowerCase() !== 'done';
+    const noPidAlive = stoppedNoPid.pidAlive === undefined;
+    expect(notDone && noPidAlive).toBe(true);
+  });
+
+  it('several historical rows for the same PR, ALL stopped/done, still free it — bindAgents keeps every one', () => {
+    const rows = [
+      { ...stoppedNoPid, sessionId: 's-1' },
+      { ...stoppedNoPid, sessionId: 's-2' },
+      { ...stoppedNoPid, state: 'done', sessionId: 's-3' },
+    ];
+    const bound = rows.map((agent) => ({ agent, cwd: '/c', sha: 'abc' }));
+    expect(assessLiveness(bound)).toBeNull();
+  });
+
+  it('a genuinely LIVE session among stale `stopped` siblings still wins — stopped never masks a real live one', () => {
+    const live = { ...stoppedNoPid, state: 'working', pid: 555, pidAlive: true, sessionId: 's-live' };
+    const bound = [
+      { agent: { ...stoppedNoPid, sessionId: 's-old' }, cwd: '/c', sha: 'abc' },
+      { agent: live, cwd: '/c', sha: 'abc' },
+    ];
+    expect(assessLiveness(bound)).toMatchObject({ kind: 'live-process' });
+  });
+
+  it('end to end: a review:pending PR bound only to stale `stopped` reviewer sessions is owed a review again', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [stoppedNoPid], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2647 })]);
+  });
+
+  it('the same PR with a `blocked` (never-stopped) sibling still correctly refuses — this fix does not widen ANY other state', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const stillBlocked = { ...stoppedNoPid, state: 'blocked', sessionId: 's-blocked' };
+    const plan = planReconcile({ prs: [pr], agents: [stillBlocked], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'liveness-unknown', prNumber: 2647 });
+  });
+});
+
+// ── #2588/review-loops (epic #3383/#4075) — THE REVIEW LOOPS: zero-findings reviews bypassing the round cap,
+// and no dedup against a head that already carries an accept verdict. Live incident: PR #2588 got `review:changes`
+// at 23:55Z and `review:accepted` at 00:00Z, five minutes apart, from THREE review sessions dispatched inside one
+// 16-minute window, all against the same head.
+describe('#2588/review-loops — the zero-findings review population now hits the round cap (epic #3383/#4075)', () => {
+  /** Shaped exactly like case 3's `pr1576` (`review:pending`, no real findings) but with a comment thread of
+   *  pure re-arm bookkeeping — zero findings by `countFindings`, but a real, non-zero durable attempt count. */
+  const zeroFindingsPr = (over = {}) => ({
+    number: 2588, state: 'OPEN',
+    headRefName: 'lane/review-loop-2588', headRefOid: '2588'.repeat(10),
+    labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pendingRollup, comments: [], ...over,
+  });
+
+  it('THE BUG, reproduced: before this fix, a zero-findings review dispatched with `attempts: 0` HARDCODED no matter how many rounds already ran — this pins the fix, the dispatched row now carries the REAL count', () => {
+    const twoRearms = [
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+    ];
+    const plan = planReconcile({ prs: [zeroFindingsPr({ comments: twoRearms })], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(1);
+    expect(plan.dispatch[0]).toMatchObject({ kind: 'review', prNumber: 2588, findings: 0, attempts: 2 });
+  });
+
+  it('once the REAL attempt count reaches the round cap, a zero-findings review population is refused `cap-exhausted`, not dispatched again — THE FIX for the "re-dispatch forever" loop', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const plan = planReconcile({ prs: [zeroFindingsPr({ comments: fiveRearms })], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['no-findings', 'cap-exhausted']);
+    expect(plan.refusals[1]).toMatchObject({ prNumber: 2588, attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('a `needs-human` PR (review:human) with zero findings is bound by the identical cap, via the SAME `attempts` value', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const pr = zeroFindingsPr({ labels: lbl('review:human'), comments: fiveRearms });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['no-findings', 'cap-exhausted']);
+  });
+
+  it('`already-reviewed-head` is on the frozen REFUSAL_KINDS list', () => {
+    expect(REFUSAL_KINDS).toContain('already-reviewed-head');
+  });
+});
+
+describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)', () => {
+  const HEAD = 'aa11bb22cc33dd44ee55ff6677889900aabbccdd';
+  const OLDER_HEAD = 'ffffffffffffffffffffffffffffffffffffffff';
+
+  it('a PR whose CURRENT head already carries a `reviewed-sha` accept marker is refused `already-reviewed-head`, never re-dispatched — the exact #2588 shape (a verdict already landed on this commit)', () => {
+    const pr = {
+      number: 2588, state: 'OPEN', headRefName: 'lane/review-loop-2588', headRefOid: HEAD,
+      labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}` }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-reviewed-head', prNumber: 2588, headSha: HEAD, reviewedSha: HEAD })]);
+  });
+
+  it('the SAME guard applies to a `needs-human` (review:human) PR — not just `needs-review`', () => {
+    const pr = {
+      number: 2589, state: 'OPEN', headRefName: 'lane/review-loop-2589', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(HEAD) }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('never fires on a PURE BOUNCE (review:changes, a real finding, no accept marker) — a `review:changes` verdict stamps no `reviewed-sha`, so an unaddressed finding still gets its fix round exactly as before', () => {
+    const pr = pr1563({ number: 2590, headRefOid: HEAD, comments: [finding()] }); // review:changes, real finding
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2590 })]);
+  });
+
+  it('does not refuse when the `reviewed-sha` marker covers an OLDER head — a fresh push after a stale accept is not "already reviewed" for its OWN new commit', () => {
+    const pr = {
+      number: 2591, state: 'OPEN', headRefName: 'lane/review-loop-2591', headRefOid: HEAD,
+      labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD) }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);
   });
 });

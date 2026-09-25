@@ -66,6 +66,11 @@ import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from '../lib/gh-app-shim.mjs
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
+// #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
+import { markWorkerEnv } from './session-role.mjs';
+// #3902 — the blocking-spawn primitive `spawnAgentToCompletion` (below) is built on, for the same reason
+// `codex-delivery-provider.mjs#spawnCodexToCompletion` is (see that file's own header).
+import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -995,6 +1000,14 @@ export function createDispatchSinks({
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
+      // #3168 — the loudest point in the whole path: right before the agent is actually spawned into the
+      // fail-open lane, printed to THIS process's own stderr rather than left to surface only in the eventual
+      // agent's own `acquire` stdout (which nobody here is watching). `payload.occupancyWarning` is `null` for
+      // every kind whose brief self-adopts (`build`/`investigate` — see `dispatch-lane.mjs`'s
+      // `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`), so this is a no-op on the common path.
+      if (payload?.occupancyWarning) {
+        console.error(`dispatch-lane: ${payload.occupancyWarning}`);
+      }
       const sessionId = String(mintSessionId());
       let handle;
       try {
@@ -1101,8 +1114,33 @@ export function defaultSpawnAgent(argv, opts = {}, { exec = execFileSync } = {})
     // Spread `opts` FIRST and sanitize whatever env it carries — a caller-supplied `opts.env` (e.g.
     // deliver-item-wrapper's `{...process.env, ...deliveryEnv}`) must never replace the stripped env (PR #2600).
     ...opts,
-    env: sanitizeSpawnEnv(opts.env || process.env),
+    // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see
+    // session-role.mjs). Composed with `sanitizeSpawnEnv` (PR #2600) rather than replacing it: the stripped-
+    // GH_TOKEN env `sanitizeSpawnEnv` returns is what gets marked, so neither guard undoes the other's work.
+    env: markWorkerEnv(sanitizeSpawnEnv(opts.env || process.env)),
   });
+}
+
+/**
+ * #3383 follow-up (the harder, per-agent-CPU half) — the ASYNC counterpart to {@link defaultSpawnAgent}, built
+ * for a dispatch wrapper's own full-turn BLOCKING agent spawn, NOT for `defaultClaudeProvider`'s fire-and-forget
+ * `--bg` dispatch (which stays on `defaultSpawnAgent`/`execFileSync` — it returns almost instantly once the CLI
+ * backgrounds the session, so an async child-rusage read has nothing to offer there).
+ *
+ * WHY THIS EXISTS: `execFileSync` is a SYNCHRONOUS call that blocks the whole event loop for the entire agent
+ * turn. This function still inherits `spawnToCompletion`'s full execFileSync-equivalence contract (stdout/
+ * stderr capture, exit-code/signal/timeout/maxBuffer handling) unchanged.
+ *
+ * @param {string[]} argv
+ * @param {object} [opts]
+ * @param {{spawnFn?: Function}} [io] - injected ONLY so a test can assert the spawn without a real `claude`.
+ * @returns {Promise<{stdout: string, stderr: string, resourceUsage: object|null}>}
+ */
+export function spawnAgentToCompletion(argv, opts = {}, io = {}) {
+  return spawnToCompletion('claude', argv, {
+    encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
+    env: markWorkerEnv(sanitizeSpawnEnv(opts.env || process.env)),
+  }, io);
 }
 
 /** The dispatched agent's own standing identity, appended as a system prompt (#xqyyoje) — see the file's own

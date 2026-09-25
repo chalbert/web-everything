@@ -142,10 +142,19 @@ const failureLine = (e) => {
   return err && err !== lines[0] ? `${lines[0]} — ${err.trim()}` : lines[0];
 };
 
-async function checkLanePoolList({ root, budgets, runChild }) {
+async function checkLanePoolList({ root, budgets, runChild, env }) {
   try {
+    // #4139 live bug (test litter reaching the real pool, card 4061 row 1 — `lane-999999` a "test-fixture id
+    // reaching the real pool"): this call used to omit `env` entirely, so `runBounded`'s underlying `spawn`
+    // fell back to ITS OWN calling process's ambient env rather than whatever isolated `env` (a private
+    // `LANE_POOL_ROOT`, in the daemon-scenario-simulator's case — see `we:scripts/conveyor/__tests__/sim/`)
+    // the caller of {@link runLiveSmoke} explicitly constructed. That silently re-targeted the REAL shared
+    // `~/workspace/.lanes/web-everything` pool from inside a supposedly-isolated simulated world. Forwarding
+    // `env` here is a no-op in production (the default `env = process.env` at `runLiveSmoke`'s own boundary
+    // already IS the real ambient env), so this only changes behavior for a caller that deliberately passed a
+    // different one — exactly the case that was silently being dropped.
     const out = await runChild('node', ['scripts/lane-pool.mjs', 'list', '--acquirable', '--no-cache', '--limit=1', '--json'], {
-      cwd: root, timeoutMs: budgets.lanePoolListMs,
+      cwd: root, timeoutMs: budgets.lanePoolListMs, env,
     });
     JSON.parse(out);
     return { ok: true, detail: 'lane-pool list --acquirable --no-cache --limit=1 ok' };
@@ -154,7 +163,7 @@ async function checkLanePoolList({ root, budgets, runChild }) {
   }
 }
 
-async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild }) {
+async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild, env }) {
   let laneNum = null;
   try {
     // #3383 Module D — `--wait-ms=<laneAcquireWaitMs>` lets a momentarily-exhausted pool (every lane busy for
@@ -164,12 +173,14 @@ async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild })
     // wait). The CHILD's own hard timeout must cover that whole wait plus the acquire's real clone/refresh
     // work, or `runBounded` kills the child before `--wait-ms` itself gets to time out — hence the `Math.max`
     // against the plain `laneAcquireMs` budget, with 60s of headroom on top.
+    // #4139 — see {@link checkLanePoolList}'s own comment just above: `env` must reach every lane-pool child
+    // this gate spawns, never just some of them, or an isolated caller's pool override is only PARTLY honored.
     const acquireTimeoutMs = Math.max(budgets.laneAcquireMs, budgets.laneAcquireWaitMs + 60_000);
     const out = await runChild('node', [
       'scripts/lane-pool.mjs', 'acquire', '--purpose=smoke', `--session=${sessionSlug}`,
       `--wait-ms=${budgets.laneAcquireWaitMs}`, '--json',
     ], {
-      cwd: root, timeoutMs: acquireTimeoutMs,
+      cwd: root, timeoutMs: acquireTimeoutMs, env,
     });
     const parsed = JSON.parse(out);
     laneNum = Number.isInteger(parsed?.lane) ? parsed.lane : null;
@@ -179,7 +190,7 @@ async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild })
   }
   try {
     await runChild('node', ['scripts/lane-pool.mjs', 'release', `--lane=${laneNum}`, `--session=${sessionSlug}`], {
-      cwd: root, timeoutMs: budgets.laneReleaseMs,
+      cwd: root, timeoutMs: budgets.laneReleaseMs, env,
     });
     return { ok: true, detail: `acquired + released lane-${laneNum}`, lane: laneNum };
   } catch (e) {
@@ -318,7 +329,10 @@ export async function runLiveSmoke({
   const budgets = resolveSmokeBudgets(env);
   const sessionSlug = `smoke-${now}-${randomUUID().slice(0, 8)}`;
   const ghChildEnv = ghDispatchedSessionEnv(env);
-  const ctx = { root, budgets, repos, sessionSlug, ghChildEnv, runChild };
+  // #4139 — `env` (the caller's OWN, possibly-isolated env) rides alongside `ghChildEnv` (the derived,
+  // sanitized-for-gh one) so the lane-pool checks can use the former while the gh checks keep using the
+  // latter; see {@link checkLanePoolList}'s comment for why dropping this here silently escaped isolation.
+  const ctx = { root, budgets, repos, sessionSlug, env, ghChildEnv, runChild };
   const results = [];
   for (const check of SMOKE_CHECKS) {
     const startedAt = Date.now();

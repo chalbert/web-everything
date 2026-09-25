@@ -19,7 +19,10 @@ import {
   runUnderAdmission, shellQuoteWord,
   WAITING_TTL_MINUTES, ADMISSION_HELD_ENV, classifyWaiter, reapStaleWaiters, reapHistory, waiterRepo,
   admissionBypassReason, poolRootOf, admittedArgv, admittedShellCommand, HEAVY_ADMISSION_CLI,
+  DEFAULT_LOAD_ADMISSION_MAX_PER_CORE, LOAD_ADMISSION_MAX_PER_CORE_ENV, LOAD_ADMISSION_SWITCH_ENV,
+  resolveLoadAdmissionMaxPerCore, isLoadAdmissionOff, loadAdmissionDecision, readLatestLoad, resolveLoadAdmission,
 } from '../heavy-admission.mjs';
+import { utcDayKey } from '../../operations/telemetry-summary-io.mjs';
 import { readLockEntry } from '../file-locks.mjs';
 
 const T0 = Date.parse('2026-09-03T12:00:00.000Z');
@@ -630,5 +633,145 @@ describe('stale-waiter reap (xaipsbs)', () => {
     expect(listWaiting(root)).toHaveLength(0);
     const status = JSON.parse(execFileSync(process.execPath, [CLI, 'status'], { cwd: lockRoot, env: cliEnv(pool), encoding: 'utf8' }));
     expect(status.reaped.count).toBe(1);
+  });
+});
+
+// ── #4076: the load-admission gate — a SECOND, per-core admission axis for NEW dispatched sessions ──────────
+
+describe('loadAdmissionDecision (pure)', () => {
+  it('admits when load1/cores is at or below the threshold', () => {
+    expect(loadAdmissionDecision({ load1: 6, cores: 12, maxPerCore: 1.5 })).toEqual({ held: false, load1: 6, cores: 12, perCore: 0.5, maxPerCore: 1.5 });
+    expect(loadAdmissionDecision({ load1: 18, cores: 12, maxPerCore: 1.5 }).held).toBe(false); // exactly at the threshold — not OVER it
+  });
+
+  it('holds once load1/cores is STRICTLY above the threshold — the exact "admission is held above threshold, admitted when it drops" contract', () => {
+    const held = loadAdmissionDecision({ load1: 18.01, cores: 12, maxPerCore: 1.5 });
+    expect(held.held).toBe(true);
+    expect(held.perCore).toBeCloseTo(1.5008, 3);
+    // the SAME reading, dropped back to the threshold, is admitted again — nothing sticky about the decision.
+    const admitted = loadAdmissionDecision({ load1: 18, cores: 12, maxPerCore: 1.5 });
+    expect(admitted.held).toBe(false);
+  });
+
+  it('mirrors the #xupukxa incident ratio (34.95/12 ≈ 2.91) against the module default — well past it', () => {
+    const d = loadAdmissionDecision({ load1: 34.95, cores: 12 });
+    expect(d.maxPerCore).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+    expect(d.held).toBe(true);
+  });
+
+  it('fails OPEN (admits) on a missing load1, missing cores, or non-positive cores — never a guess', () => {
+    expect(loadAdmissionDecision({ load1: null, cores: 12 })).toMatchObject({ held: false, load1: null, cores: 12, reason: 'no-sample' });
+    expect(loadAdmissionDecision({ load1: 20, cores: null })).toMatchObject({ held: false, load1: 20, cores: null, reason: 'no-sample' });
+    expect(loadAdmissionDecision({ load1: 20, cores: 0 })).toMatchObject({ held: false, reason: 'no-sample' });
+    expect(loadAdmissionDecision({})).toMatchObject({ held: false, load1: null, cores: null, perCore: null, reason: 'no-sample' });
+  });
+
+  it('a genuinely missing `null` reading is never coerced to a false zero (Number(null) === 0 trap)', () => {
+    // regression: an earlier draft coerced `load1`/`cores` through a bare `Number(...)`, which turns `null` into
+    // `0` (a FINITE number) rather than "absent" — this would have reported `load1: 0` for "no data" and, worse,
+    // could report `held:false` off a fabricated 0/0 reading instead of the honest `no-sample` fail-open.
+    const d = loadAdmissionDecision({ load1: null, cores: null });
+    expect(d.load1).toBeNull();
+    expect(d.cores).toBeNull();
+  });
+});
+
+describe('resolveLoadAdmissionMaxPerCore / isLoadAdmissionOff (env resolution)', () => {
+  it('defaults, and clamps a non-positive/garbage override back to the default', () => {
+    expect(resolveLoadAdmissionMaxPerCore({})).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '-1' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: 'nope' })).toBe(DEFAULT_LOAD_ADMISSION_MAX_PER_CORE);
+  });
+
+  it('honors a real override', () => {
+    expect(resolveLoadAdmissionMaxPerCore({ [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0.25' })).toBe(0.25);
+  });
+
+  it('isLoadAdmissionOff mirrors isAdmissionOff\'s own switch values, own env var', () => {
+    expect(isLoadAdmissionOff({})).toBe(false);
+    for (const v of ['off', 'OFF', '0', 'false', 'no']) expect(isLoadAdmissionOff({ [LOAD_ADMISSION_SWITCH_ENV]: v })).toBe(true);
+    expect(isLoadAdmissionOff({ [LOAD_ADMISSION_SWITCH_ENV]: 'on' })).toBe(false);
+  });
+});
+
+/** Write one host-sampler-shaped metric record — the same `{event:'metric', name, value, timestamp}` shape
+ *  `telemetry-summary-io.mjs#readHostToday` filters for. */
+function metricLine(name, value, timestamp) {
+  return JSON.stringify({ event: 'metric', name, value, timestamp }) + '\n';
+}
+
+describe('readLatestLoad + resolveLoadAdmission (real fixture fs, injectable root — #4076)', () => {
+  let telemetryRoot;
+  let dayKey;
+  const NOW = new Date('2026-09-25T13:00:00.000Z');
+
+  beforeEach(() => {
+    telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-test-'));
+    dayKey = utcDayKey(NOW);
+  });
+  afterEach(() => { rmSync(telemetryRoot, { recursive: true, force: true }); });
+
+  it('reads the LATEST sample of each metric — later timestamp wins even if it appears earlier in the file', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    writeFileSync(file, [
+      metricLine('host.cpu.load1', 20, '2026-09-25T13:00:30.000Z'), // later timestamp, written FIRST
+      metricLine('host.cpu.load1', 5, '2026-09-25T13:00:00.000Z'),
+      metricLine('host.cpu.count', 12, '2026-09-25T13:00:00.000Z'),
+      metricLine('host.cpu.busy_pct', 90, '2026-09-25T13:00:30.000Z'), // a different metric — must not leak in
+    ].join(''));
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW })).toEqual({ load1: 20, cores: 12 });
+  });
+
+  it('a missing day file reads as {load1:null, cores:null} — not a read error', () => {
+    expect(readLatestLoad({ root: telemetryRoot, now: NOW })).toEqual({ load1: null, cores: null });
+  });
+
+  it('THE LIVE BEFORE/AFTER CONTRACT: the SAME real sampled load1/cores reading is admitted under one threshold and held under another — proves the gate reacts to the actual numbers, not a canned verdict', () => {
+    const file = join(telemetryRoot, `${dayKey}.jsonl`);
+    // A real reading captured off this machine's own host-sampler on 2026-09-25 (see readLatestLoad's own doc
+    // comment) — not a synthetic round number, so this is the SAME shape of number the live CLI proof uses.
+    writeFileSync(file, [
+      metricLine('host.cpu.load1', 8.5009765625, '2026-09-25T13:04:57.144Z'),
+      metricLine('host.cpu.count', 12, '2026-09-25T13:04:57.144Z'),
+    ].join(''));
+    const before = resolveLoadAdmission({ env: {}, root: telemetryRoot, now: NOW }); // default threshold (1.5/core)
+    expect(before).toMatchObject({ held: false, load1: 8.5009765625, cores: 12 });
+    expect(before.perCore).toBeCloseTo(0.7084, 3);
+    // AFTER: the identical real reading, only the threshold config changed (a machine dialing WE_LOAD_ADMISSION_
+    // MAX_PER_CORE down past today's own real ratio) — now HELD, off the exact same numbers.
+    const after = resolveLoadAdmission({ env: { [LOAD_ADMISSION_MAX_PER_CORE_ENV]: '0.5' }, root: telemetryRoot, now: NOW });
+    expect(after).toMatchObject({ held: true, load1: 8.5009765625, cores: 12, maxPerCore: 0.5 });
+  });
+
+  it('WE_LOAD_ADMISSION=off bypasses the read entirely (admits, no fixture file needed)', () => {
+    const r = resolveLoadAdmission({ env: { [LOAD_ADMISSION_SWITCH_ENV]: 'off' }, root: telemetryRoot, now: NOW });
+    expect(r).toEqual({ held: false, load1: null, cores: null, perCore: null, maxPerCore: DEFAULT_LOAD_ADMISSION_MAX_PER_CORE, bypassed: 'off' });
+  });
+
+  it('CI=true bypasses the read entirely (admits — a CI runner is its own machine)', () => {
+    const r = resolveLoadAdmission({ env: { CI: 'true' }, root: telemetryRoot, now: NOW });
+    expect(r.held).toBe(false);
+    expect(r.bypassed).toBe('ci');
+  });
+});
+
+describe('the `load-status` CLI mode as a real process (#4076)', () => {
+  it('prints the admitted/held verdict as JSON, driven entirely by --load-root + --max-per-core (no shared pool needed)', () => {
+    const telemetryRoot = mkdtempSync(join(tmpdir(), 'load-admission-cli-test-'));
+    try {
+      const dayKey = utcDayKey(new Date());
+      writeFileSync(join(telemetryRoot, `${dayKey}.jsonl`), [
+        metricLine('host.cpu.load1', 10, new Date().toISOString()),
+        metricLine('host.cpu.count', 4, new Date().toISOString()),
+      ].join(''));
+      const env = { ...process.env }; delete env.CI; delete env.WE_LOAD_ADMISSION;
+      const admitted = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--max-per-core=3'], { encoding: 'utf8', env }));
+      expect(admitted).toEqual({ held: false, load1: 10, cores: 4, perCore: 2.5, maxPerCore: 3 });
+      const held = JSON.parse(execFileSync(process.execPath, [CLI, 'load-status', '--json', `--load-root=${telemetryRoot}`, '--max-per-core=2'], { encoding: 'utf8', env }));
+      expect(held).toEqual({ held: true, load1: 10, cores: 4, perCore: 2.5, maxPerCore: 2 });
+    } finally {
+      rmSync(telemetryRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -53,6 +53,8 @@ import { PR_VIEW_FIELDS, prViewFileName } from '../lib/pr-view-transport.mjs';
 import { defaultOriginRepo } from './record-verdict-io.mjs';
 import { REVIEW_EFFECTS } from './review-pr.mjs';
 import { isValidRunId } from './run-record.mjs';
+// mechanical-dispatcher — the `AWAITING_ADVISORY_CLEAR` sink's own label name, imported rather than restated.
+import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 
 export { PR_VIEW_FIELDS, prViewFileName };
 
@@ -438,13 +440,18 @@ export function isPreWriteRefusal(text) {
 /**
  * THE SINKS, bound to a repo root and an output channel.
  *
- * @param {{root?: string, out?: (line: string) => void, runNode?: Function, postComment?: Function, labelProvider?: object, json?: boolean}} [o] -
+ * @param {{root?: string, out?: (line: string) => void, runNode?: Function, postComment?: Function, labelProvider?: object,
+ *   json?: boolean, readLabels?: Function, setLabels?: Function}} [o] -
  *   `runNode` is the injectable subprocess runner (`(argv) => stdout`), so the label sink is testable without
  *   `gh`; `postComment` is the injectable `(repo, pr, body) => void` the `advise` sink posts through (#xlw02hw),
- *   so it too is testable without `gh` — defaults to `createGhProvider().postComment`. `json` is STDOUT-PURITY
- *   FOR THE NOTICE SINK ONLY (see the default `out` below) — a caller building sinks for a `--json` invocation
- *   passes `json: true` so the sink's default writer moves off stdout; every other sink here is unaffected
- *   because none of them write to stdout at all.
+ *   so it too is testable without `gh` — defaults to `createGhProvider().postComment`. `readLabels` (`(repo, pr)
+ *   => Array`) and `setLabels` (`(repo, pr, {add, remove}) => void`) are the mechanical-dispatcher lane's
+ *   `AWAITING_ADVISORY_CLEAR` sink's own two primitives, same reason and same default
+ *   (`createGhProvider().readLabels`/`.setLabels`) — injected rather than reaching for `createGhProvider()`
+ *   inline, so that sink is testable without `gh` too. `json` is STDOUT-PURITY FOR THE NOTICE SINK ONLY (see the
+ *   default `out` below) — a caller building sinks for a `--json` invocation passes `json: true` so the sink's
+ *   default writer moves off stdout; every other sink here is unaffected because none of them write to stdout
+ *   at all.
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
  */
 export function createReviewPrSinks({
@@ -474,6 +481,9 @@ export function createReviewPrSinks({
   // The forge port the ADVISORY_LABEL sink reads live PR state and writes labels through — injectable so the sink
   // is testable with no `gh`, exactly like `postComment` above. Defaults to the same real provider.
   labelProvider = createGhProvider(),
+  // mechanical-dispatcher — the `AWAITING_ADVISORY_CLEAR` sink's own two primitives (see the header note above).
+  readLabels = createGhProvider().readLabels,
+  setLabels = createGhProvider().setLabels,
 } = {}) {
   return {
     // ── 0. THE COMMENT BODY, staged locally. Deterministic path, deterministic bytes → safe to redo. ────────
@@ -652,6 +662,25 @@ export function createReviewPrSinks({
       if (plan.add) labelProvider.ensureLabel(payload.repo, plan.add, ADVISORY_LABEL_META[plan.add]);
       labelProvider.setLabels(payload.repo, payload.pr, { add: plan.add ?? undefined, remove: plan.remove });
       return { applied: true, added: plan.add, removed: plan.remove };
+    },
+    // ── `advise`'s AWAITING_ADVISORY_CLEAR — the mechanical flip of `review:awaiting-advisory` (mechanical-
+    // dispatcher lane). Declared ONLY ever reached AFTER `ADVISORY_NOTE` above has actually landed (see the
+    // ordering note on that effect in `review-pr.mjs`'s `advise` step) — this sink's own job is narrower still:
+    // re-read the PR's LIVE labels right before writing (the same "narrow the removal to what is actually
+    // there" discipline `we:scripts/review-set-label.mjs#presentRemoveLabels` uses), because `gh pr edit
+    // --remove-label` ERRORS on a label the PR does not carry rather than no-op'ing. A live miss (the label was
+    // already cleared by an earlier attempt, or never applied at all) is therefore treated as ALREADY the
+    // desired end state, not a failure — which is what makes this effect genuinely safe to mark `idempotent:
+    // true` above. Never `we:scripts/review-set-label.mjs`: that single home always couples a comment with a
+    // full verdict label-swap (#2644), and this is a bare removal with no verdict attached, exactly the same
+    // reason `ADVISORY_NOTE` reuses `createGhProvider` directly instead.
+    [REVIEW_EFFECTS.AWAITING_ADVISORY_CLEAR]: async (payload) => {
+      const live = readLabels(payload.repo, payload.pr);
+      if (!hasReviewLabel(live, REVIEW_LABELS.awaitingAdvisory)) {
+        return { cleared: false, alreadyAbsent: true };
+      }
+      setLabels(payload.repo, payload.pr, { remove: [REVIEW_LABELS.awaitingAdvisory] });
+      return { cleared: true };
     },
   };
 }

@@ -28,6 +28,14 @@
 	     lane-pool-health-watch). Starting the Dispatcher WITHOUT these four skipped would duplicate every one
 	     of them. If a listed daemon is ever retired, drop its --skip-pass flag here so the Dispatcher resumes
 	     covering it.
+	  4. CONVEYOR_STATE_ROOT (#4052, Ruling #3681 Fork 4 condition (iii)) PINS the conveyor's session-local
+	     queue (we:scripts/conveyor/queue-store.mjs) and the tracked scorecard store
+	     (we:scripts/conveyor/run-scorecard-store.mjs) to the OPERATOR'S OWN primary checkout, not this
+	     Dispatcher clone's own `.conveyor/` — without it, this daemon would read/write the clone's own copies,
+	     which is exactly the state fork this plist is not installed until #4052 lands. Point it at the
+	     operator's primary checkout below (never a daemon clone — the primary is the one tree no self-syncing
+	     daemon ever rebuilds, see the Fork 4(i) primary guard); replace the value if the operator's checkout
+	     moves.
 	-->
 	<key>Label</key>
 	<string>com.we.dispatcher</string>
@@ -52,6 +60,8 @@
 		<string>&lt;installation-id&gt;</string>
 		<key>WE_GITHUB_APP_PRIVATE_KEY_PATH</key>
 		<string>&lt;path-to-private-key.pem&gt;</string>
+		<key>CONVEYOR_STATE_ROOT</key>
+		<string>/Users/nicolasgilbert/workspace/webeverything</string>
 	</dict>
 	<key>WorkingDirectory</key>
 	<string>/Users/nicolasgilbert/workspace/wev-review-daemon</string>

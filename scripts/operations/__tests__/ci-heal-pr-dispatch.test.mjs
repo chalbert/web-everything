@@ -113,6 +113,22 @@ describe('dispatchCiHeal (#3852)', () => {
     expect(calls).toHaveLength(0);
   });
 
+  // #x0mn6x0 (epic #4075/#3383) — live incident 2026-09-25: PRs #2653/#2636/#2635 named no backlog item, and
+  // `resolvePrWorkUnit`'s own diff-derived fallback came back empty too (a real `gh` hiccup in the dispatching
+  // daemon's own checkout), so `runReconcileCiHealDispatch` handed `dispatchCiHeal` a genuinely empty
+  // `planned.scope`. Before this fix `SCOPE` was REQUIRED (not in `fillBrief`'s `optionalNames`), so this threw
+  // `dispatch-lane: no value for the brief placeholder {{SCOPE}}` deep inside — never reaching the sink, and
+  // (one level up, in `runReconcileCiHealDispatch`'s own per-entry `catch`) surfacing only as an opaque
+  // `dispatch-failed` refusal that consumed the lane popped for that entry. A red PR with no resolvable scope
+  // must still get SOME ci-heal attempt (an honestly UNFENCED one) rather than never getting one at all.
+  it('#x0mn6x0 — an empty scope (no item, nothing derivable from the diff either) fills SCOPE blank instead of throwing', async () => {
+    const { calls, sinks } = recordingSink();
+    const out = await dispatchCiHeal({ ...PLANNED, scope: [] }, { readBrief: () => TEMPLATE, sinks });
+    expect(calls[0].prompt).toBe(`heal #2638 pr=743 ref=lane/2638-some-slug lane=9 slug=${calls[0].sessionSlug} scope= why=red-ci`);
+    expect(calls[0].scope).toEqual([]);
+    expect(out.agentId).toBe('agent-1');
+  });
+
   it('the real fix-agent-ci-brief.md is fully filled: no required token is left behind', async () => {
     const { calls, sinks } = recordingSink();
     const real = readFileSync(briefPath(REPO_ROOT, 'ci-heal'), 'utf8');
@@ -294,5 +310,23 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
     });
     expect(dispatchCalls).toEqual([]);
     expect(result.refusals).toEqual([{ pr: 50, kind: 'no-lane', why: expect.stringContaining('PR #50') }]);
+  });
+
+  // #x0mn6x0 (epic #4075/#3383) — LIVE INCIDENT 2026-09-25: `reconcile-core.mjs#planReconcile`'s own outright
+  // refusals (a PR never even offered as a `kind:'ci-heal'` dispatch entry — e.g. PR #2635's `owed-ci-rerun`)
+  // used to be collapsed to `reconcileRefusals:<count>` here and nowhere else ever saw the reasons.
+  // `reconcileRefusalDetails` is the SAME `reconciled.refusals` array, handed up unchanged and additively (the
+  // pre-existing `reconcileRefusals` count stays exactly as it was — asserted below too).
+  it('reconcileRefusalDetails carries the real reconcile-layer refusal objects, additively alongside the existing count', async () => {
+    const result = await runReconcileCiHealDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({
+        dispatch: [],
+        refusals: [{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }],
+      }),
+      checkStaleness: FRESH,
+    });
+    expect(result.reconcileRefusals).toBe(1);
+    expect(result.reconcileRefusalDetails).toEqual([{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }]);
   });
 });

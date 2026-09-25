@@ -424,3 +424,36 @@ How each slice (a child of this item) graduates, per the statute
   (time-boxed to this item's own delivery), but worth a fresh card: the lane pool's `--adopt` exclusivity
   guarantee (#2997) did not hold for `lane-27` under concurrent load, and nothing currently stops two sessions
   from building the same unclaimed item in parallel before either claims it.
+
+- **2026-09-24/25 (#3892 lane-collision — a second concurrent duplicate, closed in favor of the better PR).**
+  Built #3892 (`we:scripts/operations/restart-runner.mjs` + `we:scripts/operations/priority-sync.mjs`, same
+  shape as the precedent this note follows: #3865's own collision, PR #2633) in `lane-27`, acquired with
+  `--adopt`. Mid-build, a DIFFERENT concurrent session independently claimed and rebuilt the same lane,
+  committing its own unrelated #3865 leftover work (`b96ba461e`, "Graduate #3720's remainder...") on top of
+  this session's `main` ref WHILE this session's own full test suite was running — so this session's own
+  commit landed with that unrelated commit as its parent by the time `git commit` ran, and the PR opened from
+  it (`#2630`) carried both changesets bundled together. Caught before land by re-diffing the pushed branch
+  against `origin/main` and noticing files (`we:scripts/land-advance-hook.mjs`, etc.) outside this item's own
+  `scope:` list. Fixed by cherry-picking only this session's own commit onto a clean `origin/main` in an
+  isolated scratch clone (outside any lane, so no further collision risk) and force-pushing that corrected
+  single-commit history to `lane/3892-*` — the lane itself was left untouched throughout (by the time this
+  was noticed, `lane-27` had ALREADY been reclaimed by yet a THIRD concurrent process, confirming it was
+  never safe to touch further).
+
+  Separately, `gh pr list` surfaced that a wholly independent session (different actor id) had ALSO built
+  #3892 from the same snapshot, as PR #2628 — fully green (`test`, `smoke`, all four shards), and its fix for
+  `we:scripts/operations/__tests__/priority-sync.test.mjs`'s real-tracker-card gap (main's own `#3383` card
+  has no `## Priority order` section — the branch's copy does, from weeks of live dogfooding) is better than
+  this session's own: a hermetic fixture (`we:scripts/operations/__fixtures__/priority-sync/3383-priority-order.md`,
+  byte-trimmed from the same `600acc14f` snapshot) rather than a skip pending a follow-up card. 184/184 green
+  there vs 183/184 + 1 skip here. Per the #2633 precedent (close the redundant/inferior duplicate rather than
+  land it), this session's own PR (`#2630`, now force-pushed clean) was closed with a comment pointing at
+  #2628.
+
+  One piece was worth keeping regardless of which PR lands: #2628's fixture makes the TEST hermetic but does
+  nothing for the real card, so `we:scripts/operations/priority-sync.mjs --apply` still cannot run for real
+  on `main`'s own `#3383` card (it refuses outright with no section to sync into) — filed as
+  `we:backlog/4150-*` (`blockedBy`: none, needs a real operator judgment call about Health-chain/Delegation
+  membership this port must not invent unaided). This item (`#3892`) is left `status: open` for whichever PR
+  (`#2628`) actually lands; this session does not resolve it, per #105 (claim/resolve tracks landed status,
+  not which session did the work).

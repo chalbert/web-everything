@@ -105,7 +105,7 @@
 import { parseSessionSlug } from './session-slug.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -113,8 +113,22 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
-import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion } from '../operations/completion-store.mjs';
+import {
+  applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
+  tryReadCompletion, writeCompletion,
+} from '../operations/completion-store.mjs';
+import {
+  deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
+} from '../operations/delivery-report-store.mjs';
+import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
+import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
+// #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
+// binds `blocked-on-infra` on, imported (never re-declared) so the reaper and the reconciler can never disagree
+// about how long a `blocked-on-infra` outcome stays "not really done yet". No circular import: `reconcile-core.mjs`
+// only ever mentions this file in prose (its own header, re: `hung-session.mjs`'s shared detector), never imports it.
+import { INFRA_RETRY_COOLOFF_MS } from './reconcile-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -193,8 +207,16 @@ export function sessionTarget(name) {
 
 /** The `outcome` a backstop-written completion record carries — deliberately distinct from every REAL
  *  self-reported outcome (`blocked-on-infra`, a review verdict, …) so a reader can always tell "the dispatched
- *  agent said this itself" apart from "the reaper concluded this on the agent's behalf, after the fact". */
+ *  agent said this itself" apart from "the reaper concluded this on the agent's behalf, after the fact".
+ *  {@link BLOCKED_ON_INFRA_OUTCOME} is the ONE exception — see {@link transcriptShowsIntendedBlockedOnInfra}'s
+ *  own doc for why a backstop write is sometimes minted with that outcome instead of this one. */
 export const UNREPORTED_EXIT_OUTCOME = 'unreported-exit';
+
+/** The SAME literal `reconcile-core.mjs#markSelfReportedDone` and `makeCompletionResolver` (this file, above)
+ *  already match on — re-declared here (never imported; no shared constants module exists for this one string
+ *  today) so {@link planBackstopCompletion}'s own backstop write can mint the SAME value a genuine self-report
+ *  would have, when the transcript shows that is what actually happened. See {@link transcriptShowsIntendedBlockedOnInfra}. */
+export const BLOCKED_ON_INFRA_OUTCOME = 'blocked-on-infra';
 
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
@@ -229,16 +251,106 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
  *   own return shape, or `null` when nothing is on disk yet.
  * @param {() => string} [now] - injectable ISO-8601 clock (mirrors every other pure-ish constructor in this
  *   codebase's completion-record family).
+ * @param {boolean} [blockedOnInfra] - live incident (PR #2647/#2625, 2026-09-25): a session can crash AFTER
+ *   deciding it is blocked on infra but BEFORE the `completion-cli.mjs report --outcome=blocked-on-infra` call
+ *   itself ever runs — its own transcript says one thing, its completion record (or lack of one) says another.
+ *   Writing the generic {@link UNREPORTED_EXIT_OUTCOME} in that case throws away a real, recoverable signal:
+ *   `reconcile-core.mjs#markSelfReportedDone`'s 15-minute infra-retry cool-off only ever keys on the LITERAL
+ *   `blocked-on-infra` outcome, so a session's own stated cause is lost the moment this reaper backstops it
+ *   with the wrong label. `false` (the default) is byte-identical to this function's pre-existing behavior —
+ *   the CALLER ({@link runSessionReaperPass}, via {@link transcriptShowsIntendedBlockedOnInfra}) decides this;
+ *   this function stays pure and takes the verdict as a plain boolean, never touching a transcript itself.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString()) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
-  return applyCompletionUpdate(base, { status: 'done', outcome: UNREPORTED_EXIT_OUTCOME }, now);
+  const outcome = blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME;
+  return applyCompletionUpdate(base, { status: 'done', outcome }, now);
+}
+
+/** How many transcript tail lines / bytes / chars-per-field {@link transcriptShowsIntendedBlockedOnInfra} reads
+ *  — generous relative to `hung-session.mjs`'s own `READ_TAIL_LINES`/`READ_MAX_BYTES` (a crash can leave a
+ *  longer trailing thought than a routine liveness check needs), still a BOUNDED read, never the whole file. */
+const BLOCKED_ON_INFRA_TAIL_LINES = 60;
+const BLOCKED_ON_INFRA_MAX_BYTES = 600_000;
+const BLOCKED_ON_INFRA_FIELD_MAX = 4000;
+
+/** Matches the phrase a review/fix agent brief instructs an agent to self-report verbatim
+ *  (`skills-src/review/review-agent-brief.md`: "report done on infra failure … outcome=blocked-on-infra") —
+ *  case-insensitive, tolerant of a hyphen or a space (`blocked on infra`), since a crashing agent's own final
+ *  words are prose, not guaranteed to be the exact CLI flag spelling. */
+const BLOCKED_ON_INFRA_TEXT_RE = /blocked[- ]on[- ]infra/i;
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#transcriptShowsIntendedBlockedOnInfra — live incident (PR #2647/#2625,
+ * 2026-09-25): a review/fix session can decide it is blocked on infra (state that in its own transcript, or
+ * even attempt the `completion-cli.mjs report --outcome=blocked-on-infra` call) and then crash/exit before that
+ * write durably lands — the SAME crash-before-self-report gap {@link planBackstopCompletion}'s own header
+ * documents for `status: done` generally, specialized here for the ONE outcome that changes downstream
+ * behavior: `reconcile-core.mjs#markSelfReportedDone` holds a `blocked-on-infra` outcome to its 15-minute
+ * cool-off before treating the session as finished, so the PR is retried once the (transient) infra recovers —
+ * a `blocked-on-infra` intent silently downgraded to the generic {@link UNREPORTED_EXIT_OUTCOME} loses that
+ * cool-off/retry behavior entirely, exactly the loss this function exists to prevent.
+ *
+ * READS THE SESSION'S OWN TRANSCRIPT, bounded tail only ({@link BLOCKED_ON_INFRA_TAIL_LINES}/
+ * {@link BLOCKED_ON_INFRA_MAX_BYTES}), reusing `we:skills-src/inspect-agent-health/agent-health.mjs`'s already-
+ * tested `tailLines`/`summarizeEntry` (the SAME pair `hung-session.mjs#readHungInfo` uses — WIDEN, never grow a
+ * private second reader) and `we:scripts/operations/agent-usage-report.mjs#resolveSessionTranscript` for the
+ * path. Scans, NEWEST first, every `text`/`thinking` block for the phrase (a crashing agent's own stated
+ * conclusion) and every `tool_use` block's raw input for the phrase (an attempted-but-never-completed
+ * `completion-cli.mjs report --outcome=blocked-on-infra` call — the input string carries the flag literally).
+ * The FIRST match wins; there is no need to scan past the newest evidence.
+ *
+ * Any failure — no `cwd`/`sessionId` on the row, no transcript found, an unreadable file — answers `false`,
+ * never a guess: this function only ever UPGRADES a backstop write from the generic outcome to the specific
+ * one, so "unknown" must default to the SAME behavior as before this function existed, not to a fabricated
+ * `blocked-on-infra` a reader would then wrongly hold to a cool-off that never actually applied.
+ * @param {{cwd?:string, sessionId?:string}|null|undefined} session
+ * @param {{resolveTranscript?:Function, tailLinesFn?:Function, summarizeEntryFn?:Function}} [io]
+ * @returns {boolean}
+ */
+export function transcriptShowsIntendedBlockedOnInfra(session, {
+  resolveTranscript = resolveSessionTranscript,
+  tailLinesFn = tailLines,
+  summarizeEntryFn = summarizeEntry,
+} = {}) {
+  const cwd = session?.cwd, sessionId = session?.sessionId;
+  if (!cwd || !sessionId) return false;
+  let file;
+  try {
+    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return false; // no transcript found — never guess
+  }
+  let lines;
+  try {
+    ({ lines } = tailLinesFn(file, BLOCKED_ON_INFRA_TAIL_LINES, BLOCKED_ON_INFRA_MAX_BYTES));
+  } catch {
+    return false; // unreadable transcript — never guess
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry;
+    try {
+      entry = summarizeEntryFn(lines[i], BLOCKED_ON_INFRA_FIELD_MAX);
+    } catch {
+      continue; // one unparseable line never aborts the scan
+    }
+    // `entry.kind === 'assistant'` guards the text/thinking match — checked live against a real transcript
+    // (PR #2647's own review-2647 sessions): the injected review-agent BRIEF (a `user`-role entry, the very
+    // first line of every dispatch) quotes this exact phrase as an INSTRUCTION ("report … outcome=blocked-on-
+    // infra"), which would otherwise false-positive on any short-lived crash whose tail still includes it. A
+    // `tool_use` block needs no such guard — only an assistant ever emits one.
+    for (const block of entry?.blocks ?? []) {
+      if (entry.kind === 'assistant' && (block.kind === 'text' || block.kind === 'thinking') && BLOCKED_ON_INFRA_TEXT_RE.test(block.text ?? '')) return true;
+      if (block.kind === 'tool_use' && BLOCKED_ON_INFRA_TEXT_RE.test(block.input ?? '')) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -497,15 +609,36 @@ export function makeGroundTruthResolver({
  * is an exact match, never a prefix guess). `done: true` iff the record's `status` is `'done'`; a missing
  * record, an invalid slug (`completionPath` refuses one — e.g. an interactive session's free-text name), or
  * any read failure all answer `null` (unknown) — NEVER a guess, matching every other resolver in this file.
- * @param {{dir?:string}} [io]
+ *
+ * #2588/review-loops (epic #3383/#4075) — `outcome: 'blocked-on-infra'` is held to the SAME
+ * {@link INFRA_RETRY_COOLOFF_MS} cool-off `reconcile-core.mjs#markSelfReportedDone` already applies to that
+ * exact outcome, and for the exact reason stated there: a persistent outage must not be hammered by a fresh
+ * agent every tick, and a fresh dispatch must not be misread as the OLD one's completion. Before this fix, this
+ * resolver read `status: 'done'` alone and reaped (stopped) the session immediately regardless of `outcome` —
+ * live-caught: a review session that reported `blocked-on-infra` was reaped by THIS module within one tick,
+ * which erased it from `claude agents --json` entirely, so `reconcile-core.mjs`'s liveness read never even saw
+ * a row to apply its own cool-off to, and a fresh review agent was re-dispatched roughly 2 minutes later — the
+ * reaper's premature reap defeated the cool-off `markSelfReportedDone` exists to enforce, one layer up.
+ * `done: false` during the cool-off keeps the session un-reaped (still `not-terminal` in
+ * {@link classifySessionReapWithGroundTruth}'s axis 1) so a real still-blocked outage is not treated as a
+ * finished session before the SAME window the reconciler honours has elapsed.
+ * @param {{dir?:string, now?:() => number}} [io]
  * @returns {(name:string) => ({done:boolean}|null)}
  */
-export function makeCompletionResolver({ dir } = {}) {
+export function makeCompletionResolver({ dir, now = Date.now } = {}) {
   return function completionFor(name) {
     if (typeof name !== 'string' || !name) return null;
     try {
       const record = tryReadCompletion(name, dir);
-      return record ? { done: record.status === 'done' } : null;
+      if (!record) return null;
+      if (record.status !== 'done') return { done: false };
+      if (record.outcome === 'blocked-on-infra') {
+        const updatedMs = Date.parse(record.updatedAt ?? '');
+        if (Number.isFinite(updatedMs) && now() - updatedMs < INFRA_RETRY_COOLOFF_MS) {
+          return { done: false }; // still inside the infra-retry cool-off — not reapable yet
+        }
+      }
+      return { done: true };
     } catch {
       return null; // invalid slug / unreadable record — unknown, never reap on an unreadable signal
     }
@@ -529,6 +662,365 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
     }
+  };
+}
+
+// ── RETENTION SWEEP (#4089, epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) ─────────
+// Deletes a FINISHED session's own RECORDS (its completion record, its delivery report, its now-stale
+// `claude agents` entry, plus terminal run records generally — see below) — a wholly separate axis from the
+// STOP pass above. Stopping decides "is this process still doing anything"; retention decides "has the WORK
+// this session served been over long enough that even the paper trail can go". A session can sit fully
+// stopped for weeks with every record above still on disk today — `#4082`'s own card measured 1581 job
+// entries and 92 `.operations/runs/` records live, with the delete helpers that already existed
+// (`run-store.mjs#deleteRun`) never once called.
+//
+// THE TWO INDEPENDENT PATHS, straight from the ratified statute:
+//   PATH A — confirmed-done + grace. The session's own target (its card, or its PR) is confirmed finished
+//     (resolved, or merged/closed), its introspection has run, and — once #4071 ships — its cost is rolled
+//     up; then a grace period (default 1 day) must elapse before deletion.
+//   PATH B — the ceiling safety valve. Regardless of path A, a record older than the ceiling (default 30
+//     days, mirroring Claude Code's own `cleanupPeriodDays`) is deleted anyway — the statute's own "the
+//     ceiling also covers a card that never finishes" clause, so a parked card's session records do not sit
+//     forever just because the card itself never resolves.
+// Both settings independently accept `'never'` (parsed to `null`, disabling that path outright — never a `0`
+// silently inferred from an unset value).
+
+/** 1 day — statute's own shipped grace default (path A). `WE_RETENTION_GRACE_HOURS` overrides it (in HOURS,
+ *  matching `hung-session.mjs`'s own `WE_HUNG_TRANSCRIPT_MINUTES` convention of naming the unit in the env var
+ *  itself); the literal string `'never'` disables path A. */
+export const RETENTION_GRACE_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+/** 30 days — statute's own shipped ceiling default (path B), described as mirroring the host's own Claude Code
+ *  `cleanupPeriodDays` setting (30 days as of this writing). This module has no IO surface onto that host
+ *  setting's live value (it lives outside this repo, in the CLI's own config) — the constant below is a
+ *  documented, deliberate approximation of it, not a claim of reading it live; a caller (an operator, or a
+ *  future health-daemon slice) that wants the two to actually track raises both independently, per the
+ *  statute's own wording. `WE_RETENTION_CEILING_DAYS` overrides it; `'never'` disables path B. */
+export const RETENTION_CEILING_MS_DEFAULT = 30 * 24 * 60 * 60 * 1000;
+
+function parseRetentionDurationSetting(raw, unitMs, defaultMs) {
+  if (raw === undefined) return defaultMs;
+  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'never') return null; // explicitly disabled
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n * unitMs : defaultMs; // an unparseable override never silently disables a path
+}
+
+/** `WE_RETENTION_GRACE_HOURS` → path A's grace, in ms. See {@link RETENTION_GRACE_MS_DEFAULT}. */
+export function resolveRetentionGraceMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_RETENTION_GRACE_HOURS, 60 * 60 * 1000, RETENTION_GRACE_MS_DEFAULT);
+}
+
+/** `WE_RETENTION_CEILING_DAYS` → path B's ceiling, in ms. See {@link RETENTION_CEILING_MS_DEFAULT}. */
+export function resolveRetentionCeilingMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_RETENTION_CEILING_DAYS, 24 * 60 * 60 * 1000, RETENTION_CEILING_MS_DEFAULT);
+}
+
+/**
+ * THE PURE RETENTION VERDICT for one session's records. No fs/exec/clock — every signal is injected, same
+ * discipline as {@link classifySessionReap}.
+ *
+ * `graceMs`/`ceilingMs` of `null` disables that path outright (the `'never'` setting) — checked explicitly
+ * against `null`, never a falsy check, so `0` (an operator who wants IMMEDIATE deletion once confirmed done)
+ * stays a real, distinct value from "disabled".
+ *
+ * @param {{workDone:boolean, terminalAt:number|null, introspectionDone:boolean, costRolledUp:boolean, recordAgeMs:number|null}} candidate
+ * @param {{graceMs:number|null, ceilingMs:number|null, now:number}} opts
+ * @returns {{deletable:boolean, reason:('ceiling'|'grace-after-done'|'not-yet')}}
+ */
+export function classifyRetention(candidate, { graceMs, ceilingMs, now }) {
+  const { workDone, terminalAt, introspectionDone, costRolledUp, recordAgeMs } = candidate || {};
+  // PATH B first — a safety valve independent of confirmation, so it still fires for a card that never
+  // resolves (the statute's own explicit case for this ordering).
+  if (ceilingMs !== null && typeof recordAgeMs === 'number' && Number.isFinite(recordAgeMs) && recordAgeMs >= ceilingMs) {
+    return { deletable: true, reason: 'ceiling' };
+  }
+  if (
+    workDone === true && introspectionDone === true && costRolledUp === true
+    && graceMs !== null && typeof terminalAt === 'number' && Number.isFinite(terminalAt)
+    && (now - terminalAt) >= graceMs
+  ) {
+    return { deletable: true, reason: 'grace-after-done' };
+  }
+  return { deletable: false, reason: 'not-yet' };
+}
+
+/**
+ * Item-kind retention ground truth: `workDone` iff `status: resolved` (this repo's lifecycle has no distinct
+ * `withdrawn` status today — see `we:backlog/4082-*.md`'s own Fork 1 wording versus `we:scripts/backlog.mjs`'s
+ * real status vocabulary, `open`/`active`/`preparing`/`resolved`/`parked` — so a `parked` item, which may still
+ * resume, is deliberately NOT treated as done here; conservatively under-deleting is the safe direction for a
+ * destructive sweep). `terminalAt` is the item's own `dateResolved` field, parsed. A missing card, an unreadable
+ * one, or a resolved card with no parseable `dateResolved`, all answer `workDone:false`/`terminalAt:null` —
+ * never a guess that could delete records for work that is not actually confirmed over.
+ * @param {string} id
+ * @param {{backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function}} [io]
+ * @returns {{workDone:boolean, terminalAt:number|null}}
+ */
+export function retentionGroundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_DIR, readdirSyncFn = readdirSync, readFileSyncFn = readFileSync } = {}) {
+  let entries;
+  try {
+    entries = readdirSyncFn(backlogDir);
+  } catch {
+    return { workDone: false, terminalAt: null };
+  }
+  const fname = entries.find((f) => f.endsWith('.md') && (f === `${id}.md` || f.startsWith(`${id}-`)));
+  if (!fname) return { workDone: false, terminalAt: null };
+  try {
+    const text = readFileSyncFn(join(backlogDir, fname), 'utf8');
+    if (readField(text, 'status') !== 'resolved') return { workDone: false, terminalAt: null };
+    const resolvedAt = Date.parse(readField(text, 'dateResolved') ?? '');
+    return { workDone: true, terminalAt: Number.isFinite(resolvedAt) ? resolvedAt : null };
+  } catch {
+    return { workDone: false, terminalAt: null };
+  }
+}
+
+/**
+ * PR-kind retention ground truth: `workDone` iff the PR is MERGED or CLOSED (the statute's own "merged or
+ * closed" wording — wider than {@link groundTruthForPr}'s "merged only", which the STOP/reap axis keeps
+ * unchanged on purpose: a closed-without-merge PR should not stop a still-working session prematurely, but its
+ * records are still safe to eventually clean up). `terminalAt` is `mergedAt` (when merged) or `closedAt`
+ * (when closed unmerged), parsed. Any failure (no `gh`, not found, timeout) answers unknown, never a guess.
+ * @param {string|number} pr
+ * @param {{exec?:Function, env?:object, repo?:string}} [io]
+ * @returns {{workDone:boolean, terminalAt:number|null}|null}
+ */
+export function retentionGroundTruthForPr(pr, { exec = execFileSync, env = process.env, repo = 'we' } = {}) {
+  const slug = Object.hasOwn(CONSTELLATION_REPOS, repo) ? CONSTELLATION_REPOS[repo].slug : null;
+  if (!slug) return null;
+  try {
+    const out = exec('gh', ['pr', 'view', String(pr), '--repo', slug, '--json', 'state,mergedAt,closedAt'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 1024 * 1024,
+      timeout: prListTimeoutMs(env),
+      killSignal: 'SIGKILL',
+    });
+    const parsed = JSON.parse(String(out || '{}'));
+    const state = String(parsed?.state || '').toUpperCase();
+    const workDone = state === 'MERGED' || state === 'CLOSED' || Boolean(parsed?.mergedAt);
+    const at = Date.parse(parsed?.mergedAt || parsed?.closedAt || '');
+    return { workDone, terminalAt: workDone && Number.isFinite(at) ? at : null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a `retentionGroundTruthFor` resolver for {@link runRetentionSweepPass}, mirroring
+ * {@link makeGroundTruthResolver}'s routing/caching/bound-`gh`-calls shape exactly (a SEPARATE cache and
+ * counter — this pass and the stop pass never share a tick, but keeping the two independent means a change to
+ * one's cost bound can never silently affect the other's).
+ * @param {{exec?:Function, env?:object, backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function, maxPrViewCalls?:number}} [io]
+ */
+export function makeRetentionGroundTruthResolver({
+  exec = execFileSync,
+  env = process.env,
+  backlogDir = DEFAULT_BACKLOG_DIR,
+  readdirSyncFn = readdirSync,
+  readFileSyncFn = readFileSync,
+  maxPrViewCalls = MAX_GH_PR_VIEW_CALLS_PER_TICK,
+} = {}) {
+  const cache = new Map();
+  let prViewCalls = 0;
+  return function retentionGroundTruthFor(target) {
+    const repo = target.repo === undefined ? 'we' : target.repo;
+    const key = target.kind === 'pr' ? `pr:${repo}:${target.id}` : `${target.kind}:${target.id}`;
+    if (cache.has(key)) return cache.get(key);
+    let result;
+    if (target.kind === 'item') {
+      result = retentionGroundTruthForItem(target.id, { backlogDir, readdirSyncFn, readFileSyncFn });
+    } else if (target.kind === 'pr') {
+      if (prViewCalls >= maxPrViewCalls) {
+        result = null;
+      } else {
+        prViewCalls++;
+        result = retentionGroundTruthForPr(target.id, { exec, env, repo: target.repo });
+      }
+    } else {
+      result = null;
+    }
+    cache.set(key, result);
+    return result;
+  };
+}
+
+/**
+ * Statute clause 1's introspection gate ([#automated-session-introspection], built by `#3477`, still `status:
+ * open` as of this file's own writing — NOT yet on `main`). Mirrors this file's own `(once #4071 exists)`
+ * precedent for the cost gate below: while the feature the gate depends on does not exist, the gate cannot
+ * block on a signal that cannot be produced, so it defaults PERMISSIVE (`true`) — introspection is also off by
+ * default (`WE_INTROSPECTION_ENABLED`, unset), so "has run" is vacuously true when it was never asked to run
+ * at all. The moment an operator turns introspection ON ahead of `#3477` landing, this flips to FAIL-CLOSED
+ * (`false`) rather than silently keep permitting deletion for a signal now expected to exist but that this
+ * file still has no way to actually read — never guess in the direction that enables a destructive sweep.
+ * @param {{env?:object}} [io]
+ * @returns {(session:string) => boolean}
+ */
+export function makeIntrospectionDoneResolver({ env = process.env } = {}) {
+  const enabled = Boolean(env.WE_INTROSPECTION_ENABLED) && env.WE_INTROSPECTION_ENABLED !== '0';
+  return function introspectionDoneFor() {
+    return !enabled; // see doc above: off (the default) ⇒ vacuously true; on ⇒ fail-closed until #3477 lands a real signal
+  };
+}
+
+/**
+ * Statute clause 1's cost-rollup gate — explicit deferral, verbatim from the ratified text: "This condition
+ * applies only once #4071 exists. Until then, conditions 1 and 2 are enough." `#4071` (telemetry) is not yet
+ * built, so this always answers `true` today; a `#4071` follow-on card wires this to a real rollup check, not
+ * a new ruling. Kept as its own named resolver (rather than inlined `true`) so that follow-on card has exactly
+ * one call site to change.
+ * @returns {(session:string) => boolean}
+ */
+export function makeCostRolledUpResolver() {
+  return function costRolledUpFor() {
+    return true; // #4071 does not exist yet — statute's own explicit deferral, not a guess
+  };
+}
+
+/**
+ * `claude rm <id>` — deregisters an already-stopped background session entirely (distinct from `claude stop`,
+ * which only ends it — see `we:scripts/operations/dispatch-abort.mjs#stopSession`'s own doc for that
+ * distinction, mirrored here rather than re-imported since this file's scope for `#4089` does not touch
+ * `dispatch-abort.mjs`). An already-gone handle is benign (`claude rm` reports the same "No job matching" shape
+ * `claude stop` does), matching every other best-effort stop/rm call in this file.
+ * @param {{handle:string, exec?:Function}} o
+ * @returns {{removed:true, alreadyGone:boolean, output:string}}
+ */
+export function rmSessionRecord({ handle, exec = execFileSync } = {}) {
+  const id = normalizeHandle(handle);
+  if (!id) throw new Error('session-reaper: rmSessionRecord needs a handle');
+  try {
+    const output = String(exec('claude', ['rm', id], { encoding: 'utf8', timeout: 30_000 }));
+    return { removed: true, alreadyGone: false, output };
+  } catch (e) {
+    const full = String(e?.stderr ?? e?.message ?? e);
+    if (/No job matching/i.test(full)) return { removed: true, alreadyGone: true, output: full.split('\n')[0] };
+    throw new Error(`session-reaper: \`claude rm ${id}\` failed: ${full.split('\n')[0]}`);
+  }
+}
+
+/**
+ * THE RETENTION-SWEEP IO SHELL (#4089) — everything the CLI's retention pass does between the two session-slug
+ * record stores and the actual deletes, reusable by a resident daemon exactly like {@link runSessionReaperPass}.
+ * Candidate slugs are the UNION of every slug carrying a completion record OR a delivery report (the two
+ * session-keyed stores this file's scope covers) — a slug with only one of the two is still a real candidate
+ * (e.g. a `review-*`/`fix-*` session that only ever wrote a completion record). A slug whose `sessionTarget`
+ * cannot be derived (unknown grammar) is skipped, never guessed.
+ *
+ * The run-record axis is handled separately, by {@link pruneTerminalRuns} — see that function's own doc for
+ * why it operates on record age/terminal-state generically rather than per-session (no session back-reference
+ * exists on a generic run record).
+ *
+ * @param {{
+ *   retentionGroundTruthFor?: (target:object) => ({workDone:boolean, terminalAt:number|null}|null),
+ *   introspectionDoneFor?: (session:string) => boolean,
+ *   costRolledUpFor?: (session:string) => boolean,
+ *   graceMs?: number|null,
+ *   ceilingMs?: number|null,
+ *   now?: number,
+ *   dryRun?: boolean,
+ *   listAgents?: () => unknown[],
+ *   rm?: Function,
+ *   statFn?: Function,
+ *   deleteCompletionFn?: Function,
+ *   deleteDeliveryReportFn?: Function,
+ *   pruneRuns?: Function,
+ *   log?: (msg:string) => void,
+ * }} [o]
+ * @returns {{scanned:number, deleted:number, kept:number, runsPruned:number, wouldDelete:Array|undefined}}
+ */
+export function runRetentionSweepPass({
+  retentionGroundTruthFor = makeRetentionGroundTruthResolver({ exec: execFileSync }),
+  introspectionDoneFor = makeIntrospectionDoneResolver(),
+  costRolledUpFor = makeCostRolledUpResolver(),
+  graceMs = resolveRetentionGraceMs(),
+  ceilingMs = resolveRetentionCeilingMs(),
+  now = Date.now(),
+  dryRun = false,
+  listAgents = () => defaultListAgents({ exec: execFileSync, all: true }),
+  rm = rmSessionRecord,
+  statFn = statSync,
+  deleteCompletionFn = deleteCompletion,
+  deleteDeliveryReportFn = deleteDeliveryReport,
+  pruneRuns = pruneTerminalRuns,
+  log: logFn = log,
+} = {}) {
+  const completionDir = resolveCompletionsDir();
+  const deliveryDir = resolveDeliveryReportsDir();
+  const slugs = new Set([...listCompletionSessions(completionDir), ...listDeliveryReportSessions(deliveryDir)]);
+
+  let sessionsByName = null;
+  const findSession = (name) => {
+    if (sessionsByName === null) {
+      sessionsByName = new Map();
+      try {
+        for (const s of listAgents() ?? []) if (s && s.name) sessionsByName.set(s.name, s);
+      } catch { /* best-effort — a stale/unreadable listing just means no `claude rm` this pass */ }
+    }
+    return sessionsByName.get(name) ?? null;
+  };
+
+  let deleted = 0;
+  let kept = 0;
+  const wouldDelete = dryRun ? [] : undefined;
+
+  for (const slug of [...slugs].sort()) {
+    const target = sessionTarget(slug);
+    if (!target) { kept++; continue; } // unknown grammar — never guess
+
+    const truth = retentionGroundTruthFor(target);
+    const workDone = truth?.workDone === true;
+    const terminalAt = truth?.terminalAt ?? null;
+
+    let recordAgeMs = null;
+    for (const p of [completionPath(slug, completionDir), deliveryReportPath(slug, deliveryDir)]) {
+      try {
+        const ageMs = now - statFn(p).mtimeMs;
+        if (recordAgeMs === null || ageMs < recordAgeMs) recordAgeMs = ageMs; // youngest record wins — never
+        //   delete on the ceiling while ANY of this session's records is still fresh
+      } catch { /* that particular record doesn't exist for this slug — fine, try the other */ }
+    }
+
+    const verdict = classifyRetention(
+      { workDone, terminalAt, introspectionDone: introspectionDoneFor(slug), costRolledUp: costRolledUpFor(slug), recordAgeMs },
+      { graceMs, ceilingMs, now },
+    );
+
+    if (!verdict.deletable) { kept++; continue; }
+
+    if (dryRun) {
+      logFn(`  would delete records for ${slug} (${verdict.reason})`);
+      wouldDelete.push({ session: slug, reason: verdict.reason });
+      continue;
+    }
+
+    try { deleteCompletionFn(slug, completionDir); } catch { /* best-effort, mirrors the rest of this file */ }
+    try { deleteDeliveryReportFn(slug, deliveryDir); } catch { /* best-effort */ }
+    const stillListed = findSession(slug);
+    if (stillListed?.id) {
+      try { rm({ handle: stillListed.id, exec: execFileSync }); } catch (e) {
+        logFn(`  ⚠ ${slug}: \`claude rm\` failed: ${String(e?.message || e).split('\n')[0]}`);
+      }
+    }
+    // #2616 lane-ports registry — best-effort, item-kind targets only (a PR-kind session never owns one).
+    // Shelled rather than imported: this file's scope for `#4089` does not touch `lane-pool.mjs`.
+    if (target.kind === 'item') {
+      try { execFileSync('node', ['scripts/lane-pool.mjs', 'unmap', `--item=${target.id}`], { cwd: REPO_ROOT, stdio: 'ignore', timeout: 15_000 }); } catch { /* best-effort */ }
+    }
+    logFn(`  deleted records for ${slug} (${verdict.reason})`);
+    deleted++;
+  }
+
+  const pruneResult = pruneRuns({ maxAgeMs: ceilingMs, now, dryRun });
+
+  return {
+    scanned: slugs.size,
+    deleted: dryRun ? 0 : deleted,
+    kept,
+    runsPruned: dryRun ? 0 : pruneResult.pruned.length,
+    wouldPruneRuns: dryRun ? pruneResult.pruned : undefined,
+    wouldDelete,
   };
 }
 
@@ -631,6 +1123,7 @@ function parseFlags(argv) {
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
+ *   blockedOnInfraFor?: ((session:object) => boolean)|null,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
@@ -655,6 +1148,10 @@ export function runSessionReaperPass({
   backstopCompletion = true,
   readCompletionRecord = tryReadCompletion,
   writeCompletionRecord = writeCompletion,
+  // Live incident fix (PR #2647/#2625, 2026-09-25) — see {@link transcriptShowsIntendedBlockedOnInfra}'s own
+  // doc. Default ON, same convention as every other axis this epic ships; `null` is the rollback escape hatch
+  // (byte-identical to this file's pre-existing backstop behavior — always `UNREPORTED_EXIT_OUTCOME`).
+  blockedOnInfraFor = transcriptShowsIntendedBlockedOnInfra,
 } = {}) {
   let sessions;
   try {
@@ -700,7 +1197,11 @@ export function runSessionReaperPass({
     let backstopRecord = null;
     if (backstopCompletion) {
       try {
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name));
+        let blockedOnInfra = false;
+        if (typeof blockedOnInfraFor === 'function') {
+          try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
+        }
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra);
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -718,8 +1219,11 @@ export function runSessionReaperPass({
     if (dryRun) {
       logFn(`  would stop ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       if (backstopRecord) {
-        logFn(`  would write backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded`);
-        wouldBackstop.push({ name: session.name ?? null, outcome: UNREPORTED_EXIT_OUTCOME });
+        // #2647/#2625 fix — reports the ACTUAL outcome the record would carry, never the hardcoded generic
+        // one: `backstopRecord.outcome` is `BLOCKED_ON_INFRA_OUTCOME` when the transcript showed that was the
+        // session's own intent, {@link UNREPORTED_EXIT_OUTCOME} otherwise — see `planBackstopCompletion`'s doc.
+        logFn(`  would write backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded`);
+        wouldBackstop.push({ name: session.name ?? null, outcome: backstopRecord.outcome });
       }
       continue;
     }
@@ -727,7 +1231,7 @@ export function runSessionReaperPass({
       try {
         writeCompletionRecord(backstopRecord);
         backstopWritten++;
-        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${UNREPORTED_EXIT_OUTCOME}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
+        logFn(`  ⚑ wrote backstop completion record for ${session.name} (outcome: ${backstopRecord.outcome}) — no self-report was ever recorded before this reaper concluded it was done (${reason})`);
       } catch (e) {
         logFn(`  ⚠ ${session.name}: failed to write backstop completion record: ${String(e?.message || e).split('\n')[0]}`);
       }
@@ -795,8 +1299,16 @@ function main(argv) {
   // `--no-backstop-completion` is the same kind of rollback escape hatch, for the xbv32pg follow-up (epic
   // #3383) root-cause fix — default ON, same as every other axis this epic ships.
   const backstopCompletion = !flags['no-backstop-completion'];
+  // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
+  // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
+  // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
+  // for a caller that invokes this CLI without expecting that. A resident daemon that wants it on every tick
+  // calls {@link runRetentionSweepPass} directly (already fully daemon-usable, no CLI needed) rather than
+  // relying on this flag. Shares this CLI's own `--dry-run`.
+  const runRetention = !!flags['retention-sweep'];
 
   const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion });
+  const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -805,13 +1317,19 @@ function main(argv) {
   }
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult }, null, 2) + '\n');
   } else {
     const { scanned, stopped, alreadyGone, failures, anomalies, backstopWritten, wouldStop, wouldWriteBackstop, kept } = result;
     log(
       `session-reaper: ${scanned} session(s) listed · ` +
         `${dryRun ? `${(wouldStop ?? []).length} would stop${(wouldWriteBackstop ?? []).length ? `, ${(wouldWriteBackstop ?? []).length} would get a backstop completion record` : ''}` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}${backstopWritten ? `, ${backstopWritten} backstop completion record(s) written` : ''}`} · ${kept} kept`,
     );
+    if (retentionResult) {
+      log(
+        `session-reaper retention: ${retentionResult.scanned} session record set(s) scanned · ` +
+          `${dryRun ? `${(retentionResult.wouldDelete ?? []).length} would be deleted, ${(retentionResult.wouldPruneRuns ?? []).length} run record(s) would be pruned` : `${retentionResult.deleted} deleted, ${retentionResult.runsPruned} run record(s) pruned`} · ${retentionResult.kept} kept`,
+      );
+    }
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
   // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop

@@ -3,10 +3,13 @@ bornAs: x1ojdxq
 kind: epic
 priority: high
 parent: "3718"
-status: open
+status: resolved
 relatedTo: ["3690", "3695", "3696", "3443", "3658", "3720", "3730", "3801", "3784"]
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 dateOpened: "2026-09-19"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: none
 tags: []
 ---
 

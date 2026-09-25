@@ -1335,6 +1335,19 @@ export function buildPanelFindings(lensFindings = {}) {
  *     real mandatory defect still outranks a missing guard — the fix comes first). The per-lens `prevention-outstanding`
  *     scan is KEPT as a belt-and-suspenders fallback for callers that pass a verdict but no findings (a mandatory
  *     lens whose whole verdict IS prevention-outstanding still surfaces). Either path → `prevention-outstanding`.
+ *   - #xu2pp2m — `degradedBasis` → `needs-human` FOR EVERY NON-BLOCKING OUTCOME. Checked AFTER needs-human and
+ *     changes (a real blocking finding is still the more actionable answer, and a bounce costs nothing), and
+ *     BEFORE `prevention-outstanding`/`accept` — the two the UNATTENDED loop CLEARS mechanically
+ *     (`we:scripts/lib/review-loop-policy.mjs` auto-answers `accept` for both on the agent-addressed
+ *     `review:pending` tier). The input means "the material this panel judged could not be resolved"; a panel
+ *     that found nothing wrong with material it could not see has told us nothing, and reducing that to
+ *     `accept` is exactly what let PR #2122 merge on a review of a ZERO-BYTE diff (2026-09-12).
+ *     MEASURED ON THAT SAME RUN, and it is why this keys on the INPUT rather than on the ANSWERS: the
+ *     tool-free Codex seat reported honestly that "the missing net diff prevents a substantive review of the
+ *     changes" — an ABSTENTION — and because an abstention carries no findings, `deriveVerdict` turned it into
+ *     an accept vote. That is the tool-free-panel risk #3158 reasoned about, now measured. Recognising
+ *     abstention PROSE is not something a pure reducer can do; recognising that the material was unreadable is
+ *     deterministic, so the guard lives on that fact instead.
  *   - every MANDATORY lens verdict is `accept` AND nothing owes a guard → `accept` (the "unanimous accept lands"
  *     spec line — an advisory lens's ordinary outstanding findings are surfaced, never blocking).
  *
@@ -1346,11 +1359,13 @@ export function buildPanelFindings(lensFindings = {}) {
  * @verdicts-total — every `VERDICTS` member is handled explicitly (needs-human, changes, prevention-outstanding,
  *   accept); the `check:standards` verdict-totality gate enforces it, so a new enum member can't be dropped here.
  * @param {{lensVerdicts: Object<string, 'accept'|'changes'|'needs-human'|'prevention-outstanding'>, humanRequired?: boolean,
- *   conflict?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o - `findings` (REQUIRED) is the WHOLE
- *   panel's list (`buildPanelFindings(lensFindings)`); the prevention scan reads it, immune to per-lens verdict flattening.
+ *   conflict?: boolean, degradedBasis?: boolean, mandatoryLenses?: string[], findings: Array<object>}} o -
+ *   `findings` (REQUIRED) is the WHOLE panel's list (`buildPanelFindings(lensFindings)`); the prevention scan
+ *   reads it, immune to per-lens verdict flattening. `degradedBasis` (#xu2pp2m) defaults to `false`, so every
+ *   pre-existing caller is byte-stable.
  * @returns {'accept'|'changes'|'needs-human'|'prevention-outstanding'}
  */
-export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, mandatoryLenses = MANDATORY_LENSES, findings, bar = PREVENTION_IMPACT_BAR } = {}) {
+export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, conflict = false, degradedBasis = false, mandatoryLenses = MANDATORY_LENSES, findings, bar = PREVENTION_IMPACT_BAR } = {}) {
   if (findings === undefined) {
     throw new Error('derivePanelVerdict: `findings` is required — pass buildPanelFindings(lensFindings) (or an explicit [] to assert none). A defaulted [] silently reinstates the #2823 advisory-prevention leak on the drain path.');
   }
@@ -1368,6 +1383,12 @@ export function derivePanelVerdict({ lensVerdicts = {}, humanRequired = false, c
   }
   if (mandatoryVerdicts.some((v) => v === VERDICTS.NEEDS_HUMAN)) return VERDICTS.NEEDS_HUMAN;
   if (mandatoryVerdicts.some((v) => v === VERDICTS.CHANGES)) return VERDICTS.CHANGES;
+  // #xu2pp2m — THE MATERIAL ITSELF WAS UNREADABLE. Nothing blocking was found, but nothing blocking COULD have
+  // been found, so the only honest non-blocking answer left is "a human has to look". Positioned here and not
+  // beside `humanRequired` above on purpose: a mandatory lens that DID find a blocker still gets to say so (a
+  // bounce is more actionable than a park, and it costs nothing), while both of the outcomes that mechanically
+  // CLEAR a PR are taken off the table. See this function's own docblock for the PR #2122 measurement.
+  if (degradedBasis) return VERDICTS.NEEDS_HUMAN;
   // #2823 round-2 finding 4 — derive "the panel owes a guard" from the FINDINGS, not the per-lens verdicts (the
   // structural fix). A RESOLVED finding whose named prevention is neither captured nor filed owes a guard, whatever
   // its lens's single verdict flattened to (an advisory lens with a co-resident unresolved finding would flatten to
@@ -2122,3 +2143,60 @@ export function deriveLoopOutcome({ verdict, round = 1, cap = DEFAULT_ROUND_CAP 
  * work, and the point of the cap is to catch a loop that is not progressing, not to ration one that is.
  */
 export const DEFAULT_ROUND_CAP = 5;
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #3887 — RULE 7 OF #3690 AT `spot-check`: the independent pass keeps full COVERAGE at every supervision
+// level and moves only in DEPTH (`#delegation-trial-record-graduation`, rule 7). `full` keeps the existing
+// mandatory panel (`MANDATORY_LENSES`/`PANEL_LENSES` above) unchanged — #3850 already ratified that panel AS
+// the full-depth independent pass, and nothing here touches it. `spot-check` owns the
+// `#every-pr-gets-a-look-advisory-floor` shape instead (#3313): ONE tool-free juror, ONE round, the diff and
+// the item card, a CAPPED finding count, and — the structural half of "advisory, never a park" — STRUCTURALLY
+// NON-BLOCKING: this module records the floor's verdict and cost; it never emits a `review:*` label and is
+// never a `REVIEW_HOLD_LABELS` member (`we:scripts/lib/review-escalation.mjs`) — a review that cannot park
+// cannot cost latency (#3313's own words).
+//
+// TWO OBLIGATIONS COME WITH THE FLOOR, AND NEITHER IS OPTIONAL (#3313): a finding files a follow-up item
+// (`we:scripts/operations/review-dispatch.mjs#runFloorPass`, which drives the declared `file-item` operation),
+// and the floor's own cost and yield are measured and reported — `recordFloorRun` below is that record, kept
+// in a shape a report can fold later, the same way `panelRigorForCareLevel` above already carries the
+// mandate's OTHER standing dial (rounds/lenses/jurors) as a pure, auditable table rather than an inline
+// decision.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The floor's own finding cap (#3313 — "a capped finding count"). A small number by design: the floor's bar
+ *  is "catch the obvious", not "converge" — see the anchor's own text in `we:docs/agent/platform-decisions.md`.
+ *  Extra findings are never silently dropped: {@link recordFloorRun} reports how many it truncated. */
+export const FLOOR_MAX_FINDINGS = 3;
+
+/**
+ * RECORD one floor-depth (`spot-check`) independent-pass run — its verdict AND its cost, in one field a
+ * report can read later (Done-when #3, #3887). Pure: no fs, no clock, no process — every number arrives as
+ * data, read at whichever io edge actually ran the pass (mirrors this module's own pure contract).
+ *
+ * DELIBERATELY NOT A `VERDICTS` MEMBER. `VERDICTS` (`accept`/`changes`/`needs-human`/`prevention-outstanding`)
+ * is the BLOCKING panel's vocabulary — a floor run is structurally non-blocking (#3313) and must never be
+ * mistaken for a value `derivePanelVerdict`/`deriveLoopOutcome` would act on. `outcome` here is its own,
+ * narrower, two-value vocabulary instead.
+ *
+ * @param {object} [o]
+ * @param {Array<Finding|string>} [o.findings] - the floor juror's raw findings; capped at
+ *   {@link FLOOR_MAX_FINDINGS} — any beyond that are counted in `truncatedCount`, never silently dropped.
+ * @param {number} [o.jurorCount] - the floor's own juror count (#3313: "one tool-free juror" — default 1).
+ * @param {number} [o.rounds] - the floor's own round count (#3313: "one round" — default 1).
+ * @param {number|null} [o.tokens] - measured token cost of the pass, when the caller has it.
+ * @param {number|null} [o.wallTimeMs] - measured wall-clock cost of the pass, when the caller has it.
+ * @returns {{runKind:'floor', outcome:('clean'|'findings'), findings:ReadonlyArray, truncatedCount:number, cost:{jurorCount:number, rounds:number, tokens:(number|null), wallTimeMs:(number|null)}}}
+ */
+export function recordFloorRun({ findings = [], jurorCount = 1, rounds = 1, tokens = null, wallTimeMs = null } = {}) {
+  const list = Array.isArray(findings) ? findings : [];
+  const kept = Object.freeze(
+    list.slice(0, FLOOR_MAX_FINDINGS).map((f) => (typeof f === 'string' ? f : Object.freeze({ ...f }))),
+  );
+  return Object.freeze({
+    runKind: 'floor',
+    outcome: kept.length ? 'findings' : 'clean',
+    findings: kept,
+    truncatedCount: Math.max(0, list.length - kept.length),
+    cost: Object.freeze({ jurorCount, rounds, tokens, wallTimeMs }),
+  });
+}

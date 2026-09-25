@@ -637,6 +637,32 @@ function ensureDeps(dir) {
 // (or TTL-reclaim). See scripts/lib/lane-lease.mjs for the pure decision logic.
 const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
 
+// #4139 — the KEEP marker: `keep --lane=N` records an operator's "I looked at this finished-needs-review /
+// unknown-work lane, leave it" call, scoped to a FINGERPRINT of the lane's content at that moment (never a
+// bare flag) — see `we:scripts/lib/lane-whois-core.mjs#keepMarkerApplies`, the pure comparison this marker's
+// shape is built to feed. Lives inside `.git` for the SAME reason `LEASE_MARKER` does (never tracked, never
+// `git clean`-ed, invisible to `git status --porcelain`). A fresh `acquire`/`reclaim` reset doesn't proactively
+// delete this file — it doesn't need to: the reset changes the lane's HEAD/dirty/ahead state, which makes the
+// OLD marker's fingerprint stop matching on the very next `lane-whois.mjs` read, so a stale marker is simply
+// inert rather than requiring active cleanup (mirrors this file's existing "conservative, self-invalidating"
+// convention for preservation proofs elsewhere in this module).
+const KEEP_FILENAME = '.lane-keep';
+const KEEP_MARKER = (dir) => join(dir, '.git', KEEP_FILENAME);
+
+/** #4139 — the lane's CURRENT fingerprint: HEAD sha + sorted dirty paths + sorted ahead-commit shas. The SAME
+ *  three axes {@link keepMarkerApplies} compares, computed fresh every time (never cached) so a `keep` marker
+ *  can never silently outlive the content it was recorded about. Reuses `gitStatusSummary`/`aheadCommits` from
+ *  `lane-whois.mjs` — the ONE place those reads are implemented — never a second copy. */
+function laneFingerprint(dir, branch) {
+  const branchRef = `origin/${branch}`;
+  const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
+  const dirtyPaths = [...trackedModifiedPaths, ...untrackedPaths].sort();
+  const aheadShas = aheadCommits(dir, branchRef).map((c) => c.sha).sort();
+  let headSha = null;
+  try { headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8', ...defaultGitTimeoutOpt() }).trim(); } catch { /* unborn/corrupt HEAD — null is a valid, never-matching fingerprint value */ }
+  return { headSha, dirtyPaths, aheadShas };
+}
+
 /**
  * Write a lease marker so a concurrent reader can never observe a half-written file. Every call site used to go
  * straight through `writeFileSync(file, body[, {flag:'wx'}])`: `wx` (O_EXCL) already makes the file's EXISTENCE
@@ -1140,6 +1166,36 @@ const ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT = 4;
 function cmdProvision(repo) {
   const count = Number(flags.count);
   if (!Number.isInteger(count) || count < 1) fail('provision needs --count=<positive integer>');
+  // #4139 live bug (2026-09-25): `provision --count=86 --dry-run` IGNORED `--dry-run` and really cloned lanes
+  // 72-86 — `--dry-run` is in `KNOWN_FLAGS` (accepted, never rejected) but this function never actually READ
+  // it anywhere below, in either the `--acquirable` branch or the plain count loop, so both always cloned for
+  // real. Fixed by returning a REPORT-ONLY answer before touching disk at all — no `mkdirSync`, no
+  // `provisionLane`/`cloneLane`/`refreshLane`, no `ensureDeps` (npm ci), nothing — the exact contract
+  // `reclaim --dry-run` already holds elsewhere in this file (see `cmdReclaim`).
+  if (flags['dry-run']) {
+    const existingCount = existingLanes(repo).length;
+    if (flags.acquirable) {
+      log(
+        `DRY RUN — would provision up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} ` +
+        `(branch ${repo.branch}); ${existingCount} lane(s) exist today. Creates/resets NOTHING (#4139 fix — ` +
+        `--dry-run was previously silently ignored here).`,
+      );
+      if (flags.json) {
+        process.stdout.write(`${JSON.stringify({ dryRun: true, acquirable: true, count, existingCount }, null, 2)}\n`);
+      }
+      return;
+    }
+    const wouldCreate = Math.max(0, count - existingCount);
+    log(
+      `DRY RUN — would provision ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}); ` +
+      `${existingCount} exist today, ${wouldCreate} would be newly cloned. Creates/resets NOTHING (#4139 fix — ` +
+      `--dry-run was previously silently ignored here).`,
+    );
+    if (flags.json) {
+      process.stdout.write(`${JSON.stringify({ dryRun: true, acquirable: false, count, existingCount, wouldCreate }, null, 2)}\n`);
+    }
+    return;
+  }
   mkdirSync(repo.poolDir, { recursive: true });
   const force = !!flags.force;
   const resetLanes = []; // only lanes actually reset lose their stale mapping — a skipped lane still serves it
@@ -1746,6 +1802,18 @@ function cmdAcquire(repo) {
     // growth-on-empty design, unreviewed here). Sticky for the rest of THIS call once any provisioning failure
     // occurs, mirroring `sawScanTimeout`'s own fail-SAFE-STOP-never-fail-safe-GROW rationale just above.
     let sawProvisionFailure = false;
+    // #xj4tewd — a wall-clock-only proof of "no poll happened" is flaky on a busy runner: plain process/git
+    // overhead alone (no polling at all) can exceed one `ACQUIRE_POLL_MS` interval under load (live-caught:
+    // 1030/1011/1003ms observed against a 1000ms ceiling, PRs #2596/#2634/#2643). Count actual poll
+    // iterations instead — an exact, load-independent fact a test can assert on — and print it to stderr
+    // ONLY when opted in (`LANE_POOL_ACQUIRE_DEBUG=1`), so this never changes stdout/stderr for any real
+    // caller. `acquirePollCount === 0` is a stronger, deterministic proof that the omitted-`--wait-ms` path
+    // never sleeps at all, which is what that behavior actually guarantees — wall time can only ever be
+    // evidence of it, never the fact itself.
+    let acquirePollCount = 0;
+    const emitAcquirePollCount = () => {
+      if (process.env.LANE_POOL_ACQUIRE_DEBUG === '1') process.stderr.write(`__ACQUIRE_POLLS__=${acquirePollCount}\n`);
+    };
     while (chosen === null) {
       // #3383 — the scan's own budget is now the FULL configured/default scan timeout (`--scan-timeout-ms` /
       // `LANE_POOL_LIST_SCAN_TIMEOUT_MS`), never shrunk to this caller's OWN remaining `--wait-ms`: the
@@ -1801,6 +1869,7 @@ function cmdAcquire(repo) {
       }
       if (Date.now() < deadline) {
         sleepSyncMs(ACQUIRE_POLL_MS);
+        acquirePollCount++;
         excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
         continue;
       }
@@ -1830,6 +1899,7 @@ function cmdAcquire(repo) {
       }
       // #3383 bug 3b — say WHICH happened: a scan that never finished (never proven "all held/dirty" at
       // all) gets its own message, distinct from a completed scan that genuinely found nothing acquirable.
+      emitAcquirePollCount(); // #xj4tewd — before fail() exits the process, so a debug-mode caller still sees it
       fail(
         sawScanTimeout
           ? `no free lane in pool "${repo.name}" — the acquirability scan itself did not finish within the ` +
@@ -1843,6 +1913,7 @@ function cmdAcquire(repo) {
             : `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`,
       );
     }
+    emitAcquirePollCount(); // #xj4tewd — success path (the loop exited via `break`, not `fail`)
   }
 
   // #2560 (§3i-A4 Fork 1) — ADVISORY, STRICTLY NON-BLOCKING scope-overlap check. Runs AFTER the atomic O_EXCL
@@ -2976,10 +3047,24 @@ function laneReclaimPreservationProof(dir, branch) {
 }
 
 /**
- * `node scripts/lane-pool.mjs reclaim --lane=N [--dry-run] [--json]` — reset ONE unleased lane back to
- * `origin/<branch>`, but only once this call's OWN re-check (never the caller's) proves every uncommitted/
- * ahead change is still preserved. `--dry-run` runs that full re-check and reports what WOULD happen, but never
- * writes the claim marker and never resets — the exact contract a proof run over a REAL pool needs.
+ * `node scripts/lane-pool.mjs reclaim --lane=N [--dry-run] [--override] [--json]` — reset ONE unleased lane
+ * back to `origin/<branch>`, but only once this call's OWN re-check (never the caller's) proves every
+ * uncommitted/ahead change is still preserved. `--dry-run` runs that full re-check and reports what WOULD
+ * happen, but never writes the claim marker and never resets — the exact contract a proof run over a REAL pool
+ * needs.
+ *
+ * `--override` (#4139) — the operator's one-click "I looked at this `finished-needs-review` lane myself, force
+ * it anyway" action, wired from `we:scripts/operations/operator-queue.mjs`'s LANE RECLAIM section. WITHOUT it,
+ * this command already only ever actions a `finished-reclaimable`-shaped lane (preservation genuinely proven)
+ * — `--override` is the explicit, logged, NEVER-automatic escape hatch past that gate for the harder case
+ * (content the automated proof could not confirm, but a human reviewed by eye and judged safe to drop). It is
+ * NEVER wired into any automatic caller (the periodic `we:scripts/conveyor/lane-pool-health-watch.mjs` pass
+ * never passes it) — only a human explicitly typing `--override` reaches this branch. It reuses every OTHER
+ * existing reclaim guard untouched: it still refuses a LIVE lease outright (the check just above this
+ * docblock's function), and it still refuses if UNRELATED new unpreserved content raced in between this call's
+ * own initial look and its claim (the re-check under the hold, below) — override only ever forgives the
+ * SPECIFIC unpreserved content this call's initial proof already named and logged, never content that shows up
+ * later and was never reviewed.
  */
 function cmdReclaim(repo) {
   const n = Number(flags.lane);
@@ -2987,6 +3072,7 @@ function cmdReclaim(repo) {
     fail('reclaim needs --lane=<positive integer> — it never scans a whole pool itself (that is `lane-whois.mjs`\'s job; a caller picks ONE `finished-reclaimable` lane at a time)');
   }
   const dryRun = !!flags['dry-run'];
+  const override = !!flags.override;
   const dir = laneDir(repo, n);
   if (!existsSync(dir)) fail(`lane-${n} does not exist under ${repo.poolDir}`);
 
@@ -2998,14 +3084,20 @@ function cmdReclaim(repo) {
   }
 
   const proof = laneReclaimPreservationProof(dir, repo.branch);
-  if (!proof.preserved) {
+  if (!proof.preserved && !override) {
     log(`  lane-${n}: NOT reclaimed — ${proof.reason}`);
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...proof }, null, 2)}\n`);
     return;
   }
+  const overriding = !proof.preserved && override; // explicit + logged (#4139) — never silent, never automatic
+  if (overriding) {
+    log(`  lane-${n}: OVERRIDE (#4139, operator call) — proceeding despite: ${proof.reason}`);
+  }
   if (dryRun) {
-    log(`  lane-${n}: WOULD reclaim — ${proof.reason}`);
-    if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, wouldReclaim: true, ...proof }, null, 2)}\n`);
+    log(`  lane-${n}: WOULD reclaim${overriding ? ' (OVERRIDE)' : ''} — ${proof.reason}`);
+    if (flags.json) {
+      process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, wouldReclaim: true, override: overriding, ...proof }, null, 2)}\n`);
+    }
     return;
   }
 
@@ -3028,19 +3120,71 @@ function cmdReclaim(repo) {
   }
   // Re-check UNDER the hold — closes the race window between the first read above and this claim.
   const reproof = laneReclaimPreservationProof(dir, repo.branch);
-  if (!reproof.preserved) {
+  // #4139 — `--override` forgives ONLY the specific unpreserved content this call's INITIAL proof already
+  // named and logged above (what the operator actually looked at before typing `--override`). If anything NEW
+  // and unpreserved raced in during the tiny window between that look and this claim, it was never reviewed by
+  // anyone — override must not silently swallow it too. `isSubset` below is true when the re-check's
+  // unpreserved sets are entirely contained in the original's (nothing new; some may have even resolved, e.g.
+  // a concurrent push finished landing — strictly safer, still allowed).
+  const isSubset = (a, b) => a.every((x) => b.includes(x));
+  const overrideStillCovers = overriding
+    && isSubset(reproof.unpreservedFiles, proof.unpreservedFiles)
+    && isSubset(reproof.unpreservedCommitShas, proof.unpreservedCommitShas);
+  if (!reproof.preserved && !overrideStillCovers) {
     // Hand the lane back with its work intact, dropping only a marker that is still OUR claim (as trim does). A
     // stale lease taken aside above is not restored — it was already dead, exactly like trim's same path.
     takeMarkerIf(dir, (moved) => moved?.session === session, n);
-    log(`  lane-${n}: NOT reclaimed — work appeared after the initial check (${reproof.reason})`);
-    if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...reproof }, null, 2)}\n`);
+    const why = overriding
+      ? `NEW unpreserved content appeared after the initial look — override never covers content nobody reviewed (${reproof.reason})`
+      : `work appeared after the initial check (${reproof.reason})`;
+    log(`  lane-${n}: NOT reclaimed — ${why}`);
+    if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, override: overriding, ...reproof }, null, 2)}\n`);
     return;
   }
   execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
-  log(`  lane-${n}: reclaimed — reset to origin/${repo.branch} (${reproof.reason})`);
-  if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, ...reproof }, null, 2)}\n`);
+  log(`  lane-${n}: reclaimed${overriding ? ' (OVERRIDE, #4139 — operator call)' : ''} — reset to origin/${repo.branch} (${reproof.reason})`);
+  if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, override: overriding, ...reproof }, null, 2)}\n`);
+}
+
+// ── keep (#4139) — record "I looked at this queued lane, leave it" so it stops resurfacing ─────────
+//
+// The other half of the LANE RECLAIM one-click pair. `we:scripts/operations/operator-queue.mjs`'s
+// `laneReclaimQueue` lists every `finished-needs-review` / `unknown-work` lane on every tick, forever, until
+// something actions it — for a lane the operator has genuinely looked at and decided is fine to leave sitting
+// (not worth `--override` reclaiming, not actively in use, just not urgent), there was no way to say so short
+// of it silently resurfacing every single run. `keep` writes a small durable marker — mirroring how
+// `we:scripts/conveyor/stand-down.mjs` records a terminal marker for a PR, the SAME "a decision needs a
+// durable record, not a hope that nobody re-asks" shape, adapted to a LANE (a filesystem directory, not a PR
+// comment thread) rather than duplicating that PR-shaped mechanism.
+//
+// SELF-INVALIDATING BY FINGERPRINT, not by clock. The marker records the lane's CURRENT `headSha` +
+// `dirtyPaths` + `aheadShas` ({@link laneFingerprint}) alongside the decision; `we:scripts/lane-whois.mjs`
+// re-derives that same fingerprint on every read and only honors the marker when
+// `we:scripts/lib/lane-whois-core.mjs#keepMarkerApplies` says it still matches. So `keep` never permanently
+// silences a lane number — it silences THIS content, and the moment the lane's content changes (new work
+// lands, or a fresh `acquire`/`reclaim` resets it for reuse), the old decision stops applying on its own and
+// the lane is free to resurface if it once again needs one.
+function cmdKeep(repo) {
+  const n = Number(flags.lane);
+  if (!Number.isInteger(n) || n < 1) {
+    fail('keep needs --lane=<positive integer> — it records a decision about ONE specific lane, never a batch');
+  }
+  const dir = laneDir(repo, n);
+  if (!existsSync(dir)) fail(`lane-${n} does not exist under ${repo.poolDir}`);
+
+  const fingerprint = laneFingerprint(dir, repo.branch);
+  const marker = {
+    keptAt: new Date().toISOString(),
+    keptBy: `${hostname()}:${process.pid}`,
+    ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+    reason: typeof flags.reason === 'string' ? flags.reason : null,
+    fingerprint,
+  };
+  writeFileSync(KEEP_MARKER(dir), `${JSON.stringify(marker, null, 2)}\n`);
+  log(`  lane-${n}: kept — excluded from LANE RECLAIM until its content changes (#4139)${marker.reason ? ` — ${marker.reason}` : ''}`);
+  if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, kept: true, ...marker }, null, 2)}\n`);
 }
 
 // ── adopt (#2997 r2) — the dispatcher → worker OCCUPANCY hand-off ──────────────────────────────────
@@ -3136,6 +3280,9 @@ const KNOWN_FLAGS = new Set([
   // #x2psfwz — release --all-pools --session=<name>'s optional ownerSession co-selector (a reused PR_KIND
   // session name is ambiguous between dispatch rounds; this narrows a by-session release to one specific round).
   'owner-session',
+  // #4139 — reclaim's operator override (explicit, logged, never automatic — see cmdReclaim's own docblock),
+  // and keep's free-text reason.
+  'override', 'reason',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -3151,6 +3298,7 @@ const COMMANDS = {
   remove: cmdRemove,
   trim: cmdTrim,
   reclaim: cmdReclaim,
+  keep: cmdKeep,
   map: cmdMap,
   unmap: cmdUnmap,
 };
@@ -3158,15 +3306,19 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|keep|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
-      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
+      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run] [--override] [--reason=<text>]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
       '  # acquire (auto-pick, no --lane): on a full pool, grows it by up to --growth-max-new=N new lanes (default 4, env ' +
       'LANE_POOL_ACQUIRE_GROWTH_MAX_NEW) up to a --hard-max=N ceiling (default 90 for web-everything/30 for siblings, env LANE_POOL_HARD_MAX) ' +
       'before failing — refuses to grow on a live remote-probe failure (#3383)\n' +
-      '  # reclaim --lane=N [--dry-run] [--json]: reset ONE unleased lane to origin/<branch>, only once this call\'s ' +
+      '  # provision --count=N [--dry-run]: --dry-run reports what WOULD be provisioned and creates/resets nothing (#4139)\n' +
+      '  # reclaim --lane=N [--dry-run] [--override] [--json]: reset ONE unleased lane to origin/<branch>, only once this call\'s ' +
       'OWN re-check proves every uncommitted/ahead change is still provably preserved (#3383 gap 2 — the mutation ' +
-      'half of lane-whois.mjs\'s finished-reclaimable verdict)\n',
+      'half of lane-whois.mjs\'s finished-reclaimable verdict); --override (#4139) forces past that gate for a ' +
+      'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic\n' +
+      '  # keep --lane=N [--reason=<text>] [--json]: record "I looked at this lane, leave it" so operator-queue\'s ' +
+      'LANE RECLAIM section excludes it until its content changes (#4139)\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }
