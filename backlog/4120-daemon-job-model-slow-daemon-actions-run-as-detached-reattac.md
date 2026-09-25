@@ -2,8 +2,11 @@
 bornAs: x6sslco
 kind: decision
 parent: "4075"
-status: open
+status: resolved
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+codifiedIn: "docs/agent/platform-decisions.md#daemon-jobs"
 preparedDate: "2026-09-24"
 preparedAgainstSha: "80cde410fe68cc365f794b0f1f7097ff984d1f76"
 relatedReport: reports/2026-09-24-daemon-blocking-antipatterns.md
@@ -169,6 +172,35 @@ Two-confusion screen (fresh-context skeptic): **standard vs implementation** —
 worktree mechanics and "cap 2" were mechanism; the statute now states only rules, and the mechanics sit in
 the forks' options and the slices. **Merit vs prioritization** — no fork is prioritization; the adoption
 order was, and it is now a "Supported by default" sequencing line.
+
+## Ruling (2026-09-25)
+
+Operator, in session: *"I ratify"*. **Fork 1 (a)** and **Fork 2 (c)** as prepared; the three ratify lines and
+the "supported by default" lines as written; the three red-team amendments below taken. Codified verbatim as
+[#daemon-jobs](/docs/agent/platform-decisions/#daemon-jobs), with amendment pointers added to
+#drain-daemon-self-hosting-boundary clause 2 and #resident-daemon-reload-lifecycle clause 3 (ii). The
+adoption order is now `blockedBy` edges on the slices; findings 2 and 3 and the open record-folder detail
+went into 4125.
+
+## Ratification red-team (2026-09-25)
+
+Currency re-check at claim: `check:item` clean; no statute ratified or edited since `preparedAgainstSha`; the
+two 2026-09-24 statutes on this turf (#conveyor-session-lifecycle-policy, #automated-health-daemon) are
+already cited. An independent tool-free skeptic seat (`judgePanel`, run `ratify-4120`, ok) raised three
+findings. None refutes a fork; all three are amended as follows:
+
+1. **The adoption order was prose only.** All six slices are `blockedBy: ["4120"]` alone, so ratifying
+   would make every adopter, including the drain follow-up (4124), ready before the core (4125) and before
+   the numbering fixes. Fork 2 (c)'s "seconds" claim depends on 4127. *Amendment:* at ratify, the order
+   becomes `blockedBy` edges: 4131 ← 4125; 4135, 4126 ← 4131; 4124 ← 4125, 4127, 4134, 4121; 4132 ← 4124.
+   The statute stays rule-only; the DAG is the gate.
+2. **"The host slept" is not defined.** Ratify 1 skips the staleness check after a sleep but names no
+   detection or threshold. *Amendment:* that is mechanism, so it goes in 4125's acceptance: name the
+   detection (the tick's wall-clock gap versus its monotonic-clock gap) and its threshold, and prove it on a
+   real sleep/wake and on a live-but-stuck job.
+3. **Snapshot `node_modules` stores can grow without bound.** The disk-cost objection to Fork 2 (a) still
+   applies to the read-only half of (c). *Amendment:* 4125 keys stores by lockfile hash (not `codeSha`)
+   and evicts any store no live job references, keeping at most 2.
 
 ## Build slices (filed uncleared, each blocked by this card)
 
