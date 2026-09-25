@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
+  isDaemonManagedClone, daemonConveyorStateRoot,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
 import { gitRun } from '../main-staleness.mjs';
@@ -1221,5 +1222,123 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
     const later = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 24 * 3600_000 });
     expect(later.reason).toBe('still-rejected');
     expect(runSmoke).not.toHaveBeenCalled();
+  });
+});
+
+// Live 2026-09-25 13:36 ET: a review session appended a scorecard row to the TRACKED
+// `scripts/conveyor/run-scorecards.json` in the review-daemon clone. The rebuild refused it as `dirty` every
+// tick, the clone fell 10 commits behind origin/main, and every review and fix dispatch refused as STALE.
+describe('rebuildClone — daemon runtime state in a tracked file is carried out, never a freeze', () => {
+  const SC = 'scripts/conveyor/run-scorecards.json';
+  const store = (records) => `${JSON.stringify({ version: 1, records }, null, 2)}\n`;
+
+  function stateFixture() {
+    const fx = makeFixture();
+    delete fx.env.CONVEYOR_STATE_ROOT;
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }]));
+    gitOk(fx.cloneDir, ['add', '-A']);
+    gitOk(fx.cloneDir, ['commit', '-q', '-m', 'seed scorecards']);
+    gitOk(fx.cloneDir, ['push', '-q', 'origin', 'main']);
+    gitOk(fx.cloneDir, ['fetch', '-q', 'origin']);
+    advanceMain(fx.originDir, (dir) => writeFile(dir, 'new-on-main.txt', 'x\n'));
+    fx.pinned = join(fx.stateDir, 'conveyor-state', '.conveyor', 'run-scorecards.json');
+    return fx;
+  }
+
+  it('carries the uncommitted rows to the pinned root, restores the file, and moves the clone to main', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }, { id: 'row-2' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).not.toBe('dirty');
+    expect(result.moved).toBe(true);
+    expect(gitOk(fx.cloneDir, ['status', '--porcelain']).trim()).toBe('');
+    expect(gitOk(fx.cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(gitOk(fx.cloneDir, ['rev-parse', 'origin/main']).trim());
+    expect(JSON.parse(readFileSync(fx.pinned, 'utf8')).records.map((r) => r.id)).toEqual(['committed', 'row-1', 'row-2']);
+    expect(result.alerts.some((a) => a.kind === 'state-file-migrated' && a.detail?.path === SC && a.detail?.added === 3)).toBe(true);
+  });
+
+  it('unions into an existing pinned store — no row lost, none duplicated', async () => {
+    const fx = stateFixture();
+    writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json', store([{ id: 'committed' }, { id: 'already-pinned' }]));
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(JSON.parse(readFileSync(fx.pinned, 'utf8')).records.map((r) => r.id)).toEqual(['committed', 'already-pinned', 'row-1']);
+  });
+
+  it('CONVEYOR_STATE_ROOT, when set, is where the rows go', async () => {
+    const fx = stateFixture();
+    const opRoot = mktemp('we-daemon-rebuild-oproot-');
+    fx.env.CONVEYOR_STATE_ROOT = opRoot;
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(JSON.parse(readFileSync(join(opRoot, '.conveyor', 'run-scorecards.json'), 'utf8')).records).toHaveLength(2);
+  });
+
+  it('state file dirty ALONGSIDE other tracked dirt still refuses, and migrates nothing', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+    writeFile(fx.cloneDir, 'README.md', 'a real local edit\n');
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(existsSync(fx.pinned)).toBe(false);
+    expect(JSON.parse(readFileSync(join(fx.cloneDir, SC), 'utf8')).records).toHaveLength(2);
+  });
+
+  it('an unparsable state file is never discarded — refuses as dirty with a migrate-failed alert', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, '{ not json');
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(join(fx.cloneDir, SC), 'utf8')).toBe('{ not json');
+    expect(result.alerts.some((a) => a.kind === 'state-file-migrate-failed' && a.detail?.reason === 'state-file-unparsable')).toBe(true);
+  });
+
+  it('an unreadable pinned store is never overwritten — refuses instead', async () => {
+    const fx = stateFixture();
+    writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json', 'corrupt');
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(fx.pinned, 'utf8')).toBe('corrupt');
+  });
+});
+
+describe('isDaemonManagedClone / daemonConveyorStateRoot', () => {
+  it('a clone with a registered overlay list or rebuild state is daemon-managed; a plain one is not', () => {
+    const fx = makeFixture();
+    expect(isDaemonManagedClone(fx.cloneDir, fx.env)).toBe(false);
+    addOverlay(fx.cloneDir, { ref: 'lane/x' }, { env: fx.env });
+    expect(isDaemonManagedClone(fx.cloneDir, fx.env)).toBe(true);
+  });
+
+  it('defaults under the rebuild state dir; CONVEYOR_STATE_ROOT wins', () => {
+    expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s' })).toBe(join('/s', 'conveyor-state'));
+    expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s', CONVEYOR_STATE_ROOT: '/op' })).toBe('/op');
   });
 });

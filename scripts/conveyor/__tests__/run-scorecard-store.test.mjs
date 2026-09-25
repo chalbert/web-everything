@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { join } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   validateScorecard, readStore, writeStore, appendScorecard, meanScore,
   resolveScorecardStorePath, DEFAULT_SCORECARD_STORE_PATH,
@@ -167,5 +169,46 @@ describe('resolveScorecardStorePath — CONVEYOR_STATE_ROOT (#4052)', () => {
     const writes = [];
     writeStore({ version: 1, records: [] }, { write: (p) => writes.push(p) });
     expect(writes[0]).toBe(join('/tmp/never-actually-touched-because-io-is-injected', '.conveyor', 'run-scorecards.json'));
+  });
+});
+
+// Live 2026-09-25 13:36 ET: a review session appended a row to the TRACKED in-tree store inside the review-daemon
+// clone; the rebuild refused the dirty clone, it fell 10 commits behind main, and every dispatch refused as STALE.
+describe('resolveScorecardStorePath — a daemon-managed clone never writes the tracked file', () => {
+  it('resolves under the daemon state dir when the module runs from a daemon-managed clone', () => {
+    const path = resolveScorecardStorePath({ WE_DAEMON_STATE_DIR: '/tmp/daemon-state' }, {
+      repoRoot: '/some/daemon-clone', isDaemonClone: () => true,
+    });
+    expect(path).toBe(join('/tmp/daemon-state', 'conveyor-state', '.conveyor', 'run-scorecards.json'));
+  });
+
+  it('CONVEYOR_STATE_ROOT still wins over the daemon default', () => {
+    const path = resolveScorecardStorePath({ CONVEYOR_STATE_ROOT: '/tmp/op', WE_DAEMON_STATE_DIR: '/tmp/d' }, {
+      isDaemonClone: () => true,
+    });
+    expect(path).toBe(join('/tmp/op', '.conveyor', 'run-scorecards.json'));
+  });
+
+  it('a plain checkout keeps the in-tree default', () => {
+    expect(resolveScorecardStorePath({}, { isDaemonClone: () => false })).toBe(DEFAULT_SCORECARD_STORE_PATH);
+  });
+
+  it('a missing out-of-tree store reads the tracked history as its seed, never an empty history', () => {
+    const files = { '/seed.json': JSON.stringify({ version: 1, records: [{ a: 1 }] }) };
+    const io = { read: (p) => files[p], exists: (p) => p in files };
+    expect(readStore({ ...io, path: '/pinned.json', seedPath: '/seed.json' }).records).toEqual([{ a: 1 }]);
+    files['/pinned.json'] = JSON.stringify({ version: 1, records: [{ a: 1 }, { b: 2 }] });
+    expect(readStore({ ...io, path: '/pinned.json', seedPath: '/seed.json' }).records).toHaveLength(2);
+  });
+
+  it('the default writer creates the out-of-tree directory on first write', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scorecard-store-'));
+    try {
+      const path = join(dir, 'conveyor-state', '.conveyor', 'run-scorecards.json');
+      writeStore({ version: 1, records: [{ x: 1 }] }, { path });
+      expect(JSON.parse(readFileSync(path, 'utf8')).records).toEqual([{ x: 1 }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

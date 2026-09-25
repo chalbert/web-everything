@@ -63,6 +63,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, rmSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, statSync, unlinkSync,
+  existsSync,
 } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname, resolve as resolvePath, isAbsolute } from 'node:path';
@@ -76,6 +77,7 @@ import {
 import { runLiveSmokeWithRetry } from './daemon-live-smoke.mjs';
 import { isSafeBranchName } from './daemon-self-sync.mjs';
 import { gitRun } from './main-staleness.mjs';
+import { pinnedStateRoot } from '../conveyor/queue-store.mjs';
 
 // ── Fixed rebuild identity (see file header — DETERMINISM) ─────────────────────────────────────────────────
 
@@ -375,6 +377,138 @@ export function findUnsafeLocalState({ git, knownInputs = [] }) {
   return {
     safe: false, reason: 'local-commits', detail: remaining, untracked,
   };
+}
+
+// ── daemon runtime state that lands in TRACKED files — carried out of the tree, never a freeze ─────────────
+
+/**
+ * Where a daemon clone's conveyor runtime state lives: the operator's `CONVEYOR_STATE_ROOT` pin when set
+ * (#4052), else `<rebuild state dir>/conveyor-state` — OUTSIDE every git tree, next to the rebuild's own state.
+ * The layout under it matches `CONVEYOR_STATE_ROOT`'s (`<root>/.conveyor/<file>`), so pinning the env var to
+ * this same directory later changes nothing on disk.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function daemonConveyorStateRoot(env = process.env) {
+  return pinnedStateRoot(env) ?? join(stateDir(env), 'conveyor-state');
+}
+
+/**
+ * Is `root` a daemon-managed clone — one the rebuild moves with `reset --hard`? True once it has a rebuild
+ * state file or a registered overlay list (both keyed on the same `cloneKey`). A plain checkout or lane has
+ * neither. Never throws.
+ * @param {string} root
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isDaemonManagedClone(root, env = process.env) {
+  try {
+    return existsSync(rebuildStatePath(root, env)) || existsSync(overlayFilePath(root, env));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * TRACKED files a daemon process (or a session it dispatched) appends runtime state to. A write there must
+ * never freeze the rebuild: 2026-09-25 13:36 ET, a review session's scorecard row left
+ * `scripts/conveyor/run-scorecards.json` modified in the review-daemon clone, the rebuild refused it as
+ * `dirty`, the clone fell 10 commits behind, and every review and fix dispatch refused as STALE. So the
+ * rebuild carries each such file's rows into {@link daemonConveyorStateRoot} (a union — no row is lost, none
+ * is duplicated), restores the tracked copy, and proceeds. `pinned` is the path under that root; the store
+ * module itself (`run-scorecard-store.mjs#resolveScorecardStorePath`) writes to the same place in a daemon
+ * clone, so this is the recovery path for rows written by older code, not the normal one.
+ */
+export const DAEMON_STATE_FILES = Object.freeze([
+  Object.freeze({ path: 'scripts/conveyor/run-scorecards.json', pinned: '.conveyor/run-scorecards.json' }),
+]);
+
+/** `{version, records:[]}` from JSON text; `null` when it is not that shape (never guessed). */
+function parseRecordsStore(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && Array.isArray(parsed.records) ? { version: parsed.version ?? 1, records: parsed.records } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The dirty paths in `git status --porcelain` lines, or `null` when any line is not a plain modification
+ * (a rename, a delete, a conflict — nothing this module should carry away on its own).
+ * @param {Array<string>} lines - trimmed porcelain lines, as {@link findUnsafeLocalState} reports them
+ */
+function modifiedPathsOf(lines) {
+  const paths = [];
+  for (const line of lines) {
+    const m = /^(M{1,2})\s+(.+)$/.exec(line);
+    if (!m) return null;
+    paths.push(m[2].trim());
+  }
+  return paths;
+}
+
+/**
+ * PURE over `git` + injected fs: when EVERY dirty path is a known {@link DAEMON_STATE_FILES} entry, union each
+ * one's rows into its pinned file, then restore the tracked copy (`checkout HEAD -- <path>`). Any other dirt,
+ * an unparsable file, or a failed write/restore migrates nothing it cannot prove and returns `ok:false` — the
+ * caller then refuses as `dirty`, exactly as before.
+ * @param {{git:Function, root:string, dirty:Array<string>, env?:NodeJS.ProcessEnv,
+ *   fs?:{read:(p:string)=>string, write:(p:string, s:string)=>void, exists:(p:string)=>boolean}}} o
+ * @returns {{ok:boolean, reason?:string, migrated:Array<{path:string, target:string, added:number, total:number}>}}
+ */
+export function migrateDaemonStateFiles({ git, root, dirty, env = process.env, fs: io }) {
+  const fs = io ?? {
+    read: (p) => readFileSync(p, 'utf8'),
+    write: (p, s) => {
+      mkdirSync(dirname(p), { recursive: true });
+      const tmp = `${p}.tmp-${process.pid}`;
+      writeFileSync(tmp, s, 'utf8');
+      renameSync(tmp, p);
+    },
+    exists: (p) => existsSync(p),
+  };
+  const paths = modifiedPathsOf(dirty || []);
+  if (!paths || paths.length === 0) return { ok: false, reason: 'not-state-files', migrated: [] };
+  const known = new Map(DAEMON_STATE_FILES.map((f) => [f.path, f]));
+  if (!paths.every((p) => known.has(p))) return { ok: false, reason: 'not-state-files', migrated: [] };
+
+  const migrated = [];
+  for (const p of paths) {
+    const target = join(daemonConveyorStateRoot(env), known.get(p).pinned);
+    // Re-read until the tracked copy is stable across the merge, so a row appended mid-migration is not lost.
+    let carried = false;
+    for (let attempt = 0; attempt < 3 && !carried; attempt += 1) {
+      let text;
+      try { text = fs.read(join(root, p)); } catch { return { ok: false, reason: 'state-file-unreadable', migrated }; }
+      const working = parseRecordsStore(text);
+      if (!working) return { ok: false, reason: 'state-file-unparsable', migrated };
+      let pinned = { version: working.version, records: [] };
+      if (fs.exists(target)) {
+        let pinnedText;
+        try { pinnedText = fs.read(target); } catch { return { ok: false, reason: 'pinned-unreadable', migrated }; }
+        pinned = parseRecordsStore(pinnedText);
+        // Never overwrite a pinned store we cannot read — that would destroy the rows already there.
+        if (!pinned) return { ok: false, reason: 'pinned-unparsable', migrated };
+      }
+      const seen = new Set(pinned.records.map((r) => JSON.stringify(r)));
+      const add = working.records.filter((r) => !seen.has(JSON.stringify(r)));
+      if (add.length > 0) {
+        try {
+          fs.write(target, `${JSON.stringify({ version: pinned.version ?? 1, records: [...pinned.records, ...add] }, null, 2)}\n`);
+        } catch { return { ok: false, reason: 'pinned-write-failed', migrated }; }
+      }
+      let after;
+      try { after = fs.read(join(root, p)); } catch { after = null; }
+      if (after !== text) continue;
+      const restore = git(['checkout', 'HEAD', '--', p]);
+      if (restore.status !== 0) return { ok: false, reason: 'restore-failed', migrated };
+      migrated.push({ path: p, target, added: add.length, total: pinned.records.length + add.length });
+      carried = true;
+    }
+    if (!carried) return { ok: false, reason: 'state-file-busy', migrated };
+  }
+  return { ok: true, migrated };
 }
 
 // ── fetch helper shared by rebuildClone and dryRunRebuild ───────────────────────────────────────────────────
@@ -680,7 +814,15 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     return finish({ moved: false, reason: 'not-on-main' });
   }
 
-  const unsafe = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) });
+  let unsafe = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) });
+  // The only dirt the rebuild clears itself: daemon runtime state in a known tracked file. Its rows go to the
+  // pinned state root first, so nothing is lost; any other dirt still refuses (see DAEMON_STATE_FILES).
+  if (!unsafe.safe && unsafe.reason === 'dirty') {
+    const mig = migrateDaemonStateFiles({ git, root, dirty: unsafe.detail, env: stEnv });
+    for (const m of mig.migrated) alert('state-file-migrated', m);
+    if (mig.ok) unsafe = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) });
+    else if (mig.reason !== 'not-state-files') alert('state-file-migrate-failed', { reason: mig.reason });
+  }
   if (!unsafe.safe) {
     alert(unsafe.reason, unsafe.detail);
     return finish({ moved: false, reason: unsafe.reason });
