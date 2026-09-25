@@ -66,7 +66,10 @@ const QUEUED_WAITING_TURN_PREFIX = 'overlaps lane-';
 // a free lane may physically exist, but the concurrent-lane ceiling is what the item is actually waiting on.
 // `dispatch-paused` (#3609) joins them too: the item itself is fully ready (dispatch-plan.mjs only assigns this
 // reason at the point it would otherwise have launched), so once the manual pause clears it launches same-tick.
-const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap', 'dispatch-paused']);
+// `pr-limit` (we:xniq7xs) joins them for the identical reason: dispatch-plan.mjs only assigns it at the exact
+// point the item would otherwise have launched, so it clears (and the item launches same-tick) once the
+// review backlog drains or an operator override lifts it — "nothing to do but wait", never an item defect.
+const QUEUED_WAITING_TURN_EXACT = Object.freeze(['no free lane', 'capacity-cap', 'dispatch-paused', 'pr-limit']);
 
 /** Held reasons that need an action (or an external event) before the item can ever be picked up, independent
  *  of lane capacity — see {@link ../readiness/dispatch-plan.mjs}'s own `HELD_REASONS` docblock for what each

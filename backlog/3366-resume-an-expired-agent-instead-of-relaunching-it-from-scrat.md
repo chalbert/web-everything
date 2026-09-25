@@ -66,6 +66,11 @@ its successor's `reset --hard` would otherwise destroy the uncommitted work the 
    since a counter that dies with the process cannot cap anything across a restart.
 5. **`#3118`'s clause 3 is answered in the card.** That ruling accepts stop-then-resume as the conveyor's
    steering mechanism; this item is where that acceptance either becomes real or is reported as unbuildable.
+6. **Resume is single-owner** ([#conveyor-session-lifecycle-policy](/docs/agent/platform-decisions/#conveyor-session-lifecycle-policy)
+   clause 3, #4082). Only the dispatcher role holding the worker's run record resumes it. A restarted
+   instance of that role picks the resume up from the durable record. Any other watcher (e.g. the health
+   daemon) only reports. A worker stopped for no net outcome (`stalled`) counts as poisoned and is
+   relaunched, never resumed. A test pins that a second actor cannot resume a session the owner holds.
 
 ## Deliberately NOT in scope
 

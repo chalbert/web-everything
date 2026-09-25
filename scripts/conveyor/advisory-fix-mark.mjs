@@ -30,6 +30,11 @@ import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
 import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
+// #3383 — the shared trusted-author gate every marker COUNTER runs a comment through (broader than
+// `isSelfAuthored` above: automation OR the repo operator). `isSelfAuthored` stays in use, unchanged, for the
+// two narrower ORDER-based supersede checks below — that is a distinct, already-reviewed discipline
+// (xaer296/#2607), not something this item's fix widens or narrows.
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/advisory-fix-mark.mjs#ADVISORY_FIX_COMMENT_MARKER — the stable FIRST LINE of the durable
@@ -56,7 +61,8 @@ export function countAdvisoryFixComments(comments) {
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER)) n += 1;
+    // #3383 — a forged advisory-fix marker from an untrusted login must not inflate this population's round cap.
+    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
   }
   return n;
 }

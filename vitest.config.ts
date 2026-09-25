@@ -14,6 +14,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    // #3383 bugfix: default delivery-telemetry OFF for the whole run (`WE_TELEMETRY=0`) so wrapper tests
+    // that invoke the real dispatch wrappers don't append fixture spans to the shared
+    // `.operations/telemetry/*.jsonl` log — see `vitest.setup.ts`'s own header for the full story.
+    setupFiles: ['./vitest.setup.ts'],
     // #x1jcikc: cap this invocation's own worker count (see vitest.shared.ts#maxTestWorkers for the sizing
     // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
     // concurrently-admitted `test:unit` runs oversubscribe a 12-core host.
@@ -204,6 +208,11 @@ export default defineConfig({
       // #3383 — same tier: real throwaway origin/reference/pool, real spawned `lane-pool.mjs` acquire/provision
       // children, a PATH git shim for the remote-probe-failure case (mirrors its growth-cap sibling above).
       'scripts/__tests__/lane-pool-acquire-growth.test.mjs',
+      // #x96v5hl — same `lane-pool-trim.test.mjs` barrier-plus-real-concurrent-spawn technique (a real
+      // `release`/`acquire` child paused mid-run via an env-var test seam, a second real concurrent CLI child
+      // racing into that exact window): proof of the release/reap and stale-reclaim TOCTOU fixes.
+      'scripts/__tests__/lane-pool-release-reap-race.test.mjs',
+      'scripts/__tests__/lane-pool-stale-reclaim-race.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',
@@ -215,6 +224,16 @@ export default defineConfig({
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
       // #x5n4zn3 — same tier: a real spawned node driver + a real hanging `gh` shim on `PATH`.
       'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
+      // #3383 — the stateful fake-GitHub's own proof: real bare origin/clone + real `execFileSync('gh', …)`,
+      // same tier as the two files immediately above it.
+      'scripts/conveyor/__tests__/fake-gh-state.test.mjs',
+      // #3383 (xitk240) — the rest of the daemon scenario simulator: real spawned sleepers/daemon hosts, real
+      // bare origins and lane pools. They belong to the integration tier only (vitest.integration.config.ts);
+      // running them in the unit suite too is what put fake-claude-sessions on CI shard 4 for PR #2623.
+      'scripts/conveyor/__tests__/sim-clock.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenarios-smoke.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenario-*.test.mjs',
+      'scripts/operations/__tests__/fake-claude-sessions.test.mjs',
     ],
   },
   resolve: {

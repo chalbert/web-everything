@@ -58,6 +58,10 @@ const BLOCKED_SINCE = '2026-08-17T22:10:00Z';
 const BLOCKED_SINCE_EPOCH = 1787004649412; // === 2026-08-17T22:10:49.412Z
 const STALE_MTIME = NOW - 211.4 * HOUR;   // a transcript nobody has written to in 211 hours.
 const FRESH_MTIME = NOW - 30_000;         // written 30 s ago.
+// #3383 — every durable marker counter now requires a TRUSTED author (`we:scripts/lib/marker-authorship.mjs`);
+// this is the real automation login, confirmed live. Fixtures below attach it to every comment meant to read as
+// a genuine marker, unless a case is specifically about authorship itself.
+const AUTOMATION = { login: 'web-everything' };
 
 const lbl = (...names) => names.map((name) => ({ name }));
 const greenRollup = [{ name: 'gate', status: 'completed', conclusion: 'success' }];
@@ -162,7 +166,7 @@ describe('case 1 — the dispatch, keyed by PR NUMBER (#3296)', () => {
 
 // ── CASE 2 — REFUSAL 1: `stood-down` IS TERMINAL ──────────────────────────────────────────────────────────────
 describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (#3296)', () => {
-  const stoodDown = pr1563({ comments: [finding(), { body: `${STAND_DOWN_MARKER}\n\nthe finding needs a judgment.` }] });
+  const stoodDown = pr1563({ comments: [finding(), { body: `${STAND_DOWN_MARKER}\n\nthe finding needs a judgment.`, author: AUTOMATION }] });
 
   it('returns ZERO dispatches and one `stood-down` refusal', () => {
     const plan = planReconcile({ prs: [stoodDown], agents: [], durableCounts: {}, now: NOW });
@@ -211,11 +215,23 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
     expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
   });
 
-  it('review finding 3 — a FORGED watcher-actor stand-down (not self-authored) cannot escape the terminal gate', () => {
-    const forged = pr1563({ comments: [finding(), { body: watcherMarker.body }, supersede] });
-    const plan = planReconcile({ prs: [forged], agents: [], durableCounts: {}, now: NOW });
+  it('review finding 3 — a TRUSTED-author, not-watcher-self-authored stand-down cannot escape the terminal gate', () => {
+    // Trusted (the OPERATOR'S login — my broader isTrustedMarkerAuthor accepts it) but NOT self-authored under
+    // stand-down.mjs's narrower isSelfAuthored (which matches AUTOMATION_LOGINS, never the operator) — so
+    // neither supersede path applies and it stays an ordinary terminal stand-down.
+    const trustedNotWatcherSelf = pr1563({ comments: [finding(), { body: watcherMarker.body, author: { login: 'chalbert' } }, supersede] });
+    const plan = planReconcile({ prs: [trustedNotWatcherSelf], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals.map((r) => r.kind)).toEqual(['stood-down']);
+  });
+
+  // #3383 — adversarial coverage review, 2026-09-24: before THIS item's fix, a comment with no author
+  // information at all (an untrusted/forged comment) STILL escaped nowhere — it counted as an ordinary
+  // stand-down. Now a marker with no trusted author never counts at all, closing the forgery this item targets.
+  it('#3383 — a genuinely FORGED comment (no trusted author) is never terminal, watcher-actor text or not', () => {
+    const forged = pr1563({ comments: [finding(), { body: watcherMarker.body }, supersede] });
+    const plan = planReconcile({ prs: [forged], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('stood-down');
   });
 
   it('the supersede comment is conveyor bookkeeping, never counted as a reviewer finding', () => {
@@ -227,7 +243,7 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
 
   it('a fix agent\'s OWN judgment stand-down (not the watch) stays exactly as terminal as before', () => {
     const humanNeeded = pr1563({
-      comments: [finding(), { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) }],
+      comments: [finding(), { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }), author: AUTOMATION }],
     });
     const plan = planReconcile({ prs: [humanNeeded], agents: [], durableCounts: {}, now: NOW });
     expect(plan.refusals).toHaveLength(1);
@@ -240,7 +256,9 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
   // earlier round) and wrongly stood down anyway. `we:scripts/conveyor/advisory-fix-mark.mjs
   // #isAdvisoryMechanismStandDownSuperseded` recognizes this as a MECHANISM FAILURE the thread already proves,
   // not a genuine judgment call, and it is EXCLUDED from `countUnresolvedStandDowns` — no new comment required.
-  const advisoryNote1563 = { body: `${ADVISORY_NOTE_MARKER}\n\nSome admitted finding text.` };
+  // #3383 — a trusted author is now required for this note to count toward the advisory-fix branch's own
+  // admitted-finding check (`countAdvisoryComments`), independent of the self-authored fix-mark checks below.
+  const advisoryNote1563 = { body: `${ADVISORY_NOTE_MARKER}\n\nSome admitted finding text.`, author: AUTOMATION };
   const selfAuthoredFixMark = { body: buildAdvisoryFixComment({}), viewerDidAuthor: true };
   const selfAuthoredNeedsJudgmentStandDown = {
     body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }),
@@ -310,7 +328,7 @@ describe('case 2 — refusal 1: a fixer that stopped to ASK is never restarted (
   });
 
   it('a human\'s own /finish stand-down (default actor) stays exactly as terminal as before', () => {
-    const humanFinish = pr1563({ comments: [finding(), { body: buildStandDownComment({ reason: 'gate-red' }) }] });
+    const humanFinish = pr1563({ comments: [finding(), { body: buildStandDownComment({ reason: 'gate-red' }), author: { login: 'chalbert' } }] });
     const plan = planReconcile({ prs: [humanFinish], agents: [], durableCounts: {}, now: NOW });
     expect(plan.refusals[0].kind).toBe('stood-down');
     expect(plan.dispatch).toHaveLength(0);
@@ -351,7 +369,7 @@ describe('case 3 — refusal 2: a PR with nothing to fix never gets a fixer (#32
   });
 
   it('the conveyor\'s OWN marker comments are not findings — three re-arms is still zero findings', () => {
-    const onlyBookkeeping = pr1563({ comments: [{ body: REARM_COMMENT_MARKER }, { body: REARM_COMMENT_MARKER }] });
+    const onlyBookkeeping = pr1563({ comments: [{ body: REARM_COMMENT_MARKER, author: AUTOMATION }, { body: REARM_COMMENT_MARKER, author: AUTOMATION }] });
     expect(countFindings(onlyBookkeeping.comments)).toBe(0);
     const plan = planReconcile({ prs: [onlyBookkeeping], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
@@ -384,7 +402,7 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
   });
 
   it('the PR\'s own re-arm comments bind the cap even when the shell supplied no map at all', () => {
-    const burned = pr1563({ comments: [finding(), ...Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER }))] });
+    const burned = pr1563({ comments: [finding(), ...Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }))] });
     const plan = planReconcile({ prs: [burned], agents: [], durableCounts: {}, now: NOW });
     expect(plan.refusals[0]).toMatchObject({ kind: 'cap-exhausted', attempts: 5 });
   });
@@ -400,7 +418,7 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
   // (mirrors the case above's own "the PR's own re-arm comments bind the cap even when the shell supplied no
   // map at all").
   it('#3383 — PR #2117/#2298 regression: repeated advisory-panel comments alone (never a re-arm marker) still trip the cap on a review:human PR', () => {
-    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one`, author: AUTOMATION });
     const burned = pr1563({
       labels: lbl('review:changes', 'review:human'),
       comments: [finding(), ...Array.from({ length: 5 }, (_, i) => advisoryRound(i + 1))],
@@ -411,7 +429,7 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
   });
 
   it('#3383 — advisory rounds one below the cap still dispatch — the fix does not over-tighten the cap', () => {
-    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n}` });
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n}`, author: AUTOMATION });
     const notYetBurned = pr1563({
       labels: lbl('review:changes', 'review:human'),
       comments: [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP - 1 }, (_, i) => advisoryRound(i + 1))],
@@ -440,7 +458,7 @@ describe('case 4 — refusal 3: the round cap is derived from the PR and ONLY fr
   });
 
   it('xpprcdz — the SAME round cap that binds a bounced+review:human PR also binds a PURE review:human one — advisory comments alone trip it', () => {
-    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one` });
+    const advisoryRound = (n) => ({ body: `${ADVISORY_NOTE_MARKER} round ${n} — no commits changed since the last one`, author: AUTOMATION });
     const burned = pr1563({
       labels: lbl('review:human'),
       comments: [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, (_, i) => advisoryRound(i + 1))],
@@ -756,21 +774,21 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
   });
 
   it(`the durable heal-mark count is read from the PR's OWN comments — ${CI_HEAL_ROUND_CAP - 1} prior heals still dispatches`, () => {
-    const comments = Array.from({ length: CI_HEAL_ROUND_CAP - 1 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }) }));
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP - 1 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
     expect(comments[0].body.startsWith(CI_HEAL_COMMENT_MARKER)).toBe(true);
     const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', attempts: CI_HEAL_ROUND_CAP - 1 })]);
   });
 
   it(`AT the cap (${CI_HEAL_ROUND_CAP} durable heal-mark comments) the PR is refused \`cap-exhausted\`, never re-dispatched`, () => {
-    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }) }));
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
     const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2602, attempts: CI_HEAL_ROUND_CAP, cap: CI_HEAL_ROUND_CAP })]);
   });
 
   it('a caller-supplied `ciHealCap` overrides the default — one prior heal already exhausts a cap of 1', () => {
-    const comments = [{ body: buildCiHealComment({ reason: 'red-ci' }) }];
+    const comments = [{ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }];
     const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW, ciHealCap: 1 });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1 })]);
@@ -779,7 +797,7 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
   it('a REARM/advisory comment count never leaks into the ci-heal cap — the two caps are independent floors', () => {
     // `roundCap` defaults to `NEGOTIATION_ROUND_CAP` (5); flood the thread with REARM markers (the fix/review
     // cap's own source) and confirm ci-heal is still owed at attempts:0 — it reads its OWN marker, not this one.
-    const comments = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const comments = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prRed({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', attempts: 0 })]);
   });
@@ -806,7 +824,7 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
     // Flood the thread with REARM/advisory markers past `NEGOTIATION_ROUND_CAP` — the shared cap this bounce
     // would otherwise be refused on — and confirm it still dispatches, because the conflict-fix cap reads its
     // OWN marker, never this one.
-    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...shared] })], agents: [], now: NOW });
     expect(plan.refusals).toEqual([]);
     expect(plan.dispatch).toEqual([expect.objectContaining({
@@ -815,13 +833,13 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
   });
 
   it(`the durable conflict-fix count is read from the PR's OWN comments — ${CONFLICT_FIX_ROUND_CAP - 1} prior rounds still dispatches`, () => {
-    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP - 1 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }))];
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP - 1 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }))];
     const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', attempts: CONFLICT_FIX_ROUND_CAP - 1 })]);
   });
 
   it(`AT the cap (${CONFLICT_FIX_ROUND_CAP} durable conflict-fix comments) the PR is refused \`cap-exhausted\`, capKind \`conflict-fix\``, () => {
-    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }))];
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }))];
     const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({
@@ -830,13 +848,13 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
   });
 
   it('a caller-supplied `conflictFixCap` overrides the default', () => {
-    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), { body: CONFLICT_FIX_COMMENT_MARKER }] })], agents: [], now: NOW, conflictFixCap: 1 });
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), { body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }] })], agents: [], now: NOW, conflictFixCap: 1 });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
   });
 
   it('a bounce WITHOUT the conflict label is unaffected — the ordinary shared cap still governs it', () => {
-    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [pr1563({ comments: [finding(), ...shared] })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 5 })]);
@@ -845,8 +863,8 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
 
   it('`countConflictFixComments` narrows on the leading line, like every sibling counter', async () => {
     const { countConflictFixComments } = await import('../conflict-fix-round-count.mjs');
-    expect(countConflictFixComments([{ body: CONFLICT_FIX_COMMENT_MARKER + '\n\nmore' }])).toBe(1);
-    expect(countConflictFixComments([{ body: `> ${CONFLICT_FIX_COMMENT_MARKER}` }])).toBe(0);
+    expect(countConflictFixComments([{ body: CONFLICT_FIX_COMMENT_MARKER + '\n\nmore', author: AUTOMATION }])).toBe(1);
+    expect(countConflictFixComments([{ body: `> ${CONFLICT_FIX_COMMENT_MARKER}`, author: AUTOMATION }])).toBe(0);
     expect(countConflictFixComments(null)).toBe(0);
   });
 });
@@ -855,7 +873,7 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   // A `needs-human` PR (review:human, no review:changes) that already carries an admitted `advisory:changes`
   // finding from `we:scripts/operations/review-pr.mjs`'s `advise` step — the population no daemon ever acted on
   // before this item: the reconcile pass only ever dispatched `review` for `needs-human`, never a `fix`.
-  const advisoryNote = { body: `${ADVISORY_NOTE_MARKER}\n\nSome admitted finding text.` };
+  const advisoryNote = { body: `${ADVISORY_NOTE_MARKER}\n\nSome admitted finding text.`, author: AUTOMATION };
   const prNeedsHuman = (over = {}) => pr1563({
     number: 2601,
     labels: [...lbl('review:human', 'advisory:changes')],
@@ -874,7 +892,7 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   it('once the advisory-fix marker outnumbers stale, it falls through to the ordinary `needs-human` → `review` path (a fresh review is owed, not another fix)', () => {
     // One advisory note, one completed advisory-fix round already posted AFTER it — the count has caught up,
     // so the SAME finding is not re-fixed; a fresh review is owed to judge the repaired head.
-    const comments = [advisoryNote, { body: buildAdvisoryFixComment({}), author: { login: 'web-everything' } }];
+    const comments = [advisoryNote, { body: buildAdvisoryFixComment({}), author: AUTOMATION }];
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2601 })]);
   });
@@ -906,8 +924,9 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
     // Two prior notes (well under `NEGOTIATION_ROUND_CAP`, so this isolates the order-vs-count fix from the
     // separate, pre-existing shared-cap union below — see the next test for the exact #2549 shape, where BOTH
     // facts are true at once).
-    const priorNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 1` };
-    const latestNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 2 — the current finding` };
+    // #3383 — a trusted author is now required for these notes/fix to count toward the shared union cap too.
+    const priorNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 1`, author: AUTOMATION };
+    const latestNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 2 — the current finding`, author: AUTOMATION };
     const theOneFix = { body: buildAdvisoryFixComment({}), viewerDidAuthor: true };
     const comments = [priorNote, latestNote, theOneFix];
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
@@ -935,8 +954,9 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   // site's own docblock for why that exemption is safe (self-limiting: it can fire at most once per completed
   // advisory-fix round, and those rounds are already bounded by `ADVISORY_FIX_ROUND_CAP`).
   it('xaer296 FOLLOW-UP 2 — the exact #2549 shape (5 pre-existing notes + 1 genuine fix) is owed a REVIEW, never cap-exhausted', () => {
-    const priorNotes = Array.from({ length: 4 }, (_, i) => ({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i + 1}` }));
-    const latestNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 5 — the current finding` };
+    // #3383 — a trusted author is now required for these notes/fix to count toward the shared union cap too.
+    const priorNotes = Array.from({ length: 4 }, (_, i) => ({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i + 1}`, author: AUTOMATION }));
+    const latestNote = { body: `${ADVISORY_NOTE_MARKER}\n\nround 5 — the current finding`, author: AUTOMATION };
     const theOneFix = { body: buildAdvisoryFixComment({}), viewerDidAuthor: true };
     const comments = [...priorNotes, latestNote, theOneFix];
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
@@ -947,7 +967,7 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   // The exemption is NARROW — a `needs-human` PR that carries NO `advisory:changes` at all (the ordinary
   // population `NEGOTIATION_ROUND_CAP` was built for) must stay EXACTLY as capped as before.
   it('xaer296 FOLLOW-UP 2 — a normal PR at the shared cap (no advisory:changes at all) is STILL refused cap-exhausted', () => {
-    const rearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER }));
+    const rearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({
       prs: [prNeedsHuman({ labels: lbl('review:human'), comments: [finding(), ...rearms] })],
       agents: [], now: NOW,
@@ -962,10 +982,10 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   it('xaer296 FOLLOW-UP 2 — advisory:changes NOT yet addressed is unaffected by the review exemption (still the advisory-fix cap)', () => {
     const comments = [];
     for (let i = 0; i < ADVISORY_FIX_ROUND_CAP; i += 1) {
-      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}` });
-      comments.push({ body: buildAdvisoryFixComment({}) });
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}`, author: AUTOMATION });
+      comments.push({ body: buildAdvisoryFixComment({}), author: AUTOMATION });
     }
-    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken` });
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken`, author: AUTOMATION });
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'advisory-fix', cap: ADVISORY_FIX_ROUND_CAP })]);
@@ -976,10 +996,10 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
     // something wrong (so the fix count never catches up to the note count) — genuinely exhausted.
     const comments = [];
     for (let i = 0; i < ADVISORY_FIX_ROUND_CAP; i += 1) {
-      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}` });
-      comments.push({ body: buildAdvisoryFixComment({}) });
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}`, author: AUTOMATION });
+      comments.push({ body: buildAdvisoryFixComment({}), author: AUTOMATION });
     }
-    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken` }); // the note the last fix didn't clear
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken`, author: AUTOMATION }); // the note the last fix didn't clear
     const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({
@@ -994,7 +1014,7 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
   });
 
   it('a REARM/ordinary comment count never leaks into the advisory-fix cap — independent floors', () => {
-    const shared = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER }));
+    const shared = Array.from({ length: NEGOTIATION_ROUND_CAP + 2 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prNeedsHuman({ comments: [advisoryNote, ...shared] })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', mode: 'advisory-fix', attempts: 0 })]);
   });
@@ -1010,8 +1030,8 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
 
   it('`countAdvisoryFixComments` narrows on the leading line, like every sibling counter', async () => {
     const { countAdvisoryFixComments } = await import('../advisory-fix-mark.mjs');
-    expect(countAdvisoryFixComments([{ body: ADVISORY_FIX_COMMENT_MARKER + '\n\nmore' }])).toBe(1);
-    expect(countAdvisoryFixComments([{ body: `> ${ADVISORY_FIX_COMMENT_MARKER}` }])).toBe(0);
+    expect(countAdvisoryFixComments([{ body: ADVISORY_FIX_COMMENT_MARKER + '\n\nmore', author: AUTOMATION }])).toBe(1);
+    expect(countAdvisoryFixComments([{ body: `> ${ADVISORY_FIX_COMMENT_MARKER}`, author: AUTOMATION }])).toBe(0);
     expect(countAdvisoryFixComments(undefined)).toBe(0);
   });
 });
@@ -1066,13 +1086,13 @@ describe('case 5i — STACKED-BASE CONFLICT dispatch, a `conflicted` PR whose ba
   });
 
   it('shares the SAME durable conflict-fix cap/marker PR #2579 added — never a fourth counter', () => {
-    const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP - 1 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }));
+    const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP - 1 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prStacked({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', mode: 'stacked-rebase', attempts: CONFLICT_FIX_ROUND_CAP - 1 })]);
   });
 
   it(`AT the cap (${CONFLICT_FIX_ROUND_CAP} durable conflict-fix comments) the PR is refused \`cap-exhausted\`, capKind \`conflict-fix\` — never \`owed-elsewhere\``, () => {
-    const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER }));
+    const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prStacked({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({
@@ -1081,7 +1101,7 @@ describe('case 5i — STACKED-BASE CONFLICT dispatch, a `conflicted` PR whose ba
   });
 
   it('a caller-supplied `conflictFixCap` overrides the default here too', () => {
-    const plan = planReconcile({ prs: [prStacked({ comments: [{ body: CONFLICT_FIX_COMMENT_MARKER }] })], agents: [], now: NOW, conflictFixCap: 1 });
+    const plan = planReconcile({ prs: [prStacked({ comments: [{ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }] })], agents: [], now: NOW, conflictFixCap: 1 });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
   });

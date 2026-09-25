@@ -3021,6 +3021,19 @@ describe('rawHeavyCommandReason — a direct vitest/playwright/eleventy run skip
     expect(RAW_VITEST_TARGETED_FILE_LIMIT).toBe(2);
   });
 
+  it('does not count redirections or a flag value as file targets (#3383, the live miscounts of 2026-09-23)', () => {
+    expect(vitestRunFileTargetCount(' a.test.mjs 2>&1')).toBe(1);
+    expect(vitestRunFileTargetCount(' a.test.mjs > ../out.log 2>&1')).toBe(1);
+    expect(vitestRunFileTargetCount(' a.test.mjs >../out.log')).toBe(1);
+    expect(vitestRunFileTargetCount(' --root /w/lane-2 a.test.mjs')).toBe(1);
+    expect(vitestRunFileTargetCount(' a.test.mjs -t "start edge"')).toBe(1);
+    expect(vitestRunFileTargetCount(' a.test.mjs --testNamePattern=x')).toBe(1);
+    // a whole-suite run with only a redirection is still the whole suite
+    expect(vitestRunFileTargetCount(' > out.log 2>&1')).toBe(0);
+    expect(rawHeavyCommandReason('npx vitest run a.test.mjs 2>&1')).toBeNull();
+    expect(rawHeavyCommandReason('npx vitest run > out.log 2>&1')).toMatch(/the WHOLE suite/);
+  });
+
   it('denies a raw whole-suite `vitest run` (no files named), bare or via npx', () => {
     expect(rawHeavyCommandReason('vitest run')).toMatch(/WHOLE suite/);
     expect(rawHeavyCommandReason('npx vitest run')).toMatch(/npm run test:unit/);

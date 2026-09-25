@@ -312,6 +312,10 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
       expect(reclaim.code).not.toBe(0);
       expect(reclaim.err).toMatch(/would destroy that work/);
       expect(git(['rev-parse', 'HEAD'], lane)).toBe(headBefore);
+      // #3383 — the refusal hands the lane back: no intruder lease is left holding it until its TTL
+      const leaseFile = join(lane, '.git', '.lane-lease');
+      const left = existsSync(leaseFile) ? JSON.parse(readFileSync(leaseFile, 'utf8')) : null;
+      expect(left?.session).not.toBe('intruder');
     });
 
     it('--force still reclaims a TTL-stale, dirty lane (documented override, unchanged end state)', () => {

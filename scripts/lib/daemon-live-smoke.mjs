@@ -23,12 +23,17 @@
  *   (a) `lane-pool.mjs list --acquirable --no-cache --limit=1` for the WE pool, then a REAL `acquire` of one
  *       lane (`--purpose=smoke`, a unique per-run session slug) and an immediate `release` — proves the pool
  *       machinery a dispatch would actually use still works, not just that the file parses.
- *   (b) one GitHub read the way a DISPATCHED session does it: through the gh App shim
- *       (`we:scripts/lib/gh-app-shim.mjs#buildGhShimSettingsEnv` — a `PATH` override, opt-in, `null` when the
- *       calling process hasn't configured App auth, in which case the check runs `gh` unshimmed rather than
- *       skip) — `gh api --method GET repos/<repo>` plus `gh pr list --limit 1`. A 401 here is the gate WORKING:
- *       it means the merged code would have dispatched sessions that get the exact 401 real sessions saw
- *       2026-09-24, and the gate keeps them off it instead of reporting it after the fact.
+ *   (b) one GitHub read the way a DISPATCHED session does it: through {@link ghDispatchedSessionEnv} — the
+ *       calling process's own ambient `GH_TOKEN`/`GITHUB_TOKEN` stripped (`we:scripts/lib/gh-app-shim.mjs#sanitizeSpawnEnv`,
+ *       #4072) THEN the gh App shim's `PATH` override folded on top (`#buildGhShimSettingsEnv` — opt-in,
+ *       contributes nothing when the calling process hasn't configured App auth, in which case the check runs
+ *       `gh` sanitized-but-unshimmed rather than skip) — `gh api --method GET repos/<repo>` plus `gh pr list
+ *       --limit 1`. A 401 here is the gate WORKING: it means the merged code would have dispatched sessions
+ *       that get the exact 401 real sessions saw 2026-09-24, and the gate keeps them off it instead of
+ *       reporting it after the fact. #4072: BEFORE the sanitize step existed, this check ran with the RAW
+ *       calling env, so the daemon's own continuously-refreshed `GH_TOKEN` rode along under the shim's PATH
+ *       override and masked exactly the fallback failure real (properly-sanitized) dispatched sessions hit —
+ *       the gate passed the same day every bot session got a real 401.
  *   (c) one `we:scripts/conveyor/reconcile-pass.mjs` dry-run per configured constellation repo (`we`,
  *       `frontierui`, `plateau-app` — {@link CONSTELLATION_REPOS}) — read-only (`runReconcilePass` only reads
  *       PRs/agents and plans; it dispatches nothing), run via its own CLI so it exercises the ACTUAL updated
@@ -73,7 +78,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { runBounded, resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from './bounded-child.mjs';
-import { buildGhShimSettingsEnv } from './gh-app-shim.mjs';
+import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from './gh-app-shim.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { gitRun } from './main-staleness.mjs';
 
@@ -176,9 +181,35 @@ async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild })
   }
 }
 
-function ghEnvFor(env) {
-  const shimEnv = buildGhShimSettingsEnv({ env });
-  return shimEnv ? { ...env, ...shimEnv } : env;
+/**
+ * Build the env the gate's gh checks run with — the SAME composition a real dispatched `claude --bg` session
+ * gets (`we:scripts/operations/dispatch-lane-io.mjs#buildSpawnOptions`/`#resolveSettingsEnv`): the CALLING
+ * process's own ambient `GH_TOKEN`/`GITHUB_TOKEN` stripped FIRST ({@link sanitizeSpawnEnv} — a dispatched
+ * session never inherits its spawner's token), THEN the App shim's `PATH` override folded on top when App
+ * auth is configured ({@link buildGhShimSettingsEnv} — the same `--settings` env object a dispatcher hands the
+ * session).
+ *
+ * #4072, live-caught 2026-09-24: the PRE-FIX gate instead did `{...env, ...shimEnv}` — the shim override
+ * merged onto the RAW, un-sanitized env. `github-app-auth-env.mjs#ensureFreshGithubAppEnv` keeps `GH_TOKEN`
+ * set and CONTINUOUSLY FRESH on the daemon's own long-running process (needed for the daemon's own gh/git
+ * calls) — so that ambient token rode along underneath the PATH override every time this gate ran. The
+ * generated shim script ignores an inherited `GH_TOKEN` while its OWN shared token cache is fresh, but FALLS
+ * BACK to whatever `GH_TOKEN` it was invoked with (`runInherited(process.env)`) the moment that shared cache
+ * is empty or stale — precisely the moment a REAL dispatched session (whose spawn env is ALWAYS sanitized,
+ * never carrying the daemon's token at all) instead falls back to no token and gets a real 401. The gate's own
+ * `gh` checks quietly rode the daemon's always-fresh fallback and passed, every time, while bot sessions with
+ * no such fallback failed — sanitizing here first closes that gap: the gate's checks can no longer pass on a
+ * fallback a dispatched session could never reach.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {{pathEnv?:string, exists?:Function, writeFile?:Function, chmod?:Function, mkdir?:Function,
+ *   readFile?:Function, cachePath?:string, dir?:string, cwd?:string}} [shimOpts] forwarded to
+ *   {@link buildGhShimSettingsEnv} — test injection only; production callers pass none (real fs, real PATH).
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ghDispatchedSessionEnv(env = process.env, shimOpts = {}) {
+  const sanitized = sanitizeSpawnEnv(env);
+  const shimEnv = buildGhShimSettingsEnv({ env, ...shimOpts });
+  return shimEnv ? { ...sanitized, ...shimEnv } : sanitized;
 }
 
 async function checkGhApiRepo({ ghChildEnv, budgets, runChild }) {
@@ -245,7 +276,7 @@ export async function runLiveSmoke({
   if (isSmokeGateDisabled(env)) return { pass: true, disabled: true, results: [], sessionSlug: null };
   const budgets = resolveSmokeBudgets(env);
   const sessionSlug = `smoke-${now}-${randomUUID().slice(0, 8)}`;
-  const ghChildEnv = ghEnvFor(env);
+  const ghChildEnv = ghDispatchedSessionEnv(env);
   const ctx = { root, budgets, repos, sessionSlug, ghChildEnv, runChild };
   const results = [];
   for (const check of SMOKE_CHECKS) {

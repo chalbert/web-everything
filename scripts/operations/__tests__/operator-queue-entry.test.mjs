@@ -35,6 +35,10 @@ const stage = (root) => {
   // #x5n4zn3 — `stand-down.mjs` now imports `../lib/bounded-child.mjs` (the shared per-child timeout budget its
   // own `gh` call reuses) — stage it too, same reason as every other transitive dependency above.
   copyFileSync(join(dirname(LEAF), 'bounded-child.mjs'), join(root, 'lib/bounded-child.mjs'));
+  // #3383 — `stand-down.mjs` now also imports `../lib/marker-authorship.mjs` (the shared trusted-author gate
+  // every marker counter runs a comment through) — stage it too, or the staged copy fails to import and
+  // `main()` silently never runs (the exact failure mode this file's own header names).
+  copyFileSync(join(dirname(LEAF), 'marker-authorship.mjs'), join(root, 'lib/marker-authorship.mjs'));
 };
 
 let dir;

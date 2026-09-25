@@ -60,7 +60,8 @@ describe('decideRearm — the pure re-arm swap (#2630)', () => {
 });
 
 describe('countRearmComments — the DURABLE, restart-surviving auto-fix attempt count (#2643)', () => {
-  const rearm = (extra = '') => ({ body: `${REARM_COMMENT_MARKER}\n\nThe \`review:changes\` bounce was repaired${extra}` });
+  const AUTHOR = { login: 'web-everything' }; // the real automation login (confirmed live, #3383)
+  const rearm = (extra = '', author = AUTHOR) => ({ body: `${REARM_COMMENT_MARKER}\n\nThe \`review:changes\` bounce was repaired${extra}`, author });
 
   it('counts one re-arm comment per completed auto-fix cycle', () => {
     expect(countRearmComments([rearm()])).toBe(1);
@@ -79,18 +80,33 @@ describe('countRearmComments — the DURABLE, restart-surviving auto-fix attempt
 
   it('does NOT inflate the count when a human QUOTES the re-arm comment mid-body', () => {
     // A reply that embeds the marker deeper in the text must not read as a fresh auto-fix.
-    expect(countRearmComments([{ body: `> ${REARM_COMMENT_MARKER}\n\nreplying to this` }])).toBe(0);
+    expect(countRearmComments([{ body: `> ${REARM_COMMENT_MARKER}\n\nreplying to this`, author: AUTHOR }])).toBe(0);
   });
 
   it('tolerates leading whitespace on the marker line (gh renders can pad)', () => {
-    expect(countRearmComments([{ body: `\n  ${REARM_COMMENT_MARKER}\n\nbody` }])).toBe(1);
+    expect(countRearmComments([{ body: `\n  ${REARM_COMMENT_MARKER}\n\nbody`, author: AUTHOR }])).toBe(1);
   });
 
-  it('tolerates the bare-string comment shape too, and non-array input → 0', () => {
-    expect(countRearmComments([REARM_COMMENT_MARKER])).toBe(1);
+  it('tolerates the bare-string comment shape too (viewerDidAuthor fallback), and non-array input → 0', () => {
+    // A bare string has no author field at all, so it can only ever count via the OTHER trust path this repo
+    // still accepts test fixtures through: `viewerDidAuthor`. Bare strings never carry that either, so a bare
+    // marker string is (correctly, post-#3383) untrusted — this pins that a bare string is a SHAPE this file
+    // tolerates without throwing, not that it counts.
+    expect(countRearmComments([REARM_COMMENT_MARKER])).toBe(0);
     expect(countRearmComments(null)).toBe(0);
     expect(countRearmComments(undefined)).toBe(0);
     expect(countRearmComments('not an array')).toBe(0);
+  });
+
+  // #3383 — adversarial coverage review, 2026-09-24: before the fix in this item, ANY GitHub account could post
+  // a comment starting with REARM_COMMENT_MARKER and inflate this PR's negotiation-round count toward
+  // NEGOTIATION_ROUND_CAP, silently burning a real fixer's remaining rounds.
+  it('a forged re-arm marker from a random commenter ("mallory") does not count', () => {
+    expect(countRearmComments([rearm('', { login: 'mallory' })])).toBe(0);
+  });
+
+  it('a re-arm marker posted by the repo operator (a manual re-arm, or a daemon on its fallback credential) still counts', () => {
+    expect(countRearmComments([rearm('', { login: 'chalbert' })])).toBe(1);
   });
 });
 

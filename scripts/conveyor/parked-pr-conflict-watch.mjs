@@ -84,6 +84,7 @@ import {
 } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
+import { parseMergeTree, manifestConflictDisposition } from '../lib/rebase-drop-manifest.mjs';
 
 // #xkmu3gv — single-sourced in the new leaf `we:scripts/conveyor/conflict-label.mjs` (a genuine pure leaf, no
 // imports) so `we:scripts/conveyor/reconcile-core.mjs` can read the label with no heavier pull-in than this
@@ -159,6 +160,59 @@ export function defaultConflictLabelAgeMs({ pr, repo, exec = execFileSyncThrottl
   } catch {
     return null;
   }
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultComputeConflictDisposition — #xngv3vn (the queued-
+ * conflict grace was wasted on a conflict the drain can never heal). A LOCAL, git-level classification of what
+ * is ACTUALLY conflicting, reusing the EXACT plumbing the drain itself uses to decide whether it can heal a
+ * conflict at all — `we:scripts/lib/rebase-drop-manifest.mjs`'s {@link parseMergeTree}/
+ * {@link manifestConflictDisposition} — never a second, independently-drifting opinion of "drain-resolvable".
+ * `git fetch` both refs (best-effort — mirrors `we:scripts/conveyor/branch-drift.mjs#computeDrift`'s own
+ * fetch-then-probe shape exactly: a stale local ref still answers; a genuinely unresolvable one fails the
+ * probe closed, below) then a WORKING-TREE-FREE `git merge-tree --write-tree` between them.
+ *
+ * WHY THIS MATTERS: `we:scripts/conveyor/parked-pr-conflict-watch.mjs#QUEUED_CONFLICT_GRACE_MS` gives the
+ * drain 30 minutes before bouncing an approved/queued conflicting PR to a fix agent — reasonable ONLY for the
+ * one conflict shape the drain can actually rebase-drop on its own (`.lane-manifest.json` alone,
+ * `we:scripts/lib/rebase-drop-manifest.mjs`'s whole reason to exist). A PR conflicting on real content has NO
+ * chance of resolving in that window no matter how long it waits — the drain has no code path that touches
+ * anything but the manifest — so waiting out the full grace on it is pure delay with no upside. This function
+ * is what lets the caller tell the two shapes apart BEFORE the wait, not just after it expires.
+ *
+ * Returns `null` on ANY failure to resolve/fetch/probe (no `headRefName`, both `git` calls throwing with no
+ * parseable output, an unparseable `merge-tree` result) — the caller reads `null` as "cannot tell" and keeps
+ * the EXISTING wait unchanged (the safe direction: a probe hiccup costs at most the pre-#xngv3vn wait, never a
+ * wrongly-skipped grace on a conflict that might in fact be manifest-only).
+ * @param {{pr:{headRefName?:string, baseRefName?:string}, cwd?:string, exec?:Function}} o
+ * @returns {?('clean'|'manifest-only'|'real')}
+ */
+export function defaultComputeConflictDisposition({ pr, cwd = REPO_ROOT, exec = execFileSyncThrottled } = {}) {
+  const head = pr?.headRefName;
+  if (typeof head !== 'string' || head === '') return null;
+  const base = (typeof pr?.baseRefName === 'string' && pr.baseRefName) || 'main';
+  const childOpts = { cwd, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' };
+  try {
+    exec('git', ['fetch', 'origin', '--quiet',
+      `+${base}:refs/remotes/origin/${base}`, `+${head}:refs/remotes/origin/${head}`],
+    { ...childOpts, stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch { /* best-effort — a stale local ref may still resolve below */ }
+  let stdout = '';
+  let exitCode = 0;
+  try {
+    stdout = exec('git', ['merge-tree', '--write-tree', `origin/${base}`, `origin/${head}`],
+      { ...childOpts, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    // A conflicting merge-tree exits non-zero, which execFileSync/execFileSyncThrottled THROWS on — the
+    // conflicted-file-info output is on the thrown error's own `.stdout`, exactly like every other `merge-tree`
+    // caller in this repo (`rebase-drop-manifest.mjs`'s own real runner reads it the same way).
+    stdout = typeof e?.stdout === 'string' ? e.stdout : (e?.stdout ? String(e.stdout) : '');
+    exitCode = typeof e?.status === 'number' ? e.status : 1;
+    if (!stdout) return null; // a transient/resolution error, not a parseable conflict — cannot tell
+  }
+  const parsed = parseMergeTree(stdout, exitCode);
+  if (!parsed.tree) return null;
+  return manifestConflictDisposition(parsed);
 }
 
 /**
@@ -924,6 +978,7 @@ export function watchParkedPrConflicts({
   listMainStatutePatches = defaultListMainStatutePatchesSinceMergeBase,
   listPrComments = defaultListPrComments,
   labelAgeMs = defaultConflictLabelAgeMs,
+  computeConflictDisposition = defaultComputeConflictDisposition,
   queueScope = {},
 } = {}) {
   const prs = scopePrsToQueue(listPrs({ repo }), { label: 'parked-pr-conflict-watch', ...queueScope });
@@ -1018,8 +1073,23 @@ export function watchParkedPrConflicts({
     if (graceDue) {
       try {
         if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
-        const age = labelAgeMs({ pr, repo: resolvedRepo });
-        if (age == null || age < QUEUED_CONFLICT_GRACE_MS) continue; // the drain still has its turn
+        // #xngv3vn — classify what is ACTUALLY conflicting BEFORE waiting on age at all. The 30-minute grace
+        // exists to give the drain a chance to auto-heal the ONE shape it can rebase-drop on its own (a
+        // conflict confined to the shared `.lane-manifest.json`, `we:scripts/lib/rebase-drop-manifest.mjs`) —
+        // waiting the SAME window on a REAL content conflict wastes the whole grace on a repair the drain has
+        // no code path for at all. `null` (cannot classify — no headRefName, an unresolvable ref, a git error)
+        // keeps the EXISTING age-gated wait unchanged, the safe direction.
+        const disposition = computeConflictDisposition({ pr, repo: resolvedRepo });
+        const manifestOnly = disposition == null || disposition === 'manifest-only' || disposition === 'clean';
+        if (manifestOnly) {
+          const age = labelAgeMs({ pr, repo: resolvedRepo });
+          if (age == null || age < QUEUED_CONFLICT_GRACE_MS) continue; // the drain still has its turn
+        } else {
+          // A REAL (non-manifest) conflict — never worth waiting out the drain's turn on. Surfaced on the
+          // entry even in dry-run (mirrors this whole branch's own dry-run-visibility discipline) so a sweep
+          // is never silent about WHY a fresh-looking conflict was routed immediately instead of deferred.
+          entry.conflictDisposition = disposition;
+        }
 
         // #3383 — a STACKED PR (`baseRefName` isn't `main`) is never landed by the drain no matter how long it
         // waits here (`#poc-branch-declared-delivery-mode` clause 5: "base is not <default>"), so the drain-grace
