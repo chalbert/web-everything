@@ -50,6 +50,27 @@
  * PURE CORE / IO SHELL: {@link decideSmokeVerdict} is pure (given a results array, is the gate a pass?);
  * everything else here does real IO (child processes, fs reads for the reject-cache) through injectable
  * `runChild`/`run` params, same convention as `daemon-self-sync.mjs`'s own `run` injection.
+ *
+ * TRANSIENT vs. CODE (Module D, card 4041 follow-up) — {@link classifySmokeFailure} is the second, finer-grained
+ * verdict on top of {@link decideSmokeVerdict}'s plain pass/fail: a FAILED check can still mean two very
+ * different things, and treating them the same was itself a bug. A 401 from `gh`, a flaky 5xx, a DNS hiccup, or
+ * a momentarily-exhausted lane pool (every worker lane busy for a few seconds under load) is an
+ * ENVIRONMENT/INFRA fault that the OLD code would have hit exactly as hard as the NEW code — it says nothing
+ * about whether the merged commit is safe. {@link recordRejectedSha}-ing a merge for a fault like that freezes
+ * the daemon on a code-independent problem until a human notices and clears the cache by hand. So every failed
+ * check's `detail` string is matched against {@link TRANSIENT_FAILURE_PATTERNS}; the verdict is `'transient'`
+ * ONLY when every single failure matches — one genuine code-shaped failure (a thrown SyntaxError, an assertion
+ * mismatch, anything not on the list) pulls the whole verdict to `'code'`, because a mix means at least one
+ * failure IS evidence the merge broke something, and that must never be laundered through the transient path.
+ * {@link runLiveSmokeWithRetry} is what actually uses the classification: on `'transient'` it retries the WHOLE
+ * smoke (a fresh run, not just the failed check) up to a small RETRY CAP
+ * (`WE_DAEMON_SMOKE_TRANSIENT_RETRIES`, default 2 — i.e. 3 attempts total) with a backoff between attempts
+ * (`WE_DAEMON_SMOKE_RETRY_BACKOFF_MS`, default 15s), because most env noise (a rate limit, a busy pool) clears
+ * within seconds. The cap exists so a GENUINELY down environment (origin unreachable for the whole window)
+ * still gives up in bounded time rather than retrying forever; when the cap is reached the verdict stays
+ * `'transient'` (never silently promoted to `'code'`) and {@link gateMergedCommit} rolls the clone back WITHOUT
+ * writing a reject record — an env fault must never poison the reject-cache and permanently block a later,
+ * healthy re-check of the SAME sha once the environment recovers.
  */
 
 import { randomUUID, createHash } from 'node:crypto';
@@ -58,6 +79,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { runBounded, resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from './bounded-child.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from './gh-app-shim.mjs';
+import { collectImportClosure, closureHits } from './import-closure.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { gitRun } from './main-staleness.mjs';
 
@@ -79,11 +101,21 @@ export const SMOKE_BUDGET_ENV = Object.freeze({
   ghApiMs: 'WE_SMOKE_GH_API_MS',
   ghPrListMs: 'WE_SMOKE_GH_PR_LIST_MS',
   reconcileMs: 'WE_SMOKE_RECONCILE_MS',
+  // #3383 Module D — how long the smoke's own `lane-pool.mjs acquire` may WAIT (`--wait-ms=`) for a busy pool
+  // to free a lane, instead of failing instantly on a momentary flicker. See `checkLaneAcquireRelease`.
+  laneAcquireWaitMs: 'WE_SMOKE_LANE_ACQUIRE_WAIT_MS',
 });
 
 function envMs(env, key, fallback) {
   const n = Number(env?.[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** Non-negative integer env override (unlike {@link envMs}, `0` is a valid, meaningful value — e.g. "no
+ *  retries"). Falls back on anything else (missing, negative, non-numeric). */
+function envNonNegInt(env, key, fallback) {
+  const n = Number(env?.[key]);
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
 }
 
 /** Resolve every check's budget from env, falling back to a sane default (or to `bounded-child.mjs`'s own
@@ -92,6 +124,7 @@ export function resolveSmokeBudgets(env = process.env) {
   return {
     lanePoolListMs: envMs(env, SMOKE_BUDGET_ENV.lanePoolListMs, resolveChildTimeoutMs(env)),
     laneAcquireMs: envMs(env, SMOKE_BUDGET_ENV.laneAcquireMs, resolveLaneAcquireTimeoutMs(env)),
+    laneAcquireWaitMs: envMs(env, SMOKE_BUDGET_ENV.laneAcquireWaitMs, 180_000),
     laneReleaseMs: envMs(env, SMOKE_BUDGET_ENV.laneReleaseMs, resolveChildTimeoutMs(env)),
     ghApiMs: envMs(env, SMOKE_BUDGET_ENV.ghApiMs, 30_000),
     ghPrListMs: envMs(env, SMOKE_BUDGET_ENV.ghPrListMs, 30_000),
@@ -100,6 +133,14 @@ export function resolveSmokeBudgets(env = process.env) {
 }
 
 const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+// #4044: a crashed node child's first stderr line is only the stack LOCATION (`node:internal/modules/cjs/
+// loader:1227`) — the live 08:14 ET smoke-rejected alert carried nothing else, hiding that the gh shim's baked
+// throttle path was missing. Keep the first line, and append the first real `…Error:` line when it differs.
+const failureLine = (e) => {
+  const lines = String((e && e.message) || e).split('\n');
+  const err = lines.find((l) => /\b[A-Za-z]*Error\b[:\s]|Cannot find module/.test(l));
+  return err && err !== lines[0] ? `${lines[0]} — ${err.trim()}` : lines[0];
+};
 
 async function checkLanePoolList({ root, budgets, runChild, env }) {
   try {
@@ -125,10 +166,21 @@ async function checkLanePoolList({ root, budgets, runChild, env }) {
 async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild, env }) {
   let laneNum = null;
   try {
+    // #3383 Module D — `--wait-ms=<laneAcquireWaitMs>` lets a momentarily-exhausted pool (every lane busy for
+    // a few seconds under real dispatch load) self-heal instead of failing the gate on the very first read;
+    // `lane-pool.mjs`'s own `cmdAcquire` polls internally up to that bound before giving up with its "no free
+    // lane" message (which is exactly what `TRANSIENT_FAILURE_PATTERNS` matches on when it still exhausts the
+    // wait). The CHILD's own hard timeout must cover that whole wait plus the acquire's real clone/refresh
+    // work, or `runBounded` kills the child before `--wait-ms` itself gets to time out — hence the `Math.max`
+    // against the plain `laneAcquireMs` budget, with 60s of headroom on top.
     // #4139 — see {@link checkLanePoolList}'s own comment just above: `env` must reach every lane-pool child
     // this gate spawns, never just some of them, or an isolated caller's pool override is only PARTLY honored.
-    const out = await runChild('node', ['scripts/lane-pool.mjs', 'acquire', '--purpose=smoke', `--session=${sessionSlug}`, '--json'], {
-      cwd: root, timeoutMs: budgets.laneAcquireMs, env,
+    const acquireTimeoutMs = Math.max(budgets.laneAcquireMs, budgets.laneAcquireWaitMs + 60_000);
+    const out = await runChild('node', [
+      'scripts/lane-pool.mjs', 'acquire', '--purpose=smoke', `--session=${sessionSlug}`,
+      `--wait-ms=${budgets.laneAcquireWaitMs}`, '--json',
+    ], {
+      cwd: root, timeoutMs: acquireTimeoutMs, env,
     });
     const parsed = JSON.parse(out);
     laneNum = Number.isInteger(parsed?.lane) ? parsed.lane : null;
@@ -186,7 +238,7 @@ async function checkGhApiRepo({ ghChildEnv, budgets, runChild }) {
     await runChild('gh', ['api', '--method', 'GET', `repos/${slug}`], { env: ghChildEnv, timeoutMs: budgets.ghApiMs });
     return { ok: true, detail: `gh api --method GET repos/${slug} ok` };
   } catch (e) {
-    return { ok: false, detail: `gh api --method GET repos/${slug} failed: ${firstLine(e)}` };
+    return { ok: false, detail: `gh api --method GET repos/${slug} failed: ${failureLine(e)}` };
   }
 }
 
@@ -196,7 +248,7 @@ async function checkGhPrList({ ghChildEnv, budgets, runChild }) {
     await runChild('gh', ['pr', 'list', '--limit', '1', '--repo', slug, '--json', 'number'], { env: ghChildEnv, timeoutMs: budgets.ghPrListMs });
     return { ok: true, detail: `gh pr list --repo ${slug} --limit 1 ok` };
   } catch (e) {
-    return { ok: false, detail: `gh pr list --repo ${slug} --limit 1 failed: ${firstLine(e)}` };
+    return { ok: false, detail: `gh pr list --repo ${slug} --limit 1 failed: ${failureLine(e)}` };
   }
 }
 
@@ -218,13 +270,45 @@ async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
 /** THE ONE LIST — every live check the gate runs, in order. Each `run(ctx)` gets `{ root, budgets, repos,
  *  sessionSlug, ghChildEnv, runChild }` and must never throw (a throw is still caught by {@link runLiveSmoke},
  *  but a check should report `{ ok:false, detail }` itself so the detail is specific). */
+// `mayBeTransient:false` — a failure of this check is ALWAYS `'code'` ({@link classifySmokeFailure}), whatever its
+// text says. THE RULE: any check that runs code FROM THE TREE UNDER TEST (`cwd: root` — `reconcile-pass.mjs`,
+// `lane-pool.mjs`) is `mayBeTransient:false`. Anything that code prints flows into `detail`; if its text could buy
+// a `'transient'` verdict, a broken (or hostile) overlay could print one of {@link TRANSIENT_FAILURE_PATTERNS}
+// ("no free lane", "ETIMEDOUT") and dodge the reject record every tick, re-smoking forever under the WRITE lock
+// (PR #2625 advisory, security/reject-cache-bypass). Only checks that run external tools (`gh`) stay eligible.
+// A test in daemon-live-smoke.test.mjs enforces the rule by running every row and watching its `cwd`.
+// Cost, accepted: a genuinely exhausted pool (after `--wait-ms` gave it 180s to free up) or a gh/network blip
+// inside the reconcile dry-run records a rejection, as every failure did before Module D; it clears as soon as
+// main or the overlay inputs move.
+//
+// `codeEntries` (#4044): the tree scripts a check RUNS. Live 2026-09-25 a full smoke took 209s under the clone's
+// WRITE lock — lane-acquire-release 172s (waiting on a busy pool), lane-pool-list 30s — so on a main that moves
+// every few minutes the clone was locked most of the time and every daemon on it skipped its ticks ("read lock
+// refused (writer-active)", 13:20Z-13:33Z; #2657 never got its advisory). When the rebuild knows the files that
+// changed since the LAST LIVE-VERIFIED build (`changedFiles`), a tree-code check whose script's import closure
+// none of them touch ran this exact code live already and passed — it is reported `skipped` (ok), not re-run.
+// Unknown diff, an incomplete closure, or any touched file ⇒ the check runs, exactly as before. The gh checks
+// (external, ~1s) always run.
 export const SMOKE_CHECKS = Object.freeze([
-  { name: 'lane-pool-list', run: checkLanePoolList },
-  { name: 'lane-acquire-release', run: checkLaneAcquireRelease },
-  { name: 'gh-api-repo', run: checkGhApiRepo },
-  { name: 'gh-pr-list', run: checkGhPrList },
-  { name: 'reconcile-dry-run', run: checkReconcileDryRun },
+  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },
+  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },
+  { name: 'gh-api-repo', run: checkGhApiRepo, mayBeTransient: true },
+  { name: 'gh-pr-list', run: checkGhPrList, mayBeTransient: true },
+  { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false, codeEntries: ['scripts/conveyor/reconcile-pass.mjs'] },
 ]);
+
+/**
+ * PURE (given `closureOf`): may `check` be skipped because none of `changedFiles` touches the code it runs?
+ * @param {{check:{codeEntries?:string[]}, changedFiles:string[]|null|undefined, root:string, closureOf?:Function}} o
+ * @returns {boolean}
+ */
+export function checkCodeUnchanged({ check, changedFiles, root, closureOf = collectImportClosure }) {
+  if (!Array.isArray(changedFiles) || !check.codeEntries || !check.codeEntries.length) return false;
+  let closure;
+  try { closure = closureOf({ root, entries: check.codeEntries }); } catch { return false; }
+  const hits = closureHits({ closure, changedFiles });
+  return Array.isArray(hits) && hits.length === 0;
+}
 
 /** PURE: does a completed set of check results pass the gate? Every single check must have passed. */
 export function decideSmokeVerdict(results) {
@@ -239,7 +323,7 @@ export function decideSmokeVerdict(results) {
  */
 export async function runLiveSmoke({
   root, env = process.env, repos = Object.values(CONSTELLATION_REPOS).map((r) => r.slug),
-  runChild = runBounded, now = Date.now(),
+  runChild = runBounded, now = Date.now(), changedFiles = null, closureOf = collectImportClosure,
 } = {}) {
   if (isSmokeGateDisabled(env)) return { pass: true, disabled: true, results: [], sessionSlug: null };
   const budgets = resolveSmokeBudgets(env);
@@ -253,14 +337,130 @@ export async function runLiveSmoke({
   for (const check of SMOKE_CHECKS) {
     const startedAt = Date.now();
     let result;
+    if (checkCodeUnchanged({ check, changedFiles, root, closureOf })) {
+      results.push({
+        name: check.name, ms: 0, ok: true, skipped: true, mayBeTransient: check.mayBeTransient !== false,
+        detail: 'code unchanged since the last live-verified build — not re-run (#4044)',
+      });
+      continue;
+    }
     try {
       result = await check.run(ctx);
     } catch (e) {
       result = { ok: false, detail: `threw: ${firstLine(e)}` };
     }
-    results.push({ name: check.name, ms: Date.now() - startedAt, ...result });
+    results.push({ name: check.name, ms: Date.now() - startedAt, ...result, mayBeTransient: check.mayBeTransient !== false });
   }
   return { pass: decideSmokeVerdict(results), disabled: false, results, sessionSlug };
+}
+
+// ── Transient vs. code classification (Module D) — see the file header for the full rationale. ──
+
+/** Env/infra fault signatures a failed check's `detail` is matched against — see {@link classifySmokeFailure}.
+ *  Frozen and exported so a caller/test can see exactly what counts as "environment noise, not code" without
+ *  re-deriving it. Kept as one pattern per alternative (rather than one combined regex) so a single culprit
+ *  substring is easy to spot/extend without fighting regex precedence. */
+export const TRANSIENT_FAILURE_PATTERNS = Object.freeze([
+  /\b401\b/i,
+  /Bad credentials/i,
+  /HTTP 5\d\d/i,
+  /rate limit/i,
+  /ETIMEDOUT/i,
+  /ECONNRESET/i,
+  /ENOTFOUND/i,
+  /EAI_AGAIN/i,
+  // `bounded-child.mjs#runBounded`'s OWN hard-timeout rejection: the WHOLE detail must be `<check prefix> failed:
+  // timed out after Nms (process group killed)`, anchored at both ends (no check prefix contains a `:`).
+  // NOT a bare /timeout|timed out/: those match ordinary code-failure text ("timed out waiting for #submit",
+  // an assertion naming a `timeout` option) and would launder a real regression through the retry path. A child
+  // that merely PRINTS this text reaches `detail` as `<prefix> failed: exited N: …`, so it cannot match.
+  /^[^:]+ failed: timed out after \d+ms \(process group killed\)$/,
+  /no free lane/i, // lane-pool.mjs#cmdAcquire's exhausted-pool message, e.g. `no free lane in pool "we" (12 all held/dirty) — release one or \`provision\` more`
+  /all lanes (are )?busy/i,
+  /pool (is )?(full|exhausted)/i,
+  /could not resolve host/i,
+  // `gh` is a Go binary: its network failures read like Go's net/http errors, never Node's `E*` codes above
+  // (live 2026-09-25 08:14 ET: both gh checks failed together and were rejected as `code`, freezing the clone).
+  /error connecting to api\.github\.com/i,
+  /i\/o timeout/i,
+  /connection reset by peer/i,
+  /broken pipe/i,
+  /TLS handshake timeout/i,
+  /no such host/i,
+  /connection refused/i,
+  /dial tcp/i,
+  /HTTP 429/i,
+  /HTTP 403: .*rate limit/i,
+]);
+
+function isTransientDetail(detail) {
+  const s = String(detail ?? '');
+  return TRANSIENT_FAILURE_PATTERNS.some((re) => re.test(s));
+}
+
+/**
+ * PURE: classify a completed {@link runLiveSmoke} `results` array as one of:
+ *  - `'pass'` — every check ok.
+ *  - `'transient'` — at least one check failed, and EVERY failure's `detail` matches
+ *    {@link TRANSIENT_FAILURE_PATTERNS} (an auth/network/pool-capacity fault the old code would hit identically)
+ *    AND came from a check that may be transient (a row with `mayBeTransient:false` — see {@link SMOKE_CHECKS} —
+ *    always counts as code; a row without the field is eligible).
+ *  - `'code'` — at least one failure does NOT match (a genuinely code-shaped failure), OR no checks ran at all
+ *    (an empty result set is never "just env noise" — same fail-closed posture as {@link decideSmokeVerdict}).
+ * A single non-transient failure pulls the WHOLE verdict to `'code'`: a mix of one real bug and one flaky 401
+ * is still a real bug, and must never be laundered through the transient/retry path.
+ * @param {Array<{ok:boolean, detail?:string}>} results
+ * @returns {'pass'|'transient'|'code'}
+ */
+export function classifySmokeFailure(results) {
+  if (!Array.isArray(results) || results.length === 0) return 'code';
+  const failures = results.filter((r) => !r.ok);
+  if (failures.length === 0) return 'pass';
+  return failures.every((r) => r.mayBeTransient !== false && isTransientDetail(r.detail)) ? 'transient' : 'code';
+}
+
+/** Default retry cap for {@link runLiveSmokeWithRetry} — the number of EXTRA attempts after the first, once a
+ *  run classifies as `'transient'`. Overridable via `WE_DAEMON_SMOKE_TRANSIENT_RETRIES` (`0` is a valid,
+ *  meaningful override: "never retry, one shot"). */
+export const SMOKE_TRANSIENT_RETRIES_ENV = 'WE_DAEMON_SMOKE_TRANSIENT_RETRIES';
+/** Default sleep between retries — env `WE_DAEMON_SMOKE_RETRY_BACKOFF_MS`. Most env noise (a rate limit, a
+ *  momentarily-full lane pool) clears within seconds; 15s gives it real room without dragging a rebuild out. */
+export const SMOKE_RETRY_BACKOFF_MS_ENV = 'WE_DAEMON_SMOKE_RETRY_BACKOFF_MS';
+
+// Deliberately NOT `.unref()`'d: the backoff IS the work in flight. With nothing else ref'd (the write-lock
+// heartbeat is unref'd, the failed attempt's child calls are done), an unref'd timer lets Node exit before it
+// fires — the retry never happens and the resident daemon dies with exit 0 (the #3870 death that
+// pass-daemon.mjs#realSleep documents).
+const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+/**
+ * Run {@link runLiveSmoke} and, on a `'transient'` verdict ONLY (see {@link classifySmokeFailure}), retry the
+ * WHOLE smoke (never just the failed check — the checks share live state like a lane lease) up to `retries`
+ * more times, sleeping `backoffMs` between attempts. A `'code'` verdict never retries — it is a real finding,
+ * not noise. The kill switch is checked up front and short-circuits identically to {@link runLiveSmoke}'s own
+ * kill-switch path, without spending an attempt.
+ * @param {{root:string, env?:NodeJS.ProcessEnv, runChild?:typeof runBounded, sleep?:(ms:number)=>Promise<void>,
+ *   retries?:number, backoffMs?:number}} o
+ * @returns {Promise<{verdict:'pass'|'transient'|'code', attempts?:number, smoke?:object, disabled?:boolean}>}
+ */
+export async function runLiveSmokeWithRetry({
+  root, env = process.env, runChild = runBounded, sleep = defaultSleep,
+  retries = envNonNegInt(env, SMOKE_TRANSIENT_RETRIES_ENV, 2),
+  backoffMs = envMs(env, SMOKE_RETRY_BACKOFF_MS_ENV, 15_000),
+  changedFiles = null,
+} = {}) {
+  if (isSmokeGateDisabled(env)) return { verdict: 'pass', disabled: true };
+  let smoke;
+  let verdict;
+  let attempts = 0;
+  for (;;) {
+    attempts += 1;
+    smoke = await runLiveSmoke({ root, env, runChild, changedFiles });
+    verdict = classifySmokeFailure(smoke.results);
+    if (verdict !== 'transient' || attempts > retries) break;
+    await sleep(backoffMs);
+  }
+  return { verdict, attempts, smoke };
 }
 
 // ── Reject-cache: remember the last merged sha the gate rejected, so a daemon never re-runs the (real,
@@ -335,9 +535,17 @@ export function rollbackToSha({ root, sha, run = gitRun }) {
 /**
  * THE ONE GATE both `daemon-self-sync.mjs#withSelfSync` and `daemon-load-overlay.mjs` call, right after a merge
  * has already landed on disk. Decides adopt vs. roll back, and does whichever effect that implies.
+ *
+ * Kept for back-compat (the module-level rebuild flow — Module C — calls {@link runLiveSmokeWithRetry}
+ * directly instead) but upgraded to use it internally: a `'transient'` verdict (see {@link
+ * classifySmokeFailure}) rolls back WITHOUT writing a reject record and returns `reason:'smoke-transient'`,
+ * distinct from `reason:'smoke-fail'` (a genuine `'code'` verdict, which DOES record the rejection). Either
+ * way, a rollback that itself fails sets `quarantine:true` on the result (the clone is left on unknown code and
+ * needs a hand `git reset --hard`) in addition to `rollback:{ok:false, reason}`.
  * @param {{root:string, preMergeSha:string|null, mergedIdentitySha?:string|null, env?:NodeJS.ProcessEnv,
  *   runChild?:typeof runBounded, run?:typeof gitRun, log?:Console}} o
- * @returns {Promise<{adopt:boolean, reason:string, smoke?:object, rollback?:object}>}
+ * @returns {Promise<{adopt:boolean, reason:'kill-switch-disabled'|'still-rejected'|'smoke-pass'|
+ *   'smoke-transient'|'smoke-fail', smoke?:object, rollback?:object, quarantine?:true}>}
  */
 export async function gateMergedCommit({
   root, preMergeSha, mergedIdentitySha = null, env = process.env, runChild = runBounded, run = gitRun, log = console,
@@ -354,10 +562,26 @@ export async function gateMergedCommit({
     return { adopt: false, reason: 'still-rejected', rollback };
   }
 
-  const smoke = await runLiveSmoke({ root, env, runChild });
-  if (smoke.pass) {
+  // #3383 Module D — retry-on-transient (classifySmokeFailure) wraps the single runLiveSmoke call below.
+  const { verdict, smoke, disabled } = await runLiveSmokeWithRetry({ root, env, runChild });
+  if (verdict === 'pass') {
     if (mergedIdentitySha) clearRejectedSha(root, env);
-    return { adopt: true, reason: smoke.disabled ? 'kill-switch-disabled' : 'smoke-pass', smoke };
+    return { adopt: true, reason: disabled ? 'kill-switch-disabled' : 'smoke-pass', smoke };
+  }
+
+  if (verdict === 'transient') {
+    // Env/infra noise (a 401, a busy lane pool, a network blip) survived every retry — roll back so the
+    // daemon never restarts onto un-vetted code, but NEVER write a reject record: caching a transient fault
+    // would permanently block a later, healthy re-check of this SAME sha once the environment recovers (the
+    // exact freeze #3383's rationale exists to prevent).
+    const rollback = rollbackToSha({ root, sha: preMergeSha, run });
+    log.error?.(
+      `daemon-live-smoke: TRANSIENT live smoke failure (env/infra noise, not recording a rejection — #3383 Module D) `
+      + `after retry; ${rollback.ok ? `rolled back to ${preMergeSha}` : `ROLLBACK FAILED (${rollback.reason}) — clone may be left mid-move, needs a hand \`git reset --hard ${preMergeSha}\``}`,
+    );
+    const result = { adopt: false, reason: 'smoke-transient', smoke, rollback };
+    if (!rollback.ok) result.quarantine = true;
+    return result;
   }
 
   const failedNames = smoke.results.filter((r) => !r.ok).map((r) => r.name);

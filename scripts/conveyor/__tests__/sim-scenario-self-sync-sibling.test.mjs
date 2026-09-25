@@ -30,6 +30,11 @@
  * own clone (its cwd, inherited by every `gh` child it spawns) — so the checkout is genuinely ahead-and-behind,
  * not merely stale.
  *
+ * #4044 UPDATE: the default self-sync path now REBUILDS a managed clone instead of merging on top of it, and a
+ * managed clone's `assertMainNotStale` refuses a plain behind-only checkout rather than fast-forwarding it. So A2 now
+ * arms the plain `push-to-main` fault: behind-only is enough to refuse, and a local-only ahead commit (what
+ * `-diverge` adds) is refused by the rebuild as local work, never merged. The paragraph above is the pre-#4044 story.
+ *
  * LIVE SMOKE GATE (`scripts/lib/daemon-live-smoke.mjs`, landed separately as `2a53302d8`, already on `main`
  * ahead of this build): every successful tick-start self-sync merge now runs a real smoke (lane-pool
  * list/acquire/release, two `gh` reads, a `reconcile-pass.mjs --json` dry run per constellation repo) before
@@ -40,11 +45,21 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { scenario, runScenario } from './sim/scenario.mjs';
 
 function headOfClone(cloneRoot) {
   return execFileSync('git', ['-C', cloneRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+}
+
+// #4044 restart gate: a daemon restarts only when a file it IMPORTS changed, and not before it has run
+// WE_DAEMON_RESTART_MIN_INTERVAL_MS (default 10m). A restart-proving scenario therefore lands a real (harmless,
+// appended-comment) change to a module both daemons import, and advances the sim clock past the window.
+const IMPORTED = 'scripts/lib/daemon-self-sync.mjs';
+function touchedImported(w, tag) {
+  return { [IMPORTED]: `${readFileSync(join(w.simCloneRoot, IMPORTED), 'utf8')}\n// sim: ${tag}\n` };
 }
 
 function a1Def() {
@@ -60,7 +75,8 @@ function a1Def() {
       'tick fix-dispatch',
       'tick review',
       // A human (or another lane) pushes a harmless commit straight to origin/main.
-      (w) => { w.git.commitToMain('we', { 'a1-harmless.txt': 'hello from A1\n' }, 'sim: a1 harmless main commit'); },
+      (w) => { w.git.commitToMain('we', touchedImported(w, 'a1'), 'sim: a1 main commit touching daemon code'); },
+      'advance 11m',
       // review's OWN tick-start self-sync finds it, merges (real git, in the shared clone), passes the live
       // smoke gate, and restarts — all within this ONE tick call.
       'tick review',
@@ -113,11 +129,16 @@ function a2Def() {
       // `FIX_DISPATCH_DAEMON_REPOS` iteration order) — see this file's own header for why `-diverge`, not a
       // bare push, is what is needed to make `assertMainNotStale` actually refuse rather than silently heal.
       (w) => {
+        // #4044: a plain push, not `-diverge`. The clone is now MANAGED (rebuilt fresh from origin/main + its
+        // overlay list; `withSelfSync` sets WE_DAEMON_MANAGED_CLONE=1), so `assertMainNotStale` REFUSES a
+        // behind-only clone instead of fast-forwarding it past the smoke gate. A local-only ahead commit is no
+        // longer how a daemon clone runs ahead (overlays are); the rebuild refuses such a commit as local work.
         w.gh.raw.fault({
-          verb: 'pr list', kind: 'push-to-main-diverge', times: 1, repo: 'chalbert/web-everything',
-          files: { 'a2-mid-tick.txt': 'origin advanced mid-tick\n' }, message: 'sim: a2 mid-tick origin advance',
+          verb: 'pr list', kind: 'push-to-main', times: 1, repo: 'chalbert/web-everything',
+          files: touchedImported(w, 'a2'), message: 'sim: a2 mid-tick origin advance (daemon code)',
         });
       },
+      'advance 11m',
       // This tick: repo 'we' ticks clean (tick-start self-sync already up to date), its own `reconcile()` calls
       // `gh pr list` — the fault fires, diverging the shared clone. repo 'frontierui' and 'plateau-app' then
       // each independently call `assertMainNotStale` at the top of their OWN `runReconcileFixDispatch` and
@@ -141,14 +162,40 @@ function a2Def() {
       expect(ticks[2].error).toBeNull();
       expect(ticks[2].result?.refusals ?? []).toEqual([]);
 
-      // Converged means "origin's new tip was actually adopted", not byte-for-byte equal HEAD shas: A2's own
-      // `push-to-main-diverge` fault ALSO committed a real local-only (never pushed) commit directly into the
-      // shared clone, so the clone's post-merge HEAD is a genuine merge commit descending from BOTH that local
-      // commit and origin's new tip — never equal to origin's tip alone (unlike A1, which never diverges
-      // locally, so ITS clone converges to an EXACT match — see that scenario's own assertion above).
+      // Converged: the rebuild moved the clone to EXACTLY origin's new tip (no overlays registered, no merge on
+      // top) — the same exact match A1 asserts.
       const originMainSha = w.git.headOf('we', 'main');
-      expect(() => execFileSync('git', ['-C', w.simCloneRoot, 'merge-base', '--is-ancestor', originMainSha, 'HEAD']))
-        .not.toThrow();
+      expect(headOfClone(w.simCloneRoot)).toBe(originMainSha);
+    },
+  });
+}
+
+// #4044 LIVE BUG 2 (restart churn): a main move touching nothing the daemons import (the common drain case — a
+// backlog card) must still bring the shared clone current, but restart NEITHER daemon; both keep ticking.
+function a3Def() {
+  return scenario('self-sync-sibling-a3-no-restart-on-unimported-move', {
+    repos: ['we'],
+    daemons: ['review', 'fix-dispatch'],
+    lanes: 2,
+    setup(w) {
+      return { w };
+    },
+    play: [
+      'tick fix-dispatch',
+      'tick review',
+      (w) => { w.git.commitToMain('we', { 'backlog/9999-sim-a3.md': '---\ntitle: sim a3\n---\nbody\n' }, 'sim: a3 backlog-only main commit'); },
+      'advance 11m', // past the window, so only the imported-file rule can be what holds the restart back
+      'tick review',
+      'tick fix-dispatch',
+    ],
+    expect(s, { w }) {
+      for (const d of ['review', 'fix-dispatch']) {
+        const ticks = s.trace.filter((t) => t.daemon === d);
+        expect(ticks).toHaveLength(2);
+        expect(ticks.every((t) => !t.restart)).toBe(true);
+        expect(s.hosts[d]).toEqual({ boots: 1, restarts: 0 });
+      }
+      expect(headOfClone(w.simCloneRoot)).toBe(w.git.headOf('we', 'main'));
     },
   });
 }
@@ -160,5 +207,9 @@ describe('#3383 daemon scenario simulator — self-sync sibling scenarios (I-15/
 
   it('A2: a mid-tick stale-main refusal re-syncs and restarts within the SAME tick (I-18)', async () => {
     await runScenario(a2Def(), { timeoutMs: 180_000 });
+  }, 180_000);
+
+  it('A3: a main move touching no daemon import rebuilds the clone but restarts neither daemon (#4044)', async () => {
+    await runScenario(a3Def(), { timeoutMs: 180_000 });
   }, 180_000);
 });

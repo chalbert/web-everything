@@ -55,18 +55,57 @@
  * `we:scripts/lib/poc-branches.json`'s `lane/daemon-poc` entry). Setting {@link DAEMON_SELF_SYNC_BRANCH_ENV}
  * (`DAEMON_SELF_SYNC_BRANCH=lane/daemon-poc`) switches a clone's "home" branch from `main` to the named POC
  * branch and, each tick, fetches BOTH `origin/main` AND `origin/<poc>`, merging whichever has commits the
- * clone lacks — same merge-commit-never-rebase-never-push contract as the default path, just against two
- * upstreams instead of one, and the SAME fail-closed/timeout posture the default path already carries (a
- * failed/timed-out probe is never silently read as clean/up-to-date). {@link decidePocSelfSync} /
- * {@link selfSyncCheckoutPoc} carry this; the DEFAULT (env unset) path through {@link decideSelfSync} /
- * {@link selfSyncCheckout} is UNCHANGED — not refactored to share the two-source logic — specifically so the
- * already-shipped, live daemon behavior stays byte-identical rather than riding on a generalization it never
- * asked for. The bug-1/bug-2 fixes above are, for the same reason, ALSO scoped to the default path only —
- * neither review-daemon.mjs nor reconcile-fix-dispatch-daemon.mjs opt into POC mode today.
+ * clone lacks — same merge-commit-never-rebase-never-push contract as the default path used to have, just
+ * against two upstreams instead of one, and the SAME fail-closed/timeout posture the default path already
+ * carries (a failed/timed-out probe is never silently read as clean/up-to-date). {@link decidePocSelfSync} /
+ * {@link selfSyncCheckoutPoc} carry this and are UNCHANGED by everything below — deliberately not
+ * generalized onto the rebuild flow, so the already-shipped POC daemon behavior stays byte-identical rather
+ * than riding on a generalization it never asked for. Neither review-daemon.mjs nor
+ * reconcile-fix-dispatch-daemon.mjs opt into POC mode today.
+ *
+ * #4044 MODULE E — THE DEFAULT PATH NOW REBUILDS, IT NEVER MERGES. Everything above (bugs 1/2, the live-smoke
+ * gate) described the FIRST cut of self-sync: fetch + `git merge origin/main` on top of whatever the clone
+ * already had, gated by a live smoke check bolted onto `withSelfSync` itself. That could drift a clone into a
+ * tree no commit on GitHub ever represented (an overlay merged last week, main merged on top THIS week, in an
+ * order nobody could reconstruct from `origin` alone) — `we:scripts/lib/daemon-rebuild.mjs` (Module C) replaces
+ * it: every tick, the clone is rebuilt FRESH from `origin/main` plus its registered overlay list
+ * (`we:scripts/lib/daemon-overlays.mjs`, Module B), in the object database, gated by the SAME live smoke
+ * (now owned by `rebuildClone` itself, not this wrapper), under the clone's own reader/writer lock
+ * (`we:scripts/lib/daemon-clone-lock.mjs`, Module A). `withSelfSync`'s DEFAULT (non-POC) path is now:
+ *   1. `rebuild()` (injectable, defaults to `rebuildClone`) — it takes the WRITE lock itself, so nothing here
+ *      needs to. `moved && adopted` ⇒ `onRestart` immediately; the read lock below is never even acquired.
+ *   2. Otherwise, acquire the clone's READ lock (`acquireRead`, Module A). Refused (a writer — i.e. a rebuild,
+ *      possibly a SIBLING process's — is active) ⇒ log and return `{skipped:true, reason}`: skip this tick
+ *      entirely rather than ever read a tree mid-move.
+ *   3. Under the read lock: if the rebuild state (`readState`, defaults to `readRebuildState`) shows the clone
+ *      quarantined ⇒ release the lock and skip the tick (never run children off a rejected tree, never
+ *      restart onto it). Else if `HEAD` has moved since this process's own boot (#3383 bug 2's drift check,
+ *      unchanged in spirit) ⇒ release the lock FIRST, then `onRestart({reason:'head-moved'})` — safe because
+ *      any HEAD change visible under the read lock is always an ADOPTED build (a rebuild's writer holds the
+ *      lock through its own live smoke, and a rejected build is restored before the writer ever releases).
+ *   4. Run the real tick under the read lock (try/finally — the lock is released whether the tick returns or
+ *      throws), and release it before doing anything else.
+ *   5. `hasStaleRefusal(result)` (#3383 bug 1, unchanged in spirit) ⇒ AFTER the read lock is released, call
+ *      `rebuild()` again (the SAME gated path, never a raw merge) — adopted ⇒ `onRestart`.
+ * `selfSyncCheckout` (the old merge-based IO) is no longer called anywhere on this path — kept exported only
+ * because nothing else in this codebase imports it privately, and removing a public export for no functional
+ * reason is its own kind of breakage. `sync`/`gate` stay ACCEPTED options (runner.mjs forwards them) but are
+ * unused on the default path now — the live smoke gate they used to wire moved inside `rebuildClone` itself.
+ * At construction, `withSelfSync` also sets `process.env.WE_DAEMON_MANAGED_CLONE = '1'` and
+ * `process.env.GIT_OPTIONAL_LOCKS = '0'` — every child process this daemon spawns inherits both, so a plain
+ * `git status` a dispatched session runs never itself takes `.git/index.lock`, and
+ * `we:scripts/lib/main-staleness.mjs#assertMainNotStale`'s own default checker sees the managed-clone flag and
+ * refuses to fast-forward a managed clone by itself (a dispatch chokepoint auto-ff-ing past the live-smoke
+ * gate would defeat the whole point of gating rebuilds in the first place).
  */
 
-import { gitRun } from './main-staleness.mjs';
+import { gitRun, isCodePath } from './main-staleness.mjs';
+import { collectImportClosure, closureHits } from './import-closure.mjs';
+
+export { collectImportClosure };
 import { gateMergedCommit } from './daemon-live-smoke.mjs';
+import { rebuildClone, readRebuildState } from './daemon-rebuild.mjs';
+import { acquireRead as acquireReadLock, releaseRead as releaseReadLock } from './daemon-clone-lock.mjs';
 
 /**
  * Pure: what should a daemon's clone do, given where it stands against `origin/main`?
@@ -302,6 +341,76 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
   return { merged: false, commits: 0, reason: 'conflict' };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #4044 RESTART GATE — restart only when the daemon's OWN code changed, and never more than once per window.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+//
+// LIVE BUG (2026-09-25): every rebuild that moved the clone restarted EVERY daemon running from it — on every
+// main move, every few minutes during drain activity, though most moves only touch `backlog/*.md`. Each restart
+// costs a boot plus a fresh tick; the fix-dispatch daemon's 120s ticks were starved. A daemon's in-memory code
+// is only stale when a file it IMPORTED changed: its children (passes, dispatched sessions) are spawned fresh
+// from disk every time and always see the new tree. So the restart decision is now: which files changed between
+// this process's boot sha and HEAD now, and does any of them sit in this daemon's static import closure?
+
+/** Env var: minimum time (ms) a daemon process runs before a code-change restart is taken. Default 10 min. */
+export const RESTART_MIN_INTERVAL_ENV = 'WE_DAEMON_RESTART_MIN_INTERVAL_MS';
+export const DEFAULT_RESTART_MIN_INTERVAL_MS = 10 * 60 * 1000;
+
+/** PURE: the restart window from env — a non-negative integer, else the default. */
+export function resolveRestartMinIntervalMs(env = process.env) {
+  const raw = env?.[RESTART_MIN_INTERVAL_ENV];
+  const n = raw == null || String(raw).trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_RESTART_MIN_INTERVAL_MS;
+}
+
+/** Files changed between two commits (`git diff --name-only from to`), or `null` on any git failure. */
+export function changedFilesBetween({ root, from, to, run = gitRun, timeoutMs = 60_000 }) {
+  if (!from || !to) return null;
+  const r = run(['diff', '--name-only', from, to], { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+
+/**
+ * PURE: does the move from boot sha to HEAD-now need this daemon to restart, and may it restart now?
+ *   - `changedFiles: null` (the diff failed — unknown) ⇒ restart NOW, as before this gate (fail safe, never
+ *     throttled: an unknown move is the one case we can't reason about).
+ *   - no changed file the daemon imports ⇒ `{restart:false, reason:'no-imported-change'}` — keep ticking; the
+ *     on-disk tree is current (dispatch staleness reads the checkout, not memory) and children see it anyway.
+ *   - an imported file changed, but this process booted less than `minIntervalMs` ago ⇒
+ *     `{restart:false, reason:'min-interval'}` — taken on a later tick, so a burst of code landings costs at
+ *     most one restart per window.
+ *   - else restart.
+ * @param {{changedFiles:string[]|null, closure:ReturnType<typeof collectImportClosure>, uptimeMs:number, minIntervalMs:number}} s
+ * @returns {{restart:boolean, reason:string, relevant?:string[]}}
+ */
+export function decideRestart({ changedFiles, closure, uptimeMs, minIntervalMs }) {
+  if (changedFiles == null) return { restart: true, reason: 'diff-unknown' };
+  let relevant;
+  if (!closure || !closure.complete) {
+    relevant = changedFiles.filter(isCodePath);
+  } else {
+    relevant = closureHits({ closure, changedFiles });
+  }
+  if (!relevant.length) return { restart: false, reason: 'no-imported-change', relevant };
+  if (Number.isFinite(minIntervalMs) && uptimeMs < minIntervalMs) return { restart: false, reason: 'min-interval', relevant };
+  return { restart: true, reason: 'imported-change', relevant };
+}
+
+/**
+ * #4044 (live 2026-09-25 ~13:20Z): a skipped tick used to return a bare `{skipped, reason}` into the daemon's
+ * `onTick`, which reads `result.repos.map(...)` — `review-daemon: tick failed (non-fatal): Cannot read properties
+ * of undefined (reading 'map')` on every skip. A skip is now an EMPTY tick in every daemon's result shape (the
+ * union of review-daemon's and reconcile-fix-dispatch-daemon's fields), plus the `skipped`/`reason` markers.
+ * @param {string} reason
+ */
+export function skippedTick(reason) {
+  return {
+    skipped: true, reason, repos: [], dispatched: [], failed: [], refusals: [], reconcileFailed: [], reviewsOwed: 0,
+  };
+}
+
 /**
  * Wrap a daemon's `runDaemonLoop` effects so each tick first self-syncs the clone. When new commits arrive,
  * `onRestart` runs in place of the tick (the caller releases its lease and exits); otherwise the tick runs.
@@ -338,18 +447,61 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
  * this option and need the fix live without a further code change on their end — {@link SMOKE_KILL_SWITCH_ENV}
  * (`WE_DAEMON_SMOKE_DISABLE=1`) is the actual escape hatch, an env var, not a code-level opt-out.
  * @param {{tickOnce:(...args:any[])=>any}} effects
- * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc, base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console, timeoutMs?:number, readHead?:typeof readHeadSha, readOriginRef?:typeof readOriginRefSha, hasStaleRefusal?:(tickResult:any)=>boolean, gate?:typeof gateMergedCommit}} o
+ * @param {{root:string, onRestart:(info:object)=>any, sync?:typeof selfSyncCheckout, syncPoc?:typeof selfSyncCheckoutPoc,
+ *   base?:string, pocBranch?:string, env?:NodeJS.ProcessEnv, log?:Console, timeoutMs?:number,
+ *   readHead?:typeof readHeadSha, readOriginRef?:typeof readOriginRefSha, hasStaleRefusal?:(tickResult:any)=>boolean,
+ *   gate?:typeof gateMergedCommit, mainOnly?:boolean, rebuild?:(o?:object)=>Promise<object>,
+ *   acquireRead?:typeof acquireReadLock, releaseRead?:typeof releaseReadLock, readState?:typeof readRebuildState}} o
  */
 export function withSelfSync(effects, {
   root, onRestart, sync = selfSyncCheckout, syncPoc = selfSyncCheckoutPoc, base = 'main', pocBranch, env = process.env,
   log = console, timeoutMs, readHead = readHeadSha, readOriginRef = readOriginRefSha, hasStaleRefusal, gate = gateMergedCommit,
+  mainOnly = false, rebuild = (o = {}) => rebuildClone({
+    root, env, log, mainOnly, ...o,
+  }), acquireRead = acquireReadLock, releaseRead = releaseReadLock, readState = readRebuildState,
+  entries = [process.argv[1]], diffFiles = changedFilesBetween, importClosure = collectImportClosure,
+  minRestartIntervalMs = resolveRestartMinIntervalMs(env), now = Date.now,
 }) {
   const tick = effects.tickOnce;
   const resolvedPocBranch = resolvePocSyncBranch({ pocBranch, env });
   const syncOpts = () => ({ root, ...(timeoutMs != null ? { timeoutMs } : {}) });
+  // #4044 Module E — every child process this daemon spawns (a dispatched session's own `git status`, `gh`,
+  // whatever) inherits both: `WE_DAEMON_MANAGED_CLONE` tells `main-staleness.mjs#assertMainNotStale`'s default
+  // checker never to fast-forward this clone itself (only a gated rebuild may move it), and
+  // `GIT_OPTIONAL_LOCKS=0` means a plain `git status` read never takes `.git/index.lock`. Set unconditionally,
+  // for BOTH the default and POC paths — a POC-mode clone is just as much a managed clone as the default one.
+  process.env.WE_DAEMON_MANAGED_CLONE = '1';
+  process.env.GIT_OPTIONAL_LOCKS = '0';
+  // `sync`/`gate` stay ACCEPTED (runner.mjs's `wireSelfSyncAndAppAuth` forwards them unconditionally) but are
+  // UNUSED on the default path now — the live smoke gate they used to wire moved inside `rebuildClone` itself
+  // (Module C). Referencing them here is a no-op that only silences an unused-destructure lint, never behavior.
+  void sync; void gate; void readOriginRef;
   // Boot-time HEAD — read ONCE, here, before any tick ever runs. A read failure (null) permanently disables
   // the drift check for this process's lifetime rather than risk comparing against a wrong/stale value.
   const bootSha = readHead(syncOpts());
+  const bootAt = now();
+  const cloneLockOpts = () => (env && env.WE_DAEMON_CLONE_LOCK_ROOT ? { lockRoot: env.WE_DAEMON_CLONE_LOCK_ROOT } : {});
+  // #4044 restart gate (see decideRestart). The closure is walked lazily, once, from the BOOT tree's files — the
+  // code actually loaded in memory. (A file newly added to the closure only matters via an edit to an existing
+  // closure file that now imports it, which the gate already catches.)
+  let closure;
+  let closureBuilt = false;
+  const loggedHeads = new Set();
+  const restartGate = (headNow) => {
+    if (!closureBuilt) {
+      closureBuilt = true;
+      try { closure = importClosure({ root, entries }); } catch { closure = null; }
+    }
+    const changedFiles = diffFiles({ root, from: bootSha, to: headNow, ...(timeoutMs != null ? { timeoutMs } : {}) });
+    const d = decideRestart({ changedFiles, closure, uptimeMs: now() - bootAt, minIntervalMs: minRestartIntervalMs });
+    if (!d.restart && !loggedHeads.has(`${headNow}:${d.reason}`)) {
+      loggedHeads.add(`${headNow}:${d.reason}`);
+      log.error?.(d.reason === 'min-interval'
+        ? `daemon-self-sync: clone moved to ${headNow} and ${d.relevant.length} imported file(s) changed — restart deferred until this process has run ${Math.round(minRestartIntervalMs / 1000)}s (#4044 restart gate)`
+        : `daemon-self-sync: clone moved to ${headNow} (${changedFiles.length} file(s) changed since boot, none imported by this daemon) — no restart needed, ticking on (#4044 restart gate)`);
+    }
+    return d;
+  };
   return {
     ...effects,
     // Forwards whatever arguments the caller's own tickOnce takes (e.g. runner.mjs's per-tick bookkeeping
@@ -380,55 +532,73 @@ export function withSelfSync(effects, {
         }
         return tick(...args);
       }
-      // ---- DEFAULT (unset) path — matches selfSyncCheckout's own shipped behavior, plus the #3383 fixes ----
-      // Read BEFORE the merge — the live-smoke gate's rollback target if the merge below turns out bad.
-      const preMergeSha = readHead(syncOpts());
-      const r = sync(syncOpts());
-      if (r.merged) {
-        // The merge's own fetch already updated the local origin/<base> ref — safe to read it now.
-        const mergedIdentitySha = readOriginRef({ root, ref: `origin/${base}`, ...(timeoutMs != null ? { timeoutMs } : {}) });
-        const verdict = await gate({ root, preMergeSha, mergedIdentitySha, env, log });
-        if (verdict.adopt) {
-          log.error?.(`daemon-self-sync: merged ${r.commits} new commit(s) from origin/main — restarting onto the new code`);
-          return onRestart(r);
+
+      // ---- DEFAULT (non-POC) path — full clone rebuild (#4044 Module E, see file header) ----
+
+      // 1. Rebuild (gated: takes the WRITE lock itself, runs the live smoke inside it). An adopted build
+      //    restarts INSTEAD of ticking — the read lock below is never even acquired for this tick.
+      const rebuildResult = await rebuild();
+      if (rebuildResult && rebuildResult.moved && rebuildResult.adopted) {
+        if (restartGate(rebuildResult.head).restart) {
+          log.error?.(`daemon-self-sync: rebuilt the clone onto ${rebuildResult.head} — restarting onto the new code (#4044)`);
+          return onRestart(rebuildResult);
         }
-        log.error?.(
-          `daemon-self-sync: merged ${r.commits} new commit(s) from origin/main but the LIVE SMOKE GATE rejected them `
-          + `(${verdict.reason}) — rolled back, staying on the OLD code (#3383)`,
-        );
-        // Fall through: the tree is back at preMergeSha (matches this process's in-memory code), so the rest
-        // of this tick runs exactly like a tick that found nothing to merge.
+      } else if (rebuildResult && rebuildResult.reason && rebuildResult.reason !== 'up-to-date') {
+        log.error?.(`daemon-self-sync: rebuild did not move the clone (${rebuildResult.reason}) — ticking on the current code`);
       }
-      // #3383 bug 2 — HEAD moved since boot even though THIS sync found nothing to merge (someone else,
-      // typically a sibling daemon process sharing this same clone, already brought it current first).
-      const headNow = bootSha != null ? readHead(syncOpts()) : null;
-      if (bootSha != null && headNow != null && headNow !== bootSha) {
-        log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (likely a sibling process sharing this clone self-synced first) — restarting onto the new code (#3383)`);
-        return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
+
+      // 2. Acquire the READ lock — refused (a writer, possibly a sibling process's rebuild, is active) means
+      //    skip this tick entirely rather than ever read a tree mid-move.
+      const acquired = acquireRead(root, cloneLockOpts());
+      if (!acquired.ok) {
+        log.error?.(`daemon-self-sync: read lock refused (${acquired.reason}) — skipping this tick, never reading a tree mid-move (#4044)`);
+        return skippedTick(acquired.reason);
       }
-      if (r.reason === 'conflict' || r.reason === 'dirty' || r.reason === 'not-on-main') {
-        log.error?.(`daemon-self-sync: behind origin/main but NOT syncing (${r.reason}) — needs a hand merge`);
-      } else if (r.reason === 'status-failed') {
-        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (status-failed) — `git status` failed or timed out; retrying next tick');
-      } else if (r.reason === 'fetch-failed') {
-        log.error?.('daemon-self-sync: NOT syncing (fetch-failed) — `git fetch origin` failed or timed out; retrying next tick');
-      } else if (r.reason === 'count-failed') {
-        log.error?.('daemon-self-sync: NOT syncing (count-failed) — `git rev-list --count` failed or timed out, so the distance to origin/main is unknown; retrying next tick');
-      } else if (r.reason === 'head-failed') {
-        log.error?.('daemon-self-sync: behind origin/main but NOT syncing (head-failed) — `git symbolic-ref HEAD` failed or timed out; retrying next tick');
+      let released = false;
+      const releaseOnce = () => {
+        if (released) return;
+        released = true;
+        releaseRead(root, cloneLockOpts());
+      };
+
+      let tickResult;
+      try {
+        // 3. Under the read lock: a quarantined clone never runs children, never restarts onto it.
+        const rebuildState = readState(root, env);
+        if (rebuildState.quarantine) {
+          releaseOnce();
+          log.error?.('daemon-self-sync: the clone is quarantined (#4044) — skipping this tick, never running children off a rejected tree');
+          return skippedTick('quarantine');
+        }
+
+        // #3383 bug 2 (unchanged in spirit) — HEAD moved since THIS process's own boot even though it never
+        // did the rebuilding itself (a sibling process sharing this clone did). Safe to restart unconditionally
+        // here: any HEAD change visible under the read lock is always an ADOPTED build — a rebuild's writer
+        // holds the write lock through its own live smoke, and a rejected build is restored before release.
+        const headNow = readHead(syncOpts());
+        if (bootSha != null && headNow != null && headNow !== bootSha && restartGate(headNow).restart) {
+          releaseOnce();
+          log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (an adopted rebuild) — restarting onto the new code (#4044)`);
+          return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
+        }
+
+        // 4. Run the real tick under the read lock.
+        tickResult = await tick(...args);
+      } finally {
+        releaseOnce();
       }
-      const result = await tick(...args);
-      // #3383 bug 1 — this SAME tick's own result shows it hit the stale-main refusal (origin/main moved
-      // AFTER the tick-start sync above but before the tick finished). Re-sync right now rather than wait out
-      // the rest of `intervalMs` to lose the same race again.
-      if (typeof hasStaleRefusal === 'function' && hasStaleRefusal(result)) {
-        const r2 = sync(syncOpts());
-        if (r2.merged) {
-          log.error?.(`daemon-self-sync: tick hit the stale-main refusal — merged ${r2.commits} new commit(s) immediately and restarting onto the new code (#3383), instead of waiting the full interval to lose the same race again`);
+
+      // 5. #3383 bug 1 (unchanged in spirit) — this SAME tick's own result shows it hit the stale-main refusal
+      //    (origin/main moved mid-tick). Rebuild IMMEDIATELY (never a raw merge) rather than wait out the rest
+      //    of `intervalMs` to lose the same race again — always AFTER the read lock above is released.
+      if (typeof hasStaleRefusal === 'function' && hasStaleRefusal(tickResult)) {
+        const r2 = await rebuild();
+        if (r2 && r2.moved && r2.adopted && restartGate(r2.head).restart) {
+          log.error?.(`daemon-self-sync: tick hit the stale-main refusal — rebuild adopted ${r2.head} immediately, restarting onto the new code (#3383/#4044), instead of waiting the full interval to lose the same race again`);
           return onRestart(r2);
         }
       }
-      return result;
+      return tickResult;
     },
   };
 }

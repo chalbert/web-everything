@@ -594,19 +594,34 @@ export function resolveSkipPasses(flagValue, { names = MECHANICAL_PASS_NAMES } =
  * a mid-session `process.exit(0)` is wrong. So unless the caller explicitly asserts "this is the dedicated
  * clone" (the CLI's `--self-sync` flag, which the staged launchd plist passes), only the App-token refresh
  * wraps the tick and no git mutation ever happens.
- * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean, gate?:Function}} o
- *   `sync` is forwarded to {@link withSelfSync} (defaults to the real `selfSyncCheckout`) — exposed so a test
- *   can simulate "new commits arrived" without a real git checkout. `selfSync` must be exactly `true` to wire
- *   the self-sync wrapper at all. `gate` is likewise forwarded (#3383's live-smoke gate — defaults to the
- *   real `gateMergedCommit`) — exposed for the same reason `sync` is: a test that injects a merge without a
- *   real lane-pool/gh/reconcile-pass-shaped `root` needs to inject a passing gate too, or the (correct,
- *   unconditional-by-design) live smoke would reject that synthetic merge as it would any other broken one.
+ * @param {{tickOnce:Function, root:string, onRestart:Function, authOpts?:object, sync?:Function, selfSync?:boolean,
+ *   gate?:Function, rebuild?:Function, mainOnly?:boolean, acquireRead?:Function, releaseRead?:Function,
+ *   readState?:Function}} o
+ *   `sync`/`gate` are forwarded to {@link withSelfSync} for back-compat call shape, but are UNUSED on its
+ *   DEFAULT (non-POC) path since #4044 Module E replaced the merge-then-gate flow with a gated clone rebuild
+ *   (`we:scripts/lib/daemon-rebuild.mjs#rebuildClone`) — `rebuild`/`mainOnly`/`acquireRead`/`releaseRead`/
+ *   `readState` are the new equivalents, likewise forwarded only when the caller passes them (a real caller
+ *   never does today; a test injects them to simulate a rebuild/lock outcome without a real git checkout or
+ *   touching `~/.claude/*`). `selfSync` must be exactly `true` to wire the self-sync wrapper at all.
  * @returns {Function} the wrapped `tickOnce` effect, same call signature as the one passed in.
  */
-export function wireSelfSyncAndAppAuth({ tickOnce, root, onRestart, authOpts, sync, selfSync = false, gate }) {
+export function wireSelfSyncAndAppAuth({
+  tickOnce, root, onRestart, authOpts, sync, selfSync = false, gate,
+  rebuild, mainOnly, acquireRead, releaseRead, readState,
+}) {
   const authed = withGithubAppAuth({ tickOnce }, authOpts);
   if (selfSync !== true) return authed.tickOnce;
-  const selfSyncOpts = { root, onRestart, ...(sync ? { sync } : {}), ...(gate ? { gate } : {}) };
+  const selfSyncOpts = {
+    root,
+    onRestart,
+    ...(sync ? { sync } : {}),
+    ...(gate ? { gate } : {}),
+    ...(rebuild ? { rebuild } : {}),
+    ...(mainOnly !== undefined ? { mainOnly } : {}),
+    ...(acquireRead ? { acquireRead } : {}),
+    ...(releaseRead ? { releaseRead } : {}),
+    ...(readState ? { readState } : {}),
+  };
   return withSelfSync(authed, selfSyncOpts).tickOnce;
 }
 

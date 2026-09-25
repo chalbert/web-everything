@@ -142,6 +142,25 @@ export function isStaleMainRefusalMessage(message) {
 }
 
 /**
+ * #4044 — PURE: is `path` code a checkout's import path can load (so a change to it can make a running
+ * checkout stale)? JS/TS modules and JSON (config/data read by name), never tests. Shared by the dispatch
+ * staleness guard below and `daemon-self-sync.mjs`'s restart gate fallback.
+ * @param {string} path
+ */
+export function isCodePath(path) {
+  const p = String(path || '');
+  return /\.(mjs|cjs|js|ts|json)$/.test(p) && !/(^|\/)__tests__\//.test(p) && !/\.test\.[mc]?[jt]s$/.test(p);
+}
+
+/** Files changed on `origin/<base>` since this checkout's merge-base with it (`git diff --name-only
+ *  HEAD...origin/<base>`), or `null` on any git failure. */
+export function behindFiles(root, base = 'main', run = gitRun) {
+  const r = run(['diff', '--name-only', `HEAD...origin/${base}`], { cwd: root, timeout: 60_000, killSignal: 'SIGKILL' });
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+}
+
+/**
  * ASSERT the calling checkout is not behind `origin/<base>` — refuse LOUDLY rather than silently act on stale
  * code from this checkout's own import path (#3439). A checkout that is merely BEHIND (no local commits ahead)
  * with a CLEAN working tree and `HEAD` on `base` is fast-forwarded with zero conflict and zero judgment
@@ -157,10 +176,29 @@ export function isStaleMainRefusalMessage(message) {
  *   `review-dispatch`, this function's original and still most common caller).
  */
 export function assertMainNotStale(root, checkStaleness, { base = 'main', label = 'review-dispatch' } = {}) {
+  // #4044 Module E — a MANAGED clone (`process.env.WE_DAEMON_MANAGED_CLONE === '1'`, set by
+  // `daemon-self-sync.mjs#withSelfSync` at wrapper construction) is rebuilt fresh from `origin/main` (+ its
+  // overlay list) by `daemon-rebuild.mjs`, gated behind a live smoke check, every tick — a dispatch chokepoint
+  // fast-forwarding it BY ITSELF would pull in un-smoked (possibly rejected) code straight past that gate. So a
+  // managed clone never auto-ffs here: it refuses with the stale marker instead, exactly like a diverged/dirty
+  // checkout always has, which `hasStaleRefusal` turns into an immediate GATED rebuild (never a raw merge).
+  const managedClone = process.env.WE_DAEMON_MANAGED_CLONE === '1';
   const check = checkStaleness ?? ((r) => checkMainStaleness({
-    base, autoFf: true, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
+    base, autoFf: !managedClone, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
   }));
-  const st = check(root);
+  let st = check(root);
+  // #4044 (live 2026-09-25): the drain lands a commit every few minutes, most touching only `backlog/*.md`, and
+  // the fix daemon refused WHOLE repos whenever its managed clone was a few such commits behind. This guard
+  // exists so a dispatch never runs STALE CODE from this checkout's import path — commits that change no code
+  // file cannot make it stale. So a managed clone behind ONLY in non-code files is fresh enough to dispatch;
+  // the next tick-start rebuild still brings it current. Unknown diff ⇒ the refusal stands (fail closed).
+  if (st && st.action === 'warn' && managedClone) {
+    const files = behindFiles(root, base);
+    if (Array.isArray(files) && files.length > 0 && !files.some(isCodePath)) {
+      process.stderr.write(`${label}: the managed clone is ${st.behind} commit(s) behind origin/${base} in non-code files only (${files.length} file(s)) — not stale for dispatch (#4044).\n`);
+      st = { fresh: true, behind: st.behind, behindNonCodeOnly: true, files: files.length };
+    }
+  }
   if (st && st.synced) {
     process.stderr.write(`${label}: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base} (#3474) before dispatching.\n`);
   }
@@ -168,7 +206,13 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main', label 
     throw new Error(
       `${label}: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
       + `dispatch a review that would run ${STALE_MAIN_REFUSAL_MARKER}'s own import path (#3439). `
-      + staleRemedy(st, base),
+      + (managedClone
+        // A daemon-managed clone is never fixed by hand (#4044): only its gated rebuild may move it, and when
+        // the rebuild is holding it back it records why in its alerts log (`clone-held-stale`).
+        ? `This is a DAEMON-MANAGED clone: only its gated rebuild moves it (never rebase/merge by hand). If this `
+          + `persists, the rebuild is holding it — see the clone's \`clone-held-stale\` alert in `
+          + `~/.claude/daemon-self-sync-state/<cloneKey>.alerts.jsonl for the reason and next retry.`
+        : staleRemedy(st, base)),
     );
   }
   return st;

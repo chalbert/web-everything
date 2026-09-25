@@ -26,10 +26,13 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import {
   decideSmokeVerdict, resolveSmokeBudgets, SMOKE_BUDGET_ENV, isSmokeGateDisabled, SMOKE_KILL_SWITCH_ENV,
   runLiveSmoke, SMOKE_CHECKS, rollbackToSha, readRejectedSha, recordRejectedSha, clearRejectedSha,
   smokeStatePath, gateMergedCommit, ghDispatchedSessionEnv,
+  TRANSIENT_FAILURE_PATTERNS, classifySmokeFailure, runLiveSmokeWithRetry,
+  SMOKE_TRANSIENT_RETRIES_ENV, SMOKE_RETRY_BACKOFF_MS_ENV,
 } from '../daemon-live-smoke.mjs';
 
 describe('decideSmokeVerdict — pure', () => {
@@ -56,6 +59,185 @@ describe('isSmokeGateDisabled / resolveSmokeBudgets — pure, env-driven', () =>
   it('a non-numeric override falls back to the default rather than NaN/0', () => {
     const b = resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.ghApiMs]: 'not-a-number' });
     expect(b.ghApiMs).toBe(30_000);
+  });
+
+  it('laneAcquireWaitMs defaults to 180000 and is independently overridable via WE_SMOKE_LANE_ACQUIRE_WAIT_MS', () => {
+    expect(resolveSmokeBudgets({}).laneAcquireWaitMs).toBe(180_000);
+    expect(resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.laneAcquireWaitMs]: '5000' }).laneAcquireWaitMs).toBe(5000);
+    // overriding the wait budget must never perturb the separate, plain laneAcquireMs budget
+    expect(resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.laneAcquireWaitMs]: '5000' }).laneAcquireMs)
+      .toBe(resolveSmokeBudgets({}).laneAcquireMs);
+  });
+});
+
+describe('classifySmokeFailure — pure, transient vs. code', () => {
+  it('every check passing → pass', () => {
+    expect(classifySmokeFailure([{ ok: true }, { ok: true }])).toBe('pass');
+  });
+  it('an empty result set is code, not transient — no checks run is not "just env noise"', () => {
+    expect(classifySmokeFailure([])).toBe('code');
+  });
+  it('a 401 auth failure → transient', () => {
+    const result = classifySmokeFailure([{ ok: true }, { ok: false, detail: 'gh api ... failed: HTTP 401: Bad credentials' }]);
+    expect(result).toBe('transient');
+  });
+  it('a thrown SyntaxError (a real code-shaped failure) → code', () => {
+    const result = classifySmokeFailure([{ ok: false, detail: 'threw: SyntaxError: Unexpected token } in JSON' }]);
+    expect(result).toBe('code');
+  });
+  it('a mix of one transient and one non-transient failure → code (one real finding taints the whole verdict)', () => {
+    const result = classifySmokeFailure([
+      { ok: false, detail: 'gh api ... failed: HTTP 401: Bad credentials' },
+      { ok: false, detail: 'threw: SyntaxError: Unexpected token' },
+    ]);
+    expect(result).toBe('code');
+  });
+  it('every TRANSIENT_FAILURE_PATTERNS entry matches at least one representative failure string', () => {
+    const samples = [
+      '401 Unauthorized', 'Bad credentials', 'HTTP 503', 'secondary rate limit exceeded', 'connect ETIMEDOUT',
+      'read ECONNRESET', 'getaddrinfo ENOTFOUND api.github.com', 'getaddrinfo EAI_AGAIN api.github.com',
+      'x failed: timed out after 30000ms (process group killed)', 'no free lane in pool "we" (12 all held/dirty)',
+      'all lanes are busy right now', 'pool is exhausted', 'could not resolve host: github.com',
+      'error connecting to api.github.com', 'dial tcp 1.2.3.4:443: i/o timeout', 'read: connection reset by peer',
+      'write: broken pipe', 'net/http: TLS handshake timeout', 'lookup api.github.com: no such host',
+      'connect: connection refused', 'HTTP 429: Too Many Requests', 'HTTP 403: API rate limit exceeded',
+    ];
+    for (const re of TRANSIENT_FAILURE_PATTERNS) {
+      expect(samples.some((s) => re.test(s)), `no sample matched ${re}`).toBe(true);
+    }
+  });
+  // Advisory 2026-09-25 (PR #2625): a bare /timeout|timed out/ matched ordinary code-failure text, so a real
+  // regression rolled back as 'transient' with no reject record and was re-smoked every tick.
+  it.each([
+    'lane-pool list --acquirable failed: exited 1: Error: operation timed out waiting for element #submit-button',
+    'gh pr list --repo x --limit 1 failed: exited 1: AssertionError: expected timeout to be 30000',
+    'lane-pool list --acquirable failed: exited 1: timed out after 5ms (process group killed)', // child PRINTED the marker
+    'lane-pool list --acquirable failed: exited 1: x failed: timed out after 5ms (process group killed)', // …with its own prefix
+  ])('code-shaped text that merely mentions a timeout → code: %s', (detail) => {
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('code');
+  });
+  it("runBounded's own hard-timeout rejection still → transient", () => {
+    const detail = 'gh api --method GET repos/x failed: timed out after 30000ms (process group killed)';
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('transient');
+  });
+  it('a failure from a mayBeTransient:false check is code even when its text looks transient', () => {
+    expect(classifySmokeFailure([{ ok: false, mayBeTransient: false, detail: 'failed: connect ETIMEDOUT' }])).toBe('code');
+  });
+  it('reconcile-dry-run (runs code from the tree under test) can never buy a transient verdict with its own output', async () => {
+    expect(SMOKE_CHECKS.find((c) => c.name === 'reconcile-dry-run').mayBeTransient).toBe(false);
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[0] === 'scripts/conveyor/reconcile-pass.mjs') throw new Error('exited 1: connect ETIMEDOUT (printed by overlay code)');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+    expect(smoke.pass).toBe(false);
+    expect(classifySmokeFailure(smoke.results)).toBe('code');
+  });
+  // PR #2625 advisory (security/reject-cache-bypass): THE RULE — every check that runs code from the tree under
+  // test (a runChild call with `cwd: root`) must be mayBeTransient:false. Enforced by running every row and
+  // watching its cwd, so a future check added without the flag fails here.
+  it('every SMOKE_CHECKS row that runs code from the tree under test (cwd: root) is mayBeTransient:false', async () => {
+    const root = '/tree-under-test';
+    for (const check of SMOKE_CHECKS) {
+      const cwds = [];
+      const runChild = vi.fn(async (cmd, args, opts = {}) => {
+        cwds.push(opts.cwd);
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+        if (args[1] === 'list') return '[]';
+        return '';
+      });
+      await check.run({
+        root, budgets: {}, repos: ['o/r'], sessionSlug: 's', ghChildEnv: {}, runChild,
+      });
+      if (cwds.includes(root)) expect({ name: check.name, mayBeTransient: check.mayBeTransient }).toEqual({ name: check.name, mayBeTransient: false });
+    }
+  });
+  // #4044: skip a tree-code check whose code is untouched since the last live-verified build.
+  describe('changedFiles — tree-code checks whose code is unchanged are skipped, never the gh checks (#4044)', () => {
+    const closureOf = ({ entries }) => ({
+      files: new Set(entries[0] === 'scripts/lane-pool.mjs' ? ['scripts/lane-pool.mjs', 'scripts/lib/lane-pool-paths.mjs'] : ['scripts/conveyor/reconcile-pass.mjs']),
+      complete: true, bareDeps: false, jsonNames: new Set(),
+    });
+    const runChildFor = () => vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const ran = (runChild) => runChild.mock.calls.map(([cmd, args]) => (cmd === 'gh' ? `gh ${args[0]}` : `${args[0]} ${args[1] ?? ''}`.trim()));
+    it('a backlog-only move runs only the gh checks; the rest report skipped + ok', async () => {
+      const runChild = runChildFor();
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['backlog/4143.md'], closureOf });
+      expect(smoke.pass).toBe(true);
+      expect(ran(runChild)).toEqual(['gh api', 'gh pr']);
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run']);
+    });
+    it('a move touching lane-pool code re-runs the lane checks (and only those tree checks)', async () => {
+      const runChild = runChildFor();
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['scripts/lib/lane-pool-paths.mjs'], closureOf });
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run']);
+    });
+    it('an unknown diff (null) or an incomplete closure runs everything, as before', async () => {
+      for (const opts of [{ changedFiles: null, closureOf }, { changedFiles: ['backlog/1.md'], closureOf: () => ({ files: new Set(), complete: false, bareDeps: false, jsonNames: new Set() }) }]) {
+        const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild: runChildFor(), ...opts });
+        expect(smoke.results.some((r) => r.skipped)).toBe(false);
+      }
+    });
+    it('runLiveSmokeWithRetry forwards changedFiles', async () => {
+      const runChild = runChildFor();
+      // Real closure of this repo: a backlog-only change touches none of the three tree scripts.
+      const root = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+      const r = await runLiveSmokeWithRetry({ root, env: {}, runChild, changedFiles: ['backlog/4143.md'] });
+      expect(r.verdict).toBe('pass');
+      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(3);
+    });
+  });
+
+  // #4044: the live 08:14 ET alert read only `exited 1: node:internal/modules/cjs/loader:1227` — the stack
+  // location, not the error. The gh checks' detail now carries the real error line too.
+  it('a crashed gh (node stack) reports the real Error line, not only the stack location (#4044)', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh') throw new Error("exited 1: node:internal/modules/cjs/loader:1227\n  throw err;\n  ^\n\nError: Cannot find module '/gone/lane-9/scripts/lib/gh-throttle.mjs'\n    at Module._resolveFilename");
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+    const gh = smoke.results.find((r) => r.name === 'gh-api-repo');
+    expect(gh.ok).toBe(false);
+    expect(gh.detail).toContain("Cannot find module '/gone/lane-9/scripts/lib/gh-throttle.mjs'");
+  });
+  it('an overlay whose lane-pool.mjs prints transient-looking text still gets a code verdict (list and acquire)', async () => {
+    for (const verb of ['list', 'acquire']) {
+      const runChild = vi.fn(async (cmd, args) => {
+        if (args[1] === verb) throw new Error('no free lane in pool "we" (42 all held/dirty) — printed by overlay code');
+        if (args[1] === 'list') return '[]';
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+        return '';
+      });
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+      expect(smoke.pass).toBe(false);
+      expect(classifySmokeFailure(smoke.results)).toBe('code');
+    }
+  });
+  // Live 2026-09-25 08:14 ET: gh (a Go binary) reports network faults in Go's words, which none of the Node-style
+  // patterns matched — so a GitHub/network blip in BOTH gh checks was rejected as `code`.
+  it.each([
+    'gh api --method GET repos/o/r failed: exited 1: error connecting to api.github.com',
+    'gh pr list failed: exited 1: Post "https://api.github.com/graphql": write tcp 1.2.3.4:5->6.7.8.9:443: write: broken pipe',
+    'gh api failed: exited 1: Get "https://api.github.com/repos/o/r": dial tcp: lookup api.github.com: no such host',
+    'gh api failed: exited 1: net/http: TLS handshake timeout',
+    'gh api failed: exited 1: read tcp 1.2.3.4:5->6.7.8.9:443: read: connection reset by peer',
+    'gh api failed: exited 1: Get "https://api.github.com/x": dial tcp 1.2.3.4:443: i/o timeout',
+  ])('gh network error %# classifies as transient', (detail) => {
+    expect(classifySmokeFailure([{ ok: false, mayBeTransient: true, detail }])).toBe('transient');
+  });
+  it("the real lane-pool.mjs cmdAcquire 'no free lane' message classifies as transient", () => {
+    // The exact shape lane-pool.mjs#cmdAcquire fails with when its bounded --wait-ms poll never finds a
+    // candidate: `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or...`.
+    const detail = 'lane-pool acquire --purpose=smoke failed: no free lane in pool "we" (42 all held/dirty) — release one or `provision` more';
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('transient');
   });
 });
 
@@ -98,6 +280,32 @@ describe('runLiveSmoke — injected runChild', () => {
     expect(sessionFromAcquire).toBeDefined();
     expect(sessionFromAcquire).toBe(sessionFromRelease);
     expect(releaseArgs).toContain('--lane=12');
+  });
+
+  it('the lane acquire argv carries --wait-ms=<laneAcquireWaitMs> so a busy pool waits instead of failing instantly', async () => {
+    const calls = [];
+    const runChild = vi.fn(async (cmd, args) => {
+      calls.push(args);
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 4 });
+      return '';
+    });
+    await runLiveSmoke({ root: '/x', env: { WE_SMOKE_LANE_ACQUIRE_WAIT_MS: '9000' }, runChild });
+    const acquireArgs = calls.find((a) => a[1] === 'acquire');
+    expect(acquireArgs).toContain('--wait-ms=9000');
+  });
+
+  it('the lane acquire argv uses the 180000ms default --wait-ms with no env override', async () => {
+    const calls = [];
+    const runChild = vi.fn(async (cmd, args) => {
+      calls.push(args);
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 4 });
+      return '';
+    });
+    await runLiveSmoke({ root: '/x', env: {}, runChild });
+    const acquireArgs = calls.find((a) => a[1] === 'acquire');
+    expect(acquireArgs).toContain('--wait-ms=180000');
   });
 
   it('a single failing check fails the WHOLE gate, but every other check still runs (no fail-fast)', async () => {
@@ -179,6 +387,103 @@ describe('runLiveSmoke — injected runChild', () => {
     const reconcileCheck = result.results.find((r) => r.name === 'reconcile-dry-run');
     expect(reconcileCheck.ok).toBe(false);
     expect(reconcileCheck.detail).toMatch(/1\/3/);
+  });
+});
+
+// Transient vehicle below is a `gh api` failure: since PR #2625's advisory fix only checks that run EXTERNAL tools
+// (gh) may earn 'transient' — lane-pool.mjs runs from the tree under test and is always 'code'.
+describe('runLiveSmokeWithRetry — retries a transient verdict, never a code one', () => {
+  it('the kill switch short-circuits without spending an attempt', async () => {
+    const runChild = vi.fn();
+    const sleep = vi.fn();
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: { [SMOKE_KILL_SWITCH_ENV]: '1' }, runChild, sleep });
+    expect(result).toEqual({ verdict: 'pass', disabled: true });
+    expect(runChild).not.toHaveBeenCalled();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('a transient failure on attempt 1 that passes on attempt 2 → pass, attempts:2, one sleep', async () => {
+    let call = 0;
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api') {
+        call += 1;
+        if (call === 1) throw new Error('HTTP 503 Service Unavailable');
+        return '[]';
+      }
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 1234 });
+    expect(result.verdict).toBe('pass');
+    expect(result.attempts).toBe(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(1234);
+  });
+
+  it('a persistently transient failure exhausts the retry cap → verdict stays transient, attempts = retries+1', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('rate limit exceeded');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 10 });
+    expect(result.verdict).toBe('transient');
+    expect(result.attempts).toBe(3); // 1 initial + 2 retries
+    expect(sleep).toHaveBeenCalledTimes(2); // sleeps between attempts, never after the last
+  });
+
+  it('a code-shaped failure never retries at all', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('SyntaxError: Unexpected token');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 10 });
+    expect(result.verdict).toBe('code');
+    expect(result.attempts).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('retries and backoff default from env (WE_DAEMON_SMOKE_TRANSIENT_RETRIES / _RETRY_BACKOFF_MS) when not passed explicitly', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const env = { [SMOKE_TRANSIENT_RETRIES_ENV]: '0', [SMOKE_RETRY_BACKOFF_MS_ENV]: '999' };
+    const result = await runLiveSmokeWithRetry({ root: '/x', env, runChild, sleep });
+    expect(result.verdict).toBe('transient');
+    expect(result.attempts).toBe(1); // retries:0 from env → no retry at all
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  // Every test above injects a fake `sleep`, so none of them exercise the REAL default backoff. An `.unref()`'d
+  // backoff timer let Node exit mid-retry when nothing else was keeping the event loop alive — the resident
+  // daemon vanished with exit 0 instead of retrying (the same death pass-daemon.mjs#realSleep documents, #3870).
+  // Run it in a real child process, with no other handle open, so that exact exit is observable.
+  it('the real default sleep keeps the process alive mid-backoff — the retry actually happens', () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), 'scripts/lib/daemon-live-smoke.mjs')).href;
+    const script = `
+      import { runLiveSmokeWithRetry } from ${JSON.stringify(moduleUrl)};
+      let call = 0;
+      const runChild = async (cmd, args) => {
+        if (cmd === 'gh' && args[0] === 'api') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
+        if (args[1] === 'list') return '[]';
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+        return '';
+      };
+      const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, retries: 2, backoffMs: 50 });
+      console.log('DONE ' + r.verdict + ' ' + r.attempts);
+    `;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+    expect(out.trim()).toBe('DONE pass 2');
   });
 });
 
@@ -304,6 +609,41 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'a-new-sha', env, runChild, run: cleanRun });
     expect(runChild).toHaveBeenCalled();
     expect(verdict.adopt).toBe(true);
+  });
+
+  it('a transient verdict (retry cap reached) rolls back but records NO rejection, and reason is smoke-transient', async () => {
+    const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
+    const resetCalls = [];
+    const run = (args) => { if (args[0] === 'reset') resetCalls.push(args); return { status: 0, stdout: '' }; };
+    // every attempt fails the SAME transient way (a 401) — retry cap is reached, never promoted to 'code'
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('HTTP 401: Bad credentials');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre-sha-3', mergedIdentitySha: 'transient-sha', env, runChild, run });
+    expect(verdict.adopt).toBe(false);
+    expect(verdict.reason).toBe('smoke-transient');
+    expect(resetCalls).toContainEqual(['reset', '--hard', 'pre-sha-3']);
+    expect(readRejectedSha('/x', env)).toBeNull(); // NEVER cached — an env fault must not poison the reject-cache
+  });
+
+  it('a transient verdict whose rollback itself fails reports quarantine:true', async () => {
+    const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
+    const run = (args) => (args[0] === 'reset' ? { status: 1, stdout: '' } : { status: 0, stdout: '' });
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const log = { error: vi.fn() };
+    const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'transient-2', env, runChild, run, log });
+    expect(verdict.reason).toBe('smoke-transient');
+    expect(verdict.rollback).toEqual({ ok: false, reason: 'reset-failed' });
+    expect(verdict.quarantine).toBe(true);
+    expect(readRejectedSha('/x', env)).toBeNull();
   });
 
   it('a failed rollback is reported, never silently swallowed', async () => {

@@ -1,17 +1,20 @@
 /**
  * @file scripts/lib/__tests__/daemon-load-overlay.test.mjs
- * @description #3383 — the operator's manual "load this early" CLI, gated through the SAME merge → live-smoke →
- *   adopt/rollback path as `daemon-self-sync.mjs#withSelfSync`.
+ * @description #4044 Module E — the operator's manual "load this early" CLI. `--ref` REGISTERS the ref as a
+ *   standing overlay (`daemon-overlays.mjs#addOverlay`) then runs a gated rebuild
+ *   (`daemon-rebuild.mjs#rebuildClone`) — the same rebuild-fresh-from-main-plus-overlays → live-smoke →
+ *   adopt/rollback path a daemon's own `daemon-self-sync.mjs#withSelfSync` runs every tick. `--dry-run` never
+ *   writes the overlay list; it previews via `dryRunRebuild`'s own `extraOverlays` option instead.
  *
- * Follow-up fix (found in live use, 2026-09-24): the first cut passed `--ref` straight through as
- * `selfSyncCheckout`'s own `base` — which checks "is HEAD on `base`?" — so `--ref=lane/xkse05k-...` made it
- * refuse `not-on-main` even though the clone WAS correctly on `main`, no fetch/merge ever attempted. The
- * operator loaded by hand instead, hit a real conflict, and their own manual rollback didn't fire (`git
- * merge --abort` never ran) — the clone sat mid-merge. `mergeOverlayRef` below fixes this: `homeBranch` (must
- * already be checked out) and `ref` (what gets fetched/merged) are independent parameters, and a conflict is
- * ALWAYS aborted before the function returns.
+ * HISTORY (#3383, PR #2601 follow-up, 2026-09-24): the first cut called `daemon-self-sync.mjs#selfSyncCheckout`
+ * directly with `--ref` spliced in as its own `base` — conflating the HOME branch with the ref being merged
+ * in. That standalone merge path ({@link mergeOverlayRef}/{@link dryRunOverlay} below) is KEPT and exported
+ * for back-compat and is still tested directly (real git, proving the conflict-abort fix) — but
+ * `runDaemonLoadOverlay` no longer calls it, since a one-shot merge left no durable record for the NEXT
+ * automatic rebuild (which rebuilds fresh from `origin/main` + the REGISTERED overlay list only) to keep.
  *
- * `runDaemonLoadOverlay`'s wiring tests inject `merge`/`gate`/`readHead` — no real git, no real child process.
+ * `runDaemonLoadOverlay`'s wiring tests inject `addOverlayFn`/`rebuild`/`dryRunRebuildFn` — no real git, no
+ * real child process (those are `daemon-overlays.mjs`'s and `daemon-rebuild.mjs`'s own test suites' job).
  * `mergeOverlayRef`/`dryRunOverlay`'s own tests inject `run` (git) — proving the ACTUAL git sequence, including
  * one REAL-git suite (temp repos) for the conflict-abort behavior, since that is exactly the live bug.
  */
@@ -22,7 +25,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { runDaemonLoadOverlay, mergeOverlayRef, dryRunOverlay } from '../daemon-load-overlay.mjs';
 
-describe('runDaemonLoadOverlay — wiring (injected merge/gate/readHead)', () => {
+describe('runDaemonLoadOverlay — wiring (injected addOverlayFn/rebuild/dryRunRebuildFn)', () => {
   it('requires --clone', async () => {
     await expect(runDaemonLoadOverlay({ clone: null, ref: 'lane/x' })).rejects.toThrow(/--clone/);
   });
@@ -31,72 +34,69 @@ describe('runDaemonLoadOverlay — wiring (injected merge/gate/readHead)', () =>
     await expect(runDaemonLoadOverlay({ clone: '/some/clone', ref: null })).rejects.toThrow(/--ref/);
   });
 
-  it('nothing to merge (e.g. up to date) → reports it, gate is never called', async () => {
-    const gate = vi.fn();
-    const merge = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
-    const readHead = vi.fn(() => 'sha');
-    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', merge, gate, readHead });
-    expect(result).toMatchObject({ mergedAnything: false, adopted: false, reason: 'up-to-date' });
-    expect(gate).not.toHaveBeenCalled();
-  });
-
-  it('a conflict is reported like any other non-merge — never leaves anything for the gate to see', async () => {
-    const gate = vi.fn();
-    const merge = vi.fn(() => ({ merged: false, commits: 0, reason: 'conflict' }));
-    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', merge, gate, readHead: vi.fn(() => 'sha') });
-    expect(result).toMatchObject({ mergedAnything: false, adopted: false, reason: 'conflict' });
-    expect(gate).not.toHaveBeenCalled();
-  });
-
-  it('merged + gate adopts → adopted:true, reason and commit count passed through', async () => {
-    const merge = vi.fn(() => ({ merged: true, commits: 5, reason: 'merged' }));
-    const gate = vi.fn(async () => ({ adopt: true, reason: 'smoke-pass', smoke: { pass: true } }));
-    const readHead = vi.fn(() => 'pre-sha');
-    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', merge, gate, readHead });
-    expect(result).toMatchObject({ mergedAnything: true, adopted: true, commits: 5, reason: 'smoke-pass' });
-  });
-
-  it('merged + gate rejects → adopted:false, the rollback/smoke detail is surfaced', async () => {
-    const merge = vi.fn(() => ({ merged: true, commits: 2, reason: 'merged' }));
-    const gate = vi.fn(async () => ({ adopt: false, reason: 'smoke-fail', smoke: { pass: false, results: [{ name: 'gh-api-repo', ok: false }] } }));
-    const readHead = vi.fn(() => 'pre-sha');
-    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', merge, gate, readHead });
-    expect(result.adopted).toBe(false);
-    expect(result.reason).toBe('smoke-fail');
-    expect(result.smoke.results[0].name).toBe('gh-api-repo');
-  });
-
-  it('the gate receives the PRE-merge HEAD (read before merge runs) as its rollback target', async () => {
+  it('registers the overlay THEN rebuilds, in order', async () => {
     const order = [];
-    const readHead = vi.fn(() => { order.push('readHead'); return 'pre-sha-xyz'; });
-    const merge = vi.fn(() => { order.push('merge'); return { merged: true, commits: 1, reason: 'merged' }; });
-    const gate = vi.fn(async (o) => { order.push('gate'); return { adopt: true, reason: 'ok', ...o }; });
-    await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', merge, gate, readHead });
-    expect(order).toEqual(['readHead', 'merge', 'gate']);
-    expect(gate).toHaveBeenCalledWith(expect.objectContaining({ preMergeSha: 'pre-sha-xyz' }));
+    const addOverlayFn = vi.fn(() => { order.push('addOverlay'); });
+    const rebuild = vi.fn(async () => { order.push('rebuild'); return { moved: false, reason: 'up-to-date' }; });
+    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', addOverlayFn, rebuild });
+    expect(order).toEqual(['addOverlay', 'rebuild']);
+    expect(result).toMatchObject({ registered: true, mergedAnything: false, adopted: false, reason: 'up-to-date' });
   });
 
-  it('defaults the home branch to main, and forwards it as homeBranch (NEVER as ref) to merge', async () => {
-    const merge = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
-    await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/xkse05k-gh-app-shim-401-fallback', merge, gate: vi.fn(), readHead: vi.fn(() => 'x') });
-    expect(merge).toHaveBeenCalledWith(expect.objectContaining({ homeBranch: 'main', ref: 'lane/xkse05k-gh-app-shim-401-fallback' }));
+  it('an ADOPTED rebuild is reported adopted:true, with the new head', async () => {
+    const addOverlayFn = vi.fn();
+    const rebuild = vi.fn(async () => ({ moved: true, adopted: true, head: 'deadbeef', alerts: [] }));
+    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', addOverlayFn, rebuild });
+    expect(result).toMatchObject({ mergedAnything: true, adopted: true, head: 'deadbeef' });
   });
 
-  it('an explicit --base is forwarded as homeBranch, distinct from --ref (the exact live bug)', async () => {
-    const merge = vi.fn(() => ({ merged: false, commits: 0, reason: 'up-to-date' }));
-    await runDaemonLoadOverlay({ clone: '/some/clone', base: 'lane/daemon-poc', ref: 'lane/xkse05k-gh-app-shim-401-fallback', merge, gate: vi.fn(), readHead: vi.fn(() => 'x') });
-    expect(merge).toHaveBeenCalledWith(expect.objectContaining({ homeBranch: 'lane/daemon-poc', ref: 'lane/xkse05k-gh-app-shim-401-fallback' }));
+  it('a REJECTED rebuild (smoke-rejected) is reported adopted:false, the reason surfaced', async () => {
+    const addOverlayFn = vi.fn();
+    const rebuild = vi.fn(async () => ({ moved: false, reason: 'smoke-rejected', rolledBack: true, alerts: [{ kind: 'smoke-rejected', detail: { failed: 'gh-api-repo' } }] }));
+    const result = await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', addOverlayFn, rebuild });
+    expect(result.adopted).toBe(false);
+    expect(result.reason).toBe('smoke-rejected');
+    expect(result.alerts[0].detail.failed).toBe('gh-api-repo');
   });
 
-  it('--dry-run never calls merge or gate at all', async () => {
-    const merge = vi.fn();
-    const gate = vi.fn();
-    const result = await runDaemonLoadOverlay({
-      clone: '/some/clone', ref: 'lane/x', dryRun: true, merge, gate,
+  it('addOverlayFn is called with the ref, pr, addedBy, and reason', async () => {
+    const addOverlayFn = vi.fn();
+    const rebuild = vi.fn(async () => ({ moved: false, reason: 'up-to-date' }));
+    await runDaemonLoadOverlay({
+      clone: '/some/clone', ref: 'lane/xkse05k-gh-app-shim-401-fallback', pr: 42, addedBy: 'nic', reason: 'early load', addOverlayFn, rebuild,
     });
-    expect(merge).not.toHaveBeenCalled();
-    expect(gate).not.toHaveBeenCalled();
+    expect(addOverlayFn).toHaveBeenCalledWith('/some/clone', expect.objectContaining({
+      ref: 'lane/xkse05k-gh-app-shim-401-fallback', pr: 42, addedBy: 'nic', reason: 'early load',
+    }), expect.anything());
+  });
+
+  it('rebuild always runs with mainOnly:false — a manual overlay load is never the main-only case', async () => {
+    const addOverlayFn = vi.fn();
+    const rebuild = vi.fn(async () => ({ moved: false, reason: 'up-to-date' }));
+    await runDaemonLoadOverlay({ clone: '/some/clone', ref: 'lane/x', addOverlayFn, rebuild });
+    expect(rebuild).toHaveBeenCalledWith(expect.objectContaining({ mainOnly: false }));
+  });
+
+  it('--dry-run never calls addOverlayFn or rebuild at all', async () => {
+    const addOverlayFn = vi.fn();
+    const rebuild = vi.fn();
+    const dryRunRebuildFn = vi.fn(async () => ({ dryRun: true, wouldDo: 'rebuild-and-smoke', plan: { finalSha: 'x' } }));
+    const result = await runDaemonLoadOverlay({
+      clone: '/some/clone', ref: 'lane/x', dryRun: true, addOverlayFn, rebuild, dryRunRebuildFn,
+    });
+    expect(addOverlayFn).not.toHaveBeenCalled();
+    expect(rebuild).not.toHaveBeenCalled();
     expect(result.dryRun).toBe(true);
+  });
+
+  it('--dry-run appends the ref VIRTUALLY via extraOverlays, never writing it', async () => {
+    const dryRunRebuildFn = vi.fn(async () => ({ dryRun: true, wouldDo: 'nothing' }));
+    await runDaemonLoadOverlay({
+      clone: '/some/clone', ref: 'lane/x', pr: 7, dryRun: true, dryRunRebuildFn,
+    });
+    expect(dryRunRebuildFn).toHaveBeenCalledWith(expect.objectContaining({
+      root: '/some/clone', extraOverlays: [{ ref: 'lane/x', pr: 7 }],
+    }));
   });
 });
 

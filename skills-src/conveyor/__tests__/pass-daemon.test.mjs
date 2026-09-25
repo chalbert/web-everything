@@ -6,8 +6,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS,
-  PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled,
+  PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled, MAIN_ONLY_PASSES,
 } from '../pass-daemon.mjs';
+import { DAEMON_MANIFEST } from '../daemon-manifest.mjs';
 import { withSelfSync, DAEMON_SELF_SYNC_BRANCH_ENV } from '../../../scripts/lib/daemon-self-sync.mjs';
 
 describe('runPassDaemonLoop — the pure run/sleep control flow', () => {
@@ -134,17 +135,24 @@ describe('the self-sync wiring pattern main() uses — proven against the real w
   // main() itself is IO shell (real child process, real lease, real timers) and is not unit-tested directly —
   // this proves the exact wiring shape it uses (`withSelfSync({ tickOnce: runPass }, { root, onRestart }).tickOnce`
   // as the loop's `runPass`) behaves correctly: restart-instead-of-run on new code, run-through otherwise.
+  // #4044 Module E — the default path is now rebuild-driven (`daemon-rebuild.mjs#rebuildClone`); a fake
+  // `rebuild`/`acquireRead`/`releaseRead`/`readState` keeps this a pure wiring proof, never touching real git
+  // or `~/.claude/*` (that proof lives in daemon-rebuild.test.mjs and daemon-self-sync.test.mjs).
+  const emptyState = () => ({
+    adopted: null, rejected: null, inProgress: null, quarantine: null,
+  });
+  const okLock = () => ({ ok: true });
+
   it('when self-sync reports new code, the wrapped tickOnce restarts INSTEAD of running the pass', async () => {
     const runPass = vi.fn(async () => ({ code: 0 }));
     const onRestart = vi.fn(() => ({ code: null, signal: null, restarted: true }));
     const { tickOnce } = withSelfSync(
       { tickOnce: runPass },
       {
-        root: '/x', onRestart, sync: () => ({ merged: true, commits: 2, reason: 'merged' }), log: { error: vi.fn() },
-        // #3383 live-smoke gate: this proves the restart-vs-run WIRING, not the gate itself (that's
-        // daemon-live-smoke.test.mjs's job) — inject a passing gate + a fake readOriginRef so it never spawns
-        // a real lane-pool/gh/reconcile-pass child against this mocked root.
-        gate: async () => ({ adopt: true, reason: 'test-gate-pass' }), readOriginRef: () => 'origin-sha',
+        root: '/x',
+        onRestart,
+        rebuild: async () => ({ moved: true, adopted: true, head: 'deadbeef' }),
+        log: { error: vi.fn() },
       },
     );
     const result = await tickOnce();
@@ -157,10 +165,35 @@ describe('the self-sync wiring pattern main() uses — proven against the real w
     const runPass = vi.fn(async () => ({ code: 0 }));
     const { tickOnce } = withSelfSync(
       { tickOnce: runPass },
-      { root: '/x', onRestart: vi.fn(), sync: () => ({ merged: false, commits: 0, reason: 'up-to-date' }) },
+      {
+        root: '/x',
+        onRestart: vi.fn(),
+        rebuild: async () => ({ moved: false, reason: 'up-to-date' }),
+        acquireRead: okLock,
+        releaseRead: vi.fn(),
+        readState: emptyState,
+      },
     );
     await expect(tickOnce()).resolves.toEqual({ code: 0 });
     expect(runPass).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MAIN_ONLY_PASSES — #4044 Module E, merge-orphan-sweep never self-syncs onto an overlay', () => {
+  it('contains exactly the landing passes', () => {
+    expect([...MAIN_ONLY_PASSES]).toEqual(['merge-orphan-sweep']);
+  });
+  // A name that is not a DAEMON_MANIFEST key can never reach `MAIN_ONLY_PASSES.has(passName)` —
+  // `resolveManifestEntry` throws first — so listing it would only look like a guarantee that isn't enforced.
+  it('every entry is a real --pass= name (a DAEMON_MANIFEST key)', () => {
+    for (const name of MAIN_ONLY_PASSES) expect(Object.keys(DAEMON_MANIFEST)).toContain(name);
+  });
+  it('an ordinary watcher pass is NOT main-only', () => {
+    expect(MAIN_ONLY_PASSES.has('branch-drift')).toBe(false);
+    expect(MAIN_ONLY_PASSES.has('lane-pool-health-watch-we')).toBe(false);
+    for (const name of Object.keys(DAEMON_MANIFEST)) {
+      if (name !== 'merge-orphan-sweep') expect(MAIN_ONLY_PASSES.has(name)).toBe(false);
+    }
   });
 });
 

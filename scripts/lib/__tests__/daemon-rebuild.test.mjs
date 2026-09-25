@@ -1,0 +1,1344 @@
+/**
+ * @file scripts/lib/__tests__/daemon-rebuild.test.mjs
+ * @description Module C (`../daemon-rebuild.mjs`) — real temp git repos throughout: a bare `origin.git`, a
+ *   working `clone` (the thing under test, exactly the shape a real daemon clone has: on `main`, tracking
+ *   `origin`), and throwaway "author" clones used only to push commits/branches from OUTSIDE the daemon clone's
+ *   own working tree — the daemon clone itself must stay clean and on `main` for `findUnsafeLocalState` to pass,
+ *   so no test ever runs a mutating git command directly against it except through `rebuildClone`/
+ *   `dryRunRebuild` themselves (the two "dirty"/"local-commits" tests are the deliberate exceptions — they
+ *   dirty the clone on purpose to prove it gets refused). `runSmoke` and `prState` are always injected fakes —
+ *   this suite never spawns the real live smoke gate or a real `gh` call. Every state/lock/overlay dir is a
+ *   fresh mkdtemp per fixture via `env`, never `~/.claude/*`.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, utimesSync,
+} from 'node:fs';
+import { tmpdir, hostname } from 'node:os';
+import { join, dirname } from 'node:path';
+import { spawnSync, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+
+import {
+  planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
+  isDaemonManagedClone, daemonConveyorStateRoot,
+} from '../daemon-rebuild.mjs';
+import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
+import { gitRun } from '../main-staleness.mjs';
+
+const tempDirs = [];
+
+function mktemp(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function git(cwd, args) {
+  return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+    cwd, encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL',
+  });
+}
+function gitOk(cwd, args) {
+  const r = git(cwd, args);
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} in ${cwd} failed: ${r.stderr || r.stdout}`);
+  return r.stdout;
+}
+
+/** A throwaway clone of `originDir`, used to push commits/branches without ever touching the daemon clone
+ *  under test. Its parent dir is registered for cleanup (the clone itself doesn't need separate registration). */
+function makeAuthorClone(originDir) {
+  const parent = mktemp('we-daemon-rebuild-author-');
+  const dir = join(parent, 'w');
+  const r = spawnSync('git', ['clone', '-q', originDir, dir], {
+    encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL',
+  });
+  if (r.status !== 0) throw new Error(`clone failed: ${r.stderr}`);
+  return dir;
+}
+
+/** Push one new commit onto `ref` (created from `base`, default `origin/main`) via a throwaway author clone.
+ *  Returns the pushed commit sha. */
+function pushBranch(originDir, ref, mutate, { base = 'origin/main' } = {}) {
+  const dir = makeAuthorClone(originDir);
+  gitOk(dir, ['fetch', '-q', 'origin']);
+  gitOk(dir, ['checkout', '-q', '-B', ref, base]);
+  mutate(dir);
+  gitOk(dir, ['add', '-A']);
+  gitOk(dir, ['commit', '-q', '-m', `overlay: ${ref}`]);
+  gitOk(dir, ['push', '-q', 'origin', `HEAD:refs/heads/${ref}`]);
+  return gitOk(dir, ['rev-parse', 'HEAD']).trim();
+}
+
+/** Advance `main` on origin with one new commit via a throwaway author clone. */
+function advanceMain(originDir, mutate) {
+  return pushBranch(originDir, 'main', mutate, { base: 'origin/main' });
+}
+
+function deleteBranch(originDir, ref) {
+  const dir = makeAuthorClone(originDir);
+  gitOk(dir, ['push', '-q', 'origin', '--delete', ref]);
+}
+
+function writeFile(dir, name, content) {
+  const full = join(dir, name);
+  mkdirSync(dirname(full), { recursive: true });
+  writeFileSync(full, content);
+}
+
+/** Fresh {origin (bare), clone (working tree under test), env} fixture. The clone starts on `main`, clean,
+ *  tracking `origin`, one commit. Every per-clone state/lock/overlay dir is a fresh mkdtemp threaded via `env`. */
+function makeFixture() {
+  const base = mktemp('we-daemon-rebuild-fixture-');
+  const originDir = join(base, 'origin.git');
+  const cloneDir = join(base, 'clone');
+  mkdirSync(cloneDir, { recursive: true });
+  gitOk(base, ['init', '--bare', '-q', originDir]);
+  gitOk(cloneDir, ['init', '-q', '-b', 'main']);
+  writeFile(cloneDir, 'README.md', 'init\n');
+  gitOk(cloneDir, ['add', '-A']);
+  gitOk(cloneDir, ['commit', '-q', '-m', 'init']);
+  gitOk(cloneDir, ['remote', 'add', 'origin', originDir]);
+  gitOk(cloneDir, ['push', '-q', '-u', 'origin', 'main']);
+  gitOk(cloneDir, ['fetch', '-q', 'origin']); // guarantee refs/remotes/origin/main exists locally
+
+  const stateDir = mktemp('we-daemon-rebuild-state-');
+  const lockDir = mktemp('we-daemon-rebuild-lock-');
+  const overlayDir = mktemp('we-daemon-rebuild-overlay-');
+  const env = {
+    ...process.env,
+    WE_DAEMON_STATE_DIR: stateDir,
+    WE_DAEMON_CLONE_LOCK_ROOT: lockDir,
+    WE_DAEMON_OVERLAY_DIR: overlayDir,
+  };
+  return { base, originDir, cloneDir, stateDir, lockDir, overlayDir, env };
+}
+
+function passSmoke() {
+  return vi.fn(async () => ({ verdict: 'pass', attempts: 1, smoke: { results: [] } }));
+}
+
+// Short lock waits — no reader ever contends in this suite, so acquireWrite should always succeed immediately,
+// but keep the budget small regardless per the design spec's "use short lock waits in tests".
+const LOCK_OPTS = { waitMs: 2000, pollMs: 20 };
+
+beforeEach(() => {
+  tempDirs.length = 0;
+});
+
+afterEach(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+  tempDirs.length = 0;
+});
+
+describe('rebuildClone', () => {
+  it('applies a clean overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/clean-a', (dir) => writeFile(dir, 'a.txt', 'hello a\n'));
+    addOverlay(cloneDir, { ref: 'lane/clean-a' }, { env });
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.adopted).toBe(true);
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(result.head);
+    expect(existsSync(join(cloneDir, 'a.txt'))).toBe(true);
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/clean-a']);
+
+    const state = readRebuildState(cloneDir, env);
+    expect(state.adopted?.head).toBe(result.head);
+  });
+
+  // #4044 live: a full smoke took 209s under the write lock (lane acquire 172s on a busy pool); every daemon on
+  // the clone skipped its ticks meanwhile. The rebuild now hands the smoke the files changed since the LAST
+  // LIVE-VERIFIED build, so tree-code checks whose code is untouched are not re-run.
+  it('passes the smoke the files changed since the adopted build — and null when the current head was never verified', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    // First rebuild: HEAD is not a recorded adopted build yet ⇒ full smoke (changedFiles null).
+    advanceMain(originDir, (dir) => writeFile(dir, 'backlog/1.md', 'one\n'));
+    const first = passSmoke();
+    const r1 = await rebuildClone({ root: cloneDir, env, runSmoke: first, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(r1.adopted).toBe(true);
+    expect(first.mock.calls[0][0].changedFiles).toBeNull();
+    // Second rebuild from the adopted head ⇒ exactly the diff.
+    advanceMain(originDir, (dir) => writeFile(dir, 'backlog/2.md', 'two\n'));
+    const second = passSmoke();
+    const r2 = await rebuildClone({ root: cloneDir, env, runSmoke: second, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(r2.adopted).toBe(true);
+    expect(second.mock.calls[0][0].changedFiles).toEqual(['backlog/2.md']);
+  });
+
+  // #4044 live (10:28-10:40 ET): the fix daemon's rebuild waited silently ~10 min on the review daemon's long tick.
+  it('a live reader holding the clone makes the rebuild wait at most 60s by default, logged, then give up', async () => {
+    const { originDir, cloneDir, env, lockDir } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'y.txt', 'y\n'));
+    const { acquireRead } = await import('../daemon-clone-lock.mjs');
+    expect(acquireRead(cloneDir, { owner: 'review-daemon-sim', lockRoot: lockDir, pid: process.pid }).ok).toBe(true);
+    let t = 1_000_000;
+    const log = { error: vi.fn() };
+    const runSmoke = passSmoke();
+    const r = await rebuildClone({
+      root: cloneDir, env, runSmoke, log, prState: async () => null, now: () => t, sleep: async (ms) => { t += ms; },
+      lockOpts: { pollMs: 1000 },
+    });
+    expect(r).toMatchObject({ moved: false, reason: 'tick-in-progress', heldBy: 'review-daemon-sim' });
+    expect(t - 1_000_000).toBeLessThanOrEqual(61_000);
+    expect(runSmoke).not.toHaveBeenCalled();
+    const lines = log.error.mock.calls.map(([m]) => m);
+    expect(lines.some((m) => /waiting up to 60s for live reader\(s\) review-daemon-sim/.test(m))).toBe(true);
+    expect(lines.some((m) => /gave up after 60s/.test(m))).toBe(true);
+  });
+
+  it('a smoke that holds the write lock 60s+ raises a smoke-slow alert with per-check timings', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'x.txt', 'x\n'));
+    let t = 1_000_000;
+    const runSmoke = vi.fn(async () => { t += 209_000; return { verdict: 'pass', attempts: 1, smoke: { results: [{ name: 'lane-acquire-release', ok: true, ms: 171834 }] } }; });
+    const r = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t });
+    const slow = r.alerts.find((a) => a.kind === 'smoke-slow');
+    expect(slow?.detail).toMatchObject({ ms: 209_000, checks: 'lane-acquire-release:171834ms' });
+  });
+
+  it('removes an overlay whose content already landed on main in a different (squashed) form', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/squashed', (dir) => writeFile(dir, 'squash.txt', 'same content\n'));
+    // main picks up the SAME content plus an unrelated change in ONE commit — a different patch-id than the
+    // overlay's own commit, so `git cherry` will NOT see it as upstream-equivalent; only the tree-equality
+    // fallback (planRebuild step 5) catches this.
+    advanceMain(originDir, (dir) => {
+      writeFile(dir, 'squash.txt', 'same content\n');
+      writeFile(dir, 'unrelated.txt', 'noise\n');
+    });
+    addOverlay(cloneDir, { ref: 'lane/squashed' }, { env });
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+    expect(result.alerts.some((a) => a.kind === 'overlay-auto-dropped' && a.detail?.reason === 'in-main')).toBe(true);
+    expect(existsSync(join(cloneDir, 'unrelated.txt'))).toBe(true);
+    expect(existsSync(join(cloneDir, 'squash.txt'))).toBe(true);
+  });
+
+  it('drops a conflicting overlay but still applies a clean one, and the conflicting ref stays in the list', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'shared.txt', 'original\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'seed shared.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+
+    pushBranch(originDir, 'lane/conflict', (dir) => writeFile(dir, 'shared.txt', 'overlay change\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    pushBranch(originDir, 'lane/clean-b', (dir) => writeFile(dir, 'b.txt', 'hello b\n'));
+
+    addOverlay(cloneDir, { ref: 'lane/conflict' }, { env });
+    addOverlay(cloneDir, { ref: 'lane/clean-b' }, { env });
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    const refs = readOverlays(cloneDir, { env }).map((o) => o.ref);
+    expect(refs).toEqual(['lane/conflict', 'lane/clean-b']); // conflict stays in the list, unchanged position
+    expect(result.alerts.some((a) => a.kind === 'overlay-conflict-dropped')).toBe(true);
+    expect(existsSync(join(cloneDir, 'b.txt'))).toBe(true);
+  });
+
+  it('removes an overlay whose PR is MERGED', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/merged-pr', (dir) => writeFile(dir, 'c.txt', 'hello c\n'));
+    addOverlay(cloneDir, { ref: 'lane/merged-pr', pr: 42 }, { env });
+
+    const runSmoke = passSmoke();
+    const prState = vi.fn(async (pr) => (pr === 42 ? 'MERGED' : null));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState, lockOpts: LOCK_OPTS });
+
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+    expect(result.alerts.some((a) => a.kind === 'overlay-auto-dropped' && a.detail?.reason === 'pr-merged')).toBe(true);
+    expect(existsSync(join(cloneDir, 'c.txt'))).toBe(false);
+  });
+
+  it('removes an overlay whose ref was deleted on origin', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/gone', (dir) => writeFile(dir, 'd.txt', 'hello d\n'));
+    addOverlay(cloneDir, { ref: 'lane/gone' }, { env });
+    deleteBranch(originDir, 'lane/gone');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+    expect(result.alerts.some((a) => a.kind === 'overlay-auto-dropped' && a.detail?.reason === 'ref-gone')).toBe(true);
+    expect(existsSync(join(cloneDir, 'd.txt'))).toBe(false);
+  });
+
+  it('refuses a dirty tree (uncommitted change to a TRACKED file) without touching anything', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'README.md', 'oops uncommitted edit\n'); // README.md is tracked (see makeFixture)
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('dirty');
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('oops uncommitted edit\n');
+  });
+
+  it('an untracked, non-ignored file never blocks the rebuild — it adopts and the file survives untouched', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/clean-stray', (dir) => writeFile(dir, 'stray-overlay.txt', 'hello\n'));
+    addOverlay(cloneDir, { ref: 'lane/clean-stray' }, { env });
+    writeFile(cloneDir, 'stray.txt', 'untracked and harmless\n');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(result.adopted).toBe(true);
+    expect(result.reason).not.toBe('dirty');
+    expect(result.reason).not.toBe('untracked-collision');
+    expect(existsSync(join(cloneDir, 'stray.txt'))).toBe(true);
+    expect(readFileSync(join(cloneDir, 'stray.txt'), 'utf8')).toBe('untracked and harmless\n');
+    expect(result.alerts.some((a) => a.kind === 'untracked-kept'
+      && a.detail?.paths?.includes('stray.txt'))).toBe(true);
+  });
+
+  it('an untracked file colliding with a path the new main adds refuses with untracked-collision', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    advanceMain(originDir, (dir) => writeFile(dir, 'newfile.txt', 'from main\n'));
+    writeFile(cloneDir, 'newfile.txt', 'local untracked content\n');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('untracked-collision');
+    expect(result.untracked).toEqual(['newfile.txt']);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readFileSync(join(cloneDir, 'newfile.txt'), 'utf8')).toBe('local untracked content\n');
+    expect(result.alerts.some((a) => a.kind === 'untracked-collision'
+      && a.detail?.paths?.includes('newfile.txt'))).toBe(true);
+  });
+
+  it('refuses a local unpushed commit', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'local-only.txt', 'local\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'local commit never pushed']);
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('local-commits');
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+  });
+
+  it('smoke "code" restores HEAD, records the rejection, and the next call short-circuits without smoking', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/broken', (dir) => writeFile(dir, 'broken.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/broken' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = vi.fn(async () => ({
+      verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
+    }));
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(first.reason).toBe('smoke-rejected');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(readRebuildState(cloneDir, env).rejected).toBeTruthy();
+
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(second.reason).toBe('still-rejected');
+    expect(runSmoke).toHaveBeenCalledTimes(1); // not called again
+  });
+
+  it('smoke "transient" restores HEAD, never records a rejection, and re-runs smoke next call', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/flaky', (dir) => writeFile(dir, 'flaky.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/flaky' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = vi.fn(async () => ({
+      verdict: 'transient', attempts: 3, smoke: { results: [{ ok: false, name: 'x', detail: 'ETIMEDOUT' }] },
+    }));
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(first.reason).toBe('smoke-transient');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(readRebuildState(cloneDir, env).rejected).toBeNull();
+
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(second.reason).toBe('smoke-transient');
+    expect(runSmoke).toHaveBeenCalledTimes(2); // re-ran, not short-circuited
+  });
+
+  it('is deterministic — the same inputs twice yield up-to-date and the identical finalSha', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/det', (dir) => writeFile(dir, 'det.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/det' }, { env });
+
+    const runSmoke = passSmoke();
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(first.moved).toBe(true);
+
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(second.moved).toBe(false);
+    expect(second.reason).toBe('up-to-date');
+    expect(second.plan.finalSha).toBe(first.head);
+  });
+
+  it('recovers a stale index.lock and proceeds', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'e.txt', 'x\n'));
+    const lockPath = join(cloneDir, '.git', 'index.lock');
+    writeFileSync(lockPath, '');
+    const oldSeconds = Date.now() / 1000 - 3600;
+    utimesSync(lockPath, oldSeconds, oldSeconds);
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.alerts.some((a) => a.kind === 'index-lock-recovered')).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(result.moved).toBe(true);
+  });
+
+  // Advisory 2026-09-25 (PR #2625): a corrupt overlay file read as "no overlays", so the next rebuild silently
+  // built main alone and dropped every registered fix, with no alert anywhere.
+  it('a corrupt overlay-state file refuses the rebuild with an alert, never builds main alone', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/kept', (dir) => writeFile(dir, 'kept.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/kept' }, { env });
+    const first = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(first.adopted).toBe(true);
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    advanceMain(originDir, (dir) => writeFile(dir, 'main-next.txt', 'y\n'));
+    writeFileSync(overlayFilePath(cloneDir, env), '{ not json');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('overlay-state-corrupt');
+    expect(result.alerts.some((a) => a.kind === 'overlay-state-corrupt')).toBe(true);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(existsSync(join(cloneDir, 'kept.txt'))).toBe(true);
+    expect(readFileSync(overlayFilePath(cloneDir, env), 'utf8')).toBe('{ not json'); // left for a person to inspect
+
+    const preview = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(preview.overlayStateCorrupt).toBe(true);
+    expect(preview.wouldDo).toBe('refuse');
+  });
+
+  // Advisory 2026-09-25 (PR #2625): a kept untracked file was reported only on ticks that moved the tree, so it
+  // could sit in the clone through every no-op tick with no signal.
+  it('a kept untracked file is re-reported on every tick, including an up-to-date one', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/tick', (dir) => writeFile(dir, 'tick.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/tick' }, { env });
+    writeFile(cloneDir, 'planted.txt', 'untracked\n');
+    const opts = { root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS };
+    expect((await rebuildClone(opts)).adopted).toBe(true);
+
+    const second = await rebuildClone(opts);
+    expect(second.reason).toBe('up-to-date');
+    expect(second.alerts.some((a) => a.kind === 'untracked-kept' && a.detail?.paths?.includes('planted.txt'))).toBe(true);
+    expect(existsSync(join(cloneDir, 'planted.txt'))).toBe(true);
+  });
+
+  it('mainOnly ignores every overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/refused', (dir) => writeFile(dir, 'f.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/refused' }, { env });
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, mainOnly: true, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.alerts.some((a) => a.kind === 'overlays-refused-main-only')).toBe(true);
+    expect(existsSync(join(cloneDir, 'f.txt'))).toBe(false);
+    expect(readOverlays(cloneDir, { env })).toHaveLength(1); // never removed — just ignored this pass
+    expect(runSmoke).not.toHaveBeenCalled(); // main alone == current HEAD already, nothing to build
+  });
+
+  // Module E follow-up (#4044) — an already-ADOPTED overlay's own commit becomes unreachable from any remote
+  // ref once its PR is squash-merged (a different sha lands on main) AND its origin branch is deleted for
+  // cleanup — exactly the shape a normal squash-merge-and-delete-branch PR leaves behind. Before `knownInputs`
+  // fed the adopted state's own shas into `findUnsafeLocalState`, that orphaned commit (reachable from HEAD via
+  // the earlier rebuild's merge commit, but from no remaining remote-tracking ref) looked exactly like a real
+  // local commit and froze the rebuild with `local-commits`, forever, on a perfectly safe clone.
+  it('an adopted overlay squash-merged + branch-deleted on origin is auto-dropped next rebuild — never refused as local-commits', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/squash-drop', (dir) => writeFile(dir, 'squash-drop.txt', 'overlay content\n'));
+    addOverlay(cloneDir, { ref: 'lane/squash-drop' }, { env });
+
+    const runSmoke = passSmoke();
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(first.moved).toBe(true);
+    expect(first.adopted).toBe(true);
+    expect(existsSync(join(cloneDir, 'squash-drop.txt'))).toBe(true);
+
+    // Origin: the overlay's content lands on main as a squash (a NEW, different commit than the overlay's own),
+    // then its own branch is deleted — the overlay's original commit is now reachable from HEAD (via the first
+    // rebuild's merge commit) but from no remaining remote-tracking ref at all.
+    advanceMain(originDir, (dir) => writeFile(dir, 'squash-drop.txt', 'overlay content\n'));
+    deleteBranch(originDir, 'lane/squash-drop');
+
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(second.reason).not.toBe('local-commits');
+    expect(second.moved).toBe(true);
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+    expect(second.alerts.some((a) => a.kind === 'overlay-auto-dropped' && a.detail?.reason === 'ref-gone')).toBe(true);
+    expect(existsSync(join(cloneDir, 'squash-drop.txt'))).toBe(true);
+    // Lands on PLAIN main — no overlay merge commit left in the picture.
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(gitOk(cloneDir, ['rev-parse', 'origin/main']).trim());
+  });
+
+  /** Seed `state.quarantine` exactly as a failed rollback leaves it (rebuildClone's own state file). */
+  function seedQuarantine(cloneDir, env, prevHead) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ quarantine: { prevHead, reason: 'smoke-code-rollback-failed' } }));
+  }
+
+  it('recovers from quarantine even when a harmless untracked file sits in the tree', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedQuarantine(cloneDir, env, gitOk(cloneDir, ['rev-parse', 'HEAD']).trim());
+    writeFile(cloneDir, 'daemon-sidecar.json', '{}\n'); // untracked, not ignored, absent from prevHead's tree
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).not.toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).toBeNull();
+    expect(readFileSync(join(cloneDir, 'daemon-sidecar.json'), 'utf8')).toBe('{}\n'); // kept, never deleted
+  });
+
+  it('stays quarantined when a tracked file is dirty', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedQuarantine(cloneDir, env, gitOk(cloneDir, ['rev-parse', 'HEAD']).trim());
+    writeFile(cloneDir, 'README.md', 'local edit\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('local edit\n');
+  });
+
+  it('stays quarantined rather than let the recovery reset overwrite an untracked file prevHead has content at', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'collide.txt', 'tracked at prevHead\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add collide.txt']);
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    gitOk(cloneDir, ['rm', '-q', 'collide.txt']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'drop collide.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    seedQuarantine(cloneDir, env, prevHead);
+    writeFile(cloneDir, 'collide.txt', 'untracked local content\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'collide.txt'), 'utf8')).toBe('untracked local content\n');
+  });
+
+  // ── Step 0: interrupted-rebuild recovery (`state.inProgress`) ──────────────────────────────────────────────
+
+  /** Seed `state.inProgress` exactly as Step 5 writes it just before its `reset --hard`. */
+  function seedInProgress(cloneDir, env, inProgress) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ inProgress }));
+  }
+  /** A pid on this host that has certainly exited (the child is reaped before spawnSync returns). */
+  function deadPid() {
+    return spawnSync(process.execPath, ['-e', '']).pid;
+  }
+  const OTHER_SHA = 'f'.repeat(40);
+  const interruptedAlerts = (result) => result.alerts.filter((a) => a.kind.startsWith('rebuild-interrupted-'));
+
+  it('recovers an interrupted rebuild whose owner died after its reset landed (HEAD == target)', async () => {
+    const { cloneDir, env } = makeFixture();
+    const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: head, startedAt: new Date().toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
+    // The reset landed but the smoke never ran — so it smokes now instead of adopting as `up-to-date`.
+    expect(result.reason).toBe('verified-after-interrupt');
+    expect(result.adopted).toBe(true);
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  // PR #2625 advisory (correctness): a rebuild killed AFTER its `reset --hard <target>` but BEFORE its live smoke
+  // resolved left HEAD == target. The next call used to clear the marker, see `up-to-date`, and adopt the build
+  // without ever smoking it. These replay that crash window with real git.
+  function crashAfterReset(cloneDir, env) {
+    writeFile(cloneDir, 'new-code.txt', 'unsmoked\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'the build the dead rebuild reset onto']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    const target = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD~1']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString(),
+    });
+    return { target, prevHead };
+  }
+
+  it('crash between reset and smoke: the next call SMOKES the build before adopting it (never adopts unverified)', async () => {
+    const { cloneDir, env } = makeFixture();
+    const { target } = crashAfterReset(cloneDir, env);
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.adopted).toBe(true);
+    expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
+    expect(readRebuildState(cloneDir, env).unverified).toBeNull();
+  });
+
+  it('crash between reset and smoke: a failing smoke rolls back to the pre-crash head and records the rejection', async () => {
+    const { cloneDir, env } = makeFixture();
+    const { prevHead } = crashAfterReset(cloneDir, env);
+    const runSmoke = vi.fn(async () => ({ verdict: 'code', attempts: 1, smoke: { results: [{ name: 'x', ok: false }] } }));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.reason).toBe('smoke-rejected');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(readRebuildState(cloneDir, env).adopted).toBeNull();
+    expect(readRebuildState(cloneDir, env).rejected).not.toBeNull();
+  });
+
+  it('recovers an aged interrupted rebuild from another host when HEAD is back at a clean prevHead', async () => {
+    const { cloneDir, env: baseEnv } = makeFixture();
+    const env = { ...baseEnv, WE_DAEMON_REBUILD_STALE_MS: String(30 * 60_000) }; // never the host shell's value
+    const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: 1, host: 'some-other-host', prevHead: head, target: OTHER_SHA,
+      startedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  it('refuses as unrecoverable when the owner is dead and HEAD is neither prevHead nor target', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'pending.txt', 'x\n'));
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const inProgress = {
+      pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: 'e'.repeat(40), startedAt: new Date().toISOString(),
+    };
+    seedInProgress(cloneDir, env, inProgress);
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('rebuild-interrupted-unrecoverable');
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-unrecoverable']);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readRebuildState(cloneDir, env).inProgress).toEqual(inProgress); // never silently cleared
+  });
+
+  it('refuses as unrecoverable when HEAD is at prevHead but a tracked file is dirty', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead: gitOk(cloneDir, ['rev-parse', 'HEAD']).trim(), target: OTHER_SHA,
+      startedAt: new Date().toISOString(),
+    });
+    writeFile(cloneDir, 'README.md', 'half-reset edit\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('rebuild-interrupted-unrecoverable');
+    expect(readRebuildState(cloneDir, env).inProgress).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('half-reset edit\n');
+  });
+
+  it('leaves a fresh inProgress owned by a live pid alone (no recovery verdict either way)', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedInProgress(cloneDir, env, {
+      pid: process.pid, host: hostname(), prevHead: OTHER_SHA, target: 'e'.repeat(40), startedAt: new Date().toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result)).toEqual([]);
+    expect(result.reason).toBe('up-to-date');
+    expect(readRebuildState(cloneDir, env).inProgress).toMatchObject({ pid: process.pid });
+  });
+
+  // ── Step 5/6: rollback failures on the live rebuildClone path (injected failing `run`) ──────────────────────
+
+  /** The real git runner, except `reset --hard <sha>` for any of `failShas` exits non-zero. With `applyFirst`
+   *  the real reset still runs before the failure is reported, so the tree really moves (a partial reset). */
+  function failingResetRun(failShas, { applyFirst = false } = {}) {
+    const fail = new Set([].concat(failShas));
+    return vi.fn((args, opts) => {
+      if (args[0] === 'reset' && args[1] === '--hard' && fail.has(args[2])) {
+        if (applyFirst) gitRun(args, opts);
+        return { status: 1, stdout: '', stderr: 'injected reset failure' };
+      }
+      return gitRun(args, opts);
+    });
+  }
+  const resetCalls = (run) => run.mock.calls.map((c) => c[0]).filter((a) => a[0] === 'reset').map((a) => a[2]);
+
+  it.each([
+    ['code', 'smoke-code-rollback-failed'],
+    ['transient', 'smoke-transient-rollback-failed'],
+  ])('a failed rollback after a "%s" smoke verdict quarantines the clone and records no rejection', async (verdict, reason) => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, `lane/rollback-${verdict}`, (dir) => writeFile(dir, 'r.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}` }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = vi.fn(async () => ({
+      verdict, attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
+    }));
+    const result = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('rollback-failed');
+    expect(result.quarantine).toBe(true);
+    expect(result.alerts.some((a) => a.kind === 'rollback-failed' && a.detail?.prevHead === prevHead)).toBe(true);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.quarantine).toEqual({ prevHead, reason });
+    expect(state.inProgress).toBeNull();
+    expect(state.rejected).toBeNull();
+
+    // The next tick refuses to build anything on the unknown tree while the rollback keeps failing.
+    const next = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(next.reason).toBe('quarantined');
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('a smoke that throws, followed by a failed rollback, quarantines with reason rebuild-threw', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/throws', (dir) => writeFile(dir, 't.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/throws' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const result = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke: vi.fn(async () => { throw new Error('smoke crashed'); }),
+      prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('rollback-failed');
+    expect(result.quarantine).toBe(true);
+    expect(readRebuildState(cloneDir, env).quarantine).toEqual({ prevHead, reason: 'rebuild-threw' });
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  it('a failed reset onto the target never smokes, rolls back, and clears inProgress', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/reset-fails', (dir) => writeFile(dir, 'u.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/reset-fails' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const plan = (await dryRunRebuild({ root: cloneDir, env, prState: async () => null })).plan;
+
+    // The failing reset really moves the tree first, so only the rollback can bring HEAD back.
+    const run = failingResetRun(plan.finalSha, { applyFirst: true });
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('reset-failed');
+    expect(result.rolledBack).toBe(true);
+    expect(resetCalls(run)).toEqual([plan.finalSha, prevHead]);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(existsSync(join(cloneDir, 'u.txt'))).toBe(false);
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+    expect(readRebuildState(cloneDir, env).quarantine).toBeNull();
+  });
+
+  it('a failed reset onto the target whose rollback ALSO fails quarantines the clone', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/reset-and-rollback-fail', (dir) => writeFile(dir, 'v.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/reset-and-rollback-fail' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const plan = (await dryRunRebuild({ root: cloneDir, env, prState: async () => null })).plan;
+
+    const run = failingResetRun([plan.finalSha, prevHead]);
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.reason).toBe('reset-failed');
+    expect(result.rolledBack).toBe(false);
+    expect(result.quarantine).toBe(true);
+    expect(runSmoke).not.toHaveBeenCalled();
+    const state = readRebuildState(cloneDir, env);
+    expect(state.quarantine).toEqual({ prevHead, reason: 'reset-rollback-failed' });
+    expect(state.inProgress).toBeNull();
+
+    const next = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(next.reason).toBe('quarantined');
+    expect(runSmoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('dryRunRebuild', () => {
+  it('leaves the clone byte-identical and reports the plan', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/preview', (dir) => writeFile(dir, 'g.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/preview' }, { env });
+    advanceMain(originDir, (dir) => writeFile(dir, 'h.txt', 'y\n'));
+
+    const snapshot = () => {
+      const gitDir = join(cloneDir, '.git');
+      let objectsCount = 0;
+      const walk = (d) => {
+        let entries;
+        try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const entry of entries) {
+          if (entry.name === 'info' || entry.name === 'pack') continue;
+          const p = join(d, entry.name);
+          if (entry.isDirectory()) walk(p); else objectsCount += 1;
+        }
+      };
+      walk(join(gitDir, 'objects'));
+      const indexPath = join(gitDir, 'index');
+      const fetchHeadPath = join(gitDir, 'FETCH_HEAD');
+      return {
+        head: gitOk(cloneDir, ['rev-parse', 'HEAD']).trim(),
+        forEachRef: gitOk(cloneDir, ['for-each-ref']),
+        objectsCount,
+        indexMtime: existsSync(indexPath) ? statSync(indexPath).mtimeMs : null,
+        fetchHeadPresent: existsSync(fetchHeadPath),
+        fetchHeadMtime: existsSync(fetchHeadPath) ? statSync(fetchHeadPath).mtimeMs : null,
+      };
+    };
+
+    const before = snapshot();
+    const result = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    const after = snapshot();
+
+    expect(after).toEqual(before);
+    expect(result.dryRun).toBe(true);
+    expect(result.onMain).toBe(true);
+    expect(result.unsafe.safe).toBe(true);
+    expect(result.plan.ok).toBe(true);
+    expect(result.wouldDo).toBe('rebuild-and-smoke');
+    expect(result.overlays.map((o) => o.ref)).toEqual(['lane/preview']);
+  });
+
+  it('reports "nothing" when there is nothing to build', async () => {
+    const { cloneDir, env } = makeFixture();
+    const result = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(result.wouldDo).toBe('nothing');
+    expect(result.plan.finalSha).toBe(result.head);
+  });
+
+  // Module E (#4044) — daemon-load-overlay.mjs's own `--dry-run` previews "what if I registered this ref too"
+  // without ever writing the overlay list.
+  it('extraOverlays are appended after the stored list, fed into the plan, and NEVER written to disk', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/virtual', (dir) => writeFile(dir, 'virtual.txt', 'x\n'));
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+
+    const result = await dryRunRebuild({
+      root: cloneDir, env, prState: async () => null, extraOverlays: [{ ref: 'lane/virtual', pr: null }],
+    });
+
+    expect(result.wouldDo).toBe('rebuild-and-smoke');
+    expect(result.plan.applied.map((a) => a.ref)).toEqual(['lane/virtual']);
+    expect(result.overlays.map((o) => o.ref)).toEqual(['lane/virtual']);
+    expect(readOverlays(cloneDir, { env })).toEqual([]); // still never written
+  });
+
+  it('reports stillRejected + "nothing (still-rejected)" when the plan matches the last recorded rejection', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/rejected', (dir) => writeFile(dir, 'rejected.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/rejected' }, { env });
+
+    const runSmoke = vi.fn(async () => ({
+      verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
+    }));
+    const rebuildResult = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(rebuildResult.reason).toBe('smoke-rejected');
+
+    const preview = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(preview.stillRejected).toBe(true);
+    expect(preview.wouldDo).toBe('nothing (still-rejected)');
+    expect(preview.state.rejected).toBeTruthy();
+  });
+});
+
+describe('findUnsafeLocalState / planRebuild (pure core)', () => {
+  function gitFor(cwd) {
+    return (args) => {
+      const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL' });
+      return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+    };
+  }
+
+  it('findUnsafeLocalState reports safe on a clean tree with nothing local', () => {
+    const { cloneDir } = makeFixture();
+    expect(findUnsafeLocalState({ git: gitFor(cloneDir) })).toEqual({ safe: true, untracked: [] });
+  });
+
+  it('findUnsafeLocalState reports untracked paths without them affecting safe', () => {
+    const { cloneDir } = makeFixture();
+    writeFile(cloneDir, 'loose.txt', 'x\n');
+    expect(findUnsafeLocalState({ git: gitFor(cloneDir) })).toEqual({ safe: true, untracked: ['loose.txt'] });
+  });
+
+  it('planRebuild reports main-unresolved when mainRef does not exist', async () => {
+    const { cloneDir } = makeFixture();
+    const plan = await planRebuild({
+      git: gitFor(cloneDir), headSha: 'deadbeef', mainRef: 'origin/does-not-exist', overlays: [],
+    });
+    expect(plan).toEqual({ ok: false, reason: 'main-unresolved' });
+  });
+});
+
+// ── pinned overlays — the 2026-09-25 self-destruct guard ────────────────────────────────────────────────────
+// Live incident: #2625 (the overlay that CARRIES daemon-rebuild.mjs) was loaded on the review/fix clone. main
+// moved, the overlay conflicted, and the rebuild conflict-dropped its own mechanism — rebuilding the clone onto
+// plain main, whose code had no rebuild or overlay list at all. These tests replay that shape with real git.
+describe('rebuildClone — pinned overlays never conflict-drop (self-destruct guard)', () => {
+  /** An overlay that ships the rebuild mechanism itself, plus a file main will later conflict on. */
+  function pushMechanismOverlay(originDir, ref) {
+    return pushBranch(originDir, ref, (dir) => {
+      writeFile(dir, 'scripts/lib/daemon-rebuild.mjs', '// the rebuild mechanism\n');
+      writeFile(dir, 'shared.txt', 'overlay change\n');
+    });
+  }
+  function seedShared(cloneDir) {
+    writeFile(cloneDir, 'shared.txt', 'original\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'seed shared.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+  }
+
+  it('an overlay carrying the rebuild mechanism that starts to conflict REFUSES: tree, HEAD and list untouched', async () => {
+    const { originDir, cloneDir, env, stateDir } = makeFixture();
+    seedShared(cloneDir);
+    pushMechanismOverlay(originDir, 'lane/4044-daemon-rebuild-and-clone-lock');
+    addOverlay(cloneDir, { ref: 'lane/4044-daemon-rebuild-and-clone-lock', pr: 2625 }, { env });
+
+    // Tick 1: the overlay applies cleanly and is adopted — the clone now RUNS the mechanism.
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS,
+    });
+    expect(first.moved).toBe(true);
+    expect(existsSync(join(cloneDir, 'scripts/lib/daemon-rebuild.mjs'))).toBe(true);
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    // main moves and now conflicts with the overlay.
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+
+    // Tick 2: must refuse, never rebuild onto plain main.
+    const runSmoke = passSmoke();
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => 'OPEN', lockOpts: LOCK_OPTS,
+    });
+    expect(second.moved).toBe(false);
+    expect(second.reason).toBe('pinned-overlay-conflict');
+    expect(second.detail).toMatchObject({
+      ref: 'lane/4044-daemon-rebuild-and-clone-lock', pr: 2625, dropReason: 'conflict', pinnedBy: 'mechanism',
+    });
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(existsSync(join(cloneDir, 'scripts/lib/daemon-rebuild.mjs'))).toBe(true);
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/4044-daemon-rebuild-and-clone-lock']);
+    expect(second.alerts.some((a) => a.kind === 'overlay-conflict-dropped')).toBe(false);
+    const alert = second.alerts.find((a) => a.kind === 'pinned-overlay-conflict');
+    expect(alert?.detail?.message).toBe('pinned overlay conflicts with main — needs a rebase');
+    // …and it lands in the durable alerts log the operator reads.
+    const log = readdirSync(stateDir).find((f) => f.endsWith('.alerts.jsonl'));
+    expect(readFileSync(join(stateDir, log), 'utf8')).toContain('pinned overlay conflicts with main — needs a rebase');
+  });
+
+  it('an overlay registered pinned:true refuses on conflict even when it touches no mechanism file', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushBranch(originDir, 'lane/pinned-plain', (dir) => writeFile(dir, 'shared.txt', 'overlay change\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/pinned-plain', pinned: true }, { env });
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('pinned-overlay-conflict');
+    expect(result.detail?.pinnedBy).toBe('flag');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readOverlays(cloneDir, { env })[0]).toMatchObject({ ref: 'lane/pinned-plain', pinned: true });
+  });
+
+  it('a pinned overlay whose ref vanished (PR not merged) refuses instead of auto-dropping', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/pinned-gone', (dir) => writeFile(dir, 'g.txt', 'g\n'));
+    addOverlay(cloneDir, { ref: 'lane/pinned-gone', pinned: true }, { env });
+    deleteBranch(originDir, 'lane/pinned-gone');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('pinned-overlay-unavailable');
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/pinned-gone']);
+  });
+
+  it('a pinned overlay whose PR MERGED still leaves the list normally (main has it now)', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushMechanismOverlay(originDir, 'lane/pinned-merged');
+    addOverlay(cloneDir, { ref: 'lane/pinned-merged', pr: 7, pinned: true }, { env });
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'MERGED', lockOpts: LOCK_OPTS,
+    });
+    expect(result.reason).not.toBe('pinned-overlay-conflict');
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+  });
+
+  it('a NON-pinned, non-mechanism overlay still conflict-drops as before', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushBranch(originDir, 'lane/plain', (dir) => writeFile(dir, 'shared.txt', 'overlay change\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/plain' }, { env });
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(true);
+    expect(result.alerts.some((a) => a.kind === 'overlay-conflict-dropped')).toBe(true);
+  });
+
+  it('dryRunRebuild reports refuse for a conflicting pinned overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushMechanismOverlay(originDir, 'lane/mech');
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/mech' }, { env });
+    const dry = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(dry.wouldDo).toBe('refuse');
+    expect(dry.plan.reason).toBe('pinned-overlay-conflict');
+  });
+});
+
+// ── overlay-list race (live 2026-09-24/25: #2640, #2641, #2643 each needed repeated adds) ────────────────────
+// Two REAL processes on a throwaway clone: process A is a real `rebuildClone` auto-removing a merged overlay;
+// while A sits inside its read→write window (widened by the test-only RMW delay; A drops a marker file when it
+// gets there), process B runs the real CLI `daemon-overlay.mjs add --no-lock` — the unlocked add path
+// `daemon-load-overlay.mjs` also takes. Before the list mutex, A wrote back its stale read and B's add vanished.
+describe('overlay list — concurrent add vs. a rebuild auto-remove (two real processes)', () => {
+  // vitest's import.meta.url is not a file: URL — resolve from the repo root like daemon-live-smoke.test.mjs does.
+  const REBUILD_URL = pathToFileURL(join(process.cwd(), 'scripts/lib/daemon-rebuild.mjs')).href;
+  const CLI = join(process.cwd(), 'scripts/daemon-overlay.mjs');
+
+  function runNode(args, env) {
+    return new Promise((resolveP) => {
+      const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.stderr.on('data', (d) => { out += d; });
+      child.on('close', (code) => resolveP({ code, out }));
+    });
+  }
+
+  it('an add that lands while a rebuild is removing a merged overlay is never lost', async () => {
+    const { originDir, cloneDir, env, base } = makeFixture();
+    pushBranch(originDir, 'lane/merged', (dir) => writeFile(dir, 'm.txt', 'm\n'));
+    addOverlay(cloneDir, { ref: 'lane/merged', pr: 42 }, { env });
+    const marker = join(base, 'rmw-window-open');
+
+    const script = `
+      const { rebuildClone } = await import(${JSON.stringify(REBUILD_URL)});
+      const r = await rebuildClone({
+        root: ${JSON.stringify(cloneDir)}, prState: async () => 'MERGED',
+        runSmoke: async () => ({ verdict: 'pass', attempts: 1, smoke: { results: [] } }),
+        lockOpts: { waitMs: 2000, pollMs: 20 }, log: { error() {} },
+      });
+      console.log(JSON.stringify({ reason: r.reason }));
+    `;
+    let rebuildDone = false;
+    const rebuildP = runNode(['--input-type=module', '-e', script], {
+      ...env, WE_DAEMON_OVERLAYS_TEST_RMW_DELAY_MS: '1500', WE_DAEMON_OVERLAYS_TEST_RMW_MARKER: marker,
+    }).then((r) => { rebuildDone = true; return r; });
+
+    // Wait until A is inside its read→write window, then fire B.
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(marker) && !rebuildDone && Date.now() < deadline) await new Promise((r) => { setTimeout(r, 20); });
+    if (!existsSync(marker)) {
+      const early = await rebuildP;
+      throw new Error(`the rebuild process never reached its read→write window: ${early.out}`);
+    }
+    const addP = runNode([CLI, 'add', `--clone=${cloneDir}`, '--ref=lane/new', '--pr=7', '--no-lock', '--json'], env);
+
+    const [a, b] = await Promise.all([rebuildP, addP]);
+    expect(b.code, b.out).toBe(0);
+    expect(a.code, a.out).toBe(0);
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/new']);
+  }, 90_000);
+});
+
+// ── live 2026-09-25 08:14 ET: a gh-only smoke failure froze the clone as still-rejected until main moved ────────
+// Both gh checks failed together (GitHub/network), the verdict came back `code`, and the rejection stuck: the clone
+// sat 3 commits behind origin/main and the fix-dispatch daemon refused every repo as stale, silently.
+describe('rebuildClone — an external-only (gh) smoke rejection retries with backoff and alerts while held', () => {
+  const ghOnlyFailure = () => vi.fn(async () => ({
+    verdict: 'code', attempts: 1,
+    smoke: {
+      results: [
+        { name: 'lane-pool-list', ok: true, mayBeTransient: false },
+        { name: 'gh-api-repo', ok: false, mayBeTransient: true, detail: 'gh api --method GET repos/o/r failed: exited 1: weird gh output' },
+        { name: 'gh-pr-list', ok: false, mayBeTransient: true, detail: 'gh pr list failed: exited 1: weird gh output' },
+      ],
+    },
+  }));
+
+  it('rejects with a retryAt, holds (alerting clone-held-stale) until it is due, then re-smokes and adopts', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const env2 = { ...env, WE_DAEMON_REJECT_RETRY_BASE_MS: '60000' };
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const first = await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    expect(first.reason).toBe('smoke-rejected');
+    const rej = readRebuildState(cloneDir, env2).rejected;
+    expect(rej).toMatchObject({ externalOnly: true, attempts: 1 });
+    expect(Date.parse(rej.retryAt)).toBe(t0 + 60_000);
+    expect(first.alerts.find((a) => a.kind === 'smoke-rejected').detail.details[0].detail).toContain('weird gh output');
+    expect(first.alerts.some((a) => a.kind === 'clone-held-stale')).toBe(true);
+
+    const runSmoke2 = passSmoke();
+    const held = await rebuildClone({ root: cloneDir, env: env2, runSmoke: runSmoke2, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 30_000 });
+    expect(held.reason).toBe('still-rejected');
+    expect(runSmoke2).not.toHaveBeenCalled();
+    expect(held.alerts.find((a) => a.kind === 'clone-held-stale')?.detail).toMatchObject({ reason: 'still-rejected', retryAt: rej.retryAt });
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+
+    const runSmoke3 = passSmoke();
+    const retried = await rebuildClone({ root: cloneDir, env: env2, runSmoke: runSmoke3, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 61_000 });
+    expect(runSmoke3).toHaveBeenCalledTimes(1);
+    expect(retried.moved).toBe(true);
+    expect(retried.adopted).toBe(true);
+  });
+
+  it('a second external-only rejection of the SAME inputs doubles the backoff', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const env2 = { ...env, WE_DAEMON_REJECT_RETRY_BASE_MS: '60000' };
+    await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 61_000 });
+    const rej = readRebuildState(cloneDir, env2).rejected;
+    expect(rej.attempts).toBe(2);
+    expect(Date.parse(rej.retryAt)).toBe(t0 + 61_000 + 120_000);
+  });
+
+  it('a failure in a check that runs tree code still sticks until the inputs change (no retryAt)', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const treeFailure = vi.fn(async () => ({
+      verdict: 'code', attempts: 1,
+      smoke: { results: [{ name: 'reconcile-dry-run', ok: false, mayBeTransient: false, detail: 'boom' }] },
+    }));
+    await rebuildClone({ root: cloneDir, env, runSmoke: treeFailure, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    expect(readRebuildState(cloneDir, env).rejected.retryAt).toBeUndefined();
+    const runSmoke = passSmoke();
+    const later = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 24 * 3600_000 });
+    expect(later.reason).toBe('still-rejected');
+    expect(runSmoke).not.toHaveBeenCalled();
+  });
+});
+
+// Live 2026-09-25 13:36 ET: a review session appended a scorecard row to the TRACKED
+// `scripts/conveyor/run-scorecards.json` in the review-daemon clone. The rebuild refused it as `dirty` every
+// tick, the clone fell 10 commits behind origin/main, and every review and fix dispatch refused as STALE.
+describe('rebuildClone — daemon runtime state in a tracked file is carried out, never a freeze', () => {
+  const SC = 'scripts/conveyor/run-scorecards.json';
+  const store = (records) => `${JSON.stringify({ version: 1, records }, null, 2)}\n`;
+
+  function stateFixture() {
+    const fx = makeFixture();
+    delete fx.env.CONVEYOR_STATE_ROOT;
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }]));
+    gitOk(fx.cloneDir, ['add', '-A']);
+    gitOk(fx.cloneDir, ['commit', '-q', '-m', 'seed scorecards']);
+    gitOk(fx.cloneDir, ['push', '-q', 'origin', 'main']);
+    gitOk(fx.cloneDir, ['fetch', '-q', 'origin']);
+    advanceMain(fx.originDir, (dir) => writeFile(dir, 'new-on-main.txt', 'x\n'));
+    fx.pinned = join(fx.stateDir, 'conveyor-state', '.conveyor', 'run-scorecards.json');
+    return fx;
+  }
+
+  it('carries the uncommitted rows to the pinned root, restores the file, and moves the clone to main', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }, { id: 'row-2' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).not.toBe('dirty');
+    expect(result.moved).toBe(true);
+    expect(gitOk(fx.cloneDir, ['status', '--porcelain']).trim()).toBe('');
+    expect(gitOk(fx.cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(gitOk(fx.cloneDir, ['rev-parse', 'origin/main']).trim());
+    expect(JSON.parse(readFileSync(fx.pinned, 'utf8')).records.map((r) => r.id)).toEqual(['committed', 'row-1', 'row-2']);
+    expect(result.alerts.some((a) => a.kind === 'state-file-migrated' && a.detail?.path === SC && a.detail?.added === 3)).toBe(true);
+  });
+
+  it('unions into an existing pinned store — no row lost, none duplicated', async () => {
+    const fx = stateFixture();
+    writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json', store([{ id: 'committed' }, { id: 'already-pinned' }]));
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(JSON.parse(readFileSync(fx.pinned, 'utf8')).records.map((r) => r.id)).toEqual(['committed', 'already-pinned', 'row-1']);
+  });
+
+  it('CONVEYOR_STATE_ROOT, when set, is where the rows go', async () => {
+    const fx = stateFixture();
+    const opRoot = mktemp('we-daemon-rebuild-oproot-');
+    fx.env.CONVEYOR_STATE_ROOT = opRoot;
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    expect(JSON.parse(readFileSync(join(opRoot, '.conveyor', 'run-scorecards.json'), 'utf8')).records).toHaveLength(2);
+  });
+
+  it('state file dirty ALONGSIDE other tracked dirt still refuses, and migrates nothing', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+    writeFile(fx.cloneDir, 'README.md', 'a real local edit\n');
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(existsSync(fx.pinned)).toBe(false);
+    expect(JSON.parse(readFileSync(join(fx.cloneDir, SC), 'utf8')).records).toHaveLength(2);
+  });
+
+  it('an unparsable state file is never discarded — refuses as dirty with a migrate-failed alert', async () => {
+    const fx = stateFixture();
+    writeFile(fx.cloneDir, SC, '{ not json');
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(join(fx.cloneDir, SC), 'utf8')).toBe('{ not json');
+    expect(result.alerts.some((a) => a.kind === 'state-file-migrate-failed' && a.detail?.reason === 'state-file-unparsable')).toBe(true);
+  });
+
+  it('an unreadable pinned store is never overwritten — refuses instead', async () => {
+    const fx = stateFixture();
+    writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json', 'corrupt');
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('dirty');
+    expect(readFileSync(fx.pinned, 'utf8')).toBe('corrupt');
+  });
+});
+
+describe('isDaemonManagedClone / daemonConveyorStateRoot', () => {
+  it('a clone with a registered overlay list or rebuild state is daemon-managed; a plain one is not', () => {
+    const fx = makeFixture();
+    expect(isDaemonManagedClone(fx.cloneDir, fx.env)).toBe(false);
+    addOverlay(fx.cloneDir, { ref: 'lane/x' }, { env: fx.env });
+    expect(isDaemonManagedClone(fx.cloneDir, fx.env)).toBe(true);
+  });
+
+  it('defaults under the rebuild state dir; CONVEYOR_STATE_ROOT wins', () => {
+    expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s' })).toBe(join('/s', 'conveyor-state'));
+    expect(daemonConveyorStateRoot({ WE_DAEMON_STATE_DIR: '/s', CONVEYOR_STATE_ROOT: '/op' })).toBe('/op');
+  });
+});

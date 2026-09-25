@@ -3,9 +3,13 @@
  *   boundary (injected `run`); the fresh/auto-ff/warn CLASSIFICATION and the fail-soft behaviour are decided
  *   here and unit-tested without a real repo.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
-  classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy,
+  classifyStaleness, checkMainStaleness, assertMainNotStale, staleRemedy, isCodePath,
   isStaleMainRefusalMessage, STALE_MAIN_REFUSAL_MARKER,
 } from '../main-staleness.mjs';
 
@@ -181,6 +185,84 @@ describe('assertMainNotStale', () => {
   it('a non-default base flows through both the thrown message and staleRemedy', () => {
     expect(() => assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 2, dirty: false }), { base: 'lane/mechanical-dispatcher', label: 'infra-blocked' }))
       .toThrow(/infra-blocked: the dispatching checkout is 1 commit\(s\) behind origin\/lane\/mechanical-dispatcher.*DIVERGED \(2 local commit\(s\) ahead of origin\/lane\/mechanical-dispatcher\)/s);
+  });
+});
+
+// #4044 Module E — a MANAGED clone (`WE_DAEMON_MANAGED_CLONE=1`, set by daemon-self-sync.mjs#withSelfSync at
+// wrapper construction) must never be fast-forwarded by a dispatch chokepoint: a dispatch-side auto-ff would
+// pull in un-smoked (possibly rejected) code straight past daemon-rebuild.mjs's live-smoke gate. Real temp
+// git repos throughout (no injected checkStaleness) — this proves the DEFAULT checker's own `autoFf` wiring,
+// which every other test in this file bypasses by injecting its own checkStaleness directly.
+describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)', () => {
+  let dir;
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const commit = (cwd, file, text) => {
+    writeFileSync(join(cwd, file), text);
+    git(cwd, 'add', file);
+    git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', `edit ${file}`);
+  };
+
+  const withManagedCloneEnv = (value, fn) => {
+    const prev = process.env.WE_DAEMON_MANAGED_CLONE;
+    if (value === undefined) delete process.env.WE_DAEMON_MANAGED_CLONE;
+    else process.env.WE_DAEMON_MANAGED_CLONE = value;
+    try {
+      return fn();
+    } finally {
+      if (prev === undefined) delete process.env.WE_DAEMON_MANAGED_CLONE;
+      else process.env.WE_DAEMON_MANAGED_CLONE = prev;
+    }
+  };
+
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = undefined; });
+
+  function makeBehindClone(behindFile = 'b.mjs') {
+    dir = mkdtempSync(join(tmpdir(), 'main-staleness-managed-'));
+    git(dir, 'init', '-q', '--bare', '-b', 'main', 'origin.git');
+    git(dir, 'clone', '-q', 'origin.git', 'upstream');
+    const up = join(dir, 'upstream');
+    commit(up, 'a.txt', 'one\n');
+    git(up, 'push', '-q', 'origin', 'main');
+    const clonePath = join(dir, 'clone');
+    git(dir, 'clone', '-q', '-b', 'main', 'origin.git', 'clone');
+    commit(up, behindFile, 'two\n');
+    git(up, 'push', '-q', 'origin', 'main');
+    return clonePath;
+  }
+
+  it('unmanaged (env unset): a clean behind checkout auto-fast-forwards silently', () => {
+    const clonePath = makeBehindClone();
+    const st = withManagedCloneEnv(undefined, () => assertMainNotStale(clonePath, undefined, { label: 'test' }));
+    expect(st.synced).toBe(true);
+    expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('0');
+  });
+
+  it('managed clone (WE_DAEMON_MANAGED_CLONE=1): the SAME clean-behind checkout REFUSES instead of fast-forwarding', () => {
+    const clonePath = makeBehindClone();
+    expect(() => withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' })))
+      .toThrow(/STALE code from this checkout/);
+    expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).not.toBe('0'); // never touched
+  });
+  // #4044 (live 2026-09-25): the fix daemon refused whole repos when its clone was a few backlog-only commits
+  // behind. Commits that change no code file cannot make a checkout's import path stale.
+  it('managed clone behind ONLY in non-code files (backlog/*.md) is not stale — no throw, and the clone is never touched', () => {
+    const clonePath = makeBehindClone('9999-backlog-card.md');
+    const st = withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' }));
+    expect(st).toMatchObject({ fresh: true, behindNonCodeOnly: true, behind: 1 });
+    expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).toBe('1'); // only the rebuild moves it
+  });
+  it('isCodePath: modules and JSON are code; markdown and tests are not', () => {
+    expect(['a.mjs', 'x/y.js', 'c.cjs', 'd.ts', 'src/_data/x.json', 'package-lock.json'].every(isCodePath)).toBe(true);
+    expect(['backlog/1.md', 'docs/a.njk', 'scripts/__tests__/a.mjs', 'x/a.test.mjs'].some(isCodePath)).toBe(false);
+  });
+  it('managed clone: the refusal points at the rebuild\'s clone-held-stale alert, never "rebase or merge by hand"', () => {
+    const clonePath = makeBehindClone();
+    let message = '';
+    try { withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' })); } catch (e) { message = e.message; }
+    expect(message).toContain('DAEMON-MANAGED');
+    expect(message).toContain('clone-held-stale');
+    expect(message).not.toMatch(/by hand\)?\s*$/);
+    expect(message).not.toContain('rebase or merge origin/main into it by hand');
   });
 });
 

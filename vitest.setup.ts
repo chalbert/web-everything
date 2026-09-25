@@ -44,3 +44,24 @@ afterEach(() => {
 if (process.env.WE_TELEMETRY === undefined) {
   process.env.WE_TELEMETRY = '0';
 }
+
+// PR #2625 advisory (correctness/test-pollution): a test that writes `process.env` must never leak that write
+// into LATER tests. Worker threads are reused across many files, so a leaked `WE_DAEMON_MANAGED_CLONE=1` (set
+// on purpose by `daemon-self-sync.mjs#withSelfSync`, whose real children must inherit it) silently flipped
+// `main-staleness.mjs#assertMainNotStale` into managed-clone mode in unrelated files, order-dependently.
+// Snapshot before each test, restore after it: keys added are deleted, keys changed or deleted are put back.
+// Env set at module load or in `beforeAll` is taken before the snapshot, so it is kept.
+let envSnapshot: Record<string, string | undefined> | undefined;
+beforeEach(() => {
+  envSnapshot = { ...process.env };
+});
+afterEach(() => {
+  if (!envSnapshot) return;
+  for (const key of Object.keys(process.env)) {
+    if (!(key in envSnapshot)) delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(envSnapshot)) {
+    if (process.env[key] !== value) process.env[key] = value;
+  }
+  envSnapshot = undefined;
+});
