@@ -155,6 +155,14 @@ export const DEFAULT_RETRY_CAP_MS = 60_000;
  *  unchanged. Overridable via `WE_GH_THROTTLE_RETRY_MAX_ATTEMPTS`. */
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
 
+/** {@link runGhCliPassthrough}'s own internal captured-output cap — mirrors `gh-app-shim.mjs`'s own
+ *  `SHIM_CAPTURE_MAX_BUFFER` (#4064): Node's `spawnSync` default `maxBuffer` is 1MB, which would silently
+ *  ENOBUFS/truncate a real `gh pr view`/`gh api` payload over that size. This module's CLI is now a hop INSIDE
+ *  the gh App shim's own call chain (`gh-app-shim.mjs#renderGhShimScript`, #4064) rather than only a standalone
+ *  direct invocation, so it must never be the layer that reintroduces the exact truncation bug the shim itself
+ *  was fixed for (#x8mpubm follow-up, review-2578/2601). Overridable per-call via `throttle.maxBuffer`. */
+export const DEFAULT_GH_CLI_MAX_BUFFER = 1024 * 1024 * 1024;
+
 /** The points-budget window — fixed, not sliding (mirrors GitHub's own "per minute" framing). Not currently
  *  overridable: unlike the tuning above, changing the window size changes what the budget NUMBER means, so a
  *  caller that wants a different window should also reconsider the budget rather than flip one env var. */
@@ -518,13 +526,21 @@ export function execFileSyncThrottled(file, args, opts = {}) {
  * stderr on an otherwise-successful call, breaking the "same stderr" half of the transparency contract.
  * `stdio[0]` stays `'inherit'` so piped/typed stdin reaches the real `gh` unchanged on the FIRST attempt (see
  * the module header's stated retry-vs-piped-stdin limitation).
+ *
+ * `bin` (#4064) — the executable to actually run, in place of the literal string `'gh'`. Lets a caller that
+ * already resolved the REAL `gh` binary itself (`gh-app-shim.mjs#renderGhShimScript`'s generated shim, which
+ * bakes in an absolute `REAL_GH` path at generation time specifically to never re-resolve `gh` off `PATH` —
+ * see that module's header) hand this function that exact path, so the throttle's own internal spawn can
+ * never accidentally re-resolve `gh` through the shim's own `PATH` override and recurse into itself. Default
+ * `'gh'` (a PATH search) is unchanged for every existing direct/CLI caller.
  * @returns {{status:number, stdout:Buffer, stderr:Buffer}}
  */
-export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } = {}) {
+export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bin = 'gh' } = {}) {
   const env = throttle.env || process.env;
   const repo = throttle.repo || process.cwd();
   const lockRoot = throttle.lockRoot || ghThrottleLockRoot(repo, env);
   const cap = throttle.cap != null ? throttle.cap : resolveGhCap(env);
+  const maxBuffer = throttle.maxBuffer != null ? throttle.maxBuffer : DEFAULT_GH_CLI_MAX_BUFFER;
   const acquireTimeoutMs = throttle.acquireTimeoutMs != null ? throttle.acquireTimeoutMs : resolveAcquireTimeoutMs(env);
   const pollMs = throttle.pollMs != null ? throttle.pollMs : DEFAULT_ACQUIRE_POLL_MS;
   const maxAttempts = throttle.maxAttempts != null ? throttle.maxAttempts : resolveRetryMaxAttempts(env);
@@ -548,7 +564,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync } =
     const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
     let r;
     try {
-      r = spawn('gh', argv, { stdio: ['inherit', 'pipe', 'pipe'] });
+      r = spawn(bin, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer });
     } finally {
       if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
     }
@@ -569,10 +585,19 @@ function parseThrottleEnvRepo() {
   return process.env.WE_GH_THROTTLE_OWNER_REPO || process.cwd();
 }
 
+/** #4064 — `gh-app-shim.mjs`'s generated shim invokes this CLI with the REAL `gh` binary's own absolute path
+ *  in `WE_GH_THROTTLE_GH_BIN` (never the bare string `'gh'`, which would resolve back through the shim's own
+ *  `PATH` override and recurse). Every other caller (a direct `node scripts/lib/gh-throttle.mjs <argv>`
+ *  invocation, unchanged) leaves this unset and gets the pre-existing `'gh'` PATH search. */
+function parseThrottleEnvBin() {
+  return process.env.WE_GH_THROTTLE_GH_BIN || 'gh';
+}
+
 async function main(argv) {
   const repo = parseThrottleEnvRepo();
   const owner = process.env.WE_GH_THROTTLE_OWNER || `${process.pid}:${randomUUID()}`;
-  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner } });
+  const bin = parseThrottleEnvBin();
+  const { status, stdout, stderr } = runGhCliPassthrough(argv, { throttle: { repo, owner }, bin });
   if (stdout && stdout.length) writeAllSync(1, stdout);
   if (stderr && stderr.length) writeAllSync(2, stderr);
   process.exitCode = status;
@@ -600,3 +625,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
 //      path, not a script it merely shells).
 // See each file's own header/diff for how the seam was wired. The remaining ~79 of the 84 originally-grepped
 // `gh`-calling files are NOT touched here — that migration is separate, larger follow-up work.
+//
+//   4. #4064 — `we:scripts/lib/gh-app-shim.mjs#renderGhShimScript`'s GENERATED shim (the `PATH`-shadowing `gh`
+//      wrapper every dispatched session resolves a bare `gh` command to) now routes BOTH of its own real-`gh`
+//      invocations (the tokened attempt and the inherited-auth fallback) through THIS CLI, via
+//      `WE_GH_THROTTLE_GH_BIN=<the shim's own resolved REAL_GH path>` (see {@link parseThrottleEnvBin} above) —
+//      so every `gh` call ANY dispatched session makes is now both on the App login AND paced by this same
+//      cross-process cap, with no call-site migration needed at all (unlike adopters 1-3 above, which each
+//      had to import and call this module themselves).
