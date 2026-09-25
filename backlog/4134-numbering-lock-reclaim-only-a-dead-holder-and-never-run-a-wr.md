@@ -6,6 +6,7 @@ parent: "4075"
 status: open
 dateOpened: "2026-09-24"
 tags: []
+scope: ["we:scripts/lane-drain.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/backlog/id.mjs"]
 ---
 
 # Numbering lock: reclaim only a dead holder and never run a write-to-main section unlocked

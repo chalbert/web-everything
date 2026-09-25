@@ -6,6 +6,7 @@ parent: "4075"
 status: open
 dateOpened: "2026-09-24"
 tags: []
+scope: ["we:scripts/lane-drain.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/backlog/id.mjs"]
 ---
 
 # Drain: number pending hashes on any pass that finds them, not only on a pass that merged a WE PR
