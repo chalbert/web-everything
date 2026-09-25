@@ -16,9 +16,10 @@ import { join } from 'node:path';
 import {
   DEFAULT_GH_CONCURRENCY_CAP, DEFAULT_ACQUIRE_TIMEOUT_MS, DEFAULT_RETRY_MAX_ATTEMPTS,
   DEFAULT_RETRY_BASE_MS, DEFAULT_RETRY_CAP_MS,
-  DEFAULT_GH_POINTS_BUDGET_PER_MIN, GH_POINTS_WINDOW_MS,
-  resolveGhCap, resolveAcquireTimeoutMs, resolveRetryMaxAttempts, resolveGhPointsBudgetPerMin,
+  DEFAULT_GH_POINTS_BUDGET_PER_MIN, GH_POINTS_WINDOW_MS, DEFAULT_HEADER_WAIT_CAP_MS,
+  resolveGhCap, resolveAcquireTimeoutMs, resolveRetryMaxAttempts, resolveGhPointsBudgetPerMin, resolveHeaderWaitCapMs,
   isRateLimitShaped, retryBackoffMs,
+  parseGhDebugResponseHeaders, parseGraphQLRateLimit, classifyRateLimitSignal, calibratedBackoffMs,
   acquireGhSlotSync, releaseGhSlotSync, ghThrottleStatus,
   decideGhPointsSpend, acquireGhPointsSync, ghThrottleLogPath, recordGhCallLogEntry,
   runGhSync, execFileSyncThrottled, runGhCliPassthrough,
@@ -99,6 +100,181 @@ describe('retryBackoffMs — bounded exponential, never instant and never unboun
   });
   it('honors an explicit cap smaller than the default', () => {
     expect(retryBackoffMs(10, { capMs: 5000 })).toBeLessThanOrEqual(5000);
+  });
+});
+
+// ── self-calibration against GitHub's REAL rate-limit signals ──────────────────────────────────────────────
+const SECONDARY_TRACE = [
+  '* Request to https://api.github.com/repos/o/n/pulls',
+  '> POST /repos/o/n/pulls HTTP/1.1',
+  '< HTTP/2.0 403 Forbidden',
+  '< Content-Type: application/json; charset=utf-8',
+  '< Retry-After: 42',
+  '< X-Ratelimit-Limit: 5000',
+  '< X-Ratelimit-Remaining: 4999',
+  '< X-Ratelimit-Reset: 1789343473',
+  '',
+  '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}',
+  '',
+  'gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)',
+].join('\n');
+
+const PRIMARY_EXHAUSTED_TRACE = [
+  '* Request to https://api.github.com/repos/o/n/pulls',
+  '> POST /repos/o/n/pulls HTTP/1.1',
+  '< HTTP/2.0 403 Forbidden',
+  '< X-Ratelimit-Limit: 5000',
+  '< X-Ratelimit-Remaining: 0',
+  '< X-Ratelimit-Reset: 2000000000',
+  '',
+  '{"message":"API rate limit exceeded for installation ID 123."}',
+  '',
+  'gh: API rate limit exceeded for installation ID 123. (HTTP 403)',
+].join('\n');
+
+describe('parseGhDebugResponseHeaders — GH_DEBUG=api trace parsing', () => {
+  it('extracts the LAST response block\'s headers, lowercased', () => {
+    const headers = parseGhDebugResponseHeaders(SECONDARY_TRACE);
+    expect(headers['retry-after']).toBe('42');
+    expect(headers['x-ratelimit-remaining']).toBe('4999');
+    expect(headers['x-ratelimit-reset']).toBe('1789343473');
+  });
+
+  it('returns {} on text with no HTTP response block (e.g. no GH_DEBUG was set)', () => {
+    expect(parseGhDebugResponseHeaders('gh: pull request #9 already exists')).toEqual({});
+    expect(parseGhDebugResponseHeaders('')).toEqual({});
+    expect(parseGhDebugResponseHeaders(null)).toEqual({});
+  });
+
+  it('takes the LAST of multiple response blocks (an internal gh retry before the final failure)', () => {
+    const twoBlocks = [
+      '< HTTP/2.0 500 Internal Server Error',
+      '< X-Ratelimit-Remaining: 10',
+      '',
+      '< HTTP/2.0 403 Forbidden',
+      '< Retry-After: 7',
+      '',
+    ].join('\n');
+    expect(parseGhDebugResponseHeaders(twoBlocks)).toEqual({ 'retry-after': '7' });
+  });
+});
+
+describe('parseGraphQLRateLimit — the in-band `rateLimit` field, when a query asks for one', () => {
+  it('reads limit/remaining/resetAt/cost when present', () => {
+    const body = JSON.stringify({ data: { rateLimit: { limit: 5000, cost: 1, remaining: 4998, resetAt: '2026-09-13T23:00:00Z' } } });
+    const rl = parseGraphQLRateLimit(body);
+    expect(rl.limit).toBe(5000);
+    expect(rl.remaining).toBe(4998);
+    expect(rl.cost).toBe(1);
+    expect(rl.resetEpochSec).toBe(Math.floor(Date.parse('2026-09-13T23:00:00Z') / 1000));
+  });
+  it('returns null when absent/unparseable (no query requested it)', () => {
+    expect(parseGraphQLRateLimit('{"data":{}}')).toBeNull();
+    expect(parseGraphQLRateLimit('not json')).toBeNull();
+    expect(parseGraphQLRateLimit(null)).toBeNull();
+  });
+});
+
+describe('classifyRateLimitSignal — primary vs secondary, NEVER conflated', () => {
+  it('a Retry-After header is UNCONDITIONALLY secondary, even alongside primary headroom', () => {
+    const signal = classifyRateLimitSignal({ 'retry-after': '42', 'x-ratelimit-remaining': '4999' });
+    expect(signal.kind).toBe('secondary');
+    expect(signal.retryAfterRaw).toBe('42');
+  });
+  it('x-ratelimit-remaining:0 with a reset, and NO retry-after, is primary', () => {
+    const signal = classifyRateLimitSignal({ 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '2000000000' });
+    expect(signal.kind).toBe('primary');
+    expect(signal.resetEpochSec).toBe(2000000000);
+  });
+  it('remaining > 0 with no retry-after is neither — "none" (nothing to calibrate from)', () => {
+    expect(classifyRateLimitSignal({ 'x-ratelimit-remaining': '10' }).kind).toBe('none');
+    expect(classifyRateLimitSignal({}).kind).toBe('none');
+  });
+});
+
+describe('calibratedBackoffMs — GitHub\'s own told wait beats a guess; falls back when there is no real signal', () => {
+  it('secondary: honors Retry-After (seconds → ms), capped by headerCapMs', () => {
+    const headers = parseGhDebugResponseHeaders(SECONDARY_TRACE);
+    const r = calibratedBackoffMs({ headers, attempt: 1, nowMs: 0, headerCapMs: 60_000 });
+    expect(r.source).toBe('secondary-retry-after');
+    expect(r.ms).toBe(42_000);
+  });
+  it('primary: waits until the reset epoch, capped by headerCapMs', () => {
+    const headers = parseGhDebugResponseHeaders(PRIMARY_EXHAUSTED_TRACE);
+    const nowMs = 2_000_000_000_000 - 5_000; // 5s before the reset
+    const r = calibratedBackoffMs({ headers, attempt: 1, nowMs, headerCapMs: 10 * 60_000 });
+    expect(r.source).toBe('primary-reset');
+    expect(r.ms).toBe(5_000);
+  });
+  it('falls back to the GUESSED exponential backoff when no header signal is present (calibration off, or no trace)', () => {
+    const r = calibratedBackoffMs({ headers: {}, attempt: 2, tuning: { baseMs: 100, factor: 2, capMs: 10_000 } });
+    expect(r.source).toBe('guessed-backoff');
+    expect(r.ms).toBe(retryBackoffMs(2, { baseMs: 100, factor: 2, capMs: 10_000 }));
+  });
+  it('a header-derived wait is capped by headerCapMs even when GitHub asks for longer', () => {
+    const headers = { 'retry-after': '9999' };
+    const r = calibratedBackoffMs({ headers, attempt: 1, nowMs: 0, headerCapMs: 5_000 });
+    expect(r.ms).toBe(5_000);
+  });
+});
+
+describe('resolveHeaderWaitCapMs — env override, clamped sane', () => {
+  it('defaults when unset', () => {
+    expect(resolveHeaderWaitCapMs({})).toBe(DEFAULT_HEADER_WAIT_CAP_MS);
+  });
+  it('reads WE_GH_THROTTLE_HEADER_WAIT_CAP_MS', () => {
+    expect(resolveHeaderWaitCapMs({ WE_GH_THROTTLE_HEADER_WAIT_CAP_MS: '1000' })).toBe(1000);
+  });
+});
+
+describe('runGhSync — calibrateHeaders opt-in: a real Retry-After beats the guessed backoff', () => {
+  it('is OFF by default — a plain rate-limit-shaped failure with no GH_DEBUG trace still uses the guessed backoff', () => {
+    const exec = vi.fn(() => { const e = new Error('fail'); e.stderr = 'secondary rate limit hit'; throw e; });
+    const sleepCalls = [];
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    try {
+      runGhSync(['pr', 'create'], { throttle: { lockRoot, cap: 2, sleep: (ms) => sleepCalls.push(ms), exec, maxAttempts: 2, retryBaseMs: 100 } });
+    } catch { /* exhausts after 2 attempts — expected */ }
+    expect(sleepCalls).toEqual([100]); // the plain guessed backoff, unaffected by calibration machinery
+  });
+
+  it('ON: a rate-limit failure whose stderr carries a real Retry-After (via the injected exec) backs off by THAT wait', () => {
+    let calls = 0;
+    const exec = vi.fn((args, opts) => {
+      calls += 1;
+      if (calls === 1) { const e = new Error('fail'); e.stderr = SECONDARY_TRACE; throw e; }
+      return 'https://github.com/o/n/pull/1';
+    });
+    const sleepCalls = [];
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const out = runGhSync(['pr', 'create'], {
+      throttle: { lockRoot, cap: 2, sleep: (ms) => sleepCalls.push(ms), exec, maxAttempts: 3, calibrateHeaders: true, op: 'pr-create' },
+    });
+    expect(out).toBe('https://github.com/o/n/pull/1');
+    expect(sleepCalls).toEqual([42_000]); // Retry-After: 42, taken verbatim — not the guessed 2000ms default
+  });
+
+  it('ON: adds GH_DEBUG=api to the exec env, unless the caller already set one', () => {
+    const seenOpts = [];
+    const exec = vi.fn((args, opts) => { seenOpts.push(opts); return 'ok'; });
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    runGhSync(['pr', 'create'], { encoding: 'utf8', throttle: { lockRoot, cap: 2, sleep: () => {}, exec, calibrateHeaders: true } });
+    expect(seenOpts[0].env.GH_DEBUG).toBe('api');
+
+    const seenOpts2 = [];
+    const exec2 = vi.fn((args, opts) => { seenOpts2.push(opts); return 'ok'; });
+    runGhSync(['pr', 'create'], {
+      env: { GH_DEBUG: 'oauth' }, throttle: { lockRoot: mkdtempSync(join(tmpdir(), 'gh-t-')), cap: 2, sleep: () => {}, exec: exec2, calibrateHeaders: true },
+    });
+    expect(seenOpts2[0].env.GH_DEBUG).toBe('oauth'); // never overridden once the caller set its own
+  });
+
+  it('OFF by default: does NOT add GH_DEBUG (the fidelity contract for existing adopters stays untouched)', () => {
+    const seenOpts = [];
+    const exec = vi.fn((args, opts) => { seenOpts.push(opts); return 'ok'; });
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    runGhSync(['pr', 'view', '1'], { encoding: 'utf8', throttle: { lockRoot, cap: 2, sleep: () => {}, exec } });
+    expect(seenOpts[0]).toEqual({ encoding: 'utf8' }); // exactly what was passed in, no env added at all
   });
 });
 
