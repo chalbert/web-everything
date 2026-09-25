@@ -22,7 +22,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import {
-  admissionStatus, admissionLockRoot, resolveCap, readLaneLease,
+  admissionStatus, admissionLockRoot, resolveCap, readLaneLease, isRankableWaiter,
 } from '../readiness/heavy-admission.mjs';
 import { SELECTED_GATE_MERGE_SHA } from './heavy-queue.mjs';
 import { redactCommandLine } from './command-redact.mjs';
@@ -78,7 +78,7 @@ function buildRawRow(entry, resolveRepo, { readCommand, isAncestorCached, readLe
   const repo = resolveRepo(entry) || null;
   const lane = repo ? ((/lane-(\d+)/.exec(repo) || [])[1] ?? null) : null;
   const lease = repo ? readLease(repo) : null;
-  const command = readCommand(entry.pid ?? null);
+  const command = readCommand(entry.pid ?? null); // already redacted by `readProcessCommand`
   return {
     owner: entry.owner ?? null, pid: Number.isInteger(entry.pid) ? entry.pid : null, repo, lane, lease,
     command, isSelectedBase: repo ? isAncestorCached(repo) : null,
@@ -94,7 +94,7 @@ function buildRawRow(entry, resolveRepo, { readCommand, isAncestorCached, readLe
 export function collectHeavyQueue({
   repo = process.cwd(), env = process.env, now = () => Date.now(),
   readAdmission = admissionStatus, readCommand = readProcessCommand, isAncestor = gitIsAncestor,
-  readLease = readLaneLease,
+  readLease = readLaneLease, isLiveWaiter = isRankableWaiter,
 } = {}) {
   const cap = resolveCap(env);
   const lockRoot = admissionLockRoot(repo, env);
@@ -109,7 +109,12 @@ export function collectHeavyQueue({
   const seams = { readCommand, isAncestorCached, readLease };
 
   const held = status.held.map((h) => buildRawRow(h, (e) => repoFromOwner(e.owner), seams));
-  const waiting = status.waiting.map((w) => buildRawRow(w, (e) => e.repo || repoFromOwner(e.owner), seams));
+  // `live` uses the SAME rule the FCFS ranking uses, so a crashed/stale marker is still SHOWN but never
+  // counted as a job ahead of a new arrival in the wait projection (PR #2692 review).
+  const waiting = status.waiting.map((w) => ({
+    ...buildRawRow(w, (e) => e.repo || repoFromOwner(e.owner), seams),
+    live: isLiveWaiter(w, { nowMs }),
+  }));
 
   return {
     observedAt: new Date(nowMs).toISOString(),

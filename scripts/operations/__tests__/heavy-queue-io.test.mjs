@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { tryAcquireSlot, markWaiting, admissionStatus } from '../../readiness/heavy-admission.mjs';
 import { collectHeavyQueue, repoFromOwner } from '../heavy-queue-io.mjs';
+import { assessHeavyQueue } from '../heavy-queue.mjs';
 
 describe('repoFromOwner — strips the `run` wrapper\'s `<repo>#<pid>` suffix', () => {
   it('strips a trailing #<pid>', () => expect(repoFromOwner('/a/b/lane-3#12345')).toBe('/a/b/lane-3'));
@@ -64,6 +65,28 @@ describe('collectHeavyQueue — the real admissionStatus() export, everything el
       readLease: () => null,
     });
     expect(read.held[0].command).toBeNull();
+  });
+
+  it('tags each waiting row live/not-live with the ranking rule, and the envelope skips dead ones', () => {
+    const T0 = Date.parse('2026-09-25T12:00:00.000Z');
+    const read = collectHeavyQueue({
+      repo: '/whatever', env: {}, now: () => T0,
+      readAdmission: () => ({
+        cap: 1, heldCount: 1, freeCount: 0, staleWaiting: 0,
+        held: [{ owner: '/lanes/lane-9#1', pid: 1, heartbeatAt: new Date(T0 - 7 * 60_000).toISOString() }],
+        waiting: [
+          { owner: '/lanes/lane-8', repo: '/lanes/lane-8', pid: 2, requestedAt: new Date(T0 - 60_000).toISOString() },
+          { owner: '/lanes/lane-7', repo: '/lanes/lane-7', pid: 3, requestedAt: new Date(T0 - 30_000).toISOString() },
+        ],
+      }),
+      readCommand: (pid) => (pid === 3 ? null : 'npm run check:standards'),
+      isAncestor: () => false, readLease: () => null,
+      isLiveWaiter: (m) => m.pid !== 3, // pid 3 crashed
+    });
+    expect(read.waiting.map((w) => w.live)).toEqual([true, false]);
+    const env = assessHeavyQueue(read);
+    // 1m left on the holder + ONE live standards waiter (8m); the crashed "other" (20m) is not counted.
+    expect(env.projectedWaitMinutesForNewJob).toBe(1 + 8);
   });
 });
 

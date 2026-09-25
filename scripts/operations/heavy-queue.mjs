@@ -89,7 +89,7 @@ export function assessHeavyQueueRow(raw, { state, observedAt }) {
   return {
     state, lane: raw.lane ?? null, who, kind, minutes: minutesBetween(since, nowMs),
     repo: raw.repo ?? null, owner: raw.owner ?? null, pid: raw.pid ?? null, command: raw.command ?? null,
-    since,
+    since, ...(state === 'WAIT' ? { live: raw.live !== false } : {}),
   };
 }
 
@@ -113,6 +113,10 @@ export function assessHeavyQueueRow(raw, { state, observedAt }) {
  * exactly the queue a new arrival actually joins. Deliberately crude on ONE remaining axis — the PER-KIND
  * DURATIONS themselves — see {@link STANDARD_MINUTES_BY_KIND}'s own doc for why that is a future admission-card
  * refinement, not this one's.
+ *
+ * A waiter marked `live: false` (crashed or stale — `heavy-admission.mjs#isRankableWaiter`, the SAME rule the
+ * FCFS ranking skips) is shown in the report but never placed on a machine: a dead `other` marker would
+ * otherwise add a phantom 20-minute wave each (PR #2692 fix-round self-review).
  * @param {{rows:Array<object>, freeCount:number}} o
  */
 export function projectedWaitMinutesForNewJob({ rows, freeCount }) {
@@ -122,8 +126,7 @@ export function projectedWaitMinutesForNewJob({ rows, freeCount }) {
   const machineFreeAt = holders
     .map((h) => Math.max((STANDARD_MINUTES_BY_KIND[h.kind] ?? STANDARD_MINUTES_BY_KIND.other) - (h.minutes ?? 0), 0));
   const waiting = rows
-    .filter((r) => r.state === 'WAIT')
-    .slice()
+    .filter((r) => r.state === 'WAIT' && r.live !== false)
     .sort((a, b) => (Date.parse(a.since) || 0) - (Date.parse(b.since) || 0)); // FCFS arrival order
   for (const w of waiting) {
     let soonest = 0;

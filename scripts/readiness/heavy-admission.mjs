@@ -613,26 +613,35 @@ export function reapHistory(lockRoot) {
 // pid-liveness alone cannot decide.
 
 /**
+ * Does this waiting marker count as a genuinely live waiter for queue ORDER (ranking, and the `heavy-queue`
+ * report's wait projection)? False when {@link classifyWaiter} would reap it, or — even while it is still
+ * fresh — when its recorded pid on THIS host is provably dead (the section header above says why). One rule,
+ * shared by {@link isOldestLiveWaiter} and `heavy-queue`, so the report never counts a waiter the queue skips.
+ * @returns {boolean}
+ */
+export function isRankableWaiter(marker, {
+  nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000,
+  pidLiveness = (pid) => probeSlotHolderLiveness(pid, process.pid), host = hostname(), ...seams
+} = {}) {
+  if (!marker || typeof marker !== 'object') return false;
+  // Same-host pid, independent of the marker's age: a provably-dead owner never ranks as live.
+  if (Number.isInteger(marker.pid) && (!marker.host || marker.host === host) && pidLiveness(marker.pid) === 'dead') return false;
+  return !classifyWaiter(marker, { nowMs, ttlMs, host, pidLiveness, ...seams }).reap;
+}
+
+/**
  * Is `owner` the one waiter currently permitted to attempt a slot? True when either nobody else holds a live
  * waiting marker (including `owner`'s own — a caller that has not yet written one, or whose write raced,
  * defaults to eligible rather than wedging), or `owner`'s own marker is the earliest live `requestedAt`. Ties
  * (identical timestamps) break on `owner` string so the ranking is deterministic rather than depending on
- * directory-listing order. Pure over the markers it is handed by {@link listWaiting}, plus an INDEPENDENT
- * pid-liveness probe (see the section header above for why this cannot simply reuse {@link classifyWaiter}'s
- * age-gated reap verdict) and, for everything pid-liveness alone cannot decide, that same reap verdict.
+ * directory-listing order. Pure over the markers it is handed by {@link listWaiting}, filtered through {@link
+ * isRankableWaiter} (see the section header above for why this cannot simply reuse {@link classifyWaiter}'s
+ * age-gated reap verdict).
  * @param {{lockRoot:string, owner:string, nowMs:number, ttlMs?:number, pidLiveness?:(pid:number)=>('dead'|'alive'|'unknown'), host?:string}} o
  * @returns {boolean}
  */
-export function isOldestLiveWaiter({
-  lockRoot, owner, nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000,
-  pidLiveness = (pid) => probeSlotHolderLiveness(pid, process.pid), host = hostname(), ...seams
-}) {
-  const live = listWaiting(lockRoot).filter((m) => {
-    // Same-host pid, independent of the marker's age (the fix): a provably-dead owner never ranks as live,
-    // no matter how recently its marker was written.
-    if (Number.isInteger(m.pid) && (!m.host || m.host === host) && pidLiveness(m.pid) === 'dead') return false;
-    return !classifyWaiter(m, { nowMs, ttlMs, host, pidLiveness, ...seams }).reap;
-  });
+export function isOldestLiveWaiter({ lockRoot, owner, nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000, ...seams }) {
+  const live = listWaiting(lockRoot).filter((m) => isRankableWaiter(m, { nowMs, ttlMs, ...seams }));
   if (live.length === 0) return true;
   const oldest = [...live].sort((a, b) => {
     const at = Date.parse(a.requestedAt), bt = Date.parse(b.requestedAt);

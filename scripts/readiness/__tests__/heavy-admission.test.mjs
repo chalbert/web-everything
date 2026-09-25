@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { execFileSync, execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -424,19 +424,42 @@ describe('isOldestLiveWaiter — the #3383 (card xb0iuxq) FCFS ranking, ignoring
     expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs })).toBe(true); // the only genuinely live waiter
   });
 
-  it('a FRESH-but-dead-pid marker never ranks oldest either — the #2692 independent-review starvation finding', () => {
-    // The gap the first cut of this fix had: `classifyWaiter`'s `age < ttlMs ⇒ 'fresh'` shortcut never even
-    // calls pidLiveness for a YOUNG marker, so a crashed waiter's marker (dead pid, but written moments ago)
-    // used to still rank "oldest/live" for up to WAITING_TTL_MINUTES — starving every genuinely live waiter
-    // off a completely free slot the whole time. Same setup as the STALE/DEAD test above, but `nowMs` stays
-    // WELL INSIDE the TTL window this time (5 minutes old, not >30) — the exact case the prior test's own
-    // `nowMs` (deliberately past the TTL) never exercised.
-    const deadPid = 999999; // kill(pid,0) → ESRCH, provably dead
-    markWaiting({ lockRoot, owner: 'CRASHED', nowIso: iso(T0), pid: deadPid });
+  // PR #2692 review finding: classifyWaiter's "fresh ⇒ never reap" shortcut skips the pid probe while the
+  // marker is younger than the TTL, so a waiter that crashed moments after marking would otherwise block
+  // every live waiter from a FREE slot for up to WAITING_TTL_MINUTES.
+  it('a FRESH marker whose own pid is provably dead is ignored for ranking (no 30-minute freeze)', () => {
+    markWaiting({ lockRoot, owner: 'CRASHED', nowIso: iso(T0), pid: 4141 });
+    markWaiting({ lockRoot, owner: 'REAL', nowIso: iso(T0 + 10_000), pid: 4242 });
+    const nowMs = T0 + 5 * 60_000; // well INSIDE the TTL window
+    const seams = { pidLiveness: (pid) => (pid === 4141 ? 'dead' : 'alive') };
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'CRASHED', nowMs, ...seams })).toBe(false);
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs, ...seams })).toBe(true);
+  });
+
+  it('a FRESH marker whose pid is alive, unknown, or on another host still ranks first (FCFS kept)', () => {
+    markWaiting({ lockRoot, owner: 'ALIVE', nowIso: iso(T0), pid: 4242 });
     markWaiting({ lockRoot, owner: 'REAL', nowIso: iso(T0 + 10_000) });
-    const nowMs = T0 + 5 * 60_000; // 5 minutes old — comfortably inside WAITING_TTL_MINUTES (30)
-    expect(isOldestLiveWaiter({ lockRoot, owner: 'CRASHED', nowMs })).toBe(false); // dead pid, never ranks
-    expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs })).toBe(true); // the only genuinely live waiter
+    const nowMs = T0 + 5 * 60_000;
+    for (const live of ['alive', 'unknown']) {
+      const seams = { pidLiveness: () => live };
+      expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs, ...seams })).toBe(false);
+      expect(isOldestLiveWaiter({ lockRoot, owner: 'ALIVE', nowMs, ...seams })).toBe(true);
+    }
+    // A dead verdict for a pid recorded on a DIFFERENT host proves nothing about that host's process.
+    const other = { pidLiveness: () => 'dead', host: 'not-the-marker-host' };
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'ALIVE', nowMs, ...other })).toBe(true);
+  });
+
+  it('acquireSlotBlocking: a fresh crashed waiter never stops a live caller from winning a FREE slot', async () => {
+    // A real child that has already exited and been reaped — a pid provably dead on any platform.
+    const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+    markWaiting({ lockRoot, owner: 'CRASHED', nowIso: iso(T0), pid: deadPid });
+    let t = T0 + 60_000;
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'REAL', pollMs: 2_000, ceilingMs: 10 * 60_000,
+      now: () => t, sleep: async (ms) => { t += ms; }, log: () => {}, env: {},
+    });
+    expect(r).toMatchObject({ ok: true, slot: 0, waitedMs: 0 });
   });
 
   it('ties on identical requestedAt break deterministically on owner name', () => {

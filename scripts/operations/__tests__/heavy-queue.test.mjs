@@ -102,6 +102,16 @@ describe('projectedWaitMinutesForNewJob — a rough estimate, 0 whenever a slot 
     expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(15);
   });
 
+  it('a crashed/stale waiter (live: false) is shown but never adds a wave to the projection', () => {
+    const rows = [
+      { state: 'RUN', kind: 'standards', minutes: 7 }, // 1m left
+      { state: 'WAIT', kind: 'other', minutes: 4, live: false },
+      { state: 'WAIT', kind: 'other', minutes: 3, live: false },
+      { state: 'WAIT', kind: 'standards', minutes: 1 },
+    ];
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(1 + STANDARD_MINUTES_BY_KIND.standards);
+  });
+
   it('never goes negative — a holder already past its kind\'s standard time floors at 0', () => {
     const rows = [{ state: 'RUN', kind: 'files', minutes: 999 }];
     expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(0);
