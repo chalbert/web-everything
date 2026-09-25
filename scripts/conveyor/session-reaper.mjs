@@ -107,6 +107,7 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readField } from '../backlog/frontmatter.mjs';
@@ -881,18 +882,50 @@ export function makeNoOutcomeResolver({
 // shape the statute's own "never on idle or disconnect" line warns against relying on). If a future Claude Code
 // version's `SessionEnd` payload carries a `reason` this repo later confirms includes a genuinely non-terminal
 // case, narrowing the allowlist here is a one-line follow-up, not a redesign.
+//
+// INDEPENDENT REVIEW FINDING (PR #2678, 2026-09-25), FIXED — two real defects, both closed below:
+//   1. CORRECTNESS: the store was originally keyed under `REPO_ROOT` (THIS process's own checkout) — for the
+//      daemon-split deployment this whole epic targets, the `SessionStart` hook that WRITES the link runs
+//      wherever the CHAT itself is (the primary checkout, a lane, a scratch clone), never the daemon's own
+//      dedicated clone the reaper actually runs from. Keying it there made the guard read "no link" for every
+//      real chat-spawned session in production — a silent no-op. FIXED: both stores now default to a
+//      MACHINE-WIDE location under `~/.claude/`, the one place every checkout on the same host already agrees
+//      on (mirrors how `~/.claude.json`/`~/.claude/projects/` are already the shared, cross-checkout home for
+//      this CLI's own session state — never per-repo).
+//   2. SECURITY: neither store validated WHO wrote a link/marker. Confirmed live (in a throwaway clone): a
+//      forged `stamp-chat-spawn` call naming a victim session id, paired with a `CLAUDE_CODE_SESSION_ID` that
+//      is never marked ended, granted that victim session PERMANENT reap immunity — worse than having no guard
+//      at all, since no other axis (hung-detection, #4090's no-outcome-stall) could override it either. FIXED:
+//      {@link classifyChatSpawnGuard} now takes a CEILING (mirrors {@link resolveNoOutcomeCeilingMs}'s own
+//      clamp) — a link blocks reaping for AT MOST {@link resolveChatSpawnGuardCeilingMs}, regardless of what a
+//      link/marker file claims, so a forged grant expires rather than lasting forever. This does not require
+//      real authentication (a local, single-tenant CLI has no user boundary to authenticate across) — it
+//      bounds the BLAST RADIUS of a bad write to a finite window instead, the same trade this file's other
+//      ceilings already make.
 
-/** `.operations/chat-spawns/<sessionId>.json` — the link store. `OPERATION_CHAT_SPAWNS_DIR` overrides it. */
+/** `~/.claude/we-chat-spawns/<sessionId>.json` — the link store, machine-wide (see the FIXED note above for
+ *  why this is NOT `REPO_ROOT`-relative). `OPERATION_CHAT_SPAWNS_DIR` overrides it. */
 function resolveChatSpawnsDir(env = process.env) {
   const override = env.OPERATION_CHAT_SPAWNS_DIR;
-  return override && override.trim() ? override.trim() : join(REPO_ROOT, '.operations', 'chat-spawns');
+  return override && override.trim() ? override.trim() : join(homedir(), '.claude', 'we-chat-spawns');
 }
 
-/** `.operations/chat-ended/<chatSessionId>.json` — the "this chat explicitly ended" marker store.
- *  `OPERATION_CHAT_ENDED_DIR` overrides it. */
+/** `~/.claude/we-chat-ended/<chatSessionId>.json` — the "this chat explicitly ended" marker store, machine-wide
+ *  for the identical reason. `OPERATION_CHAT_ENDED_DIR` overrides it. */
 function resolveChatEndedDir(env = process.env) {
   const override = env.OPERATION_CHAT_ENDED_DIR;
-  return override && override.trim() ? override.trim() : join(REPO_ROOT, '.operations', 'chat-ended');
+  return override && override.trim() ? override.trim() : join(homedir(), '.claude', 'we-chat-ended');
+}
+
+/** The chat-spawn guard's own ceiling (default 24h, generous for a legitimately long operator session) — see
+ *  the FIXED security note above. `WE_CHAT_SPAWN_GUARD_CEILING_HOURS` overrides it; an unparsable/non-positive
+ *  override falls back to the default rather than silently disabling the ceiling (same convention as
+ *  {@link resolveNoOutcomeCeilingMs}). This ceiling has NO 'never' escape hatch, unlike the retention-sweep
+ *  settings — a block that can never expire is exactly the defect being fixed, so unbounded is not offered. */
+export function resolveChatSpawnGuardCeilingMs(env = process.env) {
+  const raw = env?.WE_CHAT_SPAWN_GUARD_CEILING_HOURS;
+  const n = raw !== undefined ? Number(raw) : 24;
+  return (Number.isFinite(n) && n > 0 ? n : 24) * 60 * 60 * 1000;
 }
 
 /** Filename-safe session ids only — both stores are keyed by a CLI-minted UUID, never free text. */
@@ -923,8 +956,9 @@ export function writeChatSpawnLink({ spawnedSessionId, spawnedByChatSessionId, n
  * we:scripts/conveyor/session-reaper.mjs#tryReadChatSpawnLink — `null` when no link is on record at all (the
  * "unchanged from today" default — see this section's own header). `{ok:false}` for a link that exists but is
  * corrupt/malformed — AMBIGUOUS, per the statute, never treated the same as "no link". `{ok:true,
- * spawnedByChatSessionId}` for a genuine, readable link.
- * @returns {null|{ok:false}|{ok:true, spawnedByChatSessionId:string}}
+ * spawnedByChatSessionId, recordedAtMs}` for a genuine, readable link — `recordedAtMs` (`null` if unparseable)
+ * feeds {@link classifyChatSpawnGuard}'s own ceiling clamp, the security-finding fix (see file header).
+ * @returns {null|{ok:false}|{ok:true, spawnedByChatSessionId:string, recordedAtMs:number|null}}
  */
 export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDir(), { readFileSyncFn = readFileSync } = {}) {
   if (!isSafeSessionId(spawnedSessionId)) return null;
@@ -938,7 +972,8 @@ export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDi
   try {
     const parsed = JSON.parse(text);
     if (!isSafeSessionId(parsed?.spawnedByChatSessionId)) return { ok: false };
-    return { ok: true, spawnedByChatSessionId: parsed.spawnedByChatSessionId };
+    const recordedAtMs = Date.parse(parsed?.recordedAt ?? '');
+    return { ok: true, spawnedByChatSessionId: parsed.spawnedByChatSessionId, recordedAtMs: Number.isFinite(recordedAtMs) ? recordedAtMs : null };
   } catch {
     return { ok: false }; // a file exists but is unreadable — ambiguous, never "no link"
   }
@@ -974,19 +1009,30 @@ export function isChatEnded(chatSessionId, dir = resolveChatEndedDir(), { readFi
 }
 
 /**
- * we:scripts/conveyor/session-reaper.mjs#classifyChatSpawnGuard — PURE. The statute's own three-way rule:
+ * we:scripts/conveyor/session-reaper.mjs#classifyChatSpawnGuard — PURE. The statute's own three-way rule, PLUS
+ * the security-finding ceiling fix (see file header):
  *   - `link === null` (no stamp at all — daemon-dispatched, or this feature simply hasn't stamped it, e.g. a
  *     session started before this axis shipped) → NOT blocked. This is the "unchanged from today" default.
  *   - `link.ok === false` (a stamp exists but is unreadable/malformed) → BLOCKED, `ambiguous-chat-link` — never
  *     the same as "no link" (statute: "an unknown or ambiguous link is never reaped").
- *   - `link.ok === true` → BLOCKED unless `ended === true` for that link's own `spawnedByChatSessionId`.
- * @param {{link:null|{ok:false}|{ok:true, spawnedByChatSessionId:string}, ended?:boolean}} o
- * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended')}}
+ *   - `link.ok === true` and `ended === true` → NOT blocked, `chat-ended`.
+ *   - `link.ok === true`, not ended, but `nowMs - linkAgeMs >= ceilingMs` → NOT blocked, `chat-spawn-guard-
+ *     ceiling` — a forged or simply never-ended link cannot grant reap immunity FOREVER, mirroring
+ *     {@link classifyNoOutcomeStall}'s own ceiling-always-wins precedent. `ceilingMs`/`linkAgeMs` of `null`
+ *     (an unparseable `recordedAt`, or a caller that omits the clock) disables the clamp for THAT check only —
+ *     the surrounding `ended` check still applies — never silently widening the block instead.
+ *   - Otherwise → BLOCKED, `chat-not-ended`.
+ * @param {{link:null|{ok:false}|{ok:true, spawnedByChatSessionId:string, recordedAtMs?:number|null}, ended?:boolean, nowMs?:number, ceilingMs?:number|null}} o
+ * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended'|'chat-spawn-guard-ceiling')}}
  */
-export function classifyChatSpawnGuard({ link, ended = false } = {}) {
+export function classifyChatSpawnGuard({ link, ended = false, nowMs = Date.now(), ceilingMs = null } = {}) {
   if (link === null || link === undefined) return { blocked: false, reason: 'no-link' };
   if (link.ok !== true) return { blocked: true, reason: 'ambiguous-chat-link' };
-  return ended ? { blocked: false, reason: 'chat-ended' } : { blocked: true, reason: 'chat-not-ended' };
+  if (ended) return { blocked: false, reason: 'chat-ended' };
+  if (typeof ceilingMs === 'number' && ceilingMs > 0 && typeof link.recordedAtMs === 'number' && Number.isFinite(link.recordedAtMs)) {
+    if (nowMs - link.recordedAtMs >= ceilingMs) return { blocked: false, reason: 'chat-spawn-guard-ceiling' };
+  }
+  return { blocked: true, reason: 'chat-not-ended' };
 }
 
 /**
@@ -1001,11 +1047,13 @@ export function makeChatSpawnGuardResolver({
   spawnsDir = resolveChatSpawnsDir(),
   endedDir = resolveChatEndedDir(),
   readFileSyncFn = readFileSync,
+  ceilingMs = resolveChatSpawnGuardCeilingMs(),
+  now = Date.now,
 } = {}) {
   return function chatSpawnGuardFor(session) {
     const link = tryReadChatSpawnLink(session?.sessionId, spawnsDir, { readFileSyncFn });
     const ended = link?.ok === true ? isChatEnded(link.spawnedByChatSessionId, endedDir, { readFileSyncFn }) : false;
-    return classifyChatSpawnGuard({ link, ended });
+    return classifyChatSpawnGuard({ link, ended, nowMs: now(), ceilingMs });
   };
 }
 

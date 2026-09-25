@@ -51,6 +51,7 @@ import {
   markChatEnded,
   isChatEnded,
   classifyChatSpawnGuard,
+  resolveChatSpawnGuardCeilingMs,
   makeChatSpawnGuardResolver,
   runStampChatSpawnHook,
   runMarkChatEndedHook,
@@ -60,7 +61,7 @@ import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
@@ -1486,7 +1487,7 @@ describe('writeChatSpawnLink / tryReadChatSpawnLink — the link store', () => {
 
   it('round-trips a link', () => {
     expect(writeChatSpawnLink({ spawnedSessionId: 'child-1', spawnedByChatSessionId: 'chat-1' }, dir)).toBe(true);
-    expect(tryReadChatSpawnLink('child-1', dir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-1' });
+    expect(tryReadChatSpawnLink('child-1', dir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: expect.any(Number) });
   });
 
   it('null (no link) when nothing was ever written — the "unchanged from today" default', () => {
@@ -1502,6 +1503,22 @@ describe('writeChatSpawnLink / tryReadChatSpawnLink — the link store', () => {
   it('refuses an unsafe id as a filename, on both write and read — never a guess', () => {
     expect(writeChatSpawnLink({ spawnedSessionId: '../etc/passwd', spawnedByChatSessionId: 'chat-1' }, dir)).toBe(false);
     expect(tryReadChatSpawnLink('../etc/passwd', dir)).toBeNull();
+  });
+
+  // Independent-review correctness finding, PR #2678 (2026-09-25) — FIXED: the store used to default to
+  // `REPO_ROOT` (this process's OWN checkout), which the `SessionStart` hook (running wherever the CHAT
+  // itself is — a lane, the primary checkout, a scratch clone) almost never shares with the daemon's own
+  // dedicated clone the reaper actually runs from. The default is now machine-wide, under `~/.claude/`.
+  it('defaults to a MACHINE-WIDE location under ~/.claude/, never REPO_ROOT-relative', () => {
+    const id = `we-test-chat-spawn-default-dir-${process.pid}-${Date.now()}`;
+    const defaultPath = join(homedir(), '.claude', 'we-chat-spawns', `${id}.json`);
+    try {
+      expect(writeChatSpawnLink({ spawnedSessionId: id, spawnedByChatSessionId: 'chat-1' })).toBe(true);
+      expect(existsSync(defaultPath)).toBe(true);
+      expect(tryReadChatSpawnLink(id)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: expect.any(Number) });
+    } finally {
+      rmSync(defaultPath, { force: true });
+    }
   });
 });
 
@@ -1537,6 +1554,56 @@ describe('classifyChatSpawnGuard — PURE, the three-way rule', () => {
   it('not blocked once the linked chat has ended', () => {
     expect(classifyChatSpawnGuard({ link: { ok: true, spawnedByChatSessionId: 'chat-1' }, ended: true }))
       .toEqual({ blocked: false, reason: 'chat-ended' });
+  });
+
+  // Independent-review security finding, PR #2678 (2026-09-25) — FIXED: a link with no authentication check
+  // could grant a session PERMANENT reap immunity (confirmed live via a forged stamp-chat-spawn call). The
+  // ceiling bounds the blast radius of any bad/forged write to a finite window instead.
+  describe('the ceiling — a link can never block reaping forever (security fix, PR #2678)', () => {
+    const T0 = 1_000_000;
+    it('still blocked before the ceiling elapses', () => {
+      const link = { ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link, ended: false, nowMs: T0 + 1000, ceilingMs: 10_000 }))
+        .toEqual({ blocked: true, reason: 'chat-not-ended' });
+    });
+    it('unblocked, chat-spawn-guard-ceiling, once the ceiling elapses — even with no ended marker at all', () => {
+      const link = { ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link, ended: false, nowMs: T0 + 10_000, ceilingMs: 10_000 }))
+        .toEqual({ blocked: false, reason: 'chat-spawn-guard-ceiling' });
+    });
+    it('a forged link (this is exactly the live-confirmed exploit) still expires at the ceiling', () => {
+      // The forged case has no real `chat-1` that will ever be marked ended — `ended` stays false forever.
+      // Before this fix, that meant PERMANENT immunity; the ceiling caps it regardless.
+      const forged = { ok: true, spawnedByChatSessionId: 'never-marked-ended-forever-ghost-id', recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link: forged, ended: false, nowMs: T0 + 24 * 60 * 60 * 1000, ceilingMs: 24 * 60 * 60 * 1000 }).blocked).toBe(false);
+    });
+    it('ended still wins even past the ceiling — reason is chat-ended, not the ceiling', () => {
+      const link = { ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link, ended: true, nowMs: T0 + 999_999, ceilingMs: 10_000 }))
+        .toEqual({ blocked: false, reason: 'chat-ended' });
+    });
+    it('a null ceilingMs or a link with no recordedAtMs never applies the clamp — falls through to chat-not-ended', () => {
+      const link = { ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link, ended: false, nowMs: T0 + 999_999, ceilingMs: null }))
+        .toEqual({ blocked: true, reason: 'chat-not-ended' });
+      const linkNoAge = { ok: true, spawnedByChatSessionId: 'chat-1' };
+      expect(classifyChatSpawnGuard({ link: linkNoAge, ended: false, nowMs: T0 + 999_999, ceilingMs: 10_000 }))
+        .toEqual({ blocked: true, reason: 'chat-not-ended' });
+    });
+  });
+});
+
+describe('resolveChatSpawnGuardCeilingMs — the settings', () => {
+  it('defaults to 24 hours', () => {
+    expect(resolveChatSpawnGuardCeilingMs({})).toBe(24 * 60 * 60 * 1000);
+  });
+  it('WE_CHAT_SPAWN_GUARD_CEILING_HOURS overrides it', () => {
+    expect(resolveChatSpawnGuardCeilingMs({ WE_CHAT_SPAWN_GUARD_CEILING_HOURS: '2' })).toBe(2 * 60 * 60 * 1000);
+  });
+  it('an unparsable/non-positive override falls back to the default — never disables the ceiling', () => {
+    expect(resolveChatSpawnGuardCeilingMs({ WE_CHAT_SPAWN_GUARD_CEILING_HOURS: 'nope' })).toBe(24 * 60 * 60 * 1000);
+    expect(resolveChatSpawnGuardCeilingMs({ WE_CHAT_SPAWN_GUARD_CEILING_HOURS: '0' })).toBe(24 * 60 * 60 * 1000);
+    expect(resolveChatSpawnGuardCeilingMs({ WE_CHAT_SPAWN_GUARD_CEILING_HOURS: '-5' })).toBe(24 * 60 * 60 * 1000);
   });
 });
 
@@ -1612,7 +1679,7 @@ describe('runStampChatSpawnHook / runMarkChatEndedHook — the CLI hook bodies',
       readStdin: () => JSON.stringify({ session_id: 'bg-child-1', hook_event_name: 'SessionStart' }),
       env: { CLAUDE_CODE_SESSION_ID: 'chat-parent-1' },
     });
-    expect(tryReadChatSpawnLink('bg-child-1', spawnsDir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-parent-1' });
+    expect(tryReadChatSpawnLink('bg-child-1', spawnsDir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-parent-1', recordedAtMs: expect.any(Number) });
   });
 
   it('stamp-chat-spawn writes nothing when there is no inherited parent id (a top-level chat, or a daemon)', () => {
