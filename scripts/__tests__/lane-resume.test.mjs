@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet, deriveItemFromRef, classifyPrMissingRef, planOpenPrMissingRef } from '../lane-resume.mjs';
 // The drain's own selector — asserted alongside so the enqueue side is PROVEN to read the same entry (#xkfv491).
 import { latestRequiredCheck } from '../merge-ai-prs.mjs';
 
@@ -746,5 +746,126 @@ describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status
       // The two readers now answer identically for every item in the fixture — the whole point of #2455.
       for (const n of [777, 778, 999]) expect(set.has(n)).toBe(resolvedOnMain(n, repo));
     } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+});
+
+describe('lane-resume — deriveItemFromRef (#xcf4556)', () => {
+  it('the manifest item wins over every other signal', () => {
+    expect(deriveItemFromRef({ manifestItem: 3915, commitSubjects: ['resolve #1'], changedBacklogFiles: ['backlog/2-x.md'] })).toBe(3915);
+  });
+
+  it('falls back to a `resolve #NNN` commit subject when there is no manifest item', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['wip', 'backlog: resolve #3915 — graduate land path'], changedBacklogFiles: [] })).toBe(3915);
+  });
+
+  it('the commit-subject match is case-insensitive', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['RESOLVE #42'] })).toBe(42);
+  });
+
+  it('falls back to a changed backlog/NNN-*.md file id when neither manifest nor commit subject names one', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['unrelated commit'], changedBacklogFiles: ['backlog/3872-credential-scoping.md'] })).toBe(3872);
+  });
+
+  it('returns null when nothing names an item', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['wip', 'more wip'], changedBacklogFiles: ['scripts/foo.mjs'] })).toBeNull();
+  });
+});
+
+describe('lane-resume — classifyPrMissingRef (#xcf4556, the pr-missing discover bucket)', () => {
+  const base = (o) => ({
+    ref: 'lane/x', repo: 'chalbert/web-everything', tipSha: 'abc123', committerDate: new Date().toISOString(),
+    prStates: [], tipOnMain: false, deliversRealChange: true, item: 3915, now: Date.now(), windowDays: 7, ...o,
+  });
+
+  it('a ref with an OPEN PR is not pr-missing — discover\'s labelled-PR sweep already owns it', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'OPEN' }] }))).toBeNull();
+  });
+
+  it('a ref with a MERGED PR is not pr-missing — it already landed through the normal route', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'MERGED' }] }))).toBeNull();
+  });
+
+  it('a ref with a CLOSED PR is not pr-missing — a human deliberately closed it; never silently reopen behind them', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'CLOSED' }] }))).toBeNull();
+  });
+
+  it('a tip already reachable from main is not pr-missing — nothing left to recover', () => {
+    expect(classifyPrMissingRef(base({ tipOnMain: true }))).toBeNull();
+  });
+
+  it('a lane with no non-manifest delivery is not pr-missing — not a finished delivery', () => {
+    expect(classifyPrMissingRef(base({ deliversRealChange: false }))).toBeNull();
+  });
+
+  it('a ref older than the window is not pr-missing (default 7 days) — reads as abandoned, not mid-flight', () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    expect(classifyPrMissingRef(base({ committerDate: eightDaysAgo }))).toBeNull();
+  });
+
+  it('the SAME stale ref becomes a candidate once --window-days widens past its age', () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const v = classifyPrMissingRef(base({ committerDate: eightDaysAgo, windowDays: 14 }));
+    expect(v).not.toBeNull();
+    expect(v.disposition).toBe('pr-missing');
+  });
+
+  it('a fresh, PR-less, off-main, real-delivery ref within the window IS pr-missing, naming its item', () => {
+    const v = classifyPrMissingRef(base({}));
+    expect(v).toMatchObject({ ref: 'lane/x', repo: 'chalbert/web-everything', item: 3915, tip: 'abc123', disposition: 'pr-missing' });
+    expect(v.reason).toMatch(/#3915/);
+  });
+
+  it('the live case: lane/batch-2026-09-25-waveB4-3915 classifies pr-missing with item #3915 (before/after proof fixture)', () => {
+    const v = classifyPrMissingRef(base({
+      ref: 'lane/batch-2026-09-25-waveB4-3915', tipSha: 'a9a6d8a78a171fe42bd769c1f1446f21a7aa3d83',
+      item: 3915, prStates: [], tipOnMain: false, deliversRealChange: true,
+    }));
+    expect(v.disposition).toBe('pr-missing');
+    expect(v.item).toBe(3915);
+    expect(v.reason).toMatch(/open lane\/batch-2026-09-25-waveB4-3915/);
+  });
+
+  it('an undeliverable item still classifies pr-missing, but says so instead of a number', () => {
+    const v = classifyPrMissingRef(base({ item: null }));
+    expect(v.item).toBeNull();
+    expect(v.reason).toMatch(/item not derivable/);
+  });
+});
+
+describe('lane-resume — planOpenPrMissingRef (#xcf4556, the `open <laneRef>` refusal rules)', () => {
+  const base = (o) => ({ ref: 'lane/x', existingPr: null, tipOnMain: false, item: 3915, resolvedOnMainByOtherCommit: false, ...o });
+
+  it('refuses when a PR already exists for this head, naming its number and state', () => {
+    const v = planOpenPrMissingRef(base({ existingPr: { number: 42, state: 'CLOSED' } }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/#42/);
+    expect(v.reason).toMatch(/CLOSED/);
+  });
+
+  it('refuses when the tip is already reachable from main', () => {
+    const v = planOpenPrMissingRef(base({ tipOnMain: true }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/already reachable from main/);
+  });
+
+  it('refuses when the card it resolves is already resolved on main by a different commit', () => {
+    const v = planOpenPrMissingRef(base({ resolvedOnMainByOtherCommit: true }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/#3915/);
+    expect(v.reason).toMatch(/different commit/);
+  });
+
+  it('does NOT refuse on a resolved-elsewhere item when no item was derivable at all', () => {
+    // resolvedOnMainByOtherCommit is meaningless without an item — guard against a caller passing it true by
+    // accident with item:null; the rule is scoped to "the identified card" and must not misfire generically.
+    expect(planOpenPrMissingRef(base({ item: null, resolvedOnMainByOtherCommit: true })).ok).toBe(true);
+  });
+
+  it('proceeds (ok:true) when no PR exists, the tip is off main, and the item is not resolved elsewhere', () => {
+    expect(planOpenPrMissingRef(base({}))).toEqual({ ok: true });
+  });
+
+  it('proceeds even with an item, as long as that item is not resolved-on-main-by-another-commit', () => {
+    expect(planOpenPrMissingRef(base({ item: 3915, resolvedOnMainByOtherCommit: false })).ok).toBe(true);
   });
 });

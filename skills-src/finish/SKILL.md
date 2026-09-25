@@ -43,6 +43,9 @@ node scripts/lane-resume.mjs discover            # classify every stuck lane acr
 node scripts/lane-resume.mjs discover --json     # same, machine-readable (the plan the skill iterates); each lane is tagged with its `repo`
 node scripts/lane-resume.mjs discover --this-repo        # scope to the cwd repo only (opt out of the constellation sweep)
 node scripts/lane-resume.mjs discover --repos=owner/a,owner/b   # an explicit repo set
+node scripts/lane-resume.mjs discover --window-days=N    # widen/narrow the pr-missing staleness cutoff (default 7)
+node scripts/lane-resume.mjs open <laneRef>              # #xcf4556: open the PR for ONE pr-missing lane ref (below)
+node scripts/lane-resume.mjs open <laneRef> --repo=owner/name   # open a REMOTE constellation-repo ref (use discover's `repo` tag)
 node scripts/lane-resume.mjs land <pr> --dry-run # plan the enqueue of ONE repaired lane PR (enqueue vs rebase-drop vs skip)
 node scripts/lane-resume.mjs land <pr> --repo=owner/name   # land a REMOTE constellation-repo PR (use discover's `repo` tag); omit for the cwd repo
 node scripts/lane-resume.mjs land <pr>           # #2290: rebase-drop the manifest if only it conflicts, then ENQUEUE (label + trigger a single-couple drain) — never merges directly
@@ -57,9 +60,46 @@ defer), and `unknown` (recompute mergeability and re-run). It reads each lane's 
 `item` / `repos` / `blockedBy` / `stackParents`, treats a blocker as landed when its backlog file is
 `status: resolved` on `main`, and orders lanes so none precedes one it is `blockedBy`.
 
+### `pr-missing` (#xcf4556) — a lane can finish and STILL never get a PR
+
+Every bucket above starts from the labelled-PR sweep, so a lane that never got a PR at all is invisible to
+it — the live case (2026-09-25): a `/workflow` orchestrator ended while a lane agent sat inside `pr-land`
+waiting on required checks, so `gh pr create` never ran, even though the lane had already committed, resolved
+its card, and pushed `lane/batch-2026-09-25-waveB4-3915`. `/drain` never sees it either (it only lands what's
+already labelled). `discover` closes that gap with a SEPARATE sweep: it enumerates every remote `lane/*` ref
+per constellation repo (local git for the cwd repo; the same sibling clone `../frontierui`/`../plateau-app` the
+drain's own rebase-drop plumbing already depends on for a remote one, #2263 — no sibling clone provisioned ⇒
+that repo is skipped for this bucket, fail-soft) and buckets a ref `pr-missing` when ALL of:
+
+- it has **no PR in any state** — open, merged, **or a deliberately-CLOSED one**: a human closing a PR is a
+  decision, never silently overridden;
+- its tip is **not** already an ancestor of `origin/main` (nothing landed some other way already);
+- it carries a **real, non-manifest delivery** (some file besides `.lane-manifest.json` changed against main —
+  an aborted/empty lane is not a finished delivery);
+- its tip commit is within `--window-days` of now (**default 7** — an ancient orphan reads as abandoned, not
+  mid-flight; `/finish` never resurrects one silently).
+
+The item it delivers, when derivable, comes from the lane manifest first, then a `resolve #NNN` commit
+subject, then a changed `backlog/NNN-*.md` file's own id.
+
+**Recover one** with `node scripts/lane-resume.mjs open <laneRef>` — it opens the PR through the SAME producer
+transport every lane uses, `scripts/pr-land.mjs --label-on-green` (**never** a raw `gh pr create`), with a body
+that says it was recovered by `/finish` and names the item. It REFUSES (opens nothing) when:
+
+- a PR already exists for that head, in any state (including CLOSED);
+- the ref's tip is already reachable from `origin/main`;
+- the card it resolves is already `status: resolved` on main by a **different** commit — a human/finisher must
+  reconcile which delivery is real before either lands.
+
+**Do not open a PR for a `pr-missing` ref you are not confident is a genuinely finished delivery** — report it
+instead (e.g. in the pass summary) and let a human or a later pass decide. `pr-missing` is a discovery signal,
+not an unconditional auto-open list.
+
 ## How the skill drives it (per pass)
 
-1. **`discover --json`** → the ordered plan. Drop `ready` (hand to `/drain`) and `blocked` (report, defer).
+1. **`discover --json`** → the ordered plan. Drop `ready` (hand to `/drain`) and `blocked` (report, defer). For
+   each `prMissing` entry, `open <ref>` the ones that clearly finished (real delivery, item known or plausibly
+   inferred) and report the rest for a human — never auto-open one you aren't confident is genuinely done.
 2. **For each remaining lane, in order**, spawn ONE finisher subagent (Agent tool) seeded with the lane. Run
    **independent lanes in parallel**; keep a `blockedBy` chain **serial**. For a **cross-repo** couple, the
    finisher lands the impl (`frontierui`) ref **before** the WE ref (impl-first / WE-last).
