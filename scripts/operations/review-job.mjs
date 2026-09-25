@@ -248,7 +248,7 @@ function tail(text, n = 400) {
 /**
  * THE ARC — one review round for `repo#pr`, start to finish, no Claude wrapper session:
  *   0. claim the job slot (refuse if a live job already holds it) and report `started`;
- *   1. release any stale lease for this slug (a killed predecessor), then acquire a lane (bounded wait);
+ *   1. acquire a lane (bounded wait);
  *   2. run `review-loop-cli.mjs --json` ONCE under a fresh actor id and a hard timeout;
  *   3. report `done` with the classified outcome / loop verdict / run id;
  *   4. release the lane and drop the job record — in `finally`, so every exit path cleans up.
@@ -292,9 +292,10 @@ export function runReviewJob({
     const prev = io.readPrevCompletion(slug);
     io.report({ session: slug, kind: 'review', pr: String(planned.pr), repo: planned.repo, status: 'started' });
 
-    // A killed predecessor (SIGKILL skips its `finally`) can leave this slug's lease behind; the job slot claimed
-    // above proves no live job owns it, so releasing it by slug is safe and keeps the pool from leaking.
-    io.releaseLane(slug);
+    // NO pre-release of this slug's lease. The job slot above proves no live JOB owns the slug, but not that no
+    // live SESSION does (the `--mode=session` path, or a session dispatched just before a switch-over and not yet
+    // in `claude agents --json`) — releasing by slug here would pull a lane out from under it. Live-caught on the
+    // daemon overlay 2026-09-25. A killed job's leftover lease is the lane pool's own reaper's job (#2748).
     const actorId = io.newActorId();
     io.log(`review-job ${slug}: actor ${actorId}; acquiring a lane (wait ≤ ${laneWaitMs}ms)`);
     const acquireSpan = span('lane.acquire');
@@ -446,7 +447,7 @@ if (IS_CLI) {
   } else {
     // No signal handler: the arc is synchronous, so a handler could not run before the in-flight child returns
     // anyway. A killed job leaves a record with a dead pid (pruned on the next read) and, at worst, a lease under
-    // its slug — which the next job for the same PR releases first (step 1).
+    // its slug, which the lane pool's ghost-lease reaper reclaims (#2748).
     try {
       const out = runReviewJob({ pr: flag('pr'), repo: flag('repo') });
       writeAllSync(1, `${JSON.stringify(out)}\n`);

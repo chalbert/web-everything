@@ -136,7 +136,8 @@ describe('runReviewJob — the arc, no Claude wrapper session', () => {
     const { io, calls } = fakeIo();
     const out = runReviewJob({ pr: 10, repo: REPO, pid: 99 }, io);
     expect(out).toMatchObject({ pr: 10, sessionSlug: 'review-10', outcome: 'auto-cleared', verdict: 'accept', loopOutcome: 'converged', runId: 'review-pr-1', lanePath: '/lanes/lane-7' });
-    expect(calls.map((c) => c[0])).toEqual(['claim', 'report', 'release', 'acquire', 'update', 'loop', 'report', 'release', 'unclaim']);
+    // No release BEFORE acquire: a live session could share the slug (see the arc's step 1 comment).
+    expect(calls.map((c) => c[0])).toEqual(['claim', 'report', 'acquire', 'update', 'loop', 'report', 'release', 'unclaim']);
     const acquire = calls.find((c) => c[0] === 'acquire')[1];
     const loop = calls.find((c) => c[0] === 'loop')[1];
     expect(acquire).toMatchObject({ slug: 'review-10', actorId: 'actor-fresh-uuid', laneRepo: '.' });
@@ -162,6 +163,7 @@ describe('runReviewJob — the arc, no Claude wrapper session', () => {
     expect(calls.some((c) => c[0] === 'loop')).toBe(false);
     expect(calls.filter((c) => c[0] === 'report')[1][2]).toMatchObject({ status: 'done', outcome: DEFERRED_NO_LANE, label: 'lane-deferrals:1' });
     expect(calls.at(-1)).toEqual(['unclaim', 'review-10', 99]);
+    expect(calls.some((c) => c[0] === 'release')).toBe(false); // no lane was taken, so none is released by slug
   });
 
   it('the fifth consecutive no-lane escalates to blocked-on-infra', () => {
