@@ -1,6 +1,6 @@
 /**
  * codex-judge-spawn.mjs — the SECOND `JudgeProvider` implementation (#xqa9ttq, under #3369/#3370), Codex CLI
- * as a tool-free panelist.
+ * as a READ-ONLY-SHELL panelist (NOT tool-free — see below).
  *
  * EVERY CLAIM BELOW WAS PROVEN LIVE, NOT DERIVED FROM DOCS — `#3371`'s ten probes against `codex-cli 0.153.4`
  * on a real ChatGPT subscription are the evidentiary record this module translates into code. This header
@@ -12,11 +12,16 @@
  * `we:scripts/operations/cli-adapter.mjs`. Nothing about the port's shape changed to make this true (`#3371`'s
  * verdict: "the port's shape survives the probe intact").
  *
- * TOOL-FREE ONLY. There is no `allowedTools`/lane-cwd parameter here, and there never should be one added
- * casually: probe 9 found NO context-strip flag for a tool-bearing Codex juror in a lane cwd (`-C` always
- * loads `we:AGENTS.md`), and per `#3581`'s ratified sequencing this provider is seated as a tool-free
- * panelist first. `assertNoCodexTools` below REFUSES a request carrying `allowedTools` rather than silently
- * ignoring it.
+ * NO TOOL ALLOW-LIST — BUT A REAL READ-ONLY SHELL, NOT ZERO TOOLS. There is no `allowedTools`/lane-cwd
+ * parameter here, and there never should be one added casually: probe 9 found NO context-strip flag for a
+ * tool-bearing Codex juror in a lane cwd (`-C` always loads `we:AGENTS.md`). But `-s read-only` (see
+ * `buildCodexJudgeArgv`) is a REAL shell, confirmed live: `git --version`/`git status` exit 0; only a WRITE
+ * (`mktemp -d`, writing a file) gets `Operation not permitted`. So this provider is NOT "tool-free" — it can
+ * read and run non-mutating commands, it simply cannot write, create temp dirs/files, or mutate anything, and
+ * that ceiling is fixed by the sandbox flag rather than by any configurable allow-list (there is no allow-list
+ * mechanism here to configure). Per `#3581`'s ratified sequencing this provider is seated first with that
+ * read-only posture. `assertNoCodexToolAllowlist` below REFUSES a request carrying `allowedTools` — there is
+ * nothing for such a list to configure — rather than silently ignoring it.
  *
  * THE FOUR THINGS THAT DO NOT TRANSLATE FROM `judge-spawn.mjs`, EACH RECORDED WHERE IT DIFFERS:
  *
@@ -76,10 +81,18 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { CODEX_EFFORT_MAP, CODEX_MODEL, assertCodexModel } from './codex-model-routing.mjs';
 import { JUDGE_TIMEOUT_GRACE_MS, JUDGE_TIMEOUT_MS, JudgeTimeoutError } from './judge-spawn.mjs';
+// #3383 mechanical-dispatcher Bug 2 fix — THE missing run-quality recording call for the advisory-review
+// judge seat: `appendScorecard` (`we:scripts/conveyor/run-scorecard-store.mjs`) had zero real callers before
+// this; see `run-quality-record.mjs`'s own header for the full composition this reuses.
+import { recordCodexRunScorecard } from '../conveyor/run-quality-record.mjs';
 
 /**
  * #xqa9ttq — THE OPENAI-STRICT SCHEMA TRANSFORM, proved live against a real `codex exec` spawn in `#3371`
@@ -258,20 +271,27 @@ export function defaultCodexSpawnEnv(sourceEnv = process.env, { scratchHome } = 
 }
 
 /**
- * The shared care→rigor dial's effort enum (`judge-spawn.mjs#EFFORT_LEVELS`) does not match Codex's own
- * `model_reasoning_effort` values one-to-one. Mapped where a real Codex level exists; `xhigh`/`max` CLAMP
- * DOWN to `high` rather than being refused or passed through unrecognised, because a clamp is a degraded-but-
- * working request and a refusal is a request that cannot run at all — the same "a bound being hit is not a
- * crash" reasoning `JUDGE_TIMEOUT_MS`'s header already uses, applied to an effort level instead of a clock.
- * RE-DERIVE if Codex ever adds a level above `high`.
+ * The care→rigor dial's effort vocabulary, RE-EXPORTED from `#3635`'s single source
+ * (`we:scripts/lib/codex-model-routing.mjs`) rather than kept as a local copy.
+ *
+ * This file used to define its own map, which CLAMPED `xhigh`/`max` down to `high` and offered no `ultra`, on
+ * the stated assumption that Codex stops at `high`. `#3635` measured that assumption and found it false — and
+ * its 2026-09-12 follow-up correction names THIS file as the clamp's origin, since `codex-direct-task.mjs`
+ * had copied the convention from here. `gpt-6-astra`'s `supported_reasoning_levels` are
+ * `low·medium·high·xhigh·max·ultra` in the CLI's own server-fetched catalogue, and a live
+ * `codex exec -c model_reasoning_effort=<level>` ping at each of `xhigh`/`max`/`ultra` completed normally.
+ *
+ * So the clamp was not a "degraded-but-working request" as the old header argued — it was silently sending a
+ * WEAKER level than the caller asked for, recording nothing, on levels that would have worked as asked. That
+ * is the precise failure mode Fork 1 exists to close, one axis over. The map is now an identity over all six.
  */
-export const CODEX_EFFORT_MAP = Object.freeze({
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'high',
-  max: 'high',
-});
+export { CODEX_EFFORT_MAP };
+
+/**
+ * The ratified model pin, re-exported so a reader of THIS file (and its tests) can name the value
+ * `buildCodexJudgeArgv` now always emits, without reaching past it to the routing module.
+ */
+export { CODEX_MODEL };
 
 /**
  * A Codex `turn.failed` whose error is OpenAI's strict-schema 400 (`#3371` probe 3) — a CALLER bug (the shape
@@ -297,19 +317,23 @@ export class CodexInvalidSchemaError extends Error {
 }
 
 /**
- * Refuses a `JudgeProviderRequest` carrying `allowedTools` — this provider is TOOL-FREE ONLY (see file
- * header). Separately exported so it is provable on its own, the same reason `assertNoForbiddenArgv` is
- * exported from `judge-spawn.mjs`.
+ * Refuses a `JudgeProviderRequest` carrying `allowedTools` — NOT because this provider is tool-free (it is
+ * NOT: `-s read-only` gives it a real, if read-only, shell — see the file header), but because there is no
+ * allow-list mechanism here for such a list to configure: the sandbox flag fixes the ceiling (read, never
+ * write) for every request alike. Separately exported so it is provable on its own, the same reason
+ * `assertNoForbiddenArgv` is exported from `judge-spawn.mjs`.
  * @param {string[]|null|undefined} allowedTools
  */
-export function assertNoCodexTools(allowedTools) {
+export function assertNoCodexToolAllowlist(allowedTools) {
   if (allowedTools === null || allowedTools === undefined) return;
   if (Array.isArray(allowedTools) && allowedTools.length === 0) return;
   throw new Error(
-    'codex-judge-spawn: refusing a TOOL-BEARING request — this provider is seated as a TOOL-FREE panelist '
-    + 'only (#3581\'s ratified sequencing). Probe 9 found no context-strip flag for a tool-bearing Codex '
-    + 'juror in a lane cwd (`-C` always loads `we:AGENTS.md`), so a tool-bearing Codex juror is out of scope '
-    + 'here, not merely unimplemented. Omit `allowedTools`, or use the Claude provider for a tool-bearing role.',
+    'codex-judge-spawn: refusing a request with an `allowedTools` list — this provider has no configurable '
+    + 'tool allow-list to apply it to. Its capability is FIXED by its sandbox (`-s read-only`: a real but '
+    + 'read-only shell — it can read files and run non-mutating commands like `git status`, but cannot write, '
+    + 'create temp dirs/files, or mutate anything), not by an allow-list, and per `#3581`\'s ratified sequencing '
+    + 'there is no tool-bearing mode to opt into here. Omit `allowedTools`, or use the Claude provider for a '
+    + 'tool-bearing, allow-listed role.',
   );
 }
 
@@ -321,13 +345,19 @@ export function assertNoCodexTools(allowedTools) {
  * @param {string} opts.schemaFile - path a caller has ALREADY written the (transformed) JSON Schema to.
  * @param {string} opts.outputLastMessageFile - path Codex should write its final answer to (probe 7's clean
  *   parse seam).
- * @param {string} opts.cwd - a scratch working directory. NOT a lane — this provider is tool-free, so `-C`
- *   only decides how much ambient repo doctrine gets loaded (probe 9), never what the juror can write.
- * @param {string} [opts.model] - Codex's `-m`.
+ * @param {string} opts.cwd - a scratch working directory. NOT a lane — this provider's shell is read-only
+ *   regardless of cwd (it cannot write anywhere), so `-C` only decides how much ambient repo doctrine gets
+ *   loaded (probe 9), never what the juror can write.
+ * @param {string} [opts.model] - Codex's `-m`. #3635: defaults to the ratified `CODEX_MODEL` pin and is
+ *   ALWAYS emitted — there is no code path here that omits `-m`. A caller must name a model to get a
+ *   different one; it can no longer get an unrecorded one by saying nothing.
  * @param {string} [opts.effort] - one of `judge-spawn.mjs`'s `EFFORT_LEVELS`; mapped via `CODEX_EFFORT_MAP`.
+ *   Left UNSET-able on purpose — see the `-c model_reasoning_effort` note in the body.
  * @returns {string[]} argv AFTER the binary name.
  */
-export function buildCodexJudgeArgv({ schemaFile, outputLastMessageFile, cwd, model, effort } = {}) {
+export function buildCodexJudgeArgv({
+  schemaFile, outputLastMessageFile, cwd, model = CODEX_MODEL, effort,
+} = {}) {
   if (typeof schemaFile !== 'string' || !schemaFile.trim()) {
     throw new TypeError('codex-judge-spawn: `schemaFile` must be a non-empty path');
   }
@@ -347,12 +377,23 @@ export function buildCodexJudgeArgv({ schemaFile, outputLastMessageFile, cwd, mo
     '--ephemeral',                  // no session persistence — the `--no-session-persistence` analogue.
     '-C', cwd,
   ];
-  if (model !== undefined) {
-    if (typeof model !== 'string' || !model.trim() || model.trim().startsWith('-')) {
-      throw new TypeError(`codex-judge-spawn: \`model\` must be a plain non-empty string, got ${JSON.stringify(model)}`);
-    }
-    argv.push('-m', model.trim());
-  }
+  // #3635 Fork 1, RATIFIED: "Every Codex invocation names its model explicitly — never the CLI's own
+  // implicit default." UNCONDITIONAL, not `if (model !== undefined)` as this previously read: no caller
+  // supplied a model, so every judge run inherited whatever `codex exec` resolves to — measured live as
+  // `gpt-6-astra`, the top rung. The hole is not that the inherited model is WRONG (it is the same model this
+  // pin names); it is that nothing recorded the choice, so a server-side catalogue re-rank — the CLI fetches
+  // and caches its model list with a `priority` order, no release needed — would silently move the judge seat
+  // onto a different model with no diff, no log and no transcript entry to notice it by.
+  argv.push('-m', assertCodexModel(model, 'codex-judge-spawn'));
+  // EFFORT IS DELIBERATELY STILL OPTIONAL, and that is a KNOWN, NARROWER residual of the same rule — recorded
+  // rather than fixed here. #3635 applies "never implicit" to effort too (`resolveCodexEffort` pins the
+  // `sonnet` rung's `medium` when a caller names neither `tier` nor `effort`), and omitting `-c
+  // model_reasoning_effort` lets Codex pick its own `default_reasoning_level`. That default is measured as
+  // `medium` — the same value the `sonnet` rung would pin — so the gap costs no behaviour TODAY, only the
+  // record. It is left alone on purpose: the judge seat's right default effort is exactly what the live
+  // effort-level investigation is measuring, and pinning a rung here now would pre-empt its answer with a
+  // guess. Close it when that lands, by resolving through `resolveCodexEffort` the way the delivery provider
+  // and `codex-direct-task.mjs` already do.
   if (effort !== undefined) {
     const mapped = CODEX_EFFORT_MAP[effort];
     if (!mapped) {
@@ -499,7 +540,80 @@ export function codexLoadedContextTokens(usage = {}) {
 }
 
 /**
- * THE ONE FUNCTION A CODEX-BACKED `judge` STEP CALLS. Spawns a tool-free Codex juror and returns its
+ * THE DURABLE TRANSCRIPT DIRECTORY — mirrors `we:scripts/codex-direct-task.mjs#resolveCodexHome`'s own
+ * env-override-then-home-dir-fallback shape, but for OUR OWN captured stdout rather than Codex's own rollout
+ * file. THIS PROVIDER ALWAYS SPAWNS WITH `--ephemeral` (an intentional, RETAINED isolation property — see the
+ * file header; it protects actor-identity/non-resumability and is unrelated to transcript persistence, and
+ * removing it would reintroduce a real risk) — an ephemeral Codex run writes NO rollout file at all, so
+ * nothing else on disk holds this run's transcript unless this module puts it there itself.
+ * `CODEX_JUDGE_TRANSCRIPT_DIR` honours an override (tests, or a caller wanting a different location); the
+ * default sits in the user's home directory — NOT the OS tmpdir, which can be swept far more aggressively —
+ * so a persisted transcript survives at least as long as an operator's own machine session, for the same
+ * reason `~/.codex/sessions` does.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveCodexJudgeTranscriptDir(env = process.env) {
+  const override = env?.CODEX_JUDGE_TRANSCRIPT_DIR;
+  return (typeof override === 'string' && override.trim()) ? override.trim() : join(homedir(), '.codex-judge-transcripts');
+}
+
+/**
+ * The `thread_id` off a `thread.started` event in a Codex judge's raw JSONL stdout — extracted directly and
+ * independently of {@link parseCodexJudgeOutcome}'s own success/failure, because the transcript must be
+ * persisted even when the run goes on to fail (a `turn.failed`, an unparseable answer, a kill) — those are
+ * exactly the runs a human or the run-quality scorer most wants to read afterward. PURE.
+ * @param {string} stdout
+ * @returns {string|null}
+ */
+export function extractCodexJudgeThreadId(stdout) {
+  const lines = String(stdout).split('\n').map(parseJsonlLine).filter(Boolean);
+  const started = lines.find((l) => l?.type === 'thread.started');
+  return (typeof started?.thread_id === 'string' && started.thread_id) ? started.thread_id : null;
+}
+
+/**
+ * PERSIST THE RAW JSONL STDOUT `codexJudgeSpawn` already captures in memory to a durable local file — THE FIX
+ * for the confirmed defect this module shipped with: the function buffered the whole `codex exec --json`
+ * stream purely to parse the schema-constrained answer out of it, then discarded the buffer, so once
+ * `--ephemeral` (correctly, and NOT removed — see the file header) suppressed Codex's own rollout file,
+ * nothing on disk recorded what a judge run actually did. This writes the SAME bytes
+ * {@link parseCodexJudgeOutcome} already parses, to `<dir>/codex-judge-<threadId>.jsonl` — named by the same
+ * `thread_id`/`sessionId` `codexJudgeSpawn` already returns, so a later reader (`we:scripts/conveyor/
+ * run-quality-scorer.mjs`) can find it from a run record's stamped `transcriptFile` path alone. Scrubbing is
+ * NOT done here, matching how Claude's own local judge transcripts are handled: unscrubbed at rest, scrubbed
+ * only at the point evidence is EXCERPTED into a published finding (`we:scripts/lib/secret-scrub.mjs`).
+ *
+ * NEVER THROWS — a transcript that fails to write is a best-effort loss, not a reason to fail a judge call
+ * that otherwise completed; the caller gets `null` back and the run proceeds exactly as it did before this
+ * existed.
+ *
+ * @param {object} o
+ * @param {string} o.stdout - the raw JSONL captured from the spawn, whatever its length.
+ * @param {string|null} o.threadId - from {@link extractCodexJudgeThreadId}; a run with none gets a random id
+ *   so nothing is silently dropped, labelled `unknown-` so a reader can tell the difference from a real one.
+ * @param {string} o.dir - the durable directory (see {@link resolveCodexJudgeTranscriptDir}).
+ * @param {(dir: string) => void} [o.ensureDir] - injectable `mkdirSync`, for tests.
+ * @param {(path: string, data: string) => void} [o.writeFile] - injectable `writeFileSync`, for tests.
+ * @param {() => string} [o.mkId] - injectable id generator for the `threadId == null` fallback, for tests.
+ * @returns {string|null} the file path written, or `null` on any failure.
+ */
+export function persistCodexJudgeTranscript({
+  stdout, threadId, dir, ensureDir = (d) => mkdirSync(d, { recursive: true }), writeFile = writeFileSync, mkId = randomUUID,
+} = {}) {
+  try {
+    ensureDir(dir);
+    const name = `codex-judge-${threadId || `unknown-${mkId()}`}.jsonl`;
+    const file = join(dir, name);
+    writeFile(file, String(stdout));
+    return file;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * THE ONE FUNCTION A CODEX-BACKED `judge` STEP CALLS. Spawns a read-only-shell Codex juror and returns its
  * validated answer, in the same `JudgeProviderOutcome` shape `judgeSpawn` returns.
  *
  * DOES NOT APPLY `requireAllProperties` ITSELF — the caller (`we:scripts/operations/cli-adapter.mjs`'s
@@ -517,10 +631,10 @@ export function codexLoadedContextTokens(usage = {}) {
  *   (`#3371`'s verdict — "does not exist and cannot be built"). Kept as an accepted (unused) option rather
  *   than refused, so a caller forwarding a whole `JudgeProviderRequest` (as `createDefaultJudge` does) does
  *   not have to special-case Codex just to omit a field every other provider request already carries.
- * @param {string[]|null} [opts.allowedTools] - must be absent/empty; see `assertNoCodexTools`.
+ * @param {string[]|null} [opts.allowedTools] - must be absent/empty; see `assertNoCodexToolAllowlist`.
  * @param {string|null} [opts.cwd] - a scratch directory. Defaults to a fresh `mkdtemp` — NEVER a lane, and
- *   never the caller's own cwd, since a tool-free juror has nothing to protect a shared tree from but still
- *   has no reason to load one's doctrine either (probe 9).
+ *   never the caller's own cwd, since a read-only-shell juror cannot write to a shared tree regardless but
+ *   still has no reason to load one's doctrine either (probe 9).
  * @param {Record<string,string>} [opts.env] - defaults (when null/omitted) to `defaultCodexSpawnEnv(process.env, { scratchHome: <the per-call temp workDir> })`,
  *   an ALLOWLISTED subset of the parent's own environment, NOT the raw `process.env` — see that function's own
  *   header (round-2 review finding, #xqa9ttq). A caller that genuinely needs the child to see more passes its own
@@ -534,7 +648,10 @@ export function codexLoadedContextTokens(usage = {}) {
  * @param {(path: string, opts: object) => void} [opts.removeFile] - injectable, for tests.
  * @returns {Promise<{value: object, sessionId: string, costUsd: number, durationMs: number, wallMs: number,
  *                    numTurns: number, stopReason: string, usage: object, loadedContextTokens: number,
- *                    timedOut: boolean, argv: string[]}>}
+ *                    timedOut: boolean, argv: string[], transcriptFile: string|null}>} `transcriptFile` is the
+ *   durable local path {@link persistCodexJudgeTranscript} wrote the raw JSONL to (or `null` if the write
+ *   itself failed) — never the transcript content, per `we:scripts/operations/run-record.mjs`'s telemetry
+ *   whitelist, which this field is designed to pass through unmodified.
  */
 export async function codexJudgeSpawn({
   mandate,
@@ -552,6 +669,15 @@ export async function codexJudgeSpawn({
   writeFile = writeFileSync,
   readFile = (p) => readFileSync(p, 'utf8'),
   removeFile = (p, o) => rmSync(p, o),
+  // THE FIX (confirmed root cause): the raw JSONL this function already captures used to be discarded once
+  // parsed. `transcriptDir` + `persistTranscript` are injectable (tests; a caller wanting a different
+  // location) but default to the real durable write — see `persistCodexJudgeTranscript`'s own header.
+  // #3907 port: `env` now defaults to null (main's allowlisted child env), so the override is read off the
+  // caller's own `process.env` when no explicit `env` is passed — the branch's `env = process.env` behaviour.
+  transcriptDir = resolveCodexJudgeTranscriptDir(env ?? process.env),
+  persistTranscript = persistCodexJudgeTranscript,
+  // #3383 mechanical-dispatcher Bug 2 fix — see the call site below, right after `wallMs` is known.
+  recordScorecard = recordCodexRunScorecard,
 } = {}) {
   if (typeof mandate !== 'string' || !mandate.trim()) {
     throw new TypeError('codex-judge-spawn: `mandate` must be a non-empty string');
@@ -562,7 +688,7 @@ export async function codexJudgeSpawn({
   if (!shape || typeof shape !== 'object' || Array.isArray(shape)) {
     throw new TypeError('codex-judge-spawn: `shape` must be a JSON Schema object');
   }
-  assertNoCodexTools(allowedTools);
+  assertNoCodexToolAllowlist(allowedTools);
 
   const workDir = mkTempDir(join(tmpdir(), 'codex-judge-'));
   const childEnv = env ?? defaultCodexSpawnEnv(process.env, { scratchHome: workDir });
@@ -635,13 +761,31 @@ export async function codexJudgeSpawn({
 
   const wallMs = Date.now() - startedAt;
 
+  // THE FIX — persist the raw JSONL BEFORE any parse can throw, keyed by the thread id this run reports (a
+  // random fallback id when even that is missing), so the transcript survives regardless of whether the run
+  // went on to succeed, fail its schema, or hit the timeout wall. Best-effort: `persistTranscript` never
+  // throws (see its own header), so a disk-write failure here can never turn a completed judge call into a
+  // failed one.
+  const judgeThreadId = extractCodexJudgeThreadId(result.stdout);
+  const transcriptFile = persistTranscript({ stdout: result.stdout, threadId: judgeThreadId, dir: transcriptDir });
+  // #3383 mechanical-dispatcher Bug 2 fix — score + record THIS run's own scorecard, off the RAW stdout this
+  // function already captured (never off `transcriptFile` — scoring needs no disk round-trip, and must not
+  // depend on the write above having succeeded). Placed BEFORE the timeout/parse branches below (which may go
+  // on to THROW a `JudgeTimeoutError`) so a hung or unparseable run is recorded too — exactly the run most
+  // worth capturing. Best-effort, never throws (`recordCodexRunScorecard`'s own header) — a recording failure
+  // can never turn an otherwise-completed judge call into a failed one.
+  recordScorecard({
+    stdout: result.stdout, dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review',
+    provider: 'codex', model, effort,
+  });
+
   if (result.timedOut) {
     let outcome = null;
     try { outcome = parseCodexJudgeOutcome({ stdout: result.stdout, stderr: result.stderr, lastMessage }); } catch { outcome = null; }
     if (!outcome) throw new JudgeTimeoutError({ timeoutMs, wallMs, stdout: result.stdout, stderr: result.stderr });
     return {
       ...outcome, durationMs: wallMs, wallMs, timedOut: true,
-      loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv,
+      loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv, transcriptFile,
     };
   }
   const outcome = parseCodexJudgeOutcome({
@@ -651,6 +795,6 @@ export async function codexJudgeSpawn({
   });
   return {
     ...outcome, durationMs: wallMs, wallMs, timedOut: false,
-    loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv,
+    loadedContextTokens: codexLoadedContextTokens(outcome.usage), argv, transcriptFile,
   };
 }
