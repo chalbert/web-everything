@@ -46,12 +46,20 @@ import {
   runRetentionSweepPass,
   RETENTION_GRACE_MS_DEFAULT,
   RETENTION_CEILING_MS_DEFAULT,
+  writeChatSpawnLink,
+  tryReadChatSpawnLink,
+  markChatEnded,
+  isChatEnded,
+  classifyChatSpawnGuard,
+  makeChatSpawnGuardResolver,
+  runStampChatSpawnHook,
+  runMarkChatEndedHook,
 } from '../session-reaper.mjs';
 import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -1467,5 +1475,169 @@ describe('runSessionReaperPass — the #4090 no-outcome axis writes a STALLED_OU
     });
     expect(result.stopped).toBe(1);
     expect(written[0]).toMatchObject({ session: 'review-2647', status: 'done', outcome: STALLED_OUTCOME });
+  });
+});
+
+// #4091 (epic #3383/#4075, statute clause 4) — the chat-spawn link + guard.
+describe('writeChatSpawnLink / tryReadChatSpawnLink — the link store', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-chat-spawns-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('round-trips a link', () => {
+    expect(writeChatSpawnLink({ spawnedSessionId: 'child-1', spawnedByChatSessionId: 'chat-1' }, dir)).toBe(true);
+    expect(tryReadChatSpawnLink('child-1', dir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-1' });
+  });
+
+  it('null (no link) when nothing was ever written — the "unchanged from today" default', () => {
+    expect(tryReadChatSpawnLink('never-written', dir)).toBeNull();
+  });
+
+  it('{ok:false} for a corrupt file — AMBIGUOUS, never the same as "no link"', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'child-2.json'), '{not json');
+    expect(tryReadChatSpawnLink('child-2', dir)).toEqual({ ok: false });
+  });
+
+  it('refuses an unsafe id as a filename, on both write and read — never a guess', () => {
+    expect(writeChatSpawnLink({ spawnedSessionId: '../etc/passwd', spawnedByChatSessionId: 'chat-1' }, dir)).toBe(false);
+    expect(tryReadChatSpawnLink('../etc/passwd', dir)).toBeNull();
+  });
+});
+
+describe('markChatEnded / isChatEnded — the ended-marker store', () => {
+  let dir;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-chat-ended-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('false before marking, true after', () => {
+    expect(isChatEnded('chat-1', dir)).toBe(false);
+    expect(markChatEnded('chat-1', dir)).toBe(true);
+    expect(isChatEnded('chat-1', dir)).toBe(true);
+  });
+
+  it('false for a corrupt marker file — never guesses ended', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'chat-2.json'), '{not json');
+    expect(isChatEnded('chat-2', dir)).toBe(false);
+  });
+});
+
+describe('classifyChatSpawnGuard — PURE, the three-way rule', () => {
+  it('not blocked when there is no link at all (unchanged from today)', () => {
+    expect(classifyChatSpawnGuard({ link: null })).toEqual({ blocked: false, reason: 'no-link' });
+  });
+  it('blocked, ambiguous-chat-link, for a corrupt/unreadable link — never "no link"', () => {
+    expect(classifyChatSpawnGuard({ link: { ok: false } })).toEqual({ blocked: true, reason: 'ambiguous-chat-link' });
+  });
+  it('blocked, chat-not-ended, for a real link whose chat has not ended', () => {
+    expect(classifyChatSpawnGuard({ link: { ok: true, spawnedByChatSessionId: 'chat-1' }, ended: false }))
+      .toEqual({ blocked: true, reason: 'chat-not-ended' });
+  });
+  it('not blocked once the linked chat has ended', () => {
+    expect(classifyChatSpawnGuard({ link: { ok: true, spawnedByChatSessionId: 'chat-1' }, ended: true }))
+      .toEqual({ blocked: false, reason: 'chat-ended' });
+  });
+});
+
+describe('makeChatSpawnGuardResolver — routes link → ended lookup', () => {
+  let spawnsDir, endedDir;
+  beforeEach(() => {
+    spawnsDir = mkdtempSync(join(tmpdir(), 'we-chat-spawns-io-'));
+    endedDir = mkdtempSync(join(tmpdir(), 'we-chat-ended-io-'));
+  });
+  afterEach(() => {
+    rmSync(spawnsDir, { recursive: true, force: true });
+    rmSync(endedDir, { recursive: true, force: true });
+  });
+
+  it('not blocked for a session with no link', () => {
+    const guard = makeChatSpawnGuardResolver({ spawnsDir, endedDir });
+    expect(guard({ sessionId: 'child-1' })).toEqual({ blocked: false, reason: 'no-link' });
+  });
+
+  it('blocked while the linked chat has not ended, unblocked once it has', () => {
+    writeChatSpawnLink({ spawnedSessionId: 'child-2', spawnedByChatSessionId: 'chat-2' }, spawnsDir);
+    const guard = makeChatSpawnGuardResolver({ spawnsDir, endedDir });
+    expect(guard({ sessionId: 'child-2' })).toEqual({ blocked: true, reason: 'chat-not-ended' });
+    markChatEnded('chat-2', endedDir);
+    expect(guard({ sessionId: 'child-2' })).toEqual({ blocked: false, reason: 'chat-ended' });
+  });
+});
+
+describe('classifySessionReap — the #4091 chat-spawn guard, wired end to end', () => {
+  const bgRow = { id: 'abc12345', cwd: '/repo', kind: 'background', sessionId: 'child-3', state: 'done', name: 'review-9001' };
+
+  it('blocks a `done` session whose spawning chat has not ended — the guard outranks the terminal state', () => {
+    const chatSpawnGuardFor = () => ({ blocked: true, reason: 'chat-not-ended' });
+    expect(classifySessionReap(bgRow, { chatSpawnGuardFor })).toEqual({ reap: false, reason: 'chat-not-ended' });
+  });
+
+  it('blocks on an ambiguous link too', () => {
+    const chatSpawnGuardFor = () => ({ blocked: true, reason: 'ambiguous-chat-link' });
+    expect(classifySessionReap(bgRow, { chatSpawnGuardFor })).toEqual({ reap: false, reason: 'ambiguous-chat-link' });
+  });
+
+  it('falls through to the normal terminal-state check once unblocked (or with no guard at all)', () => {
+    const unblocked = () => ({ blocked: false, reason: 'chat-ended' });
+    expect(classifySessionReap(bgRow, { chatSpawnGuardFor: unblocked })).toEqual({ reap: true, reason: 'done' });
+    expect(classifySessionReap(bgRow, {})).toEqual({ reap: true, reason: 'done' }); // no guard at all — unchanged
+  });
+
+  it('a guard that throws is treated as not-blocked — never crashes the classifier, never a guess in the blocking direction', () => {
+    const throwing = () => { throw new Error('unreadable'); };
+    expect(classifySessionReap(bgRow, { chatSpawnGuardFor: throwing })).toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('runStampChatSpawnHook / runMarkChatEndedHook — the CLI hook bodies', () => {
+  let spawnsDir, endedDir, previousSpawns, previousEnded;
+  beforeEach(() => {
+    spawnsDir = mkdtempSync(join(tmpdir(), 'we-hook-spawns-'));
+    endedDir = mkdtempSync(join(tmpdir(), 'we-hook-ended-'));
+    previousSpawns = process.env.OPERATION_CHAT_SPAWNS_DIR;
+    previousEnded = process.env.OPERATION_CHAT_ENDED_DIR;
+    process.env.OPERATION_CHAT_SPAWNS_DIR = spawnsDir;
+    process.env.OPERATION_CHAT_ENDED_DIR = endedDir;
+  });
+  afterEach(() => {
+    rmSync(spawnsDir, { recursive: true, force: true });
+    rmSync(endedDir, { recursive: true, force: true });
+    if (previousSpawns === undefined) delete process.env.OPERATION_CHAT_SPAWNS_DIR; else process.env.OPERATION_CHAT_SPAWNS_DIR = previousSpawns;
+    if (previousEnded === undefined) delete process.env.OPERATION_CHAT_ENDED_DIR; else process.env.OPERATION_CHAT_ENDED_DIR = previousEnded;
+  });
+
+  it('stamp-chat-spawn writes a link when the env carries a different parent id', () => {
+    runStampChatSpawnHook({
+      readStdin: () => JSON.stringify({ session_id: 'bg-child-1', hook_event_name: 'SessionStart' }),
+      env: { CLAUDE_CODE_SESSION_ID: 'chat-parent-1' },
+    });
+    expect(tryReadChatSpawnLink('bg-child-1', spawnsDir)).toEqual({ ok: true, spawnedByChatSessionId: 'chat-parent-1' });
+  });
+
+  it('stamp-chat-spawn writes nothing when there is no inherited parent id (a top-level chat, or a daemon)', () => {
+    runStampChatSpawnHook({ readStdin: () => JSON.stringify({ session_id: 'top-level-1' }), env: {} });
+    expect(tryReadChatSpawnLink('top-level-1', spawnsDir)).toBeNull();
+  });
+
+  it('stamp-chat-spawn writes nothing when the session reports itself as its own parent (malformed)', () => {
+    runStampChatSpawnHook({
+      readStdin: () => JSON.stringify({ session_id: 'same-1' }),
+      env: { CLAUDE_CODE_SESSION_ID: 'same-1' },
+    });
+    expect(tryReadChatSpawnLink('same-1', spawnsDir)).toBeNull();
+  });
+
+  it('stamp-chat-spawn never throws on a malformed payload', () => {
+    expect(() => runStampChatSpawnHook({ readStdin: () => 'not json', env: { CLAUDE_CODE_SESSION_ID: 'chat-1' } })).not.toThrow();
+  });
+
+  it('mark-chat-ended marks the ending session\'s own id', () => {
+    runMarkChatEndedHook({ readStdin: () => JSON.stringify({ session_id: 'chat-ending-1', hook_event_name: 'SessionEnd', reason: 'clear' }) });
+    expect(isChatEnded('chat-ending-1', endedDir)).toBe(true);
+  });
+
+  it('mark-chat-ended never throws on a malformed payload', () => {
+    expect(() => runMarkChatEndedHook({ readStdin: () => 'not json' })).not.toThrow();
   });
 });

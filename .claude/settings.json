@@ -47,6 +47,24 @@
             "command": "node scripts/guard-prototype-tracker.mjs --session-start"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/conveyor/session-reaper.mjs stamp-chat-spawn"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/conveyor/session-reaper.mjs mark-chat-ended"
+          }
+        ]
       }
     ],
     "PreToolUse": [
