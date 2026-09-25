@@ -5574,6 +5574,33 @@ in PR #2546 against the live self-sync of #3954). Supersedes the POC-branch fram
 premise corrected, clause 3 unchanged), [#poc-branch-declared-delivery-mode](#poc-branch-declared-delivery-mode)
 (clause 4(a) amended) and [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates).
 
+### Conveyor bot sessions: records outlive their work, bots stop on no net outcome, resume has one owner {#conveyor-session-lifecycle-policy}
+
+**Ratified 2026-09-24** (`4082`, bornAs `xwysd8b`, operator, in session: *"ok fork are ok"* · *"I ratify"*).
+All three forks as prepared; the operator amended Fork 1 so retention has no upper limit, and dropped the
+bot-login / API-key question as out of scope (bots keep the operator's subscription login, per
+[#agent-runner-cli-backend](#agent-runner-cli-backend)). Grounding:
+`we:reports/2026-09-24-conveyor-operator-policy-calls.md`. Four clauses:
+
+1. **Records outlive the work they served.** A finished conveyor session's records (its background-session
+   entry, run records, completion records, delivery reports, lane-port mappings) are deleted only after its
+   card is resolved or withdrawn, its PR (if any) is merged or closed, its introspection has run
+   ([#automated-session-introspection](#automated-session-introspection)) and — once cost tracking exists
+   (#4071) — its cost is rolled up. After that, retention is the user's setting with no upper limit ("never
+   delete" is valid); the shipped default is a 1-day grace, capped by a ceiling setting that defaults to the
+   host's transcript retention.
+2. **A bot stops on no net outcome, not on a clock.** A bot is stopped when its work shows no *net* outcome
+   (a changed diff against base, a review comment or label, an item-file change — per kind) within its
+   kind's window, or when it reaches its kind's ceiling; the ceiling never exceeds the lane lease TTL.
+   Transcript silence stays a faster stop. Stopping is graceful first, then SIGTERM; a no-outcome stop
+   counts as a loop and is relaunched, never resumed. Windows and ceilings are settings.
+3. **Resume is single-owner.** Only the dispatcher role holding the worker's run record resumes an
+   interrupted worker (the durable record lets a restarted instance of that role pick it up); any other
+   watcher reports, never resumes. Chat-spawned workers are never auto-resumed.
+4. **Cleanup scope.** Cleanup touches daemon-dispatched background sessions, and a chat-spawned background
+   session only when linked to a spawning chat that was explicitly ended; an unknown or ambiguous link is
+   never reaped.
+
 ---
 
 ### A resident health process watches the conveyor from its own failure domain, diagnoses deterministically first, dedups into episodes, and recommends without a session — it never clears readiness or edits code {#automated-health-daemon}
