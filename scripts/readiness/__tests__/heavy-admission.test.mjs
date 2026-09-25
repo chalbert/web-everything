@@ -15,7 +15,7 @@ import {
   ADMISSION_LEASE_MINUTES, resolveCap, resolveTimeoutMs, resolveCeilingMs, isAdmissionOff, slotPath,
   tryAcquireSlot, releaseOwnedSlot, heldSlots, probeSlotHolderLiveness,
   markWaiting, clearWaiting, listWaiting,
-  acquireSlotBlocking, admissionStatus,
+  acquireSlotBlocking, admissionStatus, isOldestLiveWaiter,
   runUnderAdmission, shellQuoteWord,
   WAITING_TTL_MINUTES, ADMISSION_HELD_ENV, classifyWaiter, reapStaleWaiters, reapHistory, waiterRepo,
   admissionBypassReason, poolRootOf, admittedArgv, admittedShellCommand, HEAVY_ADMISSION_CLI,
@@ -399,6 +399,51 @@ describe('acquireSlotBlocking — polls until free, marks/clears waiting, FAILS 
     });
     expect(r).toEqual({ ok: false, slot: null, timedOut: false, disabled: true, waitedMs: 0 });
     expect(listWaiting(lockRoot)).toHaveLength(0); // never marked waiting
+  });
+});
+
+describe('isOldestLiveWaiter — the #3383 (card xb0iuxq) FCFS ranking, ignoring stale/dead waiters', () => {
+  it('a solo caller with no other live marker is always "oldest"', () => {
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'A', nowMs: T0 })).toBe(true);
+  });
+
+  it('the earliest requestedAt among LIVE markers wins, regardless of listing order', () => {
+    markWaiting({ lockRoot, owner: 'LATE', nowIso: iso(T0 + 20_000) });
+    markWaiting({ lockRoot, owner: 'EARLY', nowIso: iso(T0) });
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'EARLY', nowMs: T0 + 20_000 })).toBe(true);
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'LATE', nowMs: T0 + 20_000 })).toBe(false);
+  });
+
+  it('a STALE/DEAD marker is ignored for ranking — a live newer waiter still counts as oldest', () => {
+    const deadPid = 999999; // kill(pid,0) → ESRCH, provably dead
+    // A marker older than the TTL, on this host, with a provably-dead pid — classifyWaiter would reap it.
+    markWaiting({ lockRoot, owner: 'GHOST', nowIso: iso(T0), pid: deadPid });
+    markWaiting({ lockRoot, owner: 'REAL', nowIso: iso(T0 + 10_000) });
+    const nowMs = T0 + (WAITING_TTL_MINUTES + 5) * 60_000; // well past the TTL
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'GHOST', nowMs })).toBe(false); // dead debris never wins
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs })).toBe(true); // the only genuinely live waiter
+  });
+
+  it('a FRESH-but-dead-pid marker never ranks oldest either — the #2692 independent-review starvation finding', () => {
+    // The gap the first cut of this fix had: `classifyWaiter`'s `age < ttlMs ⇒ 'fresh'` shortcut never even
+    // calls pidLiveness for a YOUNG marker, so a crashed waiter's marker (dead pid, but written moments ago)
+    // used to still rank "oldest/live" for up to WAITING_TTL_MINUTES — starving every genuinely live waiter
+    // off a completely free slot the whole time. Same setup as the STALE/DEAD test above, but `nowMs` stays
+    // WELL INSIDE the TTL window this time (5 minutes old, not >30) — the exact case the prior test's own
+    // `nowMs` (deliberately past the TTL) never exercised.
+    const deadPid = 999999; // kill(pid,0) → ESRCH, provably dead
+    markWaiting({ lockRoot, owner: 'CRASHED', nowIso: iso(T0), pid: deadPid });
+    markWaiting({ lockRoot, owner: 'REAL', nowIso: iso(T0 + 10_000) });
+    const nowMs = T0 + 5 * 60_000; // 5 minutes old — comfortably inside WAITING_TTL_MINUTES (30)
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'CRASHED', nowMs })).toBe(false); // dead pid, never ranks
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'REAL', nowMs })).toBe(true); // the only genuinely live waiter
+  });
+
+  it('ties on identical requestedAt break deterministically on owner name', () => {
+    markWaiting({ lockRoot, owner: 'B', nowIso: iso(T0) });
+    markWaiting({ lockRoot, owner: 'A', nowIso: iso(T0) });
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'A', nowMs: T0 })).toBe(true);
+    expect(isOldestLiveWaiter({ lockRoot, owner: 'B', nowMs: T0 })).toBe(false);
   });
 });
 

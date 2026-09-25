@@ -58,6 +58,8 @@ import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.m
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
 import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
+import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
+import { collectHeavyQueue } from './heavy-queue-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -253,6 +255,14 @@ export const OPERATIONS = Object.freeze({
   // to apply. `collectDaemonStatus`'s real launchd/lease/log/git reads are bound here, and ONLY here.
   [DAEMON_STATUS_OP]: () => ({
     declaration: daemonStatusOperation({ collect: collectDaemonStatus }),
+    sinks: {},
+  }),
+  // Card xb0iuxq (epic #4075, under #3383) — the mechanical "who's holding/waiting on the heavy-admission pool"
+  // report (the operator's own hand-built report, made mechanical). Read-only, same no-sinks reasoning as
+  // `daemon-status`/`runner-activity`: every step is `compute`. `collectHeavyQueue`'s real `admissionStatus`/
+  // `ps`/`git` reads are bound here, and ONLY here.
+  [HEAVY_QUEUE_OP]: () => ({
+    declaration: heavyQueueOperation({ collect: collectHeavyQueue }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({
