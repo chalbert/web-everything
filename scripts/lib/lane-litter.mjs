@@ -92,6 +92,45 @@ export const LANE_RELEASE_LITTER_ALLOWLIST = [
   // `.commit-msg-fix-*.txt` / `commit-msg-fix-*.txt` family above, one more naming drift of the exact scratch
   // shape #3568 already vetted, not a new kind of file.
   '.delivery-commit-msg-*.txt',
+  // #4084 — live-observed 2026-09-24 on the web-everything pool (lanes 2, 20, 22, 35, 47, 65): each lane's
+  // ONLY dirty content was a `.fix-*` scratch family — `.fix-before.txt`, `.fix-gate.txt`, `.fix-evidence.md`,
+  // `.fix-probe-after.txt`, `.fix-<item>-standards.log`, `.fix-commit-msg.txt`, `.fix-2553-msg1.txt`, … — a
+  // delivery/converge agent's own ad hoc notes for the fix-loop `we:skills-src/conveyor/delivery-agent-brief.md`
+  // describes (step 6's converge round, and the verify-lane gate/probe/standards fix cycle): the item number,
+  // round label, and extension all vary per agent and per round, no single script hardcodes one literal name —
+  // this is the SAME root cause #3987 already names ("briefs write agent-scratch files into the lane root"),
+  // just this shape hadn't been caught by an incident yet. One prefix pattern, per this list's own established
+  // `.converge-*` precedent, not one entry per shape. Lane 7's ONLY dirty entry was a whole `.fix-2554/`
+  // scratch DIRECTORY — `[^/]*` never crosses the trailing `/` a wholly-untracked directory's porcelain line
+  // collapses to (the same gap `.conveyor/` above already had to add an explicit directory-shaped sibling
+  // for), so both a file-shaped and a directory-shaped entry are added.
+  '.fix-*',
+  '.fix-*/',
+  // #4084 — live-observed 2026-09-24: three lanes' (34, 44, 49) ONLY dirty entry was a wholly-untracked `tmp/`
+  // scratch directory — same collapsed-directory porcelain shape as `.conveyor/` above, same verified
+  // `git clean -f` (no `-d`) removal guarantee. This is precisely the directory
+  // `we:skills-src/conveyor/delivery-agent-brief.md`'s own commit-msg-file comment warns an agent AWAY from
+  // (it tells them to put `.commit-msg.txt` in the lane, "never under your own job-scratch directory
+  // (`~/.claude/jobs/<id>/tmp/`) or `/tmp`") — agents still land a `tmp/` dir INSIDE the lane in practice
+  // (this repo's own scratch convention, just misapplied to the wrong root), so it is allowlisted rather than
+  // relied on staying unused.
+  'tmp/',
+  // #4084 — live-observed 2026-09-24: lane 16's dirty set included `.prep-body.md` — a PR-prep agent's
+  // pre-`pr-land` body draft, the same family as the already-allowlisted `.pr-body-*.md` above, just named
+  // during the PREP step rather than the PR step. The SAME lane also carried `.prep-msg.txt`, which this
+  // card's own Done-When does NOT ask for and which no pattern below matches — left alone deliberately, the
+  // same restraint #3921 already applied ("not assumed safe, a human call for a future item"): only the
+  // shape actually vetted here is added, not every scratch-looking name observed alongside it.
+  '.prep-*.md',
+  // #4084 — the card's own text: a lane whose ONLY dirty content is a scratch file carrying a `-plateau`
+  // suffix stayed unacquirable. No single script hardcodes this literal name (searched: no hit in
+  // `scripts/`, `skills-src/`) — it is the same ad hoc agent-naming root cause as `.fix-*` above (#3987),
+  // here applied to a cross-repo (WE ↔ `plateau-app`) couple item's per-repo-scoped scratch, the same
+  // per-repo-suffix convention this repo's own `we:scripts/conveyor/__tests__/ci-queue-watch.test.mjs`
+  // already exercises for `-frontierui` / `-plateau-app`. Two shapes (extensioned and bare) since a suffix
+  // can land on either.
+  '*-plateau',
+  '*-plateau.*',
 ];
 
 /**

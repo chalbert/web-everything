@@ -15,10 +15,12 @@ import {
   classifyReap,
   reapPlan,
   itemNumFromSession,
+  prNumFromSession,
   sessionSlugAttemptTag,
   laneRefItemNum,
   laneRefAttemptTag,
   prStatesFromList,
+  prStatesByPrNumber,
   pidAliveForLease,
   sessionStateByName,
   sessionStatesForReap,
@@ -40,12 +42,21 @@ const stale = (over = {}) => ({ session: 'conveyor-2500', acquiredAt: new Date(N
 // A lease past the listing-visibility grace window but nowhere near TTL — the shape session-gone exists for.
 const agedPastGrace = (over = {}) => ({ session: 'conveyor-3466', acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES, host: 'Mac', pid: 333, ...over });
 
-describe('itemNumFromSession — the couple key encoded in a lease session', () => {
-  it('conveyor-/fix-/prepare- sessions → the trailing item number', () => {
+describe('itemNumFromSession — the couple key encoded in a lease session (TRUE item-kind sessions ONLY)', () => {
+  it('conveyor-/prepare-/prepare-decision- sessions → the trailing item number', () => {
     expect(itemNumFromSession('conveyor-2667')).toBe('2667');
-    expect(itemNumFromSession('fix-2630')).toBe('2630');
     expect(itemNumFromSession('prepare-2604')).toBe('2604');
     expect(itemNumFromSession('prepare-decision-2647')).toBe('2647');
+  });
+  // #x5wm9ot — `fix-<N>`'s `N` IS A PR NUMBER (`mintSessionSlug({kind:'fix', id: pr})`, every real call site),
+  // a DIFFERENT namespace from a true item number — see `prNumFromSession` for the function that reads it out.
+  // This used to return `N` here too, which is exactly bug #1: a `fix-<PR>` session's PR number, fed into a
+  // Map keyed by the item number embedded in a PR's own head ref, hit the wrong (or no) entry.
+  it('fix-<PR> (and every other PR_KIND) is NOT an item number — null here, use prNumFromSession instead', () => {
+    expect(itemNumFromSession('fix-2630')).toBeNull();
+    expect(itemNumFromSession('review-2630')).toBeNull();
+    expect(itemNumFromSession('ci-heal-2630')).toBeNull();
+    expect(itemNumFromSession('inspect-2630')).toBeNull();
   });
   it('a retry suffix (conveyor-2500b) still resolves the base item number', () => {
     expect(itemNumFromSession('conveyor-2500b')).toBe('2500');
@@ -67,7 +78,6 @@ describe('itemNumFromSession — the couple key encoded in a lease session', () 
     expect(itemNumFromSession('conveyor-2500')).toBe('2500');
     expect(itemNumFromSession('prepare-2500')).toBe('2500');
     expect(itemNumFromSession('prepare-decision-2500')).toBe('2500');
-    expect(itemNumFromSession('fix-2500')).toBe('2500');
     expect(itemNumFromSession('conveyor-2500b')).toBe('2500'); // the retry suffix still collapses
   });
 
@@ -79,6 +89,38 @@ describe('itemNumFromSession — the couple key encoded in a lease session', () 
     expect(itemNumFromSession('Mac:24827')).toBe(null);                  // `defaultSession()` — host:ppid
     expect(itemNumFromSession('build-3283-lane-27-df14bb76')).toBe(null); // a minted `holder` slug (hex tail)
     expect(itemNumFromSession('lane-27')).toBe(null);
+  });
+});
+
+// #x5wm9ot — the PR-number counterpart to itemNumFromSession: EVERY PR_KIND (review/fix/ci-heal/inspect, not
+// fix alone — bug #2's own widening) resolves its own PR number here; every item-kind session (and every
+// non-dispatcher name) is null. The two functions must never both resolve the SAME session to a non-null
+// value — that would mean a lease's number is ambiguous between "a PR" and "a backlog item".
+describe('prNumFromSession — the PR number a PR_KIND session slug encodes (a DIFFERENT namespace from itemNumFromSession)', () => {
+  it('every PR_KIND resolves its PR number', () => {
+    expect(prNumFromSession('fix-2630')).toBe('2630');
+    expect(prNumFromSession('review-2630')).toBe('2630');
+    expect(prNumFromSession('ci-heal-2630')).toBe('2630');
+    expect(prNumFromSession('inspect-2630')).toBe('2630');
+  });
+  it('a multi-repo tag still resolves the PR number (#xr4ygg7 widening, unaffected by the #x5wm9ot split)', () => {
+    expect(prNumFromSession('fix-fui-49')).toBe('49');
+    expect(prNumFromSession('review-pa-49')).toBe('49');
+  });
+  it('item-kind sessions are NOT PR numbers — null here', () => {
+    expect(prNumFromSession('conveyor-2667')).toBeNull();
+    expect(prNumFromSession('prepare-2604')).toBeNull();
+    expect(prNumFromSession('prepare-decision-2647')).toBeNull();
+  });
+  it('a non-dispatcher name → null', () => {
+    expect(prNumFromSession('Mac:24827')).toBeNull();
+    expect(prNumFromSession('')).toBeNull();
+    expect(prNumFromSession(null)).toBeNull();
+  });
+  it('itemNumFromSession and prNumFromSession never both resolve the same session — the two namespaces are disjoint', () => {
+    for (const s of ['conveyor-2667', 'fix-2630', 'review-49', 'ci-heal-1', 'inspect-9', 'prepare-1', 'Mac:1', 'probe1', '', null]) {
+      expect(itemNumFromSession(s) !== null && prNumFromSession(s) !== null).toBe(false);
+    }
   });
 });
 
@@ -104,9 +146,21 @@ describe('sessionSlugAttemptTag — the attempt identity a conveyor-<id>[a-z] se
     expect(sessionSlugAttemptTag('')).toBe(null);
     expect(sessionSlugAttemptTag(null)).toBe(null);
   });
-  it('never disagrees with itemNumFromSession about which slugs match at all', () => {
+  it('agrees with itemNumFromSession about which ITEM-KIND slugs match (both read the same underlying grammar)', () => {
     for (const s of ['conveyor-2667', 'conveyor-2500b', 'Mac:24827', 'probe1', '', null]) {
       expect(sessionSlugAttemptTag(s) === null).toBe(itemNumFromSession(s) === null);
+    }
+  });
+  // #x5wm9ot — sessionSlugAttemptTag matches EVERY kind matchSessionSlug recognizes (item-kind AND every
+  // PR_KIND — it only ever reads the attempt letter, which carries no PR-vs-item ambiguity), so for a PR_KIND
+  // slug it now DISAGREES with itemNumFromSession on purpose: itemNumFromSession is item-kind-only (see its own
+  // describe block), but a `fix-`/`review-`/`ci-heal-`/`inspect-` slug is still a real, recognized session —
+  // just not an item number. `prNumFromSession` is the one that agrees with sessionSlugAttemptTag here.
+  it('a PR_KIND slug is recognized (non-null tag) even though itemNumFromSession reads it as null — prNumFromSession is the one that agrees', () => {
+    for (const s of ['fix-2630', 'review-49', 'ci-heal-1', 'inspect-9']) {
+      expect(sessionSlugAttemptTag(s)).not.toBeNull();
+      expect(itemNumFromSession(s)).toBeNull();
+      expect(prNumFromSession(s)).not.toBeNull();
     }
   });
 });
@@ -298,6 +352,32 @@ describe('prStatesFromList — head-ref → num state reduction (OPEN WINS: neve
   });
 });
 
+// #x5wm9ot (bug #1) — the PR-NUMBER-keyed counterpart to prStatesFromList's item-number-keyed Map. A PR_KIND
+// lease's PR-terminal check must read THIS Map (by the PR's own number), never the head-ref-keyed one.
+describe('prStatesByPrNumber — PR-number → state reduction (same open-wins priority as prStatesFromList, different key)', () => {
+  it('keys by the PR\'s OWN number, ignoring headRefName entirely', () => {
+    const m = prStatesByPrNumber([
+      { number: 900, headRefName: 'lane/181-something', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' },
+      { number: 901, headRefName: 'some-other-branch', state: 'CLOSED' },
+      { number: 902, headRefName: null, state: 'OPEN' },
+    ]);
+    expect(m.get('900')).toBe('merged');
+    expect(m.get('901')).toBe('closed');
+    expect(m.get('902')).toBe('open');
+    // Critically, the ITEM number embedded in PR #900's head ref (181) is NOT a key in this Map at all.
+    expect(m.has('181')).toBe(false);
+  });
+  it('open wins over a terminal state for the SAME PR number (defensive — gh never actually reuses one)', () => {
+    const m = prStatesByPrNumber([{ number: 5, state: 'CLOSED' }, { number: 5, state: 'OPEN' }]);
+    expect(m.get('5')).toBe('open');
+  });
+  it('a PR with no usable number is ignored; empty input → empty map', () => {
+    expect(prStatesByPrNumber([{ state: 'MERGED' }, null, {}]).size).toBe(0);
+    expect(prStatesByPrNumber([]).size).toBe(0);
+    expect(prStatesByPrNumber(null).size).toBe(0);
+  });
+});
+
 describe('pidAliveForLease — DORMANT under today\'s schema (no durable agentPid)', () => {
   it('a lease with no agentPid (today\'s schema — only the acquire-CLI `pid`) → null (axis inert)', () => {
     expect(pidAliveForLease({ session: 'conveyor-2667', pid: 12345, host: 'Mac' })).toBe(null);
@@ -330,6 +410,42 @@ describe('sessionStateByName — claude agents --json --all listing → backgrou
   });
   it('AGENT_GONE_STATES is exactly done/failed/stopped — the vocabulary session-reaper.mjs already reaps on', () => {
     expect([...AGENT_GONE_STATES].sort()).toEqual(['done', 'failed', 'stopped']);
+  });
+
+  // #x2psfwz (bug #5) — review-<PR>/fix-<PR> carry no attempt suffix, so a round-2 dispatch reuses round 1's
+  // exact name. `claude agents --json --all` can list BOTH a not-yet-pruned round-1 row and round-2's own live
+  // row under that one name, in an order this CLI documents nowhere. This used to be a bare `.set()` per row —
+  // whichever came LAST in the array won, so a live round-2 session could be masked as done/failed/stopped by
+  // a stale duplicate that merely happened to sort after it.
+  describe('duplicate names (round-2 reuse, #x2psfwz) — a terminal row never masks an already-recorded LIVE one', () => {
+    it('live-then-terminal (stale duplicate arrives AFTER the live row): the live reading survives', () => {
+      const m = sessionStateByName([
+        { kind: 'background', name: 'review-1234', state: 'working' },  // round 2, live
+        { kind: 'background', name: 'review-1234', state: 'done' },    // stale round-1 duplicate, listed later
+      ]);
+      expect(m.get('review-1234')).toBe('working');
+    });
+    it('terminal-then-live (order the OLD code happened to get right) still reads live — order must never matter', () => {
+      const m = sessionStateByName([
+        { kind: 'background', name: 'review-1234', state: 'done' },
+        { kind: 'background', name: 'review-1234', state: 'working' },
+      ]);
+      expect(m.get('review-1234')).toBe('working');
+    });
+    it('two terminal duplicates: either is a correct "gone" reading — harmless either way', () => {
+      const m = sessionStateByName([
+        { kind: 'background', name: 'fix-99', state: 'failed' },
+        { kind: 'background', name: 'fix-99', state: 'done' },
+      ]);
+      expect(AGENT_GONE_STATES.has(m.get('fix-99'))).toBe(true);
+    });
+    it('two live duplicates: either live reading is correct — harmless either way', () => {
+      const m = sessionStateByName([
+        { kind: 'background', name: 'fix-99', state: 'blocked' },
+        { kind: 'background', name: 'fix-99', state: 'working' },
+      ]);
+      expect(AGENT_GONE_STATES.has(m.get('fix-99'))).toBe(false);
+    });
   });
 });
 
@@ -429,6 +545,21 @@ describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent se
     expect(sessionGoneForLease({ session: 'conveyor-3466' }, null, { nowMs: NOW })).toBe(null);
     expect(sessionGoneForLease({ session: 'conveyor-3466' }, undefined, { nowMs: NOW })).toBe(null);
   });
+
+  // #x5wm9ot (bug #2) — review-/ci-heal-/inspect- sessions used to fail the dispatcher-minted gate ABOVE
+  // (`matchSessionSlug` matched only itemKind || kind==='fix'), so this whole axis was permanently OFF for
+  // them — a dead review/ci-heal/inspect lane was reclaimed only by the 4h TTL backstop, never pre-TTL, no
+  // matter how confidently `claude agents` reported it done. Now every PR_KIND is recognized here too.
+  it('bug #2 — review-/ci-heal-/inspect- sessions are NOW recognized by this gate (were: always null, TTL-only)', () => {
+    const states = sessionStateByName([
+      { kind: 'background', name: 'review-1871', state: 'done' },
+      { kind: 'background', name: 'ci-heal-1872', state: 'working' },
+    ]);
+    expect(sessionGoneForLease({ session: 'review-1871' }, states, { nowMs: NOW })).toBe(true);  // listed, terminal → gone
+    expect(sessionGoneForLease({ session: 'ci-heal-1872' }, states, { nowMs: NOW })).toBe(false); // listed, still working → not gone
+    // Absent + past the grace window → gone, exactly like an item-kind session already worked.
+    expect(sessionGoneForLease({ session: 'inspect-1873', acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString() }, states, { nowMs: NOW })).toBe(true);
+  });
 });
 
 describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep', () => {
@@ -476,17 +607,17 @@ describe('reapPlan — maps classifyReap over candidates, splitting reap vs keep
   });
 });
 
-// #xr4ygg7 (multi-repo slice 9) — a `fix-<tag>-<id>` session now resolves its item number for ANY constellation
-// repo, not only WE: before this, a dead `fix-pa-*`/`fix-fui-*` lease's lane was reclaimed only by the 4-hour
-// TTL backstop, because this exact lookup returned null for it (see matchSessionSlug's own docblock for why
-// that was safe to widen). `review-`/`ci-heal-` sessions are UNCHANGED — still never matched here (a
-// deliberate, separate restriction: those release on merge via `pr-watch.mjs`, not this reaper).
-it('a fix session resolves its item number for ANY constellation repo (widened #xr4ygg7); review/ci-heal never match', () => {
-  expect(itemNumFromSession('fix-fui-49')).toBe('49');
-  expect(itemNumFromSession('fix-pa-49')).toBe('49');
-  expect(itemNumFromSession('fix-49')).toBe('49');
-  expect(itemNumFromSession('review-49')).toBeNull();
-  expect(itemNumFromSession('ci-heal-49')).toBeNull();
+// #xr4ygg7 (multi-repo slice 9) + #x5wm9ot (bug #2) — a PR_KIND session (fix/review/ci-heal/inspect) now
+// resolves its PR number for ANY constellation repo, via prNumFromSession — never itemNumFromSession, which is
+// item-kind-only (bug #1's fix). Before #x5wm9ot, `review-`/`ci-heal-`/`inspect-` sessions matched NEITHER
+// function at all (only `fix` did) — bug #2's exact TTL-only fallback.
+it('every PR_KIND session (fix/review/ci-heal/inspect) resolves its PR number for ANY constellation repo — never itemNumFromSession', () => {
+  for (const kind of ['fix', 'review', 'ci-heal', 'inspect']) {
+    expect(prNumFromSession(`${kind}-fui-49`)).toBe('49');
+    expect(prNumFromSession(`${kind}-pa-49`)).toBe('49');
+    expect(prNumFromSession(`${kind}-49`)).toBe('49');
+    expect(itemNumFromSession(`${kind}-49`)).toBeNull();
+  }
 });
 
 describe('repoKeyForPool — #xr4ygg7 the repo a lane-pool DIRECTORY NAME names (ground truth)', () => {
@@ -504,15 +635,20 @@ describe('repoKeyForPool — #xr4ygg7 the repo a lane-pool DIRECTORY NAME names 
 });
 
 describe('fetchPrStatesForRepo — #xr4ygg7 ONE gh pr list PER REPO, never one shared always-WE read', () => {
-  it('scopes the gh call to the repo\'s own constellation slug via --repo', () => {
+  it('scopes the gh call to the repo\'s own constellation slug via --repo, and returns BOTH keyspaces from the one fetch (#x5wm9ot)', () => {
     const calls = [];
-    const exec = (cmd, args) => { calls.push({ cmd, args }); return JSON.stringify([{ headRefName: 'lane/181-x', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' }]); };
+    // PR #900 has head ref `lane/181-x` (item 181's couple) — its OWN PR number (900) is a DIFFERENT number
+    // from that item number, on purpose: this is exactly the fix-<PR>-vs-item-number distinction bug #1 named.
+    const exec = (cmd, args) => { calls.push({ cmd, args }); return JSON.stringify([{ number: 900, headRefName: 'lane/181-x', state: 'MERGED', mergedAt: '2026-09-22T00:00:00Z' }]); };
     const states = fetchPrStatesForRepo('plateau-app', {}, { exec });
     expect(calls).toHaveLength(1);
     expect(calls[0].cmd).toBe('gh');
     expect(calls[0].args).toContain('--repo');
     expect(calls[0].args[calls[0].args.indexOf('--repo') + 1]).toBe('chalbert/plateau-app');
-    expect(states.get('181')).toBe('merged');
+    expect(states.byItem.get('181')).toBe('merged');  // an item-kind (conveyor-181) lookup
+    expect(states.byPr.get('900')).toBe('merged');    // a PR_KIND (fix-900) lookup — DIFFERENT key, same fetch
+    expect(states.byItem.get('900')).toBeUndefined(); // the PR's own number is NOT in the item-keyed map
+    expect(states.byPr.get('181')).toBeUndefined();   // the item number is NOT in the PR-keyed map
   });
   it('--pr-repo overrides the slug for we ONLY — a sibling repo always reads its own real slug', () => {
     const calls = [];
@@ -536,27 +672,53 @@ describe('fetchPrStatesForRepo — #xr4ygg7 ONE gh pr list PER REPO, never one s
   });
 });
 
-describe('#xr4ygg7 — the collision hazard the per-repo split closes: same item NUMBER, different repos', () => {
-  // Reproduces main()'s own composition (candidates tagged by POOL via repoKeyForPool, one prStates Map per
-  // distinct repo, signalsFor scoped by each candidate's own repoKey) using only the exported pure pieces — no
-  // fs/gh touched. Proves the exact hazard `fetchPrStatesForRepo`'s docblock names never actually fires: a WE
-  // PR #49 merging must NEVER reap a plateau-app lease for its OWN, unrelated item 49 whose real PR is open.
+describe('#xr4ygg7 — the collision hazard the per-repo split closes: same NUMBER, different repos', () => {
+  // Reproduces main()'s own composition (candidates tagged by POOL via repoKeyForPool, one {byItem, byPr} pair
+  // per distinct repo, signalsFor scoped by each candidate's own repoKey AND its own itemKind-vs-PR_KIND split)
+  // using only the exported pure pieces — no fs/gh touched. Proves the exact hazard `fetchPrStatesForRepo`'s
+  // docblock names never actually fires: a WE PR #49 merging must NEVER reap a plateau-app lease for its OWN,
+  // unrelated item 49 whose real PR is open.
   it('never reaps a live plateau-app lease just because a same-numbered WE PR merged', () => {
     const candidates = [
       { pool: 'web-everything', lane: 3, dir: '/x/web-everything/lane-3', lease: { session: 'fix-49', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES }, repoKey: repoKeyForPool('web-everything') },
       { pool: 'plateau-app', lane: 6, dir: '/x/plateau-app/lane-6', lease: { session: 'fix-pa-49', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES }, repoKey: repoKeyForPool('plateau-app') },
     ];
     const prStatesByRepo = new Map([
-      ['we', new Map([['49', 'merged']])],       // WE's own #49 merged
-      ['plateau-app', new Map([['49', 'open']])], // plateau-app's own #49 is still open — unrelated work
+      ['we', { byItem: new Map(), byPr: new Map([['49', 'merged']]) }],       // WE's own PR #49 merged
+      ['plateau-app', { byItem: new Map(), byPr: new Map([['49', 'open']]) }], // plateau-app's own PR #49 is still open — unrelated work
     ]);
     const signalsFor = (c) => {
-      const num = itemNumFromSession(c.lease?.session);
+      const itemNum = itemNumFromSession(c.lease?.session);
+      const prNum = prNumFromSession(c.lease?.session);
       const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
-      return { prState: repoStates && num ? repoStates.get(num) ?? null : null, sessionGone: null, pidAlive: null };
+      const prState = repoStates ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null : null;
+      return { prState, sessionGone: null, pidAlive: null };
     };
     const { reap, keep } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
     expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-3:pr-merged']);
     expect(keep.map((c) => `${c.pool}/lane-${c.lane}`)).toEqual(['plateau-app/lane-6']);
+  });
+
+  // #x5wm9ot — bug #1's OWN reproduction: a fix-<PR> session's PR number must be checked against the PR-keyed
+  // Map, never the item-number-keyed one, even when they happen to share a repo. Here the couple's ITEM number
+  // (181) and the fix session's PR number (49) are DELIBERATELY DIFFERENT and DELIBERATELY DISAGREE in state
+  // (open vs merged) — using the wrong Map for either lookup would flip the verdict.
+  it('bug #1 — a fix-<PR> session checks the PR-keyed Map by its OWN PR number, never the item-keyed Map', () => {
+    const candidates = [
+      { pool: 'web-everything', lane: 9, dir: '/x/web-everything/lane-9', lease: { session: 'fix-49', acquiredAt: new Date(NOW - 60_000).toISOString(), ttlMinutes: DEFAULT_LEASE_TTL_MINUTES }, repoKey: 'we' },
+    ];
+    // item 181 (an unrelated card, coincidentally open) vs PR #49 (the fix session's OWN target, merged).
+    const repoStates = { byItem: new Map([['181', 'open']]), byPr: new Map([['49', 'merged']]) };
+    const signalsFor = (c) => {
+      const itemNum = itemNumFromSession(c.lease?.session);
+      const prNum = prNumFromSession(c.lease?.session);
+      const prState = (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null;
+      return { prState, sessionGone: null, pidAlive: null };
+    };
+    const { reap } = reapPlan(candidates, { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    // Correctly reaped via the PR-keyed lookup (PR #49 is merged) — the old bug would have looked itemNum (null,
+    // since itemNumFromSession('fix-49') is null post-fix) up nowhere, or, pre-fix, have used '49' as an ITEM
+    // number and wrongly read item 181's unrelated 'open' state (or nothing at all).
+    expect(reap.map((c) => `${c.pool}/lane-${c.lane}:${c.reason}`)).toEqual(['web-everything/lane-9:pr-merged']);
   });
 });

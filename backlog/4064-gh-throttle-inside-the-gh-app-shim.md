@@ -3,9 +3,11 @@ bornAs: xbhoirp
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/gh-app-shim.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
