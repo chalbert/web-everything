@@ -8,6 +8,8 @@
  *   own file header for why a rebase onto `main`, not a rerun of the same stale commit, is the real mechanism.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { homedir } from 'node:os';
+import { REPO_ROOT } from '../../operations/dispatch-lane-io.mjs';
 import {
   buildCandidates, sweepCiRedRecovery, refreshOntoMain, formatReport,
   HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments, countHungCiCommentsByJob, bodyHasExactLine,
@@ -32,7 +34,10 @@ describe('ci-red-recovery-watch — buildCandidates', () => {
     const readAheadBy = vi.fn(() => 33);
     const candidates = buildCandidates([PR_QUIET, PR_2635], { readAheadBy });
     expect(candidates).toEqual([
-      { prNumber: 2635, headRefName: 'lane/xdzl6mb', aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z' },
+      {
+        prNumber: 2635, headRefName: 'lane/xdzl6mb', headSha: 'ab9985630d90019a07b94e946bc75f8de7a6161f',
+        aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z',
+      },
     ]);
     expect(readAheadBy).toHaveBeenCalledTimes(1);
     expect(readAheadBy).toHaveBeenCalledWith('ab9985630d90019a07b94e946bc75f8de7a6161f', { repo: null, base: 'main' });
@@ -50,22 +55,61 @@ describe('ci-red-recovery-watch — sweepCiRedRecovery (dry run, apply: false by
     const readOpenPrs = () => [PR_2635, PR_QUIET];
     const readMainRuns = vi.fn(() => MAIN_RUNS);
     const readAheadBy = () => 33;
+    const readComments = () => [];
     const refresh = vi.fn();
-    const result = sweepCiRedRecovery({ readOpenPrs, readMainRuns, readAheadBy, refresh });
+    const result = sweepCiRedRecovery({ readOpenPrs, readMainRuns, readAheadBy, readComments, refresh });
     expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2635, kind: 'rebase-onto-main', aheadBy: 33 })]);
     expect(result.applied).toEqual([]);
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('applies exactly one refresh per dispatched candidate when apply: true', () => {
+  it('applies exactly one refresh per dispatched candidate when apply: true, and posts the durable rebase marker', () => {
     const readOpenPrs = () => [PR_2635];
     const readMainRuns = () => MAIN_RUNS;
     const readAheadBy = () => 33;
+    const readComments = vi.fn(() => []); // no prior rebase-onto-main attempts on this sha — under cap
     const refresh = vi.fn(() => ({ ok: true, action: 'rebased' }));
-    const result = sweepCiRedRecovery({ readOpenPrs, readMainRuns, readAheadBy, refresh, apply: true });
+    const postComment = vi.fn();
+    const result = sweepCiRedRecovery({
+      readOpenPrs, readMainRuns, readAheadBy, readComments, refresh, postComment, apply: true,
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(refresh).toHaveBeenCalledWith('lane/xdzl6mb', { base: 'origin/main' });
+    // `root` defaults to WE's own checkout (no `repo` given) — see this pass's own multi-repo docblock.
+    expect(refresh).toHaveBeenCalledWith('lane/xdzl6mb', expect.objectContaining({ base: 'origin/main' }));
     expect(result.applied).toEqual([{ prNumber: 2635, headRefName: 'lane/xdzl6mb', ok: true, action: 'rebased' }]);
+    expect(postComment).toHaveBeenCalledWith(2635, expect.objectContaining({
+      headRefName: 'lane/xdzl6mb', ok: true, action: 'rebased',
+    }));
+  });
+
+  // x5uqim1 follow-up (#4075/#3383) part (c) — "check the owed-ci-rerun path for frontierui/plateau-app too":
+  // `rebaseDropManifest` needs a REAL LOCAL checkout of the repo being rebased. Left at WE's own `REPO_ROOT`
+  // unconditionally, this would have run every mechanical rebase in the WRONG local git repo for those two.
+  it('resolves the frontierui sibling checkout as `root` when repo is frontierui, never WE\'s own REPO_ROOT', () => {
+    const readOpenPrs = () => [PR_2635];
+    const readMainRuns = () => MAIN_RUNS;
+    const readAheadBy = () => 33;
+    const readComments = () => [];
+    const refresh = vi.fn(() => ({ ok: true, action: 'rebased' }));
+    sweepCiRedRecovery({
+      repo: 'chalbert/frontierui', readOpenPrs, readMainRuns, readAheadBy, readComments, refresh,
+      postComment: vi.fn(), apply: true,
+    });
+    expect(refresh).toHaveBeenCalledWith('lane/xdzl6mb', expect.objectContaining({
+      root: `${homedir()}/workspace/frontierui`,
+    }));
+  });
+
+  it('defaults `root` to REPO_ROOT (WE\'s own checkout) when no repo is given', () => {
+    const readOpenPrs = () => [PR_2635];
+    const readMainRuns = () => MAIN_RUNS;
+    const readAheadBy = () => 33;
+    const readComments = () => [];
+    const refresh = vi.fn(() => ({ ok: true, action: 'rebased' }));
+    sweepCiRedRecovery({
+      readOpenPrs, readMainRuns, readAheadBy, readComments, refresh, postComment: vi.fn(), apply: true,
+    });
+    expect(refresh).toHaveBeenCalledWith('lane/xdzl6mb', expect.objectContaining({ root: REPO_ROOT }));
   });
 
   it('PR #2596 (operator already refreshed it by hand, ahead_by 0, still red) is reported already-current, never re-applied', () => {
@@ -100,7 +144,10 @@ describe('ci-red-recovery-watch — sweepCiRedRecovery (dry run, apply: false by
     const readOpenPrs = () => [PR_2635, PR_2596, PR_2636];
     const readMainRuns = () => MAIN_RUNS;
     const readAheadBy = (headSha) => (headSha === PR_2635.headRefOid ? 33 : 0);
-    const result = sweepCiRedRecovery({ readOpenPrs, readMainRuns, readAheadBy, refresh: vi.fn() });
+    const readComments = () => []; // #2635 is the only candidate that ever reaches this read (aheadBy > 0, main-red)
+    const result = sweepCiRedRecovery({
+      readOpenPrs, readMainRuns, readAheadBy, readComments, refresh: vi.fn(),
+    });
     expect(result.dispatch.map((d) => d.prNumber)).toEqual([2635]);
     expect(result.refusals.map((r) => ({ pr: r.prNumber, kind: r.kind }))).toEqual([
       { pr: 2596, kind: 'already-current' },
@@ -261,31 +308,44 @@ describe('ci-red-recovery-watch — sweepHungCiRecovery', () => {
     expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2636, ok: false, action: 'cancel-failed', error: 'boom' })]);
   });
 
-  it('a run whose cancel+rerun keeps FAILING still trips hung-cap-exhausted after maxRetriesPerSha attempts — never hammers gh forever', () => {
+  // 2026-09-25 18:55 ET correction (#4075/#3383): once the GitHub App token got `actions:write`, a cap-hit run
+  // is no longer left refusing forever — it is cancelled (never re-run, via `cancelOnly`, the SAME primitive
+  // `repeat-hang` already uses) and handed to ci-heal instead.
+  it('a run whose cancel+rerun keeps FAILING still trips the cap after maxRetriesPerSha attempts, then escalates via cancelOnly — never hammers gh with another rerun', () => {
     // Simulates tick N+1 reading back the durable failure markers ticks 1..maxRetriesPerSha posted.
     const readComments = () => [
       { body: buildHungCiComment({ headSha: 'deadbeef2636', jobName: 'test-shard (1)', ok: false, action: 'cancel-failed', error: 'permission denied' }), author: { login: 'web-everything' } },
       { body: buildHungCiComment({ headSha: 'deadbeef2636', jobName: 'test-shard (1)', ok: false, action: 'cancel-failed', error: 'permission denied' }), author: { login: 'web-everything' } },
     ];
     const cancelAndRerun = vi.fn();
+    const cancelOnly = vi.fn(() => ({ ok: true, action: 'cancelled-no-rerun' }));
+    const postComment = vi.fn();
     const result = sweepHungCiRecovery({
-      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, now: NOW, apply: true, maxRetriesPerSha: 2,
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, postComment, now: NOW, apply: true, maxRetriesPerSha: 2,
     });
-    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-escalate' })]);
+    expect(result.refusals).toEqual([]);
     expect(cancelAndRerun).not.toHaveBeenCalled();
+    expect(cancelOnly).toHaveBeenCalledWith(36161558017, expect.objectContaining({ repo: null }));
+    expect(postComment).toHaveBeenCalled();
   });
 
-  it('refuses hung-cap-exhausted once the durable per-sha comment count already hit the cap, and never calls cancelAndRerun', () => {
+  it('dispatches hung-cap-escalate (cancelOnly, never cancelAndRerun) once the durable per-sha comment count already hit the cap', () => {
     const readComments = () => [
       { body: buildHungCiComment({ headSha: 'deadbeef2636' }), author: { login: 'web-everything' } },
       { body: buildHungCiComment({ headSha: 'deadbeef2636' }), author: { login: 'web-everything' } },
     ];
     const cancelAndRerun = vi.fn();
+    const cancelOnly = vi.fn(() => ({ ok: true, action: 'cancelled-no-rerun' }));
+    const postComment = vi.fn();
     const result = sweepHungCiRecovery({
-      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, now: NOW, apply: true, maxRetriesPerSha: 2,
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, postComment, now: NOW, apply: true, maxRetriesPerSha: 2,
     });
-    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-escalate' })]);
+    expect(result.refusals).toEqual([]);
     expect(cancelAndRerun).not.toHaveBeenCalled();
+    expect(cancelOnly).toHaveBeenCalledTimes(1);
+    expect(postComment).toHaveBeenCalled();
   });
 
   it('a NEW push (different head sha) starts the SHA cap fresh — the old sha\'s exhausted count never carries over', () => {

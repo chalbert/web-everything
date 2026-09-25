@@ -52,7 +52,7 @@ import {
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { runReconcileCiHealDispatch } from '../../scripts/operations/ci-heal-pr-dispatch.mjs';
-import { sweepHungCiRecovery } from '../../scripts/conveyor/ci-red-recovery-watch.mjs';
+import { sweepHungCiRecovery, sweepCiRedRecovery } from '../../scripts/conveyor/ci-red-recovery-watch.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
@@ -276,6 +276,45 @@ export function runHungCiRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, t
 }
 
 /**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runMainRedRebaseAllRepos — x5uqim1 follow-up (epic
+ * #4075/#3383), 2026-09-25 18:52 ET LIVE INCIDENT: PR #2685 logged `reconcile-refused owed-ci-rerun` on EVERY
+ * tick of THIS daemon ("owed a mechanical rebase onto main … once main has recovered") while nothing in any
+ * running process ever performed that rebase. `we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery`
+ * already implements the real write (via `we:scripts/lib/rebase-drop-manifest.mjs#rebaseDropManifest`, the SAME
+ * proven, no-checkout plumbing the drain itself uses) and is already registered per-repo in
+ * `we:skills-src/conveyor/daemon-manifest.mjs` (`ci-red-recovery-watch-<repo>`) — but, live-confirmed exactly
+ * like {@link runHungCiRecoveryAllRepos}'s own docblock found for the hung-CI half of this same file, NO
+ * launchd job installs `pass-daemon.mjs` for that entry (only an `.example` plist exists under
+ * `we:skills-src/conveyor/launchd/`). Rather than touch launchd (out of scope for this card — an operational
+ * action, not a code change), this rides the SAME already-live daemon the hung-CI half already rides. Mirrors
+ * {@link runHungCiRecoveryAllRepos}'s own per-repo fan-out, failure isolation, and `apply: true` always
+ * (`sweepCiRedRecovery`'s own idempotent `already-current` short-circuit, plus the new
+ * `we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_MAX_REBASE_RETRIES_PER_SHA` cap, make this safe to run
+ * unconditionally on the default cadence — the same "efficiency no-op, not a safety refusal" trade every
+ * sibling pass-daemon entry in `daemon-manifest.mjs` already documents for itself).
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
+ *   `sweepCiRedRecovery`); every other option is forwarded to it for EVERY repo except `repo` itself.
+ * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
+ *   refusals:Array<object>}} `dispatched`/`refusals` here are the pass's own `applied`/`dispatch`+`refusals`
+ *   rows, repo-tagged the same way {@link runHungCiRecoveryAllRepos} tags its own.
+ */
+export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = sweepCiRedRecovery, ...tickOpts } = {}) {
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo, apply: true }));
+  const dispatched = [];
+  const refusals = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    for (const a of (result.applied ?? [])) dispatched.push({ ...a, repo, kind: 'rebase-onto-main' });
+    for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+  }
+  return { repos: perRepo, dispatched, refusals };
+}
+
+/**
  * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runTickAllRepos — #xngv3vn (epic #3383/#4075): the
  * daemon's WHOLE per-tick unit of work, composing BOTH halves this daemon now owns — the pre-existing `fix`
  * dispatch ({@link runReconcileFixDispatchAllRepos}) and the previously-uncalled `ci-heal` dispatch
@@ -300,18 +339,23 @@ export function runHungCiRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, t
  *   `daemon-manifest.mjs` entry has no launchd job installed).
  */
 export async function runTickAllRepos({
-  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick,
+  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick,
 } = {}) {
   const fix = runReconcileFixDispatchAllRepos({ repos, ...(fixTick ? { tick: fixTick } : {}) });
   const ciHeal = await runReconcileCiHealDispatchAllRepos({ repos, ...(ciHealTick ? { tick: ciHealTick } : {}) });
   const hungCi = runHungCiRecoveryAllRepos({ repos, ...(hungCiTick ? { tick: hungCiTick } : {}) });
+  // x5uqim1 follow-up (#4075/#3383) — the FOURTH half this daemon now owns: see
+  // {@link runMainRedRebaseAllRepos}'s own docblock for why this daemon, specifically, is where it lives (same
+  // reason `hungCi` already does — the pass's own `daemon-manifest.mjs` entry has no launchd job installed).
+  const mainRedRebase = runMainRedRebaseAllRepos({ repos, ...(mainRedRebaseTick ? { tick: mainRedRebaseTick } : {}) });
   return {
     repos: fix.repos, // same repo list every half ticked — the shape onTick's log already reads from
-    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched],
-    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals],
+    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched],
+    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals],
     reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? [])],
     ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
     hungCi, // the hung-ci-recovery half's own detail, same reason
+    mainRedRebase, // the main-red-rebase half's own detail, same reason
   };
 }
 
@@ -351,6 +395,19 @@ export function formatHungActionLine(a) {
   return `reconcile-fix-dispatch-daemon: hung-ci-recovery ${a?.repo ?? '?'} ${prLabel} run ${a?.runId ?? '?'} — ${outcome} — ${a?.why ?? '(no reason recorded)'}`;
 }
 
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatMainRedRebaseActionLine — x5uqim1 follow-up
+ * (#4075/#3383): ONE printable line per mechanical-rebase action this tick attempted. Mirrors
+ * {@link formatHungActionLine}'s own shape.
+ * @param {{repo?:string, prNumber?:(number|null), headRefName?:(string|null), ok?:boolean, action?:string, error?:string}} a
+ * @returns {string}
+ */
+export function formatMainRedRebaseActionLine(a) {
+  const prLabel = a?.prNumber == null ? '(no PR)' : `PR #${a.prNumber}`;
+  const outcome = a?.ok ? `applied ${a.action}` : `FAILED ${a.action}${a?.error ? ` (${a.error})` : ''}`;
+  return `reconcile-fix-dispatch-daemon: main-red-rebase ${a?.repo ?? '?'} ${prLabel} (${a?.headRefName ?? '?'}) — ${outcome}`;
+}
+
 /** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runTickAllRepos} (`fix` +
  *  `ci-heal`, #xngv3vn), a real interval sleep, and a real keyed lease heartbeat. Kept as its own factory
  *  (mirroring `buildCliTickEffects` in runner.mjs) so `main()` stays a thin wire-up. */
@@ -362,7 +419,7 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
       const {
-        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi,
+        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase,
       } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
       for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
@@ -381,6 +438,9 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // `applied` rows (an action this tick actually attempted), never the bare refusal population already
       // covered by the `refusals` loop above.
       for (const a of (hungCi?.dispatched ?? [])) log.error(formatHungActionLine(a));
+      // x5uqim1 follow-up (#4075/#3383) — ONE LINE PER MECHANICAL-REBASE ACTION, same discipline as the
+      // hung-run loop just above.
+      for (const a of (mainRedRebase?.dispatched ?? [])) log.error(formatMainRedRebaseActionLine(a));
     },
     onTickError: (error) => {
       log.error(`reconcile-fix-dispatch-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);

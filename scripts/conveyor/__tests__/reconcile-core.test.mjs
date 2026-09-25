@@ -42,6 +42,7 @@ import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
 import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment, isLatestAdvisoryFindingAddressed } from '../advisory-fix-mark.mjs';
+import { buildRebaseOntoMainComment, DEFAULT_MAX_REBASE_RETRIES_PER_SHA } from '../main-red-recovery.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
@@ -879,6 +880,39 @@ describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable
     });
     expect(plan.dispatch).toEqual([]);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2635, cap: CI_HEAL_ROUND_CAP })]);
+  });
+
+  // x5uqim1 follow-up (#4075/#3383) — a rebase onto main that keeps failing for a NON-conflict reason (never a
+  // real conflict, which already escapes via `mergeStateStatus: 'DIRTY'` above) must not refuse `owed-ci-rerun`
+  // forever either: `we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery` posts a durable marker on
+  // EVERY rebase attempt (success or failure), and this pass reads that count straight off `pr.comments` — no
+  // new IO shell wiring needed, since `comments` is already part of this pass's own input.
+  it('#x5uqim1 — once the rebase-onto-main attempt cap is exhausted for this head sha, falls through to ci-heal instead of refusing owed-ci-rerun forever', () => {
+    const sha = pr1563().headRefOid;
+    const comments = Array.from({ length: DEFAULT_MAX_REBASE_RETRIES_PER_SHA }, () => ({
+      body: buildRebaseOntoMainComment({ headSha: sha, ok: false, action: 'error', error: 'push rejected' }),
+      author: AUTOMATION,
+    }));
+    const plan = planReconcile({
+      prs: [prRedAttributable({ comments })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635, attempts: 0 })]);
+  });
+
+  it('#x5uqim1 — a rebase attempt count BELOW the cap still refuses owed-ci-rerun as before (byte-identical to the untouched case)', () => {
+    const sha = pr1563().headRefOid;
+    const comments = Array.from({ length: DEFAULT_MAX_REBASE_RETRIES_PER_SHA - 1 }, () => ({
+      body: buildRebaseOntoMainComment({ headSha: sha, ok: false, action: 'error', error: 'push rejected' }),
+      author: AUTOMATION,
+    }));
+    const plan = planReconcile({
+      prs: [prRedAttributable({ comments })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2635 })]);
   });
 });
 
