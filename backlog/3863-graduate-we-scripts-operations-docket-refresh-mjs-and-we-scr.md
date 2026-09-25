@@ -3,10 +3,12 @@ bornAs: xj0bx08
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3901"]
 scope: ["we:scripts/operations/docket-refresh.mjs", "we:scripts/operations/docket-refresh-io.mjs", "we:scripts/operations/__tests__/docket-refresh.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
