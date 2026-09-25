@@ -1,4 +1,5 @@
 ---
+bornAs: x6sslco
 kind: decision
 parent: "4075"
 status: open
@@ -90,7 +91,7 @@ hold — a snapshot at an old commit cannot push to `main`, and a live tree move
   and state root pinned by env, so the clone rebuilds freely. A `mutates-tree` job (the drain follow-up) runs
   in its own dedicated working tree of `main`, never the daemon clone, with its ledger pinned to the state
   root; it holds the clone's shared hold only while it runs, which is seconds once the numbering loop is
-  fixed (card xn6n5gp).
+  fixed (card 4127).
 
 Skeptic: REFUTED → flipped from (a) to (c) for the four drain-follow-up breakages above.
 
@@ -109,7 +110,7 @@ Skeptic: REFUTED → flipped from (a) to (c) for the four drain-follow-up breaka
    declares `serial` or a cap (default 2 per daemon), in the daemon manifest; CPU-heavy kinds also pass the
    host-wide heavy-command admission. Kinds that write to `main` hold `NUMBERING_LOCK_PATH`
    (`we:scripts/readiness/drain-lock.mjs` 69) with a heartbeat and `runUnlockedOnContention: false` (card
-   xuqk1vp); they do not hold the whole-process drain lease, and a follow-up job never shares a working tree
+   4134); they do not hold the whole-process drain lease, and a follow-up job never shares a working tree
    with a pass. *Precedent:* the sole-writer-to-`main` rule. The first draft's "(b) one global cap" was a
    strawman, since (a) already had host-wide admission.
 3. **The health daemon pulls job records; daemons never push to it.** It reads each state root's job
@@ -129,10 +130,10 @@ Skeptic: REFUTED → flipped from (a) to (c) for the four drain-follow-up breaka
 - **Adoption behind a per-kind switch** that defaults to the inline path until the adopter's live proof
   passes, then flips; rollback is a switch flip.
 - **Order of adoption** (sequencing, not a merit call; amended by the skeptic so the riskiest single-writer
-  path does not go first): core (xjz3gof) → the health daemon (xqw7hb2) alone → verify gates (xxkqmjj) and
-  clone rebuild / `npm ci` / live smoke (xkiob80) → the drain post-merge follow-up (xf4av69), only after
-  xn6n5gp, xuqk1vp and xb94mt5 have landed → runner passes, infra-blocked resumes, dispatch launch
-  (xtl54o5).
+  path does not go first): core (4125) → the health daemon (4131) alone → verify gates (4135) and
+  clone rebuild / `npm ci` / live smoke (4126) → the drain post-merge follow-up (4124), only after
+  4127, 4134 and 4121 have landed → runner passes, infra-blocked resumes, dispatch launch
+  (4132).
 - **Single host.** A record from another host is never reattached; it is reported.
 - **The daemon still restarts only between ticks** (#resident-daemon-reload-lifecycle clause 1); ticks are
   now short, so that rule stops costing a window.
@@ -171,16 +172,16 @@ order was, and it is now a "Supported by default" sequencing line.
 
 ## Build slices (filed uncleared, each blocked by this card)
 
-1. xjz3gof — core: record kind, handle, detached launch, snapshot/working-tree per kind, reattach, caps.
-2. xqw7hb2 — first adopter: the health daemon (4077 / 4078).
-3. xxkqmjj — verify gate runs.
-4. xkiob80 — clone rebuild, `npm ci`, live smoke.
-5. xf4av69 — the drain's post-merge follow-up (after xn6n5gp, xuqk1vp, xb94mt5).
-6. xtl54o5 — runner passes, infra-blocked resumes, dispatch launch.
+1. 4125 — core: record kind, handle, detached launch, snapshot/working-tree per kind, reattach, caps.
+2. 4131 — first adopter: the health daemon (4077 / 4078).
+3. 4135 — verify gate runs.
+4. 4126 — clone rebuild, `npm ci`, live smoke.
+5. 4124 — the drain's post-merge follow-up (after 4127, 4134, 4121).
+6. 4132 — runner passes, infra-blocked resumes, dispatch launch.
 
-Not blocked by this card (fixes that land now): xn6n5gp (numbering regex, P0), xuqk1vp (numbering lock),
-xb94mt5 (number on any pass), xnjiuar, xpe1s8f, xo3l1l1, xe3plfl, x08au3e, xujt3ts, xdtot9p, x3zr5tu,
-xowehck; xz0a64g is a hand-off to the rebuild worker.
+Not blocked by this card (fixes that land now): 4127 (numbering regex, P0), 4134 (numbering lock),
+4121 (number on any pass), xnjiuar, 4130, 4128, 4123, 4117, 4133, 4122, 4118,
+4129; 4136 is a hand-off to the rebuild worker.
 
 ## Done when
 
