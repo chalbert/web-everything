@@ -529,8 +529,14 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
   }
 
   if (state.quarantine) {
-    const status = git(['status', '--porcelain']);
-    const clean = status.status === 0 && !String(status.stdout ?? '').trim();
+    // Same definition of "clean" as findUnsafeLocalState: tracked changes only (an untracked sidecar must never
+    // freeze recovery), plus the same untracked-collision guard Step 4.5 runs — refuse if prevHead has content
+    // at an untracked path, since this `reset --hard` would silently overwrite it.
+    const { prevHead: qHead } = state.quarantine;
+    const status = git(['status', '--porcelain', '--untracked-files=no']);
+    const untracked = collectUntrackedPaths(git);
+    const clean = status.status === 0 && !String(status.stdout ?? '').trim() && untracked !== null
+      && !untracked.some((p) => git(['cat-file', '-e', `${qHead}:${p}`]).status === 0);
     const reset = clean ? git(['reset', '--hard', state.quarantine.prevHead]) : { status: 1 };
     if (clean && reset.status === 0) {
       state.quarantine = null;

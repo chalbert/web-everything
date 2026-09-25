@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import {
-  planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState,
+  planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays } from '../daemon-overlays.mjs';
 
@@ -442,6 +442,62 @@ describe('rebuildClone', () => {
     expect(existsSync(join(cloneDir, 'squash-drop.txt'))).toBe(true);
     // Lands on PLAIN main — no overlay merge commit left in the picture.
     expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(gitOk(cloneDir, ['rev-parse', 'origin/main']).trim());
+  });
+
+  /** Seed `state.quarantine` exactly as a failed rollback leaves it (rebuildClone's own state file). */
+  function seedQuarantine(cloneDir, env, prevHead) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ quarantine: { prevHead, reason: 'smoke-code-rollback-failed' } }));
+  }
+
+  it('recovers from quarantine even when a harmless untracked file sits in the tree', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedQuarantine(cloneDir, env, gitOk(cloneDir, ['rev-parse', 'HEAD']).trim());
+    writeFile(cloneDir, 'daemon-sidecar.json', '{}\n'); // untracked, not ignored, absent from prevHead's tree
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).not.toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).toBeNull();
+    expect(readFileSync(join(cloneDir, 'daemon-sidecar.json'), 'utf8')).toBe('{}\n'); // kept, never deleted
+  });
+
+  it('stays quarantined when a tracked file is dirty', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedQuarantine(cloneDir, env, gitOk(cloneDir, ['rev-parse', 'HEAD']).trim());
+    writeFile(cloneDir, 'README.md', 'local edit\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('local edit\n');
+  });
+
+  it('stays quarantined rather than let the recovery reset overwrite an untracked file prevHead has content at', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'collide.txt', 'tracked at prevHead\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add collide.txt']);
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    gitOk(cloneDir, ['rm', '-q', 'collide.txt']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'drop collide.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    seedQuarantine(cloneDir, env, prevHead);
+    writeFile(cloneDir, 'collide.txt', 'untracked local content\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('quarantined');
+    expect(readRebuildState(cloneDir, env).quarantine).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'collide.txt'), 'utf8')).toBe('untracked local content\n');
   });
 });
 
