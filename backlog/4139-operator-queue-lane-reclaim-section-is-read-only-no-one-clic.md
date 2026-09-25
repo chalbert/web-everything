@@ -3,10 +3,12 @@ bornAs: x7qdbhj
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/operations/operator-queue.mjs", "we:scripts/lane-pool.mjs", "we:scripts/lane-whois.mjs", "we:scripts/lib/lane-whois-core.mjs", "we:scripts/operations/__tests__/operator-queue-lane-reclaim.test.mjs"]
 relatedTo: ["4058", "4116"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: none
 tags: []
 ---
 
@@ -16,4 +18,4 @@ we:scripts/operations/operator-queue.mjs's laneReclaimQueue lists every finished
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/__tests__/lane-pool-keep.test.mjs we:scripts/operations/__tests__/operator-queue-lane-reclaim.test.mjs` fails before this item lands (no `keep` command, `laneReclaimQueue` does not exclude kept lanes) and passes after.
