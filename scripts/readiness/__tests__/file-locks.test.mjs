@@ -192,6 +192,22 @@ describe('atomic fs primitives — real temp lock root', () => {
     expect(readLockEntry(root, 'p').owner).toBe('B'); // reclaimed
   });
 
+  it('reserve: a liveness PROBE function is judged against the entry reserve itself read — no stale double-read (review #2668)', () => {
+    // The probe says only owner A's pid is dead. A caller that probed A, then lost the lock to a live C before
+    // reserve re-read, must NOT reclaim C: the probe runs against C's entry, and C is alive.
+    const seen = [];
+    const probe = (entry) => { seen.push(entry && entry.owner); return entry && entry.owner === 'A' ? 'dead' : 'alive'; };
+    reserve(root, 'p', 'C', T0, iso(T0), 300);
+    const onLive = reserve(root, 'p', 'B', T0 + 60_000, iso(T0 + 60_000), 200, probe);
+    expect(onLive).toMatchObject({ ok: false, reason: 'held', heldBy: 'C' });
+    expect(readLockEntry(root, 'p').owner).toBe('C');
+    releaseLockDir(root, 'p');
+    reserve(root, 'p', 'A', T0, iso(T0), 100);
+    const onDead = reserve(root, 'p', 'B', T0 + 60_000, iso(T0 + 60_000), 200, probe);
+    expect(onDead).toMatchObject({ ok: true, reason: 'pid-dead', heldBy: 'B' });
+    expect(seen).toEqual(['C', 'A']);
+  });
+
   it('reserve: PID-dead owner is reclaimed immediately, before the lease lapses', () => {
     reserve(root, 'p', 'A', T0, iso(T0), 100);
     const r = reserve(root, 'p', 'B', T0 + 60_000, iso(T0 + 60_000), 200, 'dead'); // within lease, owner gone

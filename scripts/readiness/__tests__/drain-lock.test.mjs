@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { readLockEntry } from '../file-locks.mjs';
 import {
@@ -28,7 +28,7 @@ beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'drain-lock-')); });
 afterEach(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best-effort */ } });
 
 describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () => {
-  it('BLOCKS a second entrant while the first holds the section (no interleaved number+publish)', () => {
+  it('BLOCKS a second entrant while the first holds the section (no interleaved number+publish) — DEFAULT keeps the never-hang fallback for backward compat', () => {
     // Land A holds the mutex, its lease fresh.
     expect(tryAcquireNumberingLock(root, 'A', { nowMs: T0, leaseMinutes: 5 }).ok).toBe(true);
     // Land B tries the wrapped section with a bounded wait; a fake clock advances per poll but never reaches
@@ -41,9 +41,46 @@ describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () =
     expect(r.held).toBe(false);       // B never seized the lock while A held it → mutual exclusion
     expect(r.heldBy).toBe('A');
     expect(r.contended).toBe(true);   // blocked past the budget → fell through un-locked rather than HANG
+    // `runUnlockedOnContention` still DEFAULTS true (xuqk1vp: unchanged, for the out-of-scope call sites that
+    // still read `.result` unconditionally) — fn runs, ran:true.
+    expect(r.ran).toBe(true);
     expect(ran).toBe(1);              // the land never wedges: fn still ran (the never-hang fallback)
     // A still owns the lock (B's fallback never stomped it).
     expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('A');
+  });
+
+  it('opt-in `runUnlockedOnContention:false` (xuqk1vp) NEVER runs fn unlocked — the contract lane-drain.mjs uses', () => {
+    expect(tryAcquireNumberingLock(root, 'A', { nowMs: T0, leaseMinutes: 5 }).ok).toBe(true);
+    let clock = T0;
+    const now = () => clock;
+    const sleep = () => { clock += 100; };
+    let ran = 0;
+    const r = withNumberingLock(() => { ran++; return 'B'; }, {
+      lockRoot: root, owner: 'B', waitMs: 1000, pollMs: 100, leaseMinutes: 5, now, sleep, runUnlockedOnContention: false,
+    });
+    expect(r).toMatchObject({ ran: false, held: false, contended: true, result: undefined, heldBy: 'A' });
+    expect(ran).toBe(0); // fn never invoked — no second writer touched main
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('A'); // never stomped
+  });
+
+  it('a LIVE holder that heartbeats mid-section is NEVER reclaimed by the TTL alone (xuqk1vp)', () => {
+    let clock = T0;
+    const now = () => clock;
+    // A holds the lock and, INSIDE its own section, heartbeats once past what would otherwise be the 5-min
+    // TTL — simulating a genuinely long-running (but alive) numbering pass. A second acquire attempt AFTER
+    // that heartbeat, at a clock that is stale relative to the ORIGINAL acquire but fresh relative to the
+    // heartbeat, must still see A as live and refuse to reclaim.
+    const r = withNumberingLock((heartbeat) => {
+      clock = T0 + 6 * MIN; // would be lease-expired vs the ORIGINAL acquire timestamp
+      heartbeat();          // refresh — A's heartbeatAt is now T0+6min
+      // A second, concurrent acquire attempt right after the heartbeat sees a FRESH heartbeat, not a stale one.
+      const second = tryAcquireNumberingLock(root, 'B', { nowMs: clock, leaseMinutes: 5 });
+      expect(second.ok).toBe(false); // NOT reclaimed — A's heartbeat is fresh as of `clock`
+      expect(second.reason).toBe('held');
+      return 'done';
+    }, { lockRoot: root, owner: 'A', leaseMinutes: 5, now });
+    expect(r).toMatchObject({ ran: true, held: true, result: 'done' });
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH)).toBeNull(); // released after the section
   });
 
   it('once the holder releases, the next entrant acquires and runs INSIDE the lock, then frees it', () => {
@@ -64,11 +101,57 @@ describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () =
     expect(r1.held && r2.held).toBe(true);
   });
 
+  it('a PROVABLY-DEAD same-host holder is reclaimed IMMEDIATELY, ignoring the 5-min TTL (xuqk1vp pid-dead fast path)', () => {
+    const deadPid = 999999; // kill(pid,0) throws ESRCH — cannot exist
+    const owner = `${hostname()}:${deadPid}:numbering`;
+    expect(tryAcquireNumberingLock(root, owner, { nowMs: T0, pid: deadPid, leaseMinutes: 5 }).ok).toBe(true);
+    // ONE millisecond later — nowhere near the 5-min TTL — a fresh acquirer still reclaims, because the
+    // holder's pid is provably gone. Before xuqk1vp, `tryAcquireNumberingLock` always passed `pidLiveness:
+    // 'unknown'`, so this reclaim would have to wait out the full 5-min lease instead.
+    const r = tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 1, leaseMinutes: 5 });
+    expect(r).toMatchObject({ ok: true, reason: 'pid-dead', heldBy: 'B' }); // `heldBy` names the NEW winner (reserve()'s convention)
+  });
+
+  it('a LIVE same-host holder (a real pid) is NEVER reclaimed early just because its owner STRING looks stale-able', () => {
+    const owner = `${hostname()}:${process.ppid}:numbering`; // the test runner's own parent — real, alive, not us
+    expect(tryAcquireNumberingLock(root, owner, { nowMs: T0, pid: process.ppid, leaseMinutes: 5 }).ok).toBe(true);
+    const r = tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 1, leaseMinutes: 5 }); // 1ms later — TTL nowhere close
+    expect(r).toMatchObject({ ok: false, reason: 'held', heldBy: owner }); // alive ⇒ blocked, not reclaimed
+  });
+
+  it('a foreign-host owner is NEVER pid-probed locally — only the TTL floor can reclaim it', () => {
+    const foreignOwner = 'some-other-mac.local:1:numbering';
+    expect(tryAcquireNumberingLock(root, foreignOwner, { nowMs: T0, pid: 1, leaseMinutes: 5 }).ok).toBe(true);
+    // pid 1 (init/launchd) is very likely "alive" on THIS host too, which is exactly the hazard: reclaim must
+    // not even attempt the local kill(pid,0) probe for a differently-hosted owner. 1ms later it is still held.
+    const soon = tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 1, leaseMinutes: 5 });
+    expect(soon).toMatchObject({ ok: false, reason: 'held', heldBy: foreignOwner });
+    // Only the TTL floor reclaims a foreign-host owner — 6 minutes later (past the 5-min lease) it frees up.
+    const later = tryAcquireNumberingLock(root, 'B', { nowMs: T0 + 6 * MIN, leaseMinutes: 5 });
+    expect(later).toMatchObject({ ok: true, reason: 'lease-expired', heldBy: 'B' }); // `heldBy` names the NEW winner
+  });
+
   it('a STALE numbering lock (a crashed holder) is reclaimed via the TTL — the section never wedges', () => {
     tryAcquireNumberingLock(root, 'DEAD', { nowMs: T0, leaseMinutes: 5 });
     const later = T0 + 6 * MIN; // heartbeat now 6 min old vs a 5-min lease → reclaimable
     const r = withNumberingLock(() => 'ok', { lockRoot: root, owner: 'FRESH', leaseMinutes: 5, now: () => later });
     expect(r).toMatchObject({ held: true, reason: 'lease-expired', result: 'ok' });
+  });
+
+  it('a heartbeat AFTER the lock was reclaimed away is a no-op — it never re-seats the stale holder over the reclaimer (review #2668)', () => {
+    let clock = T0;
+    let reclaim = null;
+    let lateBeat = null;
+    withNumberingLock((heartbeat) => {
+      // A's section stalls past its 5-min lease without heartbeating; B legitimately reclaims via the TTL.
+      clock = T0 + 6 * MIN;
+      reclaim = tryAcquireNumberingLock(root, 'B', { nowMs: clock, leaseMinutes: 5 });
+      // A then heartbeats — an ordinary mid-section call. It must NOT overwrite B's entry.
+      lateBeat = heartbeat();
+    }, { lockRoot: root, owner: 'A', leaseMinutes: 5, now: () => clock });
+    expect(reclaim).toMatchObject({ ok: true, reason: 'lease-expired' });
+    expect(lateBeat).toBe(false);
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('B'); // B still owns it; A's release skipped too
   });
 
   it('releaseNumberingLockIfOwned never stomps a reclaimer that seized the section', () => {
@@ -80,7 +163,7 @@ describe('numbering-critical-section mutex — sole-serial-writer (#2391)', () =
 });
 
 describe('withLandWriteLock — the merge write shares the serial-writer mutex (#2683)', () => {
-  it('a merge write BLOCKS while a numbering section holds the SAME lock key (mutual exclusion across the two)', () => {
+  it('a merge write BLOCKS while a numbering section holds the SAME lock key (mutual exclusion across the two) — DEFAULT unchanged', () => {
     // A numbering land holds the mutex; a concurrent merge write must NOT proceed under the lock — they share
     // NUMBERING_LOCK_PATH, so the merge is what a --only fast drain serializes against a resident-daemon sweep.
     expect(tryAcquireNumberingLock(root, 'NUMBERING', { nowMs: T0, leaseMinutes: 5 }).ok).toBe(true);
@@ -88,9 +171,22 @@ describe('withLandWriteLock — the merge write shares the serial-writer mutex (
     const r = withLandWriteLock(() => 'merged', { lockRoot: root, waitMs: 500, pollMs: 100, leaseMinutes: 5, now: () => clock, sleep: () => { clock += 100; } });
     expect(r.held).toBe(false);        // never seized while numbering held it
     expect(r.heldBy).toBe('NUMBERING');
-    expect(r.contended).toBe(true);    // never-hang fallback — the merge still ran (fn), the idempotency guard is the backstop
+    expect(r.contended).toBe(true);    // never-hang fallback (default unchanged) — the merge still ran (fn), the idempotency guard is the backstop
+    expect(r.ran).toBe(true);
     expect(r.result).toBe('merged');
     expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('NUMBERING'); // the fallback never stomped the holder
+  });
+
+  it('opt-in `runUnlockedOnContention:false` (xuqk1vp) is available to a merge-write caller that wants the strict contract too', () => {
+    expect(tryAcquireNumberingLock(root, 'NUMBERING', { nowMs: T0, leaseMinutes: 5 }).ok).toBe(true);
+    let clock = T0;
+    let ran = false;
+    const r = withLandWriteLock(() => { ran = true; return 'merged'; }, {
+      lockRoot: root, waitMs: 500, pollMs: 100, leaseMinutes: 5, now: () => clock, sleep: () => { clock += 100; }, runUnlockedOnContention: false,
+    });
+    expect(r).toMatchObject({ ran: false, held: false, contended: true, result: undefined, heldBy: 'NUMBERING' });
+    expect(ran).toBe(false);
+    expect(readLockEntry(root, NUMBERING_LOCK_PATH).owner).toBe('NUMBERING');
   });
 
   it('two merge writes serialize on the shared key and release after each section', () => {
@@ -301,7 +397,7 @@ describe('#3637 — the per-POC-branch land lock', () => {
     expect(out).toMatchObject({ ran: false, held: false, contended: true, result: undefined });
   });
 
-  it('withNumberingLock KEEPS its never-hang fallback — #2288/#2683 behaviour is unchanged', () => {
+  it('withNumberingLock KEEPS its never-hang fallback BY DEFAULT — #2288/#2683 behaviour unchanged for out-of-scope callers', () => {
     tryAcquireNumberingLock(root, 'someone:else:numbering', { nowMs: T0 });
     // `now: () => T0` below keeps the holder live from withNumberingLock's point of view.
     let ran = false;
