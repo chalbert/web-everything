@@ -105,7 +105,7 @@
 import { parseSessionSlug } from './session-slug.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -113,7 +113,14 @@ import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
-import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion } from '../operations/completion-store.mjs';
+import {
+  applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
+  tryReadCompletion, writeCompletion,
+} from '../operations/completion-store.mjs';
+import {
+  deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
+} from '../operations/delivery-report-store.mjs';
+import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 // #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
 // binds `blocked-on-infra` on, imported (never re-declared) so the reaper and the reconciler can never disagree
@@ -558,6 +565,365 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
   };
 }
 
+// ── RETENTION SWEEP (#4089, epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) ─────────
+// Deletes a FINISHED session's own RECORDS (its completion record, its delivery report, its now-stale
+// `claude agents` entry, plus terminal run records generally — see below) — a wholly separate axis from the
+// STOP pass above. Stopping decides "is this process still doing anything"; retention decides "has the WORK
+// this session served been over long enough that even the paper trail can go". A session can sit fully
+// stopped for weeks with every record above still on disk today — `#4082`'s own card measured 1581 job
+// entries and 92 `.operations/runs/` records live, with the delete helpers that already existed
+// (`run-store.mjs#deleteRun`) never once called.
+//
+// THE TWO INDEPENDENT PATHS, straight from the ratified statute:
+//   PATH A — confirmed-done + grace. The session's own target (its card, or its PR) is confirmed finished
+//     (resolved, or merged/closed), its introspection has run, and — once #4071 ships — its cost is rolled
+//     up; then a grace period (default 1 day) must elapse before deletion.
+//   PATH B — the ceiling safety valve. Regardless of path A, a record older than the ceiling (default 30
+//     days, mirroring Claude Code's own `cleanupPeriodDays`) is deleted anyway — the statute's own "the
+//     ceiling also covers a card that never finishes" clause, so a parked card's session records do not sit
+//     forever just because the card itself never resolves.
+// Both settings independently accept `'never'` (parsed to `null`, disabling that path outright — never a `0`
+// silently inferred from an unset value).
+
+/** 1 day — statute's own shipped grace default (path A). `WE_RETENTION_GRACE_HOURS` overrides it (in HOURS,
+ *  matching `hung-session.mjs`'s own `WE_HUNG_TRANSCRIPT_MINUTES` convention of naming the unit in the env var
+ *  itself); the literal string `'never'` disables path A. */
+export const RETENTION_GRACE_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+/** 30 days — statute's own shipped ceiling default (path B), described as mirroring the host's own Claude Code
+ *  `cleanupPeriodDays` setting (30 days as of this writing). This module has no IO surface onto that host
+ *  setting's live value (it lives outside this repo, in the CLI's own config) — the constant below is a
+ *  documented, deliberate approximation of it, not a claim of reading it live; a caller (an operator, or a
+ *  future health-daemon slice) that wants the two to actually track raises both independently, per the
+ *  statute's own wording. `WE_RETENTION_CEILING_DAYS` overrides it; `'never'` disables path B. */
+export const RETENTION_CEILING_MS_DEFAULT = 30 * 24 * 60 * 60 * 1000;
+
+function parseRetentionDurationSetting(raw, unitMs, defaultMs) {
+  if (raw === undefined) return defaultMs;
+  if (typeof raw === 'string' && raw.trim().toLowerCase() === 'never') return null; // explicitly disabled
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n * unitMs : defaultMs; // an unparseable override never silently disables a path
+}
+
+/** `WE_RETENTION_GRACE_HOURS` → path A's grace, in ms. See {@link RETENTION_GRACE_MS_DEFAULT}. */
+export function resolveRetentionGraceMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_RETENTION_GRACE_HOURS, 60 * 60 * 1000, RETENTION_GRACE_MS_DEFAULT);
+}
+
+/** `WE_RETENTION_CEILING_DAYS` → path B's ceiling, in ms. See {@link RETENTION_CEILING_MS_DEFAULT}. */
+export function resolveRetentionCeilingMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_RETENTION_CEILING_DAYS, 24 * 60 * 60 * 1000, RETENTION_CEILING_MS_DEFAULT);
+}
+
+/**
+ * THE PURE RETENTION VERDICT for one session's records. No fs/exec/clock — every signal is injected, same
+ * discipline as {@link classifySessionReap}.
+ *
+ * `graceMs`/`ceilingMs` of `null` disables that path outright (the `'never'` setting) — checked explicitly
+ * against `null`, never a falsy check, so `0` (an operator who wants IMMEDIATE deletion once confirmed done)
+ * stays a real, distinct value from "disabled".
+ *
+ * @param {{workDone:boolean, terminalAt:number|null, introspectionDone:boolean, costRolledUp:boolean, recordAgeMs:number|null}} candidate
+ * @param {{graceMs:number|null, ceilingMs:number|null, now:number}} opts
+ * @returns {{deletable:boolean, reason:('ceiling'|'grace-after-done'|'not-yet')}}
+ */
+export function classifyRetention(candidate, { graceMs, ceilingMs, now }) {
+  const { workDone, terminalAt, introspectionDone, costRolledUp, recordAgeMs } = candidate || {};
+  // PATH B first — a safety valve independent of confirmation, so it still fires for a card that never
+  // resolves (the statute's own explicit case for this ordering).
+  if (ceilingMs !== null && typeof recordAgeMs === 'number' && Number.isFinite(recordAgeMs) && recordAgeMs >= ceilingMs) {
+    return { deletable: true, reason: 'ceiling' };
+  }
+  if (
+    workDone === true && introspectionDone === true && costRolledUp === true
+    && graceMs !== null && typeof terminalAt === 'number' && Number.isFinite(terminalAt)
+    && (now - terminalAt) >= graceMs
+  ) {
+    return { deletable: true, reason: 'grace-after-done' };
+  }
+  return { deletable: false, reason: 'not-yet' };
+}
+
+/**
+ * Item-kind retention ground truth: `workDone` iff `status: resolved` (this repo's lifecycle has no distinct
+ * `withdrawn` status today — see `we:backlog/4082-*.md`'s own Fork 1 wording versus `we:scripts/backlog.mjs`'s
+ * real status vocabulary, `open`/`active`/`preparing`/`resolved`/`parked` — so a `parked` item, which may still
+ * resume, is deliberately NOT treated as done here; conservatively under-deleting is the safe direction for a
+ * destructive sweep). `terminalAt` is the item's own `dateResolved` field, parsed. A missing card, an unreadable
+ * one, or a resolved card with no parseable `dateResolved`, all answer `workDone:false`/`terminalAt:null` —
+ * never a guess that could delete records for work that is not actually confirmed over.
+ * @param {string} id
+ * @param {{backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function}} [io]
+ * @returns {{workDone:boolean, terminalAt:number|null}}
+ */
+export function retentionGroundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_DIR, readdirSyncFn = readdirSync, readFileSyncFn = readFileSync } = {}) {
+  let entries;
+  try {
+    entries = readdirSyncFn(backlogDir);
+  } catch {
+    return { workDone: false, terminalAt: null };
+  }
+  const fname = entries.find((f) => f.endsWith('.md') && (f === `${id}.md` || f.startsWith(`${id}-`)));
+  if (!fname) return { workDone: false, terminalAt: null };
+  try {
+    const text = readFileSyncFn(join(backlogDir, fname), 'utf8');
+    if (readField(text, 'status') !== 'resolved') return { workDone: false, terminalAt: null };
+    const resolvedAt = Date.parse(readField(text, 'dateResolved') ?? '');
+    return { workDone: true, terminalAt: Number.isFinite(resolvedAt) ? resolvedAt : null };
+  } catch {
+    return { workDone: false, terminalAt: null };
+  }
+}
+
+/**
+ * PR-kind retention ground truth: `workDone` iff the PR is MERGED or CLOSED (the statute's own "merged or
+ * closed" wording — wider than {@link groundTruthForPr}'s "merged only", which the STOP/reap axis keeps
+ * unchanged on purpose: a closed-without-merge PR should not stop a still-working session prematurely, but its
+ * records are still safe to eventually clean up). `terminalAt` is `mergedAt` (when merged) or `closedAt`
+ * (when closed unmerged), parsed. Any failure (no `gh`, not found, timeout) answers unknown, never a guess.
+ * @param {string|number} pr
+ * @param {{exec?:Function, env?:object, repo?:string}} [io]
+ * @returns {{workDone:boolean, terminalAt:number|null}|null}
+ */
+export function retentionGroundTruthForPr(pr, { exec = execFileSync, env = process.env, repo = 'we' } = {}) {
+  const slug = Object.hasOwn(CONSTELLATION_REPOS, repo) ? CONSTELLATION_REPOS[repo].slug : null;
+  if (!slug) return null;
+  try {
+    const out = exec('gh', ['pr', 'view', String(pr), '--repo', slug, '--json', 'state,mergedAt,closedAt'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 1024 * 1024,
+      timeout: prListTimeoutMs(env),
+      killSignal: 'SIGKILL',
+    });
+    const parsed = JSON.parse(String(out || '{}'));
+    const state = String(parsed?.state || '').toUpperCase();
+    const workDone = state === 'MERGED' || state === 'CLOSED' || Boolean(parsed?.mergedAt);
+    const at = Date.parse(parsed?.mergedAt || parsed?.closedAt || '');
+    return { workDone, terminalAt: workDone && Number.isFinite(at) ? at : null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a `retentionGroundTruthFor` resolver for {@link runRetentionSweepPass}, mirroring
+ * {@link makeGroundTruthResolver}'s routing/caching/bound-`gh`-calls shape exactly (a SEPARATE cache and
+ * counter — this pass and the stop pass never share a tick, but keeping the two independent means a change to
+ * one's cost bound can never silently affect the other's).
+ * @param {{exec?:Function, env?:object, backlogDir?:string, readdirSyncFn?:Function, readFileSyncFn?:Function, maxPrViewCalls?:number}} [io]
+ */
+export function makeRetentionGroundTruthResolver({
+  exec = execFileSync,
+  env = process.env,
+  backlogDir = DEFAULT_BACKLOG_DIR,
+  readdirSyncFn = readdirSync,
+  readFileSyncFn = readFileSync,
+  maxPrViewCalls = MAX_GH_PR_VIEW_CALLS_PER_TICK,
+} = {}) {
+  const cache = new Map();
+  let prViewCalls = 0;
+  return function retentionGroundTruthFor(target) {
+    const repo = target.repo === undefined ? 'we' : target.repo;
+    const key = target.kind === 'pr' ? `pr:${repo}:${target.id}` : `${target.kind}:${target.id}`;
+    if (cache.has(key)) return cache.get(key);
+    let result;
+    if (target.kind === 'item') {
+      result = retentionGroundTruthForItem(target.id, { backlogDir, readdirSyncFn, readFileSyncFn });
+    } else if (target.kind === 'pr') {
+      if (prViewCalls >= maxPrViewCalls) {
+        result = null;
+      } else {
+        prViewCalls++;
+        result = retentionGroundTruthForPr(target.id, { exec, env, repo: target.repo });
+      }
+    } else {
+      result = null;
+    }
+    cache.set(key, result);
+    return result;
+  };
+}
+
+/**
+ * Statute clause 1's introspection gate ([#automated-session-introspection], built by `#3477`, still `status:
+ * open` as of this file's own writing — NOT yet on `main`). Mirrors this file's own `(once #4071 exists)`
+ * precedent for the cost gate below: while the feature the gate depends on does not exist, the gate cannot
+ * block on a signal that cannot be produced, so it defaults PERMISSIVE (`true`) — introspection is also off by
+ * default (`WE_INTROSPECTION_ENABLED`, unset), so "has run" is vacuously true when it was never asked to run
+ * at all. The moment an operator turns introspection ON ahead of `#3477` landing, this flips to FAIL-CLOSED
+ * (`false`) rather than silently keep permitting deletion for a signal now expected to exist but that this
+ * file still has no way to actually read — never guess in the direction that enables a destructive sweep.
+ * @param {{env?:object}} [io]
+ * @returns {(session:string) => boolean}
+ */
+export function makeIntrospectionDoneResolver({ env = process.env } = {}) {
+  const enabled = Boolean(env.WE_INTROSPECTION_ENABLED) && env.WE_INTROSPECTION_ENABLED !== '0';
+  return function introspectionDoneFor() {
+    return !enabled; // see doc above: off (the default) ⇒ vacuously true; on ⇒ fail-closed until #3477 lands a real signal
+  };
+}
+
+/**
+ * Statute clause 1's cost-rollup gate — explicit deferral, verbatim from the ratified text: "This condition
+ * applies only once #4071 exists. Until then, conditions 1 and 2 are enough." `#4071` (telemetry) is not yet
+ * built, so this always answers `true` today; a `#4071` follow-on card wires this to a real rollup check, not
+ * a new ruling. Kept as its own named resolver (rather than inlined `true`) so that follow-on card has exactly
+ * one call site to change.
+ * @returns {(session:string) => boolean}
+ */
+export function makeCostRolledUpResolver() {
+  return function costRolledUpFor() {
+    return true; // #4071 does not exist yet — statute's own explicit deferral, not a guess
+  };
+}
+
+/**
+ * `claude rm <id>` — deregisters an already-stopped background session entirely (distinct from `claude stop`,
+ * which only ends it — see `we:scripts/operations/dispatch-abort.mjs#stopSession`'s own doc for that
+ * distinction, mirrored here rather than re-imported since this file's scope for `#4089` does not touch
+ * `dispatch-abort.mjs`). An already-gone handle is benign (`claude rm` reports the same "No job matching" shape
+ * `claude stop` does), matching every other best-effort stop/rm call in this file.
+ * @param {{handle:string, exec?:Function}} o
+ * @returns {{removed:true, alreadyGone:boolean, output:string}}
+ */
+export function rmSessionRecord({ handle, exec = execFileSync } = {}) {
+  const id = normalizeHandle(handle);
+  if (!id) throw new Error('session-reaper: rmSessionRecord needs a handle');
+  try {
+    const output = String(exec('claude', ['rm', id], { encoding: 'utf8', timeout: 30_000 }));
+    return { removed: true, alreadyGone: false, output };
+  } catch (e) {
+    const full = String(e?.stderr ?? e?.message ?? e);
+    if (/No job matching/i.test(full)) return { removed: true, alreadyGone: true, output: full.split('\n')[0] };
+    throw new Error(`session-reaper: \`claude rm ${id}\` failed: ${full.split('\n')[0]}`);
+  }
+}
+
+/**
+ * THE RETENTION-SWEEP IO SHELL (#4089) — everything the CLI's retention pass does between the two session-slug
+ * record stores and the actual deletes, reusable by a resident daemon exactly like {@link runSessionReaperPass}.
+ * Candidate slugs are the UNION of every slug carrying a completion record OR a delivery report (the two
+ * session-keyed stores this file's scope covers) — a slug with only one of the two is still a real candidate
+ * (e.g. a `review-*`/`fix-*` session that only ever wrote a completion record). A slug whose `sessionTarget`
+ * cannot be derived (unknown grammar) is skipped, never guessed.
+ *
+ * The run-record axis is handled separately, by {@link pruneTerminalRuns} — see that function's own doc for
+ * why it operates on record age/terminal-state generically rather than per-session (no session back-reference
+ * exists on a generic run record).
+ *
+ * @param {{
+ *   retentionGroundTruthFor?: (target:object) => ({workDone:boolean, terminalAt:number|null}|null),
+ *   introspectionDoneFor?: (session:string) => boolean,
+ *   costRolledUpFor?: (session:string) => boolean,
+ *   graceMs?: number|null,
+ *   ceilingMs?: number|null,
+ *   now?: number,
+ *   dryRun?: boolean,
+ *   listAgents?: () => unknown[],
+ *   rm?: Function,
+ *   statFn?: Function,
+ *   deleteCompletionFn?: Function,
+ *   deleteDeliveryReportFn?: Function,
+ *   pruneRuns?: Function,
+ *   log?: (msg:string) => void,
+ * }} [o]
+ * @returns {{scanned:number, deleted:number, kept:number, runsPruned:number, wouldDelete:Array|undefined}}
+ */
+export function runRetentionSweepPass({
+  retentionGroundTruthFor = makeRetentionGroundTruthResolver({ exec: execFileSync }),
+  introspectionDoneFor = makeIntrospectionDoneResolver(),
+  costRolledUpFor = makeCostRolledUpResolver(),
+  graceMs = resolveRetentionGraceMs(),
+  ceilingMs = resolveRetentionCeilingMs(),
+  now = Date.now(),
+  dryRun = false,
+  listAgents = () => defaultListAgents({ exec: execFileSync, all: true }),
+  rm = rmSessionRecord,
+  statFn = statSync,
+  deleteCompletionFn = deleteCompletion,
+  deleteDeliveryReportFn = deleteDeliveryReport,
+  pruneRuns = pruneTerminalRuns,
+  log: logFn = log,
+} = {}) {
+  const completionDir = resolveCompletionsDir();
+  const deliveryDir = resolveDeliveryReportsDir();
+  const slugs = new Set([...listCompletionSessions(completionDir), ...listDeliveryReportSessions(deliveryDir)]);
+
+  let sessionsByName = null;
+  const findSession = (name) => {
+    if (sessionsByName === null) {
+      sessionsByName = new Map();
+      try {
+        for (const s of listAgents() ?? []) if (s && s.name) sessionsByName.set(s.name, s);
+      } catch { /* best-effort — a stale/unreadable listing just means no `claude rm` this pass */ }
+    }
+    return sessionsByName.get(name) ?? null;
+  };
+
+  let deleted = 0;
+  let kept = 0;
+  const wouldDelete = dryRun ? [] : undefined;
+
+  for (const slug of [...slugs].sort()) {
+    const target = sessionTarget(slug);
+    if (!target) { kept++; continue; } // unknown grammar — never guess
+
+    const truth = retentionGroundTruthFor(target);
+    const workDone = truth?.workDone === true;
+    const terminalAt = truth?.terminalAt ?? null;
+
+    let recordAgeMs = null;
+    for (const p of [completionPath(slug, completionDir), deliveryReportPath(slug, deliveryDir)]) {
+      try {
+        const ageMs = now - statFn(p).mtimeMs;
+        if (recordAgeMs === null || ageMs < recordAgeMs) recordAgeMs = ageMs; // youngest record wins — never
+        //   delete on the ceiling while ANY of this session's records is still fresh
+      } catch { /* that particular record doesn't exist for this slug — fine, try the other */ }
+    }
+
+    const verdict = classifyRetention(
+      { workDone, terminalAt, introspectionDone: introspectionDoneFor(slug), costRolledUp: costRolledUpFor(slug), recordAgeMs },
+      { graceMs, ceilingMs, now },
+    );
+
+    if (!verdict.deletable) { kept++; continue; }
+
+    if (dryRun) {
+      logFn(`  would delete records for ${slug} (${verdict.reason})`);
+      wouldDelete.push({ session: slug, reason: verdict.reason });
+      continue;
+    }
+
+    try { deleteCompletionFn(slug, completionDir); } catch { /* best-effort, mirrors the rest of this file */ }
+    try { deleteDeliveryReportFn(slug, deliveryDir); } catch { /* best-effort */ }
+    const stillListed = findSession(slug);
+    if (stillListed?.id) {
+      try { rm({ handle: stillListed.id, exec: execFileSync }); } catch (e) {
+        logFn(`  ⚠ ${slug}: \`claude rm\` failed: ${String(e?.message || e).split('\n')[0]}`);
+      }
+    }
+    // #2616 lane-ports registry — best-effort, item-kind targets only (a PR-kind session never owns one).
+    // Shelled rather than imported: this file's scope for `#4089` does not touch `lane-pool.mjs`.
+    if (target.kind === 'item') {
+      try { execFileSync('node', ['scripts/lane-pool.mjs', 'unmap', `--item=${target.id}`], { cwd: REPO_ROOT, stdio: 'ignore', timeout: 15_000 }); } catch { /* best-effort */ }
+    }
+    logFn(`  deleted records for ${slug} (${verdict.reason})`);
+    deleted++;
+  }
+
+  const pruneResult = pruneRuns({ maxAgeMs: ceilingMs, now, dryRun });
+
+  return {
+    scanned: slugs.size,
+    deleted: dryRun ? 0 : deleted,
+    kept,
+    runsPruned: dryRun ? 0 : pruneResult.pruned.length,
+    wouldPruneRuns: dryRun ? pruneResult.pruned : undefined,
+    wouldDelete,
+  };
+}
+
 /**
  * The idle-timeout backstop's default threshold (6 hours) — see {@link classifySessionReapWithGroundTruth}'s
  * "Axis 3" doc for exactly when this applies (a `blocked` session, name+cwd already confirmed spawned by THIS
@@ -821,8 +1187,16 @@ function main(argv) {
   // `--no-backstop-completion` is the same kind of rollback escape hatch, for the xbv32pg follow-up (epic
   // #3383) root-cause fix — default ON, same as every other axis this epic ships.
   const backstopCompletion = !flags['no-backstop-completion'];
+  // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
+  // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
+  // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
+  // for a caller that invokes this CLI without expecting that. A resident daemon that wants it on every tick
+  // calls {@link runRetentionSweepPass} directly (already fully daemon-usable, no CLI needed) rather than
+  // relying on this flag. Shares this CLI's own `--dry-run`.
+  const runRetention = !!flags['retention-sweep'];
 
   const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion });
+  const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -831,13 +1205,19 @@ function main(argv) {
   }
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult }, null, 2) + '\n');
   } else {
     const { scanned, stopped, alreadyGone, failures, anomalies, backstopWritten, wouldStop, wouldWriteBackstop, kept } = result;
     log(
       `session-reaper: ${scanned} session(s) listed · ` +
         `${dryRun ? `${(wouldStop ?? []).length} would stop${(wouldWriteBackstop ?? []).length ? `, ${(wouldWriteBackstop ?? []).length} would get a backstop completion record` : ''}` : `${stopped} stopped${alreadyGone ? `, ${alreadyGone} already gone` : ''}${failures ? `, ${failures} failed` : ''}${anomalies ? `, ${anomalies} anomal${anomalies === 1 ? 'y' : 'ies'}` : ''}${backstopWritten ? `, ${backstopWritten} backstop completion record(s) written` : ''}`} · ${kept} kept`,
     );
+    if (retentionResult) {
+      log(
+        `session-reaper retention: ${retentionResult.scanned} session record set(s) scanned · ` +
+          `${dryRun ? `${(retentionResult.wouldDelete ?? []).length} would be deleted, ${(retentionResult.wouldPruneRuns ?? []).length} run record(s) would be pruned` : `${retentionResult.deleted} deleted, ${retentionResult.runsPruned} run record(s) pruned`} · ${retentionResult.kept} kept`,
+      );
+    }
   }
   // Non-zero exit when a stop we ATTEMPTED actually failed, OR a reap candidate turned out to be missing its
   // `id` (the anomaly case — see the loop above) — mirrors lease-reaper.mjs's own convention, so a cron/loop
