@@ -12,13 +12,18 @@ relatedTo: ["3366", "3367", "3368", "2881", "4071", "4065"]
 tags: [conveyor, daemons, sessions, operator-policy, incident-2026-09-24, decision-prep]
 ---
 
-# Operator-pending conveyor policy calls: session-cleanup retention, stuck-bot timeout, cleanup scope, daemon bots on an API key, auto-resume of interrupted workers
+# Operator-pending conveyor policy calls: session-cleanup retention, stuck-bot timeout, cleanup scope, auto-resume of interrupted workers
 
-Five operator calls left open on 2026-09-24. Prep turned them into **three forks and two non-forks**.
+**The decision:** set one lifecycle policy for the conveyor's bot sessions: when a stuck bot is stopped,
+who restarts an interrupted one, and when a finished one's records are cleaned up. Today each daemon handles these ad hoc or not at all. A looping bot is never stopped and nothing
+finished is ever deleted. The 2026-09-24 incident
+exposed all of this. Three build cards, plus #3366 and #3367, wait on these rules.
+
+Five operator calls were left open on 2026-09-24. Prep turned four of them into **three forks and one
+non-fork**; the fifth (bot login / API key) is dropped as out of scope for this card.
 Retention (Fork 1), stuck-bot stopping (Fork 2) and who resumes (Fork 3) each have a branch that breaks
 something, so each default is close to forced. Auto-resume itself is already decided by #3366 and a ratified
-statute, so only "who resumes" is left. Cleanup scope and the API-key question are not forks: one is a
-build-order note, the other a per-bot setting. Grounding and prior art:
+statute, so only "who resumes" is left. Cleanup scope is not a fork: it is a ruling plus a build-order note. Grounding and prior art:
 `we:reports/2026-09-24-conveyor-operator-policy-calls.md`.
 
 ## Axes
@@ -27,7 +32,6 @@ build-order note, the other a per-bot setting. Grounding and prior art:
 - **What stops a bot that is not making progress** (Fork 2).
 - **Who may resume an interrupted worker** (Fork 3).
 - **Which sessions cleanup may touch** — ruling plus a build-order note (Supported by default).
-- **Which credential a bot runs on** — a per-bot setting (Supported by default).
 
 ## Recommended path at a glance
 
@@ -68,7 +72,12 @@ Today nothing is deleted: the reaper only runs `claude stop`
   transcript retention means a record rarely points to a transcript that is already gone. The ceiling also
   covers a card that never finishes (a parked card).
 
-Default: **(c)**. The grace and ceiling are settings, not part of the ruling.
+Default: **(c)**. The ruling fixes only the **floor**: never delete before the work is finished and
+introspected. How long to keep records after that is the user's choice, with **no upper limit**. The grace
+and the ceiling are both settings, and "never delete" is a valid value. Shipped defaults: 1-day grace,
+ceiling equal to the host's transcript retention (30 days). A user who wants records kept longer raises
+both this ceiling and Claude Code's `cleanupPeriodDays`. (Operator, 2026-09-24: "as a product… allow as long
+as the user want"; up to 30 days is fine for our own dev use.)
 
 Skeptic: SURVIVES-WITH-AMENDMENT (independent headless seat, `judgePanel`, run `prep-4082`). Two findings
 folded in. (1) The cost condition referred to a card not yet built, so records could never be deleted
@@ -166,20 +175,6 @@ option.
   lands, the behavior equals today's. Agent-tool subagents are out of scope: they never appear in the
   session listing, and their stalls belong to #2881. Skeptic amendment folded in: "ended" must be explicit,
   never inferred.
-- **Bot credential: a per-bot setting, default the operator's subscription login.** Subscription and API
-  key can coexist bot by bot, so this is a setting, not a fork. The statute already rules the order:
-  subscription CLI now, API-key backend later behind the same interface
-  ([#agent-runner-cli-backend](/docs/agent/platform-decisions/#agent-runner-cli-backend)). Today no
-  per-bot setting exists; every bot inherits the CLI login
-  (`we:scripts/operations/deliver-item-wrapper.mjs:489`). The build is the setting itself (a build child).
-  **Trigger for moving a bot to an API key**, per bot, once #4071 reports cost:
-  - bot usage causes the operator to hit a usage limit at least once in a week; or
-  - that bot uses more than a third of the weekly subscription allowance.
-
-  Moving a bot to an API key does **not** by itself lift the `--bare` ban
-  (`we:scripts/lib/judge-spawn.mjs:49`). That ban is a mechanical trap guard, not a statute: `--bare` reads
-  only an API key, so on the subscription it fails with "Not logged in". Letting an API-key bot use `--bare`
-  would be a separate, reviewed change to that guard. (Skeptic finding, folded in.)
 - **All numbers are settings** (grace, ceiling, windows): env-overridable named constants, the way
   `we:scripts/conveyor/hung-session.mjs:112` already does it.
 
@@ -189,8 +184,8 @@ A new anchor `#conveyor-session-lifecycle-policy` in `we:docs/agent/platform-dec
 
 > 1. A finished conveyor session's records are deleted only after its card is resolved or withdrawn, its
 >    PR (if any) is merged or closed, its introspection has run and (once cost tracking exists) its cost
->    is rolled up — then after a grace, and in any case by a ceiling setting that defaults to the host's
->    transcript retention.
+>    is rolled up. After that, retention is the user's setting with no upper limit ("never delete" is
+>    valid); the shipped default is a short grace, capped at the host's transcript retention.
 > 2. A bot is stopped when its work shows no net outcome within its kind's window, or it reaches its kind's
 >    ceiling; the ceiling never exceeds the lane lease TTL. Transcript silence stays a faster stop.
 >    Stopping is graceful first, then SIGTERM; a no-outcome stop counts as a loop and is relaunched, never
@@ -199,8 +194,6 @@ A new anchor `#conveyor-session-lifecycle-policy` in `we:docs/agent/platform-dec
 >    watcher reports, never resumes. Chat-spawned workers are never auto-resumed.
 > 4. Cleanup touches daemon-dispatched background sessions, and a chat-spawned background session only
 >    when linked to a spawning chat that was explicitly ended; an unknown or ambiguous link is never reaped.
-> 5. A bot's model credential is a per-bot setting, defaulting to the operator's subscription; changing it
->    does not by itself lift any spawn-flag guard.
 
 ## Build children (filed at ratification, not before)
 
@@ -209,7 +202,6 @@ A new anchor `#conveyor-session-lifecycle-policy` in `we:docs/agent/platform-dec
 | Retention sweep for finished sessions (Fork 1) | `we:scripts/conveyor/session-reaper.mjs`, `we:scripts/operations/run-store.mjs` |
 | Per-kind no-outcome window + ceiling (Fork 2) | `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/session-reaper.mjs` |
 | Stamp the spawning chat on chat-spawned background sessions (cleanup scope) | `we:scripts/conveyor/`, `we:.claude/settings.json` (a SessionStart hook) |
-| Per-bot credential setting (Supported by default) | `we:scripts/operations/dispatch-lane-io.mjs` |
 | Fork 3: add "resume is single-owner" to #3366 | card edit only |
 
 ### Review jury (provisional — pre-registered #2638)
@@ -227,5 +219,5 @@ Care level: `elevated`. This jury binds against the item's predicted scope and i
 ## Done when
 
 1. **Executable** — each fork carries a ruling and `codifiedIn:` is set, and the rulings are wired into the
-   code paths that read them (session reaper, stuck-bot timeout, dispatch auth) through the build children
+   code paths that read them (session reaper, stuck-bot timeout, resume owner) through the build children
    above.
