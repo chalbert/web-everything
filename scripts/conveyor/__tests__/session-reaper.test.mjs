@@ -37,6 +37,8 @@ import {
   resolveRetentionGraceMs,
   resolveRetentionCeilingMs,
   runRetentionSweepPass,
+  makeDeclaredStepCountResolver,
+  loadDeclaredStepCountResolver,
   RETENTION_GRACE_MS_DEFAULT,
   RETENTION_CEILING_MS_DEFAULT,
 } from '../session-reaper.mjs';
@@ -1102,6 +1104,134 @@ describe('runRetentionSweepPass — the IO shell', () => {
     const result = runRetentionSweepPass(baseOpts());
     expect(result.deleted).toBe(0);
     expect(result.kept).toBe(1);
+  });
+
+  // PR #2669 review (security finding): `claude rm` ran on a session still LISTED as live, with no stop and
+  // no liveness check. A still-live session keeps EVERY record and is never `claude rm`'d — whichever path
+  // (grace or ceiling) called it deletable.
+  for (const state of ['working', 'blocked', 'done', 'failed']) {
+    it(`a deletable session still listed as \`${state}\` (not stopped) keeps its records and is never \`claude rm\`'d`, () => {
+      writeCompletion(newCompletionRecord({ session: 'conveyor-4092', kind: 'review', pr: '1' }), completionsDir);
+      const rmCalls = [];
+      const result = runRetentionSweepPass(baseOpts({
+        listAgents: () => [{ id: 'live1', name: 'conveyor-4092', state }],
+        rm: (o) => { rmCalls.push(o.handle); return { removed: true, alreadyGone: false, output: '' }; },
+      }));
+      expect(rmCalls).toEqual([]);
+      expect(result.deleted).toBe(0);
+      expect(result.kept).toBe(1);
+      expect(result.keptLive).toEqual(['conveyor-4092']);
+      expect(tryReadCompletionSafe(completionsDir, 'conveyor-4092')).toBe(true);
+    });
+  }
+
+  it('the ceiling path never deletes a still-live session either', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4093', kind: 'review', pr: '1' }), completionsDir);
+    const rmCalls = [];
+    const result = runRetentionSweepPass(baseOpts({
+      retentionGroundTruthFor: () => ({ workDone: false, terminalAt: null }),
+      ceilingMs: 1, now: Date.now() + 60_000,
+      listAgents: () => [{ id: 'live2', name: 'conveyor-4093', state: 'working' }],
+      rm: (o) => { rmCalls.push(o.handle); return { removed: true, alreadyGone: false, output: '' }; },
+    }));
+    expect(rmCalls).toEqual([]);
+    expect(result.deleted).toBe(0);
+    expect(tryReadCompletionSafe(completionsDir, 'conveyor-4093')).toBe(true);
+  });
+
+  it('a deletable session listed only as `stopped` IS deleted and `claude rm`\'d — every matching entry', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4094', kind: 'review', pr: '1' }), completionsDir);
+    const rmCalls = [];
+    const result = runRetentionSweepPass(baseOpts({
+      listAgents: () => [
+        { id: 'old1', name: 'conveyor-4094', state: 'stopped' },
+        { id: 'old2', name: 'conveyor-4094', state: 'stopped' },
+      ],
+      rm: (o) => { rmCalls.push(o.handle); return { removed: true, alreadyGone: false, output: '' }; },
+    }));
+    expect(rmCalls).toEqual(['old1', 'old2']);
+    expect(result.deleted).toBe(1);
+    expect(tryReadCompletionSafe(completionsDir, 'conveyor-4094')).toBe(false);
+  });
+
+  it('one live entry among stopped ones for the same name keeps the whole session', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4095', kind: 'review', pr: '1' }), completionsDir);
+    const rmCalls = [];
+    const result = runRetentionSweepPass(baseOpts({
+      listAgents: () => [
+        { id: 'old1', name: 'conveyor-4095', state: 'stopped' },
+        { id: 'new1', name: 'conveyor-4095', state: 'working' },
+      ],
+      rm: (o) => { rmCalls.push(o.handle); return { removed: true, alreadyGone: false, output: '' }; },
+    }));
+    expect(rmCalls).toEqual([]);
+    expect(result.deleted).toBe(0);
+  });
+
+  it('an unreadable `claude agents` listing deletes nothing — liveness unknown means keep (fail closed)', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4096', kind: 'review', pr: '1' }), completionsDir);
+    const result = runRetentionSweepPass(baseOpts({ listAgents: () => { throw new Error('claude: not found'); } }));
+    expect(result.deleted).toBe(0);
+    expect(result.agentsUnreadable).toBe(true);
+    expect(tryReadCompletionSafe(completionsDir, 'conveyor-4096')).toBe(true);
+  });
+
+  it('dry-run applies the same liveness keep — a live session is never reported as would-delete', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4097', kind: 'review', pr: '1' }), completionsDir);
+    const result = runRetentionSweepPass(baseOpts({ dryRun: true, listAgents: () => [{ id: 'l', name: 'conveyor-4097', state: 'working' }] }));
+    expect(result.wouldDelete).toEqual([]);
+    expect(result.keptLive).toEqual(['conveyor-4097']);
+  });
+
+  // PR #2669 review (correctness finding): the run-record prune must be told how to prove a run COMPLETE.
+  it('threads its `stepCountFor` resolver into the run-record prune', () => {
+    const seen = [];
+    const stepCountFor = () => 3;
+    runRetentionSweepPass(baseOpts({ stepCountFor, pruneRuns: (o) => { seen.push(o.stepCountFor); return { pruned: [] }; } }));
+    expect(seen).toEqual([stepCountFor]);
+  });
+});
+
+describe('makeDeclaredStepCountResolver — how the sweep proves a run finished every declared step', () => {
+  it('answers the declared step count of a known operation', () => {
+    const resolve = makeDeclaredStepCountResolver({ resolveOperation: (op) => ({ declaration: { steps: op === 'a' ? [1, 2] : [] } }) });
+    expect(resolve('a')).toBe(2);
+  });
+  it('answers null for an unknown operation (never a guess)', () => {
+    const resolve = makeDeclaredStepCountResolver({ resolveOperation: () => { throw new Error('no operation named x'); } });
+    expect(resolve('x')).toBe(null);
+  });
+  // Review follow-up: a step list that depends on env (review-pr's advisory seats) must not let a longer,
+  // unfinished run pass as complete against the shorter list. The record's own step names decide.
+  const threeSteps = { resolveOperation: () => ({ declaration: { steps: [{ name: 'read' }, { name: 'judge' }, { name: 'record' }] } }) };
+  const row = (step, stepIndex, finished = true) => ({ step, stepIndex, startedAt: 't', ...(finished ? { finishedAt: 't' } : {}) });
+  it('a record whose timings match every declared step and finished the last one resolves to the count', () => {
+    const resolve = makeDeclaredStepCountResolver(threeSteps);
+    expect(resolve('op', { stepTimings: [row('read', 0), row('judge', 1), row('record', 2)] })).toBe(3);
+  });
+  it('a record whose step names differ from the declaration (built with other steps) answers null', () => {
+    const resolve = makeDeclaredStepCountResolver(threeSteps);
+    expect(resolve('op', { stepTimings: [row('read', 0), row('judge', 1), row('judgeAdvisory', 2)] })).toBe(null);
+  });
+  it('a record that never finished the last declared step answers null', () => {
+    const resolve = makeDeclaredStepCountResolver(threeSteps);
+    expect(resolve('op', { stepTimings: [row('read', 0), row('judge', 1), row('record', 2, false)] })).toBe(null);
+    expect(resolve('op', { stepTimings: [row('read', 0), row('judge', 1)] })).toBe(null);
+  });
+  it('a record with no timings (older than #3368) is checked by count alone', () => {
+    expect(makeDeclaredStepCountResolver(threeSteps)('op', { stepTimings: [] })).toBe(3);
+  });
+  it('a failed operation-table import proves nothing (prunes no run) instead of throwing', async () => {
+    const logs = [];
+    const resolve = await loadDeclaredStepCountResolver({ importRun: async () => { throw new Error('boom'); }, log: (m) => logs.push(m) });
+    expect(resolve('land-advance', {})).toBe(null);
+    expect(logs.join('\n')).toMatch(/operation table unavailable/);
+  });
+  it('resolves the REAL operation table — land-advance declares a fixed step list', async () => {
+    const resolve = await loadDeclaredStepCountResolver();
+    expect(Number.isInteger(resolve('land-advance'))).toBe(true);
+    expect(resolve('land-advance')).toBeGreaterThan(0);
+    expect(resolve('no-such-operation')).toBe(null);
   });
 });
 

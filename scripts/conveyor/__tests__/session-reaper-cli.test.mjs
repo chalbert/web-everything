@@ -593,4 +593,49 @@ describe('--retention-sweep — the #4089 opt-in retention pass, end to end thro
     expect(report.retention.wouldDelete).toEqual([{ session: 'conveyor-9003', reason: 'grace-after-done' }]);
     expect(existsSync(join(completionsDir, 'conveyor-9003.json'))).toBe(true); // still there — dry run
   }, EXEC_TIMEOUT_MS);
+
+  // PR #2669 review (security finding): `claude rm` ran on a session still listed as live. Through the real
+  // CLI + stub `claude`: a live entry keeps its records and never sees `claude rm`; a stopped one does.
+  const retentionEnv = () => ({
+    OPERATION_COMPLETIONS_DIR: completionsDir,
+    OPERATION_DELIVERY_REPORTS_DIR: deliveryDir,
+    OPERATION_RUNS_DIR: runsDir,
+    WE_BACKLOG_DIR: backlogDir,
+  });
+
+  it('with `--retention-sweep`, a confirmed-done session still listed as live is kept and never `claude rm`\'d', () => {
+    writeFileSync(join(backlogDir, '9004-fixture-item.md'), '---\nstatus: resolved\ndateResolved: "2020-01-01"\n---\n# Fixture 9004\n');
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9004', kind: 'review', pr: '1' }), completionsDir);
+    const agents = JSON.stringify([{ id: 'live9004', sessionId: 'live-9004-uuid', kind: 'background', state: 'working', name: 'conveyor-9004' }]);
+    const out = runReaperCli(['--retention-sweep', '--json'], { agents, env: retentionEnv() });
+    const report = JSON.parse(out);
+    expect(report.retention.deleted).toBe(0);
+    expect(report.retention.keptLive).toEqual(['conveyor-9004']);
+    expect(existsSync(join(completionsDir, 'conveyor-9004.json'))).toBe(true);
+    expect(readFileSync(argvFile, 'utf8')).not.toMatch(/^rm /m);
+  }, EXEC_TIMEOUT_MS);
+
+  // PR #2669 review (correctness finding), through the real CLI and the REAL operation table: a finished
+  // `land-advance` run is pruned past the ceiling; a never-started one of the same op is kept.
+  it('with `--retention-sweep`, a finished run record is pruned past the ceiling and a never-started one is kept', () => {
+    const base = { v: 1, op: 'land-advance', input: {}, findings: {}, verdict: null, effects: [], telemetry: [], stepTimings: [], pending: null };
+    writeFileSync(join(runsDir, 'run-finished.json'), JSON.stringify({ ...base, id: 'run-finished', cursor: 2 }));
+    writeFileSync(join(runsDir, 'run-neverstarted.json'), JSON.stringify({ ...base, id: 'run-neverstarted', cursor: 0 }));
+    const out = runReaperCli(['--retention-sweep', '--json'], { agents: '[]', env: { ...retentionEnv(), WE_RETENTION_CEILING_DAYS: '0' } });
+    const report = JSON.parse(out);
+    expect(report.retention.runsPruned).toBe(1);
+    expect(existsSync(join(runsDir, 'run-finished.json'))).toBe(false);
+    expect(existsSync(join(runsDir, 'run-neverstarted.json'))).toBe(true);
+  }, EXEC_TIMEOUT_MS);
+
+  it('with `--retention-sweep`, a confirmed-done session listed as `stopped` is deleted and `claude rm`\'d', () => {
+    writeFileSync(join(backlogDir, '9005-fixture-item.md'), '---\nstatus: resolved\ndateResolved: "2020-01-01"\n---\n# Fixture 9005\n');
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9005', kind: 'review', pr: '1' }), completionsDir);
+    const agents = JSON.stringify([{ id: 'old9005', sessionId: 'old-9005-uuid', kind: 'background', state: 'stopped', name: 'conveyor-9005' }]);
+    const out = runReaperCli(['--retention-sweep', '--json'], { agents, env: retentionEnv() });
+    const report = JSON.parse(out);
+    expect(report.retention.deleted).toBe(1);
+    expect(existsSync(join(completionsDir, 'conveyor-9005.json'))).toBe(false);
+    expect(readFileSync(argvFile, 'utf8')).toMatch(/^rm old9005$/m);
+  }, EXEC_TIMEOUT_MS);
 });

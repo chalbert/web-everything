@@ -801,6 +801,62 @@ export function rmSessionRecord({ handle, exec = execFileSync } = {}) {
 }
 
 /**
+ * Build a `stepCountFor(op, record)` resolver for {@link pruneTerminalRuns}: an operation's declared step
+ * count, read from the operation table, or `null` for an operation the table cannot build (never a guess).
+ *
+ * THE RECORD'S OWN STEP NAMES MUST MATCH. Some step lists depend on env (e.g. `review-pr`'s optional advisory
+ * seats), and this resolves with THIS process's env — so a 9-step advisory run halted at cursor 8 would
+ * otherwise read as complete against the 8-step list. When the record carries `stepTimings` (#3368), every
+ * named row must match the declared step at its index, and the LAST declared step must have a finished row;
+ * any mismatch answers `null`. A record with no timings (older than #3368) is checked by count alone.
+ * @param {{resolveOperation: (op:string) => {declaration:{steps:Array<{name?:string}>}}}} io
+ * @returns {(op:string, record?:object) => (number|null)}
+ */
+export function makeDeclaredStepCountResolver({ resolveOperation }) {
+  const cache = new Map();
+  const stepsFor = (op) => {
+    if (cache.has(op)) return cache.get(op);
+    let steps = null;
+    try {
+      const declared = resolveOperation(op)?.declaration?.steps;
+      steps = Array.isArray(declared) ? declared : null;
+    } catch { /* unknown operation — unprovable, so null */ }
+    cache.set(op, steps);
+    return steps;
+  };
+  return function stepCountFor(op, record = null) {
+    const steps = stepsFor(op);
+    if (!steps) return null;
+    const timings = Array.isArray(record?.stepTimings) ? record.stepTimings : [];
+    if (timings.length === 0) return steps.length;
+    for (const t of timings) {
+      if (t && typeof t.step === 'string' && steps[t.stepIndex]?.name !== t.step) return null;
+    }
+    const last = steps.length - 1;
+    if (last >= 0 && !timings.some((t) => t && t.stepIndex === last && t.finishedAt !== undefined)) return null;
+    return steps.length;
+  };
+}
+
+/**
+ * {@link makeDeclaredStepCountResolver} over the REAL operation table (`we:scripts/operations/run.mjs`).
+ * Imported lazily: that table pulls in every operation's module graph, which only the retention sweep needs.
+ * If the import fails, this answers a resolver that proves nothing (so no run record is pruned) and warns —
+ * a broken operation module must not abort the rest of the sweep.
+ * @param {{importRun?: () => Promise<object>, log?: (msg:string) => void}} [io]
+ * @returns {Promise<(op:string, record?:object) => (number|null)>}
+ */
+export async function loadDeclaredStepCountResolver({ importRun = () => import('../operations/run.mjs'), log: logFn = log } = {}) {
+  try {
+    const { resolveOperation } = await importRun();
+    return makeDeclaredStepCountResolver({ resolveOperation });
+  } catch (e) {
+    logFn(`  ⚠ retention: operation table unavailable (${String(e?.message || e).split('\n')[0]}) — pruning no run records this pass`);
+    return () => null;
+  }
+}
+
+/**
  * THE RETENTION-SWEEP IO SHELL (#4089) — everything the CLI's retention pass does between the two session-slug
  * record stores and the actual deletes, reusable by a resident daemon exactly like {@link runSessionReaperPass}.
  * Candidate slugs are the UNION of every slug carrying a completion record OR a delivery report (the two
@@ -826,9 +882,13 @@ export function rmSessionRecord({ handle, exec = execFileSync } = {}) {
  *   deleteCompletionFn?: Function,
  *   deleteDeliveryReportFn?: Function,
  *   pruneRuns?: Function,
+ *   stepCountFor?: (op:string, record?:object) => (number|null),
  *   log?: (msg:string) => void,
  * }} [o]
- * @returns {{scanned:number, deleted:number, kept:number, runsPruned:number, wouldDelete:Array|undefined}}
+ *   `stepCountFor` proves a run record complete before it is pruned ({@link makeDeclaredStepCountResolver}).
+ *   The default answers `null`, so a caller that passes none prunes no run record at all (fail closed); the
+ *   CLI passes {@link loadDeclaredStepCountResolver}'s.
+ * @returns {{scanned:number, deleted:number, kept:number, keptLive:string[], agentsUnreadable:boolean, runsPruned:number, wouldDelete:Array|undefined}}
  */
 export function runRetentionSweepPass({
   retentionGroundTruthFor = makeRetentionGroundTruthResolver({ exec: execFileSync }),
@@ -844,25 +904,41 @@ export function runRetentionSweepPass({
   deleteCompletionFn = deleteCompletion,
   deleteDeliveryReportFn = deleteDeliveryReport,
   pruneRuns = pruneTerminalRuns,
+  stepCountFor = () => null,
   log: logFn = log,
 } = {}) {
   const completionDir = resolveCompletionsDir();
   const deliveryDir = resolveDeliveryReportsDir();
   const slugs = new Set([...listCompletionSessions(completionDir), ...listDeliveryReportSessions(deliveryDir)]);
 
+  // LIVENESS GATE (PR #2669 review). Neither path proves the PROCESS is gone: the ceiling is pure record age,
+  // and a closed-unmerged PR counts as done here though the stop axis deliberately leaves its session running.
+  // So a session still listed in any state but `stopped` keeps ALL its records and is never `claude rm`'d —
+  // `claude rm` on a live entry orphans the process. The stop pass stops it; a later sweep then deletes it.
+  // Every entry with the name counts (a re-dispatch reuses the slug). An unreadable listing makes liveness
+  // unknown, so nothing is deleted this pass (fail closed).
   let sessionsByName = null;
-  const findSession = (name) => {
+  let agentsUnreadable = false;
+  const entriesFor = (name) => {
     if (sessionsByName === null) {
       sessionsByName = new Map();
       try {
-        for (const s of listAgents() ?? []) if (s && s.name) sessionsByName.set(s.name, s);
-      } catch { /* best-effort — a stale/unreadable listing just means no `claude rm` this pass */ }
+        for (const s of listAgents() ?? []) {
+          if (!s || !s.name) continue;
+          if (!sessionsByName.has(s.name)) sessionsByName.set(s.name, []);
+          sessionsByName.get(s.name).push(s);
+        }
+      } catch (e) {
+        agentsUnreadable = true;
+        logFn(`  ⚠ retention: \`claude agents\` unreadable (${String(e?.message || e).split('\n')[0]}) — deleting nothing this pass`);
+      }
     }
-    return sessionsByName.get(name) ?? null;
+    return sessionsByName.get(name) ?? [];
   };
 
   let deleted = 0;
   let kept = 0;
+  const keptLive = [];
   const wouldDelete = dryRun ? [] : undefined;
 
   for (const slug of [...slugs].sort()) {
@@ -889,6 +965,15 @@ export function runRetentionSweepPass({
 
     if (!verdict.deletable) { kept++; continue; }
 
+    const entries = entriesFor(slug);
+    if (agentsUnreadable) { kept++; continue; }
+    if (entries.some((s) => !ALREADY_STOPPED_STATES.has(s.state))) {
+      logFn(`  kept ${slug} — still listed as live in \`claude agents\` (${verdict.reason} would otherwise delete it)`);
+      keptLive.push(slug);
+      kept++;
+      continue;
+    }
+
     if (dryRun) {
       logFn(`  would delete records for ${slug} (${verdict.reason})`);
       wouldDelete.push({ session: slug, reason: verdict.reason });
@@ -897,9 +982,9 @@ export function runRetentionSweepPass({
 
     try { deleteCompletionFn(slug, completionDir); } catch { /* best-effort, mirrors the rest of this file */ }
     try { deleteDeliveryReportFn(slug, deliveryDir); } catch { /* best-effort */ }
-    const stillListed = findSession(slug);
-    if (stillListed?.id) {
-      try { rm({ handle: stillListed.id, exec: execFileSync }); } catch (e) {
+    for (const stopped of entries) {
+      if (!stopped.id) continue;
+      try { rm({ handle: stopped.id, exec: execFileSync }); } catch (e) {
         logFn(`  ⚠ ${slug}: \`claude rm\` failed: ${String(e?.message || e).split('\n')[0]}`);
       }
     }
@@ -912,12 +997,14 @@ export function runRetentionSweepPass({
     deleted++;
   }
 
-  const pruneResult = pruneRuns({ maxAgeMs: ceilingMs, now, dryRun });
+  const pruneResult = pruneRuns({ maxAgeMs: ceilingMs, now, dryRun, stepCountFor });
 
   return {
     scanned: slugs.size,
     deleted: dryRun ? 0 : deleted,
     kept,
+    keptLive,
+    agentsUnreadable,
     runsPruned: dryRun ? 0 : pruneResult.pruned.length,
     wouldPruneRuns: dryRun ? pruneResult.pruned : undefined,
     wouldDelete,
@@ -1158,7 +1245,7 @@ export function runSessionReaperPass({
   };
 }
 
-function main(argv) {
+async function main(argv) {
   const flags = parseFlags(argv);
   const dryRun = !!flags['dry-run'];
   // `--no-ground-truth` is an escape hatch back to the original state-only axis, for a rollback or an
@@ -1196,7 +1283,7 @@ function main(argv) {
   const runRetention = !!flags['retention-sweep'];
 
   const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion });
-  const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
+  const retentionResult = runRetention ? runRetentionSweepPass({ dryRun, stepCountFor: await loadDeclaredStepCountResolver() }) : null;
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -1228,5 +1315,8 @@ function main(argv) {
 
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main(process.argv.slice(2));
+  main(process.argv.slice(2)).catch((e) => {
+    process.stderr.write(`session-reaper: ${String(e?.stack || e)}\n`);
+    process.exit(1);
+  });
 }

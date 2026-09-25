@@ -130,11 +130,22 @@ export function deleteRun(id, dir = resolveRunsDir()) {
  * ./run-record.mjs}'s own doc) exists to prevent. `declared`/`applied`/`failed` effects carry no live external
  * work to lose, so a record whose effects are ALL one of those (or empty) is terminal. A malformed record
  * (missing `effects`) is treated as NOT terminal — never prune on an unreadable shape.
+ *
+ * THE RUN MUST ALSO BE COMPLETE (PR #2669 review). `pending: null` with no live effect is ALSO the shape of a
+ * run that never started (cursor 0, fresh from `newRunRecord`) and of one `driveRun` halted with `step-refused`
+ * or `stuck` — neither sets `pending`. Both are resumable, and pruning them throws away a cursor and any paid
+ * judge findings. So a run is terminal only when its cursor has reached exactly its declared step count
+ * (`engine.mjs#isComplete`'s own test). The record does not carry that count, so the caller passes it:
+ * `stepCount` unknown (`null`/absent) ⇒ NOT terminal — completion is unprovable, so never prune. A cursor PAST
+ * the count means the declaration changed under the run (`engine.mjs#declarationFor` refuses to step it) —
+ * also not provably complete.
  * @param {object} record
+ * @param {{stepCount?: number|null}} [o] - the run's declared step count (`declaration.steps.length`).
  * @returns {boolean}
  */
-export function isRunRecordTerminal(record) {
+export function isRunRecordTerminal(record, { stepCount = null } = {}) {
   if (!record || typeof record !== 'object') return false;
+  if (!Number.isInteger(stepCount) || stepCount < 0 || record.cursor !== stepCount) return false;
   if (record.pending !== null && record.pending !== undefined) return false;
   if (!Array.isArray(record.effects)) return false;
   return !record.effects.some((e) => e && (e.status === 'pending' || e.status === 'in-flight'));
@@ -158,10 +169,14 @@ export function isRunRecordTerminal(record) {
  * `session-reaper.mjs`'s own `runSessionReaperPass`/`runRetentionSweepPass` use, load-bearing for THAT
  * caller's own `--dry-run` to stay honest rather than pruning run records unconditionally underneath a
  * caller that asked for a preview.
- * @param {{dir?:string, maxAgeMs:number|null, now?:number, statFn?:Function, dryRun?:boolean}} o
+ * `stepCountFor(op, record)` (PR #2669 review) answers the run's declared step count, or `null` when it cannot —
+ * see {@link isRunRecordTerminal} for why completion needs it. The default answers `null` for everything, so a
+ * caller that supplies no resolver prunes NOTHING (fail closed); `session-reaper.mjs` passes one built from the
+ * real operation table.
+ * @param {{dir?:string, maxAgeMs:number|null, now?:number, statFn?:Function, dryRun?:boolean, stepCountFor?:(op:string, record:object)=>(number|null)}} o
  * @returns {{scanned:number, pruned:string[], kept:string[], corrupt:string[]}}
  */
-export function pruneTerminalRuns({ dir = resolveRunsDir(), maxAgeMs, now = Date.now(), statFn = statSync, dryRun = false } = {}) {
+export function pruneTerminalRuns({ dir = resolveRunsDir(), maxAgeMs, now = Date.now(), statFn = statSync, dryRun = false, stepCountFor = () => null } = {}) {
   const pruned = [];
   const kept = [];
   const corrupt = [];
@@ -175,7 +190,9 @@ export function pruneTerminalRuns({ dir = resolveRunsDir(), maxAgeMs, now = Date
       corrupt.push(id); // a torn record — never silently deleted, see tryReadRun's own refusal policy
       continue;
     }
-    if (!record || !isRunRecordTerminal(record)) {
+    let stepCount = null;
+    try { stepCount = record ? stepCountFor(record.op, record) : null; } catch { /* unresolvable — keep it */ }
+    if (!record || !isRunRecordTerminal(record, { stepCount })) {
       kept.push(id);
       continue;
     }

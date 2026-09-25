@@ -341,36 +341,80 @@ describe('the fs shell', () => {
 // #4089 (epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) — "delete helpers exist but
 // nothing calls them" was the gap the card's own root-cause card named verbatim; these prove the fix.
 describe('isRunRecordTerminal — is a run record safe to prune?', () => {
-  it('a run with no effects and no pending is terminal', () => {
-    expect(isRunRecordTerminal(sample())).toBe(true);
+  // `done` = a sample run that has finished all 2 of its declared steps.
+  const done = () => ({ ...sample(), cursor: 2 });
+  it('a run past every declared step, with no effects and no pending, is terminal', () => {
+    expect(isRunRecordTerminal(done(), { stepCount: 2 })).toBe(true);
+  });
+  // PR #2669 review (correctness finding): `pending: null` + no live effect is ALSO the shape of a run that
+  // never started, or one halted by `driveRun`'s `step-refused`/`stuck` stops. Neither is complete.
+  it('a freshly-created run (cursor 0, nothing executed) is NEVER terminal', () => {
+    expect(isRunRecordTerminal(sample(), { stepCount: 2 })).toBe(false);
+  });
+  it('a run halted mid-way (step-refused / stuck: cursor short of the step count, pending null) is NOT terminal', () => {
+    expect(isRunRecordTerminal({ ...sample(), cursor: 1 }, { stepCount: 2 })).toBe(false);
+  });
+  it('an unknown step count (no declaration to check against) is NEVER terminal — fail closed', () => {
+    expect(isRunRecordTerminal(done())).toBe(false);
+    expect(isRunRecordTerminal(done(), { stepCount: null })).toBe(false);
+  });
+  it('a cursor PAST the declared step count (the declaration changed under the run) is NOT terminal', () => {
+    expect(isRunRecordTerminal({ ...sample(), cursor: 3 }, { stepCount: 2 })).toBe(false);
   });
   it('a run with `pending` set is NOT terminal — mid-flight replay state', () => {
-    expect(isRunRecordTerminal({ ...sample(), pending: { kind: 'declared' } })).toBe(false);
+    expect(isRunRecordTerminal({ ...done(), pending: { kind: 'declared' } }, { stepCount: 2 })).toBe(false);
   });
   it('a run with an in-flight or pending effect is NOT terminal', () => {
-    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'in-flight' }] })).toBe(false);
-    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'pending' }] })).toBe(false);
+    expect(isRunRecordTerminal({ ...done(), effects: [{ key: 'a', status: 'in-flight' }] }, { stepCount: 2 })).toBe(false);
+    expect(isRunRecordTerminal({ ...done(), effects: [{ key: 'a', status: 'pending' }] }, { stepCount: 2 })).toBe(false);
   });
-  it('a run whose effects are all applied/failed/declared IS terminal', () => {
-    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'applied' }, { key: 'b', status: 'failed' }] })).toBe(true);
+  it('a completed run whose effects are all applied/failed/declared IS terminal', () => {
+    expect(isRunRecordTerminal({ ...done(), effects: [{ key: 'a', status: 'applied' }, { key: 'b', status: 'failed' }] }, { stepCount: 2 })).toBe(true);
   });
   it('a malformed record (no effects array) is never treated as terminal', () => {
-    expect(isRunRecordTerminal({ ...sample(), effects: undefined })).toBe(false);
-    expect(isRunRecordTerminal(null)).toBe(false);
-    expect(isRunRecordTerminal('nope')).toBe(false);
+    expect(isRunRecordTerminal({ ...done(), effects: undefined }, { stepCount: 2 })).toBe(false);
+    expect(isRunRecordTerminal(null, { stepCount: 2 })).toBe(false);
+    expect(isRunRecordTerminal('nope', { stepCount: 2 })).toBe(false);
   });
 });
 
 describe('pruneTerminalRuns — the fs shell', () => {
+  // A run of the one-step op `x` that has finished that step.
+  const finished = (id) => ({ ...newRunRecord({ id, op: 'x' }), cursor: 1 });
+  const stepCountFor = (op) => (op === 'x' ? 1 : null);
+
   it('deletes a terminal run past maxAgeMs, keeps one still young', () => {
-    writeRun(newRunRecord({ id: 'run-old', op: 'x' }), dir);
-    writeRun(newRunRecord({ id: 'run-fresh', op: 'x' }), dir);
+    writeRun(finished('run-old'), dir);
+    writeRun(finished('run-fresh'), dir);
     const now = Date.now();
     const statFn = (p) => ({ mtimeMs: p.includes('run-old') ? now - 1000 : now });
-    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn });
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn, stepCountFor });
     expect(result.pruned).toEqual(['run-old']);
     expect(result.kept).toEqual(['run-fresh']);
     expect(listRunIds(dir)).toEqual(['run-fresh']);
+  });
+
+  // PR #2669 review (correctness finding), reproduced: a never-started run was pruned once old enough.
+  it('never prunes a never-started or halted run, however old', () => {
+    writeRun(newRunRecord({ id: 'run-neverstarted', op: 'land-advance' }), dir);
+    writeRun({ ...newRunRecord({ id: 'run-halted', op: 'y' }), cursor: 1 }, dir);
+    const now = Date.now();
+    const result = pruneTerminalRuns({
+      dir, maxAgeMs: 1, now, statFn: () => ({ mtimeMs: now - 999_999 }),
+      stepCountFor: (op) => ({ 'land-advance': 2, y: 3 })[op] ?? null,
+    });
+    expect(result.pruned).toEqual([]);
+    expect(listRunIds(dir)).toEqual(['run-halted', 'run-neverstarted']);
+  });
+
+  it('with no `stepCountFor` (or an op it cannot resolve) nothing is ever pruned — completion is unprovable', () => {
+    writeRun(finished('run-old'), dir);
+    writeRun({ ...newRunRecord({ id: 'run-other', op: 'unknown-op' }), cursor: 5 }, dir);
+    const now = Date.now();
+    const statFn = () => ({ mtimeMs: now - 999_999 });
+    expect(pruneTerminalRuns({ dir, maxAgeMs: 1, now, statFn }).pruned).toEqual([]);
+    expect(pruneTerminalRuns({ dir, maxAgeMs: 1, now, statFn, stepCountFor }).pruned).toEqual(['run-old']);
+    expect(listRunIds(dir)).toEqual(['run-other']);
   });
 
   it('never prunes a non-terminal (in-flight) run, however old', () => {
@@ -380,7 +424,7 @@ describe('pruneTerminalRuns — the fs shell', () => {
     };
     writeRun(inFlightRun, dir);
     const now = Date.now();
-    const result = pruneTerminalRuns({ dir, maxAgeMs: 1, now, statFn: () => ({ mtimeMs: now - 999_999 }) });
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 1, now, statFn: () => ({ mtimeMs: now - 999_999 }), stepCountFor });
     expect(result.pruned).toEqual([]);
     expect(result.kept).toEqual(['run-live']);
     expect(listRunIds(dir)).toEqual(['run-live']);
@@ -394,9 +438,9 @@ describe('pruneTerminalRuns — the fs shell', () => {
   });
 
   it('`dryRun: true` reports what would be pruned without deleting anything', () => {
-    writeRun(newRunRecord({ id: 'run-old', op: 'x' }), dir);
+    writeRun(finished('run-old'), dir);
     const now = Date.now();
-    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn: () => ({ mtimeMs: now - 1000 }), dryRun: true });
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn: () => ({ mtimeMs: now - 1000 }), dryRun: true, stepCountFor });
     expect(result.pruned).toEqual(['run-old']);
     expect(listRunIds(dir)).toEqual(['run-old']); // still on disk — dry run never deletes
   });
