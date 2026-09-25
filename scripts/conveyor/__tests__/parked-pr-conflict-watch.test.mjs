@@ -821,7 +821,7 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
     const routed2 = [];
     const second = watchParkedPrConflicts({
       repo: 'o/n', listPrs: () => [pr], provider: recovered,
-      listPrComments: () => postedComments,
+      listPrComments: () => postedComments, labelRemovedAtMs: () => 0,
       postFinding: (o) => routed2.push(o), postStandDown: () => {},
     });
     expect(second[0].commented).toBe(false); // NOT re-posted — the alert marker matched
@@ -854,7 +854,7 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
     const routed = [];
     const second = watchParkedPrConflicts({
       repo: 'o/n', listPrs: () => [pr], provider: recovered,
-      listPrComments: () => postedComments,
+      listPrComments: () => postedComments, labelRemovedAtMs: () => 0,
       postFinding: (o) => routed.push(o), postStandDown: () => {},
     });
     expect(routed).toHaveLength(1); // retried — NOT lost forever, unlike the pre-#4118 shape
@@ -875,12 +875,154 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
     const routed = [];
     const results = watchParkedPrConflicts({
       repo: 'o/n', listPrs: () => [pr], provider,
-      listPrComments: () => [oldEpisodeAlert],
+      listPrComments: () => [oldEpisodeAlert], labelRemovedAtMs: () => 0,
       postFinding: (o) => routed.push(o), postStandDown: () => {},
     });
     expect(results[0].commented).toBe(true); // a FRESH alert for the new episode, not silently skipped
     expect(routed).toHaveLength(1);
     expect(provider.calls.filter((c) => c[0] === 'postComment')).toHaveLength(1);
+  });
+});
+
+// #4118 re-review (round 2) — the recency window alone cannot tell a crash-retry from a RAPID re-conflict, and
+// the fresh-path stand-down dedup was not scoped at all. The episode boundary is the latest time the
+// CONFLICT_LABEL was REMOVED (`labelRemovedAtMs`): a marker posted before it belongs to a closed episode.
+describe('#4118 — marker dedups are scoped to the CURRENT conflict episode', () => {
+  const trusted = { login: 'web-everything' };
+  const now = Date.parse('2026-09-25T12:00:00Z');
+  const iso = (msAgo) => new Date(now - msAgo).toISOString();
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => calls.push(['ensureLabel', repo, name]),
+      setLabels: (repo, num, spec) => calls.push(['setLabels', repo, num, spec]),
+      postComment: (repo, num) => calls.push(['postComment', repo, num]),
+    };
+  };
+
+  it('a second conflict within the retry window receives a fresh alert and dispatch', () => {
+    // Episode 1: alert + finding 10 minutes ago, resolved (label removed) 5 minutes ago. Episode 2: now.
+    const pr = { number: 4121, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [
+      { body: buildConflictComment({ num: 4121 }, {}), createdAt: iso(10 * 60_000), author: trusted },
+      { body: buildConflictFindingBody({ num: 4121 }), createdAt: iso(10 * 60_000), author: trusted },
+    ];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => now - 5 * 60_000,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(true);
+    expect(routed).toHaveLength(1);
+  });
+
+  it('a crash-retry in the SAME episode (markers newer than the last label removal) is still deduped', () => {
+    const pr = { number: 4122, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [
+      { body: buildConflictComment({ num: 4122 }, {}), createdAt: iso(60_000), author: trusted },
+      { body: buildConflictFindingBody({ num: 4122 }), createdAt: iso(60_000), author: trusted },
+    ];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => now - 5 * 60_000,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(false);
+    expect(routed).toHaveLength(0);
+    expect(provider.calls).toContainEqual(['setLabels', 'o/n', 4122, { add: CONFLICT_LABEL, remove: [] }]);
+  });
+
+  it('an unreadable episode boundary fails toward a duplicate post, never a lost dispatch', () => {
+    const pr = { number: 4123, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [{ body: buildConflictComment({ num: 4123 }, {}), createdAt: iso(60_000), author: trusted }];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => null,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(true);
+    expect(routed).toHaveLength(1);
+  });
+
+  const statutePr = (number) => ({
+    number, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: [{ path: 'docs/agent/platform-decisions.md' }],
+  });
+  const standDownAt = (msAgo) => ({ body: buildStandDownComment({ reason: 'conflict' }), createdAt: iso(msAgo), author: trusted });
+
+  it('a fresh statute-tier episode posts its OWN stand-down even with an old episode\'s stand-down on the thread', () => {
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4124)], provider: fakeProvider(), now,
+      listPrComments: () => [standDownAt(3 * 24 * 60 * 60_000)], labelRemovedAtMs: () => now - 2 * 24 * 60 * 60_000,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([4124]);
+  });
+
+  it('a stale out-of-window stand-down never suppresses a fresh one, even with no recorded label removal', () => {
+    const routed = [];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4125)], provider: fakeProvider(), now,
+      listPrComments: () => [standDownAt(CONFLICT_RETRY_WINDOW_MS + 60_000)], labelRemovedAtMs: () => 0,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(routed).toEqual([4125]);
+  });
+
+  it('a crash-retry of the stand-down in the SAME episode does not re-post it', () => {
+    const routed = [];
+    const provider = fakeProvider();
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4126)], provider, now,
+      listPrComments: () => [standDownAt(60_000)], labelRemovedAtMs: () => 0,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([]);
+    expect(provider.calls).toContainEqual(['setLabels', 'o/n', 4126, { add: CONFLICT_LABEL, remove: [] }]);
+  });
+
+  it('the episode boundary is only read when the thread has comments to judge', () => {
+    let reads = 0;
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4127)], provider: fakeProvider(), now,
+      listPrComments: () => [], labelRemovedAtMs: () => { reads += 1; return 0; },
+      postFinding: () => {}, postStandDown: () => {},
+    });
+    expect(reads).toBe(0);
+  });
+});
+
+// #4118 re-review (round 2) — the rearm must land BEFORE the CONFLICT_LABEL is removed: the label's presence is
+// what makes `newlyResolved` fire again on the next sweep, so removing it first made a failed rearm unretryable.
+describe('#4118 — a resolved conflict\'s rearm is crash-safe (rearm first, label removal last)', () => {
+  it('a failed rearm leaves the CONFLICT_LABEL on, so the next sweep retries it', () => {
+    const calls = [];
+    const provider = { setLabels: (repo, num, spec) => calls.push(['setLabels', num, spec]) };
+    const pr = { number: 4128, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+    const first = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, listAgents: () => [],
+      postRearm: () => { throw new Error('simulated rearm crash'); },
+    });
+    expect(first[0].error).toMatch(/simulated rearm crash/);
+    expect(calls).toEqual([]); // label NOT removed — still retryable
+
+    const rearmed = [];
+    const second = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, listAgents: () => [],
+      postRearm: (o) => { rearmed.push(o.pr.number); calls.push(['rearm', o.pr.number]); },
+    });
+    expect(second[0].routedTo).toBe('rearm-review');
+    expect(rearmed).toEqual([4128]);
+    expect(calls).toEqual([['rearm', 4128], ['setLabels', 4128, { add: undefined, remove: [CONFLICT_LABEL] }]]);
   });
 });
 
@@ -1857,8 +1999,28 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
       labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
       // #3383 — a trusted author is now required for the marker read-back to count.
       listPrComments: () => [{ body: STAND_DOWN_MARKER, author: { login: 'web-everything' } }],
+      labelRemovedAtMs: () => 0,
     });
     expect(later).toEqual([]);
+    expect(routed).toEqual(['sd']);
+  });
+
+  // #4118 round 2 — the grace-expiry stand-down dedup is scoped to the current episode too.
+  it('grace expired, statute-tier: an OLD episode\'s stand-down (before the last label removal) does not silence this one', () => {
+    const statuteFiles = [{ path: 'docs/agent/platform-decisions.md' }];
+    const routed = [];
+    const removedAt = Date.parse('2026-09-20T00:00:00Z');
+    const oldStandDown = { body: STAND_DOWN_MARKER, createdAt: '2026-09-19T00:00:00Z', author: { login: 'web-everything' } };
+    const newStandDown = { body: STAND_DOWN_MARKER, createdAt: '2026-09-21T00:00:00Z', author: { login: 'web-everything' } };
+    const run = (comments) => watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ number: 2506, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }],
+      provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
+      listPrComments: () => comments, labelRemovedAtMs: () => removedAt,
+    });
+    expect(run([oldStandDown])[0].routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual(['sd']);
+    expect(run([oldStandDown, newStandDown])).toEqual([]); // this episode's own stand-down — never re-posted
     expect(routed).toEqual(['sd']);
   });
 

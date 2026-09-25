@@ -80,7 +80,7 @@ import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLe
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import {
-  countStandDownComments, standDownComments, WATCHER_STAND_DOWN_ACTOR, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
+  standDownComments, WATCHER_STAND_DOWN_ACTOR, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
 } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
@@ -179,6 +179,27 @@ export function defaultConflictLabelAgeMs({ pr, repo, exec = execFileSyncThrottl
 }
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultConflictLabelRemovedAtMs — #4118 round 2: when the
+ * CONFLICT_LABEL was last REMOVED from this PR (the end of its previous conflict episode), from the same issue
+ * event timeline {@link defaultConflictLabelAgeMs} reads. This is the episode boundary the marker dedups key on
+ * (see the section above `CONFLICT_RETRY_WINDOW_MS`): unlike the `labeled` event, it exists even on a
+ * crash-recovery retry, because it belongs to the PREVIOUS episode, not the one being retried.
+ * @returns {number|null} epoch ms of the latest removal; `0` if the label was never removed; `null` if unreadable
+ */
+export function defaultConflictLabelRemovedAtMs({ pr, repo, exec = execFileSyncThrottled }) {
+  try {
+    const path = `repos/${repo}/issues/${pr?.number}/events?per_page=100`;
+    const out = exec('gh', ['api', '--paginate', path, '--jq',
+      `[.[] | select(.event=="unlabeled" and .label.name=="${CONFLICT_LABEL}") | .created_at] | last`],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const times = String(out || '').split('\n').map((l) => Date.parse(l.trim())).filter(Number.isFinite);
+    return times.length ? Math.max(...times) : 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultComputeConflictDisposition — #xngv3vn (the queued-
  * conflict grace was wasted on a conflict the drain can never heal). A LOCAL, git-level classification of what
  * is ACTUALLY conflicting, reusing the EXACT plumbing the drain itself uses to decide whether it can heal a
@@ -262,20 +283,25 @@ export function planConflictLabelChange({ isConflicting, isResolved = false, cur
 // leaves `plan.add` truthy on the NEXT sweep, so this whole branch retries — cheaply, because the marker checks
 // below skip whatever already landed instead of reposting/re-dispatching it.
 //
-// WHY A TIME WINDOW, NOT AN EXACT EPISODE BOUNDARY. The obvious-looking alternative — trust an existing marker
-// comment only when it belongs to the CURRENTLY open conflict episode — needs to know "when did this episode
-// start", which is unavailable in EXACTLY the case this fix must handle: on the crash-recovery retry, the label
-// was NEVER actually applied (that is the whole crash), so the `labeled` GitHub timeline event
-// {@link defaultConflictLabelAgeMs} reads never fired either — there is no episode-start timestamp to check the
-// marker against. Scoping by RECENCY instead sidesteps that circularity: a marker comment posted within the
-// last {@link CONFLICT_RETRY_WINDOW_MS} while the label is still absent is overwhelmingly likely to be THIS SAME
-// in-progress detection (the label write that would close it out normally follows within seconds, not minutes);
-// a marker older than the window is far more likely a PAST, already-resolved episode's leftover (this file's own
-// examples span hours to days between episodes on one PR). Getting this wrong in the "too old" direction costs
-// one harmless duplicate post; getting it wrong the other way (treating an old episode's marker as live) would
-// silently drop a fresh conflict's alert/dispatch forever — so the window is picked generous on the "still
-// counts as recent" side, never the reverse.
+// WHICH MARKERS COUNT: an EPISODE BOUNDARY plus a TIME WINDOW. A marker comment counts only when it was posted
+// AFTER the CONFLICT_LABEL was last removed ({@link defaultConflictLabelRemovedAtMs}) AND within the last
+// {@link CONFLICT_RETRY_WINDOW_MS}.
+// - The boundary is the end of the PREVIOUS episode, not the start of this one. The start ("labeled" event) is
+//   unusable here: on a crash-recovery retry the label was never applied, so that event never fired. The end
+//   ("unlabeled" event) does exist, because the watch removes the label when a conflict resolves. This is what
+//   stops a RAPID re-conflict (resolved and conflicting again inside the window) from reading the previous
+//   episode's alert/finding/stand-down as its own (#4118 round-2 review).
+// - The window is a second guard for the one case the boundary cannot see: an episode that never got its label
+//   (crashed) and then resolved with no label to remove. Its markers age out after the window.
+// - An UNREADABLE boundary counts no marker at all. That costs at most one duplicate post (the label lands right
+//   after, closing the branch); the opposite error would silently drop a fresh conflict's alert or dispatch.
 export const CONFLICT_RETRY_WINDOW_MS = 20 * 60 * 1000;
+
+/** PURE: does a comment's `createdAt` fall inside the current episode ({@link CONFLICT_RETRY_WINDOW_MS} section)? */
+function isInCurrentEpisode(c, { now, windowMs, sinceMs }) {
+  const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
+  return Number.isFinite(ms) && ms > sinceMs && Math.abs(now - ms) <= windowMs;
+}
 
 /** The fixed lead-in {@link buildConflictComment} always renders first (only the "parked"/"approved" word
  *  varies) — matched, never re-rendered, by {@link hasRecentConflictAlertComment} / {@link latestConflictAlertCreatedAtMs}. */
@@ -297,16 +323,16 @@ export const CONFLICT_ALERT_MARKER_RE = /^⚠️ \*\*This (?:parked|approved) PR
  * `conflict-fix-round-count.mjs`, `advisory-round-count.mjs`, `reconcile-core.mjs`) — this file's own three
  * #4118 marker readers were the one place it had not yet been applied.
  * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
- * @param {{now?:number, windowMs?:number}} [o]
+ * @param {{now?:number, windowMs?:number, sinceMs?:number}} [o] `sinceMs` — the episode boundary (epoch ms of
+ *   the last CONFLICT_LABEL removal); only markers posted strictly after it count.
  * @returns {boolean}
  */
-export function hasRecentConflictAlertComment(comments, { now = Date.now(), windowMs = CONFLICT_RETRY_WINDOW_MS } = {}) {
+export function hasRecentConflictAlertComment(comments, { now = Date.now(), windowMs = CONFLICT_RETRY_WINDOW_MS, sinceMs = -Infinity } = {}) {
   if (!Array.isArray(comments)) return false;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
-    const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
-    if (Number.isFinite(ms) && Math.abs(now - ms) <= windowMs) return true;
+    if (isInCurrentEpisode(c, { now, windowMs, sinceMs })) return true;
   }
   return false;
 }
@@ -348,19 +374,32 @@ export function latestConflictAlertCreatedAtMs(comments) {
  * PURE. #4118 review finding (security/authz) — ALSO requires {@link isTrustedMarkerAuthor}, for the identical
  * reason stated on {@link hasRecentConflictAlertComment}.
  * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
- * @param {{now?:number, windowMs?:number}} [o]
+ * @param {{now?:number, windowMs?:number, sinceMs?:number}} [o]
  * @returns {boolean}
  */
-export function hasRecentConflictFindingComment(comments, { now = Date.now(), windowMs = CONFLICT_RETRY_WINDOW_MS } = {}) {
+export function hasRecentConflictFindingComment(comments, { now = Date.now(), windowMs = CONFLICT_RETRY_WINDOW_MS, sinceMs = -Infinity } = {}) {
   if (!Array.isArray(comments)) return false;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.includes('Auto-detected by the parked-PR conflict watch')
       || !body.includes('dispatched per `#xu2krte`') || !isTrustedMarkerAuthor(c)) continue;
-    const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
-    if (Number.isFinite(ms) && Math.abs(now - ms) <= windowMs) return true;
+    if (isInCurrentEpisode(c, { now, windowMs, sinceMs })) return true;
   }
   return false;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#hasRecentConflictStandDownComment — #4118 round 2: the SAME
+ * episode-scoped dedup as {@link hasRecentConflictFindingComment}, for the fresh-detection stand-down. Replaces
+ * a bare `countStandDownComments(...) > 0`, which let ANY stand-down ever posted on the PR (a long-closed
+ * episode's) silently suppress a new episode's stand-down. Trust rule and leading-line match come from
+ * `stand-down.mjs#standDownComments`, never re-derived. PURE.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}}|string>|null|undefined} comments
+ * @param {{now?:number, windowMs?:number, sinceMs?:number}} [o]
+ * @returns {boolean}
+ */
+export function hasRecentConflictStandDownComment(comments, { now = Date.now(), windowMs = CONFLICT_RETRY_WINDOW_MS, sinceMs = -Infinity } = {}) {
+  return standDownComments(comments).some((c) => isInCurrentEpisode(c, { now, windowMs, sinceMs }));
 }
 
 /**
@@ -877,7 +916,7 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
 /**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListPrComments — `#3383`'s idempotency read for the
  * grace-expired stand-down routing: a COMPLETE, injectable read of every issue comment on the PR, so
- * {@link countStandDownComments} (`we:scripts/conveyor/stand-down.mjs`) can tell "did a fixer already stand down
+ * {@link standDownComments} (`we:scripts/conveyor/stand-down.mjs`) can tell "did a fixer already stand down
  * here" from the PR itself before posting a SECOND one. Unlike the fresh-detection stand-down (naturally
  * one-shot: it only fires on the label's absent→present transition), the grace-expired check re-evaluates on
  * EVERY sweep for as long as the PR stays queued+conflicting+labelled — a stand-down leaves no label change
@@ -895,8 +934,8 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
  * in this repo — the REST issue-comments endpoint this function calls names the poster `.user.login`, not
  * `.author.login` (that is the GraphQL `gh pr view --json comments` shape's own naming, used by this file's
  * siblings) — so callers see the ONE shape `isTrustedMarkerAuthor` already expects either way. This was NOT
- * purely additive the way `.created_at` was: `countStandDownComments` (`we:scripts/conveyor/stand-down.mjs`),
- * already called on this function's own output at both this file's `graceDue` stand-down check and the
+ * purely additive the way `.created_at` was: `standDownComments` (`we:scripts/conveyor/stand-down.mjs`),
+ * already read on this function's own output at both this file's `graceDue` stand-down check and the
  * newly-detected `standDown` path, itself requires `isTrustedMarkerAuthor` (#3383) — with no `author` field to
  * read, EVERY comment this function returned failed that check, so `alreadyStoodDown`/the fresh-path stand-down
  * dedup silently never matched a real stand-down at all. Adding `.user.login` here fixes that latent gap too,
@@ -1142,6 +1181,7 @@ export function watchParkedPrConflicts({
   listMainStatutePatches = defaultListMainStatutePatchesSinceMergeBase,
   listPrComments = defaultListPrComments,
   labelAgeMs = defaultConflictLabelAgeMs,
+  labelRemovedAtMs = defaultConflictLabelRemovedAtMs,
   computeConflictDisposition = defaultComputeConflictDisposition,
   listAgents = defaultListAgents,
   now = Date.now(),
@@ -1310,9 +1350,25 @@ export function watchParkedPrConflicts({
           // thread for an existing stand-down marker first, since (unlike a label-transition-gated dispatch)
           // `graceDue` recomputes true on EVERY sweep for as long as the PR stays queued+conflicting+labelled
           // (`stand-down.mjs` makes no label change), so without this check it would re-post every tick.
+          //
+          // #4118 round 2 — only a stand-down from THIS episode counts: one posted before the CONFLICT_LABEL was
+          // last removed belongs to a closed episode and must not silence this one. No recency window here (this
+          // path re-runs for hours by design). An unreadable boundary, or an undated comment, keeps the old
+          // "any stand-down counts" reading, so a `gh` hiccup can never turn into a re-post every sweep.
           let alreadyStoodDown = false;
           try {
-            alreadyStoodDown = countStandDownComments(listPrComments({ number: pr?.number, repo: resolvedRepo })) > 0;
+            const standDowns = standDownComments(listPrComments({ number: pr?.number, repo: resolvedRepo }));
+            alreadyStoodDown = standDowns.length > 0;
+            if (alreadyStoodDown) {
+              let removedAt = null;
+              try { removedAt = labelRemovedAtMs({ pr, repo: resolvedRepo }); } catch { removedAt = null; }
+              if (Number.isFinite(removedAt) && removedAt > 0) {
+                alreadyStoodDown = standDowns.some((c) => {
+                  const ms = Date.parse(c.createdAt ?? '');
+                  return !Number.isFinite(ms) || ms > removedAt;
+                });
+              }
+            }
           } catch { /* read failure → assume not yet stood down: a duplicate comment beats silent starvation */ }
           if (alreadyStoodDown) continue; // already handed to a human — never re-post
           if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
@@ -1359,6 +1415,15 @@ export function watchParkedPrConflicts({
         // dedup below (and a resumed-after-crash retry on the NEXT sweep) work off the SAME snapshot.
         let existingComments = [];
         try { existingComments = listPrComments({ number: pr?.number, repo: resolvedRepo }); } catch { existingComments = []; }
+        // The episode boundary every marker dedup below is scoped to (see the `CONFLICT_RETRY_WINDOW_MS`
+        // section). Read only when there is a thread to judge; unreadable → `Infinity`, so no marker counts.
+        let sinceMs = -Infinity;
+        if (Array.isArray(existingComments) && existingComments.length) {
+          let removedAt = null;
+          try { removedAt = labelRemovedAtMs({ pr, repo: resolvedRepo }); } catch { removedAt = null; }
+          sinceMs = Number.isFinite(removedAt) ? removedAt : Infinity;
+        }
+        const markerScope = { now, sinceMs };
 
         // Computed ONCE, ahead of both the alert comment and the routing decision below, so the two can never
         // disagree about what happens next — PR #1966's own review found exactly that drift (the alert still
@@ -1400,7 +1465,7 @@ export function watchParkedPrConflicts({
 
         // #4118 — the card's own fix: post the alert ONLY if it is not already sitting on the thread from a
         // still-in-progress detection this sweep is retrying after a crash (see `CONFLICT_RETRY_WINDOW_MS`).
-        if (!hasRecentConflictAlertComment(existingComments, { now })) {
+        if (!hasRecentConflictAlertComment(existingComments, markerScope)) {
           provider.postComment(resolvedRepo, pr?.number,
             buildConflictComment(pr, {
               isStatuteTier: standDown, deferredToDrain: queued, appendOnlyStatute,
@@ -1422,18 +1487,18 @@ export function watchParkedPrConflicts({
         // never retried. Leaving the label unapplied on a throw here means the WHOLE branch — alert-dedup
         // included — retries cleanly on the next sweep instead.
         if (standDown) {
-          if (countStandDownComments(existingComments) === 0) postStandDown({ pr, repo: resolvedRepo });
+          if (!hasRecentConflictStandDownComment(existingComments, markerScope)) postStandDown({ pr, repo: resolvedRepo });
           entry.routedTo = 'stand-down';
         } else if (isStatuteTier && appendOnlyStatute) {
-          if (!hasRecentConflictFindingComment(existingComments, { now })) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+          if (!hasRecentConflictFindingComment(existingComments, markerScope)) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
           entry.routedTo = 'reconcile-finding (append-only statute)';
         } else if (isStatuteTier && reviewHumanFixable) {
-          if (!hasRecentConflictFindingComment(existingComments, { now })) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+          if (!hasRecentConflictFindingComment(existingComments, markerScope)) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
           entry.routedTo = 'reconcile-finding (review-human statute amendment)';
         } else if (queued) {
           entry.routedTo = 'deferred-to-drain'; // bounced by a later sweep once QUEUED_CONFLICT_GRACE_MS passes
         } else {
-          if (!hasRecentConflictFindingComment(existingComments, { now })) postFinding({ pr, repo: resolvedRepo });
+          if (!hasRecentConflictFindingComment(existingComments, markerScope)) postFinding({ pr, repo: resolvedRepo });
           entry.routedTo = 'reconcile-finding';
         }
         provider.ensureLabel(resolvedRepo, CONFLICT_LABEL, CONFLICT_LABEL_META);
@@ -1463,7 +1528,12 @@ export function watchParkedPrConflicts({
           // "lost forever" shape #4118 (a) names, one effect over.
           entry.routedTo = 'rearm-deferred (fix agent still live)';
         } else {
-          provider.setLabels(resolvedRepo, pr?.number, { add: undefined, remove: plan.remove });
+          // #4118 round 2 — rearm FIRST, remove the label LAST. The label's presence is what makes
+          // `newlyResolved` fire again next sweep, so removing it before a rearm that then throws (or before a
+          // crash) lost the rearm for good. A failed rearm now leaves the label on and the next sweep retries;
+          // once a rearm lands, `review:changes` is gone, so a retry after a crash here only removes the label.
+          // Known cost: a rearm that posts its comment but then fails the label swap is retried, posting a second
+          // rearm comment (one extra negotiation round) — rare, and better than losing the rearm.
           if (needsRearm) {
             try {
               postRearm({ pr, repo: resolvedRepo });
@@ -1472,6 +1542,7 @@ export function watchParkedPrConflicts({
               entry.error = String((e2 && e2.message) || e2).split('\n')[0];
             }
           }
+          if (!entry.error) provider.setLabels(resolvedRepo, pr?.number, { add: undefined, remove: plan.remove });
         }
       }
     } catch (e) {
