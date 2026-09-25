@@ -5,7 +5,7 @@ size: 8
 parent: "3443"
 status: open
 blockedBy: ["3901", "3895", "3897", "3911", "3906", "3908", "3916", "3917", "3915"]
-scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/__tests__/runner.test.mjs", "we:skills-src/conveyor/__tests__/runner-shutdown-live.test.mjs", "we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/__tests__/supervisor.test.mjs", "we:scripts/conveyor/tick-once.mjs", "we:scripts/conveyor/__tests__/tick-once.test.mjs", "we:scripts/conveyor/tick-bookkeeping.mjs", "we:scripts/conveyor/__tests__/tick-bookkeeping.test.mjs", "we:scripts/operations/__fixtures__/shared-tick-driver.mjs", "we:scripts/operations/__tests__/shared-tick-two-drivers.test.mjs"]
+scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/__tests__/runner.test.mjs", "we:skills-src/conveyor/__tests__/runner-shutdown-live.test.mjs", "we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/__tests__/supervisor.test.mjs", "we:scripts/conveyor/tick-once.mjs", "we:scripts/conveyor/__tests__/tick-once.test.mjs", "we:scripts/conveyor/tick-bookkeeping.mjs", "we:scripts/conveyor/__tests__/tick-bookkeeping.test.mjs", "we:scripts/operations/__fixtures__/shared-tick-driver.mjs", "we:scripts/operations/__tests__/shared-tick-two-drivers.test.mjs", "we:scripts/operations/__tests__/action-ground-truth.test.mjs"]
 dateOpened: "2026-09-04"
 tags: []
 ---
@@ -72,3 +72,7 @@ Bug fixes and alerting layered ON TOP of the new we:skills-src/conveyor/supervis
 - **Split:** #3487 keeps only the runtime core (S4). 3916 (test setup, heavy-command admission), 3917 (dispatch gate, tick-core core) and 3915 (land path, gh-throttle, lease-reaper) land first. `we:scripts/operations/open-pr.mjs` moved to #3903; `we:scripts/operations/wake.mjs` and `we:scripts/operations/explore-io.mjs` to #3906; the `we:package.json` script to #3897; the load-analysis runner-audit fixture to #3899; `we:scripts/lane-pool.mjs` dropped (main already has everything the branch has).
 - Heavy-admission: main's reaper is the base, plus the branch's additions and status shape; the branch's second `pruneStaleWaiting` call is dropped.
 - **Landing order:** #3908 makes the blocking mechanical review path the default, and main's runner has no heartbeat for it until this slice lands. Between #3908 landing and this slice landing, the conveyor runner must not run continuously on main (pause it, or land the two back to back).
+
+## Graduation import check
+
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/action-ground-truth.test.mjs` here from #3908 — it imports a module this card owns.
