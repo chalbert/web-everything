@@ -1,6 +1,5 @@
 ---
 kind: epic
-size: 21
 status: open
 scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/lib/verify-lane-gate.mjs", "we:scripts/readiness/claimScope.mjs"]
 dateOpened: "2026-09-25"
