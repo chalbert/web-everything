@@ -1,7 +1,8 @@
 ---
+bornAs: x2i6js3
 kind: story
 size: 5
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/lib/gh-app-shim.mjs", "we:scripts/lib/github-app-auth-env.mjs", "we:scripts/lib/gh-throttle.mjs"]
 dateOpened: "2026-09-24"

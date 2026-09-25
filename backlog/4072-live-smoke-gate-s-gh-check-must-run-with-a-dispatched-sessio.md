@@ -3,9 +3,11 @@ bornAs: xhd7flk
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/daemon-live-smoke.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 

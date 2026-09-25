@@ -293,6 +293,86 @@ export function defaultTrimPool({ exec = execFileSync, repo = null, root = REPO_
   }
 }
 
+/** Presence-checked env knob (mirrors {@link DISABLE_ENV_VAR}'s own "any value disables" contract) that turns
+ *  OFF only the reclaim sub-pass below, leaving litter-reap + trim running exactly as before — an operator who
+ *  wants to pause auto-reclaim specifically (without losing the rest of this file's own periodic upkeep) sets
+ *  this rather than the whole-pass {@link DISABLE_ENV_VAR}. */
+export const RECLAIM_DISABLE_ENV_VAR = 'WE_LANE_POOL_RECLAIM_DISABLED';
+
+/**
+ * #3383 gap 2 — the live `lane-whois.mjs --json` read, shelling the SAME command an operator runs by hand
+ * (and the one `we:scripts/operations/operator-queue.mjs#laneReclaimQueue` already shells for its own
+ * "needs your decision" feed). `exec` is injectable so the argv is assertable with no real subprocess.
+ * Best-effort, like every other read in this file's IO shell: any failure (a crashed child, unparsable JSON)
+ * returns `null` — "verdicts unavailable this tick" — never throws, so a bad tick degrades to "no reclaim this
+ * tick" rather than crashing the whole health-watch pass.
+ * @param {{exec?:Function, repo?:string|null, root?:string}} [o]
+ * @returns {{lanes:Array<object>}|null}
+ */
+export function defaultListWhois({ exec = execFileSync, repo = null, root = REPO_ROOT } = {}) {
+  const argv = [join(root, 'scripts', 'lane-whois.mjs'), '--json'];
+  const repoPath = resolveLanePoolRepoPath(repo);
+  if (repoPath) argv.push(`--repo=${repoPath}`);
+  try {
+    // #3383-perf made this call BOUNDED (was 9+ minutes measured live pre-fix — see that item's own PR body
+    // for the before/after timing) — a generous-but-real ceiling, well above the ≤60s target so a slower-
+    // than-usual tick still finishes, but never the old unbounded/20-minute shape.
+    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: 3 * 60_000, killSignal: 'SIGKILL' });
+    const parsed = JSON.parse(String(out || 'null'));
+    return parsed && Array.isArray(parsed.lanes) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #3383 gap 2 — the live pool-RECLAIM call for ONE lane, shelling `node lane-pool.mjs reclaim --lane=N --json
+ * [--dry-run]` — the MUTATION half; see that command's own header for why it re-derives the preservation
+ * proof itself rather than trusting the verdict this file just read. `exec` is injectable. Best-effort: any
+ * failure (a crashed child, the lane got claimed by a live `acquire` in the race window between the whois scan
+ * and this call, unparsable JSON) returns `null` — "reclaim unavailable/refused this lane this tick" — never
+ * throws, so one bad lane never stops the sweep from trying the rest.
+ * @param {{exec?:Function, repo?:string|null, root?:string, lane:number, dryRun?:boolean}} o
+ * @returns {{reclaimed:boolean, wouldReclaim?:boolean, preserved:boolean, reason:string}|null}
+ */
+export function defaultReclaimLane({ exec = execFileSync, repo = null, root = REPO_ROOT, lane, dryRun = false }) {
+  const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'reclaim', `--lane=${lane}`, '--json'];
+  const repoPath = resolveLanePoolRepoPath(repo);
+  if (repoPath) argv.push(`--repo=${repoPath}`);
+  if (dryRun) argv.push('--dry-run');
+  try {
+    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const parsed = JSON.parse(String(out || 'null'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #3383 gap 2 — for every lane `lane-whois.mjs` verdicted `finished-reclaimable`, call the reclaim command
+ * ({@link defaultReclaimLane}) — real when `!dryRun`, a full preservation re-check with no mutation when
+ * `dryRun` (mirrors `trim`'s own `--dry-run` contract exactly). A lane whose verdict is `finished-needs-review`
+ * or `unknown-work` is NEVER touched here — that is exactly what `we:scripts/operations/operator-queue.mjs`'s
+ * existing `--with-lanes` "needs your decision" feed already surfaces (#3383's own original spec; unchanged by
+ * this file). PURE-ish shell: takes the already-computed whois report in, calls `reclaimLane` once per
+ * candidate, returns the outcomes — no fs/git of its own beyond what `reclaimLane` does.
+ * @param {{whois:{lanes:Array<object>}|null, reclaimLane:Function, dryRun:boolean}} o
+ * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, reason?:string}>}
+ */
+export function reclaimFinishedLanes({ whois, reclaimLane, dryRun }) {
+  if (!whois || !Array.isArray(whois.lanes)) return [];
+  const candidates = whois.lanes.filter((row) => row && row.exists && row.verdict === 'finished-reclaimable');
+  const outcomes = [];
+  for (const row of candidates) {
+    const result = reclaimLane({ lane: row.lane, dryRun });
+    outcomes.push(result
+      ? { lane: row.lane, ...result }
+      : { lane: row.lane, reclaimed: false, reason: 'reclaim call unavailable this tick' });
+  }
+  return outcomes;
+}
+
 /**
  * THE IO SHELL. Reads live pool status, reads each unleased lane's porcelain, plans the reap
  * ({@link planLaneReap}), and — unless `dryRun` — reaps every `action:'reap'` lane via the SAME
@@ -305,16 +385,23 @@ export function defaultTrimPool({ exec = execFileSync, repo = null, root = REPO_
  * trim evaluates it, so trim never re-derives that decision): the periodic SHRINK half beside this pass's
  * existing periodic reap half. `trimMax` forwards to `trim`'s own `--max`; omitted, `trim` falls back to its
  * own per-repo default cap (see `scripts/lane-pool.mjs`'s `TRIM_DEFAULT_CAP`).
+ * #3383 gap 2 — ALSO runs the lane-whois-driven AUTO-RECLAIM pass after trim: a fast (`lane-whois.mjs`'s own
+ * #3383-perf follow-up), read-only whois scan over the whole pool, then `reclaim --lane=N` for every
+ * `finished-reclaimable` verdict it finds. Gated by {@link RECLAIM_DISABLE_ENV_VAR} (checked by the caller,
+ * {@link runLanePoolHealthWatch}, exactly like the whole-pass {@link DISABLE_ENV_VAR}) via the `reclaimEnabled`
+ * flag here, so a disabled reclaim pass costs not even the whois scan.
  * @param {{repo?:string|null, root?:string, listStatus?:Function, readPorcelain?:Function, reap?:Function,
  *   isLeasedNow?:Function, dryRun?:boolean, trimPool?:Function, trimMax?:number|null,
- *   listAcquirable?:Function}} [o]
+ *   listAcquirable?:Function, listWhois?:Function, reclaimLane?:Function, reclaimEnabled?:boolean}} [o]
  * @returns {{health:{total:number,leased:number,acquirable:number,dirtyUnleased:number}, plan:Array<object>,
- *   reaped:number[], dryRun:boolean, trim:object|null}}
+ *   reaped:number[], dryRun:boolean, trim:object|null, reclaim:{verdicts:object|null,
+ *   outcomes:Array<object>}|null}}
  */
 export function watchLanePoolHealth({
   repo = null, root = REPO_ROOT, listStatus = defaultListLaneStatus, readPorcelain = defaultReadPorcelain,
   reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
+  listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -341,7 +428,18 @@ export function watchLanePoolHealth({
   // diverge from what `acquire`'s own auto-pick would actually do. `null` (real read unavailable this tick)
   // degrades to the pre-#3383 plan-only answer.
   const acquirableLaneNumbers = listAcquirable({ repo, root });
-  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim };
+  // #3383 gap 2 — run whois + reclaim LAST: a lane litter-reap or trim just acted on is a different lane from
+  // any whois would call finished-reclaimable (whois only ever recommends resetting a lane with real ahead/
+  // dirty content — litter-only or already-clean lanes are `lane-whois.mjs`'s own trivial "nothing to lose"
+  // case, harmlessly reclaimed too), so ordering here is not load-bearing for correctness, only for keeping
+  // this tick's own read of pool state as fresh as possible before the heaviest scan runs.
+  let reclaim = null;
+  if (reclaimEnabled) {
+    const whois = listWhois({ repo, root });
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun });
+    reclaim = { verdicts: whois, outcomes };
+  }
+  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim, reclaim };
 }
 
 /**
@@ -356,7 +454,8 @@ export function runLanePoolHealthWatch({ env = process.env, ...opts } = {}) {
   // must still disable — a bare truthiness check (`if (env[DISABLE_ENV_VAR])`) treats `''` as unset and would
   // silently run anyway, contradicting the "any value" contract documented on `DISABLE_ENV_VAR` above.
   if (env[DISABLE_ENV_VAR] !== undefined) return { disabled: true };
-  return watchLanePoolHealth(opts);
+  const reclaimEnabled = env[RECLAIM_DISABLE_ENV_VAR] === undefined && opts.reclaimEnabled !== false;
+  return watchLanePoolHealth({ ...opts, reclaimEnabled });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -372,7 +471,7 @@ if (IS_CLI) {
     if (result.disabled) {
       process.stderr.write(`  lane-pool-health-watch: disabled (${DISABLE_ENV_VAR} set)\n`);
     } else {
-      const { health, plan, reaped, trim } = result;
+      const { health, plan, reaped, trim, reclaim } = result;
       process.stderr.write(
         `  pool health: ${health.acquirable} acquirable · ${health.dirtyUnleased} dirty(unleased) · ` +
           `${health.leased} leased · ${health.total} total\n`,
@@ -396,6 +495,27 @@ if (IS_CLI) {
         );
       } else {
         process.stderr.write('  pool trim: unavailable this tick (best-effort — see any error above)\n');
+      }
+      // #3383 gap 2 — the auto-reclaim summary. `reclaim === null` means the sub-pass itself was disabled
+      // (`WE_LANE_POOL_RECLAIM_DISABLED`), never "ran and found nothing" — those two report differently on
+      // purpose (an operator scanning logs for "is reclaim even on" needs to tell them apart).
+      if (reclaim === null) {
+        process.stderr.write(`  lane reclaim: disabled (${RECLAIM_DISABLE_ENV_VAR} set)\n`);
+      } else if (!reclaim.verdicts) {
+        process.stderr.write('  lane reclaim: whois scan unavailable this tick (best-effort — see any error above)\n');
+      } else {
+        const done = reclaim.outcomes.filter((o) => o.reclaimed);
+        const would = reclaim.outcomes.filter((o) => o.wouldReclaim);
+        const refused = reclaim.outcomes.filter((o) => !o.reclaimed && !o.wouldReclaim);
+        process.stderr.write(
+          `  lane reclaim: ${reclaim.outcomes.length} finished-reclaimable candidate(s) → ` +
+            `${dryRun ? `${would.length} would reclaim` : `${done.length} reclaimed`}` +
+            `${refused.length ? `, ${refused.length} refused (preservation re-check failed)` : ''}\n`,
+        );
+        for (const o of reclaim.outcomes) {
+          if (o.reclaimed || o.wouldReclaim) continue;
+          process.stderr.write(`    lane-${o.lane}: NOT reclaimed — ${o.reason}\n`);
+        }
       }
     }
     process.stdout.write(`${JSON.stringify({ checked: true, ...result })}\n`);

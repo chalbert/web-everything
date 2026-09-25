@@ -1,7 +1,8 @@
 ---
+bornAs: xitk240
 kind: story
 size: 13
-parent: "x95yxvd"
+parent: "4097"
 status: resolved
 scope: ["we:scripts/conveyor/__tests__/sim/world.mjs", "we:scripts/conveyor/__tests__/sim/scenario.mjs", "we:scripts/conveyor/__tests__/sim/daemon-host.mjs", "we:scripts/conveyor/__tests__/helpers/fake-gh.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:vitest.integration.config.ts"]
 dateOpened: "2026-09-24"

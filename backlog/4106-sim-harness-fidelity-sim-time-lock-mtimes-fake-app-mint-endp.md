@@ -1,7 +1,8 @@
 ---
+bornAs: xtjl9s0
 kind: story
 size: 5
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/conveyor/__tests__/sim/fake-clock-preload.mjs", "we:scripts/conveyor/__tests__/helpers/fake-gh-shim.mjs", "we:scripts/operations/__tests__/helpers/fake-claude-shim.mjs"]
 dateOpened: "2026-09-24"

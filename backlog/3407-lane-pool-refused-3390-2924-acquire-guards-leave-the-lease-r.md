@@ -2,9 +2,12 @@
 bornAs: xenqv9f
 kind: story
 size: 2
-status: open
+status: resolved
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/__tests__/lane-pool-acquire-refused-lease.test.mjs", "we:scripts/__tests__/lane-pool-acquire-reverify-containment.test.mjs"]
 dateOpened: "2026-08-30"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
+graduatedTo: "we:scripts/lane-pool.mjs"
 costTokens: "in:130 cw:143479 cr:7827868 out:25088"
 costUsd: 5.98
 costSessions: 1
