@@ -3,9 +3,11 @@ bornAs: x3ecgta
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
@@ -15,4 +17,8 @@ Ruling #3681 Fork 4 condition (ii), we:docs/agent/platform-decisions.md#resident
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run` on we:scripts/lib/__tests__/daemon-clone-lock.test.mjs — fails before (module absent), passes after; includes a two-real-process mutual-exclusion test.
+
+## Delivered
+
+Built as we:scripts/lib/daemon-clone-lock.mjs (reader lease per tick, one writer that waits for readers, same-host dead-pid + TTL reclaim, `hold` CLI for hand operations). Live proof: two daemon processes on one clone — 0 overlapping write spans and 0 `index.lock` errors with the lock, 25-28 overlaps and `index.lock` failures without it.

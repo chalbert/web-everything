@@ -1,49 +1,47 @@
 #!/usr/bin/env node
 /**
  * @file scripts/lib/daemon-load-overlay.mjs
- * @description #3383 — the operator's own manual "load this early" CLI for a daemon clone, routed through the
- *   EXACT SAME merge → live-smoke → adopt/rollback code path `we:scripts/lib/daemon-self-sync.mjs#withSelfSync`
- *   runs on every automatic tick ({@link mergeOverlayRef} for the merge, `we:scripts/lib/daemon-live-smoke.mjs
- *   #gateMergedCommit` for the gate) — so a hand-triggered early load can never bypass the gate the daemon's
- *   own self-sync is held to. Operator: "Also give ME a CLI for my manual early loads."
+ * @description #4044 Module E — the operator's own manual "load this early" CLI for a daemon clone. `--ref` now
+ *   REGISTERS the ref as a standing overlay (`we:scripts/lib/daemon-overlays.mjs#addOverlay`, Module B) and
+ *   then runs a gated rebuild (`we:scripts/lib/daemon-rebuild.mjs#rebuildClone`, Module C) — the EXACT SAME
+ *   rebuild-fresh-from-`origin/main`-plus-overlays → live-smoke → adopt/rollback path a daemon's own
+ *   `we:scripts/lib/daemon-self-sync.mjs#withSelfSync` runs every tick, so a hand-triggered early load can
+ *   never bypass the gate the daemon's own self-sync is held to, and (unlike the old one-shot merge) the ref
+ *   STAYS registered — every later tick keeps rebuilding it in, auto-dropped only once `main`/its PR state make
+ *   it moot (Module B/C's own clause-5 auto-drop rules), never silently forgotten after this one CLI run exits.
  *
- * BUG FOUND IN LIVE USE (2026-09-24, follow-up on #3383/PR #2601): the first cut reused
- * `daemon-self-sync.mjs#selfSyncCheckout` verbatim, which conflates TWO things that must stay separate for an
- * OVERLAY (as opposed to a same-branch self-sync): the HOME branch the clone must already be on (`main`, so
- * `decideSelfSync`'s dirty/clean checks mean what they say) and the REF being merged IN (an arbitrary lane
- * branch, e.g. `lane/xkse05k-...`, almost never `main` itself). Passing `--ref` straight through as
- * `selfSyncCheckout`'s own `base` made it check "is HEAD on `lane/xkse05k-...`?" — false, since the clone is
- * correctly on `main` — and refuse with `not-on-main` BEFORE ever fetching or merging anything. The operator
- * then loaded the overlay by hand, hit a real merge conflict, and their own manual rollback didn't fire — the
- * clone sat mid-merge for ~1 minute. {@link mergeOverlayRef} below fixes this: `homeBranch` (must already be
- * checked out, default `main`) and `ref` (what gets fetched from `origin` and merged in) are two separate
- * parameters, never the same slot.
+ * HISTORY (#3383, PR #2601 follow-up, 2026-09-24): the FIRST cut called
+ * `we:scripts/lib/daemon-self-sync.mjs#selfSyncCheckout` directly with `--ref` spliced in as its own `base` —
+ * conflating the HOME branch (`main`) with the ref being merged IN, which made it refuse `not-on-main` before
+ * ever fetching anything. That standalone merge path ({@link mergeOverlayRef}/{@link dryRunOverlay} below) is
+ * KEPT, exported, for whatever still imports it directly — but `runDaemonLoadOverlay` no longer calls it: a
+ * one-shot merge-then-gate never left a durable record of what was loaded, so the very next automatic rebuild
+ * (which rebuilds fresh from `origin/main` + the REGISTERED overlay list, nothing else) would silently drop it
+ * again. Registering it as a real overlay is the only way a manual early load survives past this one CLI run.
  *
  * USAGE:
- *   node scripts/lib/daemon-load-overlay.mjs --clone=<path to a daemon's dedicated clone> --ref=<branch to overlay> [--base=<home branch, default main>] [--dry-run] [--json]
+ *   node scripts/lib/daemon-load-overlay.mjs --clone=<path to a daemon's dedicated clone> --ref=<branch to overlay> [--pr=N] [--base=<home branch, default main>] [--dry-run] [--json]
  *
- * WHAT IT DOES: verifies `--clone` is on `--base` (default `main`) and clean, fetches `origin/<--ref>`, and
- * merges it in — same merge-commit-never-rebase contract as `daemon-self-sync.mjs#selfSyncCheckout`, and the
- * SAME fail-closed reads (an unreadable HEAD/status/count is never coerced into a green light). A CONFLICT is
- * ALWAYS `git merge --abort`ed before this function returns — the tree is never left mid-merge, whatever calls
- * it. Then {@link gateMergedCommit} runs on a successful merge:
- *   - nothing to merge (already up to date / dirty / not on `--base` / a fetch or merge failure) → reported,
- *     nothing else happens (a conflict is reported AS `conflict`, already aborted — see above);
- *   - merged + smoke PASS → adopted, left merged;
- *   - merged + smoke FAIL → `git reset --hard` back to the pre-merge HEAD, and the merged sha is recorded so a
- *     re-run against the SAME broken sha short-circuits instead of re-running the live smoke (same reject-cache
- *     `daemon-self-sync.mjs`'s own gate uses — this CLI does not keep a second one).
- * `--dry-run` (real, read-only): fetches `origin/<--ref>` and reports whether a merge WOULD happen and what
- * it would bring in — no `git merge` is ever run, so the clone's tree is untouched either way.
+ * WHAT IT DOES (real run): `addOverlay(root, {ref, pr, addedBy, reason})` (Module B — validates `ref` with
+ * `isSafeBranchName`, updates an existing entry in place rather than duplicating it), THEN `rebuildClone(...)`
+ * (Module C) under the clone's own write lock — same object-DB rebuild, same live-smoke gate, same
+ * adopt/rollback/quarantine handling every automatic tick gets. `mainOnly` is always `false` here: a manual
+ * overlay load is never the main-only case (`we:skills-src/conveyor/pass-daemon.mjs`'s `drain`/
+ * `merge-orphan-sweep` passes) that refuses overlays altogether.
+ * `--dry-run` is STRICTLY read-only: the ref is NEVER written to the overlay list (no `addOverlay` call at
+ * all) — instead {@link dryRunRebuild} (Module C) previews the plan with the ref appended AFTER the stored
+ * list, VIRTUALLY, via its own `extraOverlays` option, so "what would registering this ref do" can be checked
+ * before committing to it.
  * This is a ONE-SHOT CLI, not a daemon — there is no process to restart. It leaves the clone's checkout in the
- * adopted or rolled-back state and reports which, exiting non-zero only when a merge was attempted and
- * rejected (so a caller scripting this can tell "nothing to do" apart from "rejected").
+ * adopted or rolled-back state and reports which, exiting non-zero only when a rebuild moved nothing because
+ * it was refused/rejected (so a caller scripting this can tell "nothing to do" apart from "rejected").
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readHeadSha, readOriginRefSha, isSafeBranchName } from './daemon-self-sync.mjs';
-import { gateMergedCommit } from './daemon-live-smoke.mjs';
+import { readHeadSha, isSafeBranchName } from './daemon-self-sync.mjs';
 import { gitRun } from './main-staleness.mjs';
+import { addOverlay } from './daemon-overlays.mjs';
+import { rebuildClone, dryRunRebuild } from './daemon-rebuild.mjs';
 
 /** Throw unless `ref` passes {@link isSafeBranchName} — same argv-injection defense
  *  `daemon-self-sync.mjs#assertSafeBranchName` applies to a POC branch; `--ref` is operator input here, but
@@ -133,33 +131,39 @@ export function dryRunOverlay({ root, ref, homeBranch = 'main', run = gitRun, ti
 }
 
 /**
- * @param {{clone:string, ref:string, base?:string, dryRun?:boolean, env?:NodeJS.ProcessEnv, log?:Console,
- *   merge?:typeof mergeOverlayRef, gate?:typeof gateMergedCommit, run?:typeof gitRun, readHead?:typeof readHeadSha}} o
+ * REGISTER `--ref` as a standing overlay (Module B) and run a gated rebuild (Module C) — the real-run path.
+ * `--dry-run` never calls `addOverlay` at all; it previews the plan with `ref` appended VIRTUALLY via
+ * {@link dryRunRebuild}'s own `extraOverlays` option, so nothing is ever written to the overlay list on a
+ * preview.
+ * @param {{clone:string, ref:string, pr?:number|null, base?:string, dryRun?:boolean, env?:NodeJS.ProcessEnv,
+ *   log?:Console, addedBy?:string|null, reason?:string|null, now?:string,
+ *   addOverlayFn?:typeof addOverlay, rebuild?:typeof rebuildClone, dryRunRebuildFn?:typeof dryRunRebuild}} o
  * @returns {Promise<object>}
  */
 export async function runDaemonLoadOverlay({
-  clone, ref, base = 'main', dryRun = false, env = process.env, log = console,
-  merge = mergeOverlayRef, gate = gateMergedCommit, run = gitRun, readHead = readHeadSha,
+  clone, ref, pr = null, base = 'main', dryRun = false, env = process.env, log = console,
+  addedBy, reason = null, now,
+  addOverlayFn = addOverlay, rebuild = rebuildClone, dryRunRebuildFn = dryRunRebuild,
 }) {
   if (!clone || typeof clone !== 'string') throw new TypeError('daemon-load-overlay: --clone=<path> is required');
   if (!ref || typeof ref !== 'string') throw new TypeError('daemon-load-overlay: --ref=<branch to overlay> is required');
   const root = resolve(clone);
+  const by = addedBy ?? (typeof env?.USER === 'string' && env.USER ? env.USER : null);
 
   if (dryRun) {
-    const preview = dryRunOverlay({ root, ref, homeBranch: base, run });
+    const preview = await dryRunRebuildFn({ root, env, extraOverlays: [{ ref, pr }] });
     return { root, ref, homeBranch: base, dryRun: true, ...preview };
   }
 
-  const preMergeSha = readHead({ root, run });
-  const r = merge({ root, ref, homeBranch: base, run });
-  if (!r.merged) {
-    return { root, ref, homeBranch: base, mergedAnything: false, adopted: false, commits: 0, reason: r.reason };
-  }
-  const mergedIdentitySha = readOriginRefSha({ root, ref: `origin/${ref}`, run });
-  const verdict = await gate({ root, preMergeSha, mergedIdentitySha, env, run, log });
+  addOverlayFn(root, {
+    ref, pr, addedBy: by, reason, now,
+  }, { env });
+  const rebuildResult = await rebuild({
+    root, env, log, mainOnly: false,
+  });
   return {
-    root, ref, homeBranch: base, mergedAnything: true, adopted: verdict.adopt, commits: r.commits,
-    reason: verdict.reason, smoke: verdict.smoke,
+    root, ref, homeBranch: base, registered: true, mergedAnything: !!rebuildResult.moved,
+    adopted: !!rebuildResult.adopted, reason: rebuildResult.reason, alerts: rebuildResult.alerts, head: rebuildResult.head,
   };
 }
 
@@ -180,26 +184,29 @@ if (IS_CLI) {
   const clone = typeof flags.clone === 'string' ? flags.clone : null;
   const ref = typeof flags.ref === 'string' ? flags.ref : null;
   const base = typeof flags.base === 'string' ? flags.base : 'main';
+  const pr = flags.pr !== undefined ? Number(flags.pr) : null;
+  const reason = typeof flags.reason === 'string' ? flags.reason : null;
+  const addedBy = typeof flags.by === 'string' ? flags.by : (process.env.USER || null);
   const dryRun = !!flags['dry-run'];
-  runDaemonLoadOverlay({ clone, ref, base, dryRun })
+  runDaemonLoadOverlay({
+    clone, ref, pr, base, dryRun, addedBy, reason,
+  })
     .then((result) => {
       if (flags.json) {
         process.stdout.write(`${JSON.stringify(result)}\n`);
       } else if (result.dryRun) {
         process.stdout.write(
-          `daemon-load-overlay --dry-run: ${result.root} onHome(${base})=${result.onHome} dirty=${result.dirty} `
-          + `fetched=${result.fetched} behind=${result.behind} headSha=${result.headSha} wouldMerge=${result.wouldMerge}\n`,
+          `daemon-load-overlay --dry-run: ${result.root} onMain=${result.onMain} safe=${result.unsafe?.safe} `
+          + `wouldDo=${result.wouldDo} finalSha=${result.plan?.finalSha ?? 'n/a'}\n`,
         );
       } else if (!result.mergedAnything) {
-        process.stdout.write(`daemon-load-overlay: nothing adopted — ${result.reason} (${result.root})\n`);
+        process.stdout.write(`daemon-load-overlay: registered ${ref} — nothing adopted this pass (${result.reason}) (${result.root})\n`);
       } else if (result.adopted) {
-        process.stdout.write(`daemon-load-overlay: ADOPTED ${result.commits} commit(s) from origin/${ref} onto ${result.root} (${result.reason})\n`);
+        process.stdout.write(`daemon-load-overlay: registered ${ref} and ADOPTED onto ${result.head} at ${result.root} (${result.reason})\n`);
       } else {
-        process.stdout.write(`daemon-load-overlay: REJECTED (${result.reason}) — rolled back ${result.root} to its pre-merge commit\n`);
-        if (result.smoke) {
-          for (const check of result.smoke.results) process.stdout.write(`  ${check.ok ? '✓' : '✗'} ${check.name} (${check.ms}ms): ${check.detail}\n`);
-        }
+        process.stdout.write(`daemon-load-overlay: registered ${ref} but the rebuild was REJECTED (${result.reason}) at ${result.root}\n`);
       }
+      for (const a of result.alerts || []) process.stdout.write(`  ! ${a.kind}\n`);
       process.exitCode = result.mergedAnything && !result.adopted ? 1 : 0;
     })
     .catch((e) => {

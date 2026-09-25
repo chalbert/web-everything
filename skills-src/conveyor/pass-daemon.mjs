@@ -55,7 +55,7 @@ import {
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { ensureFreshGithubAppEnv } from '../../scripts/lib/github-app-auth-env.mjs';
-import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { withSelfSync, resolvePocSyncBranch, DAEMON_SELF_SYNC_BRANCH_ENV } from '../../scripts/lib/daemon-self-sync.mjs';
 
 /** How often the INDEPENDENT heartbeat timer fires, regardless of whether a pass is mid-run. Deliberately
  *  much shorter than any pass's own `intervalMs` — it exists precisely to keep beating DURING a long single
@@ -90,6 +90,14 @@ export function passDaemonSelfSyncEnabled(env = process.env) {
   const pocBranch = typeof env?.DAEMON_SELF_SYNC_BRANCH === 'string' ? env.DAEMON_SELF_SYNC_BRANCH.trim() : '';
   return pocBranch !== '';
 }
+
+/** #4044 Module E — passes whose own job IS landing onto `main` (the resident drain watch, and the periodic
+ *  orphan merge sweep `merge-orphan-sweep` runs — see `daemon-manifest.mjs`'s own header for why that one is
+ *  NOT the drain role) must never self-sync onto an OVERLAY: an overlay is unreviewed, unmerged code, and
+ *  landing decisions have to be made from `origin/main` alone. `withSelfSync`'s `mainOnly` option (which the
+ *  underlying rebuild — `daemon-rebuild.mjs#rebuildClone` — refuses every registered overlay for, Module C)
+ *  is how this daemon asks for that; see {@link main} for the POC-mode refusal this implies. */
+export const MAIN_ONLY_PASSES = new Set(['drain', 'merge-orphan-sweep']);
 
 // ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
 
@@ -224,8 +232,23 @@ async function main(argv) {
     releaseRunnerLeaseIfOwned(RUNNER_LOCK_ROOT, owner, { key });
     process.exit(0);
   };
+  // #4044 Module E — a main-only pass (see MAIN_ONLY_PASSES) never self-syncs onto an overlay: if POC mode
+  // (DAEMON_SELF_SYNC_BRANCH) is also set, that would otherwise track a POC branch instead of plain `main` —
+  // refuse it here, loudly, and fall back to a plain main-only rebuild rather than silently doing either the
+  // wrong thing (tracking the POC branch) or nothing (skipping self-sync entirely for this pass).
+  const mainOnly = MAIN_ONLY_PASSES.has(passName);
+  let selfSyncEnv = process.env;
+  if (mainOnly && resolvePocSyncBranch({ env: process.env })) {
+    console.error(
+      `pass-daemon: "${passName}" is a main-only pass — refusing POC mode `
+      + `(${DAEMON_SELF_SYNC_BRANCH_ENV}=${process.env[DAEMON_SELF_SYNC_BRANCH_ENV]}); self-sync falls back to plain origin/main only.`,
+    );
+    selfSyncEnv = { ...process.env, [DAEMON_SELF_SYNC_BRANCH_ENV]: '' };
+  }
   const runPassSelfSynced = passDaemonSelfSyncEnabled()
-    ? withSelfSync({ tickOnce: () => spawnPassOnce(entry) }, { root: REPO_ROOT, onRestart: restartOntoNewCode }).tickOnce
+    ? withSelfSync({ tickOnce: () => spawnPassOnce(entry) }, {
+      root: REPO_ROOT, onRestart: restartOntoNewCode, mainOnly, env: selfSyncEnv,
+    }).tickOnce
     : () => spawnPassOnce(entry);
 
   console.error(`pass-daemon: started "${passName}" (${entry.script}) on interval ${intervalMs}ms, heartbeat every ${heartbeatIntervalMs}ms.`);

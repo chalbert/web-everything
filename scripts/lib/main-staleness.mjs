@@ -157,8 +157,15 @@ export function isStaleMainRefusalMessage(message) {
  *   `review-dispatch`, this function's original and still most common caller).
  */
 export function assertMainNotStale(root, checkStaleness, { base = 'main', label = 'review-dispatch' } = {}) {
+  // #4044 Module E — a MANAGED clone (`process.env.WE_DAEMON_MANAGED_CLONE === '1'`, set by
+  // `daemon-self-sync.mjs#withSelfSync` at wrapper construction) is rebuilt fresh from `origin/main` (+ its
+  // overlay list) by `daemon-rebuild.mjs`, gated behind a live smoke check, every tick — a dispatch chokepoint
+  // fast-forwarding it BY ITSELF would pull in un-smoked (possibly rejected) code straight past that gate. So a
+  // managed clone never auto-ffs here: it refuses with the stale marker instead, exactly like a diverged/dirty
+  // checkout always has, which `hasStaleRefusal` turns into an immediate GATED rebuild (never a raw merge).
+  const managedClone = process.env.WE_DAEMON_MANAGED_CLONE === '1';
   const check = checkStaleness ?? ((r) => checkMainStaleness({
-    base, autoFf: true, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
+    base, autoFf: !managedClone, cleanOnly: true, run: (args) => gitRun(args, { cwd: r }),
   }));
   const st = check(root);
   if (st && st.synced) {

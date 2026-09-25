@@ -12,6 +12,11 @@ test-results/
 .cloudflare.env
 .browser-selection.json
 
+# Local Claude Code settings override — a daemon clone on a host without the operator's own global gitignore
+# must not read as dirty just because this per-host file exists (ruling clause 3(iv): a daemon refuses to
+# rebuild over an unsafe/dirty tree, and this file is host-local noise, never tracked content).
+.claude/settings.local.json
+
 # Progress-board GENERATED output (item x9t5i5a) — the page is re-derived from
 # reports/progress-board.json plus live `gh` state on every run, so committing it would churn the tree on
 # every refresh (the timestamp alone changes each time) with nothing a reader could review. The cache

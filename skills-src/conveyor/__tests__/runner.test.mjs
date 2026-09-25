@@ -856,15 +856,26 @@ describe('makeCliMechanicalPasses — skipPasses omits exactly the named pass(es
 //        own payload argument threaded through both wrappers unchanged ─────────────────────────────────────
 
 describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tick, in order', () => {
-  it('up-to-date self-sync: token refresh runs, THEN the tick, and the tick receives the forwarded payload', async () => {
+  // #4044 Module E — the default path is rebuild-driven; `rebuild`/`acquireRead`/`releaseRead`/`readState` are
+  // forwarded the same way `sync`/`gate` used to be (see wireSelfSyncAndAppAuth's own header), so these tests
+  // inject fakes for them instead — never touching a real git checkout or `~/.claude/*`.
+  const emptyState = () => ({
+    adopted: null, rejected: null, inProgress: null, quarantine: null,
+  });
+  const okLock = () => ({ ok: true });
+
+  it('up-to-date rebuild: token refresh runs, THEN the tick, and the tick receives the forwarded payload', async () => {
     const order = [];
     const payloadsSeen = [];
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async (payload) => { order.push('tick'); payloadsSeen.push(payload); return { nextState: { fromTick: true } }; },
-      root: '/irrelevant-since-sync-is-injected',
+      root: '/irrelevant-since-rebuild-is-injected',
       selfSync: true,
-      onRestart: () => { throw new Error('onRestart must not run when nothing merged'); },
-      sync: () => ({ merged: false, commits: 0, reason: 'up-to-date' }),
+      onRestart: () => { throw new Error('onRestart must not run when nothing adopted'); },
+      rebuild: async () => ({ moved: false, reason: 'up-to-date' }),
+      acquireRead: okLock,
+      releaseRead: () => {},
+      readState: emptyState,
       authOpts: {
         env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
         readCache: () => ({ v: 2, expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }), // fresh cache → no real mint
@@ -880,17 +891,14 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
     expect(out).toEqual({ nextState: { fromTick: true } });
   });
 
-  it('self-sync merged: onRestart pre-empts BOTH the token refresh and the tick', async () => {
+  it('self-sync adopted a rebuild: onRestart pre-empts BOTH the token refresh and the tick', async () => {
     const order = [];
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async () => { order.push('tick'); return {}; },
-      root: '/irrelevant-since-sync-is-injected',
+      root: '/irrelevant-since-rebuild-is-injected',
       selfSync: true,
       onRestart: () => { order.push('restart'); return 'restarted'; },
-      sync: () => ({ merged: true, commits: 3, reason: 'merged' }),
-      // #3383 live-smoke gate: this test is about restart PRECEDENCE (restart before token-refresh/tick), not
-      // the gate's own verdict — inject a passing one (real daemon-live-smoke.test.mjs covers the gate itself).
-      gate: async () => ({ adopt: true, reason: 'test-gate-pass' }),
+      rebuild: async () => ({ moved: true, adopted: true, head: 'deadbeef' }),
       authOpts: {
         env: { WE_GITHUB_APP_ID: 'a', WE_GITHUB_APP_INSTALLATION_ID: 'b', WE_GITHUB_APP_PRIVATE_KEY_PATH: '/k' },
         setEnv: () => { order.push('token-refresh'); },
@@ -904,14 +912,17 @@ describe('wireSelfSyncAndAppAuth — self-sync, then token refresh, then the tic
     expect(out).toBe('restarted');
   });
 
-  it('a self-sync conflict still ticks (never worse than today), still refreshing the token first', async () => {
+  it('a rebuild that refuses (e.g. not-on-main) still ticks (never worse than today), still refreshing the token first', async () => {
     const order = [];
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async () => { order.push('tick'); return {}; },
-      root: '/irrelevant-since-sync-is-injected',
+      root: '/irrelevant-since-rebuild-is-injected',
       selfSync: true,
-      onRestart: () => { throw new Error('must not restart on a conflict'); },
-      sync: () => ({ merged: false, commits: 0, reason: 'conflict' }),
+      onRestart: () => { throw new Error('must not restart on a refused rebuild'); },
+      rebuild: async () => ({ moved: false, reason: 'not-on-main' }),
+      acquireRead: okLock,
+      releaseRead: () => {},
+      readState: emptyState,
       authOpts: { log: { error: () => {} } }, // not-configured → token refresh is a fast no-op, still runs first
     });
 
@@ -951,19 +962,17 @@ describe('wireSelfSyncAndAppAuth — self-sync is OPT-IN (never mutates an inter
     expect(out).toEqual({ ok: 1 });
   });
 
-  it('selfSync: true is the only value that wires the sync (and a merge then restarts)', async () => {
+  it('selfSync: true is the only value that wires the rebuild (and an adopted rebuild then restarts)', async () => {
     const calls = [];
     const wrapped = wireSelfSyncAndAppAuth({
       tickOnce: async () => { calls.push('tick'); return {}; },
       root: '/irrelevant',
       onRestart: () => { calls.push('restart'); return 'restarted'; },
-      sync: syncWouldMerge(calls),
-      // #3383 live-smoke gate: passing, so this test keeps proving selfSync opt-in wiring, not the gate.
-      gate: async () => ({ adopt: true, reason: 'test-gate-pass' }),
+      rebuild: async () => { calls.push('rebuild'); return { moved: true, adopted: true, head: 'deadbeef' }; },
       authOpts: { log: { error: () => {} } },
       selfSync: true,
     });
     expect(await wrapped({})).toBe('restarted');
-    expect(calls).toEqual(['sync', 'restart']);
+    expect(calls).toEqual(['rebuild', 'restart']);
   });
 });

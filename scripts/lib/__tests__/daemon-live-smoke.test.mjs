@@ -15,6 +15,8 @@ import {
   decideSmokeVerdict, resolveSmokeBudgets, SMOKE_BUDGET_ENV, isSmokeGateDisabled, SMOKE_KILL_SWITCH_ENV,
   runLiveSmoke, SMOKE_CHECKS, rollbackToSha, readRejectedSha, recordRejectedSha, clearRejectedSha,
   smokeStatePath, gateMergedCommit,
+  TRANSIENT_FAILURE_PATTERNS, classifySmokeFailure, runLiveSmokeWithRetry,
+  SMOKE_TRANSIENT_RETRIES_ENV, SMOKE_RETRY_BACKOFF_MS_ENV,
 } from '../daemon-live-smoke.mjs';
 
 describe('decideSmokeVerdict — pure', () => {
@@ -41,6 +43,55 @@ describe('isSmokeGateDisabled / resolveSmokeBudgets — pure, env-driven', () =>
   it('a non-numeric override falls back to the default rather than NaN/0', () => {
     const b = resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.ghApiMs]: 'not-a-number' });
     expect(b.ghApiMs).toBe(30_000);
+  });
+
+  it('laneAcquireWaitMs defaults to 180000 and is independently overridable via WE_SMOKE_LANE_ACQUIRE_WAIT_MS', () => {
+    expect(resolveSmokeBudgets({}).laneAcquireWaitMs).toBe(180_000);
+    expect(resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.laneAcquireWaitMs]: '5000' }).laneAcquireWaitMs).toBe(5000);
+    // overriding the wait budget must never perturb the separate, plain laneAcquireMs budget
+    expect(resolveSmokeBudgets({ [SMOKE_BUDGET_ENV.laneAcquireWaitMs]: '5000' }).laneAcquireMs)
+      .toBe(resolveSmokeBudgets({}).laneAcquireMs);
+  });
+});
+
+describe('classifySmokeFailure — pure, transient vs. code', () => {
+  it('every check passing → pass', () => {
+    expect(classifySmokeFailure([{ ok: true }, { ok: true }])).toBe('pass');
+  });
+  it('an empty result set is code, not transient — no checks run is not "just env noise"', () => {
+    expect(classifySmokeFailure([])).toBe('code');
+  });
+  it('a 401 auth failure → transient', () => {
+    const result = classifySmokeFailure([{ ok: true }, { ok: false, detail: 'gh api ... failed: HTTP 401: Bad credentials' }]);
+    expect(result).toBe('transient');
+  });
+  it('a thrown SyntaxError (a real code-shaped failure) → code', () => {
+    const result = classifySmokeFailure([{ ok: false, detail: 'threw: SyntaxError: Unexpected token } in JSON' }]);
+    expect(result).toBe('code');
+  });
+  it('a mix of one transient and one non-transient failure → code (one real finding taints the whole verdict)', () => {
+    const result = classifySmokeFailure([
+      { ok: false, detail: 'gh api ... failed: HTTP 401: Bad credentials' },
+      { ok: false, detail: 'threw: SyntaxError: Unexpected token' },
+    ]);
+    expect(result).toBe('code');
+  });
+  it('every TRANSIENT_FAILURE_PATTERNS entry matches at least one representative failure string', () => {
+    const samples = [
+      '401 Unauthorized', 'Bad credentials', 'HTTP 503', 'secondary rate limit exceeded', 'connect ETIMEDOUT',
+      'read ECONNRESET', 'getaddrinfo ENOTFOUND api.github.com', 'getaddrinfo EAI_AGAIN api.github.com',
+      'the operation timed out', 'context deadline: timeout', 'no free lane in pool "we" (12 all held/dirty)',
+      'all lanes are busy right now', 'pool is exhausted', 'could not resolve host: github.com',
+    ];
+    for (const re of TRANSIENT_FAILURE_PATTERNS) {
+      expect(samples.some((s) => re.test(s)), `no sample matched ${re}`).toBe(true);
+    }
+  });
+  it("the real lane-pool.mjs cmdAcquire 'no free lane' message classifies as transient", () => {
+    // The exact shape lane-pool.mjs#cmdAcquire fails with when its bounded --wait-ms poll never finds a
+    // candidate: `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or...`.
+    const detail = 'lane-pool acquire --purpose=smoke failed: no free lane in pool "we" (42 all held/dirty) — release one or `provision` more';
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('transient');
   });
 });
 
@@ -83,6 +134,32 @@ describe('runLiveSmoke — injected runChild', () => {
     expect(sessionFromAcquire).toBeDefined();
     expect(sessionFromAcquire).toBe(sessionFromRelease);
     expect(releaseArgs).toContain('--lane=12');
+  });
+
+  it('the lane acquire argv carries --wait-ms=<laneAcquireWaitMs> so a busy pool waits instead of failing instantly', async () => {
+    const calls = [];
+    const runChild = vi.fn(async (cmd, args) => {
+      calls.push(args);
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 4 });
+      return '';
+    });
+    await runLiveSmoke({ root: '/x', env: { WE_SMOKE_LANE_ACQUIRE_WAIT_MS: '9000' }, runChild });
+    const acquireArgs = calls.find((a) => a[1] === 'acquire');
+    expect(acquireArgs).toContain('--wait-ms=9000');
+  });
+
+  it('the lane acquire argv uses the 180000ms default --wait-ms with no env override', async () => {
+    const calls = [];
+    const runChild = vi.fn(async (cmd, args) => {
+      calls.push(args);
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 4 });
+      return '';
+    });
+    await runLiveSmoke({ root: '/x', env: {}, runChild });
+    const acquireArgs = calls.find((a) => a[1] === 'acquire');
+    expect(acquireArgs).toContain('--wait-ms=180000');
   });
 
   it('a single failing check fails the WHOLE gate, but every other check still runs (no fail-fast)', async () => {
@@ -136,6 +213,76 @@ describe('runLiveSmoke — injected runChild', () => {
     const reconcileCheck = result.results.find((r) => r.name === 'reconcile-dry-run');
     expect(reconcileCheck.ok).toBe(false);
     expect(reconcileCheck.detail).toMatch(/1\/3/);
+  });
+});
+
+describe('runLiveSmokeWithRetry — retries a transient verdict, never a code one', () => {
+  it('the kill switch short-circuits without spending an attempt', async () => {
+    const runChild = vi.fn();
+    const sleep = vi.fn();
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: { [SMOKE_KILL_SWITCH_ENV]: '1' }, runChild, sleep });
+    expect(result).toEqual({ verdict: 'pass', disabled: true });
+    expect(runChild).not.toHaveBeenCalled();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('a transient failure on attempt 1 that passes on attempt 2 → pass, attempts:2, one sleep', async () => {
+    let call = 0;
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') {
+        call += 1;
+        if (call === 1) throw new Error('HTTP 503 Service Unavailable');
+        return '[]';
+      }
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 1234 });
+    expect(result.verdict).toBe('pass');
+    expect(result.attempts).toBe(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep).toHaveBeenCalledWith(1234);
+  });
+
+  it('a persistently transient failure exhausts the retry cap → verdict stays transient, attempts = retries+1', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('rate limit exceeded');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 10 });
+    expect(result.verdict).toBe('transient');
+    expect(result.attempts).toBe(3); // 1 initial + 2 retries
+    expect(sleep).toHaveBeenCalledTimes(2); // sleeps between attempts, never after the last
+  });
+
+  it('a code-shaped failure never retries at all', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('SyntaxError: Unexpected token');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const result = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep, retries: 2, backoffMs: 10 });
+    expect(result.verdict).toBe('code');
+    expect(result.attempts).toBe(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('retries and backoff default from env (WE_DAEMON_SMOKE_TRANSIENT_RETRIES / _RETRY_BACKOFF_MS) when not passed explicitly', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('ETIMEDOUT');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const sleep = vi.fn(async () => {});
+    const env = { [SMOKE_TRANSIENT_RETRIES_ENV]: '0', [SMOKE_RETRY_BACKOFF_MS_ENV]: '999' };
+    const result = await runLiveSmokeWithRetry({ root: '/x', env, runChild, sleep });
+    expect(result.verdict).toBe('transient');
+    expect(result.attempts).toBe(1); // retries:0 from env → no retry at all
+    expect(sleep).not.toHaveBeenCalled();
   });
 });
 
@@ -261,6 +408,39 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'a-new-sha', env, runChild, run: cleanRun });
     expect(runChild).toHaveBeenCalled();
     expect(verdict.adopt).toBe(true);
+  });
+
+  it('a transient verdict (retry cap reached) rolls back but records NO rejection, and reason is smoke-transient', async () => {
+    const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
+    const resetCalls = [];
+    const run = (args) => { if (args[0] === 'reset') resetCalls.push(args); return { status: 0, stdout: '' }; };
+    // every attempt fails the SAME transient way (a 401) — retry cap is reached, never promoted to 'code'
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('HTTP 401: Bad credentials');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre-sha-3', mergedIdentitySha: 'transient-sha', env, runChild, run });
+    expect(verdict.adopt).toBe(false);
+    expect(verdict.reason).toBe('smoke-transient');
+    expect(resetCalls).toContainEqual(['reset', '--hard', 'pre-sha-3']);
+    expect(readRejectedSha('/x', env)).toBeNull(); // NEVER cached — an env fault must not poison the reject-cache
+  });
+
+  it('a transient verdict whose rollback itself fails reports quarantine:true', async () => {
+    const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
+    const run = (args) => (args[0] === 'reset' ? { status: 1, stdout: '' } : { status: 0, stdout: '' });
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[1] === 'list') throw new Error('ETIMEDOUT');
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const log = { error: vi.fn() };
+    const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'transient-2', env, runChild, run, log });
+    expect(verdict.reason).toBe('smoke-transient');
+    expect(verdict.rollback).toEqual({ ok: false, reason: 'reset-failed' });
+    expect(verdict.quarantine).toBe(true);
+    expect(readRejectedSha('/x', env)).toBeNull();
   });
 
   it('a failed rollback is reported, never silently swallowed', async () => {
