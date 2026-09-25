@@ -88,4 +88,28 @@ describe('tagReviewRound — IO shell over an injected provider (no gh process)'
     expect(result).toEqual({ changed: true, label: 'review-round:2', removed: ['review-round:1'] });
     expect(provider.calls[2]).toEqual(['setLabels', 'o/n', 42, { add: 'review-round:2', remove: ['review-round:1'] }]);
   });
+
+  // #4133 (epic #3383/#4075) — a caller with the tick's own already-fetched labels (`we:skills-src/conveyor/
+  // review-daemon.mjs#runReviewTick`) skips the per-PR `gh pr view` entirely.
+  describe('currentLabels — skips provider.readLabels entirely when supplied', () => {
+    it('never calls readLabels when currentLabels is supplied', () => {
+      const provider = fakeProvider([{ name: 'should-never-be-read' }]);
+      const result = tagReviewRound({ pr: 42, repo: 'o/n', round: 1, provider, currentLabels: [{ name: 'review:pending' }] });
+      expect(result).toEqual({ changed: true, label: 'review-round:1', removed: [] });
+      expect(provider.calls.map((c) => c[0])).toEqual(['ensureLabel', 'setLabels']); // no 'readLabels' call
+    });
+
+    it('is idempotent off the supplied labels too — no write when they already match', () => {
+      const provider = fakeProvider([{ name: 'should-never-be-read' }]);
+      const result = tagReviewRound({ pr: 42, repo: 'o/n', round: 1, provider, currentLabels: [{ name: 'review-round:1' }] });
+      expect(result).toEqual({ changed: false, label: 'review-round:1', removed: [] });
+      expect(provider.calls).toEqual([]); // no readLabels, no ensureLabel/setLabels
+    });
+
+    it('omitting it reads fresh — byte-identical to before this option existed', () => {
+      const provider = fakeProvider([{ name: 'review:pending' }]);
+      tagReviewRound({ pr: 42, repo: 'o/n', round: 1, provider });
+      expect(provider.calls[0]).toEqual(['readLabels', 'o/n', 42]);
+    });
+  });
 });

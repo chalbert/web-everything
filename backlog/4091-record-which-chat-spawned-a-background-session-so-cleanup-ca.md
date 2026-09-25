@@ -3,9 +3,10 @@ bornAs: xltlavt
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:.claude/settings.json"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 
@@ -15,4 +16,4 @@ Build clause 4 of #conveyor-session-lifecycle-policy (#4082). Nothing links a ch
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/session-reaper.test.mjs` fails before this item lands (missing `writeChatSpawnLink`/`tryReadChatSpawnLink`/`markChatEnded`/`isChatEnded`/`classifyChatSpawnGuard`/`makeChatSpawnGuardResolver`/`runStampChatSpawnHook`/`runMarkChatEndedHook` exports, and `classifySessionReap` never blocks a `done` session on a not-yet-ended spawning chat) and passes after. Live: `node we:scripts/conveyor/session-reaper.mjs stamp-chat-spawn`/`mark-chat-ended`, invoked with real stdin + `CLAUDE_CODE_SESSION_ID`, write real files the reaper's own guard resolver reads back correctly.

@@ -105,8 +105,9 @@
 import { parseSessionSlug } from './session-slug.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readField } from '../backlog/frontmatter.mjs';
@@ -168,17 +169,32 @@ export const ALREADY_STOPPED_STATES = new Set(['stopped']);
  * primary tree, a different daemon's clone). Omitting it (the default) makes this byte-identical to the
  * pre-#3383 behavior — additive, never a behavior change for an existing caller that doesn't opt in.
  *
+ * `chatSpawnGuardFor` IS A THIRD STRUCTURAL GUARD (#4091, epic #3383/#4075, statute clause 4), checked LAST of
+ * the three, still before any state check: "cleanup touches daemon-dispatched background sessions, and a
+ * chat-spawned session only when linked to a spawning chat that was explicitly ended… an unknown or ambiguous
+ * link is never reaped." A session with NO recorded link at all (every session today, and every
+ * daemon-dispatched one going forward — daemons never run the `SessionStart` hook that records one) is
+ * UNCHANGED — this guard is additive, never a behavior change for an existing caller ("until it lands, the
+ * behavior equals today's", per the ratified statute's own supporting text). Only once a link is ON RECORD
+ * does this guard ever say no, and even then only until that chat is marked ended. See
+ * {@link classifyChatSpawnGuard} for the pure decision this wraps.
+ *
  * @param {object|null} session - one element of a `claude agents --json` listing.
- * @param {{allowedCwd?:string}} [opts]
- * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'wrong-cwd'|'not-terminal')}}
+ * @param {{allowedCwd?:string, chatSpawnGuardFor?:((session:object) => ({blocked:boolean, reason?:string})|null)|null}} [opts]
+ * @returns {{reap:boolean, reason:('done'|'failed'|'already-stopped'|'not-background'|'wrong-cwd'|'chat-not-ended'|'ambiguous-chat-link'|'not-terminal')}}
  */
-export function classifySessionReap(session, { allowedCwd } = {}) {
+export function classifySessionReap(session, { allowedCwd, chatSpawnGuardFor = null } = {}) {
   if (!session || typeof session !== 'object') return { reap: false, reason: 'not-terminal' };
-  // Structural guards FIRST, in order — see the file header (`kind`) and this function's own doc (`cwd`) on
-  // why neither can ever be state-dependent.
+  // Structural guards FIRST, in order — see the file header (`kind`) and this function's own doc (`cwd`/
+  // `chatSpawnGuardFor`) on why none of the three can ever be state-dependent.
   if (session.kind !== 'background') return { reap: false, reason: 'not-background' };
   if (typeof allowedCwd === 'string' && allowedCwd && session.cwd !== allowedCwd) {
     return { reap: false, reason: 'wrong-cwd' };
+  }
+  if (typeof chatSpawnGuardFor === 'function') {
+    let guard = null;
+    try { guard = chatSpawnGuardFor(session); } catch { guard = null; }
+    if (guard && guard.blocked === true) return { reap: false, reason: guard.reason || 'chat-not-ended' };
   }
   const state = session.state;
   if (TERMINAL_REAP_STATES.has(state)) return { reap: true, reason: state };
@@ -441,12 +457,16 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
+ *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
-  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(), hungFor = null, noOutcomeFor = null } = opts || {};
-  const base = classifySessionReap(session, { allowedCwd });
+  const {
+    allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(),
+    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null,
+  } = opts || {};
+  const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap || base.reason !== 'not-terminal') return base;
 
   // Axis -1 — no-net-outcome stall. See doc above for why this runs BEFORE axis 0 and BEFORE `neverReapWorking`.
@@ -513,6 +533,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
+ *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -834,6 +855,228 @@ export function makeNoOutcomeResolver({
     }
 
     return classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs, nowMs: now(), windowMs, ceilingMs });
+  };
+}
+
+// ── CHAT-SPAWN LINK (#4091, epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 4) ──────────
+// Records which CHAT (an interactive top-level session, never a daemon) spawned a background session, so
+// cleanup can scope to it. The link is written at spawn time by a `SessionStart` hook (every NEW session,
+// background or not, runs this hook — see `.claude/settings.json`); "was the spawning chat explicitly ended"
+// is recorded separately by a `SessionEnd` hook, keyed by THAT chat's own session id.
+//
+// WHY THIS WORKS WITH NO NEW PLUMBING FOR THE LINK ITSELF. A background session started via `claude --bg` from
+// inside an interactive session's own Bash tool call is a real OS child process, and `sanitizeSpawnEnv`
+// (`dispatch-lane-io.mjs`) never strips `CLAUDE_CODE_SESSION_ID` — so a genuinely chat-spawned child's own
+// process environment still carries the PARENT chat's session id (this repo's own `delivery-loop.md` already
+// documents the identical fact for the opposite reason: "a subagent inherits its parent's
+// CLAUDE_CODE_SESSION_ID"). A DAEMON-dispatched session has no such value to inherit — a resident daemon is a
+// plain `node` process, never itself a `claude` session, so `CLAUDE_CODE_SESSION_ID` is simply unset in its own
+// environment and in everything it spawns. The env var's mere PRESENCE at `SessionStart` is therefore already
+// the "chat-spawned or not" signal; this axis only adds the missing piece — durably RECORDING it, since
+// `claude agents --json` exposes no environment fields at all.
+//
+// `SessionEnd`'s exact `reason` enum is not independently verified against a live payload in this environment
+// (no existing caller in this codebase reads it yet to ground it against) — documented honestly, not asserted.
+// This axis treats the hook FIRING AT ALL as "ended": `SessionEnd` is a lifecycle-teardown hook, distinct from
+// mere idle/disconnect (which invokes no hook — the process just stops sending activity, exactly the ambiguous
+// shape the statute's own "never on idle or disconnect" line warns against relying on). If a future Claude Code
+// version's `SessionEnd` payload carries a `reason` this repo later confirms includes a genuinely non-terminal
+// case, narrowing the allowlist here is a one-line follow-up, not a redesign.
+//
+// INDEPENDENT REVIEW FINDING (PR #2678, 2026-09-25), FIXED — two real defects, both closed below:
+//   1. CORRECTNESS: the store was originally keyed under `REPO_ROOT` (THIS process's own checkout) — for the
+//      daemon-split deployment this whole epic targets, the `SessionStart` hook that WRITES the link runs
+//      wherever the CHAT itself is (the primary checkout, a lane, a scratch clone), never the daemon's own
+//      dedicated clone the reaper actually runs from. Keying it there made the guard read "no link" for every
+//      real chat-spawned session in production — a silent no-op. FIXED: both stores now default to a
+//      MACHINE-WIDE location under `~/.claude/`, the one place every checkout on the same host already agrees
+//      on (mirrors how `~/.claude.json`/`~/.claude/projects/` are already the shared, cross-checkout home for
+//      this CLI's own session state — never per-repo).
+//   2. SECURITY: neither store validated WHO wrote a link/marker. Confirmed live (in a throwaway clone): a
+//      forged `stamp-chat-spawn` call naming a victim session id, paired with a `CLAUDE_CODE_SESSION_ID` that
+//      is never marked ended, granted that victim session PERMANENT reap immunity — worse than having no guard
+//      at all, since no other axis (hung-detection, #4090's no-outcome-stall) could override it either. FIXED:
+//      {@link classifyChatSpawnGuard} now takes a CEILING (mirrors {@link resolveNoOutcomeCeilingMs}'s own
+//      clamp) — a link blocks reaping for AT MOST {@link resolveChatSpawnGuardCeilingMs}, regardless of what a
+//      link/marker file claims, so a forged grant expires rather than lasting forever. This does not require
+//      real authentication (a local, single-tenant CLI has no user boundary to authenticate across) — it
+//      bounds the BLAST RADIUS of a bad write to a finite window instead, the same trade this file's other
+//      ceilings already make.
+
+/** `~/.claude/we-chat-spawns/<sessionId>.json` — the link store, machine-wide (see the FIXED note above for
+ *  why this is NOT `REPO_ROOT`-relative). `OPERATION_CHAT_SPAWNS_DIR` overrides it. */
+function resolveChatSpawnsDir(env = process.env) {
+  const override = env.OPERATION_CHAT_SPAWNS_DIR;
+  return override && override.trim() ? override.trim() : join(homedir(), '.claude', 'we-chat-spawns');
+}
+
+/** `~/.claude/we-chat-ended/<chatSessionId>.json` — the "this chat explicitly ended" marker store, machine-wide
+ *  for the identical reason. `OPERATION_CHAT_ENDED_DIR` overrides it. */
+function resolveChatEndedDir(env = process.env) {
+  const override = env.OPERATION_CHAT_ENDED_DIR;
+  return override && override.trim() ? override.trim() : join(homedir(), '.claude', 'we-chat-ended');
+}
+
+/** The chat-spawn guard's own ceiling (default 24h, generous for a legitimately long operator session) — see
+ *  the FIXED security note above. `WE_CHAT_SPAWN_GUARD_CEILING_HOURS` overrides it; an unparsable/non-positive
+ *  override falls back to the default rather than silently disabling the ceiling (same convention as
+ *  {@link resolveNoOutcomeCeilingMs}). This ceiling has NO 'never' escape hatch, unlike the retention-sweep
+ *  settings — a block that can never expire is exactly the defect being fixed, so unbounded is not offered. */
+export function resolveChatSpawnGuardCeilingMs(env = process.env) {
+  const raw = env?.WE_CHAT_SPAWN_GUARD_CEILING_HOURS;
+  const n = raw !== undefined ? Number(raw) : 24;
+  return (Number.isFinite(n) && n > 0 ? n : 24) * 60 * 60 * 1000;
+}
+
+/** Filename-safe session ids only — both stores are keyed by a CLI-minted UUID, never free text. */
+function isSafeSessionId(id) {
+  return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id);
+}
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#writeChatSpawnLink — the `SessionStart` hook's own write. Records
+ * `spawnedSessionId` was started with `spawnedByChatSessionId` already live in its environment. A no-op
+ * (never throws) when either id is unsafe as a filename — the CLI hook's own JSON malformed, or absent.
+ */
+export function writeChatSpawnLink({ spawnedSessionId, spawnedByChatSessionId, now = () => new Date().toISOString() } = {}, dir = resolveChatSpawnsDir()) {
+  if (!isSafeSessionId(spawnedSessionId) || !isSafeSessionId(spawnedByChatSessionId)) return false;
+  try {
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${spawnedSessionId}.json`);
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ v: 1, spawnedSessionId, spawnedByChatSessionId, recordedAt: now() }, null, 2) + '\n');
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false; // best-effort, mirrors every other sidecar writer in this codebase
+  }
+}
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#tryReadChatSpawnLink — `null` when no link is on record at all (the
+ * "unchanged from today" default — see this section's own header). `{ok:false}` for a link that exists but is
+ * corrupt/malformed — AMBIGUOUS, per the statute, never treated the same as "no link". `{ok:true,
+ * spawnedByChatSessionId, recordedAtMs}` for a genuine, readable link — `recordedAtMs` (`null` if unparseable)
+ * feeds {@link classifyChatSpawnGuard}'s own ceiling clamp, the security-finding fix (see file header).
+ * @returns {null|{ok:false}|{ok:true, spawnedByChatSessionId:string, recordedAtMs:number|null}}
+ */
+export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDir(), { readFileSyncFn = readFileSync, statFn = statSync } = {}) {
+  if (!isSafeSessionId(spawnedSessionId)) return null;
+  const path = join(dir, `${spawnedSessionId}.json`);
+  let text;
+  try {
+    text = readFileSyncFn(path, 'utf8');
+  } catch {
+    return null; // no file — no link on record, never an error
+  }
+  // Independent-review finding, PR #2678 round 2 (2026-09-25), FIXED: an `{ok:false}` (ambiguous) answer must
+  // still carry SOME age signal for {@link classifyChatSpawnGuard}'s own ceiling clamp to apply to it — the
+  // file's own mtime, obtainable even when its CONTENT fails to parse (corrupt JSON, a bad `spawnedByChatSessionId`,
+  // or a real link whose own `recordedAt` field itself failed to parse). Without this, the exact vulnerability
+  // this PR fixes for an HONEST link (permanent reap immunity) came back for a MALFORMED one — the ceiling
+  // check only ever ran on `recordedAtMs`, which was `null` for every one of these three cases.
+  const mtimeFallbackMs = () => { try { return statFn(path).mtimeMs; } catch { return null; } };
+  try {
+    const parsed = JSON.parse(text);
+    if (!isSafeSessionId(parsed?.spawnedByChatSessionId)) return { ok: false, recordedAtMs: mtimeFallbackMs() };
+    const recordedAtMs = Date.parse(parsed?.recordedAt ?? '');
+    return {
+      ok: true,
+      spawnedByChatSessionId: parsed.spawnedByChatSessionId,
+      recordedAtMs: Number.isFinite(recordedAtMs) ? recordedAtMs : mtimeFallbackMs(),
+    };
+  } catch {
+    return { ok: false, recordedAtMs: mtimeFallbackMs() }; // a file exists but is unreadable — ambiguous, never "no link"
+  }
+}
+
+/** we:scripts/conveyor/session-reaper.mjs#markChatEnded — the `SessionEnd` hook's own write. A no-op (never
+ *  throws) when `chatSessionId` is unsafe as a filename. */
+export function markChatEnded(chatSessionId, dir = resolveChatEndedDir(), { now = () => new Date().toISOString() } = {}) {
+  if (!isSafeSessionId(chatSessionId)) return false;
+  try {
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, `${chatSessionId}.json`);
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ v: 1, chatSessionId, endedAt: now() }, null, 2) + '\n');
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** we:scripts/conveyor/session-reaper.mjs#isChatEnded — has `chatSessionId` (a spawning chat) been marked
+ *  ended? Existence-only check (the record's own content is never consulted beyond "does it parse") — an
+ *  unreadable/corrupt marker file answers `false` (NOT ended), the same safe direction as an ambiguous link. */
+export function isChatEnded(chatSessionId, dir = resolveChatEndedDir(), { readFileSyncFn = readFileSync } = {}) {
+  if (!isSafeSessionId(chatSessionId)) return false;
+  try {
+    const parsed = JSON.parse(readFileSyncFn(join(dir, `${chatSessionId}.json`), 'utf8'));
+    return isSafeSessionId(parsed?.chatSessionId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * we:scripts/conveyor/session-reaper.mjs#classifyChatSpawnGuard — PURE. The statute's own three-way rule, PLUS
+ * the security-finding ceiling fix (see file header) — NOW APPLIED UNIFORMLY (round 2 fix, PR #2678):
+ *   - `link === null` (no stamp at all — daemon-dispatched, or this feature simply hasn't stamped it, e.g. a
+ *     session started before this axis shipped) → NOT blocked. This is the "unchanged from today" default.
+ *   - `link.ok === true` and `ended === true` → NOT blocked, `chat-ended`.
+ *   - Otherwise (an `{ok:false}` ambiguous/corrupt link, OR a real link that is not yet ended) → BLOCKED, UNLESS
+ *     `nowMs - link.recordedAtMs >= ceilingMs`, in which case → NOT blocked, `chat-spawn-guard-ceiling` — a
+ *     forged, corrupted, or simply never-ended link cannot grant reap immunity FOREVER, mirroring
+ *     {@link classifyNoOutcomeStall}'s own ceiling-always-wins precedent. Applying this check to BOTH blocked
+ *     branches (not only the honest-link one) is the round-2 fix itself: the first cut let the ceiling apply
+ *     only to a real link, so a MALFORMED one reintroduced the identical permanent-immunity bug through the
+ *     `ambiguous-chat-link` path instead — {@link tryReadChatSpawnLink}'s own mtime fallback is what makes
+ *     `link.recordedAtMs` available for that case too. `ceilingMs`/`recordedAtMs` of `null` (a caller that
+ *     omits the clock, or a link whose age is somehow still unknowable even via mtime) disables the clamp for
+ *     THAT check only — the surrounding block still applies — never silently widening it into a permanent one.
+ *     When blocked and NOT saved by the ceiling: `chat-not-ended` for a real link, `ambiguous-chat-link` for a
+ *     corrupt one — the reason always reflects which case it actually was.
+ * @param {{link:null|{ok:false, recordedAtMs?:number|null}|{ok:true, spawnedByChatSessionId:string, recordedAtMs?:number|null}, ended?:boolean, nowMs?:number, ceilingMs?:number|null}} o
+ * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended'|'chat-spawn-guard-ceiling')}}
+ */
+export function classifyChatSpawnGuard({ link, ended = false, nowMs = Date.now(), ceilingMs = null } = {}) {
+  if (link === null || link === undefined) return { blocked: false, reason: 'no-link' };
+  if (link.ok === true && ended) return { blocked: false, reason: 'chat-ended' };
+  // Independent-review finding, PR #2678 round 2 (2026-09-25), FIXED: the ceiling clamp used to sit ONLY on
+  // this branch (a real, honest, not-yet-ended link) — the `link.ok !== true` (ambiguous/corrupt) case
+  // returned BLOCKED immediately above, before ever reaching it, so a malformed link file granted the exact
+  // PERMANENT reap immunity this whole ceiling exists to rule out, via a different code path. The clamp now
+  // applies uniformly to BOTH "ambiguous" and "real but not ended" — `link.recordedAtMs` carries an age for
+  // either case now (a real link's own `recordedAt`, or — for a corrupt one — the file's own mtime; see
+  // {@link tryReadChatSpawnLink}'s own fix). `ceilingMs`/`recordedAtMs` of `null` (a caller that omits the
+  // clock, or a link whose age is somehow still unknowable even via mtime) disables the clamp for THAT check
+  // only — the surrounding block still applies — never silently widening a block into a permanent one.
+  if (typeof ceilingMs === 'number' && ceilingMs > 0 && typeof link.recordedAtMs === 'number' && Number.isFinite(link.recordedAtMs)) {
+    if (nowMs - link.recordedAtMs >= ceilingMs) return { blocked: false, reason: 'chat-spawn-guard-ceiling' };
+  }
+  return link.ok === true ? { blocked: true, reason: 'chat-not-ended' } : { blocked: true, reason: 'ambiguous-chat-link' };
+}
+
+/**
+ * Build a `chatSpawnGuardFor` resolver for {@link classifySessionReap} (#4091). Reads the session's own link
+ * (keyed by ITS `sessionId`, the full UUID `claude agents --json` reports — never the short `id`, which is not
+ * what {@link writeChatSpawnLink}'s `SessionStart` hook receives) and, when linked, the spawning chat's own
+ * ended-marker, then hands both to {@link classifyChatSpawnGuard}.
+ * @param {{spawnsDir?:string, endedDir?:string, readFileSyncFn?:Function}} [io]
+ * @returns {(session:object) => ({blocked:boolean, reason?:string})}
+ */
+export function makeChatSpawnGuardResolver({
+  spawnsDir = resolveChatSpawnsDir(),
+  endedDir = resolveChatEndedDir(),
+  readFileSyncFn = readFileSync,
+  ceilingMs = resolveChatSpawnGuardCeilingMs(),
+  now = Date.now,
+} = {}) {
+  return function chatSpawnGuardFor(session) {
+    const link = tryReadChatSpawnLink(session?.sessionId, spawnsDir, { readFileSyncFn });
+    const ended = link?.ok === true ? isChatEnded(link.spawnedByChatSessionId, endedDir, { readFileSyncFn }) : false;
+    return classifyChatSpawnGuard({ link, ended, nowMs: now(), ceilingMs });
   };
 }
 
@@ -1293,6 +1536,7 @@ function parseFlags(argv) {
  *   log?: (msg:string) => void,
  *   hungFor?: ((session:object) => object|null)|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
+ *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
@@ -1318,6 +1562,9 @@ export function runSessionReaperPass({
   // #4090 (epic #3383/#4075, statute clause 2) — the no-net-outcome axis. Default ON, same convention as
   // hung-detection: this is meant to actually run, not merely exist. `null` is the rollback escape hatch.
   noOutcomeFor = makeNoOutcomeResolver(),
+  // #4091 (epic #3383/#4075, statute clause 4) — default ON: a session with no recorded link is unaffected
+  // (see this axis's own header for why), so this is safe to run unconditionally, same as every other axis.
+  chatSpawnGuardFor = makeChatSpawnGuardResolver(),
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -1354,7 +1601,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -1483,6 +1730,9 @@ function main(argv) {
   // default ON, since a looping bot that is never stopped is exactly the gap this axis exists to close. (Named
   // "stall", not "no-outcome", so the flag itself doesn't read as a double negative.)
   const noOutcomeFor = flags['no-stall-detection'] ? null : makeNoOutcomeResolver();
+  // `--no-chat-spawn-guard` is the same rollback escape hatch, for the #4091 chat-spawn scope guard — default
+  // ON: a session with no recorded link is unaffected, so this is safe to run unconditionally.
+  const chatSpawnGuardFor = flags['no-chat-spawn-guard'] ? null : makeChatSpawnGuardResolver();
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -1491,7 +1741,7 @@ function main(argv) {
   // relying on this flag. Shares this CLI's own `--dry-run`.
   const runRetention = !!flags['retention-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
@@ -1522,7 +1772,48 @@ function main(argv) {
   process.exit(result.failures > 0 || result.anomalies > 0 ? 1 : 0);
 }
 
+/**
+ * `node session-reaper.mjs stamp-chat-spawn` — the `.claude/settings.json` `SessionStart` hook's own body (see
+ * this file's chat-spawn-link section for the full design). Reads the hook's stdin JSON payload for THIS
+ * (newly-starting) session's own `session_id`, and `CLAUDE_CODE_SESSION_ID` from the environment for the
+ * inherited parent id. Writes a link only when both are present, filename-safe, AND differ — a session with no
+ * inherited id (the top-level chat itself, or a daemon that never had one) has nothing to link, and a session
+ * somehow reporting itself as its own parent is a malformed payload, never written. Best-effort and silent on
+ * any failure — a hook that fails a session start is a worse outcome than a missed link (matches every other
+ * SessionStart hook in this repo's own settings.json, none of which fail the start on their own error).
+ * @param {{readStdin?:()=>string, env?:object}} [io]
+ */
+export function runStampChatSpawnHook({ readStdin = () => readFileSync(0, 'utf8'), env = process.env } = {}) {
+  let payload = {};
+  try { payload = JSON.parse(readStdin()); } catch { /* best-effort — a malformed/absent payload writes nothing */ }
+  const spawnedSessionId = payload?.session_id;
+  const spawnedByChatSessionId = env?.CLAUDE_CODE_SESSION_ID;
+  if (isSafeSessionId(spawnedSessionId) && isSafeSessionId(spawnedByChatSessionId) && spawnedSessionId !== spawnedByChatSessionId) {
+    try { writeChatSpawnLink({ spawnedSessionId, spawnedByChatSessionId }); } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * `node session-reaper.mjs mark-chat-ended` — the `.claude/settings.json` `SessionEnd` hook's own body. Reads
+ * the hook's own stdin JSON payload for the ENDING session's `session_id` and marks it. See this file's
+ * chat-spawn-link section header for why `SessionEnd` firing at all (regardless of its `reason` field, not
+ * independently verified against a live payload in this environment) is treated as "explicitly ended".
+ * Best-effort and silent on any failure, same reasoning as {@link runStampChatSpawnHook}.
+ * @param {{readStdin?:()=>string}} [io]
+ */
+export function runMarkChatEndedHook({ readStdin = () => readFileSync(0, 'utf8') } = {}) {
+  let payload = {};
+  try { payload = JSON.parse(readStdin()); } catch { /* best-effort */ }
+  const chatSessionId = payload?.session_id;
+  if (isSafeSessionId(chatSessionId)) {
+    try { markChatEnded(chatSessionId); } catch { /* best-effort */ }
+  }
+}
+
 // Run the IO shell only when invoked directly — never on import (keeps the pure core side-effect-free).
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main(process.argv.slice(2));
+  const [sub] = process.argv.slice(2);
+  if (sub === 'stamp-chat-spawn') runStampChatSpawnHook();
+  else if (sub === 'mark-chat-ended') runMarkChatEndedHook();
+  else main(process.argv.slice(2));
 }

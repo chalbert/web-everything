@@ -5,7 +5,7 @@ size: 5
 parent: "3443"
 status: open
 blockedBy: ["3903", "3905"]
-scope: ["we:scripts/operations/__tests__/ci-heal-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs", "we:scripts/operations/ci-heal-dispatch-wrapper.mjs", "we:scripts/operations/ci-heal-run.mjs", "we:scripts/operations/fix-dispatch-wrapper.mjs", "we:scripts/operations/fix-run.mjs", "we:skills-src/conveyor/ci-heal-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-ci-heal-wiring.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-fix-wiring.test.mjs"]
+scope: ["we:scripts/operations/__tests__/ci-heal-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs", "we:skills-src/conveyor/ci-heal-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief-v2.md", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md", "we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-ci-heal-wiring.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-fix-wiring.test.mjs", "we:scripts/operations/run.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -22,6 +22,12 @@ Ports 8 files (we:scripts/operations/fix-dispatch-wrapper.mjs, we:scripts/operat
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/fix-dispatch-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/fix-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/ci-heal-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/fix-run.mjs` to #3906 — #3906's `we:scripts/operations/dispatch-providers/fix.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/ci-heal-run.mjs` to #3906 — #3906's `we:scripts/operations/dispatch-providers/ci-heal.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs`, which this card ports.
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/ci-heal-dispatch-wrapper.test.mjs`, which this card ports.
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-fix-wiring.test.mjs` here from #3906 — it imports a module this card owns.
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-ci-heal-wiring.test.mjs` here from #3906 — it imports a module this card owns.
 - 2026-09-24: graduation-import-check added blockedBy #3905 — the moved-in `we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs` also imports a module #3905 owns.

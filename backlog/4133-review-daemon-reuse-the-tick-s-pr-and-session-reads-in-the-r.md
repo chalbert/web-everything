@@ -3,9 +3,11 @@ bornAs: xujt3ts
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/review-round-tag.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
@@ -15,4 +17,4 @@ Audit: we:reports/2026-09-24-daemon-blocking-antipatterns.md. Findings R2, R3 (b
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/review-round-tag.test.mjs we:scripts/conveyor/__tests__/review-status-tag.test.mjs` and `npx vitest run we:skills-src/conveyor/__tests__/review-daemon.test.mjs` fail before this item lands (missing `currentLabels`/`agents`/`readPrs`/`readAgents` options and their skip-the-fresh-read behavior) and pass after. Live: tracing `tagReviewRound`/`tagReviewStatus` against 3 real open PRs on chalbert/web-everything, `gh`/`claude` child-process counts go from 6/3 (scales with N) to 1/1 (independent of N) once the tick's own reads are shared.

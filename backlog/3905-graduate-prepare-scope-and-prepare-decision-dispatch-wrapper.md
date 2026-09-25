@@ -5,7 +5,7 @@ size: 5
 parent: "3443"
 status: open
 blockedBy: ["3903"]
-scope: ["we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs", "we:scripts/operations/prepare-decision-run.mjs", "we:scripts/operations/prepare-decision-wrapper.mjs", "we:scripts/operations/prepare-scope-run.mjs", "we:scripts/operations/prepare-scope-wrapper.mjs", "we:skills-src/conveyor/prepare-decision-agent-brief-v2.md", "we:skills-src/conveyor/prepare-decision-agent-brief.md", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:skills-src/conveyor/prepare-scope-agent-brief.md", "we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs"]
+scope: ["we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs", "we:skills-src/conveyor/prepare-decision-agent-brief-v2.md", "we:skills-src/conveyor/prepare-decision-agent-brief.md", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:skills-src/conveyor/prepare-scope-agent-brief.md", "we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -22,6 +22,13 @@ Ports 9 files (we:scripts/operations/prepare-scope-wrapper.mjs, we:scripts/opera
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-scope-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/prepare-scope-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-decision-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/prepare-decision-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-scope-run.mjs` to #3906 — #3906's `we:scripts/operations/dispatch-providers/prepare.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-decision-run.mjs` to #3906 — #3906's `we:scripts/operations/dispatch-providers/prepare-decision.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs` here from #3906 — it imports a module this card owns.
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/prepare-scope-wrapper.mjs`, which this card ports.
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/prepare-decision-wrapper.mjs`, which this card ports.
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs` here from #3906 — it imports a module this card owns.
 - 2026-09-24: graduation-import-check made this a blocker of #3904 — its moved-in `we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs` imports a module this card owns.
 - 2026-09-24: graduation-import-check made this a blocker of #3908 — its moved-in `we:scripts/operations/__tests__/telemetry-wiring.test.mjs` imports a module this card owns.

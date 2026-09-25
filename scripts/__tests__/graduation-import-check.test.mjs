@@ -7,8 +7,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   idFromFilename, stripWe, withWe, parseCard, idCompare, extractImportSpecifiers, resolveRelativeImport,
+  extractPathLiteralSpecifiers, resolvePathLiteralSpecifier,
   transitiveBlockedBy, landingDepth, computeSharedFiles, classifyImportPath, rankOwnerCandidates, planTestFileFix,
-  buildFindings, describeFix, planEdits, readArrayField, writeArrayField, appendGraduationNote, applyCardEdits,
+  buildFindings, describeFix, createCycleGuard, planEdits, readArrayField, writeArrayField, appendGraduationNote, applyCardEdits,
 } from '../graduation-import-check.mjs';
 
 describe('idFromFilename', () => {
@@ -97,6 +98,43 @@ describe('extractImportSpecifiers', () => {
     const src = `import { a } from './a.mjs'; import { b } from './b.mjs';`;
     expect(extractImportSpecifiers(src)).toEqual(['./a.mjs', './b.mjs']);
   });
+  it('sees an import AFTER a `vi.mock(...)` block, real #3906 shape (dispatch-lane-prepare-wiring.test.mjs) — ' +
+     'the old header rule silently dropped this because vi.mock() calls sat between two import blocks', () => {
+    const src = [
+      `import { describe, it, expect, vi } from 'vitest';`,
+      ``,
+      `const spawned = [];`,
+      `const execFileSyncCalls = [];`,
+      ``,
+      `vi.mock('node:child_process', async (importOriginal) => {`,
+      `  const actual = await importOriginal();`,
+      `  return { ...actual, spawn: vi.fn((bin, argv) => { spawned.push({ bin, argv }); return { pid: 1 }; }) };`,
+      `});`,
+      `vi.mock('node:fs', async (importOriginal) => {`,
+      `  const actual = await importOriginal();`,
+      `  return { ...actual, openSync: vi.fn(() => 99) };`,
+      `});`,
+      ``,
+      `import { createDispatchSinks } from '../dispatch-lane-io.mjs';`,
+      `import { parsePrepareScopeRunArgv } from '../prepare-scope-run.mjs';`,
+      ``,
+      `describe('x', () => { it('y', () => {}); });`,
+    ].join('\n');
+    expect(extractImportSpecifiers(src)).toEqual(['vitest', '../dispatch-lane-io.mjs', '../prepare-scope-run.mjs']);
+  });
+  it('a vi.mock() factory body containing a semicolon or a quote does not mis-close the balanced scan', () => {
+    const src = [
+      `import { vi } from 'vitest';`,
+      `vi.mock('node:child_process', () => ({ execFileSync: vi.fn(() => "backgrounded · 1ae0905c; not a boundary") }));`,
+      `import { real } from './real.mjs';`,
+      `const x = describe('never scanned, past the header');`,
+    ].join('\n');
+    expect(extractImportSpecifiers(src)).toEqual(['vitest', './real.mjs']);
+  });
+  it('still stops the header at a real statement — a non-recognized preamble line still ends it as before', () => {
+    const src = `import { a } from './a.mjs';\nconst x = doSomething();\nimport { b } from './b.mjs';\n`;
+    expect(extractImportSpecifiers(src)).toEqual(['./a.mjs']); // './b.mjs' is past the header — unchanged rule
+  });
 });
 
 describe('resolveRelativeImport', () => {
@@ -111,6 +149,59 @@ describe('resolveRelativeImport', () => {
   it('returns null for a non-relative (bare or node:) specifier', () => {
     expect(resolveRelativeImport('scripts/x.mjs', 'vitest')).toBeNull();
     expect(resolveRelativeImport('scripts/x.mjs', 'node:fs')).toBeNull();
+  });
+});
+
+describe('extractPathLiteralSpecifiers', () => {
+  it('finds a multi-segment join() whose literal segments have no slash of their own (real #3906/#3903 shape: ' +
+     "build.mjs's `join(REPO_ROOT, 'scripts', 'operations', 'deliver-item-run.mjs')`)", () => {
+    const src = `export const DELIVER_ITEM_RUN_SCRIPT = join(REPO_ROOT, 'scripts', 'operations', 'deliver-item-run.mjs');`;
+    expect(extractPathLiteralSpecifiers(src)).toEqual([{ path: 'scripts/operations/deliver-item-run.mjs', base: 'root' }]);
+  });
+  it('treats a `join(__dirname, …)`/`join(import.meta.dirname, …)` base as file-relative, not repo-root', () => {
+    expect(extractPathLiteralSpecifiers(`join(__dirname, 'helpers', 'fake-claude.mjs')`))
+      .toEqual([{ path: 'helpers/fake-claude.mjs', base: 'dirname' }]);
+    expect(extractPathLiteralSpecifiers(`join(import.meta.dirname, 'x.md')`))
+      .toEqual([{ path: 'x.md', base: 'dirname' }]);
+  });
+  it('does not resolve a join() whose non-first argument is a runtime variable, not a literal (dynamic file enumeration)', () => {
+    const src = `for (const file of files) { readFileSync(join(HERE, file), 'utf8'); }`;
+    expect(extractPathLiteralSpecifiers(src)).toEqual([]);
+  });
+  it('finds new URL(relative, import.meta.url)', () => {
+    expect(extractPathLiteralSpecifiers(`const p = new URL('./dispatched-agent-system-prompt.md', import.meta.url);`))
+      .toEqual([{ path: './dispatched-agent-system-prompt.md', base: 'dirname' }]);
+  });
+  it('finds a bare multi-segment literal anywhere (a readFileSync arg, or a spawn argv element)', () => {
+    expect(extractPathLiteralSpecifiers(`readFileSync('./helpers/fake-claude.mjs', 'utf8')`))
+      .toEqual([{ path: './helpers/fake-claude.mjs', base: 'dirname' }]);
+    expect(extractPathLiteralSpecifiers(`spawn('node', ['scripts/operations/deliver-item-run.mjs', '--x'])`))
+      .toEqual([{ path: 'scripts/operations/deliver-item-run.mjs', base: 'root' }]);
+  });
+  it('ignores a single-segment literal (no slash) — a dynamic per-kind lookup value has no directory to place it in', () => {
+    expect(extractPathLiteralSpecifiers(`const FILE = 'fix-agent-brief.md';`)).toEqual([]);
+  });
+  it('ignores a literal with the wrong extension even if it is multi-segment', () => {
+    expect(extractPathLiteralSpecifiers(`const cfg = require('scripts/lib/some-config.yaml');`)).toEqual([]);
+  });
+  it('ignores prose inside a comment, same discipline as extractImportSpecifiers', () => {
+    const src = `// see join(ROOT, 'scripts', 'ghost.mjs') for context\nconst x = 1;`;
+    expect(extractPathLiteralSpecifiers(src)).toEqual([]);
+  });
+});
+
+describe('resolvePathLiteralSpecifier', () => {
+  it('resolves a root-based candidate as-is, repo-relative', () => {
+    expect(resolvePathLiteralSpecifier('scripts/operations/dispatch-providers/build.mjs', { path: 'scripts/operations/deliver-item-run.mjs', base: 'root' }))
+      .toBe('scripts/operations/deliver-item-run.mjs');
+  });
+  it('resolves a dirname-based candidate relative to the containing file, like resolveRelativeImport', () => {
+    expect(resolvePathLiteralSpecifier('scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs', { path: 'helpers/fake-claude.mjs', base: 'dirname' }))
+      .toBe('scripts/operations/__tests__/helpers/fake-claude.mjs');
+  });
+  it('resolves a dirname-based candidate that already carries a leading ./', () => {
+    expect(resolvePathLiteralSpecifier('scripts/operations/dispatch-lane.mjs', { path: './dispatched-agent-system-prompt.md', base: 'dirname' }))
+      .toBe('scripts/operations/dispatched-agent-system-prompt.md');
   });
 });
 
@@ -235,6 +326,66 @@ describe('classifyImportPath', () => {
     const cardsById = new Map([['A', card({ id: 'A' })]]);
     expect(classifyImportPath({ repoPath: 'ghost.mjs', ownerId: 'A', cardsById, mainPaths: new Set() })).toEqual({ kind: 'unowned' });
   });
+
+  describe('content drift (a file on-main whose snapshot content differs from an OPEN sibling scope)', () => {
+    it('reclassifies an on-main path as later:#N when it is DRIFTED and an open sibling scopes it (real #3903/completion-record.mjs shape)', () => {
+      const cardsById = new Map([
+        ['3906', card({ id: '3906' })],
+        ['3903', card({ id: '3903', scope: ['we:completion-record.mjs'] })],
+      ]);
+      const mainPaths = new Set(['completion-record.mjs']);
+      const driftedPaths = new Set(['completion-record.mjs']);
+      expect(classifyImportPath({ repoPath: 'completion-record.mjs', ownerId: '3906', cardsById, mainPaths, driftedPaths }))
+        .toEqual({ kind: 'later', ownerId: '3903' });
+    });
+    it('stays on-main when driftedPaths is omitted — default behaviour is byte-identical to before this extension', () => {
+      const cardsById = new Map([
+        ['3906', card({ id: '3906' })],
+        ['3903', card({ id: '3903', scope: ['we:completion-record.mjs'] })],
+      ]);
+      const mainPaths = new Set(['completion-record.mjs']);
+      expect(classifyImportPath({ repoPath: 'completion-record.mjs', ownerId: '3906', cardsById, mainPaths }))
+        .toEqual({ kind: 'on-main' });
+    });
+    it('stays on-main when drifted but NO open sibling claims it (main\'s own ordinary evolution, not this epic\'s hazard)', () => {
+      const cardsById = new Map([['3906', card({ id: '3906' })]]);
+      const mainPaths = new Set(['unrelated.mjs']);
+      const driftedPaths = new Set(['unrelated.mjs']);
+      expect(classifyImportPath({ repoPath: 'unrelated.mjs', ownerId: '3906', cardsById, mainPaths, driftedPaths }))
+        .toEqual({ kind: 'on-main' });
+    });
+    it('stays on-main when drifted but the claiming sibling is already a BLOCKER (landing order already guarantees it)', () => {
+      const cardsById = new Map([
+        ['3906', card({ id: '3906', blockedBy: ['3903'] })],
+        ['3903', card({ id: '3903', scope: ['we:completion-record.mjs'] })],
+      ]);
+      const mainPaths = new Set(['completion-record.mjs']);
+      const driftedPaths = new Set(['completion-record.mjs']);
+      expect(classifyImportPath({ repoPath: 'completion-record.mjs', ownerId: '3906', cardsById, mainPaths, driftedPaths }))
+        .toEqual({ kind: 'on-main' });
+    });
+    it('stays on-main when drifted but it is the IMPORTER\'S OWN scope file (a diff-merge target, not a hazard)', () => {
+      const cardsById = new Map([['3906', card({ id: '3906', scope: ['we:dispatch-lane-io.mjs'] })]]);
+      const mainPaths = new Set(['dispatch-lane-io.mjs']);
+      const driftedPaths = new Set(['dispatch-lane-io.mjs']);
+      expect(classifyImportPath({ repoPath: 'dispatch-lane-io.mjs', ownerId: '3906', cardsById, mainPaths, driftedPaths }))
+        .toEqual({ kind: 'on-main' });
+    });
+    it('stays on-main (never later) for a drifted MULTI-OWNER shared file when the asking card is itself one of the co-owners (real bug: run.mjs wrongly moved out of a co-owner)', () => {
+      // we:scripts/operations/run.mjs shape: three open siblings ALL list it in their own scope at once
+      // (append-only house convention). #3909 asking about it must see its OWN co-ownership, not treat #3898
+      // (another co-owner) as "some other card" that outranks it.
+      const cardsById = new Map([
+        ['3898', card({ id: '3898', scope: ['we:scripts/operations/run.mjs'] })],
+        ['3906', card({ id: '3906', scope: ['we:scripts/operations/run.mjs'] })],
+        ['3909', card({ id: '3909', scope: ['we:scripts/operations/run.mjs'] })],
+      ]);
+      const mainPaths = new Set(['scripts/operations/run.mjs']);
+      const driftedPaths = new Set(['scripts/operations/run.mjs']);
+      expect(classifyImportPath({ repoPath: 'scripts/operations/run.mjs', ownerId: '3909', cardsById, mainPaths, driftedPaths }))
+        .toEqual({ kind: 'on-main' });
+    });
+  });
 });
 
 describe('rankOwnerCandidates', () => {
@@ -351,6 +502,26 @@ describe('planTestFileFix', () => {
     const cardsById = new Map([['A', card({ id: 'A' })]]);
     expect(planTestFileFix({ currentOwnerId: 'A', classifications: [{ repoPath: 'x.mjs', kind: 'own' }], cardsById, mainPaths: new Set() })).toBeNull();
   });
+  it('a SHARED file classified `later` is never a placement factor and never earns a blockedBy edge — a genuinely single-owner `later` import elsewhere still picks the target normally (real #3906/run.mjs shape)', () => {
+    const cardsById = new Map([
+      ['A', card({ id: 'A' })],
+      ['DEEP', card({ id: 'DEEP', blockedBy: ['A'], scope: ['we:deep-file.mjs'] })],
+    ]);
+    const classifications = [
+      { repoPath: 'scripts/operations/run.mjs', kind: 'later', ownerId: 'SOME_CO_OWNER' }, // shared — ignored
+      { repoPath: 'deep-file.mjs', kind: 'later', ownerId: 'DEEP' }, // genuine — drives placement
+    ];
+    const sharedPaths = new Set(['we:scripts/operations/run.mjs']);
+    const plan = planTestFileFix({ currentOwnerId: 'A', classifications, cardsById, mainPaths: new Set(), sharedPaths });
+    expect(plan.target).toBe('DEEP');
+    expect(plan.addBlockedBy).toEqual([]); // run.mjs never becomes a blockedBy edge
+  });
+  it('returns null when every `later` import is a SHARED file (nothing left to place for)', () => {
+    const cardsById = new Map([['A', card({ id: 'A' })]]);
+    const classifications = [{ repoPath: 'scripts/operations/run.mjs', kind: 'later', ownerId: 'B' }];
+    const sharedPaths = new Set(['we:scripts/operations/run.mjs']);
+    expect(planTestFileFix({ currentOwnerId: 'A', classifications, cardsById, mainPaths: new Set(), sharedPaths })).toBeNull();
+  });
 });
 
 describe('buildFindings + describeFix', () => {
@@ -408,11 +579,15 @@ describe('buildFindings + describeFix', () => {
       ],
     }];
     const findings = buildFindings({ cardsById, mainPaths: new Set(), results });
-    expect(findings[0].fix).toEqual({ kind: 'blockedBy', targets: ['3915'], cycleWarnings: [] });
+    expect(findings[0].fix).toEqual({ kind: 'blockedBy', targets: ['3915'], moveIn: [], cycleWarnings: [] });
     expect(describeFix(findings[0])).toBe('add blockedBy #3915');
   });
 
-  it('guards an impl-file blockedBy proposal against a cycle too', () => {
+  it('resolves an impl-file blockedBy proposal that would cycle by moving the dependency in, never a silent MANUAL warning (the real #3906/#3903 shape)', () => {
+    // R already depends on OWNER (`R blockedBy OWNER`) — real case: #3903 is `blockedBy` #3906, and #3906's own
+    // `dispatch-providers/build.mjs` needs #3903's `deliver-item-run.mjs`. A plain `blockedBy` edge the other
+    // way (OWNER needs R) would cycle, but that same fact makes it SAFE to relocate the one dependency FILE out
+    // of R's scope into OWNER's own scope instead — OWNER already lands before R no matter what.
     const cyclic = new Map([
       ['OWNER', card({ id: 'OWNER' })],
       ['R', card({ id: 'R', blockedBy: ['OWNER'] })], // R already depends on OWNER
@@ -422,9 +597,39 @@ describe('buildFindings + describeFix', () => {
       classifications: [{ specifier: './r.mjs', repoPath: 'r.mjs', kind: 'later', ownerId: 'R' }],
     }];
     const findings = buildFindings({ cardsById: cyclic, mainPaths: new Set(), results });
-    expect(findings[0].fix.targets).toEqual([]);
-    expect(findings[0].fix.cycleWarnings).toEqual([{ path: null, ownerId: 'R' }]);
-    expect(describeFix(findings[0])).toMatch(/MANUAL/);
+    expect(findings[0].fix).toEqual({ kind: 'blockedBy', targets: [], moveIn: [{ path: 'r.mjs', fromOwnerId: 'R' }], cycleWarnings: [] });
+    expect(describeFix(findings[0])).toBe("move `we:r.mjs` here from #R (blockedBy the other way would cycle)");
+  });
+
+  it('resolves a SHARED file dependency as a new co-owner ADD, never a blockedBy/move/moveIn (real #3906/run.mjs bug: the file must never be pulled OUT of an existing co-owner)', () => {
+    // Real live bug this guards: `we:scripts/operations/run.mjs` is co-owned by several open siblings at once
+    // (append-only house convention). Treating a reference to it like a genuinely single-owner file wholesale
+    // MOVED it out of one co-owner's scope into another's — corrupting the shared-file invariant. The fix: a
+    // classification the caller marks as a known SHARED path resolves as `add-to-scope` on the ASKING card
+    // only — nothing is ever removed from any existing owner (planEdits' addToScope never touches removeScope).
+    const results = [{
+      ownerId: '3903', file: 'we:scripts/operations/deliver-item-wrapper.mjs',
+      classifications: [{ specifier: '../run.mjs', repoPath: 'scripts/operations/run.mjs', kind: 'later', ownerId: '3898' }],
+    }];
+    const sharedPaths = new Set(['we:scripts/operations/run.mjs']);
+    const findings = buildFindings({ cardsById, mainPaths: new Set(), sharedPaths, results });
+    expect(findings[0].fix).toEqual({ kind: 'add-to-scope', owner: '3903', paths: ['we:scripts/operations/run.mjs'], addToScope: { owner: '3903', paths: ['we:scripts/operations/run.mjs'] } });
+    expect(describeFix(findings[0])).toMatch(/add `we:scripts\/operations\/run\.mjs` \(shared file — new co-owner\) to #3903's own scope/);
+  });
+
+  it('a SHARED-file later import never becomes a blockedBy target even when mixed with a genuine later import on an impl file', () => {
+    const results = [{
+      ownerId: '3895', file: 'we:scripts/operations/telemetry.mjs',
+      classifications: [
+        { specifier: '../run.mjs', repoPath: 'scripts/operations/run.mjs', kind: 'later', ownerId: '3898' }, // shared
+        { specifier: '../host-process-sample.mjs', repoPath: 'scripts/operations/host-process-sample.mjs', kind: 'later', ownerId: '3915' }, // genuine
+      ],
+    }];
+    const sharedPaths = new Set(['we:scripts/operations/run.mjs']);
+    const findings = buildFindings({ cardsById, mainPaths: new Set(), sharedPaths, results });
+    expect(findings[0].fix.kind).toBe('blockedBy');
+    expect(findings[0].fix.targets).toEqual(['3915']); // run.mjs's #3898 never appears here
+    expect(findings[0].fix.addToScope).toEqual({ owner: '3895', paths: ['we:scripts/operations/run.mjs'] });
   });
 
   it('produces no finding when every import is on-main/own/blocker', () => {
@@ -442,7 +647,7 @@ describe('buildFindings + describeFix', () => {
     }];
     const findings = buildFindings({ cardsById, mainPaths: new Set(), results });
     expect(findings[0].fix).toEqual({ kind: 'add-to-scope', owner: '3895', paths: ['we:scripts/operations/ghost.mjs'], addToScope: { owner: '3895', paths: ['we:scripts/operations/ghost.mjs'] } });
-    expect(describeFix(findings[0])).toMatch(/add `we:scripts\/operations\/ghost\.mjs` to #3895's own scope/);
+    expect(describeFix(findings[0])).toMatch(/add `we:scripts\/operations\/ghost\.mjs` \(unowned.*\) to #3895's own scope/);
   });
 
   it('attaches addToScope to a move fix when the same file has BOTH a later and an unowned import', () => {
@@ -465,6 +670,38 @@ describe('buildFindings + describeFix', () => {
     expect(findings[0].fix.kind).toBe('move');
     expect(findings[0].fix.target).toBe('3915');
     expect(findings[0].fix.addToScope).toEqual({ owner: '3915', paths: ['we:scripts/operations/ghost.mjs'] }); // follows the file to its new home
+  });
+});
+
+describe('createCycleGuard', () => {
+  it('accepts an edge that does not cycle', () => {
+    const cardsById = new Map([['A', card({ id: 'A' })], ['B', card({ id: 'B' })]]);
+    const tryAddEdge = createCycleGuard(cardsById);
+    expect(tryAddEdge('A', 'B')).toBe(true);
+  });
+  it('rejects an edge against the ORIGINAL graph (B already needs A)', () => {
+    const cardsById = new Map([['A', card({ id: 'A', blockedBy: ['B'] })], ['B', card({ id: 'B' })]]);
+    const tryAddEdge = createCycleGuard(cardsById);
+    expect(tryAddEdge('B', 'A')).toBe(false);
+  });
+  it('rejects a self-edge', () => {
+    const cardsById = new Map([['A', card({ id: 'A' })]]);
+    expect(createCycleGuard(cardsById)('A', 'A')).toBe(false);
+  });
+  it('THE LIVE BUG: rejects the SECOND of two edges that only cycle when combined, within the SAME batch — ' +
+     'neither #3906→#3907 nor #3907→#3906 existed in the graph before either call, so a guard checking only the ' +
+     'original graph would accept both and close a cycle (the real #3906/#3907 shape)', () => {
+    const cardsById = new Map([['3906', card({ id: '3906' })], ['3907', card({ id: '3907' })]]);
+    const tryAddEdge = createCycleGuard(cardsById);
+    expect(tryAddEdge('3906', '3907')).toBe(true); // accepted — nothing stood in the way yet
+    expect(tryAddEdge('3907', '3906')).toBe(false); // rejected — THIS batch already made 3907 need 3906
+  });
+  it('accepts edges transitively once earlier-in-batch edges are folded in', () => {
+    const cardsById = new Map([['A', card({ id: 'A' })], ['B', card({ id: 'B' })], ['C', card({ id: 'C' })]]);
+    const tryAddEdge = createCycleGuard(cardsById);
+    expect(tryAddEdge('A', 'B')).toBe(true);
+    expect(tryAddEdge('B', 'C')).toBe(true);
+    expect(tryAddEdge('C', 'A')).toBe(false); // A -> B -> C already; C -> A would close it
   });
 });
 
@@ -517,6 +754,87 @@ describe('planEdits', () => {
     expect(edits.get('3915').notes[0]).toMatch(/blocker of #3895/);
   });
 
+  it('plans a moveIn: relocates the dependency file out of the cycling later-owner into this card, notes both sides', () => {
+    const findings = [{
+      ownerId: '3906', file: 'we:scripts/operations/dispatch-providers/build.mjs', isTest: false,
+      later: [{ ownerId: '3903' }], unowned: [],
+      fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'scripts/operations/deliver-item-run.mjs', fromOwnerId: '3903' }], cycleWarnings: [] },
+    }];
+    const edits = planEdits(findings, '2026-09-24');
+    expect(edits.get('3903').removeScope).toEqual(['we:scripts/operations/deliver-item-run.mjs']);
+    expect(edits.get('3906').addScope).toEqual(['we:scripts/operations/deliver-item-run.mjs']);
+    expect(edits.get('3906').addBlockedBy).toEqual([]); // no new edge — the move itself is the fix
+    expect(edits.get('3903').notes[0]).toMatch(/moved .*deliver-item-run\.mjs.* to #3906/);
+    expect(edits.get('3906').notes[0]).toMatch(/moved .*deliver-item-run\.mjs.* here from #3903/);
+  });
+
+  it('REVIEW FINDING (PR #2671): two cards both cycling on the SAME single-owner dependency move it to ONE owner only — the second moveIn is dropped, never a duplicate co-owner', () => {
+    // T is blockedBy both A and B; A's and B's impl files both need T's x.mjs. Each finding independently sees
+    // wouldCycle(A,T) / wouldCycle(B,T) and proposes moving x.mjs into itself. Applying both would remove it from
+    // T once but add it to A AND B — and the next run's computeSharedFiles would then treat that accident as an
+    // intentional multi-owner SHARED file and stop scanning it (masking x.mjs's own imports of y.mjs, still T's).
+    const cardsById = new Map([
+      ['A', card({ id: 'A' })],
+      ['B', card({ id: 'B' })],
+      ['T', card({ id: 'T', blockedBy: ['A', 'B'], scope: ['we:x.mjs', 'we:y.mjs'] })],
+    ]);
+    const results = [
+      { ownerId: 'A', file: 'we:a-impl.mjs', classifications: [{ specifier: './x.mjs', repoPath: 'x.mjs', kind: 'later', ownerId: 'T' }] },
+      { ownerId: 'B', file: 'we:b-impl.mjs', classifications: [{ specifier: './x.mjs', repoPath: 'x.mjs', kind: 'later', ownerId: 'T' }] },
+    ];
+    const findings = buildFindings({ cardsById, mainPaths: new Set(), results });
+    const edits = planEdits(findings, '2026-09-25', { cardsById });
+    const owners = [...edits].filter(([, e]) => e.addScope.includes('we:x.mjs')).map(([id]) => id);
+    expect(owners).toEqual(['A']); // first proposal wins; B does not ALSO gain it
+    expect(edits.get('T').removeScope).toEqual(['we:x.mjs']);
+    expect(edits.get('B')?.notes ?? []).toEqual([]); // nothing half-applied on the dropped side
+    expect(edits.get('T').notes.some((n) => /to #B/.test(n))).toBe(false);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.mjs', from: 'T', to: 'B', keptAt: 'A' }]);
+
+    // Applied, the scopes leave x.mjs single-owned — so a re-run still scans it (never mis-flagged SHARED).
+    const after = new Map([...cardsById].map(([id, c]) => {
+      const e = edits.get(id) ?? { removeScope: [], addScope: [] };
+      return [id, { ...c, scope: [...c.scope.filter((s) => !e.removeScope.includes(s)), ...e.addScope] }];
+    }));
+    expect(computeSharedFiles(after).has('we:x.mjs')).toBe(false);
+  });
+
+  it('the same path moved to the SAME owner by two findings is not a conflict (nothing dropped)', () => {
+    const findings = [
+      { ownerId: 'A', file: 'we:a1.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+      { ownerId: 'A', file: 'we:a2.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('A').addScope).toEqual(['we:x.mjs']);
+    expect(edits.droppedMoves).toEqual([]);
+  });
+
+  it('a test-file move and a moveIn of the SAME path to different owners also keep only the first', () => {
+    const findings = [
+      { ownerId: 'T', file: 'we:x.test.mjs', isTest: true, later: [{ ownerId: 'A' }], unowned: [], fix: { kind: 'move', target: 'A', addBlockedBy: [], cycleWarnings: [] } },
+      { ownerId: 'B', file: 'we:b-impl.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.test.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('A').addScope).toEqual(['we:x.test.mjs']);
+    expect(edits.get('B')?.addScope ?? []).toEqual([]);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.test.mjs', from: 'T', to: 'B', keptAt: 'A' }]);
+  });
+
+  it('a test-file move that LOSES to an earlier moveIn drops its residual blockedBy and addToScope too — nothing written for a move that never happened', () => {
+    const findings = [
+      { ownerId: 'B', file: 'we:b-impl.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], moveIn: [{ path: 'x.test.mjs', fromOwnerId: 'T' }], cycleWarnings: [] } },
+      {
+        ownerId: 'T', file: 'we:x.test.mjs', isTest: true, later: [{ ownerId: 'A' }], unowned: [{}],
+        fix: { kind: 'move', target: 'A', addBlockedBy: ['C'], cycleWarnings: [], addToScope: { owner: 'A', paths: ['we:ghost.mjs'] } },
+      },
+    ];
+    const edits = planEdits(findings, '2026-09-25');
+    expect(edits.get('B').addScope).toEqual(['we:x.test.mjs']);
+    expect(edits.has('A')).toBe(false); // no scope, no blockedBy C, no ghost.mjs, no notes
+    expect(edits.has('C')).toBe(false);
+    expect(edits.droppedMoves).toEqual([{ path: 'we:x.test.mjs', from: 'T', to: 'A', keptAt: 'B' }]);
+  });
+
   it('plans an add-to-scope: appends the unowned path to the owning card, with a note', () => {
     const findings = [{
       ownerId: '3862', file: 'we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs', isTest: true,
@@ -534,6 +852,39 @@ describe('planEdits', () => {
   it('produces no edit for a cycle-only finding (nothing safe to apply)', () => {
     const findings = [{ ownerId: '3895', file: 'we:x.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: [], cycleWarnings: [{ path: null, ownerId: '9' }] } }];
     expect(planEdits(findings, '2026-09-24').size).toBe(0);
+  });
+
+  it('without cardsById, applies every proposed edge as-is (default — matches every call above, batch-cycle-blind)', () => {
+    const findings = [
+      { ownerId: '3906', file: 'we:a.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3907'], cycleWarnings: [] } },
+      { ownerId: '3907', file: 'we:b.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3906'], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-24');
+    expect(edits.get('3906').addBlockedBy).toEqual(['3907']);
+    expect(edits.get('3907').addBlockedBy).toEqual(['3906']); // a real cycle, applied uncaught — no cardsById supplied
+    expect(edits.droppedEdges).toEqual([]);
+  });
+
+  it('WITH cardsById, the batch guard drops whichever of two mutually-cycling edges is proposed SECOND (the real #3906/#3907 shape)', () => {
+    const cardsById = new Map([['3906', card({ id: '3906' })], ['3907', card({ id: '3907' })]]);
+    const findings = [
+      { ownerId: '3906', file: 'we:a.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3907'], cycleWarnings: [] } },
+      { ownerId: '3907', file: 'we:b.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3906'], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-24', { cardsById });
+    expect(edits.get('3906').addBlockedBy).toEqual(['3907']); // first proposal — accepted
+    expect(edits.get('3907')?.addBlockedBy ?? []).toEqual([]); // second — would cycle with the first, dropped
+    expect(edits.droppedEdges).toEqual([{ from: '3907', to: '3906' }]);
+  });
+
+  it('a dropped edge still gets no notes on either side — nothing half-applied', () => {
+    const cardsById = new Map([['3906', card({ id: '3906' })], ['3907', card({ id: '3907' })]]);
+    const findings = [
+      { ownerId: '3906', file: 'we:a.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3907'], cycleWarnings: [] } },
+      { ownerId: '3907', file: 'we:b.mjs', isTest: false, later: [], unowned: [], fix: { kind: 'blockedBy', targets: ['3906'], cycleWarnings: [] } },
+    ];
+    const edits = planEdits(findings, '2026-09-24', { cardsById });
+    expect(edits.get('3906').notes.some((n) => /blocker of #3907/.test(n))).toBe(false);
   });
 });
 

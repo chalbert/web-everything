@@ -46,12 +46,20 @@ export function planRoundLabelChange({ round, currentLabels = [] } = {}) {
  * THE IO SHELL. Reads the PR's current labels, computes the change, applies it only if one is needed.
  * `provider` is injectable (mirrors `we:scripts/review-set-label.mjs`'s own `createGhProvider()` seam) so a
  * test asserts the exact `gh` argv with no subprocess, and a caller never hand-rolls a second `execFileSync`.
- * @param {{pr:number|string, repo:string, round:number|string, provider?:object}} o
+ *
+ * `currentLabels`, WHEN SUPPLIED, SKIPS `provider.readLabels` ENTIRELY (#4133, epic #3383/#4075 — audit
+ * `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2): `we:scripts/conveyor/reconcile-pass.mjs
+ * #defaultReadPrs` already reads every open PR's `labels` field in ONE `gh pr list` call per tick, and a caller
+ * that already has that array (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) has
+ * no reason to spend a SECOND, per-PR `gh pr view --json labels` call re-reading the exact same fact. Omitting
+ * it (the default, and every pre-existing caller/test) reads fresh, byte-identical to before this option
+ * existed — this is purely additive.
+ * @param {{pr:number|string, repo:string, round:number|string, provider?:object, currentLabels?:Array<{name?:string}|string>}} o
  * @returns {{changed:boolean, label:string, removed:string[]}}
  */
-export function tagReviewRound({ pr, repo, round, provider = createGhProvider() } = {}) {
-  const currentLabels = provider.readLabels(repo, pr);
-  const plan = planRoundLabelChange({ round, currentLabels });
+export function tagReviewRound({ pr, repo, round, provider = createGhProvider(), currentLabels } = {}) {
+  const labels = currentLabels ?? provider.readLabels(repo, pr);
+  const plan = planRoundLabelChange({ round, currentLabels: labels });
   if (!plan.add && plan.remove.length === 0) return { changed: false, label: roundLabel(round), removed: [] };
   // `review-round:<N>` is an OPEN-ENDED label family — round 7 mints a brand new GitHub label the first time
   // it is ever reached, and `gh pr edit --add-label` refuses one that does not exist in the repo yet. Ensure

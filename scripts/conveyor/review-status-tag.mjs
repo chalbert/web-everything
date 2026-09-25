@@ -88,18 +88,27 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
 /**
  * THE IO SHELL. Reads live agents + the PR's current labels, derives the status, applies the change only if
  * one is needed. Both reads are injectable so a test asserts behavior with no `claude`/`gh` process.
- * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object}} o
+ *
+ * `agents`/`currentLabels`, WHEN SUPPLIED, SKIP `listAgents()`/`provider.readLabels` ENTIRELY (#4133, epic
+ * #3383/#4075 — audit `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2): this function used
+ * to spend a FRESH `claude agents --json` AND a fresh `gh pr view --json labels` call for EVERY status
+ * candidate a tick tags, even though `we:scripts/conveyor/reconcile-pass.mjs`'s own `defaultReadPrs`/
+ * `defaultReadAgents` already read both, once, for the whole tick. A caller with that data in hand
+ * (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) passes it straight through.
+ * Omitting either (the default, and every pre-existing caller/test) reads fresh, byte-identical to before
+ * these options existed.
+ * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 // x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
 // longer runs as a `claude --bg` session, so without them every job-run review would read as "nothing live" and
 // never carry `review-status:reviewing`.
-export function tagReviewStatus({ pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider() } = {}) {
+export function tagReviewStatus({ pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider(), agents: suppliedAgents, currentLabels: suppliedLabels } = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
-  const agents = listAgents();
+  const agents = suppliedAgents ?? listAgents();
   const status = deriveReviewStatus({ pr, agents, repo: repoKey });
-  const currentLabels = provider.readLabels(repo, pr);
+  const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {
     return { changed: false, label: status ? `review-status:${status.state}` : null, removed: [] };
