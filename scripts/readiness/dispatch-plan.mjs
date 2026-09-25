@@ -84,6 +84,7 @@ import { capToConcurrency, resolveMaxConcurrentLanes } from '../lib/lane-concurr
 // — only the pure predicate/normalizer come in, so "is THIS kind held" is decided in ONE place rather than
 // re-derived here and again in `tick-core.mjs`.
 import { PAUSABLE_KINDS, normalizePausedKinds, resolvePausedKinds } from './dispatch-pause.mjs';
+import { isExemptChangeset } from '../lib/pr-limit.mjs'; // we:xniq7xs — the pr-limit gate's exemption predicate (single source, shared with pr-land.mjs)
 import { driftDefaults, findPocBranch, readRegistry } from '../lib/poc-branches.mjs';
 
 // ── PURE CORE (no fs / git / clock / child_process — every input is injected) ─────────────────────────────────
@@ -153,9 +154,20 @@ import { driftDefaults, findPocBranch, readRegistry } from '../lib/poc-branches.
  *  needs-slice, needs-decision, unshaped-no-scope, an overlap, already-done, branch-drift-blocked) keeps that
  *  more specific reason, since the pause changes nothing about why THAT item wasn't launching anyway. Never
  *  touches an already-running lane — this pure core has no lease/lane-release knowledge at all. The operator
- *  gloss is {@link DISPATCH_PAUSED_HINT}. */
+ *  gloss is {@link DISPATCH_PAUSED_HINT}.
+ *
+ *  `pr-limit` (we:xniq7xs, parent #4075): too many open PRs is usually a REVIEW-SYSTEM problem (the drain/
+ *  review pipeline can't keep up), not a build problem, so opening ANOTHER new PR makes that backlog worse.
+ *  Checked at the SAME point as `dispatch-paused` (an item otherwise launchable) — the IO shell resolves the
+ *  live open-PR count/limit/override state (`we:scripts/lib/pr-limit.mjs`) and hands this core a plain
+ *  boolean, same as `dispatchPaused`. An item whose predicted `scope:` is entirely conveyor/daemon
+ *  infrastructure (`isExemptChangeset`) is exempt — the fix for an overloaded review system must always get
+ *  through. This gate governs ONLY the "open a brand-new PR" queue this core schedules — a `fix`/`ci-heal`
+ *  spawn against an ALREADY-OPEN PR is a separate pass entirely (`we:scripts/conveyor/tick-core.mjs`'s
+ *  `planFixSpawns`/CI-heal sibling), which this function never touches, so it is never held by this. The
+ *  operator gloss is {@link PR_LIMIT_HINT}. */
 export const HELD_REASONS = Object.freeze([
-  'already-done', 'blocked', 'unshaped-no-scope', 'no-size', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused',
+  'already-done', 'blocked', 'unshaped-no-scope', 'no-size', 'needs-slice', 'needs-decision', 'needs-investigation', 'branch-drift-blocked', 'no free lane', 'capacity-cap', 'overlaps lane-<n>', 'cleared-but-not-ready', 'dispatch-paused', 'pr-limit',
 ]);
 
 /** The operator-facing gloss for an `unshaped-no-scope` hold — surfaced beside the token in the CLI and the
@@ -225,6 +237,12 @@ export function dispatchPausedHint(pausedKinds = null) {
  *  would exceed `maxConcurrentLanes`. Nothing to reconcile or clear — either raise `WE_MAX_CONCURRENT_LANES`
  *  (a deliberate, per-machine judgment call) or wait for an active lane to free up. */
 export const CAPACITY_CAP_HINT = 'a free lane exists but launching it would exceed the concurrent-lane cap — raise WE_MAX_CONCURRENT_LANES or wait for a lane to free up';
+
+/** The operator-facing gloss for a `pr-limit` hold (we:xniq7xs) — surfaced beside the token so a held item
+ *  always tells the operator WHY: too many open, agent-authored, not-yet-`review:accepted` PRs already sit
+ *  on this repo. Land or review the backlog, or override (`node scripts/operations/pr-limit.mjs allow
+ *  --branch=<b>` / `off --reason=…`). */
+export const PR_LIMIT_HINT = 'open-PR backpressure limit reached — land/review the existing PRs, or override (pr-limit.mjs allow / off)';
 
 /**
  * How old (ms) an item's `open`/`active` age must be before the IO shell spends a `gh pr list --search` call
@@ -376,7 +394,7 @@ function hasOpenBlockers(item) {
  *              `false` when it launched on the `default-size` fallback.
  *   `held`   — every other queued item with its single reason ∈ {@link HELD_REASONS}.
  */
-export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null, trace = false } = {}) {
+export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes = Infinity, dispatchPaused = false, dispatchPausedKinds = null, sizePolicy = null, prLimitHeld = false, trace = false } = {}) {
   // The pause is per-KIND now, and this core only ever decides ONE kind: `build`. Resolving the marker's
   // declared scope through the shared predicate (rather than reading the raw boolean) is what makes an
   // old-format `{paused:true}` — and every caller that still passes only the boolean — keep holding builds,
@@ -545,6 +563,16 @@ export function dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, drif
     //    launches normally (the scoped kinds are held in `tick-core.mjs`, which owns those spawns).
     if (blocked('dispatch-paused', buildPaused, buildPaused)) {
       held.push({ num, reason: 'dispatch-paused' });
+      continue;
+    }
+    // 6.6. OPEN-PR BACKPRESSURE LIMIT (we:xniq7xs) — checked at the SAME point as `dispatch-paused`, same
+    //    reasoning: an item otherwise launchable, held here rather than relabelled. `prLimitHeld` is a plain
+    //    boolean the IO shell resolves (the live gh count vs. the per-repo cap, honouring the global/branch
+    //    overrides) — this pure core does no gh/fs IO of its own, mirroring `dispatchPaused`. An item whose
+    //    OWN predicted scope is entirely conveyor/daemon infrastructure is exempt (`isExemptChangeset`) — a
+    //    fix to the review/land machinery itself must never be the thing this backlog blocks.
+    if (blocked('pr-limit', prLimitHeld && !isExemptChangeset(scope), { prLimitHeld, scope })) {
+      held.push({ num, reason: 'pr-limit' });
       continue;
     }
     // 7. Disjoint — launch it on the next free lane, or hold for want of one. `capacity-cap` (#xupukxa) fires
@@ -923,9 +951,28 @@ async function main(argv) {
     }
   }
 
+  // 3.8 OPEN-PR BACKPRESSURE LIMIT (we:xniq7xs) — read the live open-PR count for WE (this core's own build
+  //     queue) against its cap, resolved through the SAME module `pr-land.mjs`'s pre-create check uses, so the
+  //     two enforcement points can never disagree on what "over the limit" means. FAIL-OPEN on any error (a
+  //     `gh` hiccup, an unreadable override file) — mirrors every other axis above; `decideOpenPr` itself
+  //     already fails open on a `null` count, but this catch also covers an import/resolve failure. Skippable
+  //     via `--no-pr-limit-check` (mirrors `--no-pause-check`/`--no-drift-check`). Scoped to `we` today — the
+  //     build queue this core schedules is WE's own; a multi-repo build queue is a follow-on, not this core's
+  //     job to invent.
+  let prLimitHeld = false;
+  if (!flags['no-pr-limit-check']) {
+    try {
+      const { countOpenPrsForRepo, isGlobalOffLive, decideOpenPr } = await import('../lib/pr-limit.mjs');
+      const { count: openCount, limit } = countOpenPrsForRepo('we');
+      prLimitHeld = !decideOpenPr({ repoKey: 'we', limit, openCount, globalOff: isGlobalOffLive() }).allowed;
+    } catch (e) {
+      log(`  ⚠ pr-limit check skipped (${String(e.message || e).split('\n')[0]}) — dispatch proceeds unheld on this axis`);
+    }
+  }
+
   // #xupukxa — the concurrency ceiling, env-overridable exactly like heavy-admission.mjs's own cap knob.
   const maxConcurrentLanes = resolveMaxConcurrentLanes(process.env);
-  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy, trace: true });
+  const plan = dispatchPlan({ queue, leases, freeLanes, driftBlockedScope, driftGraduationItem, maxConcurrentLanes, dispatchPaused, dispatchPausedKinds, sizePolicy, prLimitHeld, trace: true });
   // Surface cleared-but-not-ready ids as held entries so a clear never silently vanishes (#2613 review, 2b).
   // #3457/#3460: a `notReady` id the ground-truth pass above CONFIRMED already done (the exact `#3435` live
   // shape — a RESOLVED item whose sidecar clear was never removed) is surfaced as `already-done`, naming the
@@ -978,7 +1025,8 @@ async function main(argv) {
               : h.reason === 'branch-drift-blocked' ? ` (${BRANCH_DRIFT_BLOCKED_HINT})`
               : h.reason === 'capacity-cap' ? ` (${CAPACITY_CAP_HINT})`
                 : h.reason === 'dispatch-paused' ? ` (${dispatchPausedHint(dispatchPausedKinds)})`
-                  : '';
+                  : h.reason === 'pr-limit' ? ` (${PR_LIMIT_HINT})`
+                    : '';
       log(`  ⏸ #${h.num} — ${h.reason}${hint}`);
     }
   }

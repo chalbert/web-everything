@@ -211,6 +211,11 @@ export default defineConfig({
       // #3383 — same tier: real throwaway origin/reference/pool, real spawned `lane-pool.mjs` acquire/provision
       // children, a PATH git shim for the remote-probe-failure case (mirrors its growth-cap sibling above).
       'scripts/__tests__/lane-pool-acquire-growth.test.mjs',
+      // #x96v5hl — same `lane-pool-trim.test.mjs` barrier-plus-real-concurrent-spawn technique (a real
+      // `release`/`acquire` child paused mid-run via an env-var test seam, a second real concurrent CLI child
+      // racing into that exact window): proof of the release/reap and stale-reclaim TOCTOU fixes.
+      'scripts/__tests__/lane-pool-release-reap-race.test.mjs',
+      'scripts/__tests__/lane-pool-stale-reclaim-race.test.mjs',
       'scripts/operations/__tests__/backlog-ops-integration.test.mjs',
       'scripts/operations/__tests__/dispatch-lane-integration.test.mjs',
       'scripts/operations/__tests__/gate-health-integration.test.mjs',

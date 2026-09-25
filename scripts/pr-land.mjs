@@ -104,6 +104,8 @@ import { parseManifest, embedManifestInBody, repoKeyFromSlug, manifestBaseForRep
 import { buildDelegationMarker, DELEGATION_MARKER, DELEGATION_TASK_TYPES } from './lib/delegation-marker.mjs';
 import { currentActorId, buildAuthorActorMarker, readAuthorActorStamps } from './lib/review-independence.mjs'; // #2844 — the author stamp the self-clear refusal compares against
 import { classifyPrOpenFailure, recordInfraBlockIO, infraStorePath, primaryRootFromClone, originSlugOf } from './conveyor/infra-blocked.mjs'; // #2659 — a post-push PR-open failure on an outside dependency → the infra-blocked state (recorded for auto-retry/resume), not a hard fail
+import { decideOpenPr, countOpenPrsForRepo, isGlobalOffLive, isBranchAllowedLive } from './lib/pr-limit.mjs'; // we:xniq7xs — the open-PR backpressure limit's pre-create refusal
+import { repoKeyForSlug } from './lib/constellation-repos.mjs'; // we:xniq7xs — map this checkout's origin slug to the internal repo key the limit is keyed by
 import { join } from 'node:path';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { admittedArgv } from './readiness/heavy-admission.mjs'; // xaipsbs — the heal's check:standards waits for a heavy-command slot
@@ -257,6 +259,12 @@ const LABEL = flags['no-label'] ? null : (typeof flags.label === 'string' ? flag
 // queue, observed 2026-07-03: #55/#57/#59/#67 labelled with a red `test`). In every mode the label is now
 // applied only after the green-wait, never eagerly at open.
 const LABEL_ON_GREEN = !!flags['label-on-green'];
+// we:xniq7xs — the `force-open`/`reason` flag pair is the per-PR escape hatch for the open-PR backpressure
+// limit (below): a deliberate, logged, one-shot override for THIS land call only — never a standing
+// exemption. A reason is expected (not enforced here — see pr-limit.mjs): every override this module
+// honours is logged with actor + reason, and an unstated one would be the sole silently-unaccountable override.
+const FORCE_OPEN = !!flags['force-open'];
+const FORCE_OPEN_REASON = typeof flags.reason === 'string' ? flags.reason : null;
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
@@ -797,6 +805,27 @@ function runCli() {
     // it, stalling the queue for a human to hand-fill the body). Create-path only — an existing PR is exempt.
     const bodyGuard = prCreateBodyGuard(BODY);
     if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
+
+    // we:xniq7xs — the open-PR backpressure limit. Too many open PRs is usually a REVIEW-SYSTEM problem
+    // (the drain/review pipeline can't keep up), not a build problem, so a NEW PR over the per-repo cap is
+    // refused HERE, AFTER the ref is already pushed (step 2 above) — the branch stays pushed; only the
+    // `gh pr create` is skipped, exactly like the empty-body guard just above. Never runs for an EXISTING
+    // PR (the `else` branch below) — fixing/re-pushing to an already-open PR is never blocked by this.
+    {
+      const repoKeyForLimit = repoKeyForSlug(originSlugOf(REPO)) || 'we';
+      let changedFilesForLimit = [];
+      try { changedFilesForLimit = gitC(['diff', '--name-only', `${REMOTE}/${BASE}...${refSha}`]).split('\n').filter(Boolean); } catch { /* best-effort — an unresolvable diff degrades to "not exempt", never blocks on its own */ }
+      const { count: openCount, limit } = countOpenPrsForRepo(repoKeyForLimit);
+      const limitDecision = decideOpenPr({
+        repoKey: repoKeyForLimit, limit, openCount, changedFiles: changedFilesForLimit, branch: REF,
+        branchAllowed: isBranchAllowedLive(REF), globalOff: isGlobalOffLive(), forceOpen: FORCE_OPEN, forceReason: FORCE_OPEN_REASON,
+      });
+      if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · pr-limit(${repoKeyForLimit}): ${limitDecision.reason}\n`);
+      if (!limitDecision.allowed) {
+        emit({ repo: REPO, merged: false, reason: 'pr-limit', detail: `${limitDecision.reason} (ref ${REF} left pushed on ${REMOTE} — re-run pr-land once the count drops, or use one of the overrides named above)` }, 3);
+      }
+    }
+
     try { const out = forge.create(createParams); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return onCreateFailed(e); }
   } else if (LANE_MANIFEST || AUTHOR_MARKER || DELEGATION_MARKER_LINE) {

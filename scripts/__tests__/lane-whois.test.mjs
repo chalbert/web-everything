@@ -174,6 +174,60 @@ describe('lane-whois — AFTER', () => {
     expect(decisions.map((d) => d.lane)).toEqual([3, 4]);
   });
 
+  it('#3383-perf: a lane with MANY genuinely-unpushed ahead commits is scanned in bounded time (speed regression guard)', () => {
+    // Before the #3383 speed follow-up, `aheadCommits` ran one `git log -1` PER commit for subjects, and
+    // `aheadCommitsPreserved` ran one unbounded `git branch -r --contains <sha>` PER commit that `git cherry`
+    // couldn't already prove equivalent — a lane with N genuinely-orphaned ahead commits cost O(N) extra
+    // spawns on top of everything else. None of these 30 commits are pushed anywhere or patch-equivalent to
+    // origin/main, so every one of them used to hit that unbounded fallback.
+    expect(runPool(['acquire', '--lane=1', '--session=conveyor-perf', ...poolArgs()]).code).toBe(0);
+    const dir = lanePath(1);
+    for (let i = 0; i < 30; i += 1) {
+      writeFileSync(join(dir, `perf-${i}.txt`), `content ${i}\n`);
+      git(['add', `perf-${i}.txt`], dir);
+      git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', `perf work ${i}`], dir);
+    }
+    expect(runPool(['release', '--lane=1', '--session=conveyor-perf', ...poolArgs()]).code).toBe(0);
+
+    const startedAt = Date.now();
+    const r = runWhois(['--lane=1', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
+    const elapsedMs = Date.now() - startedAt;
+    expect(r.code).toBe(0);
+    const row = JSON.parse(r.out).lanes[0];
+    expect(row.ahead.count).toBe(30);
+    expect(row.preserved).toBe(false); // none of these were ever pushed — correctly NOT preserved
+    expect(row.verdict).not.toBe('finished-reclaimable'); // never wrongly reclaimable
+    // Generous bound for a CI/dev host (real target is the whole ~68-lane pool in well under 60s) — this
+    // guards against the specific O(N) blowup class regressing, not a tight perf SLA on this one lane.
+    expect(elapsedMs).toBeLessThan(10_000);
+  });
+
+  // PR #2641 review — `lane-pool.mjs reclaim`'s re-check used to run the cross-ref fallback unbounded; both it
+  // and `whoisForLane` now share `lanePreservedFileChecker`, whose lane-wide budget this pins.
+  it('lanePreservedFileChecker spends ONE lane-wide fallback budget across every dirty file', async () => {
+    const { lanePreservedFileChecker, otherRemoteRefs } = await import(WHOIS_SCRIPT);
+    expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    const dir = lanePath(1);
+    // Two files whose content lives ONLY on another remote branch — provable solely via the fallback scan.
+    // No trailing newline: `filePreservedInMain` compares against `tryGit` output, which strips one (a
+    // pre-existing, fail-closed quirk on main — out of this test's scope).
+    writeFileSync(join(dir, 'a.txt'), 'A');
+    writeFileSync(join(dir, 'b.txt'), 'B');
+    git(['add', 'a.txt', 'b.txt'], dir);
+    git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'side'], dir);
+    git(['push', '--quiet', 'origin', 'HEAD:refs/heads/lane/9002-side'], dir);
+    git(['reset', '--quiet', '--mixed', 'origin/main'], dir); // a.txt / b.txt now untracked, same content
+    const dirty = ['a.txt', 'b.txt'];
+    const refCount = otherRemoteRefs(dir, 'origin/main').length;
+    expect(refCount).toBeGreaterThan(0);
+
+    const unbounded = lanePreservedFileChecker(dir, 'origin/main', dirty);
+    expect(dirty.map(unbounded)).toEqual([true, true]);
+    // Budget exactly one file's worth of refs: the first file spends it all, the second gets no fallback.
+    const bounded = lanePreservedFileChecker(dir, 'origin/main', dirty, { maxFallbackShows: refCount });
+    expect(dirty.map(bounded)).toEqual([true, false]);
+  });
+
   it('scans every requested lane in ONE transcript grep pass (no lane left unreported)', () => {
     const r = runWhois(['--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]);
     const report = JSON.parse(r.out);

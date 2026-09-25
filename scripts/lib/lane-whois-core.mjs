@@ -37,6 +37,35 @@ export function guessCardIds({ paths = [], commitSubject = '', branch = '' } = {
 const TERMINAL_PR_STATES = new Set(['merged', 'closed']);
 
 /**
+ * PURE: does a card id appear, as a whole token (never a bare substring of a longer number/slug), in `text`?
+ * Shared by {@link prsMatchingCard} below — one regex construction, not re-derived per call site.
+ */
+function idAppearsIn(id, text) {
+  const escaped = String(id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(text || '');
+}
+
+/**
+ * PURE, speed follow-up (#3383's own perf note): `lane-whois.mjs` used to call `gh pr list --search <id>` ONCE
+ * PER DISTINCT CARD ID (a network round-trip apiece — the dominant cost measured live against the real ~68-lane
+ * WE pool, alongside the unbounded ref/commit fallbacks {@link aheadCommitsPreserved-adjacent code} in
+ * `lane-whois.mjs` itself bounds). This is the in-process replacement: given the WHOLE repo's PR list (fetched
+ * ONCE per run — `lane-whois.mjs#fetchAllPrs`), find every PR that mentions `cardId` as a whole token in its
+ * title, head branch name, or body — the same three surfaces a card id realistically shows up in (a `WE #NNNN:`
+ * title, a `lane/NNNN-*`/`lane/xSLUG-*` branch, or a body cross-reference). A card id embedded in a LONGER
+ * number or slug (`"420"` inside `"4200"`) never matches — the same false-positive `gh --search`'s own
+ * relevance ranking would also reject.
+ * @param {Array<{number:number, state:string, title?:string, headRefName?:string, body?:string}>} prs
+ * @param {string} cardId
+ * @returns {Array<{number:number, state:string}>}
+ */
+export function prsMatchingCard(prs, cardId) {
+  return (Array.isArray(prs) ? prs : [])
+    .filter((pr) => pr && idAppearsIn(cardId, `${pr.title || ''} ${pr.headRefName || ''} ${pr.body || ''}`))
+    .map((pr) => ({ number: pr.number, state: pr.state }));
+}
+
+/**
  * PURE: is a lease's holder presumed alive right now? A live lease (unexpired TTL) is a WEAKER signal than an
  * actually-listed live agent session - this just answers the TTL question; `lane-whois.mjs` layers the
  * `claude agents --json` cross-check on top for the stronger "owner alive -> ask" signal.

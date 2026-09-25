@@ -76,6 +76,14 @@ commitment-policy/**/*.d.ts
 # driver-watchdog's own alert/log pair just below, never committed.
 .conveyor/infra-blocked-alert.json
 .conveyor/infra-blocked.log
+# Unsupported-repo durable-owed-work sidecar (`scripts/conveyor/unsupported-repo.mjs`) — written by
+# `runReconcileFixDispatch`/`runner.mjs` EVERY tick (even to record "nothing outstanding"), same as every other
+# `.conveyor/*.json` marker here. Never gitignored until #3383 (epic #3383's own red-main incident): the SAME
+# failure mode `.conveyor/*.log` above was added for on 2026-09-22 (#xvyuwtg) — an ungitignored per-tick sidecar
+# reads as a permanently DIRTY tree, which blocks a dedicated daemon clone's self-sync (`daemon-self-sync.mjs`'s
+# `decideSelfSync` fails closed on `dirty`, forever, even once `origin/main` moves) exactly like the earlier one
+# blocked `main-staleness.mjs`'s auto-fast-forward. Machine-local, recreated on demand; never committed.
+.conveyor/unsupported-repo.json
 # CI queue-wait history sidecar (#3574) — the periodic `gh run list` wait-time sample the resident runner's own
 # tick appends to, so a genuine Actions run-queue regression becomes a visible trend instead of invisible.
 # Machine-local, recreated on demand by ci-queue-watch.mjs sweep; never committed, like the other sidecars here.

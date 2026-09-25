@@ -118,6 +118,7 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
       '.commit-msg-fix-*.txt', '.review-*-output.json',
       '.pr-body-*.md', '.open-pr*.json', '.pr-land-result.json', '.converge-*',
       '.conveyor/', '.delivery-commit-msg-*.txt',
+      '.fix-*', '.fix-*/', 'tmp/', '.prep-*.md', '*-plateau', '*-plateau.*',
     ]);
   });
 
@@ -157,6 +158,49 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
 
   it('the dot-prefixed pattern still respects the no-directory-traversal guard', () => {
     expect(isAllowlistedLitterPath('.review-foo/bar-output.json')).toBe(false);
+  });
+
+  // #4084 — live-observed 2026-09-24 on the web-everything pool: lanes 2/20/22/35/47/65's ONLY dirty content
+  // was a `.fix-*` scratch family. One live example per shape actually found, plus lane 7's whole `.fix-2554/`
+  // scratch DIRECTORY (the same collapsed-porcelain-line gap `.conveyor/` above already needed a directory
+  // sibling for). Fails before this item lands (the pre-#4084 list has neither `.fix-*` nor `.fix-*/`).
+  it('.fix-* (file) and .fix-*/ (directory) — the delivery/fix-round scratch family — are allowlisted', () => {
+    expect(isAllowlistedLitterPath('.fix-before.txt')).toBe(true);
+    expect(isAllowlistedLitterPath('.fix-gate.txt')).toBe(true);
+    expect(isAllowlistedLitterPath('.fix-evidence.md')).toBe(true);
+    expect(isAllowlistedLitterPath('.fix-2553-standards.log')).toBe(true);
+    expect(isAllowlistedLitterPath('.fix-commit-msg.txt')).toBe(true);
+    expect(isAllowlistedLitterPath('.fix-2554/')).toBe(true);
+    // A file WITHIN the `.fix-2554/` directory is one more path segment and must not match either pattern.
+    expect(isAllowlistedLitterPath('.fix-2554/notes.txt')).toBe(false);
+  });
+
+  // #4084 — live-observed 2026-09-24: lanes 34/44/49's ONLY dirty entry was a wholly-untracked `tmp/`
+  // directory. Fails before this item lands.
+  it('tmp/ (the misplaced scratch directory) is allowlisted', () => {
+    expect(isAllowlistedLitterPath('tmp/')).toBe(true);
+    expect(isAllowlistedLitterPath('tmp/whatever.txt')).toBe(false);
+  });
+
+  // #4084 — live-observed 2026-09-24: lane 16's dirty set included `.prep-body.md`. Deliberately does NOT
+  // vet `.prep-msg.txt` (a sibling seen in the SAME lane) — this card's own Done-When asks only for
+  // `.prep-*.md`, the same #3921 restraint of only adding a pattern actually vetted, not everything
+  // scratch-looking seen alongside it.
+  it('.prep-*.md is allowlisted; its .txt sibling deliberately is not', () => {
+    expect(isAllowlistedLitterPath('.prep-body.md')).toBe(true);
+    expect(isAllowlistedLitterPath('.prep-msg.txt')).toBe(false);
+  });
+
+  // #4084 — the card's own text: a `-plateau`-suffixed scratch name (a cross-repo WE/plateau-app couple's
+  // per-repo-scoped evidence, the same per-repo-suffix convention
+  // `we:scripts/conveyor/__tests__/ci-queue-watch.test.mjs` exercises for `-frontierui`/`-plateau-app`) kept a
+  // lane dirty. Both the extensioned and bare shape are proved; an unrelated file merely containing
+  // "plateau" NOT at the end of the segment must not match.
+  it('a -plateau suffixed scratch name (extensioned or bare) is allowlisted', () => {
+    expect(isAllowlistedLitterPath('gate-plateau.log')).toBe(true);
+    expect(isAllowlistedLitterPath('verify-probe-plateau.json')).toBe(true);
+    expect(isAllowlistedLitterPath('notes-plateau')).toBe(true);
+    expect(isAllowlistedLitterPath('plateau-notes.txt')).toBe(false);
   });
 });
 

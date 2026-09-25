@@ -13,15 +13,24 @@
  *   - {@link summarizeLaneTouches} - pure, touches -> per-session ranking (coverage against the lane's ACTUAL
  *     dirty paths beats a bare "did this session ever cd here" guess - a session that merely passed through a
  *     lane proves far less than one whose edited-file set matches what's sitting uncommitted).
- *   - {@link scanLaneTranscripts} - the IO shell. ONE `grep -rlE` pass across the WHOLE transcript tree for
- *     every lane's path pattern at once (never one grep per lane - #3383's own performance note), then parses
- *     only the files that pass. `grep` (not `rg`) is used deliberately: it is POSIX-universal and this host has
- *     no ripgrep installed; `-E` extended-regex mode on a big alternation gives the same one-pass shape
- *     ripgrep would.
+ *   - {@link scanLaneTranscripts} - the IO shell. ONE pass across the WHOLE transcript tree for every lane's
+ *     path pattern at once (never one grep per lane - #3383's own performance note).
+ *
+ * #3383-perf (follow-up): this used to be TWO steps — list matching FILES (`grep -rlE .../ rg -l`), then read
+ * each one's FULL content into Node and re-split/re-scan every line there. Measured live against the real
+ * `~/.claude/projects` tree (3.4GB): the file listing itself is fast (well under a second, ripgrep/grep's own
+ * job), but the matching files still total gigabytes of mostly-IRRELEVANT lines (a transcript's tool-use lines
+ * for everything else it ever touched) — reading and JS-side re-scanning all of that cost 45s of a ~100s whole
+ * run, the single largest remaining piece after the `gh`-call and per-commit git-spawn fixes. The fix: have
+ * `rg`/`grep` emit the MATCHING LINES directly (one call, whole tree, same alternation) — the actual work of
+ * finding "does this byte range match" already belongs to a tool built for exactly that, and Node then only
+ * ever sees the (tiny, by comparison) handful of lines that could possibly matter, never the surrounding bulk.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import {
+  existsSync, mkdtempSync, writeFileSync, rmSync, readdirSync, statSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** `~/.claude/projects` - the root every session (and subagent) transcript lives under. */
@@ -103,53 +112,139 @@ export function summarizeLaneTouches(touches, lanePath, dirtyRelPaths = []) {
   return rows;
 }
 
+/** Hard ceiling on the one whole-tree scan below — `~/.claude/projects` only grows, and an unbounded scan is
+ *  exactly the kind of single stuck call `we:scripts/lib/bounded-child.mjs`'s own header warns against.
+ *  Env-overridable for a slower host. */
+const SCAN_TIMEOUT_MS = Number(process.env.WE_LANE_WHOIS_TRANSCRIPT_TIMEOUT_MS) || 20_000;
+
 /**
- * IO: one `grep -rlE` pass over `root` for EVERY lane path in `lanePaths` at once (an alternation over their
- * absolute paths), returning the list of `.jsonl` files that mention at least one of them. Best-effort: an
- * absent tree, an absent `grep`, or a "no matches" exit (status 1) all degrade to `[]` - a transcript-
- * attribution miss must never fail the `whois` report it feeds.
- * @param {string} root
- * @param {Record<string,string>} lanePaths - laneKey -> absolute lane dir.
+ * #3383-perf, r2 — BOUND THE DATA VOLUME, not just the call shape. `~/.claude/projects` only grows (measured
+ * live: 3.4GB, 4000+ transcripts) and every session (this one included) keeps appending to its own file while
+ * a scan is in flight. A lane's "last holder" is, definitionally, RECENT activity — the lane-history ledger
+ * (checked FIRST, see this file's own header) already covers everything since #3383 wired it in; transcript
+ * attribution is the weaker FALLBACK for whatever predates that, so bounding it to a recent window trades away
+ * only very old, already-ledger-covered history, never a real lane's current state. Restricting to files
+ * modified in the last {@link MAX_TRANSCRIPT_AGE_MS} cut the real tree from 3.4GB/4000+ files to well under a
+ * GB/a few thousand on this host — directly controls the worst-case scan cost regardless of host load, cache
+ * state, or which of `rg`/`grep` actually runs, rather than hoping a fixed timeout alone masks a slow tick.
+ * {@link MAX_TRANSCRIPT_FILES} is a second, harder cap purely to keep one argv within the OS's `ARG_MAX`
+ * regardless of how wide the age window is set.
  */
-function grepMatchingFiles(root, lanePaths, { exec = execFileSync } = {}) {
-  const needles = Object.values(lanePaths);
-  if (!needles.length || !existsSync(root)) return [];
-  const pattern = needles.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+const MAX_TRANSCRIPT_AGE_MS = Number(process.env.WE_LANE_WHOIS_TRANSCRIPT_MAX_AGE_MS) || 3 * 24 * 60 * 60_000;
+const MAX_TRANSCRIPT_FILES = Number(process.env.WE_LANE_WHOIS_TRANSCRIPT_MAX_FILES) || 1200;
+
+/**
+ * IO: every `.jsonl` transcript under `root` (recursing into `subagents/` etc.) modified within
+ * {@link MAX_TRANSCRIPT_AGE_MS}, newest first, capped at {@link MAX_TRANSCRIPT_FILES}. Own directory walk
+ * (`readdirSync`/`statSync`, no subprocess) — cheap relative to the scan it bounds, and lets the caller pass an
+ * EXPLICIT file list to `rg`/`grep` instead of a recursive `-r`/`-g` walk over the whole tree. Best-effort: a
+ * directory read failure anywhere just skips that subtree, never throws.
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function recentTranscriptFiles(root, { maxAgeMs = MAX_TRANSCRIPT_AGE_MS, maxFiles = MAX_TRANSCRIPT_FILES, nowMs = Date.now() } = {}) {
+  if (!existsSync(root)) return [];
+  const cutoff = nowMs - maxAgeMs;
+  const found = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      let mtimeMs;
+      try { mtimeMs = statSync(full).mtimeMs; } catch { continue; }
+      if (mtimeMs >= cutoff) found.push({ path: full, mtimeMs });
+    }
+  };
+  walk(root);
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return found.slice(0, maxFiles).map((f) => f.path);
+}
+
+/**
+ * IO: one pass over an EXPLICIT file list for EVERY lane path in `lanePaths` at once, returning the MATCHING
+ * LINES THEMSELVES (never a second file list) — see this module's own header for why: a matching file's
+ * IRRELEVANT lines (everything else that session ever touched) can total gigabytes, and letting `rg`/`grep`
+ * filter those out natively, rather than reading a whole file into Node to re-scan there, is a real win — but
+ * only once the FILE LIST itself is bounded (see {@link recentTranscriptFiles}); an explicit list, never a
+ * live `-r`/`-g` recursive walk of the whole (only-ever-growing) tree, is what actually makes the bound stick.
+ *
+ * #3383-perf, r2 — FIXED-STRING matching (`-F`, a pattern-PER-LINE FILE via `-f <path>`), never a regex
+ * alternation (`-E '<esc1>|<esc2>|…'`): measured live against the real `~/.claude/projects` tree, an `-E`
+ * alternation of 71 escaped literals cost far more of `grep`'s own native scan time than `-F` does for the
+ * identical needle set — `grep`'s regex-NFA engine handles a big OR-alternation far worse than its dedicated
+ * multi-literal path (`-F`, a Boyer-Moore/Commentz-Walter-shaped search built for exactly "many fixed needles
+ * at once"). Absolute lane paths are already fixed strings with no wildcard need, so `-F` costs nothing in
+ * capability. Patterns are staged to a real temp file (`-f <path>`), never piped over stdin — simpler to
+ * reason about alongside a large stdout, and there is no reason to risk the pipe-interaction edge cases a
+ * synchronous parent/child read-and-write-at-once shape can hit.
+ *
+ * Tries `rg` (ripgrep) FIRST, falling back to `grep -hF` only if that call itself fails (not installed on
+ * `PATH` as a real executable — note this is NOT guaranteed even on a host where an interactive shell defines
+ * an `rg` alias/function of its own, since a plain subprocess spawn never resolves shell functions — or any
+ * other error). No separate "is rg installed" probe call — that would cost a second spawn on every run just to
+ * decide, which defeats its own purpose; trying it directly costs nothing extra when it succeeds, and exactly
+ * one fallback spawn on a host without a REAL standalone `rg` binary. Best-effort throughout: no candidate
+ * files, an absent binary, a "no matches" exit, or a timeout all degrade to `[]` - a transcript-attribution
+ * miss must never fail the `whois` report it feeds.
+ * @param {string[]} files - explicit file list (from {@link recentTranscriptFiles}), never a directory to walk.
+ * @param {string[]} needles - absolute lane paths, fed as literal (never regex) patterns.
+ */
+function grepMatchingLines(files, needles, { exec = execFileSync } = {}) {
+  if (!needles.length || !files.length) return [];
+  let patternDir;
+  let patternFile;
   try {
-    const out = exec('grep', ['-rlE', '--include=*.jsonl', pattern, root], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
-    });
-    return out.split('\n').filter(Boolean);
-  } catch (e) {
-    return e && e.status === 1 ? [] : []; // 1 = no matches, anything else = degrade the same way
+    patternDir = mkdtempSync(join(tmpdir(), 'lane-whois-patterns-'));
+    patternFile = join(patternDir, 'lanes.txt');
+    writeFileSync(patternFile, `${needles.join('\n')}\n`, 'utf8');
+  } catch {
+    return []; // can't even stage the pattern file (e.g. a read-only/full tmp) — degrade, never throw
+  }
+  try {
+    const execOpts = {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 128 * 1024 * 1024,
+      timeout: SCAN_TIMEOUT_MS, killSignal: 'SIGKILL',
+    };
+    try {
+      const out = exec('rg', ['--no-config', '--no-filename', '--no-line-number', '-F', '-f', patternFile, ...files], execOpts);
+      return out.split('\n').filter(Boolean);
+    } catch {
+      try {
+        const out = exec('grep', ['-hF', '-f', patternFile, ...files], execOpts);
+        return out.split('\n').filter(Boolean);
+      } catch {
+        return []; // no matches, a timeout, or neither binary present — all degrade the same way
+      }
+    }
+  } finally {
+    try { rmSync(patternDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
   }
 }
 
 /**
- * IO shell: scan the WHOLE transcript tree ONCE for every lane in `lanePaths`, returning a
- * `Map<laneKey, touch[]>`. This is the single-pass entry point `lane-whois.mjs` calls - never one grep per
- * lane. Each matching file is read and scanned line-by-line with a cheap `String.includes` pre-filter before
- * `JSON.parse` (via {@link laneTouchFromLine}), so the (usually large) transcript files are parsed only for
- * the lines that could possibly match.
+ * IO shell: scan RECENT transcripts ONCE for every lane in `lanePaths`, returning a `Map<laneKey, touch[]>`.
+ * This is the single-pass entry point `lane-whois.mjs` calls - never one grep per lane, never a full-file read
+ * either ({@link grepMatchingLines} hands back only the lines that could possibly match, which
+ * {@link laneTouchFromLine} then parses), and (#3383-perf, r2) never the WHOLE tree —
+ * {@link recentTranscriptFiles} bounds the candidate set to a recent window first.
  * @param {string} root - `claudeProjectsRoot()`.
  * @param {Record<string,string>} lanePaths - laneKey -> absolute lane dir.
  * @returns {Map<string, Array<{ts:?string, sessionId:string, tool:string, path:?string}>>}
  */
-export function scanLaneTranscripts(root, lanePaths, { exec = execFileSync, read = readFileSync } = {}) {
+export function scanLaneTranscripts(root, lanePaths, { exec = execFileSync, listFiles = recentTranscriptFiles } = {}) {
   const keys = Object.keys(lanePaths);
   const result = new Map(keys.map((k) => [k, []]));
   if (!keys.length) return result;
-  const files = grepMatchingFiles(root, lanePaths, { exec });
-  for (const file of files) {
-    let text;
-    try { text = read(file, 'utf8'); } catch { continue; }
-    for (const line of text.split('\n')) {
-      if (!line) continue;
-      for (const k of keys) {
-        if (!line.includes(lanePaths[k])) continue;
-        const touch = laneTouchFromLine(line, lanePaths[k]);
-        if (touch) result.get(k).push(touch);
-      }
+  const files = listFiles(root);
+  const lines = grepMatchingLines(files, Object.values(lanePaths), { exec });
+  for (const line of lines) {
+    for (const k of keys) {
+      if (!line.includes(lanePaths[k])) continue;
+      const touch = laneTouchFromLine(line, lanePaths[k]);
+      if (touch) result.get(k).push(touch);
     }
   }
   return result;
