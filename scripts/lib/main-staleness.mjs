@@ -175,7 +175,13 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main', label 
     throw new Error(
       `${label}: the dispatching checkout is ${st.behind} commit(s) behind origin/${base} — refusing to `
       + `dispatch a review that would run ${STALE_MAIN_REFUSAL_MARKER}'s own import path (#3439). `
-      + staleRemedy(st, base),
+      + (managedClone
+        // A daemon-managed clone is never fixed by hand (#4044): only its gated rebuild may move it, and when
+        // the rebuild is holding it back it records why in its alerts log (`clone-held-stale`).
+        ? `This is a DAEMON-MANAGED clone: only its gated rebuild moves it (never rebase/merge by hand). If this `
+          + `persists, the rebuild is holding it — see the clone's \`clone-held-stale\` alert in `
+          + `~/.claude/daemon-self-sync-state/<cloneKey>.alerts.jsonl for the reason and next retry.`
+        : staleRemedy(st, base)),
     );
   }
   return st;

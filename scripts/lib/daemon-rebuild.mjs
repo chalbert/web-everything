@@ -499,6 +499,26 @@ export function defaultPrState({ pr, root }) {
   }
 }
 
+// ── smoke-rejection helpers ────────────────────────────────────────────────────────────────────────────────
+
+/** Did only EXTERNAL checks fail? Every failed row is one `daemon-live-smoke.mjs#SMOKE_CHECKS` marks
+ *  `mayBeTransient` (it runs `gh`, not code from the tree under test). An empty list is not external-only. */
+export function isExternalOnlyFailure(failed) {
+  return Array.isArray(failed) && failed.length > 0 && failed.every((r) => r && r.mayBeTransient !== false);
+}
+
+/** Backoff before an external-only rejection is re-smoked: base * 2^(attempts-1), capped. Env-tunable. */
+export function rejectRetryDelayMs(env, attempts) {
+  const base = Number(env?.WE_DAEMON_REJECT_RETRY_BASE_MS) || 5 * 60_000;
+  const max = Number(env?.WE_DAEMON_REJECT_RETRY_MAX_MS) || 60 * 60_000;
+  return Math.min(base * 2 ** Math.max(0, attempts - 1), max);
+}
+
+/** A failed check's detail, safe for the alerts log: tokens redacted, one bounded line. */
+function redactDetail(detail) {
+  return String(detail ?? '').replace(/\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '$1<redacted>').slice(0, 500);
+}
+
 // ── rebuildClone — the IO shell ──────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -556,7 +576,19 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
       appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
     } catch { /* best-effort audit trail only */ }
   };
-  const finish = (result) => ({ ...result, alerts: alertsList });
+  const finish = (result) => {
+    // A clone the rebuild will NOT advance while origin/main (or an overlay) has moved is STALE — every dispatch
+    // from it refuses as stale-main. Say so loudly, every tick it stays that way, instead of leaving the daemons
+    // silently refusing everything (live 2026-09-25 08:14 ET: held by a still-rejected smoke, refused 6/tick).
+    if (!result.moved && !result.adopted && result.plan?.ok && !result.plan.upToDate) {
+      alert('clone-held-stale', {
+        reason: result.reason, mainSha: result.plan.mainSha, target: result.plan.finalSha,
+        retryAt: state.rejected?.inputsKey === result.plan.inputsKey ? (state.rejected.retryAt ?? null) : null,
+        message: 'the rebuild is holding this clone off origin/main — dispatches from it refuse as stale until this clears',
+      });
+    }
+    return { ...result, alerts: alertsList };
+  };
 
   const state = readRebuildState(root, stEnv);
   const writeState = () => writeRebuildState(root, state, stEnv);
@@ -698,7 +730,13 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     return finish({ moved: false, reason: 'up-to-date', plan });
   }
   if (!smokeOnly && state.rejected?.inputsKey === plan.inputsKey) {
-    return finish({ moved: false, reason: 'still-rejected', plan });
+    // An external-only rejection (only gh/network checks failed) is never permanent: once its backoff expires
+    // the same inputs are smoked again, instead of sticking until main or an overlay moves.
+    const retryAtMs = Date.parse(state.rejected.retryAt || '');
+    if (!(Number.isFinite(retryAtMs) && nowMs() >= retryAtMs)) {
+      return finish({ moved: false, reason: 'still-rejected', plan });
+    }
+    alert('rejected-retry-due', { inputsKey: plan.inputsKey, attempts: state.rejected.attempts ?? 1 });
   }
 
   // ── Step 4.5: untracked-collision guard — a `reset --hard` keeps untracked files, but SILENTLY OVERWRITES
@@ -764,11 +802,24 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     }
 
     if (smokeResult.verdict === 'code') {
-      const failedNames = (smokeResult.smoke?.results || []).filter((r) => !r.ok).map((r) => r.name).join(',');
+      const failed = (smokeResult.smoke?.results || []).filter((r) => !r.ok);
+      const failedNames = failed.map((r) => r.name).join(',');
+      const prev = state.rejected?.inputsKey === plan.inputsKey ? state.rejected : null;
       state.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
+      if (isExternalOnlyFailure(failed)) {
+        // Only checks that run EXTERNAL tools (gh) failed — nothing that runs the tree under test. That is far
+        // more likely GitHub/network than the build, so reject with a growing backoff, never until main moves.
+        const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
+        const delay = rejectRetryDelayMs(env, attempts);
+        Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(nowMs() + delay).toISOString() });
+      }
       state.inProgress = null;
       writeState();
-      alert('smoke-rejected', { failed: failedNames });
+      alert('smoke-rejected', {
+        failed: failedNames,
+        details: failed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
+        ...(state.rejected.retryAt ? { retryAt: state.rejected.retryAt, attempts: state.rejected.attempts } : {}),
+      });
       return finish({ moved: false, reason: 'smoke-rejected', rolledBack: true, plan });
     }
 
@@ -886,7 +937,8 @@ export async function dryRunRebuild({
     if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
   }
 
-  const stillRejected = !!(plan.ok && state.rejected?.inputsKey === plan.inputsKey);
+  const retryDue = Number.isFinite(Date.parse(state.rejected?.retryAt || '')) && Date.now() >= Date.parse(state.rejected.retryAt);
+  const stillRejected = !!(plan.ok && state.rejected?.inputsKey === plan.inputsKey && !retryDue);
 
   let wouldDo = 'refuse';
   if (unsafe.safe && onMain === true && plan.ok) {

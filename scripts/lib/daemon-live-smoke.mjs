@@ -327,6 +327,18 @@ export const TRANSIENT_FAILURE_PATTERNS = Object.freeze([
   /all lanes (are )?busy/i,
   /pool (is )?(full|exhausted)/i,
   /could not resolve host/i,
+  // `gh` is a Go binary: its network failures read like Go's net/http errors, never Node's `E*` codes above
+  // (live 2026-09-25 08:14 ET: both gh checks failed together and were rejected as `code`, freezing the clone).
+  /error connecting to api\.github\.com/i,
+  /i\/o timeout/i,
+  /connection reset by peer/i,
+  /broken pipe/i,
+  /TLS handshake timeout/i,
+  /no such host/i,
+  /connection refused/i,
+  /dial tcp/i,
+  /HTTP 429/i,
+  /HTTP 403: .*rate limit/i,
 ]);
 
 function isTransientDetail(detail) {

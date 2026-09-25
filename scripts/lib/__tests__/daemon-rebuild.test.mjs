@@ -1100,3 +1100,76 @@ describe('overlay list — concurrent add vs. a rebuild auto-remove (two real pr
     expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/new']);
   }, 90_000);
 });
+
+// ── live 2026-09-25 08:14 ET: a gh-only smoke failure froze the clone as still-rejected until main moved ────────
+// Both gh checks failed together (GitHub/network), the verdict came back `code`, and the rejection stuck: the clone
+// sat 3 commits behind origin/main and the fix-dispatch daemon refused every repo as stale, silently.
+describe('rebuildClone — an external-only (gh) smoke rejection retries with backoff and alerts while held', () => {
+  const ghOnlyFailure = () => vi.fn(async () => ({
+    verdict: 'code', attempts: 1,
+    smoke: {
+      results: [
+        { name: 'lane-pool-list', ok: true, mayBeTransient: false },
+        { name: 'gh-api-repo', ok: false, mayBeTransient: true, detail: 'gh api --method GET repos/o/r failed: exited 1: weird gh output' },
+        { name: 'gh-pr-list', ok: false, mayBeTransient: true, detail: 'gh pr list failed: exited 1: weird gh output' },
+      ],
+    },
+  }));
+
+  it('rejects with a retryAt, holds (alerting clone-held-stale) until it is due, then re-smokes and adopts', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const env2 = { ...env, WE_DAEMON_REJECT_RETRY_BASE_MS: '60000' };
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const first = await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    expect(first.reason).toBe('smoke-rejected');
+    const rej = readRebuildState(cloneDir, env2).rejected;
+    expect(rej).toMatchObject({ externalOnly: true, attempts: 1 });
+    expect(Date.parse(rej.retryAt)).toBe(t0 + 60_000);
+    expect(first.alerts.find((a) => a.kind === 'smoke-rejected').detail.details[0].detail).toContain('weird gh output');
+    expect(first.alerts.some((a) => a.kind === 'clone-held-stale')).toBe(true);
+
+    const runSmoke2 = passSmoke();
+    const held = await rebuildClone({ root: cloneDir, env: env2, runSmoke: runSmoke2, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 30_000 });
+    expect(held.reason).toBe('still-rejected');
+    expect(runSmoke2).not.toHaveBeenCalled();
+    expect(held.alerts.find((a) => a.kind === 'clone-held-stale')?.detail).toMatchObject({ reason: 'still-rejected', retryAt: rej.retryAt });
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+
+    const runSmoke3 = passSmoke();
+    const retried = await rebuildClone({ root: cloneDir, env: env2, runSmoke: runSmoke3, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 61_000 });
+    expect(runSmoke3).toHaveBeenCalledTimes(1);
+    expect(retried.moved).toBe(true);
+    expect(retried.adopted).toBe(true);
+  });
+
+  it('a second external-only rejection of the SAME inputs doubles the backoff', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const env2 = { ...env, WE_DAEMON_REJECT_RETRY_BASE_MS: '60000' };
+    await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    await rebuildClone({ root: cloneDir, env: env2, runSmoke: ghOnlyFailure(), prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 61_000 });
+    const rej = readRebuildState(cloneDir, env2).rejected;
+    expect(rej.attempts).toBe(2);
+    expect(Date.parse(rej.retryAt)).toBe(t0 + 61_000 + 120_000);
+  });
+
+  it('a failure in a check that runs tree code still sticks until the inputs change (no retryAt)', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
+    const t0 = Date.now();
+    const treeFailure = vi.fn(async () => ({
+      verdict: 'code', attempts: 1,
+      smoke: { results: [{ name: 'reconcile-dry-run', ok: false, mayBeTransient: false, detail: 'boom' }] },
+    }));
+    await rebuildClone({ root: cloneDir, env, runSmoke: treeFailure, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
+    expect(readRebuildState(cloneDir, env).rejected.retryAt).toBeUndefined();
+    const runSmoke = passSmoke();
+    const later = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 + 24 * 3600_000 });
+    expect(later.reason).toBe('still-rejected');
+    expect(runSmoke).not.toHaveBeenCalled();
+  });
+});

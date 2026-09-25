@@ -98,6 +98,9 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       'read ECONNRESET', 'getaddrinfo ENOTFOUND api.github.com', 'getaddrinfo EAI_AGAIN api.github.com',
       'x failed: timed out after 30000ms (process group killed)', 'no free lane in pool "we" (12 all held/dirty)',
       'all lanes are busy right now', 'pool is exhausted', 'could not resolve host: github.com',
+      'error connecting to api.github.com', 'dial tcp 1.2.3.4:443: i/o timeout', 'read: connection reset by peer',
+      'write: broken pipe', 'net/http: TLS handshake timeout', 'lookup api.github.com: no such host',
+      'connect: connection refused', 'HTTP 429: Too Many Requests', 'HTTP 403: API rate limit exceeded',
     ];
     for (const re of TRANSIENT_FAILURE_PATTERNS) {
       expect(samples.some((s) => re.test(s)), `no sample matched ${re}`).toBe(true);
@@ -163,6 +166,18 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       expect(smoke.pass).toBe(false);
       expect(classifySmokeFailure(smoke.results)).toBe('code');
     }
+  });
+  // Live 2026-09-25 08:14 ET: gh (a Go binary) reports network faults in Go's words, which none of the Node-style
+  // patterns matched — so a GitHub/network blip in BOTH gh checks was rejected as `code`.
+  it.each([
+    'gh api --method GET repos/o/r failed: exited 1: error connecting to api.github.com',
+    'gh pr list failed: exited 1: Post "https://api.github.com/graphql": write tcp 1.2.3.4:5->6.7.8.9:443: write: broken pipe',
+    'gh api failed: exited 1: Get "https://api.github.com/repos/o/r": dial tcp: lookup api.github.com: no such host',
+    'gh api failed: exited 1: net/http: TLS handshake timeout',
+    'gh api failed: exited 1: read tcp 1.2.3.4:5->6.7.8.9:443: read: connection reset by peer',
+    'gh api failed: exited 1: Get "https://api.github.com/x": dial tcp 1.2.3.4:443: i/o timeout',
+  ])('gh network error %# classifies as transient', (detail) => {
+    expect(classifySmokeFailure([{ ok: false, mayBeTransient: true, detail }])).toBe('transient');
   });
   it("the real lane-pool.mjs cmdAcquire 'no free lane' message classifies as transient", () => {
     // The exact shape lane-pool.mjs#cmdAcquire fails with when its bounded --wait-ms poll never finds a

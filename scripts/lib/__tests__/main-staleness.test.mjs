@@ -243,6 +243,15 @@ describe('assertMainNotStale — managed clone never auto-ffs (#4044 Module E)',
       .toThrow(/STALE code from this checkout/);
     expect(git(clonePath, 'rev-list', '--count', 'HEAD..origin/main').trim()).not.toBe('0'); // never touched
   });
+  it('managed clone: the refusal points at the rebuild\'s clone-held-stale alert, never "rebase or merge by hand"', () => {
+    const clonePath = makeBehindClone();
+    let message = '';
+    try { withManagedCloneEnv('1', () => assertMainNotStale(clonePath, undefined, { label: 'test' })); } catch (e) { message = e.message; }
+    expect(message).toContain('DAEMON-MANAGED');
+    expect(message).toContain('clone-held-stale');
+    expect(message).not.toMatch(/by hand\)?\s*$/);
+    expect(message).not.toContain('rebase or merge origin/main into it by hand');
+  });
 });
 
 // #3383 bug 1 — a downstream forEachRepo caller only ever keeps the flattened first-line message (the Error
