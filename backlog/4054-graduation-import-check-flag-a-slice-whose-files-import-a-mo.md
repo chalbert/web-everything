@@ -3,9 +3,12 @@ bornAs: x8w8pux
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/graduation-import-check.mjs", "we:scripts/__tests__/graduation-import-check.test.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: one-off
 tags: []
 ---
 
