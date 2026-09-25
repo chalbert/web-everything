@@ -77,8 +77,16 @@ minutes. `acquire --wait-ms=<N>` polls (no busy-wait) for up to `N` ms before fa
 without anyone having to notice and manually retry. This is still bounded, not the open-ended retry loop
 this step's own next paragraph forbids — one call, one deadline.
 
+`--wait-ms=180000` (not 30000) — raised #3383, live-caught 2026-09-24: under several concurrent review
+dispatches, the shared single-flight `--acquirable` scan itself (`we:scripts/lane-pool.mjs`) can take longer
+than 30s on a ~65-lane pool, so a caller with only 30s of wait budget could fail before the scan it was
+sharing ever finished, even though `acquire` now decouples the scan's own timeout from any one caller's
+`--wait-ms` (#2607) and reports that distinctly from a genuinely-full pool. Raising the backstop to 180000
+gives real headroom against a slow scan without changing today's self-healing behavior for the common case
+(a scan/wait that finishes in seconds still returns immediately either way).
+
 ```bash
-LANE=$(node scripts/lane-pool.mjs acquire --repo={{LANE_REPO}} --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=30000 --adopt) && echo "$LANE"
+LANE=$(node scripts/lane-pool.mjs acquire --repo={{LANE_REPO}} --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=180000 --adopt) && echo "$LANE"
 ```
 
 If this still fails after that bounded wait, the pool genuinely has no free lane — report the completion
