@@ -3,9 +3,10 @@ bornAs: xxgmty9
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/hung-session.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
