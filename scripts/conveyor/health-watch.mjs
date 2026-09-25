@@ -44,6 +44,8 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
 import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
+import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
+import { assessDaemonStatus } from '../operations/daemon-status.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
@@ -128,6 +130,39 @@ export function probeLeases(lockRoot, logNames) {
     if (!cur || (l.heartbeatAt ?? 0) > (cur.heartbeatAt ?? 0)) best.set(l.log, l);
   }
   return [...best.values()];
+}
+
+/** A launchd label → the name its log/memory is keyed by here (`com.we.fix-dispatch-daemon` → `fix-dispatch-daemon`,
+ *  `com.we.conveyor-pass-daemon.merge-orphan-sweep` → `merge-orphan-sweep`, `com.plateau.drain-daemon` →
+ *  `plateau-drain-daemon`). */
+export function daemonNameForLabel(label) {
+  return String(label).replace(/^com\.we\.(conveyor-pass-daemon\.)?/, '').replace(/^com\.plateau\./, 'plateau-');
+}
+
+/**
+ * The daemon inventory + liveness, from the declared `daemon-status` read (#4067) — launchd discovery, the
+ * lease heartbeat, and each daemon's own last-tick record — instead of re-deriving it. Mapped to the `leases`
+ * shape the smells read. `lastActivityAt` carries daemon-status's own timestamp for a daemon whose log this
+ * watch does not read (the plateau drain daemon). Every launchctl/plutil child call gets a hard timeout.
+ */
+export function probeDaemonStatus({ collect = collectDaemonStatus, assess = assessDaemonStatus, timeoutMs = 15_000 } = {}) {
+  const exec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, timeout: timeoutMs });
+  const read = assess(collect({ exec }));
+  return read.daemons.filter((d) => d.readable !== false).map((d) => {
+    const ms = (v) => (v == null ? null : typeof v === 'number' ? v : Date.parse(v) || null);
+    const entry = d.lease?.entry ?? null;
+    const activity = [ms(d.tick?.lastActivityAt), ms(d.tick?.at), ms(d.tick?.logMtimeMs)].filter(Number.isFinite);
+    return {
+      log: daemonNameForLabel(d.name),
+      role: d.kind ?? null,
+      pid: entry?.pid ?? null,
+      pidAlive: !!d.running,
+      heartbeatAt: ms(entry?.heartbeatAt),
+      lastActivityAt: activity.length ? Math.max(...activity) : null,
+      daemonState: d.state,
+      headline: d.headline,
+    };
+  });
 }
 
 /** Self-sync alerts + rebuild state per daemon clone key. */
@@ -223,7 +258,11 @@ export async function tick(flags = {}) {
 
   const logs = attempt('daemonLogs', () => probeDaemonLogs(logsDir, prev.cursors || {}));
   if (logs) probes.daemonLogs = logs.samples;
-  probes.leases = attempt('leases', () => probeLeases(flags['lock-root'] || RUNNER_LOCK_ROOT, new Set((logs?.samples || []).map((s) => s.name))));
+  // Daemon inventory: the declared daemon-status read (#4067) on a real host; the raw lease-dir scan only when a
+  // test/fixture points --lock-root somewhere, or daemon-status itself fails (then that failure is a probe error).
+  const leaseScan = () => probeLeases(flags['lock-root'] || RUNNER_LOCK_ROOT, new Set((logs?.samples || []).map((s) => s.name)));
+  probes.leases = flags['lock-root'] ? attempt('leases', leaseScan)
+    : (attempt('daemonStatus', () => probeDaemonStatus()) ?? attempt('leases', leaseScan));
   probes.selfSync = attempt('selfSync', () => probeSelfSync(flags['self-sync-dir'] || defaultSelfSyncDir()));
   probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
   probes.appStatus = attempt('appStatus', () => readGithubAppStatus()) ?? null;

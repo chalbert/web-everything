@@ -71,10 +71,15 @@ export function assessDaemonEntry(raw, { observedAt, staleAfterMs = DEFAULT_STAL
   // heartbeat is treated as stale, never as "fine", mirroring `runner-activity.mjs#assessDaemonState`'s own
   // `!Number.isFinite(heartbeatAge)` handling.
   const tickAt = raw.tick?.at ?? null;
-  const tickAgeMs = tickAt ? Date.parse(observedAt) - Date.parse(tickAt) : null;
+  // #4077: a leaseless daemon (the drain) is judged on its NEWEST activity — `tick.lastActivityAt` (its log's
+  // own timestamp / the pass end), never only on `lastPass.at`, which is a pass START and goes 20+ min stale
+  // during a long merging pass (false `alive-and-stalled` at 2026-09-25 11:39 ET).
+  const activityAt = [tickAt, raw.tick?.lastActivityAt ?? null].filter(Boolean)
+    .reduce((a, b) => (a == null || Date.parse(b) > Date.parse(a) ? b : a), null);
+  const tickAgeMs = activityAt ? Date.parse(observedAt) - Date.parse(activityAt) : null;
   const stale = raw.leaseKey != null
     ? (heartbeatAgeMs == null || !Number.isFinite(heartbeatAgeMs) || heartbeatAgeMs > staleAfterMs)
-    : (tickAt != null && Number.isFinite(tickAgeMs) && tickAgeMs > staleAfterMs);
+    : (activityAt != null && Number.isFinite(tickAgeMs) && tickAgeMs > staleAfterMs);
 
   const t = raw.tick ?? { found: false };
   const attempted = t.found && !t.tickFailed ? t.attempted ?? null : null;

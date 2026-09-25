@@ -5,7 +5,7 @@ size: 8
 parent: "4075"
 status: active
 blockedBy: ["4065", "4052"]
-scope: ["we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/", "we:skills-src/conveyor/daemon-manifest.mjs", "we:scripts/operations/operator-queue.mjs", "we:skills-src/conveyor/launchd/com.we.health-watch.plist.example", "we:scripts/conveyor/__tests__/health-watch-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs"]
+scope: ["we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/", "we:skills-src/conveyor/daemon-manifest.mjs", "we:scripts/operations/operator-queue.mjs", "we:skills-src/conveyor/launchd/com.we.health-watch.plist.example", "we:scripts/conveyor/__tests__/health-watch-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs", "we:scripts/operations/daemon-status-io.mjs", "we:scripts/operations/daemon-status.mjs", "we:scripts/operations/__tests__/daemon-status-io.test.mjs", "we:scripts/operations/__tests__/daemon-status.test.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
 tags: [health-daemon]
@@ -46,6 +46,11 @@ First build slice of the health daemon ruled in 4065 (design: we:reports/2026-09
 - **HEALTH section**: we:scripts/operations/operator-queue.mjs was owned by #4139 when this landed, so the section
   ships as a separate renderer (`healthSectionLines` in we:scripts/conveyor/health-watch.mjs, and its `section`
   subcommand); the one-line call in the operator queue is a follow-up.
+- **Daemon inventory from the declared `daemon-status` read (#4067)**: `daemon-silent` reads launchd liveness, the
+  lease heartbeat and each daemon's last activity from it (the raw lease-dir scan is only the fallback). Fixed
+  there too: the plateau drain daemon was judged on `lastPass.at` (a pass START), so a long merging pass read as
+  `alive-and-stalled` (11:39 ET); it is now judged on its newest activity (the log's own `[drain-daemon] <ISO>`
+  stamp / pass end / log mtime).
 - The daemon logs carry no timestamps; the watch uses its own sample clock (first read estimates backwards from
   the log's mtime at the daemon's tick interval, flagged `estimated`).
 

@@ -29,7 +29,10 @@ export default {
   evaluate({ leases }, { now, daemons }) {
     const out = [];
     for (const lease of leases) {
-      const mem = daemons[lease.log];
+      // A daemon whose log this watch does not read (the plateau drain daemon) is judged on daemon-status's own
+      // last-activity timestamp; one with neither is skipped.
+      const mem = daemons[lease.log] ?? (lease.lastActivityAt != null
+        ? { ticksSeen: 0, lastGrowthAt: lease.lastActivityAt, intervalMs: 120_000, recentTicks: [] } : null);
       if (!mem) continue;
       const lastActivity = mem.ticksSeen > 0 && mem.lastTickAt != null ? mem.lastTickAt : mem.lastGrowthAt;
       const lastHour = (mem.recentTicks || []).filter((t) => now - t.at <= 60 * MINUTE).length;
@@ -44,7 +47,7 @@ export default {
       out.push({
         subject: lease.log,
         breach,
-        measure: { hung, observedGapMin: Math.round(observedGap / MINUTE), silentForMin: silentFor == null ? null : Math.round(silentFor / MINUTE), thresholdMin: Math.round(threshold / MINUTE), pid: lease.pid, pidAlive: lease.pidAlive, heartbeatAgeMin: hbAge == null ? null : Math.round(hbAge / MINUTE), judgedOn: mem.ticksSeen > 0 ? 'last tick line' : 'last log growth', estimated: !!mem.lastTickEstimated },
+        measure: { daemonState: lease.daemonState ?? null, hung, observedGapMin: Math.round(observedGap / MINUTE), silentForMin: silentFor == null ? null : Math.round(silentFor / MINUTE), thresholdMin: Math.round(threshold / MINUTE), pid: lease.pid, pidAlive: lease.pidAlive, heartbeatAgeMin: hbAge == null ? null : Math.round(hbAge / MINUTE), judgedOn: mem.ticksSeen > 0 ? 'last tick line' : 'last log growth', estimated: !!mem.lastTickEstimated },
         summary: `${lease.log}: no ${mem.ticksSeen > 0 ? 'tick' : 'log output'} for ${fmtAge(silentFor)} (threshold ${fmtAge(threshold)}); ${state}.`,
         recommendation: !lease.pidAlive
           ? `${lease.log} is dead but its lease is still on disk — check its launchd job (\`launchctl list | grep ${lease.log}\`); the crash reason is in the last lines of its log.`

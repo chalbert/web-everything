@@ -321,6 +321,22 @@ export function readDrainDaemonState(stateRoot, { readText = (p) => readFileSync
   } catch { return null; }
 }
 
+/**
+ * The newest `[drain-daemon] <ISO> …` stamp in a drain-daemon log tail (the drain's log IS timestamped, unlike
+ * the review/fix daemons'). #4077 follow-up to #4067: `state.json`'s `lastPass.at` is the pass's START time and
+ * is only rewritten when a pass ENDS, so during (or right after) a long pass it reads 20+ minutes old while the
+ * drain is merging — live-caught 2026-09-25 11:39 ET, flagged `alive-and-stalled` the minute it merged #2665 and
+ * #2667. The log stamp is written when each pass finishes, and the log itself grows while one runs.
+ * @returns {string|null} ISO timestamp
+ */
+export function latestDrainLogStamp(text) {
+  let best = null;
+  for (const m of String(text ?? '').matchAll(/^\[drain-daemon\] (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/gm)) {
+    if (!best || Date.parse(m[1]) > Date.parse(best)) best = m[1];
+  }
+  return best;
+}
+
 /** Normalize a drain-daemon `state.json`'s `lastPass` into the same `{attempted,succeeded,refused}` shape
  *  the other bespoke parsers return, so `assessDaemonEntry` needs no daemon-kind branching for that part. */
 export function normalizeDrainLastPass(lastPass) {
@@ -516,6 +532,14 @@ function collectOneDaemon(label, { launchAgentsDir, launchctlTable, exec, readTe
     const stateRoot = typeof spec.env?.DRAIN_DAEMON_STATE_ROOT === 'string' ? spec.env.DRAIN_DAEMON_STATE_ROOT : null;
     const state = readDrainDaemonState(stateRoot, { readText });
     tick = normalizeDrainLastPass(state?.lastPass);
+    // #4077: judge the drain's liveness on its newest real activity, not only on `lastPass.at` (a pass START).
+    const passEnd = tick.found && tick.at && Number.isFinite(Number(state?.lastPass?.ms))
+      ? new Date(Date.parse(tick.at) + Number(state.lastPass.ms)).toISOString() : tick.at ?? null;
+    const tail = spec.logPath ? tailFile(spec.logPath, { fs: tailFs }) : null;
+    const stamp = tail && !tail.error ? latestDrainLogStamp(tail.text) : null;
+    const candidates = [passEnd, stamp, tail && !tail.error && tail.mtimeMs ? new Date(tail.mtimeMs).toISOString() : null].filter(Boolean);
+    const lastActivityAt = candidates.length ? candidates.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a)) : null;
+    tick = { ...tick, lastActivityAt, logMtimeMs: tail?.mtimeMs ?? null };
   } else if (spec.logPath) {
     const tail = tailFile(spec.logPath, { fs: tailFs });
     const text = tail && !tail.error ? tail.text : '';

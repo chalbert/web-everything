@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
+  probeDaemonStatus, daemonNameForLabel,
 } from '../health-watch.mjs';
 
 let dir;
@@ -176,5 +177,31 @@ describe('tick() — forced lane-starvation fixture', () => {
 
     const lines = healthSectionLines({ stateRoot });
     expect(lines[0]).toContain('last health tick completed');
+  });
+});
+
+// ── probeDaemonStatus (the declared #4067 daemon-status read as the daemon inventory) ───────────────────────
+
+describe('probeDaemonStatus', () => {
+  it('maps launchd labels to the log names the smells key on', () => {
+    expect(daemonNameForLabel('com.we.fix-dispatch-daemon')).toBe('fix-dispatch-daemon');
+    expect(daemonNameForLabel('com.we.conveyor-pass-daemon.merge-orphan-sweep')).toBe('merge-orphan-sweep');
+    expect(daemonNameForLabel('com.plateau.drain-daemon')).toBe('plateau-drain-daemon');
+  });
+
+  it('turns assessed daemon-status rows into lease rows, with the drain judged on its newest activity', () => {
+    const collect = () => ({ observedAt: 'x', daemons: [] });
+    const assess = () => ({ daemons: [
+      { name: 'com.we.review-daemon', readable: true, running: true, kind: 'review-daemon', state: 'alive',
+        lease: { entry: { pid: 42, heartbeatAt: '2026-09-25T15:00:00.000Z' } }, tick: { found: true, logMtimeMs: Date.parse('2026-09-25T15:01:00.000Z') } },
+      { name: 'com.plateau.drain-daemon', readable: true, running: true, kind: 'drain-daemon', state: 'alive', lease: { entry: null },
+        tick: { found: true, at: '2026-09-25T15:17:31.332Z', lastActivityAt: '2026-09-25T15:37:21.553Z' } },
+      { name: 'com.we.broken', readable: false, running: false },
+    ] });
+    const rows = probeDaemonStatus({ collect, assess });
+    expect(rows.map((r) => r.log)).toEqual(['review-daemon', 'plateau-drain-daemon']);
+    expect(rows[0]).toMatchObject({ pid: 42, pidAlive: true, heartbeatAt: Date.parse('2026-09-25T15:00:00.000Z') });
+    expect(rows[1].lastActivityAt).toBe(Date.parse('2026-09-25T15:37:21.553Z'));
+    expect(rows[1].heartbeatAt).toBeNull();
   });
 });

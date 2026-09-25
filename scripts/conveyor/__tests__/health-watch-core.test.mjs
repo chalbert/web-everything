@@ -591,3 +591,20 @@ describe('scrubText', () => {
     expect(out).toContain('[redacted]');
   });
 });
+
+// #4077 — a daemon whose log this watch does not read (the plateau drain daemon) is judged on daemon-status's own
+// last-activity timestamp (`lastActivityAt`), so a long merging pass never reads as silent.
+describe('daemon-silent on a daemon known only through daemon-status', () => {
+  const T0 = Date.parse('2026-09-25T15:39:00.000Z');
+  const lease = (lastActivityAt) => ({ log: 'plateau-drain-daemon', role: 'drain-daemon', pid: null, pidAlive: true, heartbeatAt: null, lastActivityAt });
+  it('is clean while its newest activity is recent, and breaches once it is older than the threshold', () => {
+    const fresh = daemonSilent.evaluate({ leases: [lease(T0 - 2 * 60_000)] }, { now: T0, daemons: {} });
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0].breach).toBe(false);
+    const stale = daemonSilent.evaluate({ leases: [lease(T0 - 40 * 60_000)] }, { now: T0, daemons: {} });
+    expect(stale[0].breach).toBe(true);
+  });
+  it('skips a daemon with neither a log memory nor a last-activity time', () => {
+    expect(daemonSilent.evaluate({ leases: [lease(null)] }, { now: T0, daemons: {} })).toEqual([]);
+  });
+});
