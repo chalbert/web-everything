@@ -36,10 +36,16 @@ import {
   defaultListMainStatutePatchesSinceMergeBase,
   COMPARE_FILES_CAP,
   defaultComputeConflictDisposition,
+  CONFLICT_RETRY_WINDOW_MS,
+  CONFLICT_ALERT_MARKER_RE,
+  hasRecentConflictAlertComment,
+  latestConflictAlertCreatedAtMs,
+  hasRecentConflictFindingComment,
 } from '../parked-pr-conflict-watch.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
 } from '../stand-down.mjs';
+import { mintSessionSlug } from '../session-slug.mjs';
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
 // `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
@@ -71,9 +77,12 @@ describe('the real incident that motivated this pass — WE PR #1920, captured l
     };
     const results = watchParkedPrConflicts({ repo: 'chalbert/web-everything', listPrs: () => [REAL_1920_SNAPSHOT], provider, ...noopRouting() });
     expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
-    expect(calls[0]).toEqual(['ensureLabel', 'chalbert/web-everything', CONFLICT_LABEL]);
-    expect(calls[1]).toEqual(['setLabels', 'chalbert/web-everything', 1920, { add: CONFLICT_LABEL, remove: [] }]);
-    expect(calls[2][3]).toContain('lane/2412c-engine-tier-redteam-gate');
+    // #4118 — the label now applies LAST, only once the alert + dispatch are known-good (see this file's own
+    // header, "IDEMPOTENCY, NO SEPARATE STORE" section's #4118 update, and `CONFLICT_RETRY_WINDOW_MS`).
+    expect(calls[0][0]).toBe('postComment');
+    expect(calls[0][3]).toContain('lane/2412c-engine-tier-redteam-gate');
+    expect(calls[1]).toEqual(['ensureLabel', 'chalbert/web-everything', CONFLICT_LABEL]);
+    expect(calls[2]).toEqual(['setLabels', 'chalbert/web-everything', 1920, { add: CONFLICT_LABEL, remove: [] }]);
   });
 
   it('once the PR is rebased clean (as #1920 actually was, mid-investigation) the label self-clears', () => {
@@ -312,10 +321,12 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
       postStandDown: (o) => routed.push(['stand-down', o.pr.number, o.repo]),
     });
     expect(results).toEqual([{ num: 1920, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
+    // #4118 — the alert posts first (marker-deduped), then the dispatch, then the label LAST — the label's own
+    // presence no longer certifies "the alert/dispatch already happened" until they actually have.
     expect(provider.calls).toEqual([
+      ['postComment', 'o/n', 1920],
       ['ensureLabel', 'o/n', CONFLICT_LABEL],
       ['setLabels', 'o/n', 1920, { add: CONFLICT_LABEL, remove: [] }],
-      ['postComment', 'o/n', 1920],
     ]);
     expect(routed).toEqual([['finding', 1920, 'o/n']]);
   });
@@ -486,6 +497,108 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     expect(results[1].routedTo).toBe('rearm-review');
   });
 
+  // #4118 finding (c) — adversarial review: "it hands a PR back for review (rearm) while a fixer is still live
+  // on it". A bare `mergeable: MERGEABLE` read cannot rule out a fix-agent session still mid-push on this exact
+  // lane (it could be resolving something else on the same PR); rearming underneath it races the review against
+  // work that has not actually landed yet.
+  describe('#4118 (c) — never rearm while a fix agent is still live on this exact PR', () => {
+    it('defers the rearm (and leaves the CONFLICT_LABEL on) while a live fix session is bound to this PR by name', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const liveFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 1920, repo: 'we' }), state: 'working', pid: 4242, pidAlive: true };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => [liveFixAgent],
+      });
+      expect(routed).toEqual([]); // never rearmed while the fixer is live
+      // Deliberately NOT setLabels'd either — removing the CONFLICT_LABEL now would make `planConflictLabelChange`
+      // stop emitting `newlyResolved` next sweep, permanently losing the rearm this fixer is still owed.
+      expect(provider.calls).toEqual([]);
+      expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+    });
+
+    it('a `blocked` (stuck) fix session ALSO defers the rearm — not just an actively working one', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const stuckFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 1920, repo: 'we' }), state: 'blocked', pid: 4242, pidAlive: true };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => [stuckFixAgent],
+      });
+      expect(routed).toEqual([]);
+      expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+    });
+
+    it('once the fix session is gone (or finished), the very next sweep rearms normally — nothing lost', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => [], // no live agents at all
+      });
+      expect(routed).toEqual([['rearm', 1920]]);
+      expect(provider.calls).toEqual([['setLabels', 'chalbert/web-everything', 1920, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+      expect(results[0].routedTo).toBe('rearm-review');
+    });
+
+    it('a DONE fix session (finished, `claude agents` just has not pruned the row yet) does not defer the rearm', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const doneFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 1920, repo: 'we' }), state: 'done', pid: 4242, pidAlive: true };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => [doneFixAgent],
+      });
+      expect(routed).toEqual([['rearm', 1920]]);
+      expect(results[0].routedTo).toBe('rearm-review');
+    });
+
+    it('a live fix session bound to a DIFFERENT PR never defers this one\'s rearm', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const otherPrFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 4242, repo: 'we' }), state: 'working', pidAlive: true };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => [otherPrFixAgent],
+      });
+      expect(routed).toEqual([['rearm', 1920]]);
+    });
+
+    it('a listAgents failure fails TOWARD completing the rearm, never toward eternal paralysis', () => {
+      const provider = fakeProvider();
+      const routed = [];
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+      const results = watchParkedPrConflicts({
+        repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
+        postRearm: (o) => routed.push(['rearm', o.pr.number]),
+        listAgents: () => { throw new Error('claude agents --json failed'); },
+      });
+      expect(routed).toEqual([['rearm', 1920]]);
+      expect(results[0].routedTo).toBe('rearm-review');
+    });
+
+    it('never even calls listAgents for a resolved PR that carries no review:changes bounce at all', () => {
+      let called = false;
+      const provider = fakeProvider();
+      const listPrs = () => [{ number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }] }];
+      watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider, postRearm: () => {},
+        listAgents: () => { called = true; return []; },
+      });
+      expect(called).toBe(false);
+    });
+  });
+
   it.each(['UNKNOWN', undefined, 'CONFLICTING'])('does not rearm or lose the marker while mergeable is %s', (mergeable) => {
     const provider = fakeProvider();
     const routed = [];
@@ -529,7 +642,10 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
       { number: 1, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }] },
       { number: 2, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] },
     ];
-    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
+    // #4118 — the label write now happens LAST (after the alert + dispatch), so this failure surfaces only
+    // once routing has already been attempted; `...noopRouting()` isolates the assertion to the label failure
+    // itself, exactly as it already does in every other test that reaches a real dispatch call.
+    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider, ...noopRouting() });
     expect(results).toHaveLength(2);
     expect(results.every((r) => r.error === 'boom')).toBe(true);
   });
@@ -546,9 +662,9 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     const results = watchParkedPrConflicts({ repo: null, listPrs, provider, ...noopRouting() }); // no --repo given
     expect(results).toEqual([{ num: 1932, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: true, routedTo: 'reconcile-finding' }]);
     expect(provider.calls).toEqual([
+      ['postComment', 'resolved/repo', 1932],
       ['ensureLabel', 'resolved/repo', CONFLICT_LABEL],
       ['setLabels', 'resolved/repo', 1932, { add: CONFLICT_LABEL, remove: [] }],
-      ['postComment', 'resolved/repo', 1932],
     ]);
   });
 
@@ -570,6 +686,343 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     const listPrsB = () => [{ number: 1920, mergeable: 'CONFLICTING', labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }] }];
     watchParkedPrConflicts({ repo: null, listPrs: listPrsB, provider, ...noopRouting() });
     expect(currentRepoCalls).toBe(0);
+  });
+});
+
+// #4118 (bornAs x3zr5tu) — "Parked-PR conflict watch: make the conflict label and its one-time comment
+// crash-safe". Fold-in from the adversarial review: (a) a crash between the label and the routing decision used
+// to leave `plan.add` reading null forever (already labelled → skipped), losing the dispatch/stand-down for good.
+describe('#4118 — hasRecentConflictAlertComment / latestConflictAlertCreatedAtMs / hasRecentConflictFindingComment (pure)', () => {
+  const now = Date.parse('2026-09-25T12:00:00Z');
+  const alertBody = buildConflictComment({ num: 4118 }, {});
+  const findingBody = buildConflictFindingBody({ num: 4118 });
+
+  it('CONFLICT_ALERT_MARKER_RE matches the alert\'s own fixed header, parked or approved', () => {
+    expect(CONFLICT_ALERT_MARKER_RE.test(buildConflictComment({ num: 1 }, {}))).toBe(true);
+    expect(CONFLICT_ALERT_MARKER_RE.test(buildConflictComment({ num: 1 }, { deferredToDrain: true }))).toBe(true);
+    expect(CONFLICT_ALERT_MARKER_RE.test('some unrelated comment')).toBe(false);
+  });
+
+  const trusted = { login: 'web-everything' };
+  const forged = { login: 'some-random-user' };
+
+  it('hasRecentConflictAlertComment: true within the window, false once it ages out', () => {
+    const recent = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
+    expect(hasRecentConflictAlertComment(recent, { now })).toBe(true);
+    const stale = [{ body: alertBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString(), author: trusted }];
+    expect(hasRecentConflictAlertComment(stale, { now })).toBe(false);
+  });
+
+  it('hasRecentConflictAlertComment: false with no matching comment, a non-alert comment, or a bad timestamp', () => {
+    expect(hasRecentConflictAlertComment([], { now })).toBe(false);
+    expect(hasRecentConflictAlertComment([{ body: 'unrelated', author: trusted }], { now })).toBe(false);
+    expect(hasRecentConflictAlertComment([{ body: alertBody, createdAt: 'not-a-date', author: trusted }], { now })).toBe(false);
+    expect(hasRecentConflictAlertComment(undefined, { now })).toBe(false);
+  });
+
+  // #4118 review finding (security/authz) — CONFIRMED live vulnerability: without an author check, any GitHub
+  // login could post a comment matching the marker and make the watch believe its own alert already went out,
+  // silently swallowing the real one (then still applying CONFLICT_LABEL, marking the PR fully handled).
+  it('hasRecentConflictAlertComment: a marker-matching comment from an UNTRUSTED author never counts, however recent', () => {
+    const forgedComment = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: forged }];
+    expect(hasRecentConflictAlertComment(forgedComment, { now })).toBe(false);
+    const noAuthorAtAll = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString() }];
+    expect(hasRecentConflictAlertComment(noAuthorAtAll, { now })).toBe(false);
+    const bareString = [alertBody]; // a bare-string comment carries no author at all — never trusted
+    expect(hasRecentConflictAlertComment(bareString, { now })).toBe(false);
+  });
+
+  it('latestConflictAlertCreatedAtMs: UNSCOPED by recency — an old-but-only match still returns its timestamp', () => {
+    const old = new Date(now - (CONFLICT_RETRY_WINDOW_MS * 5)).toISOString();
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: old, author: trusted }])).toBe(Date.parse(old));
+    expect(latestConflictAlertCreatedAtMs([])).toBeNull();
+    expect(latestConflictAlertCreatedAtMs([{ body: 'unrelated', author: trusted }])).toBeNull();
+  });
+
+  it('latestConflictAlertCreatedAtMs: picks the MOST RECENT of several matching alert comments', () => {
+    const older = new Date(now - 500_000).toISOString();
+    const newer = new Date(now - 10_000).toISOString();
+    const comments = [{ body: alertBody, createdAt: older, author: trusted }, { body: alertBody, createdAt: newer, author: trusted }];
+    expect(latestConflictAlertCreatedAtMs(comments)).toBe(Date.parse(newer));
+  });
+
+  // #4118 review finding (security/authz) — without this, an attacker who keeps posting fresh forged
+  // alert-marker comments could hold this fallback `age` near zero forever, suppressing the post-drain-grace
+  // dispatch for a genuinely conflicting PR indefinitely.
+  it('latestConflictAlertCreatedAtMs: ignores a marker-matching comment from an UNTRUSTED author entirely', () => {
+    const fresh = new Date(now - 1_000).toISOString();
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: fresh, author: forged }])).toBeNull();
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: fresh }])).toBeNull();
+  });
+
+  it('hasRecentConflictFindingComment: true within the window over the finding\'s own footer text, false once stale', () => {
+    const recent = [{ body: findingBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
+    expect(hasRecentConflictFindingComment(recent, { now })).toBe(true);
+    const stale = [{ body: findingBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString(), author: trusted }];
+    expect(hasRecentConflictFindingComment(stale, { now })).toBe(false);
+  });
+
+  it('hasRecentConflictFindingComment: an alert comment never counts as a finding comment (different marker)', () => {
+    const comments = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
+    expect(hasRecentConflictFindingComment(comments, { now })).toBe(false);
+  });
+
+  it('hasRecentConflictFindingComment: a marker-matching comment from an UNTRUSTED author never counts', () => {
+    const forgedComment = [{ body: findingBody, createdAt: new Date(now - 60_000).toISOString(), author: forged }];
+    expect(hasRecentConflictFindingComment(forgedComment, { now })).toBe(false);
+  });
+});
+
+describe('#4118 — crash-safety: the label applies LAST, after the alert + dispatch are known-good', () => {
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => calls.push(['ensureLabel', repo, name]),
+      setLabels: (repo, num, spec) => calls.push(['setLabels', repo, num, spec]),
+      postComment: (repo, num) => calls.push(['postComment', repo, num]),
+    };
+  };
+
+  // THE CARD ITSELF (bornAs x3zr5tu): a crash between the label write and the alert comment used to lose the
+  // alert forever, because the label's own presence was this file's only durable marker. Reproduced here as a
+  // crash BETWEEN the alert/dispatch and the label (the label is now the LAST write, so that is the only window
+  // left) — the next sweep must retry the label without re-posting the alert or re-dispatching.
+  it('a crash right after the alert + dispatch, before the label lands, retries ONLY the label on the next sweep', () => {
+    const pr = { number: 4118, mergeable: 'CONFLICTING', headRefName: 'lane/x', labels: [{ name: 'review:pending' }] };
+    const postedComments = [];
+    const crashingProvider = {
+      // ensureLabel throws — simulates the process dying (or the `gh label create` call failing) in the exact
+      // window between the alert/dispatch succeeding and the label write actually landing.
+      ensureLabel: () => { throw new Error('simulated crash: never reaches the gh label write'); },
+      setLabels: () => {},
+      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString(), author: { login: 'web-everything' } }),
+    };
+    const routed = [];
+    // The fake `postFinding` simulates what `defaultPostConflictFinding` really does on success: leaves a
+    // durable finding comment on the thread (via `reconcile-finding.mjs`) — without this, the SECOND sweep's
+    // `hasRecentConflictFindingComment` marker check has no way to tell "already dispatched" from "never tried".
+    const first = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider: crashingProvider,
+      postFinding: (o) => {
+        routed.push(o);
+        postedComments.push({ body: buildConflictFindingBody({ num: pr.number }), createdAt: new Date().toISOString(), author: { login: 'web-everything' } });
+      },
+      postStandDown: () => {},
+    });
+    expect(first[0].error).toMatch(/simulated crash/);
+    expect(postedComments).toHaveLength(2); // the alert AND the finding comment both landed before the crash
+    expect(routed).toHaveLength(1); // the dispatch ALSO landed before the crash
+
+    // Next sweep: `pr.labels` never actually gained CONFLICT_LABEL (the crash happened before that write), so
+    // `plan.add` is truthy again — a real provider now, and `listPrComments` returns exactly what the crashed
+    // sweep already posted.
+    const recovered = fakeProvider();
+    const routed2 = [];
+    const second = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider: recovered,
+      listPrComments: () => postedComments, labelRemovedAtMs: () => 0,
+      postFinding: (o) => routed2.push(o), postStandDown: () => {},
+    });
+    expect(second[0].commented).toBe(false); // NOT re-posted — the alert marker matched
+    expect(second[0].routedTo).toBe('reconcile-finding');
+    expect(routed2).toHaveLength(0); // NOT re-dispatched either — the finding-comment marker matched
+    expect(recovered.calls.some((c) => c[0] === 'postComment')).toBe(false);
+    expect(recovered.calls).toContainEqual(['ensureLabel', 'o/n', CONFLICT_LABEL]);
+    expect(recovered.calls).toContainEqual(['setLabels', 'o/n', 4118, { add: CONFLICT_LABEL, remove: [] }]);
+  });
+
+  // FINDING (a) — adversarial review: "the watch adds its label and then crashes before routing, and the next
+  // sweep skips the PR forever (`plan.add` is null)". Reproduced with the crash landing BETWEEN the alert and
+  // the dispatch (postFinding) instead of after it, proving the dispatch itself — not just the label — survives
+  // a crash and is retried, never silently dropped.
+  it('finding (a) — a crash between the alert and the dispatch retries the dispatch on the next sweep, never loses it', () => {
+    const pr = { number: 4119, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const postedComments = [];
+    const provider1 = {
+      ensureLabel: () => {}, setLabels: () => {},
+      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString(), author: { login: 'web-everything' } }),
+    };
+    const first = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider: provider1,
+      postFinding: () => { throw new Error('simulated dispatch crash'); }, postStandDown: () => {},
+    });
+    expect(first[0].error).toMatch(/simulated dispatch crash/);
+    expect(postedComments).toHaveLength(1);
+
+    const recovered = fakeProvider();
+    const routed = [];
+    const second = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider: recovered,
+      listPrComments: () => postedComments, labelRemovedAtMs: () => 0,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(routed).toHaveLength(1); // retried — NOT lost forever, unlike the pre-#4118 shape
+    expect(second[0].commented).toBe(false); // no duplicate alert
+    expect(second[0].routedTo).toBe('reconcile-finding');
+    expect(recovered.calls.some((c) => c[0] === 'setLabels')).toBe(true); // the label finally lands
+  });
+
+  it('a genuinely fresh SECOND episode (label absent again after a real resolution) still gets its OWN alert', () => {
+    // The old episode's alert comment is well outside the retry window — CONFLICT_RETRY_WINDOW_MS exists
+    // precisely so this does not get read as "already handled".
+    const pr = { number: 4120, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const oldEpisodeAlert = {
+      body: buildConflictComment({ num: 4120 }, {}),
+      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days ago
+    };
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider,
+      listPrComments: () => [oldEpisodeAlert], labelRemovedAtMs: () => 0,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(true); // a FRESH alert for the new episode, not silently skipped
+    expect(routed).toHaveLength(1);
+    expect(provider.calls.filter((c) => c[0] === 'postComment')).toHaveLength(1);
+  });
+});
+
+// #4118 re-review (round 2) — the recency window alone cannot tell a crash-retry from a RAPID re-conflict, and
+// the fresh-path stand-down dedup was not scoped at all. The episode boundary is the latest time the
+// CONFLICT_LABEL was REMOVED (`labelRemovedAtMs`): a marker posted before it belongs to a closed episode.
+describe('#4118 — marker dedups are scoped to the CURRENT conflict episode', () => {
+  const trusted = { login: 'web-everything' };
+  const now = Date.parse('2026-09-25T12:00:00Z');
+  const iso = (msAgo) => new Date(now - msAgo).toISOString();
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => calls.push(['ensureLabel', repo, name]),
+      setLabels: (repo, num, spec) => calls.push(['setLabels', repo, num, spec]),
+      postComment: (repo, num) => calls.push(['postComment', repo, num]),
+    };
+  };
+
+  it('a second conflict within the retry window receives a fresh alert and dispatch', () => {
+    // Episode 1: alert + finding 10 minutes ago, resolved (label removed) 5 minutes ago. Episode 2: now.
+    const pr = { number: 4121, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [
+      { body: buildConflictComment({ num: 4121 }, {}), createdAt: iso(10 * 60_000), author: trusted },
+      { body: buildConflictFindingBody({ num: 4121 }), createdAt: iso(10 * 60_000), author: trusted },
+    ];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => now - 5 * 60_000,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(true);
+    expect(routed).toHaveLength(1);
+  });
+
+  it('a crash-retry in the SAME episode (markers newer than the last label removal) is still deduped', () => {
+    const pr = { number: 4122, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [
+      { body: buildConflictComment({ num: 4122 }, {}), createdAt: iso(60_000), author: trusted },
+      { body: buildConflictFindingBody({ num: 4122 }), createdAt: iso(60_000), author: trusted },
+    ];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => now - 5 * 60_000,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(false);
+    expect(routed).toHaveLength(0);
+    expect(provider.calls).toContainEqual(['setLabels', 'o/n', 4122, { add: CONFLICT_LABEL, remove: [] }]);
+  });
+
+  it('an unreadable episode boundary fails toward a duplicate post, never a lost dispatch', () => {
+    const pr = { number: 4123, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }] };
+    const comments = [{ body: buildConflictComment({ num: 4123 }, {}), createdAt: iso(60_000), author: trusted }];
+    const provider = fakeProvider();
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, now,
+      listPrComments: () => comments, labelRemovedAtMs: () => null,
+      postFinding: (o) => routed.push(o), postStandDown: () => {},
+    });
+    expect(results[0].commented).toBe(true);
+    expect(routed).toHaveLength(1);
+  });
+
+  const statutePr = (number) => ({
+    number, mergeable: 'CONFLICTING', labels: [{ name: 'review:pending' }], files: [{ path: 'docs/agent/platform-decisions.md' }],
+  });
+  const standDownAt = (msAgo) => ({ body: buildStandDownComment({ reason: 'conflict' }), createdAt: iso(msAgo), author: trusted });
+
+  it('a fresh statute-tier episode posts its OWN stand-down even with an old episode\'s stand-down on the thread', () => {
+    const routed = [];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4124)], provider: fakeProvider(), now,
+      listPrComments: () => [standDownAt(3 * 24 * 60 * 60_000)], labelRemovedAtMs: () => now - 2 * 24 * 60 * 60_000,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([4124]);
+  });
+
+  it('a stale out-of-window stand-down never suppresses a fresh one, even with no recorded label removal', () => {
+    const routed = [];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4125)], provider: fakeProvider(), now,
+      listPrComments: () => [standDownAt(CONFLICT_RETRY_WINDOW_MS + 60_000)], labelRemovedAtMs: () => 0,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(routed).toEqual([4125]);
+  });
+
+  it('a crash-retry of the stand-down in the SAME episode does not re-post it', () => {
+    const routed = [];
+    const provider = fakeProvider();
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4126)], provider, now,
+      listPrComments: () => [standDownAt(60_000)], labelRemovedAtMs: () => 0,
+      postFinding: () => {}, postStandDown: (o) => routed.push(o.pr.number),
+    });
+    expect(results[0].routedTo).toBe('stand-down');
+    expect(routed).toEqual([]);
+    expect(provider.calls).toContainEqual(['setLabels', 'o/n', 4126, { add: CONFLICT_LABEL, remove: [] }]);
+  });
+
+  it('the episode boundary is only read when the thread has comments to judge', () => {
+    let reads = 0;
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [statutePr(4127)], provider: fakeProvider(), now,
+      listPrComments: () => [], labelRemovedAtMs: () => { reads += 1; return 0; },
+      postFinding: () => {}, postStandDown: () => {},
+    });
+    expect(reads).toBe(0);
+  });
+});
+
+// #4118 re-review (round 2) — the rearm must land BEFORE the CONFLICT_LABEL is removed: the label's presence is
+// what makes `newlyResolved` fire again on the next sweep, so removing it first made a failed rearm unretryable.
+describe('#4118 — a resolved conflict\'s rearm is crash-safe (rearm first, label removal last)', () => {
+  it('a failed rearm leaves the CONFLICT_LABEL on, so the next sweep retries it', () => {
+    const calls = [];
+    const provider = { setLabels: (repo, num, spec) => calls.push(['setLabels', num, spec]) };
+    const pr = { number: 4128, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+    const first = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, listAgents: () => [],
+      postRearm: () => { throw new Error('simulated rearm crash'); },
+    });
+    expect(first[0].error).toMatch(/simulated rearm crash/);
+    expect(calls).toEqual([]); // label NOT removed — still retryable
+
+    const rearmed = [];
+    const second = watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [pr], provider, listAgents: () => [],
+      postRearm: (o) => { rearmed.push(o.pr.number); calls.push(['rearm', o.pr.number]); },
+    });
+    expect(second[0].routedTo).toBe('rearm-review');
+    expect(rearmed).toEqual([4128]);
+    expect(calls).toEqual([['rearm', 4128], ['setLabels', 4128, { add: undefined, remove: [CONFLICT_LABEL] }]]);
   });
 });
 
@@ -775,6 +1228,56 @@ describe('defaultListPrPatches — argv shape + @tsv round-trip (exec injected, 
 
   it('an empty listing yields an empty map', () => {
     expect(defaultListPrPatches({ number: 1, repo: 'o/n', exec: () => '\n\n' })).toEqual({});
+  });
+});
+
+// #4118 review finding (security/authz) — `defaultListPrComments` now ALSO projects `.user.login`, reshaped to
+// `author: {login}` so `isTrustedMarkerAuthor` (every marker reader in this file, plus `countStandDownComments`
+// from `stand-down.mjs`) can gate on it. No test exercised this function's raw `exec` output at all before #4118.
+describe('defaultListPrComments — argv shape + @tsv round-trip incl. author.login (exec injected, no real gh call)', () => {
+  it('paginates the REST issue-comments endpoint projecting body + created_at + user.login via @tsv', () => {
+    let capturedArgv;
+    defaultListPrComments({ number: 42, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv).toEqual(['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/issues/42/comments',
+      '--jq', '.[] | [.body, .created_at, .user.login] | @tsv']);
+  });
+
+  it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
+    let capturedArgv;
+    defaultListPrComments({ number: 7, exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv[6]).toBe('repos/{owner}/{repo}/issues/7/comments');
+  });
+
+  it('parses body + createdAt + author.login off the three-field @tsv wire shape', () => {
+    const wire = 'hello world\t2026-09-25T12:00:00Z\tweb-everything\nbye\t2026-09-24T00:00:00Z\tsome-random-user';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([
+      { body: 'hello world', createdAt: '2026-09-25T12:00:00Z', author: { login: 'web-everything' } },
+      { body: 'bye', createdAt: '2026-09-24T00:00:00Z', author: { login: 'some-random-user' } },
+    ]);
+  });
+
+  it('a body containing an escaped tab/newline (jq @tsv) still splits on the REAL field-delimiter tabs only', () => {
+    const wire = 'line one\\nline two\\twith a tab\t2026-09-25T12:00:00Z\tweb-everything';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([
+      { body: 'line one\nline two\twith a tab', createdAt: '2026-09-25T12:00:00Z', author: { login: 'web-everything' } },
+    ]);
+  });
+
+  it('a missing login (bot/deleted-account edge, `.user.login` empty) yields author: null, not a forged trust', () => {
+    const wire = 'hello\t2026-09-25T12:00:00Z\t';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([{ body: 'hello', createdAt: '2026-09-25T12:00:00Z', author: null }]);
+  });
+
+  it('a line with no tab at all (malformed) yields author: null and createdAt: null, never a crash', () => {
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => 'no-tabs-here' });
+    expect(out).toEqual([{ body: 'no-tabs-here', createdAt: null, author: null }]);
+  });
+
+  it('an empty listing yields an empty array', () => {
+    expect(defaultListPrComments({ number: 1, repo: 'o/n', exec: () => '\n\n' })).toEqual([]);
   });
 });
 
@@ -1415,6 +1918,69 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(routed).toEqual([]);
   });
 
+  // #4118 finding (b) — adversarial review: "an unreadable events API waits forever with no output". A
+  // PERSISTENTLY (every sweep) unreadable `labelAgeMs` used to mean this PR waits past grace forever, no matter
+  // how long it has actually been conflicting — the same "silently stuck" shape #2503/#2514/#2515 already named.
+  // The durable alert comment this watch itself posts at detection (now ALWAYS present once CONFLICT_LABEL is,
+  // per #4118's own label-applies-last ordering) is a reliable fallback age source.
+  it('#4118 (b) — a persistently unreadable events API does not wait forever: falls back to the durable alert-comment timestamp', () => {
+    const routed = [];
+    const oldAlert = {
+      body: buildConflictComment({ num: 2514 }, {}),
+      createdAt: new Date(Date.now() - (QUEUED_CONFLICT_GRACE_MS + 5 * 60 * 1000)).toISOString(),
+      author: { login: 'web-everything' },
+    };
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, // the events API is unreadable on EVERY sweep — not a one-off blip
+      listPrComments: () => [oldAlert],
+      listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([2514]);
+  });
+
+  it('#4118 (b) — still waits when the fallback alert comment is also unavailable (unchanged safe default)', () => {
+    const routed = [];
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('ready-to-merge', CONFLICT_LABEL) }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, listPrComments: () => [], listPrFiles: () => [],
+    });
+    expect(routed).toEqual([]);
+  });
+
+  it('#4118 (b) — a fallback alert comment that has not YET sat past grace still waits (no premature bounce)', () => {
+    const routed = [];
+    const recentAlert = { body: buildConflictComment({ num: 2514 }, {}), createdAt: new Date().toISOString(), author: { login: 'web-everything' } };
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, listPrComments: () => [recentAlert], listPrFiles: () => [],
+    });
+    expect(routed).toEqual([]);
+  });
+
+  // #4118 review finding (security/authz) — a FORGED fallback alert comment (untrusted author) must never
+  // substitute for a real one: an attacker who keeps posting fresh forged alert-marker comments could otherwise
+  // hold this fallback age near zero forever, suppressing the post-drain-grace dispatch indefinitely.
+  it('#4118 (b) — an UNTRUSTED-author fallback alert comment is never used as the age source, however old', () => {
+    const routed = [];
+    const forgedOldAlert = {
+      body: buildConflictComment({ num: 2514 }, {}),
+      createdAt: new Date(Date.now() - (QUEUED_CONFLICT_GRACE_MS + 5 * 60 * 1000)).toISOString(),
+      author: { login: 'some-random-user' },
+    };
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, listPrComments: () => [forgedOldAlert], listPrFiles: () => [],
+    });
+    expect(routed).toEqual([]); // never bounced off a forged fallback comment — still waits, the safe default
+  });
+
   it('statute-tier: handed to a human at first sighting, and NEVER re-posted by the grace path once the marker is on the PR', () => {
     const routed = [];
     const statuteFiles = [{ path: 'docs/agent/platform-decisions.md' }];
@@ -1433,8 +1999,28 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
       labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
       // #3383 — a trusted author is now required for the marker read-back to count.
       listPrComments: () => [{ body: STAND_DOWN_MARKER, author: { login: 'web-everything' } }],
+      labelRemovedAtMs: () => 0,
     });
     expect(later).toEqual([]);
+    expect(routed).toEqual(['sd']);
+  });
+
+  // #4118 round 2 — the grace-expiry stand-down dedup is scoped to the current episode too.
+  it('grace expired, statute-tier: an OLD episode\'s stand-down (before the last label removal) does not silence this one', () => {
+    const statuteFiles = [{ path: 'docs/agent/platform-decisions.md' }];
+    const routed = [];
+    const removedAt = Date.parse('2026-09-20T00:00:00Z');
+    const oldStandDown = { body: STAND_DOWN_MARKER, createdAt: '2026-09-19T00:00:00Z', author: { login: 'web-everything' } };
+    const newStandDown = { body: STAND_DOWN_MARKER, createdAt: '2026-09-21T00:00:00Z', author: { login: 'web-everything' } };
+    const run = (comments) => watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ number: 2506, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }],
+      provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
+      labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
+      listPrComments: () => comments, labelRemovedAtMs: () => removedAt,
+    });
+    expect(run([oldStandDown])[0].routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual(['sd']);
+    expect(run([oldStandDown, newStandDown])).toEqual([]); // this episode's own stand-down — never re-posted
     expect(routed).toEqual(['sd']);
   });
 
