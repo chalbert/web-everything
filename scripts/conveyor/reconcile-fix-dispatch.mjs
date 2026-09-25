@@ -868,7 +868,16 @@ export function dispatchFix(planned, {
  *   REAL constellation repo profile has `fix` on (see the docblock above).
  * @param {Function} [o.pickFreeLanes] - injectable; when omitted, defaults to {@link freeLaneNumbers} scoped to
  *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
- * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}}
+ * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number,
+ *   reconcileRefusalDetails:Array<object>}} `reconcileRefusals` stays the bare count this function has always
+ *   returned (asserted by `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`). `reconcileRefusalDetails`
+ *   is ADDITIVE (#x0mn6x0, epic #4075/#3383) — see `we:scripts/operations/ci-heal-pr-dispatch.mjs
+ *   #runReconcileCiHealDispatch`'s own identical addition for the full rationale: a PR `reconcile-core.mjs`
+ *   refuses OUTRIGHT (`owed-ci-rerun`, `no-findings`, `live-process`, `cap-exhausted`, `stood-down`,
+ *   `owed-elsewhere`, `nothing-owed`, ...) never becomes a `refusals` entry here either — that array only ever
+ *   holds THIS function's own per-entry refusals (`no-scope`/`no-lane`/`dispatch-failed`/`unsupported-repo`)
+ *   for PRs the plan DID offer. Handing up `reconciled.refusals` itself is what lets the daemon's own onTick
+ *   print the reconcile layer's real reason instead of discarding it to a count.
  */
 export function runReconcileFixDispatch({
   root = REPO_ROOT,
@@ -925,7 +934,7 @@ export function runReconcileFixDispatch({
     const refusals = [...fixRefusals, ...ciHealRefusals];
     const reviews = readUnsupported({ path: unsupportedPath }).filter((row) => row.repo === repoKey && row.action === 'review');
     recordUnsupported({ repo: repoKey, rows: [...reviews, ...refusals], path: unsupportedPath });
-    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
+    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
   }
   // `fix` IS supported here — still durably record any ci-heal refusals (a separate capability, possibly still
   // off), preserving prior `review` rows exactly as above.
@@ -993,7 +1002,7 @@ export function runReconcileFixDispatch({
     }
   }
 
-  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length };
+  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
 }
 
 /**

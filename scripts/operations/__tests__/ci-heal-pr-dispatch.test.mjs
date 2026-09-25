@@ -295,4 +295,22 @@ describe('runReconcileCiHealDispatch — repo capability gate (#3967 multi-repo 
     expect(dispatchCalls).toEqual([]);
     expect(result.refusals).toEqual([{ pr: 50, kind: 'no-lane', why: expect.stringContaining('PR #50') }]);
   });
+
+  // #x0mn6x0 (epic #4075/#3383) — LIVE INCIDENT 2026-09-25: `reconcile-core.mjs#planReconcile`'s own outright
+  // refusals (a PR never even offered as a `kind:'ci-heal'` dispatch entry — e.g. PR #2635's `owed-ci-rerun`)
+  // used to be collapsed to `reconcileRefusals:<count>` here and nowhere else ever saw the reasons.
+  // `reconcileRefusalDetails` is the SAME `reconciled.refusals` array, handed up unchanged and additively (the
+  // pre-existing `reconcileRefusals` count stays exactly as it was — asserted below too).
+  it('reconcileRefusalDetails carries the real reconcile-layer refusal objects, additively alongside the existing count', async () => {
+    const result = await runReconcileCiHealDispatch({
+      root: '/repo', repo: 'chalbert/plateau-app',
+      reconcile: () => ({
+        dispatch: [],
+        refusals: [{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }],
+      }),
+      checkStaleness: FRESH,
+    });
+    expect(result.reconcileRefusals).toBe(1);
+    expect(result.reconcileRefusalDetails).toEqual([{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }]);
+  });
 });

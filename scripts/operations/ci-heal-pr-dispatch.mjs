@@ -147,7 +147,21 @@ export async function dispatchCiHeal(planned, {
  *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
  * @param {Function} [o.resolveProfile] - injectable, defaults to the real {@link repoProfile}.
  * @param {Function} [o.resolveWorkUnit] - injectable, defaults to the real {@link resolvePrWorkUnit}.
- * @returns {Promise<{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number}>}
+ * @returns {Promise<{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number,
+ *   reconcileRefusalDetails:Array<object>}>} `reconcileRefusals` stays the bare count it always was (an
+ *   existing, asserted contract — see `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`'s
+ *   sibling assertion on `runReconcileFixDispatch`). `reconcileRefusalDetails` is ADDITIVE (#x0mn6x0, epic
+ *   #4075/#3383): the SAME `reconciled.refusals` array the count was always derived from
+ *   (`we:scripts/conveyor/reconcile-core.mjs#planReconcile` already computes a `{prNumber, kind, why, ...}`
+ *   per entry — see that file's own `refuse()` closure), now handed up instead of collapsed to nothing. A PR
+ *   `reconcile-core.mjs` refuses OUTRIGHT (never becoming a `kind:'ci-heal'` dispatch entry at all — e.g.
+ *   `owed-ci-rerun`, `no-findings`, `live-process`, `cap-exhausted`, `stood-down`, `owed-elsewhere`,
+ *   `nothing-owed`) left NO trace anywhere in the daemon's own tick log before this: it was neither a
+ *   `dispatched` entry nor a `refusals` entry (that array only ever held THIS file's OWN per-entry refusals —
+ *   `no-lane`/`held`/`dispatch-failed`/`unsupported-repo` — for PRs reconcile DID plan), so a PR silently
+ *   never even reaching the plan was invisible. Live incident 2026-09-25: PRs #2635/#2636/#2653 sat
+ *   `ci:failed` with the daemon logging only "dispatched 0, refused N" — #2635's real reason
+ *   (`owed-ci-rerun`) lived exclusively in here and nowhere the daemon ever printed.
  */
 export async function runReconcileCiHealDispatch({
   root = REPO_ROOT,
@@ -181,7 +195,7 @@ export async function runReconcileCiHealDispatch({
       why: 'CI-heal dispatch requires a repo-specific brief and gate; the existing worker is WE-only.',
     }));
     recordUnsupported({ repo: repoKey, rows: [...otherRows, ...refusals], path: unsupportedPath });
-    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length };
+    return { dispatched: [], refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
   }
   // `ci-heal` IS supported here — clear any stale `ci-heal` unsupported rows, preserving `fix`/`review` rows.
   recordUnsupported({ repo: repoKey, rows: otherRows, path: unsupportedPath });
@@ -233,7 +247,7 @@ export async function runReconcileCiHealDispatch({
     }
   }
 
-  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length };
+  return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
 }
 
 const IS_CLI = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
