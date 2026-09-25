@@ -104,6 +104,12 @@ export const SMOKE_BUDGET_ENV = Object.freeze({
   // #3383 Module D — how long the smoke's own `lane-pool.mjs acquire` may WAIT (`--wait-ms=`) for a busy pool
   // to free a lane, instead of failing instantly on a momentary flicker. See `checkLaneAcquireRelease`.
   laneAcquireWaitMs: 'WE_SMOKE_LANE_ACQUIRE_WAIT_MS',
+  // xp4lw2v (epic #4075/#3383) — the two new checks below. `dispatchDryRunMs` covers three direct dispatch
+  // fills (no IO) plus three real reconcile passes over LIVE open `we` PRs (each a `gh pr list`, plus a `gh pr
+  // diff`/`gh api` per PR needing a diff-derived scope fallback) — see `checkDispatchDryRun`.
+  // `treeStaysCleanMs` is one bare `git status --porcelain`, always fast.
+  dispatchDryRunMs: 'WE_SMOKE_DISPATCH_DRY_RUN_MS',
+  treeStaysCleanMs: 'WE_SMOKE_TREE_STAYS_CLEAN_MS',
 });
 
 function envMs(env, key, fallback) {
@@ -129,6 +135,8 @@ export function resolveSmokeBudgets(env = process.env) {
     ghApiMs: envMs(env, SMOKE_BUDGET_ENV.ghApiMs, 30_000),
     ghPrListMs: envMs(env, SMOKE_BUDGET_ENV.ghPrListMs, 30_000),
     reconcileMs: envMs(env, SMOKE_BUDGET_ENV.reconcileMs, 60_000),
+    dispatchDryRunMs: envMs(env, SMOKE_BUDGET_ENV.dispatchDryRunMs, 45_000),
+    treeStaysCleanMs: envMs(env, SMOKE_BUDGET_ENV.treeStaysCleanMs, 10_000),
   };
 }
 
@@ -267,6 +275,241 @@ async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
   return { ok: true, detail: `reconcile-pass dry-run ok for ${repos.length} repo(s)` };
 }
 
+// ── xp4lw2v (epic #4075/#3383) — dispatch-dry-run: what would have caught the live crash of 2026-09-25 ──────
+// (commit a6cbfced4 fixed it): `dispatchCiHeal` threw "no value for the brief placeholder {{SCOPE}}" for a PR
+// with no backlog item and an empty diff-derived scope. This check dry-runs EACH dispatch kind (review, fix,
+// ci-heal) from the CANDIDATE TREE (`cwd: root`), against the live repo, with a STUB spawner/sink: nothing is
+// ever spawned, and every claim/lane-pool primitive is stubbed to a no-op so the real coordination sidecar and
+// lane pool are never touched. Code from the tree under test runs as a CHILD process (never an in-process
+// import), so this check is `mayBeTransient:false` and `codeEntries` lists the dispatch modules it runs.
+//
+// WHAT IT COVERS:
+//   - a DIRECT call to each of `dispatchReview`/`dispatchFix`/`dispatchCiHeal` with worst-case-but-legal
+//     planned entries — an item-less PR with an EMPTY diff-derived scope for ci-heal (the exact a6cbfced4
+//     shape: `dispatchFix`'s own planner refuses that shape before ever calling it, so it is not a legal input
+//     there) and an item-less PR with a NON-EMPTY diff-derived scope for fix/ci-heal both (the ordinary
+//     item-less shape each of their planners actually produces) — using real brief files and a real repo
+//     profile for `we`, and a stub sink/spawner that captures the filled prompt and spawns nothing;
+//   - the PASS LEVEL, once per kind, with dispatch stubbed: `runReconcileFixDispatch`/`runReconcileCiHealDispatch`
+//     (`we:scripts/conveyor/reconcile-fix-dispatch.mjs` / `we:scripts/operations/ci-heal-pr-dispatch.mjs`) and
+//     the review daemon's own `runReviewTick` (`we:skills-src/conveyor/review-daemon.mjs`) — so the REAL
+//     planner runs its REAL `reconcile-pass.mjs` read over the LIVE open `we` PRs (real `gh` reads) and every
+//     planned entry is dispatched into a stub that spawns nothing. Lane selection is stubbed (`pickFreeLanes`),
+//     the fix pass's own resume-candidate check is stubbed (`tryResume` — it would otherwise read
+//     `claude agents --json` and a real lane's git HEAD for no reason this dry-run needs), and every WRITE
+//     effect the review daemon's tick would otherwise perform (`holdReconcile`/`tagRound`/`tagStatus` — real
+//     `gh` label writes) is stubbed to a no-op so this check touches no real PR.
+//
+// WHAT IT DOES NOT COVER: it never exercises the REAL `claude --bg` spawn, the REAL claim/lane-pool primitives
+// (`fix-dispatch-claim.mjs`'s real `acquireFixDispatchClaim`/`releaseFixDispatchClaim`, or `lane-pool.mjs`
+// itself — covered separately by `lane-pool-list`/`lane-acquire-release`), or a resume attempt
+// (`tryResumeFix`) — only that a fill-and-hand-to-the-sink pass, for every dispatch kind, over live PRs,
+// completes with no thrown error and no unfilled `{{...}}` placeholder left in what would have been sent.
+//
+// FAILS (non-zero exit from the child, caught below) on any throw from a dispatch call, OR when a filled
+// prompt/brief the stub captured still contains an unfilled `{{...}}` placeholder — the error text names the
+// kind and PR.
+// The child resolves every module off ITS cwd (the candidate tree) through `load(...)` rather than static
+// `import ... from '<path>'` lines: static specifiers inside this file's own string literals were read as THIS
+// module's imports by the repo's import-graph scanner (`we:scripts/operations/__tests__/import-graph.mjs`),
+// which then resolved them against `scripts/lib/` and failed.
+const DISPATCH_DRY_RUN_LINES = [
+  // Split so neither this file's closure scanner (`import-closure.mjs`: a non-literal dynamic import marks the
+  // closure incomplete, which would disable skip-unchanged for every check) nor the import-graph scanner reads it.
+  "const load = (rel) => im" + "port(new URL(rel, 'file://' + process.cwd() + '/').href);",
+  "const { dispatchReview, REVIEW_BRIEF_PLACEHOLDERS, canonicalReviewPlaceholder } = await load(['scripts', 'operations', 'review-dispatch.mjs'].join('/'));",
+  "const { dispatchFix, runReconcileFixDispatch } = await load(['scripts', 'conveyor', 'reconcile-fix-dispatch.mjs'].join('/'));",
+  "const { dispatchCiHeal, runReconcileCiHealDispatch } = await load(['scripts', 'operations', 'ci-heal-pr-dispatch.mjs'].join('/'));",
+  "const { DISPATCH_EFFECT, BRIEF_REQUIRED_BY_KIND, canonicalPlaceholder } = await load(['scripts', 'operations', 'dispatch-lane.mjs'].join('/'));",
+  "const { runReviewTick } = await load(['skills-src', 'conveyor', 'review-daemon.mjs'].join('/'));",
+  "",
+  "const results = [];",
+  "const noopAcquire = () => ({ ok: true });",
+  "const noopRelease = () => ({ released: true });",
+  "const skipStaleness = () => ({ fresh: true, behind: 0 });",
+  "const TOKEN_RE = /\\{\\{\\s*([^{}\\n]*?)\\s*\\}\\}/g;",
+  "",
+  "// Every brief's own prose legitimately says things like 'fills the {{PLACEHOLDERS}} below' as documentation",
+  "// (fillBrief/fillReviewBrief both report such tokens as non-fatal 'unknown', by design — see their own",
+  "// docblocks) — a bare '{{...}}' scan would flag that prose as a false positive on every healthy run. So this",
+  "// only flags a leftover token whose CANONICALIZED name is one of THIS kind's own REQUIRED placeholder names:",
+  "// fillBrief/fillReviewBrief already throw before returning when a required name has no value, so a required",
+  "// name surviving unfilled in a prompt that was actually returned is a defense-in-depth signal that their own",
+  "// throw-on-missing contract was silently bypassed, never a benign documentation string.",
+  "function checkFilled(promptText, label, canonicalize, requiredNames) {",
+  "  const text = String(promptText || '');",
+  "  let m;",
+  "  TOKEN_RE.lastIndex = 0;",
+  "  while ((m = TOKEN_RE.exec(text)) !== null) {",
+  "    const canon = canonicalize(m[1]);",
+  "    if (canon && requiredNames.includes(canon)) {",
+  "      throw new Error(label + ': required placeholder {{' + canon + '}} left unfilled in the filled prompt (matched ' + m[0] + ')');",
+  "    }",
+  "  }",
+  "}",
+  "function record(kind, pr, fn) {",
+  "  try { fn(); results.push({ kind, pr: pr === undefined ? null : pr, ok: true }); }",
+  "  catch (e) { results.push({ kind, pr: pr === undefined ? null : pr, ok: false, error: String((e && e.message) || e) }); }",
+  "}",
+  "async function recordAsync(kind, pr, fn) {",
+  "  try { await fn(); results.push({ kind, pr: pr === undefined ? null : pr, ok: true }); }",
+  "  catch (e) { results.push({ kind, pr: pr === undefined ? null : pr, ok: false, error: String((e && e.message) || e) }); }",
+  "}",
+  "",
+  "// 1. review — direct dispatchReview call. review-dispatch never derives an item/scope, so any positive PR",
+  "// number is legal input to it; the PR need not exist for the brief to fill (no gh read happens here).",
+  "record('review', 900001, () => {",
+  "  const spawn = () => 'stub-review-900001';",
+  "  const r = dispatchReview({ pr: 900001, repo: 'chalbert/web-everything', spawnAgent: spawn, extraArgs: [], checkStaleness: skipStaleness, judgeProvider: 'claude' });",
+  "  checkFilled(r.prompt, 'review PR #900001', canonicalReviewPlaceholder, REVIEW_BRIEF_PLACEHOLDERS);",
+  "});",
+  "",
+  "// 2. fix — direct dispatchFix call: an item-less PR with a NON-EMPTY diff-derived scope, the one legal shape",
+  "// planFixesFromReconcile ever hands dispatchFix for an item-less PR (its own planner refuses an item-less",
+  "// PR with an empty scope as 'no-scope' before dispatchFix is ever called, so that shape is not legal input",
+  "// here the way it is for ci-heal below).",
+  "record('fix', 900002, () => {",
+  "  let captured = null;",
+  "  const spawn = (argv) => { captured = argv[argv.length - 1]; return 'stub-fix-900002'; };",
+  "  dispatchFix(",
+  "    { itemNum: null, pr: 900002, laneRef: 'lane/900002-smoke-fix', scope: ['we:scripts/lib/daemon-live-smoke.mjs'], lane: 90101, headRefOid: null },",
+  "    { repo: 'we', spawnAgent: spawn, extraArgs: [], acquireClaim: noopAcquire, releaseClaim: noopRelease },",
+  "  );",
+  "  checkFilled(captured, 'fix PR #900002', canonicalPlaceholder, BRIEF_REQUIRED_BY_KIND.fix);",
+  "});",
+  "",
+  "// 3a. ci-heal — WORST CASE, the exact a6cbfced4 live-crash shape: an item-less PR with an EMPTY",
+  "// diff-derived scope. runReconcileCiHealDispatch's own plan/dispatch loop is ONE phase (unlike fix's",
+  "// plan-then-dispatch split), so this shape reaches dispatchCiHeal for real — SCOPE must be optional for",
+  "// ci-heal, or this throws exactly as the pre-fix code did.",
+  "await recordAsync('ci-heal-worst-case', 900003, async () => {",
+  "  let captured = null;",
+  "  const sinks = { [DISPATCH_EFFECT]: async (payload) => { captured = payload.prompt; return { handle: 'stub-cih-a' }; } };",
+  "  await dispatchCiHeal(",
+  "    { itemNum: null, pr: 900003, laneRef: 'lane/900003-smoke-cih', scope: [], lane: 90102, headRefOid: null },",
+  "    { repo: 'we', sinks, acquireClaim: noopAcquire, releaseClaim: noopRelease },",
+  "  );",
+  "  checkFilled(captured, 'ci-heal-worst-case PR #900003', canonicalPlaceholder, BRIEF_REQUIRED_BY_KIND['ci-heal']);",
+  "});",
+  "",
+  "// 3b. ci-heal — ordinary: an item-less PR with a non-empty diff-derived scope.",
+  "await recordAsync('ci-heal-ordinary', 900004, async () => {",
+  "  let captured = null;",
+  "  const sinks = { [DISPATCH_EFFECT]: async (payload) => { captured = payload.prompt; return { handle: 'stub-cih-b' }; } };",
+  "  await dispatchCiHeal(",
+  "    { itemNum: null, pr: 900004, laneRef: 'lane/900004-smoke-cih', scope: ['we:scripts/operations/ci-heal-pr-dispatch.mjs'], lane: 90103, headRefOid: null },",
+  "    { repo: 'we', sinks, acquireClaim: noopAcquire, releaseClaim: noopRelease },",
+  "  );",
+  "  checkFilled(captured, 'ci-heal-ordinary PR #900004', canonicalPlaceholder, BRIEF_REQUIRED_BY_KIND['ci-heal']);",
+  "});",
+  "",
+  "// 4. pass level — the REAL planner (reconcile-pass.mjs) over LIVE open 'we' PRs (real gh reads); dispatch",
+  "// stubbed so nothing is ever spawned. Lane selection and (for fix) the resume-candidate check are stubbed",
+  "// too — neither needs a real pool/agents read for this dry run. WE_SMOKE_DISPATCH_PASSES=0 skips this part",
+  "// (a unit test with no GitHub credential runs only the direct dispatch calls above).",
+  "if (process.env.WE_SMOKE_DISPATCH_PASSES !== '0') {",
+  "record('reconcile-fix-pass', null, () => {",
+  "  const stubDispatch = (planned) => ({ agentId: null, sessionSlug: 'stub-fix', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [], resumed: false });",
+  "  const r = runReconcileFixDispatch({",
+  "    repo: 'chalbert/web-everything', dispatch: stubDispatch, tryResume: () => ({ resumed: false, resumeAttempt: null }),",
+  "    pickFreeLanes: () => [90201, 90202, 90203, 90204, 90205], checkStaleness: skipStaleness,",
+  "  });",
+  "  if (!Array.isArray(r.dispatched) || !Array.isArray(r.refusals)) throw new Error('runReconcileFixDispatch returned an unexpected shape');",
+  "});",
+  "",
+  "await recordAsync('reconcile-ci-heal-pass', null, async () => {",
+  "  const stubDispatch = async (planned) => ({ agentId: null, sessionSlug: 'stub-ci-heal', pr: planned.pr, itemNum: planned.itemNum, lane: planned.lane, unknownTokens: [] });",
+  "  const r = await runReconcileCiHealDispatch({",
+  "    repo: 'chalbert/web-everything', dispatch: stubDispatch, pickFreeLanes: () => [90301, 90302, 90303, 90304, 90305], checkStaleness: skipStaleness,",
+  "  });",
+  "  if (!Array.isArray(r.dispatched) || !Array.isArray(r.refusals)) throw new Error('runReconcileCiHealDispatch returned an unexpected shape');",
+  "});",
+  "",
+  "record('reconcile-review-pass', null, () => {",
+  "  const stubDispatch = () => ({ agentId: null });",
+  "  const r = runReviewTick({",
+  "    repo: 'chalbert/web-everything', dispatch: stubDispatch,",
+  "    tagRound: () => {}, tagStatus: () => {}, holdReconcile: () => [], statusCandidates: () => [],",
+  "  });",
+  "  if (r.reconcileError) throw new Error('reconcile failed: ' + r.reconcileError);",
+  "  if (!Array.isArray(r.dispatched) || !Array.isArray(r.failed)) throw new Error('runReviewTick returned an unexpected shape');",
+  "});",
+  "}",
+  "",
+  "process.stdout.write(JSON.stringify(results));",
+];
+export const DISPATCH_DRY_RUN_SCRIPT = DISPATCH_DRY_RUN_LINES.join('\n');
+
+/** The dispatch modules {@link DISPATCH_DRY_RUN_SCRIPT} runs — {@link checkCodeUnchanged}'s `codeEntries` for
+ *  `dispatch-dry-run`, so skip-unchanged skips it when none of their import closure (which transitively pulls
+ *  in `dispatch-lane.mjs`/`dispatch-lane-io.mjs`/`repo-profile.mjs`/`reconcile-pass.mjs`/`pr-work-unit.mjs`/
+ *  `review-daemon.mjs`'s own dependencies) has changed since the last live-verified build. */
+export const DISPATCH_DRY_RUN_CODE_ENTRIES = Object.freeze([
+  'scripts/operations/review-dispatch.mjs',
+  'scripts/conveyor/reconcile-fix-dispatch.mjs',
+  'scripts/operations/ci-heal-pr-dispatch.mjs',
+  'skills-src/conveyor/review-daemon.mjs',
+]);
+
+async function checkDispatchDryRun({ root, budgets, runChild, env }) {
+  let out;
+  try {
+    out = await runChild('node', ['--input-type=module', '-e', DISPATCH_DRY_RUN_SCRIPT], {
+      cwd: root, timeoutMs: budgets.dispatchDryRunMs, env,
+    });
+  } catch (e) {
+    return { ok: false, detail: `dispatch dry-run child failed: ${failureLine(e)}` };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(out);
+  } catch (e) {
+    return { ok: false, detail: `dispatch dry-run produced unparsable output: ${firstLine(e)}` };
+  }
+  if (!Array.isArray(parsed) || !parsed.length) {
+    return { ok: false, detail: 'dispatch dry-run reported no rows — refusing to treat "nothing ran" as a pass' };
+  }
+  const failures = parsed.filter((r) => !r.ok);
+  if (failures.length) {
+    const detail = failures.map((f) => `${f.kind}${f.pr != null ? ` PR #${f.pr}` : ''}: ${f.error}`).join('; ');
+    return { ok: false, detail: `dispatch dry-run failed (${failures.length}/${parsed.length}): ${detail}` };
+  }
+  return { ok: true, detail: `dispatch dry-run ok — ${parsed.map((r) => r.kind).join(', ')}` };
+}
+
+/**
+ * xp4lw2v — LAST in {@link SMOKE_CHECKS}, and NEVER skipped (no `codeEntries`, so {@link checkCodeUnchanged}
+ * always returns `false` for it): `git status --porcelain` in `root` must be empty after every other check has
+ * run — they are the "one real tick of reads" (a reconcile-pass dry-run per repo, the dispatch dry-run pass)
+ * this smoke's own `#4044` skip-unchanged logic still lets through even on an otherwise-unchanged move. A check
+ * that leaves ANY dirt fails, with the dirty paths in `detail` — this is what would have caught a state writer
+ * dirtying the candidate tree (live 2026-09-25: `.conveyor/unsupported-repo.json`,
+ * `scripts/conveyor/run-scorecards.json`).
+ *
+ * Records the porcelain BEFORE the checks ran too ({@link runLiveSmoke}'s `beforePorcelain`, best-effort) and
+ * reports pre-existing dirt DISTINCTLY from dirt newly introduced by this smoke's own checks — still fails on
+ * either (a dirty tree is a real problem to the caller regardless of which ran first), but names which is
+ * which so a human/daemon reading `detail` is not left guessing whether this smoke run itself is the cause.
+ */
+async function checkTreeStaysClean({ root, budgets, runChild, env, beforePorcelain }) {
+  let out;
+  try {
+    out = await runChild('git', ['status', '--porcelain'], { cwd: root, timeoutMs: budgets.treeStaysCleanMs, env });
+  } catch (e) {
+    return { ok: false, detail: `git status --porcelain failed: ${firstLine(e)}` };
+  }
+  const after = String(out || '').trim();
+  if (!after) return { ok: true, detail: 'git status --porcelain empty — tree stayed clean' };
+  const afterLines = after.split('\n').map((l) => l.trim()).filter(Boolean);
+  const beforeLines = new Set(String(beforePorcelain || '').split('\n').map((l) => l.trim()).filter(Boolean));
+  const newDirt = afterLines.filter((l) => !beforeLines.has(l));
+  const preExisting = afterLines.filter((l) => beforeLines.has(l));
+  const parts = [];
+  if (newDirt.length) parts.push(`${newDirt.length} path(s) newly dirtied by this smoke's own checks: ${newDirt.join(' | ')}`);
+  if (preExisting.length) parts.push(`${preExisting.length} pre-existing dirty path(s) (present before this smoke ran): ${preExisting.join(' | ')}`);
+  return { ok: false, detail: `tree is dirty after the smoke's checks ran — ${parts.join('; ')}` };
+}
+
 /** THE ONE LIST — every live check the gate runs, in order. Each `run(ctx)` gets `{ root, budgets, repos,
  *  sessionSlug, ghChildEnv, runChild }` and must never throw (a throw is still caught by {@link runLiveSmoke},
  *  but a check should report `{ ok:false, detail }` itself so the detail is specific). */
@@ -295,6 +538,10 @@ export const SMOKE_CHECKS = Object.freeze([
   { name: 'gh-api-repo', run: checkGhApiRepo, mayBeTransient: true },
   { name: 'gh-pr-list', run: checkGhPrList, mayBeTransient: true },
   { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false, codeEntries: ['scripts/conveyor/reconcile-pass.mjs'] },
+  // xp4lw2v (epic #4075/#3383) — see the two functions' own docblocks just above for what each covers.
+  { name: 'dispatch-dry-run', run: checkDispatchDryRun, mayBeTransient: false, codeEntries: DISPATCH_DRY_RUN_CODE_ENTRIES },
+  // ALWAYS LAST, NEVER SKIPPED: no `codeEntries`, so `checkCodeUnchanged` never short-circuits it.
+  { name: 'tree-stays-clean', run: checkTreeStaysClean, mayBeTransient: false },
 ]);
 
 /**
@@ -329,10 +576,18 @@ export async function runLiveSmoke({
   const budgets = resolveSmokeBudgets(env);
   const sessionSlug = `smoke-${now}-${randomUUID().slice(0, 8)}`;
   const ghChildEnv = ghDispatchedSessionEnv(env);
+  // xp4lw2v — the porcelain snapshot BEFORE any check below runs, best-effort (never throws, never blocks the
+  // rest of the smoke on a failed read): {@link checkTreeStaysClean} uses it to report pre-existing dirt
+  // distinctly from dirt its own checks introduced. `null` on any failure — the check then treats every dirty
+  // path found afterward as unclassified rather than guessing.
+  let beforePorcelain = null;
+  try {
+    beforePorcelain = await runChild('git', ['status', '--porcelain'], { cwd: root, timeoutMs: budgets.treeStaysCleanMs, env });
+  } catch { /* best-effort — see comment above */ }
   // #4139 — `env` (the caller's OWN, possibly-isolated env) rides alongside `ghChildEnv` (the derived,
   // sanitized-for-gh one) so the lane-pool checks can use the former while the gh checks keep using the
   // latter; see {@link checkLanePoolList}'s comment for why dropping this here silently escaped isolation.
-  const ctx = { root, budgets, repos, sessionSlug, env, ghChildEnv, runChild };
+  const ctx = { root, budgets, repos, sessionSlug, env, ghChildEnv, runChild, beforePorcelain };
   const results = [];
   for (const check of SMOKE_CHECKS) {
     const startedAt = Date.now();
