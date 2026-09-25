@@ -116,6 +116,13 @@ describe('gateFor', () => {
     expect(gateFor('we', { checkoutExists: () => true, weRoot: '/opt/we' })).toBe('node /opt/we/scripts/verify-lane.mjs run --repo=.');
   });
 
+  it('resolves the same gate from any vocabulary (key, gh slug, scope prefix) and defaults WE root to THIS checkout', () => {
+    const byKey = gateFor('frontierui', { home: HOME, checkoutExists: () => true });
+    expect(gateFor('chalbert/frontierui', { home: HOME, checkoutExists: () => true })).toBe(byKey);
+    expect(gateFor('fui:', { home: HOME, checkoutExists: () => true })).toBe(byKey);
+    expect(byKey).toBe(`node ${briefTokensForRepo('we', { checkoutExists: () => true }).WE_ROOT}/scripts/verify-lane.mjs run --repo=.`);
+  });
+
   it('the gate string is brief-safe (no quote / backtick / $ — BRIEF_FREE_TEXT_VALUE_RE)', () => {
     expect(gateFor('we', { checkoutExists: () => true })).toMatch(/^[^`$"\\\n]+$/);
   });
