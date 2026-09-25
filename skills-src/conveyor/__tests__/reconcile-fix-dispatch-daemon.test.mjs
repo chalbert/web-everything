@@ -5,9 +5,13 @@
  *   with fakes exactly like runner.mjs's own `runLoop` is.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS,
   runReconcileFixDispatchAllRepos, FIX_DISPATCH_DAEMON_REPOS, hasStaleMainRefusal,
+  runReconcileCiHealDispatchAllRepos, runTickAllRepos,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -188,5 +192,118 @@ describe('realSleep — regression, live-caught 2026-09-22', () => {
     const start = Date.now();
     await realSleep(20);
     expect(Date.now() - start).toBeGreaterThanOrEqual(15); // loose bound — real timers, not fake ones
+  });
+});
+
+// #xngv3vn (epic #3383/#4075) — LIVE incident: an adversarial review found `we:scripts/operations
+// /ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch` had NO CALLER in any running daemon, so a PR that fell
+// `ci:failed` and was owed a `ci-heal` dispatch by `runReconcilePass`'s own plan just sat there — nothing ever
+// ran it. `runReconcileCiHealDispatchAllRepos` is the per-repo fan-out (this daemon's `fix` half already has
+// one, `runReconcileFixDispatchAllRepos`); `runTickAllRepos` is what actually reaches the daemon's tick.
+describe('runReconcileCiHealDispatchAllRepos — one runReconcileCiHealDispatch call per watched repo, SEQUENTIALLY awaited (#xngv3vn)', () => {
+  it('ticks every repo in the list, awaiting each async call, and merges dispatched/refusals with repo attached', async () => {
+    const calls = [];
+    const tick = vi.fn(async ({ repo }) => {
+      calls.push(repo);
+      return repo === 'repo-a'
+        ? { dispatched: [{ pr: 10 }], refusals: [] }
+        : { dispatched: [], refusals: [{ kind: 'unsupported-repo', prNumber: 20 }] };
+    });
+    const out = await runReconcileCiHealDispatchAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-b' });
+    expect(calls).toEqual(['repo-a', 'repo-b']); // sequential, not raced
+    expect(out.dispatched).toEqual([{ pr: 10, repo: 'repo-a' }]);
+    expect(out.refusals).toEqual([{ kind: 'unsupported-repo', prNumber: 20, repo: 'repo-b' }]);
+  });
+
+  it('one repo\'s rejected promise (a gh outage, a stale-checkout refusal) never stops the others — isolated per repo', async () => {
+    const tick = vi.fn(async ({ repo }) => {
+      if (repo === 'repo-bad') throw new Error('ci-heal-pr-dispatch: behind origin/main');
+      return { dispatched: [{ pr: 1 }], refusals: [] };
+    });
+    const out = await runReconcileCiHealDispatchAllRepos({ repos: ['repo-bad', 'repo-good'], tick });
+    expect(out.dispatched).toEqual([{ pr: 1, repo: 'repo-good' }]);
+    expect(out.refusals).toEqual([{ repo: 'repo-bad', prNumber: null, kind: 'tick-failed', why: 'ci-heal-pr-dispatch: behind origin/main' }]);
+    expect(out.repos[0]).toEqual({ repo: 'repo-bad', error: 'ci-heal-pr-dispatch: behind origin/main' });
+  });
+
+  it('defaults to FIX_DISPATCH_DAEMON_REPOS and to the real runReconcileCiHealDispatch when nothing is injected', async () => {
+    const tick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const out = await runReconcileCiHealDispatchAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(FIX_DISPATCH_DAEMON_REPOS.length);
+    expect(out.repos.map((r) => r.repo)).toEqual(FIX_DISPATCH_DAEMON_REPOS);
+  });
+});
+
+describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal dispatch, merged (#xngv3vn)', () => {
+  it('awaits the async ci-heal half and merges both halves\' dispatched/refusals into one result', async () => {
+    const fixTick = vi.fn(({ repo }) => ({ dispatched: repo === 'repo-a' ? [{ pr: 1 }] : [], refusals: [] }));
+    const ciHealTick = vi.fn(async ({ repo }) => ({ dispatched: repo === 'repo-b' ? [{ pr: 2 }] : [], refusals: [] }));
+    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick });
+    expect(fixTick).toHaveBeenCalledTimes(2);
+    expect(ciHealTick).toHaveBeenCalledTimes(2);
+    expect(out.dispatched).toEqual([{ pr: 1, repo: 'repo-a' }, { pr: 2, repo: 'repo-b' }]);
+    expect(out.refusals).toEqual([]);
+    expect(out.repos.map((r) => r.repo)).toEqual(['repo-a', 'repo-b']);
+    expect(out.ciHeal.dispatched).toEqual([{ pr: 2, repo: 'repo-b' }]); // the ci-heal half's own detail survives the merge
+  });
+
+  it('a fix-side failure for one repo does not skip that SAME repo\'s ci-heal attempt, and vice versa', async () => {
+    const fixTick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('fix broke'); return { dispatched: [], refusals: [] }; });
+    const ciHealTick = vi.fn(async ({ repo }) => {
+      if (repo === 'repo-b') throw new Error('ci-heal broke');
+      return { dispatched: [{ pr: 9, repo }], refusals: [] };
+    });
+    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick });
+    expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' }); // ci-heal still ran for repo-a despite fix's own failure there
+    expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-b' }); // fix still ran for repo-b despite ci-heal's own failure there
+    expect(out.refusals).toEqual(expect.arrayContaining([
+      { repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'fix broke' },
+      { repo: 'repo-b', prNumber: null, kind: 'tick-failed', why: 'ci-heal broke' },
+    ]));
+    // repo-a's ci-heal succeeded (dispatched a fix's own {pr:9, repo:'repo-a'}) even though repo-a's fix failed.
+    expect(out.dispatched).toEqual(expect.arrayContaining([{ pr: 9, repo: 'repo-a' }]));
+  });
+
+  it('a ci-heal-side stale-main refusal is visible to hasStaleMainRefusal exactly like a fix-side one', async () => {
+    let message = null;
+    try { assertMainNotStale('/repo', () => ({ action: 'warn', reason: 'diverged', behind: 1, ahead: 5, dirty: false })); }
+    catch (e) { message = e.message; }
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    // The ci-heal half throws the REAL `assertMainNotStale` refusal — `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`
+    // calls that same guard near its own top, exactly as `runReconcileFixDispatch` already does.
+    const ciHealTick = vi.fn(async () => { throw new Error(message); });
+    const out = await runTickAllRepos({ repos: ['chalbert/web-everything'], fixTick, ciHealTick });
+    // Proves the WIRING: hasStaleMainRefusal reads whatever `runTickAllRepos` puts in `.refusals`, regardless
+    // of which half (fix or ci-heal) produced it — a ci-heal-side entry is never dropped or siloed from the
+    // SAME self-resync signal (`withSelfSync`'s `hasStaleRefusal` option) a fix-side one already triggers.
+    expect(hasStaleMainRefusal(out)).toBe(true);
+  });
+});
+
+// #xngv3vn — SOURCE-CONTRACT proof that the REAL `buildCliDaemonEffects` (no injection point for its own
+// `tickOnce`, which always builds the real dispatch functions — see this file's existing `buildCliDaemonEffects`
+// suite, which deliberately never CALLS `tickOnce`, only checks its shape, for the same reason) is wired to
+// `runTickAllRepos` and not to the old fix-only `runReconcileFixDispatchAllRepos()` call it used to make. This
+// mirrors this repo's own established norm for proving a call-site wiring fact inside code that is expensive or
+// unsafe to execute directly in a unit test (see e.g. `merge-ai-prs-ai-detection-and-drain-ordering.test.mjs`'s
+// #984 F2 block, or this fix's sibling `merge-ai-prs-merge-trace-post-confirm.test.mjs`).
+describe('buildCliDaemonEffects — tickOnce is wired to runTickAllRepos, not the old fix-only call (#xngv3vn)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
+
+  it('tickOnce calls runTickAllRepos()', () => {
+    const m = src.match(/tickOnce: \(\) => (\w+)\(\),/);
+    expect(m).not.toBeNull();
+    expect(m[1]).toBe('runTickAllRepos');
+  });
+
+  it('runTickAllRepos itself calls BOTH runReconcileFixDispatchAllRepos and runReconcileCiHealDispatchAllRepos', () => {
+    const start = src.indexOf('export async function runTickAllRepos(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toMatch(/runReconcileFixDispatchAllRepos\(/);
+    expect(body).toMatch(/await runReconcileCiHealDispatchAllRepos\(/);
   });
 });

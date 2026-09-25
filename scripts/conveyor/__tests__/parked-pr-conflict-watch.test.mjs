@@ -35,6 +35,7 @@ import {
   buildSupersedeStandDownComment,
   defaultListMainStatutePatchesSinceMergeBase,
   COMPARE_FILES_CAP,
+  defaultComputeConflictDisposition,
 } from '../parked-pr-conflict-watch.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -1443,6 +1444,164 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(r.newlyResolved).toBe(true);
     expect(routed).toEqual([]); // no review:changes to rearm — the approval stands
     expect(provider.calls).toEqual([['setLabels', 'o/n', 2514, { add: undefined, remove: [CONFLICT_LABEL] }]]);
+  });
+
+  describe('#xngv3vn — defaultComputeConflictDisposition (injected exec, no real git/network)', () => {
+    it('no headRefName → null, no git call made at all', () => {
+      const exec = () => { throw new Error('must not be called'); };
+      expect(defaultComputeConflictDisposition({ pr: {}, exec })).toBeNull();
+    });
+
+    it('a clean merge-tree (fetch + probe both succeed) → "clean"', () => {
+      const calls = [];
+      const exec = (cmd, args) => { calls.push([cmd, args[0]]); return 'abc123tree\n'; };
+      const disp = defaultComputeConflictDisposition({ pr: { headRefName: 'lane/x', baseRefName: 'main' }, exec });
+      expect(disp).toBe('clean');
+      expect(calls[0]).toEqual(['git', 'fetch']);
+      expect(calls[1]).toEqual(['git', 'merge-tree']);
+    });
+
+    it('a conflict confined to the manifest → "manifest-only"', () => {
+      const conflictOut = [
+        'abc123tree',
+        '100644 aaa 2\t.lane-manifest.json',
+        '100644 bbb 3\t.lane-manifest.json',
+        '',
+        'CONFLICT (content): Merge conflict in .lane-manifest.json',
+      ].join('\n');
+      const exec = (cmd, args) => {
+        if (args[0] === 'merge-tree') { const e = new Error('exit 1'); e.status = 1; e.stdout = conflictOut; throw e; }
+        return '';
+      };
+      expect(defaultComputeConflictDisposition({ pr: { headRefName: 'lane/x' }, exec })).toBe('manifest-only');
+    });
+
+    it('a conflict touching a real file beyond the manifest → "real" — the #2596 shape', () => {
+      const conflictOut = [
+        'abc123tree',
+        '100644 aaa 2\tscripts/merge-ai-prs.mjs',
+        '100644 bbb 3\tscripts/merge-ai-prs.mjs',
+        '',
+        'CONFLICT (content): Merge conflict in scripts/merge-ai-prs.mjs',
+      ].join('\n');
+      const exec = (cmd, args) => {
+        if (args[0] === 'merge-tree') { const e = new Error('exit 1'); e.status = 1; e.stdout = conflictOut; throw e; }
+        return '';
+      };
+      expect(defaultComputeConflictDisposition({ pr: { headRefName: 'lane/x' }, exec })).toBe('real');
+    });
+
+    it('a fetch failure is best-effort (swallowed) — the merge-tree probe still runs', () => {
+      const exec = (cmd, args) => {
+        if (args[0] === 'fetch') throw new Error('no route to host');
+        return 'abc123tree\n';
+      };
+      expect(defaultComputeConflictDisposition({ pr: { headRefName: 'lane/x' }, exec })).toBe('clean');
+    });
+
+    it('an unparseable merge-tree failure (no stdout at all) → null, never guessed', () => {
+      const exec = (cmd, args) => {
+        if (args[0] === 'merge-tree') { const e = new Error('transient'); e.status = 1; e.stdout = ''; throw e; }
+        return '';
+      };
+      expect(defaultComputeConflictDisposition({ pr: { headRefName: 'lane/x' }, exec })).toBeNull();
+    });
+  });
+
+  // #xngv3vn (epic #3383/#4075) — LIVE INCIDENT, chalbert/web-everything#2596, 2026-09-24: an approved/queued
+  // PR drifted into a REAL content conflict (not the shared manifest) and the queued-conflict watch deferred it
+  // the full 30-minute `QUEUED_CONFLICT_GRACE_MS` to "give the drain first try" — but the drain's ONLY
+  // self-heal path is `we:scripts/lib/rebase-drop-manifest.mjs`'s manifest-only rebase-drop, which cannot touch
+  // a real conflict no matter how long it waits. `computeConflictDisposition` (default:
+  // `defaultComputeConflictDisposition`, a real `git merge-tree` probe) lets the grace-expiry branch tell the
+  // two shapes apart BEFORE waiting on age at all, so a real conflict is routed to the fixer immediately and
+  // the grace is spent only on the one shape it can actually heal.
+  describe('#xngv3vn — the queued-conflict grace is skipped entirely for a REAL (non-manifest) conflict', () => {
+    it('a REAL conflict (computeConflictDisposition → "real") is bounced IMMEDIATELY, even with age 0 / just labelled', () => {
+      const provider = fakeProvider(); const routed = [];
+      const listPrs = () => [{ number: 2596, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL) }];
+      const [r] = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+        computeConflictDisposition: () => 'real',
+        labelAgeMs: () => { throw new Error('must not be called — a real conflict never waits on age'); },
+        listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+      });
+      expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+      expect(r.conflictDisposition).toBe('real');
+      expect(routed).toEqual([2596]); // bounced to the fixer at once — not deferred to the drain
+    });
+
+    it('a manifest-only conflict (computeConflictDisposition → "manifest-only") is UNCHANGED — still waits out the grace', () => {
+      const routed = [];
+      const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', CONFLICT_LABEL) }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider: fakeProvider(),
+        postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+        computeConflictDisposition: () => 'manifest-only',
+        labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS - 1000, // grace not yet elapsed
+      });
+      expect(results).toEqual([]); // nothing happens yet — the drain still has its turn
+      expect(routed).toEqual([]);
+    });
+
+    it('a manifest-only conflict still bounces once the grace genuinely elapses (unchanged pre-#xngv3vn behaviour)', () => {
+      const routed = [];
+      const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', CONFLICT_LABEL) }];
+      const [r] = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider: fakeProvider(),
+        postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+        computeConflictDisposition: () => 'manifest-only',
+        labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS + 1000,
+        listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+      });
+      expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+      expect(routed).toEqual([2514]);
+    });
+
+    it('an UNCLASSIFIABLE conflict (computeConflictDisposition → null) fails toward the existing wait — the safe direction', () => {
+      const routed = [];
+      const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', CONFLICT_LABEL) }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider: fakeProvider(),
+        postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+        computeConflictDisposition: () => null,
+        labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS - 1000,
+      });
+      expect(results).toEqual([]);
+      expect(routed).toEqual([]);
+    });
+
+    it('a REAL conflict is reported even in dry-run — never silent about why it skipped the wait', () => {
+      const listPrs = () => [{ number: 2596, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL) }];
+      const [r] = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider: fakeProvider(), dryRun: true,
+        computeConflictDisposition: () => 'real',
+        labelAgeMs: () => { throw new Error('must not be called'); },
+        listPrFiles: () => [{ path: 'scripts/x.mjs' }],
+      });
+      expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+      expect(r.conflictDisposition).toBe('real');
+    });
+
+    it('a REAL conflict on a STACKED-base PR still defers to reconcile-core, never bounced through postFinding', () => {
+      // #3383's stacked-base carve-out stays authoritative regardless of disposition: the drain never lands a
+      // stacked PR at all, so "route to the fixer immediately" (which strips review:accepted) would be worse
+      // than today's behaviour, not better — reconcile-core's own mechanical rebase already owns this case.
+      const routed = [];
+      const listPrs = () => [{
+        number: 2578, mergeable: 'CONFLICTING', baseRefName: 'lane/3681-ratify-daemon-lifecycle',
+        labels: L('review:accepted', CONFLICT_LABEL),
+      }];
+      const [r] = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider: fakeProvider(),
+        postFinding: (o) => routed.push(o.pr.number), postStandDown: () => routed.push('sd'),
+        computeConflictDisposition: () => 'real',
+        listPrFiles: () => { throw new Error('must not be called for a stacked PR'); },
+      });
+      expect(r.routedTo).toBe('deferred-to-reconcile (stacked base — see reconcile-core.mjs#3383, review labels untouched)');
+      expect(routed).toEqual([]);
+    });
   });
 
   it('defaultConflictLabelAgeMs reads the LATEST labeled event across pages; unparseable → null', () => {
