@@ -133,15 +133,54 @@ import { CONSTELLATION_REPOS, repoKeyForDir } from '../lib/constellation-repos.m
  *  list`, never WE's. `lane-pool.mjs`'s acquire-native backstop (the OTHER consumer of this widened
  *  `itemNumFromSession`) was ALREADY per-repo-scoped before this change (its own `gh pr list` runs with
  *  `cwd: repo.referencePath`, i.e. inside the ONE pool being acquired against) — so it needed no change at all
- *  to safely benefit from the wider match. */
+ *  to safely benefit from the wider match.
+ *
+ *  #x5wm9ot — WIDENED AGAIN, and the return shape SPLIT. Two separate bugs shared this one function:
+ *
+ *  (1) It matched `parsed.itemKind || parsed.kind === 'fix'` — every OTHER `PR_KIND` (`review`, `ci-heal`,
+ *      `inspect`; see `session-slug.mjs`) fell through to `null`. Those sessions are just as PR-keyed as `fix`
+ *      — `review-<PR>`, `ci-heal-<PR>`, `inspect-<PR>` all encode a PR number the exact same way `fix-<PR>`
+ *      does — so a dead review/ci-heal/inspect lane was invisible to BOTH consumers of this match (the
+ *      PR-terminal axis below, and `sessionGoneForLease`'s "is this a dispatcher-minted name at all" gate),
+ *      reclaimed only by the 4h TTL backstop. Now every `PR_KIND` matches, not `fix` alone.
+ *
+ *  (2) `itemNumFromSession` handed BOTH namespaces out through one name and one field. `fix-<PR>`'s `id` IS a
+ *      PR's own number (`mintSessionSlug({kind:'fix', id: pr})` at every call site — `review-status-tag.mjs`,
+ *      `parked-pr-progress-watch.mjs` — always mints it FROM a PR number), but every caller that fed
+ *      `itemNumFromSession`'s result into `prStatesFromList`'s Map (below, in this file, AND in
+ *      `lane-pool.mjs`'s `deadLeasePlan`) was looking a PR number up in a Map keyed by the ITEM number embedded
+ *      in a PR's OWN head ref (`lane/<num>-*`) — a different namespace, coincidentally equal only by chance.
+ *      `lane-pool.mjs`'s `cmdReleaseAllPools --item=N` inherited the identical mixup: a `fix-<PR>` lease could
+ *      match a land-time `--item=N` sweep whenever that PR's number happened to equal the just-landed item's.
+ *      `itemNumFromSession` now returns a num ONLY for a TRUE item-kind session (`conveyor-`/`prepare-`/
+ *      `prepare-decision-`) — never for any `PR_KIND` — and the new {@link prNumFromSession} is the ONLY way
+ *      to read a PR_KIND session's own PR number back out. A caller needing "is this session's target PR
+ *      merged/closed" must go through `prNumFromSession` + a PR-number-keyed Map (see `prStatesByPrNumber`
+ *      below), never through `itemNumFromSession` + the head-ref-keyed one. */
 function matchSessionSlug(session) {
   const parsed = parseSessionSlug(session);
-  return parsed && (parsed.itemKind || parsed.kind === 'fix')
-    ? { num: parsed.id, tag: parsed.attempt, repo: parsed.repo } : null;
+  return parsed ? { num: parsed.id, tag: parsed.attempt, repo: parsed.repo, itemKind: parsed.itemKind } : null;
 }
 
+/** A TRUE backlog-item number (`conveyor-`/`prepare-`/`prepare-decision-<id>`) — never a PR_KIND session's own
+ *  PR number (see {@link prNumFromSession} for that, a DIFFERENT namespace this function must never mix in). */
 export function itemNumFromSession(session) {
-  return matchSessionSlug(session)?.num ?? null;
+  const m = matchSessionSlug(session);
+  return m && m.itemKind ? m.num : null;
+}
+
+/** The PR number a PR_KIND session's slug names (`review-`/`fix-`/`ci-heal-`/`inspect-<PR>`) — never a backlog
+ *  item number (see {@link itemNumFromSession}). `null` for an item-kind session or an unrecognized name. */
+export function prNumFromSession(session) {
+  const m = matchSessionSlug(session);
+  return m && !m.itemKind ? m.num : null;
+}
+
+/** Is `session` ANY dispatcher-minted slug this grammar recognizes — item-kind or PR-kind alike? The general
+ *  "recognized name" gate `sessionGoneForLease` needs (never `itemNumFromSession`, which is now item-kind-only
+ *  and would wrongly read every PR_KIND session as "not dispatcher-minted, don't guess" — see #x5wm9ot). */
+function isDispatcherMintedSession(session) {
+  return matchSessionSlug(session) !== null;
 }
 
 /**
@@ -266,18 +305,41 @@ export function classifyReap(lease, { nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES *
  * @param {Array<{headRefName?:string, state?:string, mergedAt?:string|null}>} prs
  * @returns {Map<string,'open'|'merged'|'closed'>}
  */
-export function prStatesFromList(prs) {
-  const RANK = { open: 3, merged: 2, closed: 1 };
-  const byNum = new Map();
+const PR_STATE_RANK = { open: 3, merged: 2, closed: 1 };
+
+/** The one terminal-state reduction both `prStatesFromList` (keyed by item num) and `prStatesByPrNumber` (keyed
+ *  by the PR's OWN number) share — same "open wins, then merged over closed" priority, different key function,
+ *  never two separately-maintained copies of the same rank table. */
+function reduceTerminalStates(prs, keyFor) {
+  const byKey = new Map();
   for (const pr of Array.isArray(prs) ? prs : []) {
-    const num = laneRefItemNum(pr?.headRefName);
-    if (!num) continue;
-    const s = String(pr.state || '').toUpperCase();
-    const state = pr.mergedAt || s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
-    const prev = byNum.get(num);
-    if (!prev || RANK[state] > RANK[prev]) byNum.set(num, state); // open wins; then merged over closed
+    const key = keyFor(pr);
+    if (!key) continue;
+    const s = String(pr?.state || '').toUpperCase();
+    const state = pr?.mergedAt || s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
+    const prev = byKey.get(key);
+    if (!prev || PR_STATE_RANK[state] > PR_STATE_RANK[prev]) byKey.set(key, state); // open wins; then merged over closed
   }
-  return byNum;
+  return byKey;
+}
+
+export function prStatesFromList(prs) {
+  return reduceTerminalStates(prs, (pr) => laneRefItemNum(pr?.headRefName));
+}
+
+/**
+ * Reduce a parsed `gh pr list` array → a Map of PR-NUMBER → terminal state — the namespace a PR_KIND session
+ * (`review-`/`fix-`/`ci-heal-`/`inspect-<PR>`, via {@link prNumFromSession}) actually names, DISTINCT from
+ * {@link prStatesFromList}'s item-number-keyed Map (via a PR's head ref). #x5wm9ot: before this, the ONLY
+ * PR-state Map any caller had was the head-ref-keyed one, so a `fix-<PR>` session's PR-terminal check used the
+ * PR's own number as a key into a Map keyed by a DIFFERENT number (the couple's item id) — right only by
+ * coincidence. Same "open wins" safety as `prStatesFromList` — a live retry PR opened under the SAME number
+ * (`gh` never reuses a PR number) can't arise, so this needs no retry-suffix collapse.
+ * @param {Array<{number?:number, state?:string, mergedAt?:string|null}>} prs
+ * @returns {Map<string,'open'|'merged'|'closed'>}
+ */
+export function prStatesByPrNumber(prs) {
+  return reduceTerminalStates(prs, (pr) => (pr?.number != null ? String(pr.number) : null));
 }
 
 /**
@@ -296,6 +358,16 @@ export const AGENT_GONE_STATES = new Set(['done', 'failed', 'stopped']);
  * split. `kind !== 'background'` rows (a human's own interactive terminal session) are excluded — mirrors
  * `session-reaper.mjs`'s own absolute guard, and matters here because an interactive session's `name` is never
  * dispatcher-minted but nothing stops it coincidentally colliding with one.
+ *
+ * #x2psfwz — DUPLICATE NAMES NEVER LET A TERMINAL ROW MASK A LIVE ONE. A PR_KIND session name (`review-`/
+ * `fix-`/`ci-heal-`/`inspect-<PR>`) carries no attempt suffix, so a round-2 dispatch for the same PR reuses the
+ * exact name round 1 used — and this listing can legitimately carry TWO rows for that one name (a round-1 row
+ * `claude agents` has not pruned yet, and round-2's own live one), in an order this CLI documents nowhere. This
+ * used to be a bare `.set()` per row, so whichever row happened to come LAST in the array won — a live round-2
+ * session could be masked as `done`/`failed`/`stopped` by a stale round-1 duplicate that simply sorted after
+ * it, entirely by listing order, not recency. Now a TERMINAL reading never overwrites a LIVE one already
+ * recorded for the same name (a live-over-live or terminal-over-terminal overwrite is harmless either way, so
+ * this is the one asymmetric case that needs guarding).
  * @param {Array<{kind?:string, name?:string, state?:string}>} sessions
  * @returns {Map<string,string|null>}
  */
@@ -303,7 +375,14 @@ export function sessionStateByName(sessions) {
   const byName = new Map();
   for (const s of Array.isArray(sessions) ? sessions : []) {
     if (!s || typeof s !== 'object' || s.kind !== 'background') continue;
-    if (typeof s.name === 'string' && s.name) byName.set(s.name, s.state ?? null);
+    if (typeof s.name !== 'string' || !s.name) continue;
+    const state = s.state ?? null;
+    if (byName.has(s.name)) {
+      const existingIsLive = !AGENT_GONE_STATES.has(byName.get(s.name));
+      const newIsTerminal = AGENT_GONE_STATES.has(state);
+      if (existingIsLive && newIsTerminal) continue; // keep the live reading; a duplicate terminal row never masks it
+    }
+    byName.set(s.name, state);
   }
   return byName;
 }
@@ -384,7 +463,11 @@ export function sessionStatesForReap(sessions) {
  */
 export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000 } = {}) {
   const session = lease && typeof lease.session === 'string' ? lease.session : null;
-  if (!session || itemNumFromSession(session) === null) return null; // not a dispatcher-minted name — don't guess
+  // #x5wm9ot — was `itemNumFromSession(session) === null`, which after that function narrowed to item-kind-only
+  // now reads EVERY PR_KIND session (review-/fix-/ci-heal-/inspect-) as "not dispatcher-minted, don't guess" —
+  // exactly the TTL-only fallback bug #2 named. `isDispatcherMintedSession` is the general recognized-name
+  // gate this check actually means; it matches every kind `parseSessionSlug` accepts, item or PR alike.
+  if (!session || !isDispatcherMintedSession(session)) return null; // not a dispatcher-minted name — don't guess
   if (!(sessionStates instanceof Map)) return null; // listing unavailable/all-empty this pass — axis off
   if (!sessionStates.has(session)) {
     // Absence alone is ambiguous until the lease has outlived the listing's own visibility lag.
@@ -484,17 +567,23 @@ export function pidAliveForLease(lease) {
 }
 
 /**
- * ONE `gh pr list` PER DISTINCT REPO among this pass's held leases → THAT repo's own Map of item-num → terminal
- * PR state (`merged` / `closed` / `open`), keyed by matching each PR's head ref `lane/<num>-*`. Terminal states
- * win over `open` so a couple's merged WE PR reads `merged`.
+ * ONE `gh pr list` PER DISTINCT REPO among this pass's held leases → THAT repo's own PAIR of PR-state Maps: an
+ * item-num-keyed one (`byItem`, matching each PR's head ref `lane/<num>-*` — for `conveyor-`/`prepare-`/
+ * `prepare-decision-<item>` leases) and a PR-number-keyed one (`byPr` — for `review-`/`fix-`/`ci-heal-`/
+ * `inspect-<PR>` leases, #x5wm9ot). Terminal states win over `open` so a couple's merged WE PR reads `merged`.
  *
  * #xr4ygg7 (multi-repo slice 9) — REPLACES the old single, ALWAYS-WE read (`fetchPrStates`, no `repoKey`
- * parameter at all): now that {@link itemNumFromSession} resolves a `fix-<tag>-<id>` session's num for ANY
+ * parameter at all): now that {@link prNumFromSession} resolves a `fix-<tag>-<id>` session's PR num for ANY
  * constellation repo (see its own docblock), a plateau-app item "49" and a WE item "49" are BOTH real, DISTINCT
  * lookup keys — reading them out of ONE shared Map would let an unrelated WE PR #49 merging read as "plateau-
  * app's own item 49 is done", reclaiming a lane whose real work is still in flight (the reap axis this file
  * exists to gate SAFELY, per its own header). Scoping the `gh pr list` to `repoKey`'s own slug is what keeps a
  * WE lookup and a plateau-app lookup from ever sharing a Map.
+ *
+ * #x5wm9ot — split into `{byItem, byPr}` (was a bare `Map`): a `fix-<PR>` (or `review-`/`ci-heal-`/`inspect-`)
+ * session's PR-state check must key off the PR's OWN number, never off `byItem`'s head-ref-derived item number
+ * — see {@link prStatesByPrNumber}'s own docblock for the exact mixup this replaces. Both Maps are reduced from
+ * the SAME one `gh pr list` call — no second fetch.
  *
  * @param {string} repoKey - which constellation repo's PR list to read (`'we'`/`'frontierui'`/`'plateau-app'`).
  * @param {object} flags - the CLI flags; `--no-check-prs` disables the axis globally, `--pr-repo=<owner/name>`
@@ -502,8 +591,8 @@ export function pidAliveForLease(lease) {
  *   real constellation slug, never the override.
  * @param {{exec?:Function}} [o] - `exec` is injectable (mirrors `reconcile-fix-dispatch.mjs#freeLaneNumbers`'s
  *   own convention) so a unit test can assert the exact `--repo` argument without touching real `gh`.
- * @returns {Map<string,string>|null} null = axis off for this repo this run (gh failed, `--no-check-prs`, or
- *   `repoKey` has no known slug).
+ * @returns {{byItem:Map<string,string>, byPr:Map<string,string>}|null} null = axis off for this repo this run
+ *   (gh failed, `--no-check-prs`, or `repoKey` has no known slug).
  */
 export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {}) {
   if (flags['no-check-prs']) return null;
@@ -518,7 +607,7 @@ export function fetchPrStatesForRepo(repoKey, flags, { exec = execFileSync } = {
     log(`  ⚠ gh pr list (${slug}) failed — PR-terminal reap axis OFF for ${repoKey} this run (TTL-stale still applies): ${String(e?.message || e).split('\n')[0]}`);
     return null;
   }
-  return prStatesFromList(prs); // pure "open wins" reduction — see prStatesFromList
+  return { byItem: prStatesFromList(prs), byPr: prStatesByPrNumber(prs) }; // pure "open wins" reductions — one fetch, two keyspaces
 }
 
 /**
@@ -603,9 +692,16 @@ function main(argv) {
   const prStatesByRepo = new Map(distinctRepoKeys.map((repoKey) => [repoKey, fetchPrStatesForRepo(repoKey, flags)]));
 
   const signalsFor = (c) => {
-    const num = itemNumFromSession(c.lease?.session);
+    // #x5wm9ot — an item-kind session (`conveyor-`/`prepare-`/`prepare-decision-`) checks `byItem` by its item
+    // number; a PR_KIND session (`review-`/`fix-`/`ci-heal-`/`inspect-`) checks `byPr` by its OWN PR number —
+    // never the other Map with the other kind's number (the exact bug this split fixes; see `matchSessionSlug`
+    // and `fetchPrStatesForRepo`'s own docblocks).
+    const itemNum = itemNumFromSession(c.lease?.session);
+    const prNum = prNumFromSession(c.lease?.session);
     const repoStates = c.repoKey ? prStatesByRepo.get(c.repoKey) : null;
-    const prState = repoStates && num ? repoStates.get(num) ?? null : null;
+    const prState = repoStates
+      ? (itemNum != null ? repoStates.byItem.get(itemNum) : prNum != null ? repoStates.byPr.get(prNum) : null) ?? null
+      : null;
     return { prState, sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs }), pidAlive: pidAliveForLease(c.lease) };
   };
   const { reap, keep } = reapPlan(candidates, { nowMs, ttlMs, signalsFor });
