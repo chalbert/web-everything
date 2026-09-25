@@ -876,3 +876,129 @@ describe('findUnsafeLocalState / planRebuild (pure core)', () => {
     expect(plan).toEqual({ ok: false, reason: 'main-unresolved' });
   });
 });
+
+// ── pinned overlays — the 2026-09-25 self-destruct guard ────────────────────────────────────────────────────
+// Live incident: #2625 (the overlay that CARRIES daemon-rebuild.mjs) was loaded on the review/fix clone. main
+// moved, the overlay conflicted, and the rebuild conflict-dropped its own mechanism — rebuilding the clone onto
+// plain main, whose code had no rebuild or overlay list at all. These tests replay that shape with real git.
+describe('rebuildClone — pinned overlays never conflict-drop (self-destruct guard)', () => {
+  /** An overlay that ships the rebuild mechanism itself, plus a file main will later conflict on. */
+  function pushMechanismOverlay(originDir, ref) {
+    return pushBranch(originDir, ref, (dir) => {
+      writeFile(dir, 'scripts/lib/daemon-rebuild.mjs', '// the rebuild mechanism\n');
+      writeFile(dir, 'shared.txt', 'overlay change\n');
+    });
+  }
+  function seedShared(cloneDir) {
+    writeFile(cloneDir, 'shared.txt', 'original\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'seed shared.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+  }
+
+  it('an overlay carrying the rebuild mechanism that starts to conflict REFUSES: tree, HEAD and list untouched', async () => {
+    const { originDir, cloneDir, env, stateDir } = makeFixture();
+    seedShared(cloneDir);
+    pushMechanismOverlay(originDir, 'lane/4044-daemon-rebuild-and-clone-lock');
+    addOverlay(cloneDir, { ref: 'lane/4044-daemon-rebuild-and-clone-lock', pr: 2625 }, { env });
+
+    // Tick 1: the overlay applies cleanly and is adopted — the clone now RUNS the mechanism.
+    const first = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS,
+    });
+    expect(first.moved).toBe(true);
+    expect(existsSync(join(cloneDir, 'scripts/lib/daemon-rebuild.mjs'))).toBe(true);
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    // main moves and now conflicts with the overlay.
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+
+    // Tick 2: must refuse, never rebuild onto plain main.
+    const runSmoke = passSmoke();
+    const second = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => 'OPEN', lockOpts: LOCK_OPTS,
+    });
+    expect(second.moved).toBe(false);
+    expect(second.reason).toBe('pinned-overlay-conflict');
+    expect(second.detail).toMatchObject({
+      ref: 'lane/4044-daemon-rebuild-and-clone-lock', pr: 2625, dropReason: 'conflict', pinnedBy: 'mechanism',
+    });
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(existsSync(join(cloneDir, 'scripts/lib/daemon-rebuild.mjs'))).toBe(true);
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/4044-daemon-rebuild-and-clone-lock']);
+    expect(second.alerts.some((a) => a.kind === 'overlay-conflict-dropped')).toBe(false);
+    const alert = second.alerts.find((a) => a.kind === 'pinned-overlay-conflict');
+    expect(alert?.detail?.message).toBe('pinned overlay conflicts with main — needs a rebase');
+    // …and it lands in the durable alerts log the operator reads.
+    const log = readdirSync(stateDir).find((f) => f.endsWith('.alerts.jsonl'));
+    expect(readFileSync(join(stateDir, log), 'utf8')).toContain('pinned overlay conflicts with main — needs a rebase');
+  });
+
+  it('an overlay registered pinned:true refuses on conflict even when it touches no mechanism file', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushBranch(originDir, 'lane/pinned-plain', (dir) => writeFile(dir, 'shared.txt', 'overlay change\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/pinned-plain', pinned: true }, { env });
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('pinned-overlay-conflict');
+    expect(result.detail?.pinnedBy).toBe('flag');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readOverlays(cloneDir, { env })[0]).toMatchObject({ ref: 'lane/pinned-plain', pinned: true });
+  });
+
+  it('a pinned overlay whose ref vanished (PR not merged) refuses instead of auto-dropping', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/pinned-gone', (dir) => writeFile(dir, 'g.txt', 'g\n'));
+    addOverlay(cloneDir, { ref: 'lane/pinned-gone', pinned: true }, { env });
+    deleteBranch(originDir, 'lane/pinned-gone');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('pinned-overlay-unavailable');
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/pinned-gone']);
+  });
+
+  it('a pinned overlay whose PR MERGED still leaves the list normally (main has it now)', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushMechanismOverlay(originDir, 'lane/pinned-merged');
+    addOverlay(cloneDir, { ref: 'lane/pinned-merged', pr: 7, pinned: true }, { env });
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'MERGED', lockOpts: LOCK_OPTS,
+    });
+    expect(result.reason).not.toBe('pinned-overlay-conflict');
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+  });
+
+  it('a NON-pinned, non-mechanism overlay still conflict-drops as before', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushBranch(originDir, 'lane/plain', (dir) => writeFile(dir, 'shared.txt', 'overlay change\n'));
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/plain' }, { env });
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.moved).toBe(true);
+    expect(result.alerts.some((a) => a.kind === 'overlay-conflict-dropped')).toBe(true);
+  });
+
+  it('dryRunRebuild reports refuse for a conflicting pinned overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedShared(cloneDir);
+    pushMechanismOverlay(originDir, 'lane/mech');
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/mech' }, { env });
+    const dry = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(dry.wouldDo).toBe('refuse');
+    expect(dry.plan.reason).toBe('pinned-overlay-conflict');
+  });
+});

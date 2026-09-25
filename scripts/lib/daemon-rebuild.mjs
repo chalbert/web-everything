@@ -112,6 +112,46 @@ function verifyRev(git, rev) {
   return r.status === 0 && out ? out : null;
 }
 
+// ── pinned overlays — the self-destruct guard ───────────────────────────────────────────────────────────────
+
+/**
+ * The files that ARE the rebuild mechanism: the daemon tick imports these to rebuild itself. An overlay that
+ * changes any of them is "load-bearing" for the clone. Dropping it for a conflict would rebuild the clone onto
+ * a tree whose code no longer knows how to rebuild (or re-add) it. That happened live on 2026-09-25: #2625 was
+ * the overlay carrying this very module; main moved, the overlay conflicted, the rebuild conflict-dropped it,
+ * and the clone fell back to main's old merge-on-top self-sync with no overlay list at all.
+ */
+export const REBUILD_MECHANISM_PATHS = Object.freeze([
+  'scripts/lib/daemon-rebuild.mjs',
+  'scripts/lib/daemon-overlays.mjs',
+  'scripts/lib/daemon-clone-lock.mjs',
+  'scripts/lib/daemon-self-sync.mjs',
+  'scripts/lib/daemon-live-smoke.mjs',
+  'scripts/daemon-overlay.mjs',
+]);
+
+/** The one human-readable line every pinned refusal carries. */
+export const PINNED_OVERLAY_MESSAGE = 'pinned overlay conflicts with main — needs a rebase';
+/** …and the one a pinned overlay carries when its ref/PR went away without main having it. */
+export const PINNED_OVERLAY_GONE_MESSAGE = 'pinned overlay is gone (ref deleted or PR closed) but main does not have it — re-register or unpin it';
+
+/**
+ * Is this overlay pinned? Either the entry says `pinned:true`, or its own changes (merge-base(main, tip)..tip)
+ * touch {@link REBUILD_MECHANISM_PATHS}. Fail closed: if git cannot answer, treat it as pinned. A wrong "pinned"
+ * only makes the rebuild wait for a rebase; a wrong "not pinned" can destroy the mechanism.
+ * @returns {{pinned:boolean, why:'flag'|'mechanism'|'unknown'|null}}
+ */
+function pinnedStatus(git, raw, mainSha, ovSha) {
+  if (raw?.pinned === true) return { pinned: true, why: 'flag' };
+  if (!ovSha) return { pinned: false, why: null };
+  const mb = git(['merge-base', mainSha, ovSha]);
+  const base = String(mb.stdout ?? '').trim();
+  if (mb.status !== 0 || !base) return { pinned: true, why: 'unknown' };
+  const diff = git(['diff', '--name-only', base, ovSha, '--', ...REBUILD_MECHANISM_PATHS]);
+  if (diff.status !== 0) return { pinned: true, why: 'unknown' };
+  return String(diff.stdout ?? '').trim() ? { pinned: true, why: 'mechanism' } : { pinned: false, why: null };
+}
+
 // ── planRebuild — pure over an injected git(args) runner ────────────────────────────────────────────────────
 
 /**
@@ -144,6 +184,20 @@ export async function planRebuild({
     alerts.push({ kind: 'overlays-refused-main-only', detail: { count: overlays.length } });
   }
 
+  // A pinned overlay may only leave the build because main already has it (`pr-merged` / `in-main`). Any other
+  // exit (conflict, failed merge/commit, closed PR, deleted ref) REFUSES the whole rebuild instead: the clone
+  // keeps its current tree, and nothing on the overlay list changes (see REBUILD_MECHANISM_PATHS).
+  const refusePinned = (ref, pr, sha, dropReason, why) => {
+    const conflict = ['conflict', 'merge-tree-failed', 'commit-tree-failed'].includes(dropReason);
+    return {
+      ok: false,
+      reason: conflict ? 'pinned-overlay-conflict' : 'pinned-overlay-unavailable',
+      detail: {
+        ref, pr, sha, dropReason, pinnedBy: why, message: conflict ? PINNED_OVERLAY_MESSAGE : PINNED_OVERLAY_GONE_MESSAGE,
+      },
+    };
+  };
+
   for (const raw of toProcess) {
     const ref = raw?.ref;
     const pr = raw?.pr ?? null;
@@ -151,6 +205,7 @@ export async function planRebuild({
     // 1. PR state — MERGED/CLOSED means the overlay is moot; never call prState for a PR-less overlay.
     const state = pr != null && prState ? await prState(pr) : null;
     if (state === 'MERGED' || state === 'CLOSED') {
+      if (state === 'CLOSED' && raw?.pinned === true) return refusePinned(ref, pr, null, 'pr-closed', 'flag');
       decisions.push({ ref, pr, action: 'remove', reason: state === 'MERGED' ? 'pr-merged' : 'pr-closed', sha: null });
       continue;
     }
@@ -158,9 +213,16 @@ export async function planRebuild({
     // 2. resolve the overlay ref's remote-tracking tip.
     const ovSha = verifyRev(git, `refs/remotes/origin/${ref}^{commit}`);
     if (!ovSha) {
+      if (raw?.pinned === true) return refusePinned(ref, pr, null, 'ref-gone', 'flag');
       decisions.push({ ref, pr, action: 'remove', reason: 'ref-gone', sha: null });
       continue;
     }
+    const dropOrRefuse = (reason) => {
+      const p = pinnedStatus(git, raw, mainSha, ovSha);
+      if (p.pinned) return refusePinned(ref, pr, ovSha, reason, p.why);
+      decisions.push({ ref, pr, action: 'drop', reason, sha: ovSha });
+      return null;
+    };
 
     // 3. already upstream-equivalent to main? (`git cherry` compares patch-ids; a failed cherry is treated as
     //    inconclusive — proceed to the merge-tree attempt rather than silently dropping a real overlay.)
@@ -176,11 +238,13 @@ export async function planRebuild({
     // 4. merge-tree in the object DB — no working tree, no index.
     const mt = git(['merge-tree', '--write-tree', '--no-messages', cur, ovSha]);
     if (mt.status === 1) {
-      decisions.push({ ref, pr, action: 'drop', reason: 'conflict', sha: ovSha });
+      const refused = dropOrRefuse('conflict');
+      if (refused) return refused;
       continue;
     }
     if (mt.status !== 0) {
-      decisions.push({ ref, pr, action: 'drop', reason: 'merge-tree-failed', sha: ovSha });
+      const refused = dropOrRefuse('merge-tree-failed');
+      if (refused) return refused;
       continue;
     }
     const tree = String(mt.stdout ?? '').split('\n')[0].trim();
@@ -208,7 +272,8 @@ export async function planRebuild({
     });
     const newSha = String(ct.stdout ?? '').trim();
     if (ct.status !== 0 || !newSha) {
-      decisions.push({ ref, pr, action: 'drop', reason: 'commit-tree-failed', sha: ovSha });
+      const refused = dropOrRefuse('commit-tree-failed');
+      if (refused) return refused;
       continue;
     }
     cur = newSha;
@@ -592,8 +657,9 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     git, headSha: prevHead, mainRef: 'origin/main', overlays: overlaysBefore, prState, mainOnly,
   });
   if (!plan.ok) {
-    alert(plan.reason);
-    return finish({ moved: false, reason: plan.reason });
+    // A pinned refusal keeps the current tree AND the overlay list untouched (no decisions were applied).
+    alert(plan.reason, plan.detail);
+    return finish({ moved: false, reason: plan.reason, ...(plan.detail ? { detail: plan.detail } : {}) });
   }
   for (const d of plan.decisions) {
     if (d.action === 'remove') {

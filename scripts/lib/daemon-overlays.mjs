@@ -158,21 +158,31 @@ export function writeOverlays(root, list, { env = process.env } = {}) {
  * {@link isSafeBranchName} (`daemon-self-sync.mjs`) — an unsafe ref throws a `TypeError` rather than ever
  * being written to disk or later spliced into a git argv. A duplicate `ref` updates `pr`/`reason` and keeps
  * its ORIGINAL position, `addedAt`, and `addedBy` — re-registering an overlay is not a re-add.
+ * `pinned:true` marks an overlay the rebuild must never drop for a conflict (it refuses instead — see
+ * `daemon-rebuild.mjs#REBUILD_MECHANISM_PATHS`); `pinned:false` clears the flag; leaving it out keeps it as is.
  * @param {string} root
- * @param {{ref:string, pr?:number|null, addedBy?:string|null, reason?:string|null, now?:string}} entry
+ * @param {{ref:string, pr?:number|null, addedBy?:string|null, reason?:string|null, now?:string, pinned?:boolean}} entry
  * @param {{env?:NodeJS.ProcessEnv}} [o]
  * @returns {Array<object>} the new list
  */
-export function addOverlay(root, { ref, pr = null, addedBy = null, reason = null, now } = {}, { env = process.env } = {}) {
+export function addOverlay(root, {
+  ref, pr = null, addedBy = null, reason = null, now, pinned,
+} = {}, { env = process.env } = {}) {
   if (!isSafeBranchName(ref)) {
     throw new TypeError(`daemon-overlays: ref ${JSON.stringify(ref)} is not a safe branch name — refusing to add it`);
   }
   const list = readOverlaysForWrite(root, env).slice();
   const idx = list.findIndex((o) => o && o.ref === ref);
   if (idx === -1) {
-    list.push({ ref, pr: pr ?? null, addedAt: now || new Date().toISOString(), addedBy: addedBy ?? null, reason: reason ?? null });
+    list.push({
+      ref, pr: pr ?? null, addedAt: now || new Date().toISOString(), addedBy: addedBy ?? null, reason: reason ?? null,
+      ...(pinned === true ? { pinned: true } : {}),
+    });
   } else {
-    list[idx] = { ...list[idx], pr: pr ?? null, reason: reason ?? null };
+    const next = { ...list[idx], pr: pr ?? null, reason: reason ?? null };
+    if (pinned === true) next.pinned = true;
+    else if (pinned === false) delete next.pinned;
+    list[idx] = next;
   }
   return writeOverlays(root, list, { env });
 }

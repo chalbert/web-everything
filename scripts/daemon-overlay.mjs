@@ -16,7 +16,7 @@
  * lock itself, e.g. `daemon-rebuild.mjs`) skips it entirely.
  *
  * USAGE:
- *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--reason=..] [--by=..] [--no-lock] [--json]
+ *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--pinned|--unpinned] [--reason=..] [--by=..] [--no-lock] [--json]
  *   node scripts/daemon-overlay.mjs remove --clone=<path> --ref=<branch> [--reason=..] [--by=..] [--no-lock] [--json]
  *   node scripts/daemon-overlay.mjs list   --clone=<path> [--json]
  *
@@ -68,6 +68,10 @@ async function main() {
   }
   const reason = typeof flags.reason === 'string' ? flags.reason : null;
   const by = typeof flags.by === 'string' ? flags.by : (process.env.USER || null);
+  // `--pinned`: the rebuild refuses (keeps the current tree) rather than ever conflict-drop this overlay.
+  let pinned;
+  if (flags.pinned) pinned = true;
+  else if (flags.unpinned) pinned = false;
   const noLock = !!flags['no-lock'];
   const asJson = !!flags.json;
   const env = process.env;
@@ -91,8 +95,12 @@ async function main() {
     }
   } else if (cmd === 'add') {
     const locked = await withLockIfNeeded(() => {
-      const list = addOverlay(root, { ref: flags.ref, pr, addedBy: by, reason }, { env });
-      appendOverlayEvent(root, { kind: 'added', ref: flags.ref, pr, by, reason }, { env });
+      const list = addOverlay(root, {
+        ref: flags.ref, pr, addedBy: by, reason, pinned,
+      }, { env });
+      appendOverlayEvent(root, {
+        kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
+      }, { env });
       return list;
     });
     if (!locked.ok) {

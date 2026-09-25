@@ -217,3 +217,23 @@ describe('CLI (spawnSync, --no-lock — never imports daemon-clone-lock.mjs)', (
     expect(r.status).toBe(2);
   });
 });
+
+describe('pinned overlays (self-destruct guard, 2026-09-25)', () => {
+  it('addOverlay records pinned:true, keeps it on a plain re-add, and clears it with pinned:false', () => {
+    const env = { WE_DAEMON_OVERLAY_DIR: overlayDir };
+    addOverlay(cloneRoot, { ref: 'lane/mech', pr: 1, pinned: true }, { env });
+    expect(readOverlays(cloneRoot, { env })[0].pinned).toBe(true);
+    addOverlay(cloneRoot, { ref: 'lane/mech', pr: 1 }, { env });
+    expect(readOverlays(cloneRoot, { env })[0].pinned).toBe(true);
+    addOverlay(cloneRoot, { ref: 'lane/mech', pr: 1, pinned: false }, { env });
+    expect(readOverlays(cloneRoot, { env })[0].pinned).toBeUndefined();
+  });
+
+  it('CLI add --pinned writes pinned:true', () => {
+    const r = spawnSync(process.execPath, [CLI_PATH, 'add', `--clone=${cloneRoot}`, '--ref=lane/mech', '--pinned', '--no-lock', '--json'], {
+      encoding: 'utf8', env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir },
+    });
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).list[0]).toMatchObject({ ref: 'lane/mech', pinned: true });
+  });
+});
