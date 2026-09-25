@@ -1,4 +1,5 @@
 ---
+bornAs: xah96oj
 kind: decision
 parent: "3383"
 status: open
@@ -316,7 +317,7 @@ and is not codified.
 
 ## What this card does not decide
 
-- **#4043 (xcw0nxo):** whether an *incumbent* running an overlay may review that overlay's graduation PR. No default here leans on how #4043 rules. The Fork 3 guard covers only *candidates*, a concept #4043 does not address, so this card is not `blockedBy` #4043.
+- **#4043 (4043):** whether an *incumbent* running an overlay may review that overlay's graduation PR. No default here leans on how #4043 rules. The Fork 3 guard covers only *candidates*, a concept #4043 does not address, so this card is not `blockedBy` #4043.
 - **#3615's remote build host:** lanes on one host driven by a dispatcher on another. Fork 1 moves the dispatcher
   together with its lanes.
 
