@@ -3,9 +3,10 @@ bornAs: xs5b4fj
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/__tests__/runner.test.mjs", "we:skills-src/conveyor/__tests__/runner-repos.test.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
