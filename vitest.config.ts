@@ -233,6 +233,11 @@ export default defineConfig({
       // #3383 — the stateful fake-GitHub's own proof: real bare origin/clone + real `execFileSync('gh', …)`,
       // same tier as the two files immediately above it.
       'scripts/conveyor/__tests__/fake-gh-state.test.mjs',
+      // #xpc3krl — the #2949 fidelity qualifier against the REAL `gh` binary: needs the real, unauthenticated
+      // subprocess boundary this file's own header describes, which `vitest.setup.ts`'s sandbox-by-default
+      // (a fake `gh` on PATH) would otherwise mask. Moved to the integration tier, which opts out of that
+      // sandbox.
+      'scripts/operations/__tests__/route-pr-outcome-io-live.test.mjs',
       // #3383 (xitk240) — the rest of the daemon scenario simulator: real spawned sleepers/daemon hosts, real
       // bare origins and lane pools. They belong to the integration tier only (vitest.integration.config.ts);
       // running them in the unit suite too is what put fake-claude-sessions on CI shard 4 for PR #2623.

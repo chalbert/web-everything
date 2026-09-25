@@ -1,7 +1,84 @@
 import { beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// #xpc3krl (ci-heal-2684, 2026-09-25; extended by operator-approved follow-up the same day) — SANDBOX BY
+// DEFAULT, FIRST, before anything below reads `process.env`. Live-caught on this Mac: 6 tests across
+// main-staleness.test.mjs, review-dispatch.test.mjs, reconcile-fix-dispatch.test.mjs and
+// daemon-self-sync.test.mjs failed ONLY on a host running real daemon sessions (ambient
+// `WE_DAEMON_MANAGED_CLONE=1`/`WE_GITHUB_APP_*`), never in CI. The per-test env snapshot/restore further down
+// this file (PR #2625) only guards a write LEAKING from one test into a LATER one in the SAME run — it does
+// nothing about the run's own STARTING point, which is whatever the launching process's ambient env already
+// was. This block makes that starting point identical to CI's, every time:
+//
+//   1. A fake `gh` placed ahead of everything else on `PATH`, so a test that shells a bare `gh` without
+//      overriding PATH or injecting its own `run` can never reach a host's real authenticated `gh` OR its
+//      GitHub App shim. It fails the same way a real, unauthenticated `gh` does (message + exit 1), so a test
+//      asserting "gh failed" still gets a realistic failure.
+//   2. Every ambient `WE_*`/`CONVEYOR_*`/`GH_*`/`CLAUDE_*` env var stripped, minus a tiny allowlist — the
+//      exact categories a live daemon process (or an operator's own fleet-configured shell) sets that a test
+//      must never silently inherit as "the unconfigured default". This runs BEFORE the `WE_COORDINATION_ROOT`
+//      and `WE_TELEMETRY` blocks below so their own "was this already set?" checks see the sandboxed
+//      baseline, never a live daemon's real value.
+//
+// NOT DONE HERE, DELIBERATELY, after trying it and finding it BROKEN rather than just "not cheap" — a
+// throwaway `$HOME` (so `os.homedir()`-derived real-path defaults, `~/.claude/*` chief among them, redirect
+// tree-wide with no per-call-site change). Built it, then caught a live regression proving it does NOT work
+// under this repo's default vitest `threads` pool: `lane-pool-health-watch.test.mjs` started failing because
+// `resolveLanePoolRepoPath`'s `home = homedir()` kept returning the REAL home while the test's own
+// `process.env.HOME` correctly showed the sandboxed one. Root cause, confirmed with a minimal two-file
+// `worker_threads` repro: `os.homedir()`'s native binding does NOT consult a Worker thread's own (virtualized,
+// per-thread) `process.env` — only a `child_process` spawn's inherited env does, which is why the `PATH` trick
+// below still works fine. A real `$HOME` sandbox would need the heavier `forks` pool (real OS processes, where
+// `process.env` mutation IS process-wide) or a per-call-site change — worth knowing before the separate
+// detection-checks follow-up card picks a mechanism; it should not re-reach for this same "cheap" fix.
+//
+// ALSO NOT DONE HERE, same reason: a general guard that FAILS a test for touching the real `~/.claude`/real
+// lane folders. Checked empirically — mutating `node:fs`'s exported functions from this setup file does NOT
+// intercept a test file's own `import { readFileSync, writeFileSync, ... } from 'node:fs'` named-import calls
+// (confirmed with a minimal two-file repro: a patched `fs.writeFileSync` never fired for a sibling module's
+// named-import call to it), which is this codebase's dominant `fs` import style. A real interception guard
+// needs a loader/`vi.mock`-level hook, not a setup-file patch.
+//
+// OPT OUT, per config, for the tier that means to prove REAL host/subprocess behavior on purpose
+// (`vitest.integration.config.ts`'s real-git/real-`gh` files, `vitest.soak.config.ts`'s real daemons) via
+// `test.env: { WE_TEST_SANDBOX: '0' }` — vitest applies a config's own `env` before `setupFiles` runs
+// (empirically verified: a probe config/test pair read it inside `setupFiles` and inside the test body
+// alike), so this checks that BEFORE doing anything else. A single file inside the DEFAULT (sandboxed)
+// config that itself needs the real thing moves to that opt-out tier instead of fighting the default here —
+// see `route-pr-outcome-io-live.test.mjs`, moved to `vitest.integration.config.ts` for exactly this reason:
+// its whole point is a real, unauthenticated `gh` failure, which the fake `gh` below would otherwise mask.
+//
+// A test that means to exercise the CONFIGURED path (a real env var, a real `gh`) sets it itself, inside its
+// own test body — that always wins over this file, since it runs after.
+if (process.env.WE_TEST_SANDBOX !== '0') {
+  try {
+    const fakeGhDir = mkdtempSync(join(tmpdir(), 'we-fake-gh-'));
+    const fakeGhPath = join(fakeGhDir, 'gh');
+    writeFileSync(
+      fakeGhPath,
+      '#!/bin/sh\n'
+      + 'echo "To get started with GitHub CLI, please run:  gh auth login" >&2\n'
+      + 'echo "Alternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token." >&2\n'
+      + 'exit 1\n',
+    );
+    chmodSync(fakeGhPath, 0o755);
+    process.env.PATH = `${fakeGhDir}:${process.env.PATH || ''}`;
+  } catch {
+    // Best-effort — a host where this fails (e.g. no writable temp dir) is no worse off than before this
+    // existed; a test that genuinely needs `gh` unavailable still sees whatever the real PATH gives it.
+  }
+
+  const ENV_STRIP_PREFIXES = ['WE_', 'CONVEYOR_', 'GH_', 'CLAUDE_'];
+  const ENV_STRIP_ALLOWLIST = new Set([
+    'WE_TELEMETRY', // an operator's own explicit local opt-in, handled below — never ambient daemon state.
+  ]);
+  for (const key of Object.keys(process.env)) {
+    if (ENV_STRIP_ALLOWLIST.has(key)) continue;
+    if (ENV_STRIP_PREFIXES.some((p) => key.startsWith(p))) delete process.env[key];
+  }
+}
 
 // #3383: isolate tests from home AND from each other's durable action holds.
 const ownsCoordinationRoot = process.env.WE_COORDINATION_ROOT === undefined;
@@ -40,29 +117,10 @@ afterEach(() => {
 // default can never block a real telemetry test, only an incidental one.
 //
 // Respects an operator's own explicit `WE_TELEMETRY` (e.g. `WE_TELEMETRY=1 npm run test:unit` to deliberately
-// watch real wrapper tests emit telemetry) rather than clobbering it.
+// watch real wrapper tests emit telemetry) rather than clobbering it — the sandbox block above allowlists
+// this exact key so a live daemon's own ambient value can never masquerade as that operator opt-in.
 if (process.env.WE_TELEMETRY === undefined) {
   process.env.WE_TELEMETRY = '0';
-}
-
-// #xpc3krl (ci-heal-2684, 2026-09-25) — sanitize known daemon/host env leaks ONCE, before the per-test
-// snapshot/restore below captures its baseline. That restore (PR #2625) only guards a write LEAKING from one
-// test into a LATER one in the same run; it does nothing about the run's own STARTING point, which is
-// whatever ambient env the launching process already had. A vitest run started from inside (or by) a live
-// daemon-managed clone inherits `WE_DAEMON_MANAGED_CLONE=1` (set by
-// `scripts/lib/daemon-self-sync.mjs#withSelfSync` at wrapper construction) or a host that has opted into
-// GitHub App auth inherits the three `WE_GITHUB_APP_*` vars (see
-// `scripts/lib/github-app-auth-env.mjs#resolveGithubAppEnvConfig`) as that baseline for EVERY test — and
-// `main-staleness.mjs#assertMainNotStale` / `gh-app-shim.mjs#buildGhShimSettingsEnv` both read these directly,
-// so a polluted baseline silently flips branches in tests that assume the unconfigured default and never set
-// these vars themselves. Live-caught on this Mac: 6 tests across main-staleness.test.mjs,
-// review-dispatch.test.mjs and reconcile-fix-dispatch.test.mjs failed with the real ambient values set, never
-// in CI (which never carries them). A test that means to exercise the CONFIGURED path sets these itself,
-// inside its own test body — that always wins, since it runs after this.
-for (const key of [
-  'WE_DAEMON_MANAGED_CLONE', 'WE_GITHUB_APP_ID', 'WE_GITHUB_APP_INSTALLATION_ID', 'WE_GITHUB_APP_PRIVATE_KEY_PATH',
-]) {
-  delete process.env[key];
 }
 
 // PR #2625 advisory (correctness/test-pollution): a test that writes `process.env` must never leak that write

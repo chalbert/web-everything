@@ -17,6 +17,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
+    // #xpc3krl — the real review + fix daemons, real rebuild/self-sync, a real bare remote (see the file
+    // header above) need the real PATH/env this tier is built to exercise, so it opts OUT of
+    // `vitest.setup.ts`'s sandbox-by-default (a fake `gh` on PATH, stripped WE_*/CONVEYOR_*/GH_*/CLAUDE_*
+    // env) — the exact opposite of what this harness is FOR.
+    env: { WE_TEST_SANDBOX: '0' },
     include: ['scripts/conveyor/soak/**/*.soak.test.mjs'],
     pool: 'forks',
     testTimeout: 15 * 60_000,
