@@ -18,6 +18,10 @@ import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyHungSession, resolveHungThresholdMs, DEFAULT_HUNG_THRESHOLD_MS, PENDING_CALL_GRACE_MULTIPLIER } from '../hung-session.mjs';
+import {
+  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall,
+} from '../hung-session.mjs';
+import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 
 describe('classifyHungSession — PURE core', () => {
   const NOW = 1_000_000_000;
@@ -69,6 +73,79 @@ describe('resolveHungThresholdMs — WE_HUNG_TRANSCRIPT_MINUTES, IO shell only',
     expect(resolveHungThresholdMs({ WE_HUNG_TRANSCRIPT_MINUTES: '0' })).toBe(DEFAULT_HUNG_THRESHOLD_MS);
     expect(resolveHungThresholdMs({ WE_HUNG_TRANSCRIPT_MINUTES: '-5' })).toBe(DEFAULT_HUNG_THRESHOLD_MS);
     expect(resolveHungThresholdMs({ WE_HUNG_TRANSCRIPT_MINUTES: '0.2' })).toBe(60_000); // clamped up to 1 minute
+  });
+});
+
+// #4090 (epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 2) — the no-net-outcome axis.
+describe('NO_OUTCOME_KINDS — names exactly the statute\'s four kinds (prepare-decision mirrors prepare)', () => {
+  it('covers conveyor/fix/review/prepare/prepare-decision, never ci-heal/inspect', () => {
+    expect([...NO_OUTCOME_KINDS].sort()).toEqual(['conveyor', 'fix', 'prepare', 'prepare-decision', 'review']);
+  });
+});
+
+describe('resolveNoOutcomeWindowMs / resolveNoOutcomeCeilingMs — the per-kind settings', () => {
+  it('default fallback minutes match the statute\'s own stated defaults', () => {
+    expect(resolveNoOutcomeWindowMs('conveyor', {})).toBe(45 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('conveyor', {})).toBe(240 * 60_000);
+    expect(resolveNoOutcomeWindowMs('fix', {})).toBe(30 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('fix', {})).toBe(120 * 60_000);
+    expect(resolveNoOutcomeWindowMs('review', {})).toBe(30 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('review', {})).toBe(60 * 60_000);
+    expect(resolveNoOutcomeWindowMs('prepare', {})).toBe(45 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('prepare', {})).toBe(180 * 60_000);
+    expect(resolveNoOutcomeWindowMs('prepare-decision', {})).toBe(45 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('prepare-decision', {})).toBe(180 * 60_000);
+  });
+
+  it('null for a kind the statute never named — never a guessed window/ceiling', () => {
+    expect(resolveNoOutcomeWindowMs('ci-heal', {})).toBeNull();
+    expect(resolveNoOutcomeCeilingMs('inspect', {})).toBeNull();
+  });
+
+  it('env override, per kind, named WE_NO_OUTCOME_<KIND>_WINDOW_MIN / _CEILING_MIN', () => {
+    expect(resolveNoOutcomeWindowMs('review', { WE_NO_OUTCOME_REVIEW_WINDOW_MIN: '15' })).toBe(15 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('fix', { WE_NO_OUTCOME_FIX_CEILING_MIN: '90' })).toBe(90 * 60_000);
+    expect(resolveNoOutcomeWindowMs('prepare-decision', { WE_NO_OUTCOME_PREPARE_DECISION_WINDOW_MIN: '20' })).toBe(20 * 60_000);
+  });
+
+  it('an unparsable/non-positive override falls back to the default, never disables the axis', () => {
+    expect(resolveNoOutcomeWindowMs('review', { WE_NO_OUTCOME_REVIEW_WINDOW_MIN: 'nope' })).toBe(30 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('review', { WE_NO_OUTCOME_REVIEW_CEILING_MIN: '0' })).toBe(60 * 60_000);
+    expect(resolveNoOutcomeCeilingMs('review', { WE_NO_OUTCOME_REVIEW_CEILING_MIN: '-5' })).toBe(60 * 60_000);
+  });
+
+  it('the ceiling NEVER exceeds the lane lease TTL, even if an operator configures a larger one (statute)', () => {
+    expect(DEFAULT_LEASE_TTL_MINUTES).toBe(240);
+    expect(resolveNoOutcomeCeilingMs('conveyor', { WE_NO_OUTCOME_CONVEYOR_CEILING_MIN: '9999' })).toBe(DEFAULT_LEASE_TTL_MINUTES * 60_000);
+    expect(resolveNoOutcomeCeilingMs('review', { WE_NO_OUTCOME_REVIEW_CEILING_MIN: '500' })).toBe(DEFAULT_LEASE_TTL_MINUTES * 60_000);
+  });
+});
+
+describe('classifyNoOutcomeStall — PURE, the two-trigger verdict (window vs ceiling)', () => {
+  const T0 = 1_000_000;
+  it('active when neither the window nor the ceiling has elapsed', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, lastOutcomeAtMs: T0 + 1000, nowMs: T0 + 2000, windowMs: 10_000, ceilingMs: 100_000 }))
+      .toEqual({ stall: false, reason: 'active' });
+  });
+  it('stalls on the WINDOW once no outcome has landed for windowMs, measured from the LAST outcome', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, lastOutcomeAtMs: T0 + 5000, nowMs: T0 + 5000 + 10_000, windowMs: 10_000, ceilingMs: 999_999 }))
+      .toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+  it('with NO outcome ever, the window is measured from startedAtMs, never treated as automatically fresh', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, lastOutcomeAtMs: null, nowMs: T0 + 10_000, windowMs: 10_000, ceilingMs: 999_999 }))
+      .toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+  it('the CEILING wins even while outcomes keep landing inside the window — an absolute cap', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, lastOutcomeAtMs: T0 + 99_000, nowMs: T0 + 100_000, windowMs: 10_000, ceilingMs: 100_000 }))
+      .toEqual({ stall: true, reason: 'ceiling' });
+  });
+  it('windowMs/ceilingMs of null (an uncovered kind) disables that trigger, never a guess', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, lastOutcomeAtMs: null, nowMs: T0 + 999_999_999, windowMs: null, ceilingMs: null }))
+      .toEqual({ stall: false, reason: 'active' });
+  });
+  it('no-signal when startedAtMs/nowMs are not finite numbers — never a guess', () => {
+    expect(classifyNoOutcomeStall({ startedAtMs: null, nowMs: T0, windowMs: 1, ceilingMs: 1 })).toEqual({ stall: false, reason: 'no-signal' });
+    expect(classifyNoOutcomeStall({ startedAtMs: T0, nowMs: undefined, windowMs: 1, ceilingMs: 1 })).toEqual({ stall: false, reason: 'no-signal' });
   });
 });
 
