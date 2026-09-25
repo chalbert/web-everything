@@ -81,7 +81,9 @@ async function bootInProcess(modulePath) {
 
   const effects = withSelfSync(
     withGithubAppAuth(daemonModule.buildCliDaemonEffects({ owner: `sim-${KIND}`, log }), { log }),
-    { root: SIM_CLONE, onRestart, hasStaleRefusal: daemonModule.hasStaleMainRefusal, log },
+    // #4044: `entries` = the daemon's own script, exactly what `process.argv[1]` is in production (here argv[1]
+    // is this host), so the restart gate walks the real daemon's import closure.
+    { root: SIM_CLONE, onRestart, hasStaleRefusal: daemonModule.hasStaleMainRefusal, log, entries: [join(SIM_CLONE, modulePath)] },
   );
 
   let tickCount = 0;
