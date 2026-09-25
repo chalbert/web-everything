@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { validateScorecard, readStore, writeStore, appendScorecard, meanScore } from '../run-scorecard-store.mjs';
+import { describe, it, expect, afterEach } from 'vitest';
+import { join } from 'node:path';
+import {
+  validateScorecard, readStore, writeStore, appendScorecard, meanScore,
+  resolveScorecardStorePath, DEFAULT_SCORECARD_STORE_PATH,
+} from '../run-scorecard-store.mjs';
 
 const baseRow = () => ({
   rubricVersion: '2026-09-13.1',
@@ -138,5 +142,30 @@ describe('meanScore — the required-rubricVersion/provider/model aggregate, nev
     const { mean, n } = meanScore({ rubricVersion: 'nope', provider: 'codex', model: 'gpt-6-astra' }, io);
     expect(mean).toBeNull();
     expect(n).toBe(0);
+  });
+});
+
+describe('resolveScorecardStorePath — CONVEYOR_STATE_ROOT (#4052)', () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    if (savedEnv.CONVEYOR_STATE_ROOT === undefined) delete process.env.CONVEYOR_STATE_ROOT;
+    else process.env.CONVEYOR_STATE_ROOT = savedEnv.CONVEYOR_STATE_ROOT;
+  });
+
+  it('defaults to the script-colocated, git-tracked location — TODAY\'s location, unchanged', () => {
+    expect(resolveScorecardStorePath({})).toBe(DEFAULT_SCORECARD_STORE_PATH);
+  });
+
+  it('moves under the pinned root, OUT of this repo\'s git tree, once CONVEYOR_STATE_ROOT is set', () => {
+    const path = resolveScorecardStorePath({ CONVEYOR_STATE_ROOT: '/tmp/operator-primary' });
+    expect(path).toBe(join('/tmp/operator-primary', '.conveyor', 'run-scorecards.json'));
+    expect(path).not.toBe(DEFAULT_SCORECARD_STORE_PATH);
+  });
+
+  it('readStore/writeStore honor the live pin (not a frozen import-time default)', () => {
+    process.env.CONVEYOR_STATE_ROOT = '/tmp/never-actually-touched-because-io-is-injected';
+    const writes = [];
+    writeStore({ version: 1, records: [] }, { write: (p) => writes.push(p) });
+    expect(writes[0]).toBe(join('/tmp/never-actually-touched-because-io-is-injected', '.conveyor', 'run-scorecards.json'));
   });
 });

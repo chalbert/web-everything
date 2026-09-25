@@ -19,6 +19,11 @@ import {
   serializeQueue,
   readQueueFile,
   writeQueueFile,
+  pinnedStateRoot,
+  queuePath,
+  resolveQueuePath,
+  QUEUE_ROOT,
+  STATE_ROOT_ENV,
 } from '../queue-store.mjs';
 
 describe('normNum — dedup/membership key', () => {
@@ -158,5 +163,46 @@ describe('writeQueueFile / readQueueFile — atomic fs roundtrip (#2613 review n
   it('readQueueFile on a missing path → []', () => {
     dir = mkdtempSync(join(tmpdir(), 'qs-fs-'));
     expect(readQueueFile(join(dir, 'nope', 'queue.json'))).toEqual([]);
+  });
+});
+
+describe('pinnedStateRoot / queuePath / resolveQueuePath — CONVEYOR_STATE_ROOT (#4052)', () => {
+  const savedEnv = { ...process.env };
+  afterEach(() => {
+    for (const k of ['CONVEYOR_STATE_ROOT', 'CONVEYOR_QUEUE_FILE']) {
+      if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('pinnedStateRoot is null when unset, whitespace-only, or absent from an injected env', () => {
+    expect(pinnedStateRoot({})).toBeNull();
+    expect(pinnedStateRoot({ [STATE_ROOT_ENV]: '' })).toBeNull();
+    expect(pinnedStateRoot({ [STATE_ROOT_ENV]: '   ' })).toBeNull();
+  });
+
+  it('pinnedStateRoot resolves + trims a set value', () => {
+    expect(pinnedStateRoot({ [STATE_ROOT_ENV]: '  /tmp/pinned-root  ' })).toBe(join('/tmp/pinned-root'));
+  });
+
+  it('queuePath defaults to the script-location repo root when nothing is pinned — TODAY\'s location, unchanged', () => {
+    delete process.env.CONVEYOR_STATE_ROOT;
+    expect(queuePath()).toBe(join(QUEUE_ROOT, '.conveyor', 'queue.json'));
+  });
+
+  it('queuePath nests under the pinned root once CONVEYOR_STATE_ROOT is set', () => {
+    process.env.CONVEYOR_STATE_ROOT = '/tmp/some-pinned-root';
+    expect(queuePath()).toBe(join('/tmp/some-pinned-root', '.conveyor', 'queue.json'));
+  });
+
+  it('resolveQueuePath honors the pinned root when CONVEYOR_QUEUE_FILE is not set', () => {
+    delete process.env.CONVEYOR_QUEUE_FILE;
+    process.env.CONVEYOR_STATE_ROOT = '/tmp/operator-primary';
+    expect(resolveQueuePath()).toBe(join('/tmp/operator-primary', '.conveyor', 'queue.json'));
+  });
+
+  it('CONVEYOR_QUEUE_FILE (an explicit full-path override) still wins over a pinned root', () => {
+    process.env.CONVEYOR_STATE_ROOT = '/tmp/operator-primary';
+    process.env.CONVEYOR_QUEUE_FILE = '/tmp/explicit/queue.json';
+    expect(resolveQueuePath()).toBe('/tmp/explicit/queue.json');
   });
 });
