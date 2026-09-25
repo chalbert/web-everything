@@ -20,12 +20,25 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'
 describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
   const REPO_KEYS = Object.keys(CONSTELLATION_REPOS);
 
-  it('has exactly the 6 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep + lease-reaper) plus 5 passes × 3 repos = 21 total (epic #3383 stuck-pr-watch added)', () => {
+  it('has exactly the 6 WE-only entries (incl. #3913 orphan-claim-release, epic #3383 merge-orphan-sweep + lease-reaper) plus 6 passes × 3 repos = 24 total (we:backlog/x5uqim1-*.md added ci-red-recovery-watch)', () => {
     expect(Object.keys(DAEMON_MANIFEST).sort()).toEqual([
       'branch-drift', 'infra-blocked', 'duplicate-pr-watch', 'orphan-claim-release', 'merge-orphan-sweep', 'lease-reaper',
-      ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch']
+      ...['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch', 'ci-red-recovery-watch']
         .flatMap((p) => REPO_KEYS.map((k) => `${p}-${k}`)),
     ].sort());
+  });
+
+  // we:backlog/x5uqim1-*.md (#4075/#3383) — the CI-red-recovery watcher runs `--apply` (a real `gh run rerun`
+  // when its own idempotent cap allows it), unlike a read-only watcher such as `ci-queue-watch` — see
+  // `we:scripts/conveyor/ci-red-recovery-watch.mjs`'s own header for why running it unconditionally is safe.
+  it('ci-red-recovery-watch runs --apply against the real script, per-repo, against a script that exists', () => {
+    for (const key of REPO_KEYS) {
+      const e = DAEMON_MANIFEST[`ci-red-recovery-watch-${key}`];
+      expect(e.script).toBe('scripts/conveyor/ci-red-recovery-watch.mjs');
+      expect(e.args).toContain('sweep');
+      expect(e.args).toContain('--apply');
+      expect(existsSync(join(REPO_ROOT, e.script))).toBe(true);
+    }
   });
 
   // #3383 — live-caught 2026-09-24: `lease-reaper.mjs` had gone the same way `session-reaper.mjs` had before
@@ -77,8 +90,8 @@ describe('DAEMON_MANIFEST — #3873, the 7 real watcher passes', () => {
     expect(DAEMON_MANIFEST['merge-orphan-sweep'].args.some((a) => a.startsWith('--label'))).toBe(false);
   });
 
-  it('the 5 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {
-    for (const passName of ['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch']) {
+  it('the 6 repo-generic passes each get one entry per constellation repo, with the matching --repo=<slug>', () => {
+    for (const passName of ['ci-queue-watch', 'parked-pr-conflict-watch', 'parked-pr-progress-watch', 'lane-pool-health-watch', 'stuck-pr-watch', 'ci-red-recovery-watch']) {
       for (const [key, { slug }] of Object.entries(CONSTELLATION_REPOS)) {
         const entry = DAEMON_MANIFEST[`${passName}-${key}`];
         expect(entry, `${passName}-${key}`).toBeDefined();

@@ -9,7 +9,7 @@
  * reconciler living inside it would forget every PR the moment the session that launched them exited — which is
  * the exact defect being fixed, reintroduced one level down.
  *
- * WHAT THIS FILE ADDS, AND ALL IT ADDS: the four impure facts the core cannot read.
+ * WHAT THIS FILE ADDS, AND ALL IT ADDS: the impure facts the core cannot read.
  *   1. The open PRs — `gh pr list --state open --json number,headRefName,headRefOid,labels,statusCheckRollup,
  *      mergeStateStatus,comments`.
  *   2. The live sessions — `claude agents --json`, via `defaultListAgents`
@@ -22,6 +22,12 @@
  *   4. `pidAlive` per session — `process.kill(pid, 0)`. A `pid` is on only 13 of 17 entries; where it is absent
  *      this stays UNDEFINED and the core refuses as `liveness-unknown`. It must never be defaulted to `false`:
  *      absence of a field is not evidence of death.
+ *   5. we:backlog/x5uqim1-*.md (#4075/#3383) — `main`'s own red-CI windows (`gh run list --branch main`) plus,
+ *      per PR whose required check is currently failing, that check's own completion time and `gh run view`
+ *      attempt count ({@link enrichPrsWithMainRedFacts}). Read ONLY when at least one PR is failing, so a quiet
+ *      pass pays nothing for it. Lets the core tell a required check that failed only because `main` itself was
+ *      red apart from the PR's own defect (`reconcile-core.mjs#isPrCiFailureOwedRerun`), so it is never handed
+ *      to a `ci-heal`.
  *
  * WHY THE ARGV IS PINNED BY A TEST AND NOT MERELY EXERCISED. The failure mode of a wrong discovery query is
  * SILENCE, not an error: an empty listing is indistinguishable from "no PR needs anything", so a query that
@@ -52,6 +58,12 @@ import { countRearmComments } from './rearm-review.mjs';
 import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+// we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
+// per `ci-red` PR, plus `main`'s own red windows. `latestRequiredCheck`/`isRequiredCheckFailed` are REUSED from
+// `we:scripts/merge-ai-prs.mjs` (never re-derived) — the same collapsed-rollup reader every other required-check
+// consumer in this repo already shares.
+import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
+import { computeMainRedWindows, runIdFromDetailsUrl, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 /**
@@ -214,6 +226,84 @@ export function durableCountsFrom(prs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMainRuns — `main`'s own recent run history for one
+ * workflow, the ONE read `we:scripts/conveyor/main-red-recovery.mjs#computeMainRedWindows` needs. `exec` is
+ * injectable so the argv is assertable with no `gh` on PATH.
+ * @param {{exec?:Function, repo?:string|null, branch?:string, workflowName?:string, limit?:number}} [o]
+ * @returns {Array<object>}
+ */
+export function defaultReadMainRuns({
+  exec = execFileSyncThrottled, repo = null, branch = 'main', workflowName = DEFAULT_MAIN_WORKFLOW_NAME, limit = 100,
+} = {}) {
+  const argv = ['run', 'list', '--branch', branch, '--limit', String(limit), '--json', 'databaseId,conclusion,status,createdAt,updatedAt,workflowName'];
+  if (repo) argv.push('--repo', repo);
+  const out = exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(String(out || '[]'));
+  return (Array.isArray(parsed) ? parsed : []).filter((r) => r?.workflowName === workflowName);
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadRunAttempt — how many times GitHub has (re)run this run id.
+ * Best-effort: ANY failure (no `gh`, the run vanished, a network hiccup) degrades to `null` — never thrown — so
+ * one bad read cannot break the whole pass; `isPrCiFailureOwedRerun` already treats an unknown attempt as "not
+ * yet rerun" (the safe direction — see its own docblock).
+ * @param {number} runId
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {number|null}
+ */
+export function defaultReadRunAttempt(runId, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const argv = ['run', 'view', String(runId), '--json', 'attempt'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const n = Number(JSON.parse(String(out || '{}'))?.attempt);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithMainRedFacts — we:backlog/x5uqim1-*.md (#4075/#3383):
+ * attach `requiredCheckCompletedAt` / `requiredCheckAttempt` to every PR whose required check is currently
+ * FAILING, and return `main`'s own red windows alongside — the two facts `reconcile-core.mjs
+ * #isPrCiFailureOwedRerun` needs, so a `ci-heal` is never dispatched for a failure that was never this PR's own.
+ *
+ * PAYS THE EXTRA `gh run list --branch main` READ ONLY WHEN AT LEAST ONE PR NEEDS IT — a pass with nothing
+ * currently `ci:failed` (the common case) costs nothing beyond the `latestRequiredCheck` scan it already had
+ * every field for. `requiredCheckCompletedAt` comes off the ALREADY-FETCHED `statusCheckRollup` (no extra call);
+ * only `requiredCheckAttempt` needs a fresh `gh run view` per failing PR, and only for the ones whose rollup
+ * even resolves a run id at all (`runIdFromDetailsUrl`).
+ * @param {Array<object>} prs
+ * @param {{readMainRuns?:Function, readRunAttempt?:Function, requiredCheck?:string, defaultBranch?:string, repo?:string|null}} [o]
+ * @returns {{prs:Array<object>, mainRedWindows:Array<object>}}
+ */
+export function enrichPrsWithMainRedFacts(prs, {
+  readMainRuns = defaultReadMainRuns, readRunAttempt = defaultReadRunAttempt,
+  requiredCheck = DEFAULT_REQUIRED_CHECK, defaultBranch = 'main', repo = null,
+} = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  const failing = list.filter((pr) => isRequiredCheckFailed(pr, requiredCheck));
+  if (!failing.length) return { prs: list, mainRedWindows: [] };
+
+  const mainRedWindows = computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch }));
+  const failingSet = new Set(failing);
+  const enriched = list.map((pr) => {
+    if (!failingSet.has(pr)) return pr;
+    const check = latestRequiredCheck(pr, requiredCheck);
+    const runId = runIdFromDetailsUrl(check?.detailsUrl);
+    const attempt = runId != null ? readRunAttempt(runId, { repo }) : null;
+    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckAttempt: attempt };
+  });
+  return { prs: enriched, mainRedWindows };
+}
+
+/**
  * we:scripts/conveyor/reconcile-pass.mjs#formatReport — the human half of the output, and it is not decoration.
  *
  * A PASS THAT REFUSES FOUR PRs AND PRINTS ONE LINE HAS REPRODUCED THE ORIGINAL DEFECT ONE LEVEL UP. So every
@@ -250,18 +340,22 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
- * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
+ * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
-  now = Date.now(), repo = null, defaultBranch = 'main',
+  enrichMainRed = enrichPrsWithMainRedFacts, now = Date.now(), repo = null, defaultBranch = 'main',
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
-  const prs = readPrs({ repo });
+  const rawPrs = readPrs({ repo });
+  // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`requiredCheckAttempt` to any currently-failing
+  // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
+  // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
+  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo, defaultBranch });
   const agents = enrich(readAgents({}));
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch });
+  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows });
   return { ...plan, prs: prs.length, agents: agents.length };
 }
 
