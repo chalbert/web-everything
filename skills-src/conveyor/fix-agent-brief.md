@@ -290,6 +290,11 @@ test if the finding touches a call path, not only a unit test of the isolated pi
 {{GATE_COMMAND}}          # this repo's own gate ({{REPO}}'s package.json — gateFor(...) in scripts/lib/repo-profile.mjs)
 ```
 
+**Run it in the FOREGROUND with an explicit Bash `timeout: 600000`** (the 10-minute max) — never
+`run_in_background`, and never `sleep`-poll its `tasks/<id>.output` file (`we:scripts/guard-bash.mjs` denies that
+in an agent session, #x36vidg). If the tool still moves it to the background, re-run it once in the foreground.
+The same holds after you re-push (step 6): do not wait on CI or the merge — report and exit.
+
 If the repair also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
 anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
 `{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself

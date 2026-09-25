@@ -42,3 +42,19 @@ arbitrary shell command that could touch anything. This applies EVEN INSIDE your
 itself is fully permitted: the auto-mode classifier's "shared resource" categorization keys on what the
 command DOES (rewrite a git-tracked file), not on whose directory it runs in. Reach for Edit/Write first;
 treat a Bash-based full-file rewrite as a last resort only for a shape those tools genuinely cannot express.
+
+**Never wait-poll — run long commands in the FOREGROUND, then report and exit (#x36vidg).** Two wait shapes cost
+~17h of idle across worker sessions in a single day, and `we:scripts/guard-bash.mjs` now DENIES both in an agent
+session:
+- **PR merge / CI state.** Never loop `sleep` around `gh pr view … state|labels|mergedAt`, `gh pr checks`,
+  `statusCheckRollup`, `gh api …/check-runs` or `gh run list`, and never run `gh pr checks --watch` /
+  `gh run watch`. The resident drain daemon is the SOLE merger and pr-watch / the conveyor observe merge and CI.
+  Once your PR is opened (or re-pushed), read it at most ONCE for your report, return your one-line result, and
+  EXIT.
+- **Your own background output.** Never `sleep`-poll a `tasks/<id>.output` file or a `subagents/*.jsonl`
+  transcript. A long gating command (`test:unit`, `check:standards`, `verify-lane`, `pr-land` / `open-pr`,
+  `review-loop-cli`) goes in the FOREGROUND with an explicit Bash `timeout: 600000` (the 10-minute max) — never
+  `run_in_background`, never a trailing `&`. The dispatcher also passes `BASH_DEFAULT_TIMEOUT_MS=600000` in
+  this session's `--settings`, but do not rely on it: always pass the timeout explicitly. If a
+  command is moved anyway, re-run it once in the foreground (the gates and `pr-land`/`open-pr` are idempotent)
+  instead of polling its output.

@@ -356,9 +356,12 @@ drain — the resident drain daemon lands the labelled PR on its next pass. The 
 red PR never enters the drain's queue.
 
 `open-pr --mode=label-on-green` BLOCKS until the required `test` check is green (often several minutes). Run
-it BACKGROUNDED (or with a generous timeout) — a foreground call may hit the tool timeout mid-wait, which is
-EXPECTED and harmless: the PR is already open (`checking`), and re-invoking it with the SAME `--ref` is
-idempotent (it targets the existing PR and applies the label, never a duplicate).
+it in the **FOREGROUND with an explicit Bash `timeout: 600000`** (the 10-minute max) — never
+`run_in_background`, never a trailing `&`. If the tool still reports the command *"was moved to the
+background"*, that is harmless: the PR is already open (`checking`). **Do NOT poll its `tasks/<id>.output`
+file and do NOT loop on `gh pr view`/`gh pr checks`** (`we:scripts/guard-bash.mjs` denies both in an agent
+session, #x36vidg) — re-invoke the SAME command once more in the foreground (same `--ref` ⇒ idempotent: it
+targets the existing PR and applies the label, never a duplicate), then report whatever it returns and exit.
 
 - End the commit message with:
   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
@@ -411,7 +414,8 @@ curates centrally.
 ### 10. EXIT — do not merge, do not release, do not wait
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane — the resident drain
-daemon lands the PR. The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
+daemon lands the PR. Do NOT wait for it to merge or for CI to finish — no `sleep` loop around `gh pr view` /
+`gh pr checks` / `statusCheckRollup`, no `gh pr checks --watch` (denied in an agent session, #x36vidg). The **merge watcher** (`scripts/conveyor/pr-watch.mjs <pr-number>`) is spawned by the
 **conveyor skill, not by you**, on the PR number `pr-land` reported for this item in step 8; its process exit
 (merged / parked / closed) wakes the main session and re-dispatches the freed lane. Your OWN process EXIT is the
 signal you are done. Return a one-line result to the conveyor: `#{{ITEM_NUM}} → PR #<n> (ready-to-merge |

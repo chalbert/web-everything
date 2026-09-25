@@ -995,7 +995,8 @@ export function createDispatchSinks({
   // by default so every OTHER existing test of either keeps working unchanged. `resolveGhShimSettingsEnv`
   // itself never throws and is a no-op (fs untouched) on any host that has not opted into App auth — see
   // `we:scripts/lib/gh-app-shim.mjs`'s own header.
-  resolveSettingsEnv = resolveGhShimSettingsEnv,
+  // #x36vidg — plus the Bash timeouts (`resolveDispatchSettingsEnv`), so every dispatch carries `--settings`.
+  resolveSettingsEnv = resolveDispatchSettingsEnv,
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -1216,6 +1217,23 @@ export const DISPATCHED_AGENT_SYSTEM_PROMPT_FILE = join(dirname(fileURLToPath(im
  */
 export function resolveGhShimSettingsEnv(cwd) {
   try { return buildGhShimSettingsEnv({ cwd }); } catch { return null; }
+}
+
+/**
+ * #x36vidg — the Bash-tool timeouts every dispatched session starts with. Claude Code's Bash tool MOVES a
+ * command to the background once it passes its timeout (default `BASH_DEFAULT_TIMEOUT_MS` = 120000), and a
+ * worker whose gate/pr-land/review loop got moved then hand-rolls a `sleep` poll over its own
+ * `tasks/<id>.output` — measured at ~7h of idle in one day. Raising the DEFAULT to the documented 10-minute
+ * ceiling (`BASH_MAX_TIMEOUT_MS`, also pinned here) removes that 2-minute trigger at its source: a long gate
+ * simply runs to completion in the foreground. Names and semantics per code.claude.com/docs/en/env-vars;
+ * settings-`env` values are read by Claude Code itself ("Claude Code reads them directly from the file").
+ */
+export const DISPATCH_BASH_TIMEOUT_ENV = Object.freeze({ BASH_DEFAULT_TIMEOUT_MS: '600000', BASH_MAX_TIMEOUT_MS: '600000' });
+
+/** The dispatched session's `--settings` env: the gh-App shim override (when this host opted in) plus the
+ *  #x36vidg Bash timeouts (always). Never throws. */
+export function resolveDispatchSettingsEnv(cwd) {
+  return { ...(resolveGhShimSettingsEnv(cwd) || {}), ...DISPATCH_BASH_TIMEOUT_ENV };
 }
 
 export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null }) {

@@ -554,23 +554,22 @@ function laneItemPrompt(it, laneDirs) {
     `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
     `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
     // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --timeout-min=9 --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`), \`labelApplied\`, and \`held\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
     `     #984 — if the JSON carries \`held:true\`, the PR is DELIBERATELY held for review (a review-hold verdict stripped`,
     `     ready-to-merge): report \`held:true\` on that PR and labelled:false. A held PR is held ON PURPOSE — do NOT re-label it.`,
-    `   • HOW TO WAIT ON pr-land (#2429): it BLOCKS until its required checks resolve — often minutes, past the Bash`,
-    `     timeout — so launch it as a BACKGROUND task (the Bash tool's run_in_background) and let the harness RESUME`,
-    `     you with the task's completion notification, then read the finished task output for the JSON. Do NOT wrap it`,
-    `     in a poll loop that greps for its own process: a wait whose match pattern (the ref, the slug, the tool name)`,
-    `     also appears in the WAITER'S own argv self-matches, so the liveness check never fails and the loop idles the`,
-    `     lane to a Monitor timeout even though pr-land already finished green. The completion notification is the ONLY`,
-    `     wait you need — never build a self-matching process poll.`,
+    `   • HOW TO WAIT ON pr-land (#2429, #x36vidg): it BLOCKS until its required checks resolve — often minutes. Run it`,
+    `     in the FOREGROUND with an explicit Bash timeout of 600000 (the 10-minute max) and add \`--timeout-min=9\` so`,
+    `     pr-land's own check wait always returns inside that window (reason:"check-timeout" = PR open, unlabelled —`,
+    `     report labelled:false; Finalize reconciles it). NEVER run it with run_in_background, and NEVER sleep-poll its`,
+    `     \`tasks/<id>.output\` file or loop on \`gh pr view\`/\`gh pr checks\` for merge/CI state — guard-bash DENIES both`,
+    `     in an agent session. The drain lands the PR; you report and EXIT.`,
   );
   for (const r of implRepos) {
     // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
-    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --no-require-verified --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
+    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --no-require-verified --timeout-min=9 --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
   }
   lines.push(
     labelReady

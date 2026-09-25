@@ -94,6 +94,8 @@ for (let i = 0; i < argv.length; i += 1) {
   // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
   // acceptance (the real CLI's own --help lists this flag), not file contents.
   if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; extraFlagCount += 1; continue; }
+  // #x8mpubm/#x36vidg — \`--settings '{"env":{...}}'\` (gh-App shim PATH, Bash timeouts); a real CLI flag.
+  if (a === '--settings') { i += 1; extraFlagCount += 1; continue; }
   // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
   // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
   // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.
