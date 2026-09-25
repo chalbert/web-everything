@@ -43,6 +43,9 @@ First build slice of the health daemon ruled in 4065 (design: we:reports/2026-09
   09:20 ET); `clone-stale` (design smell 4: `smoke-rejected` / `clone-held-stale` / `smoke-slow` in
   `~/.claude/daemon-self-sync-state/*.alerts.jsonl`, the 08:15 ET stuck clone); `red-pr-unattended` (CI red for
   over 1 h with no `fix-<PR>` session in `claude agents --json`).
+- **`heavy-queue-wait`** (added at the coordinator's request): a heavy-admission waiter past 30 min, or a slot
+  held past 40 min (measured from first sight — the status read has no acquire time). Live 16:02 ET: lane-9
+  waited 1.5 h.
 - **HEALTH section**: `node we:scripts/operations/operator-queue.mjs --with-health` prints it first (opt-in like
   `--with-lanes` / `--with-backpressure`, whose tests pin the exact default output); its first line is the health
   watch's last-tick age. Read by we:scripts/conveyor/health-watch-section.mjs (fs only, no child process).

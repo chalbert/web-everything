@@ -305,6 +305,10 @@ export async function tick(flags = {}) {
   probes.selfSync = attempt('selfSync', () => probeSelfSync(flags['self-sync-dir'] || defaultSelfSyncDir()));
   probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
   probes.appStatus = attempt('appStatus', () => readGithubAppStatus()) ?? null;
+  // The declared heavy-command admission read (cap, held slots, waiters with requestedAt) — a fixture file in tests.
+  probes.heavyQueue = attempt('heavyQueue', () => (flags['heavy-status-file']
+    ? JSON.parse(readFileSync(flags['heavy-status-file'], 'utf8'))
+    : JSON.parse(run(process.execPath, [join(REPO_ROOT, 'scripts/readiness/heavy-admission.mjs'), 'status', '--json'], { timeoutMs: 15_000 }))));
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);

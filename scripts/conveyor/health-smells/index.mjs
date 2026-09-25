@@ -14,7 +14,8 @@ import redPrUnattended from './red-pr-unattended.mjs';
 import badCredentials from './bad-credentials.mjs';
 import laneStarvation from './lane-starvation.mjs';
 import healthTickOverrun from './health-tick-overrun.mjs';
+import heavyQueueWait from './heavy-queue-wait.mjs';
 
 export const SMELLS = Object.freeze([
-  daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun,
+  daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait,
 ]);

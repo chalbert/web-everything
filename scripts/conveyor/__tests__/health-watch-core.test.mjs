@@ -18,6 +18,7 @@ import redPrUnattended from '../health-smells/red-pr-unattended.mjs';
 import badCredentials from '../health-smells/bad-credentials.mjs';
 import laneStarvation from '../health-smells/lane-starvation.mjs';
 import healthTickOverrun from '../health-smells/health-tick-overrun.mjs';
+import heavyQueueWait from '../health-smells/heavy-queue-wait.mjs';
 
 const sample = (name, text, over = {}) => ({ name, mtimeMs: 0, sizeBytes: text.length, text, bootstrap: false, defaultIntervalMs: 120_000, ...over });
 
@@ -714,5 +715,41 @@ describe('round 2: attribution and benign-only ticks', () => {
       'reconcile-fix-dispatch-daemon: reconcile-refused cap-exhausted chalbert/web-everything PR #2 — cap',
     ].join('\n'));
     expect(p.ticks.map(tickIsUnproductive)).toEqual([false, false]);
+  });
+});
+
+// ── heavy-queue-wait (coordinator request, live 16:02 ET: lane-9 waited 1.5 h for a heavy slot) ──────────────
+
+describe('heavy-queue-wait', () => {
+  const T0 = Date.parse('2026-09-25T20:00:00.000Z');
+  const iso = (ms) => new Date(ms).toISOString();
+  const held = [{ slot: 0, owner: '/x/.lanes/web-everything/lane-13', pid: 33047, heartbeatAt: iso(T0) }];
+  it('opens when a waiter has waited over 30 min (the 16:02 ET lane-9 case), and closes once the queue drains', () => {
+    const q = (waiting) => ({ heavyQueue: { cap: 2, heldCount: 1, held, waiting } });
+    let state = emptyHealthState();
+    let r = runHealthTick(state, q([{ owner: '/x/.lanes/web-everything/lane-9', lane: '9', pid: 1, requestedAt: iso(T0 - 90 * MINUTE) }]), [heavyQueueWait], T0, {});
+    expect(r.transitions).toEqual([expect.objectContaining({ type: 'opened', key: 'heavy-queue-wait::heavy-admission' })]);
+    expect(r.state.episodes['heavy-queue-wait::heavy-admission'].measure.longWaiters).toEqual([{ lane: 'lane-9', pid: 1, waitedMin: 90 }]);
+    state = r.state;
+    for (let i = 1; i <= 2; i += 1) { r = runHealthTick(state, q([]), [heavyQueueWait], T0 + i * 5 * MINUTE, {}); state = r.state; }
+    expect(r.transitions.map((t) => t.type)).toEqual(['closed']);
+  });
+  it('measures a holder from when the watch first saw it, and opens past 40 min', () => {
+    const q = { heavyQueue: { cap: 2, heldCount: 1, held, waiting: [] } };
+    let state = emptyHealthState();
+    let opened = null;
+    for (let m = 0; m <= 45; m += 5) {
+      const r = runHealthTick(state, q, [heavyQueueWait], T0 + m * MINUTE, {});
+      state = r.state;
+      if (r.transitions.some((t) => t.type === 'opened')) opened = opened ?? m;
+    }
+    expect(opened).toBe(45);
+    expect(state.episodes['heavy-queue-wait::heavy-admission'].measure.longHolders[0]).toMatchObject({ lane: 'lane-13', heldMin: 45 });
+  });
+  it('forgets a holder as soon as it releases its slot', () => {
+    let r = runHealthTick(emptyHealthState(), { heavyQueue: { cap: 2, held, waiting: [] } }, [heavyQueueWait], T0, {});
+    expect(Object.keys(r.state.heavyHeldSince)).toHaveLength(1);
+    r = runHealthTick(r.state, { heavyQueue: { cap: 2, held: [], waiting: [] } }, [heavyQueueWait], T0 + MINUTE, {});
+    expect(r.state.heavyHeldSince).toEqual({});
   });
 });

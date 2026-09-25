@@ -524,7 +524,18 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
   for (const name of Object.keys(errs)) if (!name.startsWith('smell:') && !(name in probeErrors)) delete errs[name];
   for (const [name, msg] of Object.entries(probeErrors)) errs[name] = { count: (errs[name]?.count ?? 0) + 1, last: String(msg).slice(0, 200) };
 
-  const ctx = { now, config: cfg, daemons, probeErrors: errs, lastTick: state.lastTick };
+  // When each heavy-admission slot holder was FIRST seen (the status read carries no acquire time): kept in state,
+  // dropped as soon as that (slot, owner, pid) no longer holds.
+  let heavyHeldSince = state.heavyHeldSince || {};
+  if (probes.heavyQueue) {
+    const next = {};
+    for (const h of probes.heavyQueue.held || []) {
+      const k = `${h.slot}|${h.owner}|${h.pid}`;
+      next[k] = heavyHeldSince[k] ?? now;
+    }
+    heavyHeldSince = next;
+  }
+  const ctx = { now, config: cfg, daemons, probeErrors: errs, lastTick: state.lastTick, heavyHeldSince };
   const evaluations = smells.map((smell) => {
     const needs = smell.probes ?? [];
     const missing = needs.filter((p) => probes[p] === undefined);
@@ -538,7 +549,7 @@ export function runHealthTick(prevState, probes, smells, now, { config = {}, act
       return { smell, results: null, error: String(e?.message || e) };
     }
   });
-  const stepped = stepEpisodes({ ...state, daemons, probeErrors: errs }, evaluations, now, { config: cfg, activeCards });
+  const stepped = stepEpisodes({ ...state, daemons, probeErrors: errs, heavyHeldSince }, evaluations, now, { config: cfg, activeCards });
   const smellsById = Object.fromEntries(smells.map((s) => [s.id, s]));
   const plan = planActions(stepped.transitions, smellsById, { mode: cfg.mode });
   return { state: stepped.state, transitions: stepped.transitions, plan, evaluations };
