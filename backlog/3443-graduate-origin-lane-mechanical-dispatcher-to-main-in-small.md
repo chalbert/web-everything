@@ -453,7 +453,7 @@ How each slice (a child of this item) graduates, per the statute
   One piece was worth keeping regardless of which PR lands: #2628's fixture makes the TEST hermetic but does
   nothing for the real card, so `we:scripts/operations/priority-sync.mjs --apply` still cannot run for real
   on `main`'s own `#3383` card (it refuses outright with no section to sync into) — filed as
-  `we:backlog/xdzl6mb-*` (`blockedBy`: none, needs a real operator judgment call about Health-chain/Delegation
+  `we:backlog/4150-*` (`blockedBy`: none, needs a real operator judgment call about Health-chain/Delegation
   membership this port must not invent unaided). This item (`#3892`) is left `status: open` for whichever PR
   (`#2628`) actually lands; this session does not resolve it, per #105 (claim/resolve tracks landed status,
   not which session did the work).
