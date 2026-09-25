@@ -91,6 +91,22 @@ describe('assessDaemonEntry', () => {
     expect(assessDaemonEntry(stale, { observedAt: OBSERVED_AT }).state).toBe('alive-and-stalled');
   });
 
+  // #4077 — live-caught 2026-09-25 11:39 ET: the drain's `lastPass.at` is a pass START and goes 20+ min stale
+  // during a long merging pass; its log's own newer stamp (`tick.lastActivityAt`) must keep it `alive`.
+  it('a leaseless daemon whose lastPass.at is stale but whose log shows newer activity is NOT stalled', () => {
+    const raw = {
+      name: 'drain', readable: true, running: true, leaseKey: null, lease: null,
+      tick: { found: true, at: STALE_HEARTBEAT, lastActivityAt: FRESH_HEARTBEAT, attempted: 3, succeeded: 2, refused: 0 },
+    };
+    const out = assessDaemonEntry(raw, { observedAt: OBSERVED_AT });
+    expect(out.state).toBe('alive');
+    // …and the reported last-tick time is that same fresh activity, not the stale pass start.
+    expect(out.lastTickAt).toBe(FRESH_HEARTBEAT);
+    expect(out.lastTickAtSource).toBe('log-activity');
+    const bothStale = { ...raw, tick: { ...raw.tick, lastActivityAt: STALE_HEARTBEAT } };
+    expect(assessDaemonEntry(bothStale, { observedAt: OBSERVED_AT }).state).toBe('alive-and-stalled');
+  });
+
   it('a daemon with no dispatch/refusal concept (no lease, no tick timestamp) is plain alive, never flagged stale on nothing', () => {
     const raw = { name: 'ci-queue-watch-we', readable: true, running: true, leaseKey: null, lease: null, tick: { found: false, raw: 'some line' } };
     const out = assessDaemonEntry(raw, { observedAt: OBSERVED_AT });
