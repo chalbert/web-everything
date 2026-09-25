@@ -31,8 +31,10 @@ import {
   createFileRunStore,
   createMemoryRunStore,
   deleteRun,
+  isRunRecordTerminal,
   listRunIds,
   newRunId,
+  pruneTerminalRuns,
   readRun,
   resolveRunsDir,
   runPath,
@@ -333,5 +335,76 @@ describe('the fs shell', () => {
   it('deleteRun on a directory that does not exist is a no-op', () => {
     mkdirSync(join(dir, 'empty'), { recursive: true });
     expect(() => deleteRun('run-nope', join(dir, 'empty'))).not.toThrow();
+  });
+});
+
+// #4089 (epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) — "delete helpers exist but
+// nothing calls them" was the gap the card's own root-cause card named verbatim; these prove the fix.
+describe('isRunRecordTerminal — is a run record safe to prune?', () => {
+  it('a run with no effects and no pending is terminal', () => {
+    expect(isRunRecordTerminal(sample())).toBe(true);
+  });
+  it('a run with `pending` set is NOT terminal — mid-flight replay state', () => {
+    expect(isRunRecordTerminal({ ...sample(), pending: { kind: 'declared' } })).toBe(false);
+  });
+  it('a run with an in-flight or pending effect is NOT terminal', () => {
+    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'in-flight' }] })).toBe(false);
+    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'pending' }] })).toBe(false);
+  });
+  it('a run whose effects are all applied/failed/declared IS terminal', () => {
+    expect(isRunRecordTerminal({ ...sample(), effects: [{ key: 'a', status: 'applied' }, { key: 'b', status: 'failed' }] })).toBe(true);
+  });
+  it('a malformed record (no effects array) is never treated as terminal', () => {
+    expect(isRunRecordTerminal({ ...sample(), effects: undefined })).toBe(false);
+    expect(isRunRecordTerminal(null)).toBe(false);
+    expect(isRunRecordTerminal('nope')).toBe(false);
+  });
+});
+
+describe('pruneTerminalRuns — the fs shell', () => {
+  it('deletes a terminal run past maxAgeMs, keeps one still young', () => {
+    writeRun(newRunRecord({ id: 'run-old', op: 'x' }), dir);
+    writeRun(newRunRecord({ id: 'run-fresh', op: 'x' }), dir);
+    const now = Date.now();
+    const statFn = (p) => ({ mtimeMs: p.includes('run-old') ? now - 1000 : now });
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn });
+    expect(result.pruned).toEqual(['run-old']);
+    expect(result.kept).toEqual(['run-fresh']);
+    expect(listRunIds(dir)).toEqual(['run-fresh']);
+  });
+
+  it('never prunes a non-terminal (in-flight) run, however old', () => {
+    const inFlightRun = {
+      ...newRunRecord({ id: 'run-live', op: 'x' }),
+      effects: [{ key: 'a', type: 'dispatch', stepIndex: 0, index: 0, status: 'in-flight', handle: 'h1' }],
+    };
+    writeRun(inFlightRun, dir);
+    const now = Date.now();
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 1, now, statFn: () => ({ mtimeMs: now - 999_999 }) });
+    expect(result.pruned).toEqual([]);
+    expect(result.kept).toEqual(['run-live']);
+    expect(listRunIds(dir)).toEqual(['run-live']);
+  });
+
+  it('`maxAgeMs: null` (the "never" setting) is a no-op read-only pass', () => {
+    writeRun(sample(), dir);
+    const result = pruneTerminalRuns({ dir, maxAgeMs: null });
+    expect(result.pruned).toEqual([]);
+    expect(listRunIds(dir)).toEqual(['run-sample']);
+  });
+
+  it('`dryRun: true` reports what would be pruned without deleting anything', () => {
+    writeRun(newRunRecord({ id: 'run-old', op: 'x' }), dir);
+    const now = Date.now();
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 500, now, statFn: () => ({ mtimeMs: now - 1000 }), dryRun: true });
+    expect(result.pruned).toEqual(['run-old']);
+    expect(listRunIds(dir)).toEqual(['run-old']); // still on disk — dry run never deletes
+  });
+
+  it('a corrupt run file is reported, never silently deleted', () => {
+    writeFileSync(join(dir, 'run-torn.json'), '{not json');
+    const result = pruneTerminalRuns({ dir, maxAgeMs: 0 });
+    expect(result.corrupt).toEqual(['run-torn']);
+    expect(listRunIds(dir)).toEqual(['run-torn']); // filename-valid, so still LISTED — content is never touched
   });
 });

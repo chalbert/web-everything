@@ -28,10 +28,24 @@ import {
   makeHungResolver,
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
+  BLOCKED_ON_INFRA_OUTCOME,
+  transcriptShowsIntendedBlockedOnInfra,
+  classifyRetention,
+  retentionGroundTruthForItem,
+  retentionGroundTruthForPr,
+  makeRetentionGroundTruthResolver,
+  makeIntrospectionDoneResolver,
+  makeCostRolledUpResolver,
+  resolveRetentionGraceMs,
+  resolveRetentionCeilingMs,
+  runRetentionSweepPass,
+  RETENTION_GRACE_MS_DEFAULT,
+  RETENTION_CEILING_MS_DEFAULT,
 } from '../session-reaper.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -697,6 +711,99 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(planBackstopCompletion({ name: 'my terminal' }, null)).toBeNull();
     expect(planBackstopCompletion({ name: undefined }, null)).toBeNull();
   });
+
+  // Live incident fix (PR #2647/#2625, 2026-09-25): a crashed session's own transcript can show it intended
+  // `blocked-on-infra` even though it never durably self-reported that. The 4th `blockedOnInfra` param lets the
+  // caller (runSessionReaperPass, below) upgrade the backstop outcome to match — see the constant's own doc.
+  it('mints outcome BLOCKED_ON_INFRA_OUTCOME (not the generic one) when the caller says the transcript showed it', () => {
+    const rec = planBackstopCompletion({ name: 'review-2647' }, null, () => '2026-09-25T15:00:00.000Z', true);
+    expect(rec).toMatchObject({ session: 'review-2647', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME });
+  });
+
+  it('defaults to the generic outcome when `blockedOnInfra` is omitted or false — byte-identical to before', () => {
+    const now = () => '2026-09-25T15:00:00.000Z';
+    expect(planBackstopCompletion({ name: 'review-2647' }, null, now)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+    expect(planBackstopCompletion({ name: 'review-2647' }, null, now, false)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+  });
+});
+
+describe('transcriptShowsIntendedBlockedOnInfra — reading the crashed session\'s own last words (PR #2647/#2625, 2026-09-25)', () => {
+  const jsonl = (entries) => entries.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  const textEntry = (text) => ({ type: 'assistant', timestamp: '2026-09-25T15:00:00Z', message: { content: [{ type: 'text', text }] } });
+  const toolUseEntry = (command) => ({ type: 'assistant', timestamp: '2026-09-25T15:00:00Z', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command } }] } });
+
+  it('true when the newest assistant text states it is blocked on infra', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: [jsonl([textEntry('I am blocked-on-infra, cannot proceed')])].map((s) => s.trim()) }),
+        summarizeEntryFn: (raw) => { const o = JSON.parse(raw); return { kind: o.type, blocks: [{ kind: 'text', text: o.message.content[0].text }] }; },
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('true when the newest tool_use attempted the completion-cli report call, even though it never resolved', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'tool_use', input: 'node scripts/operations/completion-cli.mjs report --status=done --outcome=blocked-on-infra' }] }),
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('tolerates a space instead of a hyphen ("blocked on infra") and is case-insensitive', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'text', text: 'Looks like I am BLOCKED ON INFRA here.' }] }),
+      },
+    );
+    expect(found).toBe(true);
+  });
+
+  it('false when nothing in the tail mentions it', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'assistant', blocks: [{ kind: 'text', text: 'Running the tests now.' }] }),
+      },
+    );
+    expect(found).toBe(false);
+  });
+
+  it('a `user`-role entry mentioning the phrase (the injected review-agent BRIEF quotes it as an instruction) is NEVER a match — only the agent\'s own assistant-authored words count', () => {
+    const found = transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      {
+        resolveTranscript: () => '/fake/path.jsonl',
+        tailLinesFn: () => ({ lines: ['line1'] }),
+        summarizeEntryFn: () => ({ kind: 'user', blocks: [{ kind: 'text', text: 'report done with --outcome=blocked-on-infra if you cannot proceed' }] }),
+      },
+    );
+    expect(found).toBe(false);
+  });
+
+  it('false, never a guess, when the session is missing cwd/sessionId or the transcript is unreadable', () => {
+    expect(transcriptShowsIntendedBlockedOnInfra(null)).toBe(false);
+    expect(transcriptShowsIntendedBlockedOnInfra({ cwd: '/c' })).toBe(false); // no sessionId
+    expect(transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      { resolveTranscript: () => { throw new Error('ENOENT'); } },
+    )).toBe(false);
+    expect(transcriptShowsIntendedBlockedOnInfra(
+      { cwd: '/c', sessionId: 's1' },
+      { resolveTranscript: () => '/fake/path.jsonl', tailLinesFn: () => { throw new Error('unreadable'); } },
+    )).toBe(false);
+  });
 });
 
 describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow-up, epic #3383)', () => {
@@ -779,6 +886,68 @@ describe('runSessionReaperPass — the backstop-completion write (xbv32pg follow
     expect(result.backstopWritten).toBe(0);
     expect(result.stopped).toBe(1); // the stop itself still proceeds — the backstop write is a side concern
   });
+
+  // Live incident fix (PR #2647/#2625, 2026-09-25) — the outcome the backstop write carries actually reflects
+  // what `blockedOnInfraFor` said, end to end through the real dry-run/live paths (not just the pure function).
+  it('writes BLOCKED_ON_INFRA_OUTCOME when the injected transcript resolver says the session intended it', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', cwd: '/wev-review-daemon', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: (session) => session.name === 'review-2647',
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.backstopWritten).toBe(1);
+    expect(written[0]).toMatchObject({ session: 'review-2647', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME });
+  });
+
+  it('dry-run reports the ACTUAL outcome (blocked-on-infra), not the generic one, when the resolver says so', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', cwd: '/wev-review-daemon', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: () => true,
+      dryRun: true,
+      readCompletionRecord: () => null,
+      writeCompletionRecord: () => { throw new Error('dry-run must never write'); },
+      log: () => {},
+    });
+    expect(result.wouldWriteBackstop).toEqual([{ name: 'review-2647', outcome: BLOCKED_ON_INFRA_OUTCOME }]);
+  });
+
+  it('a `blockedOnInfraFor` that throws is treated as false — never crashes the pass, never guesses', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: () => { throw new Error('unreadable'); },
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(written[0]).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+  });
+
+  it('`blockedOnInfraFor: null` is a rollback escape hatch — byte-identical to the pre-fix generic outcome', () => {
+    const written = [];
+    runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', kind: 'background', state: 'done', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      blockedOnInfraFor: null,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(written[0]).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
+  });
 });
 
 describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3436)', () => {
@@ -857,3 +1026,244 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
     });
   });
 });
+
+// #4089 (epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) — the retention sweep: a
+// FINISHED session's own RECORDS (completion record, delivery report, `claude agents` entry) are deletable
+// only once the work they served is confirmed over, past a grace period, or unconditionally past a ceiling.
+describe('classifyRetention — the pure two-path verdict', () => {
+  const now = 1_000_000_000;
+  it('PATH A: deletes once confirmed done, past the grace period', () => {
+    const v = classifyRetention(
+      { workDone: true, terminalAt: now - 1000, introspectionDone: true, costRolledUp: true, recordAgeMs: 500 },
+      { graceMs: 999, ceilingMs: null, now },
+    );
+    expect(v).toEqual({ deletable: true, reason: 'grace-after-done' });
+  });
+  it('PATH A: NOT yet deletable before the grace period elapses', () => {
+    const v = classifyRetention(
+      { workDone: true, terminalAt: now - 10, introspectionDone: true, costRolledUp: true, recordAgeMs: 10 },
+      { graceMs: 999, ceilingMs: null, now },
+    );
+    expect(v).toEqual({ deletable: false, reason: 'not-yet' });
+  });
+  it('PATH A: never deletes while `workDone`/`introspectionDone`/`costRolledUp` is not ALL true, however old', () => {
+    for (const partial of [
+      { workDone: false, terminalAt: now - 10_000, introspectionDone: true, costRolledUp: true },
+      { workDone: true, terminalAt: now - 10_000, introspectionDone: false, costRolledUp: true },
+      { workDone: true, terminalAt: now - 10_000, introspectionDone: true, costRolledUp: false },
+    ]) {
+      expect(classifyRetention({ ...partial, recordAgeMs: 10_000 }, { graceMs: 1, ceilingMs: null, now }))
+        .toEqual({ deletable: false, reason: 'not-yet' });
+    }
+  });
+  it("`graceMs: null` (the 'never' setting) disables path A outright", () => {
+    const v = classifyRetention(
+      { workDone: true, terminalAt: now - 1_000_000, introspectionDone: true, costRolledUp: true, recordAgeMs: 1_000_000 },
+      { graceMs: null, ceilingMs: null, now },
+    );
+    expect(v).toEqual({ deletable: false, reason: 'not-yet' });
+  });
+  it('PATH B: the ceiling deletes unconditionally, even with workDone:false (a card that never finishes)', () => {
+    const v = classifyRetention(
+      { workDone: false, terminalAt: null, introspectionDone: false, costRolledUp: false, recordAgeMs: 5000 },
+      { graceMs: null, ceilingMs: 4999, now },
+    );
+    expect(v).toEqual({ deletable: true, reason: 'ceiling' });
+  });
+  it("`ceilingMs: null` (the 'never' setting) disables path B outright", () => {
+    const v = classifyRetention(
+      { workDone: false, terminalAt: null, introspectionDone: false, costRolledUp: false, recordAgeMs: Number.MAX_SAFE_INTEGER },
+      { graceMs: null, ceilingMs: null, now },
+    );
+    expect(v).toEqual({ deletable: false, reason: 'not-yet' });
+  });
+  it('the ceiling is checked FIRST — it wins even when path A would also say yes', () => {
+    const v = classifyRetention(
+      { workDone: true, terminalAt: now - 100, introspectionDone: true, costRolledUp: true, recordAgeMs: 10 },
+      { graceMs: 1, ceilingMs: 5, now },
+    );
+    expect(v).toEqual({ deletable: true, reason: 'ceiling' });
+  });
+});
+
+describe('resolveRetentionGraceMs / resolveRetentionCeilingMs — the env-overridable settings', () => {
+  it('default to 1 day grace / 30 day ceiling when unset', () => {
+    expect(resolveRetentionGraceMs({})).toBe(RETENTION_GRACE_MS_DEFAULT);
+    expect(resolveRetentionCeilingMs({})).toBe(RETENTION_CEILING_MS_DEFAULT);
+    expect(RETENTION_GRACE_MS_DEFAULT).toBe(24 * 60 * 60 * 1000);
+    expect(RETENTION_CEILING_MS_DEFAULT).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+  it('`WE_RETENTION_GRACE_HOURS` / `WE_RETENTION_CEILING_DAYS` override the defaults', () => {
+    expect(resolveRetentionGraceMs({ WE_RETENTION_GRACE_HOURS: '2' })).toBe(2 * 60 * 60 * 1000);
+    expect(resolveRetentionCeilingMs({ WE_RETENTION_CEILING_DAYS: '7' })).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+  it("the literal string 'never' disables the path (null), matching the statute's own \"no upper limit\" amendment", () => {
+    expect(resolveRetentionGraceMs({ WE_RETENTION_GRACE_HOURS: 'never' })).toBeNull();
+    expect(resolveRetentionCeilingMs({ WE_RETENTION_CEILING_DAYS: 'Never' })).toBeNull();
+  });
+});
+
+describe('retentionGroundTruthForItem — item-kind ground truth (status + dateResolved)', () => {
+  const fakeIo = (files) => ({
+    readdirSyncFn: () => Object.keys(files),
+    readFileSyncFn: (path) => {
+      const name = path.split('/').pop();
+      if (!(name in files)) throw new Error(`ENOENT: ${path}`);
+      return files[name];
+    },
+  });
+  it('workDone:true with a parsed terminalAt when status is resolved', () => {
+    const io = fakeIo({ '4089-thing.md': '---\nstatus: resolved\ndateResolved: "2026-09-24"\n---\n# T\n' });
+    expect(retentionGroundTruthForItem('4089', { backlogDir: '/backlog', ...io }))
+      .toEqual({ workDone: true, terminalAt: Date.parse('2026-09-24') });
+  });
+  it('workDone:false for a `parked` item — this repo has no distinct `withdrawn` status, and parked may resume', () => {
+    const io = fakeIo({ '4089-thing.md': '---\nstatus: parked\n---\n# T\n' });
+    expect(retentionGroundTruthForItem('4089', { backlogDir: '/backlog', ...io })).toEqual({ workDone: false, terminalAt: null });
+  });
+  it('workDone:false, never true, when no card matches — absence is never done', () => {
+    const io = fakeIo({ '9999-other.md': '---\nstatus: resolved\n---\n' });
+    expect(retentionGroundTruthForItem('4089', { backlogDir: '/backlog', ...io })).toEqual({ workDone: false, terminalAt: null });
+  });
+  it('an unreadable backlog dir answers unknown, never a guess', () => {
+    const io = { readdirSyncFn: () => { throw new Error('ENOENT'); }, readFileSyncFn: () => '' };
+    expect(retentionGroundTruthForItem('4089', { backlogDir: '/backlog', ...io })).toEqual({ workDone: false, terminalAt: null });
+  });
+});
+
+describe('retentionGroundTruthForPr — PR-kind ground truth (merged OR closed, wider than the stop axis)', () => {
+  it('workDone:true for a MERGED pr, terminalAt from mergedAt', () => {
+    const exec = () => JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-20T00:00:00Z' });
+    expect(retentionGroundTruthForPr('100', { exec })).toEqual({ workDone: true, terminalAt: Date.parse('2026-09-20T00:00:00Z') });
+  });
+  it('workDone:true for a CLOSED (never merged) pr, terminalAt from closedAt', () => {
+    const exec = () => JSON.stringify({ state: 'CLOSED', closedAt: '2026-09-21T00:00:00Z' });
+    expect(retentionGroundTruthForPr('101', { exec })).toEqual({ workDone: true, terminalAt: Date.parse('2026-09-21T00:00:00Z') });
+  });
+  it('workDone:false for an OPEN pr', () => {
+    const exec = () => JSON.stringify({ state: 'OPEN' });
+    expect(retentionGroundTruthForPr('102', { exec })).toEqual({ workDone: false, terminalAt: null });
+  });
+  it('any `gh` failure answers null (unknown), never a guess', () => {
+    const exec = () => { throw new Error('gh: not found'); };
+    expect(retentionGroundTruthForPr('103', { exec })).toBeNull();
+  });
+});
+
+describe('makeRetentionGroundTruthResolver — routes + caches, bounded PR calls', () => {
+  it('routes item vs pr targets and caches repeat lookups', () => {
+    let prCalls = 0;
+    const exec = () => { prCalls++; return JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-20T00:00:00Z' }); };
+    const resolver = makeRetentionGroundTruthResolver({
+      exec,
+      readdirSyncFn: () => ['4089-t.md'],
+      readFileSyncFn: () => '---\nstatus: resolved\ndateResolved: "2026-09-24"\n---\n',
+    });
+    expect(resolver({ kind: 'item', id: '4089' })).toEqual({ workDone: true, terminalAt: Date.parse('2026-09-24') });
+    expect(resolver({ kind: 'pr', id: '200', repo: 'we' })).toEqual({ workDone: true, terminalAt: Date.parse('2026-09-20T00:00:00Z') });
+    expect(resolver({ kind: 'pr', id: '200', repo: 'we' })).toEqual({ workDone: true, terminalAt: Date.parse('2026-09-20T00:00:00Z') });
+    expect(prCalls).toBe(1); // second lookup of the same target was cached
+  });
+  it('bounds `gh pr view` calls to maxPrViewCalls, leaving the rest unresolved (null) this pass', () => {
+    let prCalls = 0;
+    const exec = () => { prCalls++; return JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-20T00:00:00Z' }); };
+    const resolver = makeRetentionGroundTruthResolver({ exec, maxPrViewCalls: 1 });
+    expect(resolver({ kind: 'pr', id: '201' })).not.toBeNull();
+    expect(resolver({ kind: 'pr', id: '202' })).toBeNull();
+    expect(prCalls).toBe(1);
+  });
+});
+
+describe('makeIntrospectionDoneResolver — the #3477 deferral gate', () => {
+  it('vacuously true when introspection is OFF (the default) — nothing was ever asked to run', () => {
+    expect(makeIntrospectionDoneResolver({ env: {} })()).toBe(true);
+    expect(makeIntrospectionDoneResolver({ env: { WE_INTROSPECTION_ENABLED: '0' } })()).toBe(true);
+  });
+  it('fail-closed when introspection is turned ON — #3477 has not shipped a real signal to read yet', () => {
+    expect(makeIntrospectionDoneResolver({ env: { WE_INTROSPECTION_ENABLED: '1' } })()).toBe(false);
+  });
+});
+
+describe('makeCostRolledUpResolver — the #4071 explicit statute deferral', () => {
+  it('always true today — "This condition applies only once #4071 exists"', () => {
+    expect(makeCostRolledUpResolver()()).toBe(true);
+  });
+});
+
+describe('runRetentionSweepPass — the IO shell', () => {
+  let completionsDir;
+  let deliveryDir;
+  let previousCompletions;
+  let previousDelivery;
+  beforeEach(() => {
+    completionsDir = mkdtempSync(join(tmpdir(), 'we-retention-completions-'));
+    deliveryDir = mkdtempSync(join(tmpdir(), 'we-retention-delivery-'));
+    // BOTH env vars, every test — a test that sets only one leaks onto this checkout's REAL
+    // `.operations/delivery-reports`/`.operations/completions` (gitignored, so `git reset` never clears it,
+    // and this file's own `runRetentionSweepPass` calls `resolveCompletionsDir`/`resolveDeliveryReportsDir`
+    // INTERNALLY — it takes no `dir` override at all, unlike every fs-shell test elsewhere in this repo that
+    // passes `dir` explicitly). Found live: an earlier draft of these tests set only one var and a non-dry-run
+    // case deleted real leftover delivery reports from this very checkout.
+    previousCompletions = process.env.OPERATION_COMPLETIONS_DIR;
+    previousDelivery = process.env.OPERATION_DELIVERY_REPORTS_DIR;
+    process.env.OPERATION_COMPLETIONS_DIR = completionsDir;
+    process.env.OPERATION_DELIVERY_REPORTS_DIR = deliveryDir;
+  });
+  afterEach(() => {
+    rmSync(completionsDir, { recursive: true, force: true });
+    rmSync(deliveryDir, { recursive: true, force: true });
+    if (previousCompletions === undefined) delete process.env.OPERATION_COMPLETIONS_DIR; else process.env.OPERATION_COMPLETIONS_DIR = previousCompletions;
+    if (previousDelivery === undefined) delete process.env.OPERATION_DELIVERY_REPORTS_DIR; else process.env.OPERATION_DELIVERY_REPORTS_DIR = previousDelivery;
+  });
+
+  const baseOpts = (extra = {}) => ({
+    retentionGroundTruthFor: () => ({ workDone: true, terminalAt: Date.now() - 2 * 24 * 60 * 60 * 1000 }),
+    introspectionDoneFor: () => true,
+    costRolledUpFor: () => true,
+    graceMs: 24 * 60 * 60 * 1000,
+    ceilingMs: null,
+    now: Date.now(),
+    listAgents: () => [],
+    rm: () => ({ removed: true, alreadyGone: true, output: '' }),
+    pruneRuns: () => ({ pruned: [] }),
+    log: () => {},
+    ...extra,
+  });
+
+  it('deletes a confirmed-done session\'s completion record and delivery report once past grace', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4089', kind: 'review', pr: '1' }), completionsDir);
+    writeDeliveryReport(newDeliveryReport({ session: 'conveyor-4089', item: '4089' }), deliveryDir);
+    const result = runRetentionSweepPass(baseOpts());
+    expect(result.deleted).toBe(1);
+    expect(result.kept).toBe(0);
+    expect(tryReadCompletionSafe(completionsDir, 'conveyor-4089')).toBe(false);
+  });
+
+  it('keeps a session whose work is not yet confirmed done', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4090', kind: 'review', pr: '1' }), completionsDir);
+    const result = runRetentionSweepPass(baseOpts({ retentionGroundTruthFor: () => ({ workDone: false, terminalAt: null }) }));
+    expect(result.deleted).toBe(0);
+    expect(result.kept).toBe(1);
+  });
+
+  it('dry-run reports what would be deleted without touching disk', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-4091', kind: 'review', pr: '1' }), completionsDir);
+    const result = runRetentionSweepPass(baseOpts({ dryRun: true }));
+    expect(result.deleted).toBe(0);
+    expect(result.wouldDelete).toEqual([{ session: 'conveyor-4091', reason: 'grace-after-done' }]);
+    expect(tryReadCompletionSafe(completionsDir, 'conveyor-4091')).toBe(true); // still on disk
+  });
+
+  it('an unknown session-slug grammar is skipped, never guessed', () => {
+    writeCompletion(newCompletionRecord({ session: 'my-freeform-session-name', kind: 'review', pr: '1' }), completionsDir);
+    const result = runRetentionSweepPass(baseOpts());
+    expect(result.deleted).toBe(0);
+    expect(result.kept).toBe(1);
+  });
+});
+
+// Tiny local helper — just "is the file still on disk", independent of the completion-store's own
+// parse-or-refuse contract (not what these tests are checking).
+function tryReadCompletionSafe(dir, session) {
+  return existsSync(join(dir, `${session}.json`));
+}
