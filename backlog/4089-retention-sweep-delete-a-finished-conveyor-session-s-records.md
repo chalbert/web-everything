@@ -3,10 +3,12 @@ bornAs: x2ij3r2
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/operations/run-store.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: main
 tags: []
 ---
 
