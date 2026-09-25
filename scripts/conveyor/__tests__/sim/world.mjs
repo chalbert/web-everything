@@ -243,6 +243,10 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
     WE_CHILD_TIMEOUT_MS: '20000',
     LANE_POOL_LIST_CACHE_TTL_MS: '0',
     LANE_POOL_LIST_SCAN_TIMEOUT_MS: '20000',
+    // x26lw6u — production reviews now run as a node JOB (`review-job.mjs`), but every scenario here scripts a
+    // review as a fake `claude --bg` session's actions. Pin the opt-in session path until the simulator models
+    // the job (filed as its own follow-up) — this keeps the fix/lane/label scenarios exercising what they did.
+    WE_REVIEW_DISPATCH_MODE: 'session',
   };
   delete env.WE_GITHUB_APP_ID;
   delete env.WE_GITHUB_APP_INSTALLATION_ID;
