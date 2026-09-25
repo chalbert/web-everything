@@ -34,7 +34,9 @@
  * rewritten, so the history survives even though the list itself is mutated in place.
  */
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, realpathSync, rmdirSync, statSync,
+} from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -125,6 +127,47 @@ export function readOverlays(root, { env = process.env } = {}) {
   return readOverlayState(root, { env }).overlays;
 }
 
+// ── the list mutex — every read-modify-write of the list runs under it ─────────────────────────────────────
+//
+// WHY. Live 2026-09-24/25 (#2640, #2641, #2643): an overlay `add` was LOST. `daemon-load-overlay.mjs` adds WITHOUT
+// the clone lock, and the CLI has `--no-lock`; meanwhile a rebuild's auto-remove of a merged overlay read the
+// list, then wrote it back — without the entry added in between. So the list itself now serializes its own
+// read-modify-writes, whatever lock (if any) the caller holds: a `mkdir` mutex next to the state file, held for
+// milliseconds (never across a smoke, unlike the clone write lock), so an add never waits minutes on a rebuild.
+// A holder that died is detected by age (`LIST_LOCK_STALE_MS`) and its lock is broken.
+
+const LIST_LOCK_STALE_MS = 30_000;
+const LIST_LOCK_WAIT_MS = 20_000;
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** Run `fn` holding the overlay list's own mutex for `root`. Throws if it cannot be taken within the wait. */
+function withListLock(root, env, fn) {
+  const lockDir = `${overlayFilePath(root, env)}.lock`;
+  mkdirSync(dirname(lockDir), { recursive: true });
+  const deadline = Date.now() + LIST_LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      try {
+        if (Date.now() - statSync(lockDir).mtimeMs > LIST_LOCK_STALE_MS) { rmdirSync(lockDir); continue; }
+      } catch { continue; /* released between our mkdir and stat — retry at once */ }
+      if (Date.now() > deadline) throw new Error(`daemon-overlays: overlay list lock ${lockDir} still held after ${LIST_LOCK_WAIT_MS}ms`);
+      sleepSync(10);
+    }
+  }
+  try {
+    // Test-only seam: widen the read→write window so a race test can prove the mutex (never set in production).
+    const delay = Number(env?.WE_DAEMON_OVERLAYS_TEST_RMW_DELAY_MS);
+    const marker = env?.WE_DAEMON_OVERLAYS_TEST_RMW_MARKER;
+    return fn(delay > 0 ? () => { if (marker) writeFileSync(marker, String(process.pid)); sleepSync(delay); } : () => {});
+  } finally {
+    try { rmdirSync(lockDir); } catch { /* already broken as stale by another process — nothing to release */ }
+  }
+}
+
 /** The list to MUTATE — like {@link readOverlays}, but throws on a corrupt file so a write never replaces it. */
 function readOverlaysForWrite(root, env) {
   const state = readOverlayState(root, { env });
@@ -171,20 +214,23 @@ export function addOverlay(root, {
   if (!isSafeBranchName(ref)) {
     throw new TypeError(`daemon-overlays: ref ${JSON.stringify(ref)} is not a safe branch name — refusing to add it`);
   }
-  const list = readOverlaysForWrite(root, env).slice();
-  const idx = list.findIndex((o) => o && o.ref === ref);
-  if (idx === -1) {
-    list.push({
-      ref, pr: pr ?? null, addedAt: now || new Date().toISOString(), addedBy: addedBy ?? null, reason: reason ?? null,
-      ...(pinned === true ? { pinned: true } : {}),
-    });
-  } else {
-    const next = { ...list[idx], pr: pr ?? null, reason: reason ?? null };
-    if (pinned === true) next.pinned = true;
-    else if (pinned === false) delete next.pinned;
-    list[idx] = next;
-  }
-  return writeOverlays(root, list, { env });
+  return withListLock(root, env, (pause) => {
+    const list = readOverlaysForWrite(root, env).slice();
+    pause();
+    const idx = list.findIndex((o) => o && o.ref === ref);
+    if (idx === -1) {
+      list.push({
+        ref, pr: pr ?? null, addedAt: now || new Date().toISOString(), addedBy: addedBy ?? null, reason: reason ?? null,
+        ...(pinned === true ? { pinned: true } : {}),
+      });
+    } else {
+      const next = { ...list[idx], pr: pr ?? null, reason: reason ?? null };
+      if (pinned === true) next.pinned = true;
+      else if (pinned === false) delete next.pinned;
+      list[idx] = next;
+    }
+    return writeOverlays(root, list, { env });
+  });
 }
 
 /**
@@ -199,12 +245,15 @@ export function addOverlay(root, {
  */
 export function removeOverlay(root, ref, { env = process.env, why } = {}) {
   void why; // caller bookkeeping only — see JSDoc above.
-  const list = readOverlaysForWrite(root, env);
-  const idx = list.findIndex((o) => o && o.ref === ref);
-  if (idx === -1) return { removed: false, list };
-  const next = list.slice(0, idx).concat(list.slice(idx + 1));
-  writeOverlays(root, next, { env });
-  return { removed: true, list: next };
+  return withListLock(root, env, (pause) => {
+    const list = readOverlaysForWrite(root, env);
+    pause();
+    const idx = list.findIndex((o) => o && o.ref === ref);
+    if (idx === -1) return { removed: false, list };
+    const next = list.slice(0, idx).concat(list.slice(idx + 1));
+    writeOverlays(root, next, { env });
+    return { removed: true, list: next };
+  });
 }
 
 /**

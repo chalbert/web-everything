@@ -16,7 +16,8 @@ import {
 } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
@@ -1042,4 +1043,60 @@ describe('rebuildClone — pinned overlays never conflict-drop (self-destruct gu
     expect(dry.wouldDo).toBe('refuse');
     expect(dry.plan.reason).toBe('pinned-overlay-conflict');
   });
+});
+
+// ── overlay-list race (live 2026-09-24/25: #2640, #2641, #2643 each needed repeated adds) ────────────────────
+// Two REAL processes on a throwaway clone: process A is a real `rebuildClone` auto-removing a merged overlay;
+// while A sits inside its read→write window (widened by the test-only RMW delay; A drops a marker file when it
+// gets there), process B runs the real CLI `daemon-overlay.mjs add --no-lock` — the unlocked add path
+// `daemon-load-overlay.mjs` also takes. Before the list mutex, A wrote back its stale read and B's add vanished.
+describe('overlay list — concurrent add vs. a rebuild auto-remove (two real processes)', () => {
+  // vitest's import.meta.url is not a file: URL — resolve from the repo root like daemon-live-smoke.test.mjs does.
+  const REBUILD_URL = pathToFileURL(join(process.cwd(), 'scripts/lib/daemon-rebuild.mjs')).href;
+  const CLI = join(process.cwd(), 'scripts/daemon-overlay.mjs');
+
+  function runNode(args, env) {
+    return new Promise((resolveP) => {
+      const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let out = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.stderr.on('data', (d) => { out += d; });
+      child.on('close', (code) => resolveP({ code, out }));
+    });
+  }
+
+  it('an add that lands while a rebuild is removing a merged overlay is never lost', async () => {
+    const { originDir, cloneDir, env, base } = makeFixture();
+    pushBranch(originDir, 'lane/merged', (dir) => writeFile(dir, 'm.txt', 'm\n'));
+    addOverlay(cloneDir, { ref: 'lane/merged', pr: 42 }, { env });
+    const marker = join(base, 'rmw-window-open');
+
+    const script = `
+      const { rebuildClone } = await import(${JSON.stringify(REBUILD_URL)});
+      const r = await rebuildClone({
+        root: ${JSON.stringify(cloneDir)}, prState: async () => 'MERGED',
+        runSmoke: async () => ({ verdict: 'pass', attempts: 1, smoke: { results: [] } }),
+        lockOpts: { waitMs: 2000, pollMs: 20 }, log: { error() {} },
+      });
+      console.log(JSON.stringify({ reason: r.reason }));
+    `;
+    let rebuildDone = false;
+    const rebuildP = runNode(['--input-type=module', '-e', script], {
+      ...env, WE_DAEMON_OVERLAYS_TEST_RMW_DELAY_MS: '1500', WE_DAEMON_OVERLAYS_TEST_RMW_MARKER: marker,
+    }).then((r) => { rebuildDone = true; return r; });
+
+    // Wait until A is inside its read→write window, then fire B.
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(marker) && !rebuildDone && Date.now() < deadline) await new Promise((r) => { setTimeout(r, 20); });
+    if (!existsSync(marker)) {
+      const early = await rebuildP;
+      throw new Error(`the rebuild process never reached its read→write window: ${early.out}`);
+    }
+    const addP = runNode([CLI, 'add', `--clone=${cloneDir}`, '--ref=lane/new', '--pr=7', '--no-lock', '--json'], env);
+
+    const [a, b] = await Promise.all([rebuildP, addP]);
+    expect(b.code, b.out).toBe(0);
+    expect(a.code, a.out).toBe(0);
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/new']);
+  }, 90_000);
 });
