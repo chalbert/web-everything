@@ -21,7 +21,7 @@ changed.
 
 **Superseded by a live incident, 2026-09-25, before that shape was built.** Review sessions started giving up
 because `we:scripts/lane-pool.mjs acquire`'s auto-pick can't find a lane within its 180s wait: the shared,
-single-flight full-pool scan it sources candidates from (#xn432dz/#3383) is cheap when idle (35.8s measured,
+single-flight full-pool scan it sources candidates from (#4012/#3383) is cheap when idle (35.8s measured,
 88 lanes, 27 acquirable) but degrades hard under concurrent load — live-measured 240s for `acquire`, 66s for
 `list --acquirable`, against acquire's 180s ceiling, while 30+ lanes sat genuinely free. Victims: PR #2647 (4
 failed reviews), #2625 (8), #2596 (5); 41 sessions ended `blocked-on-infra`. Operator-approved fix (the
