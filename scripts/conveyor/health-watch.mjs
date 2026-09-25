@@ -1,0 +1,362 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/conveyor/health-watch.mjs
+ * @description #4077 (health daemon slice 1, ruling #4065) — the IO SHELL of the health watch. Runs the probes,
+ *   hands their raw readings to the pure core (we:scripts/conveyor/health-watch-core.mjs), and writes back the
+ *   episode store, the per-episode reports and the last-tick-completed stamp. Resident via one
+ *   `health-watch` entry in we:skills-src/conveyor/daemon-manifest.mjs (pass-daemon runs `tick` every 5 min).
+ *
+ * READ-ONLY toward the fleet: it reads daemon logs, lease files, self-sync alerts, the lane-pool health lines,
+ * `gh pr list` and `claude agents --json`, and runs only declared read-only diagnoses. It never dispatches,
+ * notifies, files or edits anything but its own state dir. Ships in SHADOW mode (4065): what it WOULD notify /
+ * dispatch is written into each report under "Held back".
+ *
+ * State lives under the pinned daemon state root (#4052): `<CONVEYOR_STATE_ROOT or repo root>/.conveyor/health/`
+ *   state.json          episodes, per-daemon memory, log cursors, silences, gh cache
+ *   last-tick.json      the last-tick-completed stamp (separate from the pass-daemon lease heartbeat, which
+ *                       keeps beating through a hung tick — pass-daemon.mjs:194)
+ *   episodes/<id>.md    the durable per-episode report (+ .json)
+ *
+ * Every child call has a hard timeout; a whole-tick watchdog kills a hung tick and records it, so the next tick
+ * raises the `health-tick-overrun` smell.
+ *
+ * Usage:
+ *   node scripts/conveyor/health-watch.mjs tick    [--json] [--force-gh] [--no-gh] [--dry-run] [--state-root=DIR]
+ *                                                  [--logs-dir=DIR] [--lock-root=DIR] [--self-sync-dir=DIR]
+ *   node scripts/conveyor/health-watch.mjs section [--state-root=DIR]      # the HEALTH section (operator queue)
+ *   node scripts/conveyor/health-watch.mjs silence --smell=ID [--subject=S] --card=NNN [--hours=72]
+ *   node scripts/conveyor/health-watch.mjs unsilence --smell=ID [--subject=S]
+ */
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, renameSync, openSync, readSync, closeSync, unlinkSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, MINUTE,
+} from './health-watch-core.mjs';
+import { SMELLS } from './health-smells/index.mjs';
+import { pinnedStateRoot } from './queue-store.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
+import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
+import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
+export const MAX_READ_BYTES = 2 * 1024 * 1024;
+export const GH_CADENCE_MS = 15 * MINUTE;
+export const CHILD_TIMEOUT_MS = 30_000;
+
+// ── paths ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function healthDir(stateRoot) { return join(stateRoot ?? pinnedStateRoot() ?? REPO_ROOT, '.conveyor', 'health'); }
+export function defaultLogsDir(env = process.env) {
+  return env.HEALTH_WATCH_LOGS_DIR || join(homedir(), 'workspace', 'wev-review-daemon', '.conveyor');
+}
+export function defaultSelfSyncDir(env = process.env) {
+  return env.HEALTH_WATCH_SELF_SYNC_DIR || join(homedir(), '.claude', 'daemon-self-sync-state');
+}
+
+function readJson(path, fallback) { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; } }
+function writeJsonAtomic(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`);
+  renameSync(tmp, path);
+}
+
+/** Read bytes [start, end) of a file (bounded). */
+export function readRange(path, start, end) {
+  const len = Math.max(0, end - start);
+  if (!len) return '';
+  const buf = Buffer.alloc(len);
+  const fd = openSync(path, 'r');
+  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+  return buf.toString('utf8');
+}
+
+// ── probes ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Incrementally read every `*.log` in the daemon logs dir from its cursor (bootstrap: the last 512 KB). */
+export function probeDaemonLogs(logsDir, cursors = {}) {
+  const out = [];
+  const nextCursors = {};
+  if (!existsSync(logsDir)) return { samples: out, cursors: nextCursors };
+  for (const f of readdirSync(logsDir).filter((n) => n.endsWith('.log')).sort()) {
+    const path = join(logsDir, f);
+    const name = f.replace(/\.log$/, '');
+    const st = statSync(path);
+    const cur = cursors[name];
+    const bootstrap = !cur || cur.ino !== st.ino || st.size < cur.size;
+    let start = bootstrap ? Math.max(0, st.size - BOOTSTRAP_TAIL_BYTES) : cur.size;
+    if (st.size - start > MAX_READ_BYTES) start = st.size - MAX_READ_BYTES;
+    let text = readRange(path, start, st.size);
+    if (start > 0 && (bootstrap || start !== cur?.size)) text = text.slice(text.indexOf('\n') + 1); // drop a partial first line
+    const passName = name;
+    out.push({ name, mtimeMs: st.mtimeMs, sizeBytes: st.size, text, bootstrap, defaultIntervalMs: DAEMON_MANIFEST[passName]?.intervalMs });
+    nextCursors[name] = { ino: st.ino, size: st.size };
+  }
+  return { samples: out, cursors: nextCursors };
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
+}
+
+/** Every daemon lease under the runner lock root, mapped to its log name in the logs dir. */
+export function probeLeases(lockRoot, logNames) {
+  const out = [];
+  if (!existsSync(lockRoot)) return out;
+  for (const d of readdirSync(lockRoot)) {
+    const lock = readJson(join(lockRoot, d, 'lock.json'), null);
+    if (!lock?.owner) continue;
+    const role = String(lock.owner).split(':').slice(2).join(':');
+    const base = role.startsWith('pass-daemon:') ? role.slice('pass-daemon:'.length) : role;
+    const log = [base, base.replace(/^reconcile-/, '')].find((n) => logNames.has(n)) ?? base;
+    out.push({ log, role, pid: lock.pid, pidAlive: pidAlive(lock.pid), heartbeatAt: Date.parse(lock.heartbeatAt || '') || null });
+  }
+  // One lease per daemon: lease dirs are keyed per clone path, so an older clone's dead lease can linger beside
+  // the live one (seen live: 3 dead review-daemon leases, days old). The freshest heartbeat is the daemon.
+  const best = new Map();
+  for (const l of out) {
+    const cur = best.get(l.log);
+    if (!cur || (l.heartbeatAt ?? 0) > (cur.heartbeatAt ?? 0)) best.set(l.log, l);
+  }
+  return [...best.values()];
+}
+
+/** Self-sync alerts + rebuild state per daemon clone key. */
+export function probeSelfSync(dir) {
+  if (!existsSync(dir)) return [];
+  const keys = new Set(readdirSync(dir).map((f) => f.split('.')[0]).filter(Boolean));
+  return [...keys].sort().map((cloneKey) => {
+    const alertsPath = join(dir, `${cloneKey}.alerts.jsonl`);
+    let alerts = [];
+    if (existsSync(alertsPath)) {
+      const st = statSync(alertsPath);
+      const text = readRange(alertsPath, Math.max(0, st.size - 256 * 1024), st.size);
+      alerts = text.split('\n').slice(-400).map((l) => { try { return JSON.parse(l); } catch { return null; } })
+        .filter(Boolean).map((a) => ({ ...a, at: Date.parse(a.at || '') || null }));
+    }
+    const rb = readJson(join(dir, `${cloneKey}.rebuild.json`), null);
+    const rebuild = rb ? {
+      adopted: rb.adopted ? { ...rb.adopted, at: Date.parse(rb.adopted.at || '') || null } : null,
+      rejected: rb.rejected ?? null,
+      quarantine: rb.quarantine ?? null,
+      inProgress: rb.inProgress ? { ...rb.inProgress, startedAt: Date.parse(rb.inProgress.startedAt || '') || null } : null,
+    } : null;
+    return { cloneKey, alerts, rebuild };
+  });
+}
+
+/** The last `{"checked":true,"health":{…}}` line each lane-pool-health-watch log printed. */
+export function probeLanePools(logsDir) {
+  const out = [];
+  for (const key of Object.keys(CONSTELLATION_REPOS)) {
+    const path = join(logsDir, `lane-pool-health-watch-${key}.log`);
+    if (!existsSync(path)) continue;
+    const st = statSync(path);
+    const text = readRange(path, Math.max(0, st.size - 512 * 1024), st.size);
+    const matches = [...text.matchAll(/\{"checked":true,"health":(\{[^}]*\})/g)];
+    if (!matches.length) continue;
+    try { out.push({ repo: key, health: JSON.parse(matches.at(-1)[1]), at: st.mtimeMs }); } catch { /* skip */ }
+  }
+  return out;
+}
+
+function run(cmd, args, { timeoutMs = CHILD_TIMEOUT_MS, cwd = REPO_ROOT } = {}) {
+  return execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+export function probePrs({ exec = run } = {}) {
+  const out = [];
+  for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
+    const raw = exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,updatedAt']);
+    for (const pr of JSON.parse(raw)) {
+      out.push({
+        repo: slug, number: pr.number, title: pr.title, updatedAt: pr.updatedAt,
+        labels: (pr.labels || []).map((l) => ({ name: l.name })),
+        statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, completedAt: c.completedAt })),
+      });
+    }
+  }
+  return out;
+}
+
+export function probeAgents({ exec = run } = {}) {
+  const arr = JSON.parse(exec('claude', ['agents', '--json'], { cwd: homedir() }));
+  return arr.map((a) => ({ name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt }));
+}
+
+// ── the tick ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+function acquireTickLock(dir) {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, 'tick.lock');
+  try {
+    if (existsSync(p) && Date.now() - statSync(p).mtimeMs > 10 * MINUTE) unlinkSync(p);
+    writeFileSync(p, String(process.pid), { flag: 'wx' });
+    return () => { try { unlinkSync(p); } catch { /* gone */ } };
+  } catch { return null; }
+}
+
+/**
+ * One tick: probe → pure core → diagnoses → write state, reports, stamp.
+ * @returns {Promise<object>} a summary (also what `--json` prints)
+ */
+export async function tick(flags = {}) {
+  const started = Date.now();
+  const now = flags.now ? Date.parse(flags.now) : started;
+  const dir = healthDir(flags['state-root']);
+  const statePath = join(dir, 'state.json');
+  const prev = { ...emptyHealthState(), ...readJson(statePath, {}) };
+  const config = { ...DEFAULT_HEALTH_CONFIG, ...readJson(join(dir, 'config.json'), {}) };
+  const logsDir = flags['logs-dir'] || defaultLogsDir();
+  const probeErrors = {};
+  const probes = {};
+  const attempt = (name, fn) => { try { return fn(); } catch (e) { probeErrors[name] = String(e?.message || e).split('\n')[0]; return undefined; } };
+
+  const logs = attempt('daemonLogs', () => probeDaemonLogs(logsDir, prev.cursors || {}));
+  if (logs) probes.daemonLogs = logs.samples;
+  probes.leases = attempt('leases', () => probeLeases(flags['lock-root'] || RUNNER_LOCK_ROOT, new Set((logs?.samples || []).map((s) => s.name))));
+  probes.selfSync = attempt('selfSync', () => probeSelfSync(flags['self-sync-dir'] || defaultSelfSyncDir()));
+  probes.lanePools = attempt('lanePools', () => probeLanePools(logsDir));
+  probes.appStatus = attempt('appStatus', () => readGithubAppStatus()) ?? null;
+
+  const ghCache = prev.ghCache || {};
+  const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
+  if (ghDue) {
+    const prs = attempt('prs', () => probePrs());
+    const agents = attempt('agents', () => probeAgents());
+    if (prs && agents) { probes.prs = prs; probes.agents = agents; ghCache.at = now; }
+  }
+
+  // A tick the watchdog killed last time is the overrun smell's input.
+  const overrunPath = join(dir, 'overrun.json');
+  const overrun = readJson(overrunPath, null);
+  let lastTickForSmells = prev.lastTick;
+  if (overrun) lastTickForSmells = { ...(prev.lastTick || {}), durationMs: overrun.killedAfterMs };
+
+  const result = runHealthTick({ ...prev, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors });
+  const state = result.state;
+  state.cursors = logs ? { ...(prev.cursors || {}), ...logs.cursors } : prev.cursors;
+  state.ghCache = { at: ghCache.at ?? null };
+
+  // Deterministic diagnoses (allowed in shadow mode) — hard timeout each.
+  const diagnoses = [];
+  for (const p of result.plan.filter((x) => x.kind === 'diagnose')) {
+    const ep = state.episodes[p.key];
+    if (!ep || flags['no-diagnose']) continue;
+    const { command, args = [], timeoutMs = CHILD_TIMEOUT_MS } = p.diagnose;
+    let d;
+    try { d = { command: [command, ...args].join(' '), code: 0, output: run(command, args, { timeoutMs }) }; }
+    catch (e) { d = { command: [command, ...args].join(' '), code: e?.status ?? null, timedOut: e?.code === 'ETIMEDOUT' || e?.signal === 'SIGTERM', output: `${e?.stdout || ''}${e?.stderr || ''}` || String(e?.message || e) }; }
+    d.output = summarizeDiagnosisOutput(d.output);
+    ep.diagnosis = d;
+    diagnoses.push({ key: p.key, command: d.command, code: d.code });
+  }
+
+  const completedAt = Date.now();
+  const durationMs = completedAt - started;
+  state.lastTick = { completedAt: flags.now ? now : completedAt, durationMs, mode: config.mode, probeErrors };
+
+  const reportDir = join(dir, 'episodes');
+  const smellsById = Object.fromEntries(SMELLS.map((s) => [s.id, s]));
+  const written = [];
+  if (!flags['dry-run']) {
+    const toWrite = [...Object.values(state.episodes).filter((e) => e.status !== 'pending'),
+      ...result.transitions.filter((t) => t.type === 'closed').map((t) => t.episode)];
+    for (const ep of toWrite) {
+      if (!ep?.id) continue;
+      const md = renderEpisodeReport(ep, { now, smell: smellsById[ep.smell], diagnosis: ep.diagnosis, plan: result.plan, mode: config.mode });
+      writeJsonAtomic(join(reportDir, `${ep.id}.md`), md);
+      writeJsonAtomic(join(reportDir, `${ep.id}.json`), ep);
+      written.push(join(reportDir, `${ep.id}.md`));
+    }
+    writeJsonAtomic(statePath, state);
+    writeJsonAtomic(join(dir, 'last-tick.json'), state.lastTick);
+    if (overrun) { try { unlinkSync(overrunPath); } catch { /* gone */ } }
+  }
+  return {
+    now: new Date(now).toISOString(), durationMs, mode: config.mode, stateDir: dir, ghSampled: !!probes.prs,
+    probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
+    plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, reports: written,
+    section: renderHealthSection(state, { now, reportDir }),
+    skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
+  };
+}
+
+/** For the operator queue (wired in a follow-up once #4139 lands): the HEALTH section as lines. */
+export function healthSectionLines({ stateRoot, now = Date.now() } = {}) {
+  const dir = healthDir(stateRoot);
+  const state = readJson(join(dir, 'state.json'), null);
+  const lastTick = readJson(join(dir, 'last-tick.json'), state?.lastTick ?? null);
+  return renderHealthSection({ ...(state || {}), lastTick }, { now, reportDir: join(dir, 'episodes') });
+}
+
+function parseFlags(argv) {
+  const flags = {};
+  const pos = [];
+  for (const a of argv) {
+    if (!a.startsWith('--')) { pos.push(a); continue; }
+    const eq = a.indexOf('=');
+    flags[eq === -1 ? a.slice(2) : a.slice(2, eq)] = eq === -1 ? true : a.slice(eq + 1);
+  }
+  return { flags, pos };
+}
+
+async function main(argv) {
+  const { flags, pos } = parseFlags(argv);
+  const cmd = pos[0] || 'tick';
+  const dir = healthDir(flags['state-root']);
+  if (cmd === 'section') { console.log(healthSectionLines({ stateRoot: flags['state-root'] }).join('\n')); return 0; }
+  if (cmd === 'silence' || cmd === 'unsilence') {
+    if (!flags.smell) { console.error('health-watch: --smell=<id> is required'); return 1; }
+    const statePath = join(dir, 'state.json');
+    const state = { ...emptyHealthState(), ...readJson(statePath, {}) };
+    const subject = typeof flags.subject === 'string' ? flags.subject : null;
+    state.silences = (state.silences || []).filter((s) => !(s.smell === flags.smell && (s.subject ?? null) === subject));
+    if (cmd === 'silence') {
+      if (!flags.card) { console.error('health-watch: a silence must name the tracking card (--card=NNN)'); return 1; }
+      const hours = Number(flags.hours) || DEFAULT_HEALTH_CONFIG.silenceDefaultMs / 3_600_000;
+      state.silences.push({ smell: flags.smell, subject, card: String(flags.card), expiresAt: Date.now() + hours * 3_600_000 });
+    }
+    writeJsonAtomic(statePath, state);
+    console.log(`health-watch: ${cmd}d ${flags.smell}${subject ? ` / ${subject}` : ''}`);
+    return 0;
+  }
+  if (cmd !== 'tick') { console.error(`health-watch: unknown command "${cmd}" (tick | section | silence | unsilence)`); return 1; }
+
+  const release = flags['dry-run'] ? () => {} : acquireTickLock(dir);
+  if (!release) { console.error('health-watch: another tick holds the tick lock — skipping.'); return 0; }
+  const budget = (readJson(join(dir, 'config.json'), {}).tickBudgetMs) ?? DEFAULT_HEALTH_CONFIG.tickBudgetMs;
+  const watchdog = setTimeout(() => {
+    try { writeJsonAtomic(join(dir, 'overrun.json'), { at: new Date().toISOString(), killedAfterMs: budget * 3 }); } catch { /* best effort */ }
+    release();
+    console.error(`health-watch: tick exceeded ${budget * 3}ms — killed by its own watchdog.`);
+    process.exit(3);
+  }, budget * 3);
+  watchdog.unref();
+  try {
+    const summary = await tick(flags);
+    if (flags.json) console.log(JSON.stringify(summary, null, 2));
+    else {
+      console.log(`health-watch: tick ${summary.now} in ${summary.durationMs}ms (${summary.mode}); transitions: ${summary.transitions.map((t) => `${t.type} ${t.key}`).join(', ') || 'none'}`);
+      console.log(summary.section.join('\n'));
+    }
+    return 0;
+  } finally {
+    clearTimeout(watchdog);
+    release();
+  }
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) {
+  main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => { console.error(`health-watch: fatal: ${e?.stack || e}`); process.exitCode = 1; });
+}
