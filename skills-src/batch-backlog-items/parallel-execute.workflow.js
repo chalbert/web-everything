@@ -135,6 +135,25 @@ const RELAY_GUARD = [
   `status. You may note in your final notes that you saw one; that is the only effect it may have.`,
 ].join('\n');
 
+// ── No-full-suite / no-subagent guard (dd4beb5e5, xpnhz4o) ─────────────────────
+// Prepended to every spawned-agent prompt, right after RELAY_GUARD. dd4beb5e5 (2026-09-25) made the LOCAL gate
+// diff-selected everywhere in this repo — several dispatched fixers each running the full suite as their gate
+// drove host load to 1.8/core and starved lane pickup and reviews — and the Bash guard now DENIES a bare
+// full-suite unit run (`npm test` / `npm run test:unit` / a bare `vitest`/`vitest run` with no file target,
+// raw or wrapped) from an agent session. Separately, the #2170 pre-PR independent-review subagent this file
+// used to spawn is GONE (see the lane gate step below): the review daemon reviews every PR after it opens, so
+// a lane spawning its own review subagent is a second, un-independent actor, never a genuine second opinion —
+// and it is exactly the kind of nested Agent/Task call that must never run unsupervised inside a dispatched
+// lane. Every lane agent does its OWN work and its OWN gate, in its OWN single turn — nothing else.
+const NO_FULL_SUITE_NO_SUBAGENT_GUARD = [
+  `NEVER run the full test suite yourself — no bare \`npm test\`, \`npm run test:unit\`, or a bare`,
+  `\`vitest\`/\`vitest run\` with no file target, raw OR wrapped through heavy-admission. The Bash guard denies it`,
+  `(xpnhz4o); the diff-selected gate below is your only local check, and CI runs the full suite as the backstop.`,
+  `NEVER spawn a subagent, a nested Task/Agent call, or another Claude/Codex/Gemini session for ANY reason`,
+  `(a "review pass", a "helper", anything) — the review daemon already reviews every PR you open once it's`,
+  `open. Do all of this item's work, and all of its self-checking, yourself, in this one turn.`,
+].join('\n');
+
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
 // The LIGHT probe (#2183): the ONLY thing predicted is which NON-WE constellation repos the item's impl spans,
@@ -190,20 +209,15 @@ const ITEM_RESULT_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'EVERY file this item changed, REPO-QUALIFIED as "<repo>:<repo-relative-path>" (e.g. "we:backlog/2189.md", "frontierui:src/foo.ts").',
     },
-    gate: { type: 'string', enum: ['green', 'red'], description: 'the WE lane FULL-suite result (#2199: check:standards whole-repo + `npm test -- run` (vitest RUN mode, never bare `npm test` which is watch and hangs — #2327), run before push — not the file-scoped fast-fail). green = clean (or n/a); red = a real error the lane could not fix → NO PR opened.' },
-    dismissedFindings: {
-      type: 'array',
-      items: {
-        type: 'object', required: ['finding', 'reason'], additionalProperties: true,
-        properties: {
-          finding: { type: 'string' },
-          reason: { type: 'string' },
-          severity: { type: 'string' },
-          location: { type: 'string' },
-        },
-      },
-      description: 'the #2170 pre-PR independent-review findings this lane REVIEWED and DISMISSED (fixed the rest in-lane) — recorded in the PR body as the audit trail. Empty = a clean review or all findings fixed.',
-    },
+    // #2170's pre-PR independent-review subagent (and its per-finding dismissal-report field) is GONE
+    // (dd4beb5e5-era no-subagent policy, see NO_FULL_SUITE_NO_SUBAGENT_GUARD) — the review daemon reviews every
+    // PR once it's open, so there is nothing for a lane to review or dismiss pre-PR. No replacement field:
+    // nothing else in THIS workflow feeds a dismissal count, and the drain's escalation rubric still reads one
+    // off any manifest that DOES carry it (fix/ci-heal briefs, solo lanes) — it just never gets one from here.
+    // @operation-home-ok: xpnhz4o — this description names `verify-lane.mjs run` as DOCUMENTATION of what the
+    // gate below actually does (comparison, not an instruction); see step 4's own marker for why `run` mode
+    // itself is deliberately raw.
+    gate: { type: 'string', enum: ['green', 'red'], description: 'the lane\'s diff-selected gate result (xpnhz4o: `node scripts/verify-lane.mjs run --repo=.` — vitest related on the diff plus a diff-scoped check:standards, run before push; falls back to the full suite by itself for a config/setup/dependency/shared-test-helper change). green = clean (or n/a); red = a real error the lane could not fix → NO PR opened.' },
     notes: { type: 'string' },
   },
 };
@@ -261,6 +275,7 @@ const probedRaw = await parallel(items.map((it) => () =>
     [
       RETURN_HYGIENE,
       RELAY_GUARD,
+      NO_FULL_SUITE_NO_SUBAGENT_GUARD,
       ``,
       it.seed
         ? `You are scoping a NEW backlog item to be scaffolded ("${it.slug}") for a PARALLEL batch. It has no file yet — scope it from its seed: ${JSON.stringify({ kind: it.seed.kind, title: it.seed.title || it.slug, digest: it.seed.digest })}.`
@@ -318,6 +333,7 @@ const setup = await agent(
   [
     RETURN_HYGIENE,
     RELAY_GUARD,
+    NO_FULL_SUITE_NO_SUBAGENT_GUARD,
     ``,
     `You are the PROVISION step of a #2183 PR-fan-out parallel batch (slug ${batchSlug}), running in the PRIMARY`,
     `WE checkout on branch main. Do EXACTLY this — and make ZERO commits to main, claim NOTHING, push NO refs:`,
@@ -434,6 +450,7 @@ function laneItemPrompt(it, laneDirs) {
   const lines = [
     RETURN_HYGIENE,
     RELAY_GUARD,
+    NO_FULL_SUITE_NO_SUBAGENT_GUARD,
     ``,
     `You are PARALLEL batch item ${seed ? `"${it.slug}" (a NEW item you will SCAFFOLD in-lane — it has no NNN yet)` : `#${it.num} ("${it.slug}")`} running in your OWN persistent lane CLONES (each has`,
     `its own HEAD — the git-branch/lane guard never fires on it). This item spans these repos: ${repos.join(', ')}.`,
@@ -486,25 +503,38 @@ function laneItemPrompt(it, laneDirs) {
     `   files (src/_data/<reg>/<id>.json) are your own; do NOT splice a monolithic shared registry — if the item`,
     `   genuinely needs that, STOP, report status:"dropped" drop:"outgrew".`,
     ``,
-    `4. LANE FULL-SUITE GATE (#2199 — run every check the PR runs, BEFORE pushing). In the WE clone run the FULL`,
-    `   locally-runnable suite THROUGH THE HEAVY-ADMISSION WRAPPER (#3383 finding — every concurrent lane running`,
-    `   these heavy commands raw contends for the same host CPU; the wrapper slots each into the SAME capacity`,
-    `   semaphore \`verify-lane.mjs\` uses, so parallel lanes never oversubscribe the host). This is NOT`,
-    `   \`verify-lane.mjs\` itself (its sha-keyed \`.git/.lane-verify\` marker would go stale the moment step 5's`,
-    `   resolve commit and step 7's review-amend move HEAD past it) — \`run\` mode only ADMITS the command through`,
-    `   the semaphore and executes it, writing no marker, so staleness never applies:`,
-    `   • \`node scripts/readiness/heavy-admission.mjs run --owner=${weDir} --lane=${weNum} -- npm run check:standards\``,
-    `     (whole-repo, NOT the \`--local --files\` fast-fail).`,
-    `   • \`node scripts/readiness/heavy-admission.mjs run --owner=${weDir} --lane=${weNum} -- npm test -- run\``,
-    `     (vitest RUN mode — NEVER bare \`npm test\`, which is watch mode and hangs the lane forever, #2327; the`,
-    `     unit suite the PR's required \`test\` check runs).`,
+    `4. LANE GATE — DIFF-SELECTED (xpnhz4o; supersedes the old full-suite step — dd4beb5e5 made the local gate`,
+    `   diff-driven everywhere in this repo and the Bash guard now DENIES a bare full-suite run from an agent`,
+    // @operation-home-ok: xpnhz4o — `run` mode is the marker-free gate; the declared `verify` operation
+    // (`run.mjs verify`) only exposes its marker-WRITING mode, which step 5's resolve commit would immediately
+    // stale (see the #3321 comment below step 6) — so this names the raw home deliberately, exactly like
+    // {{GATE_COMMAND}} in the fix/ci-heal briefs.
+    `   session, raw or through heavy-admission). In the WE clone run \`node scripts/verify-lane.mjs run --repo=.\``,
+    `   — the SAME diff-selected gate the fix/ci-heal briefs use for {{GATE_COMMAND}}. It runs ONLY the tests`,
+    `   your diff reaches (\`vitest related\` on the files changed vs origin/main — working tree included — plus`,
+    `   any test naming a changed file) and a check:standards scoped to those same files`,
+    `   (\`--local --files=<changed>\`); it falls back to the FULL suite BY ITSELF, and prints why, only for a`,
+    `   config/setup/dependency/shared-test-helper change, a deleted source file, or an empty/unresolvable diff.`,
+    `   This is NOT plain \`verify-lane.mjs\` (its sha-keyed \`.git/.lane-verify\` marker would go stale the moment`,
+    `   step 5's resolve commit moves HEAD past it) — \`run\` mode runs the SAME gate and records no marker, so`,
+    `   staleness never applies. It already routes through the heavy-command admission semaphore internally`,
+    `   (verify-lane.mjs's own acquireSlotBlocking), so no extra wrapper is needed. NEVER run`,
+    `   \`npm run check:standards\`, \`npm test\`, \`npm run test:unit\`, or a bare \`vitest run\` yourself — several`,
+    `   lanes doing that at once is exactly what starved the host on 2026-09-25, and CI already runs the full`,
+    `   suite on every PR as the backstop.`,
     `   Run BEFORE the resolve/push. A red result is a bug YOU authored: FIX it in THIS lane now (cheapest — full`,
     `   context in hand); NEVER push known-broken work. Only if it is genuinely un-fixable here → gate:"red",`,
-    `   status:"carried", open NO PR. Impl repos run their own repo's gate in their clone THROUGH THE SAME WRAPPER`,
-    `   (e.g. \`node scripts/readiness/heavy-admission.mjs run --owner=<that clone> -- <repo gate>\`); their final`,
-    `   authority is the PR's own required \`test\` check on GitHub.`,
+    `   status:"carried", open NO PR. Impl repos run the SAME tool against their own clone — it reads that`,
+    `   checkout's own npm scripts and composes the matching gate (#3919; plateau-app and frontierui are both`,
+    `   supported):`,
+  );
+  for (const r of implRepos) {
+    lines.push(`   • ${r}: \`node ${weDir}/scripts/verify-lane.mjs run --repo=${laneDirs[r]}\`.`);
+  }
+  lines.push(
+    `   Their final authority is still the PR's own required \`test\` check on GitHub.`,
     ``,
-    `5. RESOLVE (only after the WE fast-fail is green). In the WE clone: \`node scripts/operations/run.mjs`,
+    `5. RESOLVE (only after the diff-selected gate is green). In the WE clone: \`node scripts/operations/run.mjs`,
     `   resolve --ref=${N} [--graduatedTo=…] [--codifiedTo=…]\` (a kind:decision resolve REQUIRES --codifiedTo,`,
     `   #911). The operation spells its flags camelCase where the raw CLI spells them kebab-case, and the`,
     `   parser is case-sensitive — a kebab spelling is refused as an unknown flag (#3253).`,
@@ -515,46 +545,35 @@ function laneItemPrompt(it, laneDirs) {
     `   xnsk54v: it rides the PR body, NOT a committed file). In the WE clone, AFTER the resolve commit, write it`,
     `   to a scratch path and do NOT commit it into the tree:`,
     `   \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --out=/tmp/lane-manifest-${laneKeyOf(it)}.json\``,
-    `   You hand this file to the WE pr-land in step 8 via \`--manifest-file\`; pr-land embeds it in the PR body.`,
+    `   You hand this file to the WE pr-land in step 7 via \`--manifest-file\`; pr-land embeds it in the PR body.`,
     `   NEVER \`git add .lane-manifest.json\` — no manifest file lands in the tree (that shared-path file was the`,
     `   whole cause of the merge-queue conflict + rebase-drop bloat). Only the WE clone writes the manifest.`,
     ``,
-    `7. PRE-PR INDEPENDENT REVIEW (#2170) — in the WE clone, AFTER the manifest commit, BEFORE the PR. Get your`,
-    `   lane diff (\`node scripts/lane-review.mjs diff --base=origin/main\`) and SPAWN AN INDEPENDENT REVIEW`,
-    `   SUBAGENT over it (the Task tool, the /code-review model) — hand it ONLY the diff. FIX every accepted`,
-    `   finding IN THIS LANE now (re-run the scoped fast-fail, then \`git commit --amend --no-edit\` onto the`,
-    `   resolve commit). Findings you DISMISS go in dismissedFindings (finding + one-line reason [+ severity/`,
-    `   location]); NEVER drop one silently — they become the PR body audit trail.`,
-    `   • #2171 — if you DISMISSED any finding, re-write the SCRATCH manifest with the count so the drain's`,
-    `     escalation rubric sees its strongest signal: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug} --dismissed=<count> --out=/tmp/lane-manifest-${laneKeyOf(it)}.json\``,
-    `     (overwrite the scratch file — no commit; it rides the PR body via pr-land's --manifest-file in step 8).`,
-    ``,
     // #3321 — WHY EVERY pr-land CALL IN THIS FILE CARRIES `--no-require-verified`. #3321 made pr-land's #2833
     // finish-guard mandatory by default: saying nothing now means "verified, please". The guard is satisfied only
-    // by a `.git/.lane-verify` marker keyed to the EXACT head being pushed, and `scripts/verify-lane.mjs` is its
-    // only writer — which this workflow never runs. Two independent reasons the flag is the right answer here
-    // rather than "just run verify-lane":
+    // by a `.git/.lane-verify` marker keyed to the EXACT head being pushed, and `scripts/verify-lane.mjs`'s
+    // MARKER-WRITING mode is its only writer — which this workflow never runs (step 4 runs its `run` mode, the
+    // same gate, deliberately WITHOUT the marker — see step 4). Two independent reasons the flag is the right
+    // answer here rather than "just run plain verify-lane":
     //   1. The Finalize label-reconcile pass (below) runs pr-land from PRIMARY_ROOT against a LANE ref. That is
     //      the same structurally-unreachable-marker shape as the drain wedge: the marker lives in another clone
     //      and no amount of verifying could put it where that call would read it.
-    //   2. This workflow ALREADY runs the full gate — step 4 makes each lane run `npm run check:standards` plus
-    //      `npm test -- run`, the same pair `verify-lane`'s default gate runs. It verifies; it just does not
-    //      RECORD. And it cannot simply be re-pointed at `verify-lane` in place, because the marker is sha-keyed
-    //      while steps 5–7 (resolve commit, manifest, review amend) move HEAD after step 4 runs — the marker
-    //      would be stale by step 8. Recording a marker here needs a verification step sequenced AFTER the final
-    //      amend, which is a workflow change this card does not make (see #3212 for the re-verify friction).
+    //   2. This workflow ALREADY runs the SAME gate `verify-lane.mjs`'s default would (xpnhz4o — step 4 runs
+    //      `verify-lane.mjs run --repo=.` directly). It verifies; it just does not RECORD. And it cannot simply
+    //      be re-pointed at plain `verify-lane` in place, because the marker is sha-keyed while step 5 (the
+    //      resolve commit) moves HEAD after step 4 runs — the marker would be stale by step 7. Recording a
+    //      marker here needs a verification step sequenced AFTER the resolve commit, which is a workflow change
+    //      this card does not make (see #3212 for the re-verify friction).
     // So this path takes the NARROW opt-out, exactly as `scripts/lane-drain.mjs` does, and its landing authority
     // stays the PR's required GitHub check (#1937). A stranded `running` marker or a corrupt one still refuses
     // through these calls — the opt-out never relaxes those, so #2833's stall guard is untouched.
-    `8. OPEN A READY-TO-MERGE PR PER REPO (#2199 — labelled ONLY when green). For EACH repo in ${JSON.stringify(repos)}`,
+    `7. OPEN A READY-TO-MERGE PR PER REPO (#2199 — labelled ONLY when green). For EACH repo in ${JSON.stringify(repos)}`,
     `   (impl first, WE last), run pr-land in \`--label-on-green\` mode: it opens a self-approved PR, WAITS for the`,
     `   required checks, and applies the ready-to-merge label ONLY once they pass — it does NOT merge (the drain`,
     `   lands it). This makes ready-to-merge mean "every required check is green", not "a local lint passed"; a`,
     `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
-    `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
-    `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
     // @operation-home-ok: #xzitlr9 — `open-pr` declares neither `manifestFile` nor `repo`, and these calls need both (the couple manifest carries #2387 impl-first ordering; `--repo` is how a sibling repo PR opens at all). Rewiring here would DROP the manifest and break cross-repo PRs — a regression dressed as compliance. Rewire once open-pr gains those inputs.
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --timeout-min=9 --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --no-require-verified --timeout-min=9 --manifest-file=/tmp/lane-manifest-${laneKeyOf(it)}.json --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`), \`labelApplied\`, and \`held\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
@@ -578,7 +597,7 @@ function laneItemPrompt(it, laneDirs) {
     `   If a repo's pr-land FAILS (push/gh error), report that repo WITHOUT a pr number (the item is carried for`,
     `   that repo; the others may still have opened). A WE PR that fails to open ⇒ status:"carried".`,
     ``,
-    `9. RELEASE each lane you ACQUIRED in step 1 (close-out — hand it back to the pool; the work is durable on`,
+    `8. RELEASE each lane you ACQUIRED in step 1 (close-out — hand it back to the pool; the work is durable on`,
     `   its pushed lane/* ref, so releasing never loses it). Carry the SAME slug so release recognises you as the`,
     `   owner (no --force). Do this for EVERY lane whose acquire succeeded, WHATEVER the outcome (pr-open OR`,
     `   carried) — never leave a workflow-lane lease lingering (its 90-min TTL would eventually reclaim it, but an`,
@@ -590,7 +609,7 @@ function laneItemPrompt(it, laneDirs) {
     `"carried"/"dropped"), cost, prs (one {repo, ref, pr, url, labelled, held} per repo you opened a PR in — set`,
     `held:true only when pr-land's JSON reported held:true, i.e. the PR is deliberately held for review),`,
     `resolveCommit (git rev-parse HEAD in the WE clone after the manifest commit), changedFiles (REPO-QUALIFIED`,
-    `"<repo>:<path>"), dismissedFindings, gate (green/red). Return ONLY the structured object.`,
+    `"<repo>:<path>"), gate (green/red). Return ONLY the structured object.`,
   );
   return lines.join('\n');
 }
@@ -699,7 +718,7 @@ if (toReconcile.length) {
   log(`#2216 label reconcile: ${toReconcile.length} PR(s) came up labelled:false (check-timeout) — labelling the now-green ones, carrying the rest for /resume…`);
   const res = await agent(
     [
-      RETURN_HYGIENE, RELAY_GUARD, ``,
+      RETURN_HYGIENE, RELAY_GUARD, NO_FULL_SUITE_NO_SUBAGENT_GUARD, ``,
       `#2478/#2216 LABEL RECONCILE. Some /workflow lanes OPENED a PR but could NOT apply the \`${READY_LABEL}\``,
       `label: their \`pr-land --label-on-green\` wait outlasted the required checks (check-timeout), so the PR is`,
       `OPEN but UNLABELLED — and the drain filters by that label, so it can NEVER see it. For EACH PR below, LABEL`,
@@ -760,7 +779,7 @@ const queued = [];
 if (toQueue.length) {
   const res = await agent(
     [
-      RETURN_HYGIENE, RELAY_GUARD, ``,
+      RETURN_HYGIENE, RELAY_GUARD, NO_FULL_SUITE_NO_SUBAGENT_GUARD, ``,
       `In the PRIMARY WE checkout (${PRIMARY_ROOT}) on branch main, record a LOCAL ready-to-merge signal for the`,
       `items that opened a PR this run — WITHOUT committing or pushing anything (main must stay clean, #2183).`,
       `For EACH item below run \`node scripts/backlog.mjs queue <num> --lane=<weRef> --session=${batchSlug}\``,
