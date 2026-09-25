@@ -242,3 +242,52 @@ describe('runTickWithWatchdog', () => {
     expect(JSON.parse(readFileSync(join(hd, 'overrun.json'), 'utf8')).killedAfterMs).toBe(300);
   }, 15_000);
 });
+
+// ── review round 2 (PR #2672) regressions ─────────────────────────────────────────────────────────────────────
+
+describe('round 2: tick output, silences, partial lines', () => {
+  const setup = () => {
+    const logsDir = join(dir, 'logs'); mkdirSync(logsDir, { recursive: true });
+    const lockRoot = join(dir, 'locks'); mkdirSync(lockRoot, { recursive: true });
+    const syncDir = join(dir, 'sync'); mkdirSync(syncDir, { recursive: true });
+    const stateRoot = join(dir, 'state');
+    return { logsDir, stateRoot, flags: { 'state-root': stateRoot, 'logs-dir': logsDir, 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true } };
+  };
+
+  it("tick()'s own return value (printed section, --json summary) never carries a raw credential", async () => {
+    const { logsDir, flags } = setup();
+    const tok = `ghp_${'Z'.repeat(36)}`;
+    // Bootstrap-read ticks are spread back at the interval, so 16 unproductive ticks span 30 min: the episode
+    // opens on the first tick and its summary/recommendation carry the refusal text.
+    const block = `reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 1\nreconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #9 — auth header token ${tok} rejected\n`;
+    writeFileSync(join(logsDir, 'fix-dispatch-daemon.log'), `reconcile-fix-dispatch-daemon: started on Mac:1, tick every 120000ms.\n${block.repeat(16)}`);
+    const summary = await tick(flags);
+    expect(summary.transitions.some((t) => t.key === 'daemon-owed-no-dispatch::fix-dispatch-daemon')).toBe(true);
+    expect(JSON.stringify(summary)).not.toContain(tok);
+  });
+
+  it('a silence set while a tick runs survives the tick (silences.json is never written by the tick)', async () => {
+    const { flags, stateRoot } = setup();
+    const hd = healthDir(stateRoot);
+    mkdirSync(hd, { recursive: true });
+    const silence = [{ smell: 'clone-stale', subject: null, card: '4078', expiresAt: Date.now() + 3_600_000 }];
+    writeFileSync(join(hd, 'silences.json'), JSON.stringify(silence));
+    await tick(flags);
+    const { readFileSync } = await import('node:fs');
+    expect(JSON.parse(readFileSync(join(hd, 'silences.json'), 'utf8'))).toEqual(silence);
+    expect(JSON.parse(readFileSync(join(hd, 'state.json'), 'utf8')).silences).toBeUndefined();
+  });
+
+  it('a refusal line split across two reads (no trailing newline yet) is parsed whole on the next read', () => {
+    const logsDir = join(dir, 'logs'); mkdirSync(logsDir);
+    const f = join(logsDir, 'fix-dispatch-daemon.log');
+    writeFileSync(f, 'reconcile-fix-dispatch-daemon: started on Mac:1, tick every 120000ms.\n');
+    const a = probeDaemonLogs(logsDir, {});
+    appendFileSync(f, 'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 1\nreconcile-fix-dispatch-daemon: refused no-lane chalbert/fronti');
+    const b = probeDaemonLogs(logsDir, a.cursors);
+    expect(b.samples[0].text).not.toContain('chalbert/fronti');
+    appendFileSync(f, 'erui PR #7 — no free lane\n');
+    const c = probeDaemonLogs(logsDir, b.cursors);
+    expect(c.samples[0].text).toBe('reconcile-fix-dispatch-daemon: refused no-lane chalbert/frontierui PR #7 — no free lane\n');
+  });
+});

@@ -693,3 +693,26 @@ describe('review-daemon per-PR failures and the dirty-clone hold', () => {
     expect(cloneStale.evaluate(probe(at + 5 * 60_000), { now: later, daemons: {} })[0].breach).toBe(false);
   });
 });
+
+// ── review round 2 (PR #2672) regressions ─────────────────────────────────────────────────────────────────────
+
+describe('round 2: attribution and benign-only ticks', () => {
+  it('a review-daemon `deferred N (no acquirable lane…)` is recorded unattributed, never credited to the we pool', () => {
+    const p = parseDaemonLog('review-daemon: tick (a, b, c) — 2 owed, dispatched 0, failed 0, deferred 2 (no acquirable lane this tick, #3383)');
+    expect(p.ticks[0].noLane).toEqual([{ repo: null }, { repo: null }]);
+    const now = Date.parse('2026-09-25T12:00:00.000Z');
+    const daemons = { review: { lastTick: { noLane: [null, null] }, noLaneTimes: [{ at: now, repo: null }, { at: now, repo: null }] } };
+    const out = laneStarvation.evaluate({ lanePools: [{ repo: 'we', health: { total: 3, leased: 2, acquirable: 1, dirtyUnleased: 0 }, at: now }] }, { now, daemons });
+    expect(out[0].breach).toBe(false);
+    expect(out[0].measure).toMatchObject({ demandNow: 0, noLaneRefusals30m: 0, unattributedNoLane30m: 2 });
+  });
+  it('owed work refused only by correct no-ops (live-process, cap-exhausted) is NOT unproductive', () => {
+    const p = parseDaemonLog([
+      'review-daemon: tick (a) — 2 owed, dispatched 0, failed 0',
+      'reconcile-fix-dispatch-daemon: tick (a) — dispatched 0, refused 2',
+      'reconcile-fix-dispatch-daemon: reconcile-refused live-process chalbert/web-everything PR #1 — a bound session has a LIVE pid',
+      'reconcile-fix-dispatch-daemon: reconcile-refused cap-exhausted chalbert/web-everything PR #2 — cap',
+    ].join('\n'));
+    expect(p.ticks.map(tickIsUnproductive)).toEqual([false, false]);
+  });
+});

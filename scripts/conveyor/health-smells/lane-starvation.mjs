@@ -23,14 +23,17 @@ export default {
   evaluate({ lanePools }, { now, daemons }) {
     const demand = {};
     const recent = {};
+    let unattributed = 0; // no-lane deferrals whose log line names no repo (the review daemon's) — reported, never credited
     for (const mem of Object.values(daemons)) {
       for (const e of mem.noLaneTimes || []) {
+        if (!e.repo) { if (now - e.at <= this.windowMs) unattributed += 1; continue; }
         const k = repoKeyForSlug(e.repo) ?? e.repo;
         if (now - e.at <= this.windowMs) recent[k] = (recent[k] || 0) + 1;
       }
       // Current demand = the no-lane refusals in each daemon's LATEST tick, credited to the repo each one names
       // (never a hardcoded pool — lane-pool-health-watch runs per constellation repo).
       for (const repo of mem.lastTick?.noLane || []) {
+        if (!repo) continue;
         const k = repoKeyForSlug(repo) ?? repo;
         demand[k] = (demand[k] || 0) + 1;
       }
@@ -43,7 +46,7 @@ export default {
       return {
         subject: `lane-pool:${p.repo}`,
         breach,
-        measure: { ...h, demandNow: d, noLaneRefusals30m: r, healthLineAgeMin: p.at ? Math.round((now - p.at) / MINUTE) : null },
+        measure: { ...h, demandNow: d, noLaneRefusals30m: r, unattributedNoLane30m: unattributed, healthLineAgeMin: p.at ? Math.round((now - p.at) / MINUTE) : null },
         summary: `lane pool ${p.repo}: ${h.acquirable ?? '?'} acquirable of ${h.total ?? '?'} (${h.leased ?? '?'} leased, ${h.dirtyUnleased ?? '?'} dirty); ${r} no-lane refusal(s) in 30m.`,
         recommendation: r > 0 && (h.acquirable ?? 0) >= 5
           ? `Daemons were refused a lane ${r} time(s) in 30m while the ${p.repo} pool reports ${h.acquirable} acquirable — the acquire path and the pool's own count disagree (lease contention, or acquire's per-call wait too short); investigate acquire, not pool size.`

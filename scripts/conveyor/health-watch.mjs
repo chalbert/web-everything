@@ -12,7 +12,8 @@
  * dispatch is written into each report under "Held back".
  *
  * State lives under the pinned daemon state root (#4052): `<CONVEYOR_STATE_ROOT or repo root>/.conveyor/health/`
- *   state.json          episodes, per-daemon memory, log cursors, silences, gh cache
+ *   state.json          episodes, per-daemon memory, log cursors, gh cache (written only by the tick)
+ *   silences.json       tracked-silences (written only by `silence`/`unsilence`; the tick only reads it)
  *   last-tick.json      the last-tick-completed stamp (separate from the pass-daemon lease heartbeat, which
  *                       keeps beating through a hung tick — pass-daemon.mjs:194)
  *   episodes/<id>.md    the durable per-episode report (+ .json)
@@ -73,6 +74,16 @@ function writeJsonAtomic(path, value) {
   renameSync(tmp, path);
 }
 
+/** Read bytes [start, end) of a file as a Buffer (bounded). */
+export function readRangeBuf(path, start, end) {
+  const len = Math.max(0, end - start);
+  const buf = Buffer.alloc(len);
+  if (!len) return buf;
+  const fd = openSync(path, 'r');
+  try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+  return buf;
+}
+
 /** Read bytes [start, end) of a file (bounded). */
 export function readRange(path, start, end) {
   const len = Math.max(0, end - start);
@@ -98,11 +109,16 @@ export function probeDaemonLogs(logsDir, cursors = {}) {
     const bootstrap = !cur || cur.ino !== st.ino || st.size < cur.size;
     let start = bootstrap ? Math.max(0, st.size - BOOTSTRAP_TAIL_BYTES) : cur.size;
     if (st.size - start > MAX_READ_BYTES) start = st.size - MAX_READ_BYTES;
-    let text = readRange(path, start, st.size);
+    // Consume only through the LAST complete line: a line still being written (no trailing newline yet) is left
+    // for the next sample, so a refusal split across two reads is parsed whole, never dropped.
+    const buf = readRangeBuf(path, start, st.size);
+    const lastNl = buf.lastIndexOf(0x0a);
+    const consumed = lastNl === -1 ? 0 : lastNl + 1;
+    let text = buf.subarray(0, consumed).toString('utf8');
     if (start > 0 && (bootstrap || start !== cur?.size)) text = text.slice(text.indexOf('\n') + 1); // drop a partial first line
     const passName = name;
     out.push({ name, mtimeMs: st.mtimeMs, sizeBytes: st.size, text, bootstrap, defaultIntervalMs: DAEMON_MANIFEST[passName]?.intervalMs });
-    nextCursors[name] = { ino: st.ino, size: st.size };
+    nextCursors[name] = { ino: st.ino, size: start + consumed };
   }
   return { samples: out, cursors: nextCursors };
 }
@@ -283,8 +299,18 @@ export async function tick(flags = {}) {
   let lastTickForSmells = prev.lastTick;
   if (overrun) lastTickForSmells = { ...(prev.lastTick || {}), durationMs: overrun.killedAfterMs, killedByWatchdog: true };
 
-  const result = runHealthTick({ ...prev, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors });
-  const state = result.state;
+  // Silences live in their OWN file, written only by `silence`/`unsilence` and only read here, so a silence
+  // set while a tick runs can never be lost to the tick's state.json write (nor roll that write back). Which
+  // expired silences were already announced is tick state (`notifiedSilences`).
+  const notified = new Set(prev.notifiedSilences || []);
+  const silenceSig = (x) => `${x.smell}|${x.subject ?? '*'}|${x.card ?? ''}|${x.expiresAt ?? ''}`;
+  const silences = readJson(join(dir, 'silences.json'), []).map((x) => ({ ...x, expiredNotified: notified.has(silenceSig(x)) }));
+  const result = runHealthTick({ ...prev, silences, lastTick: lastTickForSmells }, probes, SMELLS, now, { config, probeErrors });
+  // Scrubbed ONCE, right here: everything below — the printed section, the returned summary, every file — sees
+  // only the redacted state.
+  const state = scrubDeep(result.state);
+  state.notifiedSilences = (result.state.silences || []).filter((x) => x.expiredNotified).map(silenceSig);
+  delete state.silences;
   state.cursors = logs ? { ...(prev.cursors || {}), ...logs.cursors } : prev.cursors;
   state.ghCache = { at: ghCache.at ?? null };
 
@@ -319,7 +345,7 @@ export async function tick(flags = {}) {
       writeJsonAtomic(join(reportDir, `${ep.id}.json`), scrubDeep(ep));
       written.push(join(reportDir, `${ep.id}.md`));
     }
-    writeJsonAtomic(statePath, scrubDeep(state));
+    writeJsonAtomic(statePath, state);
     writeJsonAtomic(join(dir, 'last-tick.json'), state.lastTick);
     if (overrun) { try { unlinkSync(overrunPath); } catch { /* gone */ } }
   }
@@ -350,16 +376,16 @@ async function main(argv) {
   if (cmd === 'section') { console.log(healthSectionLines({ stateRoot: flags['state-root'] }).join('\n')); return 0; }
   if (cmd === 'silence' || cmd === 'unsilence') {
     if (!flags.smell) { console.error('health-watch: --smell=<id> is required'); return 1; }
-    const statePath = join(dir, 'state.json');
-    const state = { ...emptyHealthState(), ...readJson(statePath, {}) };
+    // Only this command writes silences.json; the tick only reads it (see tick()).
+    const silencesPath = join(dir, 'silences.json');
     const subject = typeof flags.subject === 'string' ? flags.subject : null;
-    state.silences = (state.silences || []).filter((s) => !(s.smell === flags.smell && (s.subject ?? null) === subject));
+    const silences = readJson(silencesPath, []).filter((x) => !(x.smell === flags.smell && (x.subject ?? null) === subject));
     if (cmd === 'silence') {
       if (!flags.card) { console.error('health-watch: a silence must name the tracking card (--card=NNN)'); return 1; }
       const hours = Number(flags.hours) || DEFAULT_HEALTH_CONFIG.silenceDefaultMs / 3_600_000;
-      state.silences.push({ smell: flags.smell, subject, card: String(flags.card), expiresAt: Date.now() + hours * 3_600_000 });
+      silences.push({ smell: flags.smell, subject, card: String(flags.card), expiresAt: Date.now() + hours * 3_600_000 });
     }
-    writeJsonAtomic(statePath, state);
+    writeJsonAtomic(silencesPath, silences);
     console.log(`health-watch: ${cmd}d ${flags.smell}${subject ? ` / ${subject}` : ''}`);
     return 0;
   }

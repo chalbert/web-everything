@@ -26,7 +26,6 @@
  */
 
 import { isHighEntropyToken } from '../lib/secret-scrub.mjs';
-import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -108,7 +107,8 @@ export function parseDaemonLog(text) {
       if (cur.failed > 0) cur.blocking.push('dispatch failed');
       if (cur.deferred > 0 && /no acquirable lane/.test(body)) {
         cur.blocking.push('deferred: no acquirable lane');
-        for (let i = 0; i < cur.deferred; i += 1) cur.noLane.push({ repo: CONSTELLATION_REPOS.we.slug }); // the review daemon's deferral names no repo
+        // The review daemon's deferral names no repo: recorded UNATTRIBUTED (repo null), never credited to a pool.
+        for (let i = 0; i < cur.deferred; i += 1) cur.noLane.push({ repo: null });
       }
       continue;
     }
@@ -151,11 +151,13 @@ export function parseDaemonLog(text) {
 }
 
 /** A tick is UNPRODUCTIVE when it dispatched nothing while something blocked it (a blocking refusal, a failed
- *  dispatch, a failed repo/whole tick, owed review work left undispatched). Idle (nothing owed) is not. */
+ *  dispatch, a no-lane deferral, a failed repo/whole tick). Idle, or owed work refused only by correct no-ops, is not. */
 export function tickIsUnproductive(t) {
   if (!t) return false;
   if (t.dispatched > 0) return false;
-  return t.wholeFailed || t.blocking.length > 0 || t.owed > 0;
+  // Owed work alone is not a signal: owed PRs whose only refusals are correct no-ops (`live-process`,
+  // `cap-exhausted`, …) must never count. Only a blocking reason or a thrown tick does.
+  return !!t.wholeFailed || (t.blocking?.length ?? 0) > 0;
 }
 
 // ── 2. Per-daemon memory ─────────────────────────────────────────────────────────────────────────────────────
