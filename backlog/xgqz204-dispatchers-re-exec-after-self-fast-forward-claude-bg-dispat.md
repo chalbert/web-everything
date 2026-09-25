@@ -14,4 +14,5 @@ Two defects traced live 2026-09-25. (1) A dispatcher CLI that fast-forwards its 
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/main-staleness-self-reexec.test.mjs we:scripts/__tests__/guard-bash-wait-poll.test.mjs we:scripts/operations/__tests__/session-role.test.mjs` fails before (no re-exec; the worker marker never reaches `--settings`) and passes after.
+2. **Live** — a dispatcher N commits behind re-executes after its fast-forward and the new code's path runs; a real `claude --bg` dispatch that sleep-polls a `tasks/*.output` file is DENIED by the guard, not warned (evidence on the PR).
