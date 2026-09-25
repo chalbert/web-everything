@@ -24,9 +24,21 @@ export function mergeMethodFlag(method) {
 }
 
 /** Build the `gh pr merge` argv the gate shells — mirrors the merge-ai-prs inline call exactly:
- *  `pr merge <n> [--repo <slug>] --<method> --delete-branch`. `repo` null → the cwd repo (no --repo). Pure. */
-export function buildGateMergeArgs({ pr, repo = null, method = 'merge' }) {
-  return ['pr', 'merge', String(pr), ...(repo ? ['--repo', repo] : []), mergeMethodFlag(method), '--delete-branch'];
+ *  `pr merge <n> [--repo <slug>] --<method> --delete-branch [--match-head-commit <sha>]`. `repo` null → the cwd
+ *  repo (no --repo). `matchHeadCommit` null/empty → the flag is omitted (byte-identical to before this option
+ *  existed — every pre-existing caller/test is unaffected). Pure.
+ *
+ * xvzc4v4 (merge-safety review, bug 1) — `--match-head-commit` is `gh`'s own guard against merging a commit
+ * OTHER than the one just reviewed: the merge decision (labels, CI, mergeability) is read once at a pass's
+ * START, but the actual `gh pr merge` call can run minutes later at the end of a serial cascade. A push, or a
+ * `review:changes` a reviewer adds, in that window was previously invisible — the merge landed whatever head
+ * happened to be live at merge time, not the one the decision was actually made about. Passing the head SHA
+ * this same pass just re-confirmed makes `gh` itself refuse the merge (a real, server-side race check) if the
+ * PR's head moved again between that re-confirmation and this exact call.
+ */
+export function buildGateMergeArgs({ pr, repo = null, method = 'merge', matchHeadCommit = null }) {
+  return ['pr', 'merge', String(pr), ...(repo ? ['--repo', repo] : []), mergeMethodFlag(method), '--delete-branch',
+    ...(matchHeadCommit ? ['--match-head-commit', String(matchHeadCommit)] : [])];
 }
 
 /** Is the emergency break-glass override armed? (`WE_MERGE_BREAK_GLASS=1`.) */
@@ -162,12 +174,12 @@ export function assertMayMerge({ caller, pr = null, repo = null, env = process.e
  * `gh pr merge …`. Returns whatever `exec` returns (the merge-ai-prs inline call ignored the result and relied
  * on a throw for failure — preserved: the default `exec` is `execFileSync`, which throws on a non-zero gh exit).
  * `exec` is injectable so the gate is unit-testable without shelling gh.
- * @param {{pr:(number|string), repo?:(string|null), method?:string, caller:string,
+ * @param {{pr:(number|string), repo?:(string|null), method?:string, matchHeadCommit?:(string|null), caller:string,
  *          exec?:Function, env?:object, log?:{write:Function}}} o
  */
-export function mergePr({ pr, repo = null, method = 'merge', caller, exec = execFileSync, env = process.env, log = process.stderr } = {}) {
+export function mergePr({ pr, repo = null, method = 'merge', matchHeadCommit = null, caller, exec = execFileSync, env = process.env, log = process.stderr } = {}) {
   assertMayMerge({ caller, pr, repo, env, log });
-  return exec('gh', buildGateMergeArgs({ pr, repo, method }), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return exec('gh', buildGateMergeArgs({ pr, repo, method, matchHeadCommit }), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 // ── #3383 — retarget a stacked PR BEFORE its base branch is deleted ────────────────────────────────────

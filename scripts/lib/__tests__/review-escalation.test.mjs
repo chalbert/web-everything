@@ -523,8 +523,9 @@ describe('#3317 — the escalation basis is cumulative (merge-base…head) for e
     const gate = decideReviewGate({ escalate: r.escalate, humanRequired: r.humanRequired });
     expect(gate.action).toBe('park');              // park ALIVE — never 'block', never 'refuse'
     expect(gate.applyLabel).toBe(REVIEW_LABELS.pending);
-    // and a converged agent verdict lands it, exactly as before
-    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
+    // and a converged agent verdict lands it, exactly as before (xvzc4v4: a matching accepted/head SHA pair, so
+    // this exercises the "covered" path — the SHA-coverage gate is a different concern from this test's own)
+    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
 
   it('#3317 — both PRODUCTION call sites feed the cumulative line count in, or the rubric scores a lie', async () => {
@@ -751,7 +752,8 @@ describe('decideReviewGate — the non-blocking review gate', () => {
     expect(decideReviewGate({ escalate: false }).action).toBe('merge');
   });
   it('escalated + review:accepted → merge', () => {
-    expect(decideReviewGate({ escalate: true, labels: [{ name: REVIEW_LABELS.accepted }] }).action).toBe('merge');
+    // xvzc4v4: a matching accepted/head SHA — the SHA-coverage gate is a separate concern, exercised below.
+    expect(decideReviewGate({ escalate: true, labels: [{ name: REVIEW_LABELS.accepted }], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
   it('escalated + review:changes → wait for the author lane', () => {
     expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.changes] }).action).toBe('wait-author');
@@ -789,7 +791,7 @@ describe('decideReviewGate — the non-blocking review gate', () => {
     expect(g.humanRequired).toBe(true);
   });
   it('humanRequired + review:accepted → merge (a human verdict still wins)', () => {
-    expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
+    expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
 
   // #2362 — the review:human LABEL is a STICKY veto: a PR ALREADY carrying it must never merge even when this
@@ -809,7 +811,7 @@ describe('decideReviewGate — the non-blocking review gate', () => {
     expect(g.applyLabel).toBe(REVIEW_LABELS.human);
   });
   it('review:human LABEL + review:accepted → merge (a human explicitly cleared the gate, still wins first)', () => {
-    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.accepted] }).action).toBe('merge');
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.accepted], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
   it('review:human LABEL + review:changes → wait-author (a reviewer bounce still routes to the author lane)', () => {
     expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.changes] }).action).toBe('wait-author');
@@ -838,12 +840,25 @@ describe('decideReviewGate — the non-blocking review gate', () => {
       const g2 = decideReviewGate({ escalate: true, humanRequired: false, labels: [...accepted, { name: REVIEW_LABELS.human }], acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb' });
       expect(g2.applyLabel).toBe(REVIEW_LABELS.human);
     });
-    it('FAILS OPEN — no recorded reviewed SHA (accept predates the gate / applied out-of-band) → merge', () => {
-      expect(decideReviewGate({ escalate: true, labels: accepted }).action).toBe('merge');
-      expect(decideReviewGate({ escalate: true, labels: accepted, headSha: 'abc1234' }).action).toBe('merge');
+    // xvzc4v4 (merge-safety review, bug 3) — PREVIOUSLY these two cases failed OPEN (merged on an unverifiable
+    // head). Fixed to fail CLOSED: `action` is `park` either way — an accept that cannot be confirmed to cover
+    // the live head must never merge — with `staleVerified:false` (not the proven-stale `true`) so it does not
+    // gratuitously revoke a recorded `review:human` clearance on a mere inability to check (see the suppression
+    // tests further down this file for that half of the contract).
+    it('FAILS CLOSED — no recorded reviewed SHA (accept predates the gate / applied out-of-band) → park', () => {
+      const g1 = decideReviewGate({ escalate: true, labels: accepted });
+      expect(g1.action).toBe('park');
+      expect(g1.staleAcceptance).toBe(true);
+      expect(g1.staleVerified).toBe(false);
+      const g2 = decideReviewGate({ escalate: true, labels: accepted, headSha: 'abc1234' });
+      expect(g2.action).toBe('park');
+      expect(g2.staleVerified).toBe(false);
     });
-    it('FAILS OPEN — head SHA unreadable (fetch miss) → merge', () => {
-      expect(decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234', headSha: null }).action).toBe('merge');
+    it('FAILS CLOSED — head SHA unreadable (fetch miss) → park', () => {
+      const g = decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234', headSha: null });
+      expect(g.action).toBe('park');
+      expect(g.staleAcceptance).toBe(true);
+      expect(g.staleVerified).toBe(false);
     });
   });
 
@@ -852,12 +867,14 @@ describe('decideReviewGate — the non-blocking review gate', () => {
   // hardened validator's redteam:accepted (#2439) must ALSO be present.
   describe('#2412 layer 4 — engineTier requires redteam:accepted in addition to review:accepted', () => {
     const accepted = [{ name: REVIEW_LABELS.accepted }];
+    // xvzc4v4: each carries a matching accepted/head SHA so it clears the (separate) SHA-coverage gate and
+    // actually reaches the engine-tier check this describe block is testing.
     it('engineTier:false (the default) is byte-identical to before — review:accepted alone merges', () => {
-      expect(decideReviewGate({ escalate: true, labels: accepted }).action).toBe('merge');
-      expect(decideReviewGate({ escalate: true, labels: accepted, engineTier: false }).action).toBe('merge');
+      expect(decideReviewGate({ escalate: true, labels: accepted, acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
+      expect(decideReviewGate({ escalate: true, labels: accepted, engineTier: false, acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
     });
     it('engineTier:true + review:accepted alone → park review:pending (awaiting the independent validator)', () => {
-      const g = decideReviewGate({ escalate: true, labels: accepted, engineTier: true });
+      const g = decideReviewGate({ escalate: true, labels: accepted, engineTier: true, acceptedSha: 'abc1234', headSha: 'abc1234' });
       expect(g.action).toBe('park');
       expect(g.applyLabel).toBe(REVIEW_LABELS.pending);
       expect(g.humanRequired).toBeFalsy();
@@ -868,6 +885,8 @@ describe('decideReviewGate — the non-blocking review gate', () => {
         escalate: true,
         labels: [...accepted, { name: REVIEW_LABELS.redteamAccepted }],
         engineTier: true,
+        acceptedSha: 'abc1234',
+        headSha: 'abc1234',
       });
       expect(g.action).toBe('merge');
     });
@@ -925,10 +944,25 @@ describe('#2409 — acceptanceCoversHead', () => {
     expect(r.covers).toBe(false);
     expect(r.reason).toMatch(/advanced/i);
   });
-  it('either SHA missing → fails OPEN (covers:true)', () => {
-    expect(acceptanceCoversHead({ acceptedSha: null, headSha: 'abc1234' }).covers).toBe(true);
-    expect(acceptanceCoversHead({ acceptedSha: 'abc1234', headSha: '' }).covers).toBe(true);
-    expect(acceptanceCoversHead({}).covers).toBe(true);
+  // xvzc4v4 (merge-safety review, bug 3) — PREVIOUSLY this fired OPEN (`covers:true`), so a broken read or a
+  // never-recorded reviewed SHA silently waved an UNVERIFIED head through to merge. Fixed to fail CLOSED:
+  // `covers:false` either way (never merges on an unconfirmed head), with `staleVerified:false` (not `true`) so
+  // it parks for a fresh look without gratuitously revoking a recorded human `review:human` clearance on a mere
+  // inability to check — the same "unproven, not proven-stale" tier the sibling `headReadFailed` case uses.
+  it('either SHA missing → fails CLOSED (covers:false, staleVerified:false) — never waves an unverified head through', () => {
+    const noHead = acceptanceCoversHead({ acceptedSha: 'abc1234', headSha: '' });
+    expect(noHead.covers).toBe(false);
+    expect(noHead.staleVerified).toBe(false);
+    expect(noHead.reason).toMatch(/head sha could not be read/i);
+
+    const noAccepted = acceptanceCoversHead({ acceptedSha: null, headSha: 'abc1234' });
+    expect(noAccepted.covers).toBe(false);
+    expect(noAccepted.staleVerified).toBe(false);
+    expect(noAccepted.reason).toMatch(/no recorded reviewed sha/i);
+
+    const both = acceptanceCoversHead({});
+    expect(both.covers).toBe(false);
+    expect(both.staleVerified).toBe(false);
   });
 });
 

@@ -60,10 +60,15 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
     expect(afterPush).toMatch(/postMergeTrace\(\);/);
   });
 
+  // xvzc4v4 (merge-safety review, bug 2) — both windows below were widened (700→2400, 400→1600) to fit the
+  // explanatory comment this fix added ahead of each branch's `postMergeTrace();` call. The invariant these two
+  // tests prove is unchanged: `merged.push`/`postMergeTrace()` still fire only on a CONFIRMED-merge branch —
+  // bug 2's fix is that these two branches now ALSO push into `merged` (see the couple test file for that half),
+  // never that they call `postMergeTrace()` any differently than before.
   it('postMergeTrace() is called on the already-merged-by-a-concurrent-lander idempotent path (still a confirmed merge)', () => {
     const idx = block.indexOf("skipped === 'already-merged'");
     expect(idx).toBeGreaterThan(-1);
-    const branch = block.slice(idx, idx + 700);
+    const branch = block.slice(idx, idx + 2400);
     expect(branch).toMatch(/postMergeTrace\(\);/);
   });
 
@@ -73,7 +78,7 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
     const afterCatch = block.slice(catchIdx);
     const alreadyMergedIdx = afterCatch.indexOf('if (isPrAlreadyMerged(c.repo, c.num)) {');
     expect(alreadyMergedIdx).toBeGreaterThan(-1);
-    const branch = afterCatch.slice(alreadyMergedIdx, alreadyMergedIdx + 400);
+    const branch = afterCatch.slice(alreadyMergedIdx, alreadyMergedIdx + 1600);
     expect(branch).toMatch(/postMergeTrace\(\);/);
   });
 
@@ -81,7 +86,8 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
     // Anchored to START right AFTER the contended-fallback already-merged recovery's own `continue;` (a real
     // confirmed-merge branch this suite already covers above), so this region is exactly the genuine-failure
     // path — never accidentally including the recovery branch's own legitimate `postMergeTrace()` call.
-    const recoveryContinueIdx = block.indexOf('during a contended write — idempotent no-op (#2683)');
+    // xvzc4v4 — the anchor text is this branch's own (post-bug-2-fix) stderr message, unique to it.
+    const recoveryContinueIdx = block.indexOf('confirmed merged despite the gh error above');
     expect(recoveryContinueIdx).toBeGreaterThan(-1);
     const genuineFailureStart = block.indexOf('continue;', recoveryContinueIdx) + 'continue;'.length;
     const failedPushIdx = block.indexOf('failedMerges.push({', genuineFailureStart);
@@ -93,5 +99,22 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
   it('exactly 3 call sites of postMergeTrace() total: one per confirmed-merge branch, 0 anywhere else', () => {
     const calls = block.match(/postMergeTrace\(\);/g) || [];
     expect(calls).toHaveLength(3);
+  });
+
+  // xvzc4v4 (merge-safety review, bug 2) — the actual fix: BOTH already-merged recovery branches now also push
+  // into `merged` (previously only the fresh-merge branch did, on the mistaken theory that "another lander"
+  // always owns the post-land numbering/resolve-on-land/derived-regen follow-up — false whenever nothing else
+  // actually merged it, e.g. our own `gh` call throwing after a real server-side merge, or a GitHub-UI merge).
+  it('bug 2 fix: the pre-check already-merged branch also records the PR into `merged` (its numbering/regen follow-up now runs)', () => {
+    const idx = block.indexOf("skipped === 'already-merged'");
+    const branch = block.slice(idx, idx + 2400);
+    expect(branch).toMatch(/merged\.push\(\{ num: c\.num, repo: c\.repo, headSha: c\.headSha \?\? null \}\);/);
+  });
+  it('bug 2 fix: the contended-write-fallback already-merged branch also records the PR into `merged`', () => {
+    const catchIdx = block.indexOf('} catch (e) {');
+    const afterCatch = block.slice(catchIdx);
+    const alreadyMergedIdx = afterCatch.indexOf('if (isPrAlreadyMerged(c.repo, c.num)) {');
+    const branch = afterCatch.slice(alreadyMergedIdx, alreadyMergedIdx + 1600);
+    expect(branch).toMatch(/merged\.push\(\{ num: c\.num, repo: c\.repo, headSha: c\.headSha \?\? null \}\);/);
   });
 });

@@ -615,6 +615,28 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
 }
 
 /**
+ * xvzc4v4 (merge-safety review, bug 1) — is a candidate's PASS-START `classifyPr` decision still safe to act on,
+ * given a FRESH read of the same PR taken right at the merge site (labels/CI/mergeable/base/body re-read, not
+ * reused from the listing the whole pass started with)? Pure: delegates to `classifyPr` itself, so "safe to
+ * merge" is never defined twice — a candidate that no longer classifies as `'merge'` on the fresh read (a push
+ * landed, a reviewer added `review:changes`, CI flipped) is refused here exactly as it would have been refused
+ * at plan time had the pass started this instant.
+ *
+ * `freshPr: null` (the caller's `gh` re-read failed, or returned a reply this couldn't even confirm was the
+ * right PR) is treated as `decision: 'skip'` — FAIL CLOSED: a read miss must never be read as "still fine",
+ * only as "cannot confirm, so do not merge on stale pass-start data".
+ * @param {object|null} freshPr
+ * @param {{requiredCheck?:string, allowPendingReview?:boolean, defaultBranch?:(string|null)}} [o]
+ * @returns {{decision:string, reason:string}}
+ */
+export function revalidateForMerge(freshPr, { requiredCheck = 'test', allowPendingReview = false, defaultBranch = null } = {}) {
+  if (!freshPr || freshPr.number == null) {
+    return { decision: 'skip', reason: 'could not re-read the PR fresh right before merging — refusing to merge on stale pass-start data' };
+  }
+  return classifyPr(freshPr, { requiredCheck, allowPendingReview, defaultBranch });
+}
+
+/**
  * Is this SKIPPED verdict a rebase-drop-manifest candidate (#2198)? Pure. A PR that is producer-certified and
  * required-check-green but not landable ONLY because it is BEHIND/DIRTY/CONFLICTING is (almost always) blocked
  * by the shared `.lane-manifest.json` on that one repo-root path — the classic "manifest lands then conflicts
@@ -3243,6 +3265,20 @@ async function runCli() {
     } catch { return null; }
   };
 
+  // xvzc4v4 (merge-safety review, bug 1) — the SAME fields `classifyPr` scored at pass-start (labels,
+  // statusCheckRollup, mergeable, mergeStateStatus, baseRefName, body) plus `commits` (the AI-generated gate),
+  // read FRESH right before merging. A `gh` miss (or a malformed/numberless reply) returns `null`, which
+  // `revalidateForMerge` below treats as "cannot confirm — do not merge" (fail closed), never as "still fine".
+  const fetchFreshPrForRevalidation = (repo, num) => {
+    try {
+      const raw = execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json',
+        'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels,commits'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const data = JSON.parse(raw || '{}');
+      return data && data.number != null ? data : null;
+    } catch { return null; }
+  };
+
   const fail = (reason, detail, code) => {
     if (AS_JSON) writeAllSync(1, JSON.stringify({ ok: false, reason, detail }) + '\n');
     else process.stderr.write(`merge-ai-prs ✗ ${reason}: ${detail}\n`);
@@ -4470,6 +4506,10 @@ async function runCli() {
 
   const merged = [];
   const failedMerges = [];
+  // xvzc4v4 (merge-safety review, bug 1) — a candidate whose PASS-START `classifyPr` decision no longer holds on
+  // a FRESH re-read right before the merge (see `revalidateForMerge`): reported, never silently dropped, and
+  // left `skip` so it keeps blocking its dependents and is re-read fresh next pass.
+  const revalidationAborted = [];
   const pendingRebased = []; // #2198 — PRs rebuilt onto main this pass; CI re-running, land on a later pass
   let deferred = [];
   if (DRY_RUN) {
@@ -4512,6 +4552,23 @@ async function runCli() {
       let progressed = false;
       for (const c of plan.ready) {
         try {
+          // xvzc4v4 (merge-safety review, bug 1) — `c`'s `decision === 'merge'` was computed ONCE at PASS-START
+          // (`prepareDrainVerdicts`, before this whole cascade began), but this cascade is a SERIAL loop that can
+          // run for minutes on a busy queue — a push, or a reviewer adding `review:changes`, between then and
+          // THIS candidate's turn was previously invisible to it. Re-check against a FRESH read, as the very
+          // FIRST thing this candidate's turn does (ahead of the land-side comment stamps below, so a PR that
+          // fails this re-check gets no "acted-on manifest" / "review coverage" stamp implying it is landing).
+          // `revalidateForMerge` fails CLOSED on a `gh` miss — never merges on unconfirmed data.
+          const reliefAllowsPendingNow = (escalationRelief.prs || []).includes(Number(c.num)) || (!!escalationRelief.passWide && !!label);
+          const revalidated = revalidateForMerge(fetchFreshPrForRevalidation(c.repo, c.num), {
+            requiredCheck: REQUIRED, allowPendingReview: reliefAllowsPendingNow, defaultBranch: defaultBranchOf(c.repo),
+          });
+          if (revalidated.decision !== 'merge') {
+            const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; re-read live next pass
+            revalidationAborted.push({ num: c.num, repo: c.repo, reason: revalidated.reason });
+            if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} no longer safe to merge on a fresh re-read (${revalidated.reason}) — the pass-start decision is stale; refusing to merge this pass (xvzc4v4)\n`);
+            continue;
+          }
           // xnsk54v follow-up (land-path tamper-evidence) — the park/skip comment paths only fire when the drain
           // does NOT merge, so they record NOTHING in the attack's SUCCESS state: `dismissedFindings` edited DOWN
           // to suppress escalation so the PR LANDS. Close that gap by stamping the acted-on manifest values onto
@@ -4592,6 +4649,9 @@ async function runCli() {
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
           // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).
+          // xvzc4v4 — `matchHeadCommit: traceHeadSha` (the freshest possible head read, taken immediately above)
+          // is now threaded through so `gh` itself refuses the merge if the PR's head moved again in the razor-
+          // thin window between that read and this exact call (bug 1 of the merge-safety review).
           // #2683 — the write is now SERIALIZED by the serial-writer mutex (drain-lock, shared with the numbering
           // section) and GUARDED by a per-PR idempotency re-check. The mutex is the ONLY lock a `--only` fast drain
           // shares with a concurrent resident-daemon sweep (the fast drain bypasses the whole-process lease), so
@@ -4601,19 +4661,33 @@ async function runCli() {
             if (isPrAlreadyMerged(c.repo, c.num)) return { skipped: 'already-merged' };
             // x2e120n — the actual `gh pr merge` round-trip, timed on its own (a sub-component of the wider
             // "mergeCascade" step below, which also covers the pre-merge stamps/retarget for every candidate).
-            __t.time('mergeCall', () => mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' }));
+            __t.time('mergeCall', () => mergePr({ pr: c.num, repo: c.repo, method: 'merge', matchHeadCommit: traceHeadSha, caller: 'drain' }));
             return { merged: true };
           });
           if (landLock.contended && !AS_JSON) process.stderr.write(`  ⚠ merge-write mutex not acquired (held by ${landLock.heldBy || '?'}) — merged under the per-PR idempotency guard instead (#2683)\n`);
           if (landLock.result && landLock.result.skipped === 'already-merged') {
-            // A concurrent lander already merged this PR. Treat it as landed for THIS pass's ordering bookkeeping
-            // (item leaves the open set → dependents free) but do NOT add it to `merged`: the lander that actually
-            // ran `gh pr merge` owns the post-land numbering / derived-regen / main-sync. Idempotent no-op.
+            // xvzc4v4 (merge-safety review, bug 2) — THIS BRANCH USED TO withhold the PR from `merged` on the
+            // theory that "whoever actually ran `gh pr merge` owns the post-land numbering/regen". That holds
+            // only for a genuine RACE against another drain PROCESS this same instant — one that will itself
+            // reach this same code in ITS OWN pass and number/resolve/regen it. It does NOT hold for the two
+            // failure modes that land on this exact branch just as often: (a) our OWN merge attempt above
+            // already landed the PR server-side but the underlying `gh` call never got a chance to throw here in
+            // the first place — this is the PRE-check, so this branch actually also covers a plain out-of-band
+            // merge (a GitHub-UI merge, or any process outside this pipeline) discovered before we ever tried;
+            // there is no "other lander" coming for either. Withholding was a PERMANENT skip, not a deferral —
+            // once a PR is merged it drops off every future pass's OPEN-PR listing, so this was the only chance
+            // it would ever get its JIT number / resolve-on-land / derived regen (`landedLocal` below gates on
+            // `merged`, not on `landedThisPass`). Fixed by recording it into `merged` unconditionally: the
+            // numbering/resolve/regen steps downstream are themselves idempotent (they act on whatever is still
+            // PENDING — nothing, if a genuine concurrent lander already did it), so running them again here is a
+            // safe no-op in the true-race case and the ONLY chance to run them at all otherwise. "Exactly once"
+            // is delivered by that idempotency, not by this branch trying to guess which case it is in.
+            merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
+            progressed = true;
             remaining = remaining.filter((x) => !sameCand(x, c));
             for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
-            progressed = true;
             postMergeTrace(); // #xngv3vn — confirmed merged (just by a concurrent lander, not this call)
-            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
+            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged (by us, a concurrent lander, or out-of-band, e.g. the GitHub UI) — running its numbering/resolve/regen follow-up now, idempotently (xvzc4v4)\n`);
             continue;
           }
           merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null }); progressed = true;
@@ -4635,11 +4709,19 @@ async function runCli() {
           // `failedMerges` (the other lander owns the post-land numbering/regen). Only a merge failure on a PR
           // that is genuinely still open is a real fault below.
           if (isPrAlreadyMerged(c.repo, c.num)) {
+            // xvzc4v4 (merge-safety review, bug 2) — this is the EXACT case the review named: `gh pr merge`
+            // above THREW (the branch it's in is the `catch`), but the PR is confirmed MERGED on GitHub anyway —
+            // a local branch-delete failure or a network drop AFTER the merge response landed, not a race
+            // against a concurrent lander. There is no "other lander" that owns the follow-up here; WE are the
+            // one who merged it. As with the pre-check branch above, record it into `merged` so the numbering/
+            // resolve-on-land/derived-regen this pass runs for it — those steps are idempotent, so this is a
+            // safe no-op in the genuine-race case too and the ONLY chance to run them at all in this one.
+            merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
+            progressed = true;
             remaining = remaining.filter((x) => !sameCand(x, c));
             for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
-            progressed = true;
             postMergeTrace(); // #xngv3vn — confirmed merged (raced past the mutex, but genuinely landed)
-            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} merged by a concurrent lander during a contended write — idempotent no-op (#2683)\n`);
+            if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} confirmed merged despite the gh error above (local branch-delete/network failure, or a concurrent lander) — running its numbering/resolve/regen follow-up now, idempotently (xvzc4v4)\n`);
             continue;
           }
           // #xngv3vn — a REAL merge failure (not the idempotent-already-merged case just above): the trace
@@ -4902,7 +4984,7 @@ async function runCli() {
   // goes to the formatter — it computes+appends the trailing `total=` itself; passing `timings` here would
   // print `total=` twice (once as an ordinary step, once as the formatter's own).
   process.stderr.write(`merge-ai-prs · pass timings: ${formatTimingsSummary(timingSteps, { total: passTotalMs, order: PASS_STEP_ORDER })} (considered ${verdicts.length}, merged ${merged.length})\n`);
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, ...(revalidationAborted.length ? { revalidationAborted } : {}), rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 

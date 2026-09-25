@@ -12,7 +12,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, revalidateForMerge, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { acquireDrainLease, drainLeaseStatus, localRepoSlug } from '../readiness/drain-lock.mjs';
 import { claudeCommit, humanCommit, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
@@ -151,6 +151,52 @@ describe('merge-ai-prs — label-conditional AI gate (#2195, blockedBy #2196)', 
   });
 });
 
+// xvzc4v4 (merge-safety review, bug 1) — the merge decision was computed ONCE at pass-start and never re-checked
+// against a fresh read right before the actual `gh pr merge`, so a push or a `review:changes` added mid-pass
+// (the cascade can run for minutes on a busy queue) was invisible. `revalidateForMerge` re-runs the SAME
+// `classifyPr` a caller uses against a fresh PR read; only `decision === 'merge'` on THAT fresh read clears a
+// candidate to actually land.
+describe('merge-ai-prs — revalidateForMerge (bug 1: re-check the merge decision against a FRESH read)', () => {
+  it('a fresh read that still classifies "merge" clears the candidate', () => {
+    const r = revalidateForMerge(aiPr(), {});
+    expect(r.decision).toBe('merge');
+  });
+  it('a fresh read discovering a review:changes label added mid-pass now REFUSES the merge', () => {
+    // The exact scenario named by the review: `classifyPr` at plan time saw no hold; a reviewer added
+    // `review:changes` while this candidate's turn in the serial cascade was still pending. A stale decision
+    // would merge anyway; the fresh re-read must not.
+    const r = revalidateForMerge(aiPr({ labels: [{ name: 'review:changes' }] }), {});
+    expect(r.decision).toBe('skip');
+    expect(r.reviewHeld).toBe(true);
+  });
+  it('a fresh read discovering CI went red mid-pass now REFUSES the merge', () => {
+    const redRollup = { contexts: { nodes: [{ name: 'test', conclusion: 'FAILURE' }] } };
+    const r = revalidateForMerge(aiPr({ statusCheckRollup: redRollup }), {});
+    expect(r.decision).toBe('skip');
+  });
+  it('a fresh read discovering a push made the PR no longer mergeable now REFUSES the merge', () => {
+    const r = revalidateForMerge(aiPr({ mergeable: 'CONFLICTING' }), {});
+    expect(r.decision).toBe('skip');
+  });
+  // FAIL CLOSED — a `gh` re-read miss must never be read as "still fine, merge it".
+  it('a null freshPr (the gh re-read failed) fails CLOSED — never treated as still safe to merge', () => {
+    const r = revalidateForMerge(null, {});
+    expect(r.decision).toBe('skip');
+    expect(r.reason).toMatch(/could not re-read/i);
+  });
+  it('a freshPr with no `number` (a malformed/empty gh reply) is treated the same as a read miss', () => {
+    const r = revalidateForMerge({}, {});
+    expect(r.decision).toBe('skip');
+  });
+  it('threads requiredCheck/allowPendingReview/defaultBranch through to classifyPr exactly as the pass-start call does', () => {
+    // allowPendingReview lets a relieved review:pending PR through on the fresh read too, mirroring the
+    // pass-start relief wiring (escalationRelief) — the fresh re-check must not silently drop that valve.
+    const pending = aiPr({ labels: [{ name: 'review:pending' }] });
+    expect(revalidateForMerge(pending, { allowPendingReview: false }).decision).toBe('skip');
+    expect(revalidateForMerge(pending, { allowPendingReview: true }).decision).toBe('merge');
+  });
+});
+
 describe('merge-ai-prs — #2820 hold-integrity: an unsatisfied review hold blocks merge regardless of ready-to-merge', () => {
   const rtm = { name: 'ready-to-merge' };
   // An otherwise-perfectly-landable PR (AI, green, cleanly mergeable, real body, ready-to-merge): the ONLY
@@ -268,7 +314,8 @@ describe('merge-ai-prs — #2820-review-fix (finding 2): review:pending is stick
   it('a real verdict still wins over the sticky pending: review:changes → wait-author, review:human → park human', () => {
     expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.changes }] }).action).toBe('wait-author');
     expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.human }] }).humanRequired).toBe(true);
-    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }] }).action).toBe('merge');
+    // xvzc4v4: a matching accepted/head SHA — the SHA-coverage gate is a separate concern from this test.
+    expect(decideReviewGate({ escalate: false, labels: [{ name: REVIEW_LABELS.pending }, { name: REVIEW_LABELS.accepted }], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
 
   it('no review label + de-escalated still merges — the fix is a no-op for the common path', () => {

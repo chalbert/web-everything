@@ -266,7 +266,13 @@ describe('INVARIANT 2 — human-gated ⇒ no auto-merge without review:accepted'
           if (humanLabel) labels.push(REVIEW_LABELS.human);
           if (accepted) labels.push(REVIEW_LABELS.accepted);
           const tainted = humanRequired || humanLabel; // the PR is under the human gate
-          const g = decideReviewGate({ escalate, humanRequired, labels, ...age });
+          // xvzc4v4 (merge-safety review, bug 3) — a matching accepted/head SHA, so an `accepted` case here
+          // exercises "human accept, verified against a live head that still matches it" — the property this
+          // invariant is actually about. The now-separate "accepted but UNVERIFIABLE (no/failed SHA read) must
+          // still fail closed" property is covered by its own tests in review-escalation.test.mjs; this
+          // invariant never intended to also cover that axis (it iterates only escalate × humanRequired ×
+          // humanLabel × accepted × extra labels × park age — SHA-coverage is orthogonal).
+          const g = decideReviewGate({ escalate, humanRequired, labels, ...age, acceptedSha: 'abc1234', headSha: 'abc1234' });
 
           if (tainted && !accepted) {
             // the safety property: a human-gated PR with no human accept must NOT land, ever.
