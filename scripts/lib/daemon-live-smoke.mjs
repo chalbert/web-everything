@@ -347,10 +347,11 @@ export const SMOKE_TRANSIENT_RETRIES_ENV = 'WE_DAEMON_SMOKE_TRANSIENT_RETRIES';
  *  momentarily-full lane pool) clears within seconds; 15s gives it real room without dragging a rebuild out. */
 export const SMOKE_RETRY_BACKOFF_MS_ENV = 'WE_DAEMON_SMOKE_RETRY_BACKOFF_MS';
 
-const defaultSleep = (ms) => new Promise((resolve) => {
-  const t = setTimeout(resolve, ms);
-  t.unref?.(); // never keep the process alive on a pending backoff
-});
+// Deliberately NOT `.unref()`'d: the backoff IS the work in flight. With nothing else ref'd (the write-lock
+// heartbeat is unref'd, the failed attempt's child calls are done), an unref'd timer lets Node exit before it
+// fires — the retry never happens and the resident daemon dies with exit 0 (the #3870 death that
+// pass-daemon.mjs#realSleep documents).
+const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /**
  * Run {@link runLiveSmoke} and, on a `'transient'` verdict ONLY (see {@link classifySmokeFailure}), retry the

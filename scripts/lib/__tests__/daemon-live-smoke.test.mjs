@@ -26,6 +26,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import {
   decideSmokeVerdict, resolveSmokeBudgets, SMOKE_BUDGET_ENV, isSmokeGateDisabled, SMOKE_KILL_SWITCH_ENV,
   runLiveSmoke, SMOKE_CHECKS, rollbackToSha, readRejectedSha, recordRejectedSha, clearRejectedSha,
@@ -298,6 +299,27 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
     expect(result.verdict).toBe('transient');
     expect(result.attempts).toBe(1); // retries:0 from env → no retry at all
     expect(sleep).not.toHaveBeenCalled();
+  });
+
+  // Every test above injects a fake `sleep`, so none of them exercise the REAL default backoff. An `.unref()`'d
+  // backoff timer let Node exit mid-retry when nothing else was keeping the event loop alive — the resident
+  // daemon vanished with exit 0 instead of retrying (the same death pass-daemon.mjs#realSleep documents, #3870).
+  // Run it in a real child process, with no other handle open, so that exact exit is observable.
+  it('the real default sleep keeps the process alive mid-backoff — the retry actually happens', () => {
+    const moduleUrl = pathToFileURL(join(process.cwd(), 'scripts/lib/daemon-live-smoke.mjs')).href;
+    const script = `
+      import { runLiveSmokeWithRetry } from ${JSON.stringify(moduleUrl)};
+      let call = 0;
+      const runChild = async (cmd, args) => {
+        if (args[1] === 'list') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+        return '';
+      };
+      const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, retries: 2, backoffMs: 50 });
+      console.log('DONE ' + r.verdict + ' ' + r.attempts);
+    `;
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+    expect(out.trim()).toBe('DONE pass 2');
   });
 });
 
