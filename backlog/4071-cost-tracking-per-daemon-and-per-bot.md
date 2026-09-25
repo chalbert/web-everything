@@ -3,9 +3,10 @@ bornAs: xfxl484
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/lib/telemetry.mjs", "we:scripts/operations/telemetry-summary-io.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 
