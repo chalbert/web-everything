@@ -26,6 +26,20 @@ import {
 } from '../../conveyor/__tests__/sim/agent-actions.mjs';
 import { createSimClock } from '../../conveyor/__tests__/sim/clock.mjs';
 
+/**
+ * A SIGTERM is delivered asynchronously: the sleeper can still answer `kill(pid, 0)` for a few milliseconds
+ * after `stop`/`killPid`/`cleanup` return. Asserting death on the very next line was a real race (it failed on
+ * CI shard 4 for PR #2623 while passing locally), so poll briefly instead of asserting instantly.
+ */
+function pidGoneWithin(pid, ms = 3000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    try { process.kill(pid, 0); } catch { return true; }
+    if (Date.now() > end) return false;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+}
+
 let fake = null;
 afterEach(() => { if (fake) fake.cleanup(); fake = null; });
 
@@ -80,7 +94,7 @@ describe('createFakeClaude — spawn/list/stop through the real production seams
     const all = defaultListAgents({ env, all: true });
     expect(all).toHaveLength(1);
     expect(all[0].state).toBe('stopped');
-    expect(() => process.kill(row.pid, 0)).toThrow();
+    expect(pidGoneWithin(row.pid)).toBe(true);
   });
 
   it('`killPid` (the JS API) kills the sleeper directly, no `claude stop` involved', () => {
@@ -90,7 +104,7 @@ describe('createFakeClaude — spawn/list/stop through the real production seams
     expect(() => process.kill(row.pid, 0)).not.toThrow();
 
     fake.killPid(row.id);
-    expect(() => process.kill(row.pid, 0)).toThrow();
+    expect(pidGoneWithin(row.pid)).toBe(true);
   });
 
   it('`--all` vs no-`--all`: multiple sessions, one stopped, one still working', () => {
@@ -180,7 +194,7 @@ describe('createFakeClaude — spawn/list/stop through the real production seams
     const pids = local.sessions().map((s) => s.pid);
     expect(pids).toHaveLength(3);
     local.cleanup();
-    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    for (const pid of pids) expect(pidGoneWithin(pid)).toBe(true);
   });
 });
 
@@ -197,7 +211,7 @@ describe('scripted actions — writeCompletion / exit / setState, through the re
       await exitAction({ state: 'done', writeCompletion: false }).run(ctx, session);
       expect(tryReadCompletion('fix-508', completionsDir)).toBeNull();
       expect(fake.session('fix-508').state).toBe('done');
-      expect(() => process.kill(session.pid, 0)).toThrow();
+      expect(pidGoneWithin(session.pid)).toBe(true);
 
       defaultSpawnAgent(bg(18, 'fix-518'), { env: envFor(fake) });
       const session2 = fake.session('fix-518');
