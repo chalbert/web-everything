@@ -3,10 +3,11 @@ bornAs: xvxs2u3
 kind: story
 size: 3
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/queue-store.mjs", "we:scripts/conveyor/run-scorecard-store.mjs", "we:scripts/review-set-label.mjs", "we:skills-src/conveyor/launchd/"]
 dateOpened: "2026-09-23"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
