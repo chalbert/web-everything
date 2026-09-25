@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3902", "3901", "3897", "3907", "3915", "x0n0eiz"]
+blockedBy: ["3902", "3901", "3897", "3907", "3915", "4178"]
 scope: ["we:scripts/operations/__tests__/dispatch-sinks-root-hermeticity.test.mjs", "we:scripts/operations/__tests__/run-store.test.mjs", "we:scripts/operations/dispatch-provider-registry.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/prepare-decision.mjs", "we:scripts/operations/dispatch-providers/prepare.mjs", "we:scripts/operations/dispatch-task-io.mjs", "we:scripts/operations/dispatch-task.mjs", "we:scripts/operator/dispatch.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__tests__/delivery-agent-marker.test.mjs", "we:scripts/operations/wake.mjs", "we:scripts/operations/explore-io.mjs", "we:scripts/operations/__tests__/explore.test.mjs", "we:scripts/operations/runner-activity-io.mjs", "we:scripts/operations/ci-heal-run.mjs", "we:scripts/operations/fix-run.mjs", "we:scripts/operations/prepare-decision-run.mjs", "we:scripts/operations/prepare-scope-run.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/completion-record.mjs", "we:scripts/operations/__tests__/juror-flags.test.mjs", "we:scripts/operations/__tests__/record-verdict-cli.test.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:scripts/operations/ci-heal-dispatch-wrapper.mjs", "we:scripts/operations/fix-dispatch-wrapper.mjs", "we:scripts/operations/prepare-decision-wrapper.mjs", "we:scripts/operations/prepare-scope-wrapper.mjs", "we:scripts/operations/review-dispatch-wrapper.mjs", "we:scripts/conveyor/autofix-review-findings.mjs", "we:scripts/conveyor/fix-autofix-gate.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/conveyor/ci-heal-mark.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/dispatch-supervision-promotions.json"]
 dateOpened: "2026-09-22"
 tags: []
@@ -161,26 +161,26 @@ union both `we:scripts/operations/dispatch-lane.mjs` conflicts above need.
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check moved `we:scripts/lib/dispatch-supervision-promotions.json` here from #xvlu8t1 — this card's `we:scripts/operations/dispatch-lane-io.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/operator/dispatch.mjs` imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/operations/prepare-scope-wrapper.mjs` imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/lib/dispatch-contracts.mjs` here from #xvlu8t1 — this card's `we:scripts/operations/dispatch-task-io.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-providers/__tests__/ci-heal-dispatch-routing.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/conveyor/ci-heal-mark.mjs` here from #xvlu8t1 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-lane.mjs` here from #xvlu8t1 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-lane-io.mjs` here from #xvlu8t1 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/wake-cli.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/inflight-fail-closed.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-provider-registry.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-marker-freshen.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-crosses-processes.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-abort.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/lib/__tests__/dispatch-supervisor.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/conveyor/__tests__/lease-reaper.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/__tests__/dispatch-routing-table.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/dispatch-supervision-promotions.json` here from #4180 — this card's `we:scripts/operations/dispatch-lane-io.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check added blockedBy #4178 — `we:scripts/operator/dispatch.mjs` imports a module #4178 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — `we:scripts/operations/prepare-scope-wrapper.mjs` imports a module #4178 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/dispatch-contracts.mjs` here from #4180 — this card's `we:scripts/operations/dispatch-task-io.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-providers/__tests__/ci-heal-dispatch-routing.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/conveyor/ci-heal-mark.mjs` here from #4180 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-lane.mjs` here from #4180 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/dispatch-lane-io.mjs` here from #4180 — this card's `we:scripts/operations/ci-heal-dispatch-wrapper.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/wake-cli.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/inflight-fail-closed.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-provider-registry.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-marker-freshen.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-defaults.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-crosses-processes.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-abort.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/__tests__/dispatch-supervisor.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/conveyor/__tests__/lease-reaper.test.mjs` to #4180 — it imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/__tests__/dispatch-routing-table.test.mjs` to #4180 — it imports a module #4180 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/delivery-report-store.mjs` to #3915 — #3915's `we:scripts/operations/deliver-item-wrapper.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/open-pr.mjs` to #3915 — #3915's `we:scripts/operations/deliver-item-wrapper.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/deliver-item-wrapper.mjs` to #3915 — #3915's `we:scripts/operations/deliver-item-run.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.

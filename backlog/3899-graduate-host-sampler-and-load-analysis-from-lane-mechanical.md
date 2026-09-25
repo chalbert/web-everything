@@ -4,7 +4,7 @@ kind: story
 size: 8
 parent: "3443"
 status: open
-blockedBy: ["3898", "3895", "3854", "3487", "xvlu8t1", "x0n0eiz"]
+blockedBy: ["3898", "3895", "3854", "3487", "4180", "4178"]
 scope: ["we:scripts/operations/__tests__/host-sampler-attribution.test.mjs", "we:scripts/operations/__tests__/host-sampler-capacity.test.mjs", "we:scripts/operations/__tests__/host-sampler-classes.test.mjs", "we:scripts/operations/__tests__/host-sampler-episodes.test.mjs", "we:scripts/operations/__tests__/host-sampler-extras.test.mjs", "we:scripts/operations/__tests__/host-sampler-install.test.mjs", "we:scripts/operations/__tests__/host-sampler-large-file.test.mjs", "we:scripts/operations/__tests__/host-sampler-retention.test.mjs", "we:scripts/operations/__tests__/host-sampler-rollup.test.mjs", "we:scripts/operations/__tests__/host-sampler.test.mjs", "we:scripts/operations/__tests__/load-analysis.test.mjs", "we:scripts/operations/__tests__/load-review.test.mjs", "we:scripts/operations/host-sampler-attribution.mjs", "we:scripts/operations/host-sampler-calibrate.mjs", "we:scripts/operations/host-sampler-classes.mjs", "we:scripts/operations/host-sampler-episodes.mjs", "we:scripts/operations/host-sampler-extras.mjs", "we:scripts/operations/host-sampler-install.mjs", "we:scripts/operations/host-sampler-retention.mjs", "we:scripts/operations/host-sampler-rollup.mjs", "we:scripts/operations/host-sampler-selfcheck.mjs", "we:scripts/operations/host-sampler-tail.mjs", "we:scripts/operations/host-sampler.mjs", "we:scripts/operations/load-analysis.mjs", "we:scripts/operations/load-report-cli.mjs", "we:scripts/operations/load-review.mjs", "we:scripts/operations/__fixtures__/load-analysis/runner-audit.jsonl", "we:scripts/operations/__tests__/host-sampler-github.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -22,22 +22,22 @@ Ports 14 files (we:scripts/operations/host-sampler.mjs, we:scripts/operations/ho
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-github.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/host-sampler-github.test.mjs` here from #xvlu8t1 — it imports a module this card owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/load-review.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/load-report-cli.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/load-analysis.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/host-sampler.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/operations/host-sampler.mjs` imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/host-sampler-tail.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/host-sampler-rollup.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/host-sampler-retention.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/host-sampler-calibrate.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/load-review.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/load-analysis.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-rollup.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-retention.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-episodes.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/host-sampler-capacity.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-github.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/host-sampler-github.test.mjs` here from #4180 — it imports a module this card owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/load-review.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/load-report-cli.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/load-analysis.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/host-sampler.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — `we:scripts/operations/host-sampler.mjs` imports a module #4178 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/host-sampler-tail.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/host-sampler-rollup.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/host-sampler-retention.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/host-sampler-calibrate.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/load-review.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/load-analysis.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-rollup.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-retention.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-large-file.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-episodes.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/host-sampler-capacity.test.mjs` also imports a module #4180 owns.

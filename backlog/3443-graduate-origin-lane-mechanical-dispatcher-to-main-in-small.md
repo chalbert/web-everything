@@ -478,12 +478,12 @@ How each slice (a child of this item) graduates, per the statute
   For the remaining changed files not covered by any moved card (owned only by resolved/landed slices, or by
   no slice at all), filed two new post-snapshot tail cards (parent `#3443`, `--queue=false`), grouped by
   coherence per the operator's own split:
-  - **`we:backlog/x0n0eiz-*`** — lane-pool/lane-lease/verify-lane/guard-bash/poc-land landing tooling
+  - **`we:backlog/4178-*`** — lane-pool/lane-lease/verify-lane/guard-bash/poc-land landing tooling
     (`cdec41cd1`, `5db6d9484`, `6a2c8c1ab`'s own stranded-hash-grace commit). Explicitly diff-merges
     `we:scripts/verify-lane.mjs` and `we:scripts/guard-bash.mjs` onto their `dd4beb5e5`-shaped bodies (main's
     own diff-selected-test-gate + full-suite-deny work), never copies over them. `blockedBy`: none — every
     base-file owner (`#3481`, `#3484`, `#3890`, `#3917`) is already resolved/landed.
-  - **`we:backlog/xvlu8t1-*`** — dispatch-contracts rule enforcement (`4f357472d`, `#3784` Rule 6), the
+  - **`we:backlog/4180-*`** — dispatch-contracts rule enforcement (`4f357472d`, `#3784` Rule 6), the
     `we:scripts/conveyor/ci-heal-mark.mjs` land-seam hold half of prototype item `#4021` Fork 2, and telemetry
     (`b92c91637`, `e14f27bef`). `blockedBy: ["3906", "3915"]` — its `we:scripts/conveyor/ci-heal-mark.mjs`
     port is one coherent feature (`#4021` Fork 2) whose sibling files

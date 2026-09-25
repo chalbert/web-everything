@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "3443"
 status: open
-blockedBy: ["3856", "3897", "3906", "xvlu8t1"]
+blockedBy: ["3856", "3897", "3906", "4180"]
 scope: ["we:scripts/operations/__tests__/wip-agents-io.test.mjs", "we:scripts/operations/__tests__/wip-report-compact.test.mjs", "we:scripts/operations/__tests__/wip-report-io-real.test.mjs", "we:scripts/operations/__tests__/wip-report-io.test.mjs", "we:scripts/operations/__tests__/wip-report-queue.test.mjs", "we:scripts/operations/__tests__/wip-report.test.mjs", "we:scripts/operations/wip-agents-cli.mjs", "we:scripts/operations/wip-agents-io.mjs", "we:scripts/operations/wip-agents.mjs", "we:scripts/operations/wip-report-cli.mjs", "we:scripts/operations/wip-report-io.mjs", "we:scripts/operations/wip-report-queue.mjs", "we:scripts/operations/wip-report.mjs", "we:scripts/operations/__fixtures__/wip-agents/", "we:scripts/operations/__fixtures__/wip-report/", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs", "we:scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json", "we:scripts/operations/__fixtures__/wip-agents/live-finished-dead.json", "we:scripts/operations/__fixtures__/wip-report/raw-2026-09-20.json"]
 dateOpened: "2026-09-22"
 tags: []
@@ -22,9 +22,9 @@ Ports 7 files (we:scripts/operations/wip-agents.mjs, we:scripts/operations/wip-a
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/wip-report.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/wip-agents-io.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/wip-agents-io.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/wip-report.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/wip-agents-io.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/wip-agents-io.test.mjs` also imports a module #4180 owns.
 - 2026-09-25: graduation-import-check added blockedBy #3906 — `we:scripts/operations/wip-agents-io.mjs` imports a module #3906 owns.
 - 2026-09-25: graduation-import-check added we:scripts/operations/__fixtures__/wip-report/raw-2026-09-20.json to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/wip-report.test.mjs`, which this card ports.
 - 2026-09-25: graduation-import-check added we:scripts/operations/__fixtures__/wip-report/raw-2026-09-20.json to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/wip-report-queue.test.mjs`, which this card ports.

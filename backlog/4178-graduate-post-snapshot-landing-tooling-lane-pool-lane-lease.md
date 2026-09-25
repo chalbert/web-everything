@@ -1,4 +1,5 @@
 ---
+bornAs: x0n0eiz
 kind: story
 size: 3
 parent: "3443"
@@ -30,18 +31,18 @@ Post-snapshot tail slice of epic #3443. origin/lane/mechanical-dispatcher moved 
 - 2026-09-25: graduation-import-check made this a blocker of #3915 — its `we:scripts/lib/gh-throttle.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3915 — its moved-in `we:scripts/lib/__tests__/gh-throttle.test.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3915 — its `we:scripts/conveyor/lease-reaper.mjs` imports a module this card owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/readiness/heavy-admission.mjs` here from #xvlu8t1 — this card's `we:scripts/operations/verify-io.mjs` needs it directly, and a blockedBy edge to #xvlu8t1 would cycle (it already depends on this card).
-- 2026-09-25: graduation-import-check made this a blocker of #xvlu8t1 — its `we:scripts/check-standards.mjs` imports a module this card owns.
-- 2026-09-25: graduation-import-check made this a blocker of #xvlu8t1 — its moved-in `we:scripts/__tests__/check-standards-rules-conformance-gates.test.mjs` imports a module this card owns.
-- 2026-09-25: graduation-import-check made this a blocker of #xvlu8t1 — its moved-in `we:scripts/operations/__tests__/verify.test.mjs` imports a module this card owns.
-- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/verify.test.mjs` to #xvlu8t1 — it imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/readiness/heavy-admission.mjs` here from #4180 — this card's `we:scripts/operations/verify-io.mjs` needs it directly, and a blockedBy edge to #4180 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check made this a blocker of #4180 — its `we:scripts/check-standards.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #4180 — its moved-in `we:scripts/__tests__/check-standards-rules-conformance-gates.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #4180 — its moved-in `we:scripts/operations/__tests__/verify.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/verify.test.mjs` to #4180 — it imports a module #4180 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/__tests__/lane-verify.test.mjs` to #3910 — it imports a module #3910 owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3909 — its `we:scripts/operations/turn-digest-io.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3908 — its moved-in `we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3908 — its `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3906 — its `we:scripts/operator/dispatch.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3906 — its `we:scripts/operations/prepare-scope-wrapper.mjs` imports a module this card owns.
-- 2026-09-25: graduation-import-check made this a blocker of #xvlu8t1 — its moved-in `we:scripts/conveyor/__tests__/lease-reaper.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #4180 — its moved-in `we:scripts/conveyor/__tests__/lease-reaper.test.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3905 — its moved-in `we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3904 — its moved-in `we:scripts/operations/__tests__/fix-dispatch-wrapper.test.mjs` imports a module this card owns.
 - 2026-09-25: graduation-import-check made this a blocker of #3904 — its moved-in `we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs` imports a module this card owns.

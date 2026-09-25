@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3898", "3892", "3891", "3906", "3908", "x0n0eiz", "xvlu8t1"]
+blockedBy: ["3898", "3892", "3891", "3906", "3908", "4178", "4180"]
 scope: ["we:scripts/__tests__/fixtures/prototype-tracker-full.golden.html", "we:scripts/lib/prototype-tracker-compact-io.mjs", "we:scripts/operations/__tests__/tracker-refresh-real.test.mjs", "we:scripts/operations/__tests__/tracker-refresh.test.mjs", "we:scripts/operations/__tests__/turn-digest.test.mjs", "we:scripts/operations/tracker-refresh-io.mjs", "we:scripts/operations/tracker-refresh-state.mjs", "we:scripts/operations/tracker-refresh.mjs", "we:scripts/operations/turn-digest-io.mjs", "we:scripts/operations/turn-digest.mjs", "we:scripts/prototype-tracker.mjs", "we:skills-src/prototype-tracker/SKILL.md", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -22,7 +22,7 @@ Ports 8 files (we:scripts/lib/prototype-tracker-compact-io.mjs, we:scripts/opera
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/turn-digest-io.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/operations/turn-digest-io.mjs` imports a module #x0n0eiz owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/operations/turn-digest-io.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — `we:scripts/operations/turn-digest-io.mjs` imports a module #4178 owns.
 - 2026-09-25: graduation-import-check added blockedBy #3908 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3908 owns.
 - 2026-09-25: graduation-import-check added blockedBy #3906 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3906 owns.

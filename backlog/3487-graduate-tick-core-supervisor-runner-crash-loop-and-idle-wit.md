@@ -4,7 +4,7 @@ kind: story
 size: 8
 parent: "3443"
 status: open
-blockedBy: ["3901", "3895", "3897", "3911", "3906", "3908", "3916", "3917", "3915", "x0n0eiz", "xvlu8t1"]
+blockedBy: ["3901", "3895", "3897", "3911", "3906", "3908", "3916", "3917", "3915", "4178", "4180"]
 scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/__tests__/runner.test.mjs", "we:skills-src/conveyor/__tests__/runner-shutdown-live.test.mjs", "we:skills-src/conveyor/supervisor.mjs", "we:skills-src/conveyor/__tests__/supervisor.test.mjs", "we:scripts/conveyor/tick-once.mjs", "we:scripts/conveyor/__tests__/tick-once.test.mjs", "we:scripts/conveyor/tick-bookkeeping.mjs", "we:scripts/conveyor/__tests__/tick-bookkeeping.test.mjs", "we:scripts/operations/__fixtures__/shared-tick-driver.mjs", "we:scripts/operations/__tests__/shared-tick-two-drivers.test.mjs", "we:scripts/operations/__tests__/action-ground-truth.test.mjs"]
 dateOpened: "2026-09-04"
 tags: []
@@ -75,8 +75,8 @@ Bug fixes and alerting layered ON TOP of the new we:skills-src/conveyor/supervis
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:skills-src/conveyor/__tests__/runner.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — the moved-in `we:scripts/operations/__tests__/action-ground-truth.test.mjs` also imports a module #x0n0eiz owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:skills-src/conveyor/__tests__/runner.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — the moved-in `we:scripts/operations/__tests__/action-ground-truth.test.mjs` also imports a module #4178 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/action-ground-truth.test.mjs` here from #3908 — it imports a module this card owns.
 
 ## Snapshot moved to 6a2c8c1ab (2026-09-25)

@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3906", "3904", "3907", "3905", "3915", "xvlu8t1", "x0n0eiz"]
+blockedBy: ["3906", "3904", "3907", "3905", "3915", "4180", "4178"]
 scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/operations/__tests__/telemetry-wiring.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -188,13 +188,13 @@ test fixtures may answer whether `supervision` is meant to reach `reviewSeatRout
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — the moved-in `we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs` also imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-pass.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-core.mjs` imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/conveyor/__tests__/reconcile-core.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — the moved-in `we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs` also imports a module #4178 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/conveyor/reconcile-pass.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #4178 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — `we:scripts/conveyor/reconcile-core.mjs` imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/conveyor/__tests__/reconcile-core.test.mjs` also imports a module #4180 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/conveyor/fix-autofix-gate.mjs` to #3906 — #3906's `we:scripts/conveyor/autofix-review-findings.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/conveyor/autofix-review-findings.mjs` to #3906 — #3906's `we:scripts/operations/review-dispatch.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/review-dispatch-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/review-dispatch.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.

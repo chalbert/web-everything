@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3903", "xvlu8t1", "x0n0eiz"]
+blockedBy: ["3903", "4180", "4178"]
 scope: ["we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs", "we:scripts/operations/__tests__/prepare-scope-wrapper.test.mjs", "we:skills-src/conveyor/prepare-decision-agent-brief-v2.md", "we:skills-src/conveyor/prepare-decision-agent-brief.md", "we:skills-src/conveyor/prepare-scope-agent-brief-v2.md", "we:skills-src/conveyor/prepare-scope-agent-brief.md", "we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -22,10 +22,10 @@ Ports 9 files (we:scripts/operations/prepare-scope-wrapper.mjs, we:scripts/opera
 
 ## Graduation import check
 
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — the moved-in `we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs` also imports a module #x0n0eiz owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs` also imports a module #xvlu8t1 owns.
-- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4178 — the moved-in `we:scripts/operations/__tests__/prepare-decision-wrapper.test.mjs` also imports a module #4178 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-prepare-wiring.test.mjs` also imports a module #4180 owns.
+- 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-prepare-decision-wiring.test.mjs` also imports a module #4180 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-scope-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/prepare-scope-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-decision-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/prepare-decision-run.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/prepare-scope-run.mjs` to #3906 — #3906's `we:scripts/operations/dispatch-providers/prepare.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
