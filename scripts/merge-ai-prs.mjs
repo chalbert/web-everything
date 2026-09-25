@@ -101,6 +101,15 @@
  * so a transient `gh` hiccup is never misread as the duplicate-NNN tripwire); 5 = red-main dispatch-freeze
  * stop-the-line (#2681).
  */
+// we:xniq7xs — `isAiAuthor`/`isAiCommit`/`isMechanicalMergeCommit`/`isAiGeneratedPr`/`hasLabel` moved to
+// `./lib/ai-pr-authorship.mjs` (a zero-dependency leaf) so `scripts/lib/pr-limit.mjs` can reuse the SAME
+// AI-authorship rubric without inheriting this file's own heavy transitive import graph. `isAiGeneratedPr`/
+// `hasLabel` are imported normally (this file's OWN code below still calls both directly); the other three
+// are re-exported ONLY (mirrors `pr-land.mjs`'s own `forge-land-provider.mjs` split of used-here vs.
+// re-exported-only names) — every existing importer of THIS file keeps resolving all five unchanged.
+import { isAiGeneratedPr, hasLabel } from './lib/ai-pr-authorship.mjs';
+export { isAiAuthor, isAiCommit, isMechanicalMergeCommit } from './lib/ai-pr-authorship.mjs';
+export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
@@ -262,15 +271,6 @@ export function matchesOnlyTarget({ prNumber, onlyPr, repo, onlyRepo, isLocal, r
   return !!isLocal;
 }
 
-/** An anthropic/Claude identity on a commit author (the `Co-Authored-By: Claude …` trailer gh surfaces as an
- *  author). Matches the name "Claude" or an anthropic email — the stamp every commit in an AI session carries. */
-export function isAiAuthor(author) {
-  if (!author) return false;
-  const name = String(author.name || '').toLowerCase();
-  const email = String(author.email || '').toLowerCase();
-  return /\bclaude\b/.test(name) || email.includes('anthropic.com') || email.includes('noreply@anthropic');
-}
-
 /**
  * Locate the user's primary checkout to ff-sync after a land, INDEPENDENT of how the drain clone was made
  * (#xwokc1n). Resolution order: an explicit `--primary=<path>` (wins), else the `WE_PRIMARY` env, else the
@@ -321,40 +321,6 @@ export function syncPrimaryOnLand({ exec, primary, hinted = false, isCwd = () =>
   if (dirty) return { synced: false, reason: 'dirty', warn: true };
   try { at(['pull', '--ff-only']); return { synced: true, reason: 'synced', warn: false }; }
   catch { return { synced: false, reason: 'diverged', warn: true }; }
-}
-
-/** A commit is AI if ANY of its authors (author + Co-Authored-By co-authors) is an AI identity. */
-export function isAiCommit(commit) {
-  const authors = Array.isArray(commit?.authors) ? commit.authors : [];
-  // Fallback: some gh versions omit co-authors from `authors` but keep the trailer in the body.
-  const bodyHasTrailer = /co-authored-by:\s*claude/i.test(String(commit?.messageBody || commit?.body || ''));
-  return authors.some(isAiAuthor) || bodyHasTrailer;
-}
-
-/** A mechanical integration commit (`Merge branch 'main' …` / `Merge remote-tracking …` with an EMPTY body) —
- *  what `gh pr update-branch` / a rebase-on-behind creates. It carries no authored content, so it does not
- *  count as human work and must not disqualify an otherwise-AI PR. A merge commit WITH a body, or a
- *  `Merge pull request …`, is treated as a normal (must-be-AI) commit. */
-export function isMechanicalMergeCommit(commit) {
-  const head = String(commit?.messageHeadline || '').trim();
-  const body = String(commit?.messageBody || '').trim();
-  return /^Merge (branch|remote-tracking branch) /i.test(head) && body === '';
-}
-
-/** A PR is AI-generated ONLY if — ignoring mechanical merge commits — it has ≥1 substantive commit and EVERY
- *  substantive commit is AI (one human content commit disqualifies it). */
-export function isAiGeneratedPr(pr) {
-  const commits = Array.isArray(pr?.commits) ? pr.commits : [];
-  const substantive = commits.filter((c) => !isMechanicalMergeCommit(c));
-  return substantive.length > 0 && substantive.every(isAiCommit);
-}
-
-/** Does this PR carry the given label? (#2196 producer-certification signal, e.g. `ready-to-merge`.) The gh
- *  list surfaces labels as `[{ name }]`; tolerant of a missing/odd shape. Pure. */
-export function hasLabel(pr, label) {
-  if (!label) return false;
-  const labels = Array.isArray(pr?.labels) ? pr.labels : [];
-  return labels.some((l) => (typeof l === 'string' ? l : l?.name) === label);
 }
 
 /**

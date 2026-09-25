@@ -284,6 +284,9 @@ export const HOME_REASONS = Object.freeze({
   'bad-delegation': 'refused', 'bad-park': 'refused', 'bad-ref': 'refused', 'empty-body': 'refused', 'locus-prefix': 'refused',
   'no-ref': 'refused', 'no-such-src': 'refused', behind: 'refused', conflict: 'refused',
   'check-red': 'refused',
+  // we:xniq7xs — the open-PR backpressure limit refused a NEW pr-land open over the per-repo cap (the ref
+  // stays pushed): a guard answered, same as `check-red`/`behind` — land/review the existing PRs, or override.
+  'pr-limit': 'refused',
   // …and the #2833 verify refusals, which come from `lib/lane-verify.mjs`'s own `verifyGateDecision`
   // rather than from pr-land's argv parsing. THESE ARE THE ONES THAT MATTER: they are the guard the
   // bypass skipped, and every one of them must reach the caller as an answer, never as a shrug.

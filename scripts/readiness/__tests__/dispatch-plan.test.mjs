@@ -17,6 +17,8 @@ import {
   parseFreeLanes,
   // epic #3383 — the kind-scoped dispatch-pause and its narrowed operator gloss.
   dispatchPausedHint, DISPATCH_PAUSED_HINT,
+  // we:xniq7xs — the open-PR backpressure limit's intake hold.
+  PR_LIMIT_HINT,
 } from '../dispatch-plan.mjs';
 import { PAUSABLE_KINDS } from '../dispatch-pause.mjs';
 import { normNum } from '../../conveyor/queue-store.mjs';
@@ -1087,6 +1089,66 @@ describe('dispatchPausedHint — the operator gloss narrows to a scoped pause (e
     expect(hint).toContain('build, prepare, prepare-decision, investigate');
     expect(hint).toContain('dispatch-pause.mjs clear');
     expect(hint).not.toBe(DISPATCH_PAUSED_HINT);
+  });
+});
+
+describe('dispatchPlan — open-PR backpressure limit (we:xniq7xs): a deliberate hold, distinct from dispatch-paused', () => {
+  it('omitted / false — unheld, byte-for-byte the pre-xniq7xs behavior', () => {
+    const plan = dispatchPlan({ queue: [{ num: 1, scope: ['a/'] }], leases: [], freeLanes: [10] });
+    const held = dispatchPlan({ queue: [{ num: 1, scope: ['a/'] }], leases: [], freeLanes: [10], prLimitHeld: false });
+    expect(held).toEqual(plan);
+  });
+
+  it('an otherwise-launchable item holds `pr-limit` instead of getting a lane, and NO lane is consumed', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['a/'] }, { num: 2, scope: ['b/'] }],
+      leases: [],
+      freeLanes: [10, 11],
+      prLimitHeld: true,
+    });
+    expect(plan.launch).toEqual([]);
+    expect(plan.held).toEqual([
+      { num: 1, reason: 'pr-limit' },
+      { num: 2, reason: 'pr-limit' },
+    ]);
+  });
+
+  it('an item whose OWN predicted scope is entirely conveyor/daemon infrastructure is EXEMPT — it launches even while held', () => {
+    const plan = dispatchPlan({
+      queue: [
+        { num: 1, scope: ['scripts/conveyor/tick-core.mjs'] }, // exempt — infra-only scope
+        { num: 2, scope: ['src/components/widget.ts'] },       // ordinary feature — held
+      ],
+      leases: [],
+      freeLanes: [10, 11],
+      prLimitHeld: true,
+    });
+    expect(plan.launch).toEqual([{ num: 1, lane: 10 }]);
+    expect(plan.held).toEqual([{ num: 2, reason: 'pr-limit' }]);
+  });
+
+  it('a MIXED scope (one exempt path + one ordinary file) is NOT exempt — still held', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, scope: ['scripts/conveyor/tick-core.mjs', 'src/components/widget.ts'] }],
+      leases: [],
+      freeLanes: [10],
+      prLimitHeld: true,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'pr-limit' }]);
+  });
+
+  it('an item held for a MORE SPECIFIC reason keeps that reason — pr-limit never relabels it', () => {
+    const plan = dispatchPlan({
+      queue: [{ num: 1, kind: 'epic', scope: [] }], // needs-slice, checked well before pr-limit
+      leases: [],
+      freeLanes: [10],
+      prLimitHeld: true,
+    });
+    expect(plan.held).toEqual([{ num: 1, reason: 'needs-slice' }]);
+  });
+
+  it('PR_LIMIT_HINT names the override commands', () => {
+    expect(PR_LIMIT_HINT).toMatch(/pr-limit\.mjs/);
   });
 });
 
