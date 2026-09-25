@@ -4,23 +4,34 @@
  * @description we:backlog/x5uqim1-*.md (parent #4075, epic #3383) — LIVE INCIDENT 2026-09-25: five
  *   `ready-to-merge` + `review:accepted` PRs (chalbert/web-everything#2596/#2622/#2629/#2631/#2634, plus #2635)
  *   sat for hours because their required `test` check failed while `origin/main`'s OWN CI was red (`main` was
- *   fixed by PR #2638 at 2026-09-25T02:23:27Z). Nobody re-ran their stale CI once `main` recovered, and
+ *   fixed by PR #2638 at 2026-09-25T02:23:27Z). Nobody refreshed their branches once `main` recovered, and
  *   `we:scripts/conveyor/ci-heal-pr-dispatch.mjs` would have dispatched a CI-heal agent to "repair" code that
  *   was never broken — measured live: at the moment this file was written, `we:scripts/conveyor/
- *   reconcile-pass.mjs` planned a `ci-heal` dispatch for all seven currently `ci:failed` PRs, five of which
- *   (#2596/#2622/#2629/#2631/#2634) had ALREADY been manually rerun once by the operator (GitHub's own
- *   `attempt: 2` on each of their `test` runs, confirmed via `gh run view`) and one (#2635) had not been rerun
- *   at all — every one of the six PRs whose `test` run's own `attempts/1` completion timestamp
- *   (`gh api .../actions/runs/<id>/attempts/1`) falls inside the same red window `main`'s own `gh run list
- *   --branch main` shows between 2026-09-25T01:30:55Z and 02:31:25Z.
+ *   reconcile-pass.mjs` planned a `ci-heal` dispatch for all seven currently `ci:failed` PRs, every one of the
+ *   six whose `test` run's own `attempts/1` completion timestamp (`gh api .../actions/runs/<id>/attempts/1`)
+ *   falls inside the same red window `main`'s own `gh run list --branch main` shows between
+ *   2026-09-25T01:30:55Z and 02:31:25Z.
+ *
+ * CORRECTED MID-BUILD, FROM A LIVE FINDING: this file originally reasoned about rerunning the failed GitHub
+ * Actions run itself and capped on the run's own `attempt` counter. A live coordinator check on the operator's
+ * own manual recovery (they reran #2596/#2622/#2629/#2631/#2634 by hand as the incident's emergency step) found
+ * `gh run rerun --failed` re-executes the SAME commit — `main`'s fix is never in that tree — and all five
+ * concluded `failure` again for the identical reason. The real fix is to actually merge current `main` into
+ * each PR's head (the operator did this too, by hand, as a second emergency step; confirmed live: PR #2596's
+ * head then compared `ahead_by: 0` against `main`). This file now reasons about THAT: `aheadBy` (how many
+ * commits `main`'s current tip has that a PR's head lacks) replaces the run-attempt counter throughout.
  *
  * PURE CORE ONLY — no fs, no gh, no clock, no process. Every fact (`main`'s own run history, a PR's failing
- * run id/attempt/completion time) is read by the two IO shells that consume this module:
+ * check's completion time, how far behind `main` its head is) is read by the two IO shells that consume this
+ * module:
  *   - `we:scripts/conveyor/reconcile-pass.mjs` — annotates a `ci-red` PR with `requiredCheckCompletedAt` /
- *     `requiredCheckAttempt` so `we:scripts/conveyor/reconcile-core.mjs` can refuse `owed-ci-rerun` instead of
+ *     `aheadByOnMain` so `we:scripts/conveyor/reconcile-core.mjs` can refuse `owed-ci-rerun` instead of
  *     planning a `ci-heal` for a PR whose failure was never its own code's fault.
- *   - `we:scripts/conveyor/ci-red-recovery-watch.mjs` — the pass-daemon-wired watcher that actually runs
- *     `gh run rerun <id> --failed` once, per (PR, run), once `main` itself is confirmed to have recovered.
+ *   - `we:scripts/conveyor/ci-red-recovery-watch.mjs` — the pass-daemon-wired watcher that actually refreshes a
+ *     PR's branch onto current `main`, once, via `we:scripts/lib/rebase-drop-manifest.mjs#rebaseDropManifest`
+ *     (the SAME proven, no-checkout plumbing the drain itself already uses to rebuild a lane's tip onto `main`
+ *     — never a raw `git merge` or the GitHub `update-branch` REST endpoint, both of which would reintroduce
+ *     the `.lane-manifest.json` collision that file exists to avoid).
  * Mirrors the pure-classify / thin-IO-shell split every sibling in this directory already follows
  * (`branch-drift.mjs`, `ci-queue-watch.mjs`, `infra-blocked.mjs`) — one place decides, two places read/act.
  *
@@ -149,64 +160,63 @@ export function classifyCiFailureAttribution({ failureCompletedAt, mainRedWindow
  *      `'unknown'` attribution (no readable timestamp) is treated as NOT owed a rerun, the same safe direction
  *      `reconcile-core.mjs`'s own liveness refusals take everywhere else: absence of evidence never manufactures
  *      a NEW kind of refusal, it falls through to the pass's existing, already-safe `ci-heal` path.
- *   2. This run has not ALREADY been given its one rerun (`attempt < 2`, or unknown — see below). A run GitHub
- *      itself has already rerun once (`attempt >= 2`) and is STILL red has been given the benefit of the doubt
- *      and answered "no, it is not just `main`" — CONFIRMED LIVE 2026-09-25: PR #2596/#2622/#2629/#2631/#2634
- *      were all manually rerun once (`attempt: 2` on each `test` run) and all STILL concluded `failure` — so a
- *      PR in this state must fall through to the ordinary `ci-heal` cap, never stay parked behind
- *      `owed-ci-rerun` forever.
- *   `requiredCheckAttempt` UNKNOWN (the IO shell's `gh run view` read failed, or was never attempted) is
- *   treated as "not yet rerun" — the safe direction here is the OPPOSITE of point 1's: misdiagnosing a real
- *   main-red artifact as a code defect and dispatching a fixer to "repair" nonexistent code (the exact harm
- *   this whole item exists to prevent) is worse than deferring one more tick until the attempt count is known.
- * @param {{requiredCheckCompletedAt?:(string|null), requiredCheckAttempt?:(number|null), mainRedWindows?:Array<object>}} o
+ *   2. This PR has not ALREADY been refreshed against the current `main` (`aheadBy > 0` — how many commits
+ *      `main`'s current tip has that this PR's head lacks, from `GET /repos/.../compare/<head>...<base>`'s own
+ *      `ahead_by`). `aheadBy === 0` means `main`'s fix is already in this PR's own history and it is STILL red —
+ *      that answers "no, it is not just `main`" and the PR must fall through to the ordinary `ci-heal` cap.
+ *      CORRECTED 2026-09-25, mid-build, from a live coordinator finding: this item ORIGINALLY reran the failed
+ *      GitHub Actions run in place (`gh run rerun <id> --failed`) and capped on the run's own `attempt` counter.
+ *      Live-measured that this DOES NOT WORK: `gh run rerun --failed` re-executes the SAME commit the run
+ *      already built — main's fix is never in that tree — so PR #2596/#2622/#2629/#2631/#2634, manually rerun
+ *      by the operator as the emergency step, all concluded `failure` a second time for the identical reason.
+ *      The operator's own correction, applied by hand as the emergency and confirmed live (`ahead_by: 0` on
+ *      #2596 against current `main` after their manual refresh): actually MERGE current `main` into the PR's
+ *      head first. That is what {@link module:./ci-red-recovery-watch.mjs} now does, via the existing, PROVEN
+ *      `we:scripts/lib/rebase-drop-manifest.mjs#rebaseDropManifest` plumbing the drain itself already uses to
+ *      rebuild a lane's tip onto `main` (no checkout, single-branch-safe, and it already knows how to drop the
+ *      transient `.lane-manifest.json` collision rather than colliding on it) — never a hand-rolled `git merge`
+ *      or the raw GitHub `update-branch` REST endpoint, which would re-introduce exactly the manifest collision
+ *      that file exists to prevent.
+ *   `aheadBy` UNKNOWN (the IO shell's `compare` read failed) is treated as "not yet refreshed" — the safe
+ *   direction here is the OPPOSITE of point 1's: misdiagnosing a real main-red artifact as a code defect and
+ *   dispatching a fixer to "repair" nonexistent code (the exact harm this whole item exists to prevent) is worse
+ *   than deferring one more tick until `aheadBy` is known.
+ * @param {{requiredCheckCompletedAt?:(string|null), aheadBy?:(number|null), mainRedWindows?:Array<object>}} o
  * @returns {boolean}
  */
-export function isPrCiFailureOwedRerun({ requiredCheckCompletedAt, requiredCheckAttempt, mainRedWindows } = {}) {
+export function isPrCiFailureOwedRerun({ requiredCheckCompletedAt, aheadBy, mainRedWindows } = {}) {
   const attribution = classifyCiFailureAttribution({ failureCompletedAt: requiredCheckCompletedAt, mainRedWindows });
   if (attribution !== 'main-red') return false;
-  const attempt = Number.isFinite(requiredCheckAttempt) ? requiredCheckAttempt : null;
-  return attempt == null || attempt < 2;
+  const behind = Number.isFinite(aheadBy) ? aheadBy : null;
+  return behind == null || behind > 0;
 }
 
 /**
- * we:scripts/conveyor/main-red-recovery.mjs#runIdFromDetailsUrl — pull the GitHub Actions run id out of a
- * `statusCheckRollup` CheckRun's own `detailsUrl` (`https://github.com/<owner>/<repo>/actions/runs/<id>/job/<jobId>`)
- * — the ONE field `gh pr list/view --json statusCheckRollup` already returns for free, so no second `gh run
- * list` call is needed to find which run produced a given check. PURE (string parse only).
- * @param {string|null|undefined} detailsUrl
- * @returns {number|null}
- */
-export function runIdFromDetailsUrl(detailsUrl) {
-  const m = /\/actions\/runs\/(\d+)/.exec(String(detailsUrl || ''));
-  return m ? Number(m[1]) : null;
-}
-
-/**
- * we:scripts/conveyor/main-red-recovery.mjs#planCiRedReruns — THE PASS `ci-red-recovery-watch.mjs` runs: given
- * every candidate PR whose required check is currently failing, and `main`'s own red windows, decide which
- * ones to `gh run rerun <id> --failed` right now. PURE, total — every candidate yields a dispatch or a named
- * refusal, mirroring `reconcile-core.mjs#planReconcile`'s own "every PR produces a row" discipline.
+ * we:scripts/conveyor/main-red-recovery.mjs#planMainRedRebases — THE PASS `ci-red-recovery-watch.mjs` runs:
+ * given every candidate PR whose required check is currently failing, and `main`'s own red windows, decide
+ * which ones to refresh against current `main` right now. PURE, total — every candidate yields a dispatch or a
+ * named refusal, mirroring `reconcile-core.mjs#planReconcile`'s own "every PR produces a row" discipline.
  *
  * ORDER OF THE CHECKS:
- *   1. Attribution — not `main-red` → `own-failure` (or `unknown`), never this pass's job; `ci-heal` owns it.
- *   2. `main` still red (an OPEN window is the very last one in `mainRedWindows`) → `main-still-red`: rerunning
- *      now would just fail again for the same reason, and would ALSO burn this candidate's one-rerun budget
- *      for nothing — wait for `main` to actually recover before spending it.
- *   3. No resolvable run id → `no-run-id` (can't `gh run rerun` a run this pass never found).
- *   4. `attempt >= 2` already → `already-rerun`, the CAP: once per (PR, run), enforced by reading GitHub's OWN
- *      `attempt` counter back off the run — no parallel store, the same "the count IS state, read off the
- *      thing itself" discipline `we:scripts/conveyor/ci-heal-mark.mjs`'s comment-count cap already uses for a
- *      different durable floor. This is what makes the pass idempotent against the operator's own manual
- *      `gh run rerun` from this exact incident: their rerun already bumped `attempt` to 2, so a later sweep
- *      reports it `already-rerun` rather than rerunning a THIRD time.
- *   5. Otherwise → `ci-rerun` dispatch.
+ *   1. Attribution — not `main-red` → `own-failure` (or `unknown-attribution`), never this pass's job; `ci-heal`
+ *      owns it.
+ *   2. `main` still red (an OPEN window is the very last one in `mainRedWindows`) → `main-still-red`: refreshing
+ *      against a still-broken `main` would just fail again for the same reason — wait for `main` to recover.
+ *   3. `aheadBy` unresolved → `unknown-ahead-by` (can't tell whether a refresh is even needed; the safe
+ *      direction is to wait for a tick where the `compare` read succeeds, never guess).
+ *   4. `aheadBy === 0` already → `already-current`, THE CAP: `main`'s current tip is already an ancestor of this
+ *      PR's head (read back off GitHub's own `compare` endpoint — no parallel store, the same "the count IS
+ *      state, read off the thing itself" discipline `we:scripts/conveyor/ci-heal-mark.mjs`'s comment-count cap
+ *      already uses for a different durable floor). This is what makes the pass idempotent against the
+ *      operator's own manual refresh from this exact incident, and against `rebaseDropManifest`'s OWN
+ *      `action:'current'` short-circuit once this pass has already refreshed a PR once.
+ *   5. Otherwise → `rebase-onto-main` dispatch.
  * @param {object} o
- * @param {Array<{prNumber:number, headRefName?:(string|null), runId?:(number|null), attempt?:(number|null), failureCompletedAt?:(string|null)}>} [o.candidates]
+ * @param {Array<{prNumber:number, headRefName?:(string|null), aheadBy?:(number|null), failureCompletedAt?:(string|null)}>} [o.candidates]
  * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows]
  * @returns {{dispatch:Array<object>, refusals:Array<object>}}
  */
-export function planCiRedReruns({ candidates = [], mainRedWindows = [] } = {}) {
+export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}) {
   const dispatch = [];
   const refusals = [];
   const mainStillRed = isMainCurrentlyRed(mainRedWindows);
@@ -217,8 +227,7 @@ export function planCiRedReruns({ candidates = [], mainRedWindows = [] } = {}) {
     const base = {
       prNumber,
       headRefName: c?.headRefName ?? null,
-      runId: Number.isFinite(c?.runId) ? c.runId : null,
-      attempt: Number.isFinite(c?.attempt) ? c.attempt : null,
+      aheadBy: Number.isFinite(c?.aheadBy) ? c.aheadBy : null,
       failureCompletedAt: c?.failureCompletedAt ?? null,
     };
     const attribution = classifyCiFailureAttribution({ failureCompletedAt: base.failureCompletedAt, mainRedWindows });
@@ -228,31 +237,31 @@ export function planCiRedReruns({ candidates = [], mainRedWindows = [] } = {}) {
         ...base, kind: attribution === 'unknown' ? 'unknown-attribution' : 'own-failure',
         why: attribution === 'unknown'
           ? `PR #${prNumber}'s failing run has no readable completion timestamp — cannot attribute it to a red \`main\` window`
-          : `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, outside every red-\`main\` window — this is the PR's own failure, owed a ci-heal, not a rerun`,
+          : `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, outside every red-\`main\` window — this is the PR's own failure, owed a ci-heal, not a rebase`,
       });
       continue;
     }
     if (mainStillRed) {
       refusals.push({
         ...base, kind: 'main-still-red',
-        why: `main's own CI is still red right now — rerunning PR #${prNumber} would not prove anything and would spend its one rerun for nothing; wait for main to recover`,
+        why: `main's own CI is still red right now — refreshing PR #${prNumber} against it would not prove anything; wait for main to recover`,
       });
       continue;
     }
-    if (base.runId == null) {
-      refusals.push({ ...base, kind: 'no-run-id', why: `PR #${prNumber}'s failing run has no resolvable GitHub Actions run id to rerun` });
+    if (base.aheadBy == null) {
+      refusals.push({ ...base, kind: 'unknown-ahead-by', why: `could not resolve how far behind main PR #${prNumber}'s head is — refusing to guess` });
       continue;
     }
-    if (base.attempt != null && base.attempt >= 2) {
+    if (base.aheadBy === 0) {
       refusals.push({
-        ...base, kind: 'already-rerun',
-        why: `run ${base.runId} for PR #${prNumber} is already at attempt ${base.attempt} — capped at one automatic rerun per (PR, run); still red is now owed a ci-heal, not a second rerun`,
+        ...base, kind: 'already-current',
+        why: `PR #${prNumber}'s head already contains main's current tip (ahead_by: 0) — still red is now owed a ci-heal, not another refresh`,
       });
       continue;
     }
     dispatch.push({
-      ...base, kind: 'ci-rerun',
-      why: `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, inside a window where main's own CI was red; main has since recovered — rerunning run ${base.runId}`,
+      ...base, kind: 'rebase-onto-main',
+      why: `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, inside a window where main's own CI was red; main has recovered and this head is ${base.aheadBy} commit(s) behind it — refreshing onto main`,
     });
   }
 

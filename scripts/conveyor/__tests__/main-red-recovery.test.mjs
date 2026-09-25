@@ -3,13 +3,15 @@
  * @description Pins we:backlog/x5uqim1-*.md's pure core against the REAL shapes measured live 2026-09-25 off
  *   `chalbert/web-everything`: `main`'s own `gh run list --branch main` history (one genuine red window,
  *   01:30:55Z–02:31:25Z, closed by PR #2638) and the six PRs whose `test` run's own `attempts/1` completion
- *   timestamp falls inside it — five already manually rerun once (`attempt: 2`, still red) and one not yet
- *   rerun (`attempt: 1`) — plus one PR (#2636) whose failure completed hours after `main` recovered, its own.
+ *   timestamp falls inside it — five already manually refreshed onto main by the operator (`ahead_by: 0`,
+ *   still red — a genuine own-failure now) and one never refreshed (PR #2635, `ahead_by: 33`) — plus one PR
+ *   (#2636) whose failure completed hours after `main` recovered, its own. See the module's own file header for
+ *   the mid-build correction from `gh run rerun` (measured NOT to work) to a branch refresh onto `main`.
  */
 import { describe, it, expect } from 'vitest';
 import {
   MAIN_RED_CONCLUSIONS, computeMainRedWindows, isWithinRedWindow, isMainCurrentlyRed,
-  classifyCiFailureAttribution, isPrCiFailureOwedRerun, runIdFromDetailsUrl, planCiRedReruns,
+  classifyCiFailureAttribution, isPrCiFailureOwedRerun, planMainRedRebases,
 } from '../main-red-recovery.mjs';
 
 // ── fixtures — measured off chalbert/web-everything, 2026-09-25 ────────────────────────────────────────────────
@@ -91,69 +93,62 @@ describe('main-red-recovery — classifyCiFailureAttribution', () => {
   });
 });
 
+// CORRECTED mid-build (see main-red-recovery.mjs's own file header): the real recovery mechanism is refreshing
+// a PR's branch onto current `main` (`ahead_by` from GitHub's own `compare` endpoint), never rerunning the same
+// stale commit in place — `gh run rerun --failed` was live-measured to fail again for the identical reason.
 describe('main-red-recovery — isPrCiFailureOwedRerun', () => {
   const windows = computeMainRedWindows(MAIN_RUNS);
-  it('true for a main-red failure never yet rerun (PR #2635\'s real shape: attempt 1)', () => {
-    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T01:57:47Z', requiredCheckAttempt: 1, mainRedWindows: windows })).toBe(true);
+  it('true for a main-red failure whose head is still behind main (PR #2635\'s real shape: 33 commits behind)', () => {
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadBy: 33, mainRedWindows: windows })).toBe(true);
   });
-  it('false once the run has already been rerun (PR #2596\'s real shape: attempt 2, still red)', () => {
-    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T02:02:29Z', requiredCheckAttempt: 2, mainRedWindows: windows })).toBe(false);
+  it('false once the head already contains main\'s current tip (PR #2596\'s real shape post-refresh: ahead_by 0, still red)', () => {
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T02:02:29Z', aheadBy: 0, mainRedWindows: windows })).toBe(false);
   });
-  it('false for a failure outside any red window (PR #2636\'s real shape), whatever the attempt count', () => {
-    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T08:03:45Z', requiredCheckAttempt: 1, mainRedWindows: windows })).toBe(false);
+  it('false for a failure outside any red window (PR #2636\'s real shape), whatever aheadBy is', () => {
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T08:03:45Z', aheadBy: 33, mainRedWindows: windows })).toBe(false);
   });
-  it('an UNKNOWN attempt count is treated as "not yet rerun" — the safe direction against misdiagnosing main-red as a code defect', () => {
-    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T02:02:29Z', requiredCheckAttempt: null, mainRedWindows: windows })).toBe(true);
+  it('an UNKNOWN aheadBy is treated as "not yet refreshed" — the safe direction against misdiagnosing main-red as a code defect', () => {
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-25T02:02:29Z', aheadBy: null, mainRedWindows: windows })).toBe(true);
   });
   it('an UNKNOWN completion timestamp never grants owed-ci-rerun — falls through to the existing ci-heal path', () => {
-    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: null, requiredCheckAttempt: 1, mainRedWindows: windows })).toBe(false);
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: null, aheadBy: 33, mainRedWindows: windows })).toBe(false);
   });
 });
 
-describe('main-red-recovery — runIdFromDetailsUrl', () => {
-  it('extracts the run id from a real statusCheckRollup detailsUrl', () => {
-    expect(runIdFromDetailsUrl('https://github.com/chalbert/web-everything/actions/runs/36084065168/job/108038525861')).toBe(36084065168);
-  });
-  it('returns null for a missing/malformed url', () => {
-    expect(runIdFromDetailsUrl(null)).toBeNull();
-    expect(runIdFromDetailsUrl('not-a-url')).toBeNull();
-  });
-});
-
-describe('main-red-recovery — planCiRedReruns', () => {
+describe('main-red-recovery — planMainRedRebases', () => {
   const windows = computeMainRedWindows(MAIN_RUNS);
 
   it('every candidate yields a dispatch or a refusal — never neither', () => {
     const candidates = [
-      { prNumber: 2635, headRefName: 'lane/xdzl6mb', runId: 36083748258, attempt: 1, failureCompletedAt: '2026-09-25T01:57:47Z' },
-      { prNumber: 2596, headRefName: 'lane/batch-...-3901', runId: 36084065168, attempt: 2, failureCompletedAt: '2026-09-25T02:02:29Z' },
-      { prNumber: 2636, headRefName: 'lane/batch-...-3915', runId: 36084655276, attempt: 1, failureCompletedAt: '2026-09-25T08:03:45Z' },
+      { prNumber: 2635, headRefName: 'lane/xdzl6mb', aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z' },
+      { prNumber: 2596, headRefName: 'lane/batch-...-3901', aheadBy: 0, failureCompletedAt: '2026-09-25T02:02:29Z' },
+      { prNumber: 2636, headRefName: 'lane/batch-...-3915', aheadBy: 33, failureCompletedAt: '2026-09-25T08:03:45Z' },
     ];
-    const plan = planCiRedReruns({ candidates, mainRedWindows: windows });
+    const plan = planMainRedRebases({ candidates, mainRedWindows: windows });
     expect(plan.dispatch.length + plan.refusals.length).toBe(candidates.length);
   });
 
-  it('dispatches a real ci-rerun for a main-red failure never yet rerun (PR #2635)', () => {
-    const plan = planCiRedReruns({
-      candidates: [{ prNumber: 2635, runId: 36083748258, attempt: 1, failureCompletedAt: '2026-09-25T01:57:47Z' }],
+  it('dispatches a real rebase-onto-main for a main-red failure whose head is still behind (PR #2635)', () => {
+    const plan = planMainRedRebases({
+      candidates: [{ prNumber: 2635, headRefName: 'lane/xdzl6mb', aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z' }],
       mainRedWindows: windows,
     });
-    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2635, kind: 'ci-rerun', runId: 36083748258 })]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2635, kind: 'rebase-onto-main', aheadBy: 33 })]);
     expect(plan.refusals).toEqual([]);
   });
 
-  it('refuses already-rerun for a main-red failure GitHub already gave one rerun (PR #2596, attempt 2, still red)', () => {
-    const plan = planCiRedReruns({
-      candidates: [{ prNumber: 2596, runId: 36084065168, attempt: 2, failureCompletedAt: '2026-09-25T02:02:29Z' }],
+  it('refuses already-current for a main-red failure whose head already contains main\'s tip (PR #2596, ahead_by 0, still red)', () => {
+    const plan = planMainRedRebases({
+      candidates: [{ prNumber: 2596, aheadBy: 0, failureCompletedAt: '2026-09-25T02:02:29Z' }],
       mainRedWindows: windows,
     });
-    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2596, kind: 'already-rerun' })]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2596, kind: 'already-current' })]);
     expect(plan.dispatch).toEqual([]);
   });
 
   it('refuses own-failure for a failure outside every red window (PR #2636) — never this pass\'s job', () => {
-    const plan = planCiRedReruns({
-      candidates: [{ prNumber: 2636, runId: 36084655276, attempt: 1, failureCompletedAt: '2026-09-25T08:03:45Z' }],
+    const plan = planMainRedRebases({
+      candidates: [{ prNumber: 2636, aheadBy: 33, failureCompletedAt: '2026-09-25T08:03:45Z' }],
       mainRedWindows: windows,
     });
     expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'own-failure' })]);
@@ -161,19 +156,19 @@ describe('main-red-recovery — planCiRedReruns', () => {
 
   it('refuses main-still-red when the failure is main-red-attributable but main has not recovered yet', () => {
     const stillRedWindows = computeMainRedWindows(MAIN_RUNS_STILL_RED);
-    const plan = planCiRedReruns({
-      candidates: [{ prNumber: 9001, runId: 123, attempt: 1, failureCompletedAt: '2026-09-25T03:40:00Z' }],
+    const plan = planMainRedRebases({
+      candidates: [{ prNumber: 9001, aheadBy: 5, failureCompletedAt: '2026-09-25T03:40:00Z' }],
       mainRedWindows: stillRedWindows,
     });
     expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 9001, kind: 'main-still-red' })]);
   });
 
-  it('refuses no-run-id when no run id could be resolved', () => {
-    const plan = planCiRedReruns({
-      candidates: [{ prNumber: 9002, runId: null, attempt: 1, failureCompletedAt: '2026-09-25T02:02:29Z' }],
+  it('refuses unknown-ahead-by when the compare read could not be resolved', () => {
+    const plan = planMainRedRebases({
+      candidates: [{ prNumber: 9002, aheadBy: null, failureCompletedAt: '2026-09-25T02:02:29Z' }],
       mainRedWindows: windows,
     });
-    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 9002, kind: 'no-run-id' })]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 9002, kind: 'unknown-ahead-by' })]);
   });
 
   it('MAIN_RED_CONCLUSIONS deliberately excludes cancelled — the ordinary drain-traffic case', () => {

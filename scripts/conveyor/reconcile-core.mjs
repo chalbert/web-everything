@@ -173,12 +173,16 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          rebase). Named rather than dropped, so the PR is visible in the report.
  *   `owed-ci-rerun`      — we:backlog/x5uqim1-*.md (#4075/#3383): the required check failed while `main`'s OWN
  *                          CI was red (`we:scripts/conveyor/main-red-recovery.mjs#isPrCiFailureOwedRerun`) and
- *                          this run has not yet been given its one automatic rerun. Owed a mechanical
- *                          `gh run rerun <id> --failed` (`we:scripts/conveyor/ci-red-recovery-watch.mjs`), NEVER
- *                          a `ci-heal` — a ci-heal agent dispatched here would misdiagnose `main`'s own breakage
- *                          as a defect in code that was never broken. Once that one rerun has run and the PR is
- *                          STILL red, this refusal no longer fires (see the leaf's own docblock) and the PR
- *                          falls through to the ordinary `ci-red` → `ci-heal` path below, unaffected.
+ *                          this PR's head has not yet been refreshed onto the now-recovered `main`. Owed a
+ *                          mechanical rebase onto `main` (`we:scripts/conveyor/ci-red-recovery-watch.mjs`, via
+ *                          the SAME proven `we:scripts/lib/rebase-drop-manifest.mjs` plumbing the drain itself
+ *                          uses), NEVER a `ci-heal` — a ci-heal agent dispatched here would misdiagnose `main`'s
+ *                          own breakage as a defect in code that was never broken. NAMED `owed-ci-rerun` for the
+ *                          population it covers (a red-`main`-caused CI failure), not the literal mechanism —
+ *                          see the leaf's own file header for why a REBASE, not a rerun of the same stale
+ *                          commit, is what actually resolves it. Once the head already contains `main`'s
+ *                          current tip and is STILL red, this refusal no longer fires and the PR falls through
+ *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
  */
 export const REFUSAL_KINDS = Object.freeze([
@@ -683,8 +687,12 @@ export function planReconcile({
       // we:backlog/x5uqim1-*.md — the two facts `isPrCiFailureOwedRerun` needs, injected by the IO shell ONLY
       // for a PR whose required check is currently failing (reconcile-pass.mjs never pays for these reads on a
       // PR with nothing red). EVIDENCE ONLY here; the `ci-red` branch below is the one decision that reads them.
+      // `aheadByOnMain` is `main`'s own current tip's `ahead_by` against this PR's head (0 once it already
+      // contains that tip) — REPLACES an earlier `requiredCheckAttempt` design, corrected mid-build: see
+      // `main-red-recovery.mjs`'s own file header for why a GitHub Actions rerun of the same stale commit does
+      // not actually resolve a red-main-caused failure, live-measured on this exact incident.
       requiredCheckCompletedAt: pr?.requiredCheckCompletedAt ?? null,
-      requiredCheckAttempt: Number.isFinite(pr?.requiredCheckAttempt) ? pr.requiredCheckAttempt : null,
+      aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
 
@@ -765,12 +773,12 @@ export function planReconcile({
       // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
       if (isPrCiFailureOwedRerun({
         requiredCheckCompletedAt: base.requiredCheckCompletedAt,
-        requiredCheckAttempt: base.requiredCheckAttempt,
+        aheadBy: base.aheadByOnMain,
         mainRedWindows,
       })) {
         refuse('owed-ci-rerun', {
           ...withPhase,
-          why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical re-run (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
+          why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
         });
         continue;
       }

@@ -34,8 +34,11 @@ it('maps repo slugs before binding and refuses unknown repos before IO', async (
 
 // we:backlog/x5uqim1-*.md (#4075/#3383) — enrichPrsWithMainRedFacts pays the extra `gh run list --branch main`
 // read only when at least one PR is currently failing its required check; the other tests in this file (no PR
-// ever fails) already prove the zero-cost path implicitly (no `readMainRuns`/`readRunAttempt` was ever wired in
-// and nothing broke). These pin the paying path explicitly, with the REAL shapes measured 2026-09-25.
+// ever fails) already prove the zero-cost path implicitly (no `readMainRuns`/`readAheadBy` was ever wired in and
+// nothing broke). These pin the paying path explicitly, with the REAL shapes measured 2026-09-25. CORRECTED
+// mid-build from an earlier `gh run view --json attempt` design to `ahead_by` (`gh api .../compare`) — see
+// `main-red-recovery.mjs`'s own file header for why a rerun of the same stale commit does not actually resolve
+// a red-main-caused failure.
 it('enrichPrsWithMainRedFacts skips the extra main-run read entirely when nothing is ci-failed', async () => {
   const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
   const readMainRuns = vi.fn();
@@ -45,25 +48,24 @@ it('enrichPrsWithMainRedFacts skips the extra main-run read entirely when nothin
   expect(out).toEqual({ prs, mainRedWindows: [] });
 });
 
-it('enrichPrsWithMainRedFacts attaches requiredCheckCompletedAt/Attempt only to the failing PR (PR #2635\'s real shape)', async () => {
+it('enrichPrsWithMainRedFacts attaches requiredCheckCompletedAt/aheadByOnMain only to the failing PR (PR #2635\'s real shape)', async () => {
   const { enrichPrsWithMainRedFacts } = await import('../reconcile-pass.mjs');
   const failingCheck = {
     __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
     completedAt: '2026-09-25T01:57:47Z',
-    detailsUrl: 'https://github.com/chalbert/web-everything/actions/runs/36083748258/job/107911542269',
   };
   const quietPr = { number: 1, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
-  const redPr = { number: 2635, statusCheckRollup: [failingCheck] };
+  const redPr = { number: 2635, headRefOid: 'ab9985630d90019a07b94e946bc75f8de7a6161f', statusCheckRollup: [failingCheck] };
   const readMainRuns = vi.fn(() => [
     { status: 'completed', conclusion: 'failure', updatedAt: '2026-09-25T01:30:55Z', workflowName: 'CI' },
     { status: 'completed', conclusion: 'success', updatedAt: '2026-09-25T02:31:25Z', workflowName: 'CI' },
   ]);
-  const readRunAttempt = vi.fn(() => 1);
-  const out = enrichPrsWithMainRedFacts([quietPr, redPr], { readMainRuns, readRunAttempt });
+  const readAheadBy = vi.fn(() => 33);
+  const out = enrichPrsWithMainRedFacts([quietPr, redPr], { readMainRuns, readAheadBy });
   expect(readMainRuns).toHaveBeenCalledTimes(1);
-  expect(readRunAttempt).toHaveBeenCalledWith(36083748258, { repo: null });
+  expect(readAheadBy).toHaveBeenCalledWith('ab9985630d90019a07b94e946bc75f8de7a6161f', { repo: null, base: 'main' });
   expect(out.prs[0]).toBe(quietPr); // untouched — not failing
-  expect(out.prs[1]).toMatchObject({ number: 2635, requiredCheckCompletedAt: '2026-09-25T01:57:47Z', requiredCheckAttempt: 1 });
+  expect(out.prs[1]).toMatchObject({ number: 2635, requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33 });
   expect(out.mainRedWindows).toEqual([{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }]);
 });
 
@@ -81,12 +83,16 @@ it('defaultReadMainRuns filters to the CI workflow and passes the exact pinned a
   ], expect.any(Object));
 });
 
-it('defaultReadRunAttempt reads the attempt field, and degrades to null on any failure (best-effort)', async () => {
+it('defaultReadAheadBy reads ahead_by off the real compare-endpoint shape, and degrades to null on any failure (best-effort)', async () => {
   const { execFileSync } = await import('node:child_process');
-  execFileSync.mockReturnValueOnce(JSON.stringify({ attempt: 2 }));
-  const { defaultReadRunAttempt } = await import('../reconcile-pass.mjs');
-  expect(defaultReadRunAttempt(36084065168, {})).toBe(2);
+  execFileSync.mockReturnValueOnce('33\n');
+  const { defaultReadAheadBy } = await import('../reconcile-pass.mjs');
+  expect(defaultReadAheadBy('ab9985630d90019a07b94e946bc75f8de7a6161f', { repo: 'chalbert/web-everything' })).toBe(33);
+  expect(execFileSync).toHaveBeenCalledWith('gh', [
+    'api', '--method', 'GET',
+    'repos/chalbert/web-everything/compare/ab9985630d90019a07b94e946bc75f8de7a6161f...main', '--jq', '.ahead_by',
+  ], expect.any(Object));
 
-  execFileSync.mockImplementationOnce(() => { throw new Error('gh: run not found'); });
-  expect(defaultReadRunAttempt(999, {})).toBeNull();
+  execFileSync.mockImplementationOnce(() => { throw new Error('gh: not found'); });
+  expect(defaultReadAheadBy('deadbeef', {})).toBeNull();
 });

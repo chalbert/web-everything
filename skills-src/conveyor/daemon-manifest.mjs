@@ -146,12 +146,15 @@ export const DAEMON_MANIFEST = {
   ...perRepoEntries('ci-queue-watch', 'scripts/conveyor/ci-queue-watch.mjs', ['sweep']),
   // we:backlog/x5uqim1-*.md (#4075/#3383) — the CI-RED-RECOVERY watcher, wired per-repo like `ci-queue-watch`
   // above (see `we:scripts/conveyor/ci-red-recovery-watch.mjs`'s own file header for why THIS shape — a
-  // pass-daemon watcher, never the drain and never the fix-dispatch daemon — is the right home). `--apply` is
-  // passed here, unlike an operator's own bare `sweep`, because a daemon entry's whole point is to actually run
-  // `gh run rerun <id> --failed` once a candidate clears every gate; the pass's own idempotent cap (one rerun
-  // per (PR, run), read back off GitHub's own `attempt` counter, no parallel store) is what makes running this
-  // unconditionally on the default cadence safe — the same "efficiency no-op, not a safety refusal" trade
-  // `merge-orphan-sweep` above already documents for its own always-on entry.
+  // pass-daemon watcher, never the drain and never the fix-dispatch daemon — is the right home, and for the
+  // mid-build correction from a `gh run rerun` design to refreshing the branch onto `main` via the existing
+  // `we:scripts/lib/rebase-drop-manifest.mjs` plumbing). `--apply` is passed here, unlike an operator's own bare
+  // `sweep`, because a daemon entry's whole point is to actually refresh a candidate's branch once it clears
+  // every gate; the pass's own idempotent cap (`already-current` once `main`'s tip is already an ancestor of
+  // the PR's head, read back off GitHub's own `compare` endpoint, no parallel store — AND `rebaseDropManifest`'s
+  // own independent `action:'current'` short-circuit) is what makes running this unconditionally on the default
+  // cadence safe — the same "efficiency no-op, not a safety refusal" trade `merge-orphan-sweep` above already
+  // documents for its own always-on entry.
   ...perRepoEntries('ci-red-recovery-watch', 'scripts/conveyor/ci-red-recovery-watch.mjs', ['sweep', '--apply']),
   ...perRepoEntries('parked-pr-conflict-watch', 'scripts/conveyor/parked-pr-conflict-watch.mjs', ['sweep']),
   ...perRepoEntries('parked-pr-progress-watch', 'scripts/conveyor/parked-pr-progress-watch.mjs', ['sweep']),
