@@ -94,6 +94,13 @@ import { parseMergeTree, manifestConflictDisposition } from '../lib/rebase-drop-
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { deriveReviewStatus } from './review-status-tag.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+// #4118 review finding (security/authz) — the SAME `author.login`-gated trust rule #3383 already put behind
+// every OTHER durable marker reader in this file's sibling modules (`stand-down.mjs#isTrustedMarkerAuthor` call
+// sites, `rearm-review.mjs`, `ci-heal-mark.mjs`, `advisory-fix-mark.mjs`, `conflict-fix-round-count.mjs`,
+// `advisory-round-count.mjs`, `reconcile-core.mjs`) — see this file's own `hasRecentConflictAlertComment` /
+// `latestConflictAlertCreatedAtMs` / `hasRecentConflictFindingComment` for why these three, uniquely in this
+// file, were missing it.
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 // #xkmu3gv — single-sourced in the new leaf `we:scripts/conveyor/conflict-label.mjs` (a genuine pure leaf, no
 // imports) so `we:scripts/conveyor/reconcile-core.mjs` can read the label with no heavier pull-in than this
@@ -279,7 +286,17 @@ export const CONFLICT_ALERT_MARKER_RE = /^⚠️ \*\*This (?:parked|approved) PR
  * for the one-time alert comment: has THIS WATCH already posted {@link buildConflictComment}'s alert, recently
  * enough that it can only be the SAME still-open detection retrying after a crash (see the `CONFLICT_RETRY_
  * WINDOW_MS` section above for why "recently" substitutes for an exact episode boundary)? PURE.
- * @param {Array<{body?:string, createdAt?:string}|string>|null|undefined} comments
+ *
+ * #4118 review finding (security/authz) — ALSO requires {@link isTrustedMarkerAuthor}: WE's PRs are public, so
+ * without this any other GitHub login could post a comment whose body matches {@link CONFLICT_ALERT_MARKER_RE}
+ * and make this function (and, downstream, the label-applies-last dispatch this fix exists to protect) read the
+ * real alert as already-posted — silently skipping it, then still applying CONFLICT_LABEL, exactly the crash
+ * failure mode this whole card fixes, now reachable with no crash at all. The SAME two-principal trust rule
+ * (`we:scripts/lib/marker-authorship.mjs`) every sibling marker reader in this repo already applies
+ * (`stand-down.mjs`, `rearm-review.mjs`, `ci-heal-mark.mjs`, `advisory-fix-mark.mjs`,
+ * `conflict-fix-round-count.mjs`, `advisory-round-count.mjs`, `reconcile-core.mjs`) — this file's own three
+ * #4118 marker readers were the one place it had not yet been applied.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
  * @param {{now?:number, windowMs?:number}} [o]
  * @returns {boolean}
  */
@@ -287,7 +304,7 @@ export function hasRecentConflictAlertComment(comments, { now = Date.now(), wind
   if (!Array.isArray(comments)) return false;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart())) continue;
+    if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
     const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
     if (Number.isFinite(ms) && Math.abs(now - ms) <= windowMs) return true;
   }
@@ -303,7 +320,12 @@ export function hasRecentConflictAlertComment(comments, { now = Date.now(), wind
  * specifically because the CONFLICT_LABEL is already confirmed present at that call site — and by this file's
  * own effect ordering (the label applies LAST, only once the alert has landed), the label cannot still be
  * sitting on a PR from an episode whose alert-then-label sequence never completed. PURE.
- * @param {Array<{body?:string, createdAt?:string}|string>|null|undefined} comments
+ *
+ * #4118 review finding (security/authz) — ALSO requires {@link isTrustedMarkerAuthor}, for the same reason as
+ * {@link hasRecentConflictAlertComment}: without it, an attacker who keeps posting fresh forged alert-marker
+ * comments could hold the fallback `age` near zero forever, indefinitely suppressing the post-drain-grace
+ * dispatch for a genuinely conflicting PR.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
  * @returns {?number}
  */
 export function latestConflictAlertCreatedAtMs(comments) {
@@ -311,7 +333,7 @@ export function latestConflictAlertCreatedAtMs(comments) {
   let best = null;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart())) continue;
+    if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
     const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
     if (Number.isFinite(ms) && (best === null || ms > best)) best = ms;
   }
@@ -323,8 +345,9 @@ export function latestConflictAlertCreatedAtMs(comments) {
  * as {@link hasRecentConflictAlertComment}, over {@link buildConflictFindingBody}'s own fixed footer text
  * instead of the alert's header — a finding is posted by `reconcile-finding.mjs` through `defaultPostConflict
  * Finding`, not this file's own `provider.postComment`, so it carries THIS text on the thread, not the alert's.
- * PURE.
- * @param {Array<{body?:string, createdAt?:string}|string>|null|undefined} comments
+ * PURE. #4118 review finding (security/authz) — ALSO requires {@link isTrustedMarkerAuthor}, for the identical
+ * reason stated on {@link hasRecentConflictAlertComment}.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
  * @param {{now?:number, windowMs?:number}} [o]
  * @returns {boolean}
  */
@@ -333,7 +356,7 @@ export function hasRecentConflictFindingComment(comments, { now = Date.now(), wi
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.includes('Auto-detected by the parked-PR conflict watch')
-      || !body.includes('dispatched per `#xu2krte`')) continue;
+      || !body.includes('dispatched per `#xu2krte`') || !isTrustedMarkerAuthor(c)) continue;
     const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
     if (Number.isFinite(ms) && Math.abs(now - ms) <= windowMs) return true;
   }
@@ -867,20 +890,38 @@ export function defaultListPrPatches({ number, repo, exec = execFileSyncThrottle
  * `.created_at` (#4118) is projected alongside `.body` — {@link hasRecentConflictAlertComment} /
  * {@link hasRecentConflictFindingComment} / {@link latestConflictAlertCreatedAtMs} need a comment's own
  * timestamp to tell a still-in-progress crash-retry from a past, already-resolved episode's leftover marker.
- * Every EXISTING reader of this function's output (`countStandDownComments`, `findWatcherStandDownComment`,
- * `isWatcherMarkerAlreadySuperseded`) reads `.body` only, so the extra field is purely additive.
+ * `.user.login` (also #4118, review finding security/authz) is projected too, reshaped to the `author: {login}`
+ * field {@link isTrustedMarkerAuthor}/`we:scripts/lib/marker-authorship.mjs` reads on every OTHER marker counter
+ * in this repo — the REST issue-comments endpoint this function calls names the poster `.user.login`, not
+ * `.author.login` (that is the GraphQL `gh pr view --json comments` shape's own naming, used by this file's
+ * siblings) — so callers see the ONE shape `isTrustedMarkerAuthor` already expects either way. This was NOT
+ * purely additive the way `.created_at` was: `countStandDownComments` (`we:scripts/conveyor/stand-down.mjs`),
+ * already called on this function's own output at both this file's `graceDue` stand-down check and the
+ * newly-detected `standDown` path, itself requires `isTrustedMarkerAuthor` (#3383) — with no `author` field to
+ * read, EVERY comment this function returned failed that check, so `alreadyStoodDown`/the fresh-path stand-down
+ * dedup silently never matched a real stand-down at all. Adding `.user.login` here fixes that latent gap too,
+ * not only the three #4118 marker readers it was added for.
  * @param {{number:number|string, repo?:string|null, exec?:Function}} o
- * @returns {Array<{body:string, createdAt:?string}>}
+ * @returns {Array<{body:string, createdAt:?string, author:?{login:string}}>}
  */
 export function defaultListPrComments({ number, repo, exec = execFileSyncThrottled }) {
   const path = repo ? `repos/${repo}/issues/${number}/comments` : `repos/{owner}/{repo}/issues/${number}/comments`;
-  const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.body, .created_at] | @tsv'];
+  const argv = ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', path, '--jq', '.[] | [.body, .created_at, .user.login] | @tsv'];
   // #x5n4zn3 — was bare (no timeout).
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   return String(out || '').split('\n').filter((l) => l !== '').map((line) => {
-    const tab = line.indexOf('\t');
-    if (tab === -1) return { body: unescapeTsvField(line), createdAt: null };
-    return { body: unescapeTsvField(line.slice(0, tab)), createdAt: unescapeTsvField(line.slice(tab + 1)) || null };
+    const tab1 = line.indexOf('\t');
+    if (tab1 === -1) return { body: unescapeTsvField(line), createdAt: null, author: null };
+    const rest = line.slice(tab1 + 1);
+    const tab2 = rest.indexOf('\t');
+    const createdAtRaw = tab2 === -1 ? rest : rest.slice(0, tab2);
+    const loginRaw = tab2 === -1 ? '' : rest.slice(tab2 + 1);
+    const login = unescapeTsvField(loginRaw) || null;
+    return {
+      body: unescapeTsvField(line.slice(0, tab1)),
+      createdAt: unescapeTsvField(createdAtRaw) || null,
+      author: login ? { login } : null,
+    };
   });
 }
 

@@ -703,44 +703,73 @@ describe('#4118 — hasRecentConflictAlertComment / latestConflictAlertCreatedAt
     expect(CONFLICT_ALERT_MARKER_RE.test('some unrelated comment')).toBe(false);
   });
 
+  const trusted = { login: 'web-everything' };
+  const forged = { login: 'some-random-user' };
+
   it('hasRecentConflictAlertComment: true within the window, false once it ages out', () => {
-    const recent = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString() }];
+    const recent = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
     expect(hasRecentConflictAlertComment(recent, { now })).toBe(true);
-    const stale = [{ body: alertBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString() }];
+    const stale = [{ body: alertBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString(), author: trusted }];
     expect(hasRecentConflictAlertComment(stale, { now })).toBe(false);
   });
 
   it('hasRecentConflictAlertComment: false with no matching comment, a non-alert comment, or a bad timestamp', () => {
     expect(hasRecentConflictAlertComment([], { now })).toBe(false);
-    expect(hasRecentConflictAlertComment([{ body: 'unrelated' }], { now })).toBe(false);
-    expect(hasRecentConflictAlertComment([{ body: alertBody, createdAt: 'not-a-date' }], { now })).toBe(false);
+    expect(hasRecentConflictAlertComment([{ body: 'unrelated', author: trusted }], { now })).toBe(false);
+    expect(hasRecentConflictAlertComment([{ body: alertBody, createdAt: 'not-a-date', author: trusted }], { now })).toBe(false);
     expect(hasRecentConflictAlertComment(undefined, { now })).toBe(false);
+  });
+
+  // #4118 review finding (security/authz) — CONFIRMED live vulnerability: without an author check, any GitHub
+  // login could post a comment matching the marker and make the watch believe its own alert already went out,
+  // silently swallowing the real one (then still applying CONFLICT_LABEL, marking the PR fully handled).
+  it('hasRecentConflictAlertComment: a marker-matching comment from an UNTRUSTED author never counts, however recent', () => {
+    const forgedComment = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: forged }];
+    expect(hasRecentConflictAlertComment(forgedComment, { now })).toBe(false);
+    const noAuthorAtAll = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString() }];
+    expect(hasRecentConflictAlertComment(noAuthorAtAll, { now })).toBe(false);
+    const bareString = [alertBody]; // a bare-string comment carries no author at all — never trusted
+    expect(hasRecentConflictAlertComment(bareString, { now })).toBe(false);
   });
 
   it('latestConflictAlertCreatedAtMs: UNSCOPED by recency — an old-but-only match still returns its timestamp', () => {
     const old = new Date(now - (CONFLICT_RETRY_WINDOW_MS * 5)).toISOString();
-    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: old }])).toBe(Date.parse(old));
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: old, author: trusted }])).toBe(Date.parse(old));
     expect(latestConflictAlertCreatedAtMs([])).toBeNull();
-    expect(latestConflictAlertCreatedAtMs([{ body: 'unrelated' }])).toBeNull();
+    expect(latestConflictAlertCreatedAtMs([{ body: 'unrelated', author: trusted }])).toBeNull();
   });
 
   it('latestConflictAlertCreatedAtMs: picks the MOST RECENT of several matching alert comments', () => {
     const older = new Date(now - 500_000).toISOString();
     const newer = new Date(now - 10_000).toISOString();
-    const comments = [{ body: alertBody, createdAt: older }, { body: alertBody, createdAt: newer }];
+    const comments = [{ body: alertBody, createdAt: older, author: trusted }, { body: alertBody, createdAt: newer, author: trusted }];
     expect(latestConflictAlertCreatedAtMs(comments)).toBe(Date.parse(newer));
   });
 
+  // #4118 review finding (security/authz) — without this, an attacker who keeps posting fresh forged
+  // alert-marker comments could hold this fallback `age` near zero forever, suppressing the post-drain-grace
+  // dispatch for a genuinely conflicting PR indefinitely.
+  it('latestConflictAlertCreatedAtMs: ignores a marker-matching comment from an UNTRUSTED author entirely', () => {
+    const fresh = new Date(now - 1_000).toISOString();
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: fresh, author: forged }])).toBeNull();
+    expect(latestConflictAlertCreatedAtMs([{ body: alertBody, createdAt: fresh }])).toBeNull();
+  });
+
   it('hasRecentConflictFindingComment: true within the window over the finding\'s own footer text, false once stale', () => {
-    const recent = [{ body: findingBody, createdAt: new Date(now - 60_000).toISOString() }];
+    const recent = [{ body: findingBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
     expect(hasRecentConflictFindingComment(recent, { now })).toBe(true);
-    const stale = [{ body: findingBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString() }];
+    const stale = [{ body: findingBody, createdAt: new Date(now - (CONFLICT_RETRY_WINDOW_MS + 60_000)).toISOString(), author: trusted }];
     expect(hasRecentConflictFindingComment(stale, { now })).toBe(false);
   });
 
   it('hasRecentConflictFindingComment: an alert comment never counts as a finding comment (different marker)', () => {
-    const comments = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString() }];
+    const comments = [{ body: alertBody, createdAt: new Date(now - 60_000).toISOString(), author: trusted }];
     expect(hasRecentConflictFindingComment(comments, { now })).toBe(false);
+  });
+
+  it('hasRecentConflictFindingComment: a marker-matching comment from an UNTRUSTED author never counts', () => {
+    const forgedComment = [{ body: findingBody, createdAt: new Date(now - 60_000).toISOString(), author: forged }];
+    expect(hasRecentConflictFindingComment(forgedComment, { now })).toBe(false);
   });
 });
 
@@ -767,7 +796,7 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
       // window between the alert/dispatch succeeding and the label write actually landing.
       ensureLabel: () => { throw new Error('simulated crash: never reaches the gh label write'); },
       setLabels: () => {},
-      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString() }),
+      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString(), author: { login: 'web-everything' } }),
     };
     const routed = [];
     // The fake `postFinding` simulates what `defaultPostConflictFinding` really does on success: leaves a
@@ -777,7 +806,7 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
       repo: 'o/n', listPrs: () => [pr], provider: crashingProvider,
       postFinding: (o) => {
         routed.push(o);
-        postedComments.push({ body: buildConflictFindingBody({ num: pr.number }), createdAt: new Date().toISOString() });
+        postedComments.push({ body: buildConflictFindingBody({ num: pr.number }), createdAt: new Date().toISOString(), author: { login: 'web-everything' } });
       },
       postStandDown: () => {},
     });
@@ -812,7 +841,7 @@ describe('#4118 — crash-safety: the label applies LAST, after the alert + disp
     const postedComments = [];
     const provider1 = {
       ensureLabel: () => {}, setLabels: () => {},
-      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString() }),
+      postComment: (repo, num, body) => postedComments.push({ body, createdAt: new Date().toISOString(), author: { login: 'web-everything' } }),
     };
     const first = watchParkedPrConflicts({
       repo: 'o/n', listPrs: () => [pr], provider: provider1,
@@ -1057,6 +1086,56 @@ describe('defaultListPrPatches — argv shape + @tsv round-trip (exec injected, 
 
   it('an empty listing yields an empty map', () => {
     expect(defaultListPrPatches({ number: 1, repo: 'o/n', exec: () => '\n\n' })).toEqual({});
+  });
+});
+
+// #4118 review finding (security/authz) — `defaultListPrComments` now ALSO projects `.user.login`, reshaped to
+// `author: {login}` so `isTrustedMarkerAuthor` (every marker reader in this file, plus `countStandDownComments`
+// from `stand-down.mjs`) can gate on it. No test exercised this function's raw `exec` output at all before #4118.
+describe('defaultListPrComments — argv shape + @tsv round-trip incl. author.login (exec injected, no real gh call)', () => {
+  it('paginates the REST issue-comments endpoint projecting body + created_at + user.login via @tsv', () => {
+    let capturedArgv;
+    defaultListPrComments({ number: 42, repo: 'o/n', exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv).toEqual(['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/issues/42/comments',
+      '--jq', '.[] | [.body, .created_at, .user.login] | @tsv']);
+  });
+
+  it("falls back to gh's own {owner}/{repo} template when repo is omitted", () => {
+    let capturedArgv;
+    defaultListPrComments({ number: 7, exec: (cmd, argv) => { capturedArgv = argv; return ''; } });
+    expect(capturedArgv[6]).toBe('repos/{owner}/{repo}/issues/7/comments');
+  });
+
+  it('parses body + createdAt + author.login off the three-field @tsv wire shape', () => {
+    const wire = 'hello world\t2026-09-25T12:00:00Z\tweb-everything\nbye\t2026-09-24T00:00:00Z\tsome-random-user';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([
+      { body: 'hello world', createdAt: '2026-09-25T12:00:00Z', author: { login: 'web-everything' } },
+      { body: 'bye', createdAt: '2026-09-24T00:00:00Z', author: { login: 'some-random-user' } },
+    ]);
+  });
+
+  it('a body containing an escaped tab/newline (jq @tsv) still splits on the REAL field-delimiter tabs only', () => {
+    const wire = 'line one\\nline two\\twith a tab\t2026-09-25T12:00:00Z\tweb-everything';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([
+      { body: 'line one\nline two\twith a tab', createdAt: '2026-09-25T12:00:00Z', author: { login: 'web-everything' } },
+    ]);
+  });
+
+  it('a missing login (bot/deleted-account edge, `.user.login` empty) yields author: null, not a forged trust', () => {
+    const wire = 'hello\t2026-09-25T12:00:00Z\t';
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => wire });
+    expect(out).toEqual([{ body: 'hello', createdAt: '2026-09-25T12:00:00Z', author: null }]);
+  });
+
+  it('a line with no tab at all (malformed) yields author: null and createdAt: null, never a crash', () => {
+    const out = defaultListPrComments({ number: 1, repo: 'o/n', exec: () => 'no-tabs-here' });
+    expect(out).toEqual([{ body: 'no-tabs-here', createdAt: null, author: null }]);
+  });
+
+  it('an empty listing yields an empty array', () => {
+    expect(defaultListPrComments({ number: 1, repo: 'o/n', exec: () => '\n\n' })).toEqual([]);
   });
 });
 
@@ -1707,6 +1786,7 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     const oldAlert = {
       body: buildConflictComment({ num: 2514 }, {}),
       createdAt: new Date(Date.now() - (QUEUED_CONFLICT_GRACE_MS + 5 * 60 * 1000)).toISOString(),
+      author: { login: 'web-everything' },
     };
     const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
     const [r] = watchParkedPrConflicts({
@@ -1732,13 +1812,31 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
 
   it('#4118 (b) — a fallback alert comment that has not YET sat past grace still waits (no premature bounce)', () => {
     const routed = [];
-    const recentAlert = { body: buildConflictComment({ num: 2514 }, {}), createdAt: new Date().toISOString() };
+    const recentAlert = { body: buildConflictComment({ num: 2514 }, {}), createdAt: new Date().toISOString(), author: { login: 'web-everything' } };
     const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
     watchParkedPrConflicts({
       repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
       labelAgeMs: () => null, listPrComments: () => [recentAlert], listPrFiles: () => [],
     });
     expect(routed).toEqual([]);
+  });
+
+  // #4118 review finding (security/authz) — a FORGED fallback alert comment (untrusted author) must never
+  // substitute for a real one: an attacker who keeps posting fresh forged alert-marker comments could otherwise
+  // hold this fallback age near zero forever, suppressing the post-drain-grace dispatch indefinitely.
+  it('#4118 (b) — an UNTRUSTED-author fallback alert comment is never used as the age source, however old', () => {
+    const routed = [];
+    const forgedOldAlert = {
+      body: buildConflictComment({ num: 2514 }, {}),
+      createdAt: new Date(Date.now() - (QUEUED_CONFLICT_GRACE_MS + 5 * 60 * 1000)).toISOString(),
+      author: { login: 'some-random-user' },
+    };
+    const listPrs = () => [{ number: 2514, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }];
+    watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(), postFinding: (o) => routed.push(o.pr.number), postStandDown: () => {},
+      labelAgeMs: () => null, listPrComments: () => [forgedOldAlert], listPrFiles: () => [],
+    });
+    expect(routed).toEqual([]); // never bounced off a forged fallback comment — still waits, the safe default
   });
 
   it('statute-tier: handed to a human at first sighting, and NEVER re-posted by the grace path once the marker is on the PR', () => {
