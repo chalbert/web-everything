@@ -257,16 +257,26 @@ export function readBacklogCards(cwd = process.cwd()) {
   }).filter(Boolean);
 }
 
-// xvr2o8r — the AUTO-WIRED default log-limit is wider than the manual CLI's (400, above): this path runs
-// UNATTENDED, once per drain pass, with no human re-running it with a bigger `--log-limit` when a stranding
-// turns out to be older than the window. The live case that motivated this item proves the gap is real: #3916
-// (delivered at origin/main position ~403) and #4025 (~438) both sit just past a 400-commit window. 2000 keeps
-// the same "bounded, never whole-history" discipline the CLI's own comment insists on (~12.6k commits on this
-// repo's `main` as of xvr2o8r) while giving a real backstop margin against exactly this drift. Overridable via
-// `WE_STRANDED_SWEEP_LOG_LIMIT` for an operator who wants a different bound without a code change.
+// xvr2o8r — the AUTO-WIRED default log-limit is a DELIBERATELY NARROW widening past the manual CLI's own 400
+// (above), not a jump to "wide enough to never miss anything". Live evidence while authoring this item is WHY:
+// running the strict check at --log-limit=2000 (a first attempt) surfaced not just the two live-stranded cards
+// this item exists to close (#3916 at origin/main position ~403, #4025 at ~438) but THREE FALSE POSITIVES
+// further back — #3634, #3881, #3751-adjacent commits whose trailing `(#NNNN)` cites a bigger PARENT
+// story/decision an unrelated follow-up commit happened to land against (e.g. "fix(auth): refresh the App
+// token per tick … (#3881)" — a partial follow-up on a story explicitly gated on a still-pending human step,
+// NOT its delivery). `commitSubjectDeliversItem` has no defense against this shape (unlike `isAnnotationPr`,
+// which only guards the general, report-only `sweepStrandings` signal) — the nearest such false positive at
+// authoring time sits at position ~660. 500 sits with real margin on BOTH sides: past #4025's ~438 (the
+// farther of the two live targets), short of the ~660 false-positive boundary. It is intentionally NOT pushed
+// further just to buy more drift-margin — that trade directly re-admits the false-positive class this
+// comment's own investigation exists to document. A stranding older than this window is exactly what
+// `we:scripts/backlog-stranded-sweep.mjs --apply --log-limit=<bigger>` (already shipped, #2661) is for: a
+// human-reviewed, supervised widening, not a silently-widened unattended default. Overridable via
+// `WE_STRANDED_SWEEP_LOG_LIMIT` for an operator who has weighed that tradeoff and wants a different bound
+// without a code change — including narrower, e.g. matching the CLI's own 400 exactly.
 export const AUTO_SWEEP_LOG_LIMIT = Number(process.env.WE_STRANDED_SWEEP_LOG_LIMIT) > 0
   ? Number(process.env.WE_STRANDED_SWEEP_LOG_LIMIT)
-  : 2000;
+  : 500;
 
 /**
  * xvr2o8r — THE ONE CALLABLE the drain (`we:scripts/merge-ai-prs.mjs`) uses to run the strict stranded-item
