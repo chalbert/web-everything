@@ -452,49 +452,57 @@ if (IS_CLI) {
   // this file's brief describes, run as code, with no Claude wrapper session. `--mode=session` (or
   // `WE_REVIEW_DISPATCH_MODE=session`) keeps the `claude --bg` + brief path below. Imported lazily: review-job.mjs
   // itself imports this module.
-  const { resolveReviewDispatchMode, dispatchReviewJob } = await import('./review-job.mjs');
-  const mode = flag('mode') === 'session' || flag('mode') === 'job' ? flag('mode') : resolveReviewDispatchMode();
-  if (mode === 'job') {
-    try {
-      const r = dispatchReviewJob({ pr: flag('pr'), repo: flag('repo') });
-      writeAllSync(1, r.skipped
-        ? `dispatch-review: ${r.repo}#${r.pr} not started — ${r.skipped}${r.jobPid ? ` (job pid ${r.jobPid})` : ''}\n`
-        : `dispatch-review: started review job pid ${r.jobPid} (slug ${r.sessionSlug}) for ${r.repo}#${r.pr} — no Claude wrapper session\n`
-          + `log: ${r.logPath}\nresult: node scripts/operations/completion-cli.mjs show --session=${r.sessionSlug}\n`);
+  // xgqz204 — and NOT with a top-level `await`: while this entry module sits in a pending top-level await,
+  // review-job.mjs's static import of it waits for this module to finish evaluating, which waits on the import —
+  // a cycle node reports as "unsettled top-level await" (exit 13, nothing dispatched; reproduced live on main
+  // 0cb0bf39f and later). `.then` lets this module finish evaluating first.
+  import('./review-job.mjs').then(({ resolveReviewDispatchMode, dispatchReviewJob }) => {
+    const mode = flag('mode') === 'session' || flag('mode') === 'job' ? flag('mode') : resolveReviewDispatchMode();
+    if (mode === 'job') {
+      try {
+        const r = dispatchReviewJob({ pr: flag('pr'), repo: flag('repo') });
+        writeAllSync(1, r.skipped
+          ? `dispatch-review: ${r.repo}#${r.pr} not started — ${r.skipped}${r.jobPid ? ` (job pid ${r.jobPid})` : ''}\n`
+          : `dispatch-review: started review job pid ${r.jobPid} (slug ${r.sessionSlug}) for ${r.repo}#${r.pr} — no Claude wrapper session\n`
+            + `log: ${r.logPath}\nresult: node scripts/operations/completion-cli.mjs show --session=${r.sessionSlug}\n`);
+      } catch (e) {
+        writeLineSync(2, `error: ${String(e?.message ?? e)}`);
+        process.exitCode = 1;
+      }
+    } else try {
+      // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
+      // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
+      // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
+      // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
+      // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
+      // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
+      // case, not a gap.
+      const result = dispatchReview({
+        pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
+      });
+      // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
+      // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
+      // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
+      // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
+      // carries `-n` verbatim).
+      writeAllSync(
+        1,
+        (result.agentId
+          ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
+            + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
+            + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
+          : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
+            + `(judge provider: ${result.judgeProvider}), `
+            + 'but could NOT read its id off `claude --bg`\'s output\n'
+            + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
+        + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
+      );
     } catch (e) {
       writeLineSync(2, `error: ${String(e?.message ?? e)}`);
       process.exitCode = 1;
     }
-  } else try {
-    // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
-    // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
-    // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this
-    // one silently could not. Reused verbatim, not re-derived, for the same reason every other primitive here is.
-    // #xqa9ttq — `--judge-provider` is OPTIONAL; `dispatchReview`'s own `judgeProvider = 'claude'` default
-    // applies when the flag is omitted, so `flag('judge-provider')` returning `undefined` here is the ordinary
-    // case, not a gap.
-    const result = dispatchReview({
-      pr: flag('pr'), repo: flag('repo'), extraArgs: agentArgsFromEnv(), judgeProvider: flag('judge-provider'),
-    });
-    // #3331 — PRINT THE ID THAT ACTUALLY ADDRESSES THE SESSION. This used to print the minted uuid and tell the
-    // operator to grep for it; that grep can never match (see `dispatchReview`), which is how a working
-    // dispatch read as a silent failure. When stdout could not be parsed we say so rather than printing an id
-    // that will not be found — the session slug is still a real handle in that case (`claude agents --json`
-    // carries `-n` verbatim).
-    writeAllSync(
-      1,
-      (result.agentId
-        ? `dispatch-review: started agent ${result.agentId} (slug ${result.sessionSlug}) reviewing `
-          + `${result.repo}#${result.pr} (judge provider: ${result.judgeProvider})\n`
-          + `watch it: claude agents --json | grep ${result.agentId}   # or: claude logs ${result.agentId}\n`
-        : `dispatch-review: started a session (slug ${result.sessionSlug}) reviewing ${result.repo}#${result.pr} `
-          + `(judge provider: ${result.judgeProvider}), `
-          + 'but could NOT read its id off `claude --bg`\'s output\n'
-          + `watch it by name: claude agents --json | grep ${result.sessionSlug}\n`)
-      + (result.unknownTokens.length ? `note: unrecognized brief tokens (reported, not fatal): ${result.unknownTokens.join(', ')}\n` : ''),
-    );
-  } catch (e) {
+  }, (e) => {
     writeLineSync(2, `error: ${String(e?.message ?? e)}`);
     process.exitCode = 1;
-  }
+  });
 }
