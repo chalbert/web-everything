@@ -3,10 +3,11 @@ bornAs: xujt3ts
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/review-round-tag.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
