@@ -66,10 +66,13 @@ import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs'
 import {
   computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK,
   buildHungCandidates, planHungCiRecoveries, DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
+  classifyCiFailureAttribution, countRebaseOntoMainComments, buildRebaseOntoMainComment,
+  DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
 } from './main-red-recovery.mjs';
 import { defaultReadMainRuns, defaultReadAheadBy } from './reconcile-pass.mjs';
 import { rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
+import { resolveLanePoolRepoPath } from './lane-pool-health-watch.mjs';
 
 /** How many open PRs one sweep reads — mirrors `we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_LIMIT`. */
 export const PR_LIST_LIMIT = 200;
@@ -113,7 +116,7 @@ export function buildCandidates(prs, {
     const check = latestRequiredCheck(pr, requiredCheck);
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
     out.push({
-      prNumber, headRefName: pr?.headRefName ?? null, aheadBy,
+      prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null, aheadBy,
       failureCompletedAt: check?.completedAt ?? null,
     });
   }
@@ -138,6 +141,26 @@ export function refreshOntoMain(laneRef, { root = REPO_ROOT, base = 'origin/main
 }
 
 /**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultPostRebaseComment — post the durable rebase-onto-main
+ * marker comment ({@link module:./main-red-recovery.mjs.buildRebaseOntoMainComment}) after EVERY attempt,
+ * success or failure — mirrors {@link defaultPostHungCiComment}'s own discipline exactly.
+ * @param {number} prNumber
+ * @param {{exec?:Function, repo?:string|null, headRefName?:(string|null), headSha?:(string|null),
+ *   ok?:boolean, action?:string, error?:(string|null)}} [o]
+ */
+export function defaultPostRebaseComment(prNumber, {
+  exec = execFileSyncThrottled, repo = null, headRefName = null, headSha = null, ok = true, action = 'rebased', error = null,
+} = {}) {
+  const argv = ['pr', 'comment', String(prNumber), '--body', buildRebaseOntoMainComment({
+    headRefName, headSha, ok, action, error,
+  })];
+  if (repo) argv.push('--repo', repo);
+  exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+}
+
+/**
  * we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery — THE IO SHELL. Read, plan, and — only with
  * `apply: true` — act. Every reader is injectable so the whole sweep is exercisable with no network and no
  * credential.
@@ -148,21 +171,51 @@ export function refreshOntoMain(laneRef, { root = REPO_ROOT, base = 'origin/main
 export function sweepCiRedRecovery({
   repo = null, apply = false, requiredCheck = DEFAULT_REQUIRED_CHECK, defaultBranch = 'main',
   readOpenPrs = defaultReadOpenPrs, readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
-  refresh = refreshOntoMain,
+  readComments = defaultReadPrComments, refresh = refreshOntoMain, postComment = defaultPostRebaseComment,
+  maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
 } = {}) {
   const prs = readOpenPrs({ repo });
-  const candidates = buildCandidates(prs, { requiredCheck, readAheadBy, repo, defaultBranch });
+  const rawCandidates = buildCandidates(prs, { requiredCheck, readAheadBy, repo, defaultBranch });
   // The `gh run list --branch main` read only matters when there is at least one candidate to judge against it
   // — mirrors `reconcile-pass.mjs#enrichPrsWithMainRedFacts`'s own "pay for it only when needed" discipline.
-  const mainRedWindows = candidates.length
+  const mainRedWindows = rawCandidates.length
     ? computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch, workflowName: DEFAULT_MAIN_WORKFLOW_NAME }))
     : [];
-  const plan = planMainRedRebases({ candidates, mainRedWindows });
+  // x5uqim1 follow-up (#4075/#3383) — the durable per-sha rebase-attempt count (`rebaseAttemptsForSha`,
+  // {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s own safety net) only matters for a candidate that would
+  // otherwise actually be dispatched: attributable to a red-`main` window AND still `aheadBy > 0`. Reading a
+  // PR's comment thread only for THOSE mirrors `sweepHungCiRecovery`'s own "pay for it only when needed"
+  // discipline — never one extra `gh pr view` per open PR on every tick.
+  const candidates = rawCandidates.map((c) => {
+    if (!(c.aheadBy > 0)) return c;
+    const attribution = classifyCiFailureAttribution({ failureCompletedAt: c.failureCompletedAt, mainRedWindows });
+    if (attribution !== 'main-red') return c;
+    const comments = readComments(c.prNumber, { repo });
+    return { ...c, rebaseAttemptsForSha: countRebaseOntoMainComments(comments, c.headSha) };
+  });
+  const plan = planMainRedRebases({ candidates, mainRedWindows, maxRebaseRetriesPerSha });
+
+  // x5uqim1 follow-up (#4075/#3383) part (c) — "check the owed-ci-rerun path for frontierui/plateau-app too":
+  // `rebaseDropManifest` needs a REAL LOCAL checkout of the repo it rebases (this file's own header). Left at
+  // its old default (`REPO_ROOT`, WE's own checkout, always) this would have run every mechanical rebase in
+  // the WRONG local git repo for frontierui/plateau-app — `git fetch origin <laneRef>` against WE's own
+  // `origin` remote, which just fails cleanly (no matching ref) rather than corrupting anything, but never
+  // actually refreshes those repos' PRs either. `resolveLanePoolRepoPath` (already used the identical way by
+  // `we:scripts/conveyor/lane-pool-health-watch.mjs`) resolves the SAME sibling checkout path every other
+  // multi-repo conveyor pass already reads from (`we:scripts/lib/constellation-repos.mjs#CONSTELLATION_REPOS`),
+  // returning `null` for `we` itself (kept on `REPO_ROOT`, unchanged).
+  const repoRoot = resolveLanePoolRepoPath(repo) ?? REPO_ROOT;
 
   const applied = [];
   if (apply) {
     for (const d of plan.dispatch) {
-      const result = refresh(d.headRefName, { base: `origin/${defaultBranch}` });
+      const result = refresh(d.headRefName, { base: `origin/${defaultBranch}`, root: repoRoot });
+      // Posted on EVERY attempt, success or failure — mirrors `sweepHungCiRecovery`'s own discipline: a
+      // permanently-failing refresh must still trip {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s cap, not
+      // retry forever silently.
+      postComment(d.prNumber, {
+        repo, headRefName: d.headRefName, headSha: d.headSha, ok: result.ok, action: result.action, error: result.error ?? null,
+      });
       applied.push({ prNumber: d.prNumber, headRefName: d.headRefName, ...result });
     }
   }
@@ -207,7 +260,9 @@ export function buildHungCiComment({
   const outcome = ok
     ? (kind === 'repeat-hang'
       ? `cancelled run ${runId ?? '?'} (job "${jobName ?? '?'}") and did NOT re-run it — this job has hung before on a different head, so this is handed to ci-heal for a real diagnosis instead of retried again.`
-      : `found run ${runId ?? '?'} stuck in_progress/queued past the hung threshold; cancelled it and asked GitHub to re-run it.`)
+      : kind === 'hung-cap-escalate'
+        ? `cancelled run ${runId ?? '?'} (job "${jobName ?? '?'}") and did NOT re-run it — this head sha's own hung-recovery retries are exhausted, so this is handed to ci-heal instead of left for GitHub's own job timeout-minutes, which this PR's branch predates.`
+        : `found run ${runId ?? '?'} stuck in_progress/queued past the hung threshold; cancelled it and asked GitHub to re-run it.`)
     : `attempted "${action}" on run ${runId ?? '?'} and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a permanently-failing action (e.g. a token missing \`actions:write\`) cannot retry forever.`;
   return [
     HUNG_CI_COMMENT_MARKER,
@@ -474,7 +529,9 @@ export function sweepHungCiRecovery({
     for (const d of plan.dispatch) {
       const result = d.runId == null
         ? { ok: false, action: 'no-run-id', error: `PR #${d.prNumber}'s hung check has no resolvable run id (detailsUrl missing/unparseable)` }
-        : (d.kind === 'repeat-hang' ? cancelOnly(d.runId, { repo }) : cancelAndRerun(d.runId, { repo }));
+        // #4075/#3383, 2026-09-25 18:55 ET correction — `hung-cap-escalate` cancels only, exactly like
+        // `repeat-hang`: both hand the PR to the existing ci-red -> ci-heal path rather than retrying.
+        : ((d.kind === 'repeat-hang' || d.kind === 'hung-cap-escalate') ? cancelOnly(d.runId, { repo }) : cancelAndRerun(d.runId, { repo }));
       // Posted on EVERY attempt, success or failure — see this function's own docblock above for why.
       if (d.runId != null) {
         postComment(d.prNumber, {

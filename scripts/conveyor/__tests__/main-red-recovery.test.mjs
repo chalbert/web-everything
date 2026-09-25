@@ -14,6 +14,8 @@ import {
   classifyCiFailureAttribution, isPrCiFailureOwedRerun, planMainRedRebases,
   DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
   runIdFromDetailsUrl, isRunHung, buildHungCandidates, planHungCiRecoveries,
+  DEFAULT_MAX_REBASE_RETRIES_PER_SHA, REBASE_ONTO_MAIN_COMMENT_MARKER,
+  countRebaseOntoMainComments, buildRebaseOntoMainComment,
 } from '../main-red-recovery.mjs';
 
 // ── fixtures — measured off chalbert/web-everything, 2026-09-25 ────────────────────────────────────────────────
@@ -178,6 +180,75 @@ describe('main-red-recovery — planMainRedRebases', () => {
   });
 });
 
+// ── OWED-CI-RERUN MECHANICAL-REBASE RETRY CAP (x5uqim1 follow-up, #4075/#3383) ─────────────────────────────────
+describe('main-red-recovery — countRebaseOntoMainComments / buildRebaseOntoMainComment', () => {
+  const AUTOMATION = { login: 'web-everything' };
+
+  it('counts a trusted marker scoped to the given head sha, ignoring an unrelated sha', () => {
+    const comments = [
+      { body: buildRebaseOntoMainComment({ headSha: 'sha-a', ok: true, action: 'rebased' }), author: AUTOMATION },
+      { body: buildRebaseOntoMainComment({ headSha: 'sha-b', ok: true, action: 'rebased' }), author: AUTOMATION },
+    ];
+    expect(countRebaseOntoMainComments(comments, 'sha-a')).toBe(1);
+    expect(countRebaseOntoMainComments(comments, 'sha-b')).toBe(1);
+    expect(countRebaseOntoMainComments(comments, 'sha-c')).toBe(0);
+  });
+
+  it('counts EVERY attempt regardless of outcome — a persistently failing refresh must still trip the cap', () => {
+    const comments = [
+      { body: buildRebaseOntoMainComment({ headSha: 'sha-a', ok: false, action: 'error', error: 'push rejected' }), author: AUTOMATION },
+      { body: buildRebaseOntoMainComment({ headSha: 'sha-a', ok: false, action: 'error', error: 'push rejected' }), author: AUTOMATION },
+    ];
+    expect(countRebaseOntoMainComments(comments, 'sha-a')).toBe(2);
+  });
+
+  it('never counts a forged marker from an untrusted login', () => {
+    const comments = [
+      { body: buildRebaseOntoMainComment({ headSha: 'sha-a' }), author: { login: 'some-rando' } },
+    ];
+    expect(countRebaseOntoMainComments(comments, 'sha-a')).toBe(0);
+  });
+
+  it('non-array input is 0, never throws', () => {
+    expect(countRebaseOntoMainComments(null)).toBe(0);
+    expect(countRebaseOntoMainComments(undefined)).toBe(0);
+  });
+
+  it('the built comment always leads with the stable marker, whatever the outcome', () => {
+    expect(buildRebaseOntoMainComment({ headRefName: 'lane/x', headSha: 'sha-a', ok: true, action: 'rebased' }))
+      .toMatch(new RegExp(`^${REBASE_ONTO_MAIN_COMMENT_MARKER.replace(/[()]/g, '\\$&')}`));
+    expect(buildRebaseOntoMainComment({ ok: false, action: 'error', error: 'boom' })).toContain('boom');
+  });
+});
+
+describe('main-red-recovery — planMainRedRebases, the rebase-onto-main retry cap', () => {
+  const windows = computeMainRedWindows(MAIN_RUNS);
+  const candidate = (over = {}) => ({
+    prNumber: 2685, headRefName: 'lane/xgqz204', headSha: 'deadbeef2685',
+    aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z', ...over,
+  });
+
+  it('dispatches rebase-onto-main with attempts:0 for a fresh candidate (no prior attempts counted)', () => {
+    const plan = planMainRedRebases({ candidates: [candidate()], mainRedWindows: windows });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2685, kind: 'rebase-onto-main', attempts: 0 })]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('refuses rebase-cap-exhausted once this head sha already burned its retry budget — never retries forever', () => {
+    const plan = planMainRedRebases({
+      candidates: [candidate({ rebaseAttemptsForSha: DEFAULT_MAX_REBASE_RETRIES_PER_SHA })],
+      mainRedWindows: windows,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2685, kind: 'rebase-cap-exhausted' })]);
+  });
+
+  it('a candidate the caller never counted (rebaseAttemptsForSha omitted) defaults to 0 — a fresh candidate, never pre-exhausted', () => {
+    const plan = planMainRedRebases({ candidates: [candidate()], mainRedWindows: windows });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ attempts: 0 })]);
+  });
+});
+
 // ── HUNG-CI-RUN RECOVERY (xd1sfms, #4075/#3383) ─────────────────────────────────────────────────────────────
 // Fixtures mirror PR #2636's REAL statusCheckRollup shape, read live 2026-09-25 off run 36161558017: shard 1
 // stuck `IN_PROGRESS` since 16:34:28Z while shards 2-4 and `smoke` had already completed — and the required
@@ -276,14 +347,20 @@ describe('main-red-recovery — planHungCiRecoveries', () => {
     expect(plan.dispatch).toEqual([]);
   });
 
-  it('refuses hung-cap-exhausted once a head sha has already used up its cap — never a third try', () => {
+  // 2026-09-25 18:55 ET correction (#4075/#3383): once the GitHub App token got `actions:write`, a cap-hit run
+  // is no longer left for GitHub's own job timeout-minutes (PR #2636's own branch predates that fix and has no
+  // timeout-minutes set) — it is now cancelled (never re-run) and handed to ci-heal, the SAME shape `repeat-hang`
+  // already uses.
+  it('dispatches hung-cap-escalate (cancel only, never rerun) once a head sha has already used up its cap — never a third blind retry', () => {
     const candidates = [{
       prNumber: 2636, headRefName: 'lane/x', headSha: 'deadbeef2636', runId: 36161558017,
       startedAt: '2026-09-25T16:34:28Z', hungAttemptsForSha: 2,
     }];
     const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
-    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
-    expect(plan.dispatch).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      prNumber: 2636, runId: 36161558017, kind: 'hung-cap-escalate', attempts: 2,
+    })]);
+    expect(plan.refusals).toEqual([]);
   });
 
   it('a candidate the caller never counted (hungAttemptsForSha omitted) defaults to 0 — a fresh candidate, never pre-exhausted', () => {
@@ -326,14 +403,14 @@ describe('main-red-recovery — planHungCiRecoveries', () => {
   // its OWN marker against the current sha — so without capping repeat-hang by the SAME per-sha budget, a
   // permanently-failing repeat-hang candidate would re-dispatch `repeat-hang` every tick forever. The per-sha
   // cap is now checked BEFORE the repeat-hang classification, so it closes this for both kinds at once.
-  it('the per-sha cap takes priority over repeat-hang once THIS sha has already burned its attempts — never dispatches repeat-hang forever', () => {
+  it('the per-sha cap takes priority over repeat-hang once THIS sha has already burned its attempts — hung-cap-escalate, never repeat-hang', () => {
     const candidates = [{
       prNumber: 2636, headSha: 'a-sha-that-keeps-failing-to-cancel', runId: 36187480460, startedAt: '2026-09-25T19:00:00Z',
       jobName: 'test-shard (1)', hungAttemptsForSha: 2, hungAttemptsForJob: 1,
     }];
     const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
-    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
-    expect(plan.dispatch).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-escalate' })]);
+    expect(plan.refusals).toEqual([]);
   });
 
   it('a job that has never hung before (hungAttemptsForJob 0/omitted) takes the ordinary hung-cancel-rerun path, not repeat-hang', () => {

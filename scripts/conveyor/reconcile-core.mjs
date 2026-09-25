@@ -129,7 +129,7 @@ import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 // check failed only because `origin/main`'s own CI was red at that moment must never be handed to `ci-heal`,
 // which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
 // (see its own docblock for the full incident and the two facts it needs); this file only calls it.
-import { isPrCiFailureOwedRerun } from './main-red-recovery.mjs';
+import { isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE_RETRIES_PER_SHA } from './main-red-recovery.mjs';
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
@@ -833,13 +833,22 @@ export function planReconcile({
       // through to the ordinary `ci-heal` cap-check/dispatch below — the correct owner once a mechanical rebase
       // cannot possibly succeed.
       const mergeDirty = String(pr?.mergeStateStatus ?? '').toUpperCase() === 'DIRTY';
+      // x5uqim1 follow-up (#4075/#3383), 2026-09-25 18:55 ET: `owed-ci-rerun`'s whole premise is "a MECHANICAL
+      // rebase clears this" — which is no longer true once that rebase has already been tried and capped
+      // against this exact head sha (`we:scripts/conveyor/main-red-recovery.mjs#countRebaseOntoMainComments`,
+      // counted straight off `pr.comments` — already part of this pass's own input, no new IO shell wiring
+      // needed). Read the SAME way `mergeDirty` above is: a fact about THIS pr object, not a re-derivation.
+      // Without this, a rebase that keeps failing for a non-conflict reason (a push race, a transient `gh`
+      // error — a REAL conflict already escapes via `mergeDirty` above) would have refused `owed-ci-rerun`
+      // forever, since `isPrCiFailureOwedRerun` itself has no notion of "already tried and gave up".
+      const rebaseCapExhausted = countRebaseOntoMainComments(pr?.comments, pr?.headRefOid) >= DEFAULT_MAX_REBASE_RETRIES_PER_SHA;
       // we:backlog/x5uqim1-*.md — LIVE INCIDENT 2026-09-25 (see `main-red-recovery.mjs`'s own header for the
       // full measured shape): a required check that failed only because `main`'s own CI was red at that moment
       // is not this PR's own defect. Checked BEFORE the `ci-heal` cap below (and skips it entirely) — this is
       // not one more round spent against that cap, it is a DIFFERENT job this pass does not run itself
       // (`we:scripts/conveyor/ci-red-recovery-watch.mjs` does), the same "owed elsewhere, never dispatched
       // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
-      if (!mergeDirty && isPrCiFailureOwedRerun({
+      if (!mergeDirty && !rebaseCapExhausted && isPrCiFailureOwedRerun({
         requiredCheckCompletedAt: base.requiredCheckCompletedAt,
         aheadBy: base.aheadByOnMain,
         mainRedWindows,

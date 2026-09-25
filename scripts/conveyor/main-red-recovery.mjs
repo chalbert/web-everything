@@ -47,6 +47,7 @@
  * actually let finish and CONCLUDE failed, never one merely superseded by the next push.
  * @see we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment
  */
+import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 
 /**
  * we:scripts/conveyor/main-red-recovery.mjs#MAIN_RED_CONCLUSIONS — which of `main`'s own `CI` run conclusions
@@ -216,7 +217,9 @@ export function isPrCiFailureOwedRerun({ requiredCheckCompletedAt, aheadBy, main
  * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows]
  * @returns {{dispatch:Array<object>, refusals:Array<object>}}
  */
-export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}) {
+export function planMainRedRebases({
+  candidates = [], mainRedWindows = [], maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
+} = {}) {
   const dispatch = [];
   const refusals = [];
   const mainStillRed = isMainCurrentlyRed(mainRedWindows);
@@ -227,6 +230,7 @@ export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}
     const base = {
       prNumber,
       headRefName: c?.headRefName ?? null,
+      headSha: c?.headSha ?? null,
       aheadBy: Number.isFinite(c?.aheadBy) ? c.aheadBy : null,
       failureCompletedAt: c?.failureCompletedAt ?? null,
     };
@@ -259,13 +263,110 @@ export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}
       });
       continue;
     }
+    // x5uqim1 follow-up (#4075/#3383) — this pass's OWN safety net against a REPEATEDLY-FAILING rebase attempt
+    // against the SAME head sha (a transient push/network error, never a real conflict — a real conflict flips
+    // `mergeStateStatus` to `DIRTY` and `reconcile-core.mjs`'s own `ci-red` branch already routes that straight
+    // to `ci-heal`, ahead of ever consulting this pass at all). See {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s
+    // own docblock for the full incident this closes: nothing ever bounded a non-conflict rebase failure, so it
+    // could retry every tick forever exactly like the pre-fix hung-CI cancel/rerun could.
+    const rebaseAttempts = Number.isFinite(c?.rebaseAttemptsForSha) ? c.rebaseAttemptsForSha : 0;
+    if (rebaseAttempts >= maxRebaseRetriesPerSha) {
+      refusals.push({
+        ...base, kind: 'rebase-cap-exhausted', attempts: rebaseAttempts,
+        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${rebaseAttempts} rebase-onto-main attempt(s) that did not clear it (cap ${maxRebaseRetriesPerSha}) — no longer a clean mechanical refresh; this is owed a ci-heal instead of another retry`,
+      });
+      continue;
+    }
     dispatch.push({
-      ...base, kind: 'rebase-onto-main',
+      ...base, attempts: rebaseAttempts, kind: 'rebase-onto-main',
       why: `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, inside a window where main's own CI was red; main has recovered and this head is ${base.aheadBy} commit(s) behind it — refreshing onto main`,
     });
   }
 
   return { dispatch, refusals };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// OWED-CI-RERUN MECHANICAL-REBASE RETRY CAP — x5uqim1 follow-up (parent #4075, epic #3383). LIVE INCIDENT
+// 2026-09-25 continuation: `owed-ci-rerun` (this file's own header) correctly refuses a `ci-heal` for a
+// red-`main`-caused failure, but nothing ever PERFORMED the mechanical rebase that refusal names —
+// `ci-red-recovery-watch.mjs#sweepCiRedRecovery` existed but was never wired into a live process (its own
+// `daemon-manifest.mjs` entry has no launchd job installed, exactly like the hung-CI pass below). Wired now
+// into `reconcile-fix-dispatch-daemon.mjs` (the one daemon confirmed live and ticking), the same way the
+// hung-CI pass already was. This retry cap is that pass's OWN bound, mirroring
+// {@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA}'s shape exactly, for the reason given at its own call site above.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_MAX_REBASE_RETRIES_PER_SHA — see the section header just
+ *  above for the incident. Small, like {@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA}: a rebase attempt that keeps
+ *  failing against the identical head sha is no longer "bad luck", it is a real signal this pass should stop
+ *  absorbing and hand to a `ci-heal` agent instead. */
+export const DEFAULT_MAX_REBASE_RETRIES_PER_SHA = 2;
+
+/** we:scripts/conveyor/main-red-recovery.mjs#REBASE_ONTO_MAIN_COMMENT_MARKER — the stable FIRST LINE of the
+ *  durable rebase-onto-main comment, mirroring `we:scripts/conveyor/ci-red-recovery-watch.mjs
+ *  #HUNG_CI_COMMENT_MARKER`'s own shape and posted-on-every-attempt discipline (see
+ *  {@link buildRebaseOntoMainComment}'s own docblock). Distinct marker text so this cap never cross-counts with
+ *  the hung-CI cap or any other durable marker in this repo. */
+export const REBASE_ONTO_MAIN_COMMENT_MARKER = '🔀 conveyor rebase-onto-main';
+
+/** Mirrors `we:scripts/conveyor/ci-red-recovery-watch.mjs#bodyHasExactLine` exactly — DUPLICATED, not imported,
+ *  for the same reason {@link CI_HEAL_ROUND_CAP} above is duplicated rather than imported: `ci-red-recovery-
+ *  watch.mjs` imports THIS module already (and, transitively via `reconcile-pass.mjs`, `reconcile-core.mjs`
+ *  too — which also imports THIS module directly), so importing back from it would be circular. Each copy is
+ *  pinned by its own file's tests so a drift between them fails loud rather than silently diverging. */
+function bodyHasExactLine(body, line) {
+  if (typeof body !== 'string' || typeof line !== 'string' || !line) return false;
+  return body.split('\n').some((l) => l === line);
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#countRebaseOntoMainComments — the DURABLE, restart-surviving
+ * rebase-onto-main attempt count for ONE head sha (see {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s own
+ * docblock for why this cap exists at all). Mirrors `ci-red-recovery-watch.mjs#countHungCiComments`'s own
+ * per-sha scoping and trusted-author gate exactly — counts EVERY attempt marker regardless of outcome (success
+ * or failure), so a permanently-failing rebase still trips the cap rather than retrying forever. PURE.
+ * @param {Array<{body?:string, viewerDidAuthor?:boolean, author?:{login?:string}}|string>|null|undefined} comments
+ * @param {string|null} [headSha] - when given, only a marker whose body names THIS sha counts.
+ * @returns {number}
+ */
+export function countRebaseOntoMainComments(comments, headSha = null) {
+  if (!Array.isArray(comments)) return 0;
+  let n = 0;
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(REBASE_ONTO_MAIN_COMMENT_MARKER)) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // a forged marker from an untrusted login must never inflate this cap.
+    if (headSha && !bodyHasExactLine(body, `sha: ${headSha}`)) continue;
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#buildRebaseOntoMainComment — the durable comment body posted after
+ * EVERY rebase-onto-main attempt, success or failure — mirrors `ci-red-recovery-watch.mjs#buildHungCiComment`'s
+ * own "count every attempt, not just every success" discipline: a permanently-failing write must still trip
+ * the cap, or a token/permission gap would retry forever exactly like the pre-fix hung-CI cancel/rerun did.
+ * PURE.
+ * @param {{headRefName?:(string|null), headSha?:(string|null), ok?:boolean, action?:string, error?:(string|null)}} o
+ * @returns {string}
+ */
+export function buildRebaseOntoMainComment({
+  headRefName = null, headSha = null, ok = true, action = 'rebased', error = null,
+} = {}) {
+  const outcome = ok
+    ? (action === 'current'
+      ? "found this branch's head already current with main's tip — nothing to do."
+      : "refreshed this branch onto main's current tip.")
+    : `attempted to refresh this branch onto main and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing refresh cannot retry forever; once capped, this is left for a ci-heal agent to investigate instead.`;
+  return [
+    REBASE_ONTO_MAIN_COMMENT_MARKER,
+    '',
+    `branch: ${headRefName ?? '(unknown)'}`,
+    `sha: ${headSha ?? '(unknown)'}`,
+    `conveyor rebase-onto-main ${outcome}`,
+  ].join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -302,15 +403,19 @@ export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}
 // posts on every completed cancel+rerun ({@link module:./ci-red-recovery-watch.mjs#HUNG_CI_COMMENT_MARKER}) —
 // never a parallel in-memory store a conveyor restart would wipe.
 //
-// ESCALATION PAST THE CAP NEEDS NO NEW CODE PATH. Once a head sha has been cancelled+rerun
-// {@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA} times, this pass refuses (`hung-cap-exhausted`) and stops touching
-// it — deliberately. The NEW `timeout-minutes` on every `we:.github/workflows/ci.yml` job (this same card,
-// xd1sfms) means a run this pass has given up on will now be force-failed by GitHub itself within, at most,
-// the slowest job's own timeout (20min for `test`) rather than hanging for the 360-min default — at which
-// point the required check genuinely CONCLUDES failed, and the EXISTING `ci-red` → `ci-heal` path
-// (`we:scripts/conveyor/reconcile-core.mjs`) picks it up exactly as it already does for any other red PR. The
-// two halves of this card compose: bounded job timeouts are what make "escalate to ci-heal" true without this
-// file inventing a second escalation mechanism of its own.
+// ESCALATION PAST THE CAP, UPDATED 2026-09-25 18:55 ET (#4075/#3383 continuation). Once a head sha has been
+// cancelled+rerun {@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA} times, this pass now DISPATCHES a `hung-cap-escalate`
+// action (cancel the run, never re-run it) instead of refusing — see that dispatch's own inline comment in
+// {@link planHungCiRecoveries} for the live incident this corrects (PR #2636's own branch predates the
+// `timeout-minutes` fix below, so GitHub's own per-job default could still hang it for 360 minutes even after
+// this pass gave up). Cancelling flips the required check to CONCLUDED (cancelled counts as failed —
+// `we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed`), and the EXISTING `ci-red` → `ci-heal` path
+// (`we:scripts/conveyor/reconcile-core.mjs`) picks it up exactly as it already does for any other red PR — a
+// `ci-heal` agent merges `main` in (which DOES carry the new `timeout-minutes`, onto this PR's OWN branch, for
+// its next run) and investigates the shard itself. The NEW `timeout-minutes` on every `we:.github/workflows/
+// ci.yml` job (this same card, xd1sfms) still matters for every run that starts AFTER a PR has already been
+// refreshed onto post-fix `main` — it is this cap's fallback, not its primary mechanism, now that a cancel is
+// possible again.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_HUNG_THRESHOLD_MS — a required-check RUN (see
@@ -491,9 +596,25 @@ export function planHungCiRecoveries({
     // over, exactly as an ordinary exhausted retry already does.
     const attempts = Number.isFinite(c?.hungAttemptsForSha) ? c.hungAttemptsForSha : 0;
     if (attempts >= maxRetriesPerSha) {
-      refusals.push({
-        ...base, kind: 'hung-cap-exhausted',
-        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${attempts} hung-recovery attempt(s) (cap ${maxRetriesPerSha}) — leaving it for GitHub's own job timeout-minutes to conclude it, at which point the ordinary ci-heal path takes over`,
+      // 2026-09-25 18:55 ET correction (#4075/#3383): this branch used to REFUSE here (`hung-cap-exhausted`)
+      // and leave the run for GitHub's own job `timeout-minutes` to eventually force-fail — necessary while the
+      // GitHub App token was `actions:read`-only (a cancel attempt could only fail). LIVE-CONFIRMED GAP: PR
+      // #2636's own branch still carries the OLD `ci.yml`, with no `timeout-minutes` set on any job (workflows
+      // run from the PR's HEAD, never from `main`, so a fix landed on `main` never reaches an open PR's own
+      // run) — so that fallback could hang for GitHub's 360-min per-job default, and every tick logged
+      // `nothing-owed` throughout. Now that the operator has granted the App `actions:write`, a cancel is
+      // actually possible again, so this DISPATCHES a cancel-only action instead of refusing — the EXACT same
+      // shape the `repeat-hang` branch below already uses to hand a stuck run to `ci-heal`
+      // (`we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed` already treats a CANCELLED required check as
+      // failed, so the existing `ci-red` → `ci-heal` path in `reconcile-core.mjs` picks it up with no new code
+      // there — `ci-heal` merges `main` in, which brings the new `timeout-minutes` onto this PR's own branch
+      // for its NEXT run, and investigates the shard itself). Self-bounding: once the required check concludes
+      // (cancelled), `buildHungCandidates` no longer returns this PR as a candidate at all, so this branch stops
+      // firing on its own — no separate escalate-only cap needed.
+      dispatch.push({
+        ...base, attempts,
+        kind: 'hung-cap-escalate',
+        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${attempts} hung-recovery attempt(s) (cap ${maxRetriesPerSha}) — cancelling run ${base.runId ?? '?'} (never re-running it) so the existing ci-red -> ci-heal path takes over and merges main's newer CI timeouts in, instead of waiting on GitHub's own job timeout-minutes, which this PR's own stale branch does not have set`,
       });
       continue;
     }
