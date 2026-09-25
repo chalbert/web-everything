@@ -155,6 +155,32 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
       }
     });
 
+    // #4044 live bug (2026-09-25 08:14 ET): the shared shim had baked in a gh-throttle.mjs path from a checkout
+    // that was gone; every gh call on the machine died with `node:internal/modules/cjs/loader:1227` and the
+    // daemon rebuild's live smoke rejected main on it. A missing throttle CLI must degrade to the real gh.
+    it('a baked GH_THROTTLE_CLI that no longer exists (its checkout was removed) falls back to the real gh — never a Cannot-find-module crash (#4044)', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'we-gh-shim-live-'));
+      try {
+        const realGh = join(dir, 'real-gh');
+        writeFileSync(realGh, '#!/usr/bin/env node\nconsole.log(JSON.stringify({ argv: process.argv.slice(2), ghToken: process.env.GH_TOKEN || null }));\n', 'utf8');
+        chmodSync(realGh, 0o755);
+        const cachePath = join(dir, 'cache.json');
+        writeFileSync(cachePath, JSON.stringify({ v: 2, token: 'ghs_live_fresh', expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }), 'utf8');
+        const shimPath = join(dir, 'gh');
+        const goneCli = join(dir, 'lane-that-was-deleted', 'scripts', 'lib', 'gh-throttle.mjs');
+        writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath, ghThrottleCliPath: goneCli }), 'utf8');
+        chmodSync(shimPath, 0o755);
+        const r = spawnSync(shimPath, ['api', 'repos/x/y'], { encoding: 'utf8' });
+        expect(r.stderr).not.toMatch(/Cannot find module|cjs\/loader/);
+        expect(r.status).toBe(0);
+        const out = JSON.parse(r.stdout);
+        expect(out.argv).toEqual(['api', 'repos/x/y']);
+        expect(out.ghToken).toBe('ghs_live_fresh'); // still on the App token — only the pacing hop is skipped
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('a missing cache file is treated as absent, never thrown on — the real gh still runs', () => {
       const { dir, shimPath } = setup(); // cache.json is never written
       try {
@@ -348,6 +374,18 @@ describe('ensureGhShim — the one real write, best-effort, never throws', () =>
     expect(ensureGhShim({ dir: '/x', realGhPath: null, mkdir, writeFile })).toEqual({ ok: false, reason: 'no-real-gh' });
     expect(mkdir).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('the real write is atomic — temp file then rename onto dir/gh, never an in-place truncate a concurrent gh could exec half-written (#4044)', () => {
+    const writeFile = vi.fn();
+    const chmod = vi.fn();
+    const rename = vi.fn();
+    const result = ensureGhShim({ dir: '/shim', realGhPath: '/bin/gh', cachePath: '/x/c.json', mkdir: vi.fn(), writeFile, chmod, rename });
+    expect(result).toEqual({ ok: true, path: '/shim/gh' });
+    const tmp = writeFile.mock.calls[0][0];
+    expect(tmp).toMatch(/^\/shim\/gh\.tmp-/);
+    expect(chmod).toHaveBeenCalledWith(tmp, 0o755);
+    expect(rename).toHaveBeenCalledWith(tmp, '/shim/gh');
   });
 
   it('a failing write is swallowed — {ok:false}, never a thrown error', () => {

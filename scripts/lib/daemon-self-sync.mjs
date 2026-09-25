@@ -99,6 +99,8 @@
  * gate would defeat the whole point of gating rebuilds in the first place).
  */
 
+import { readFileSync, statSync } from 'node:fs';
+import { dirname, resolve as resolvePath, relative, isAbsolute, basename } from 'node:path';
 import { gitRun } from './main-staleness.mjs';
 import { gateMergedCommit } from './daemon-live-smoke.mjs';
 import { rebuildClone, readRebuildState } from './daemon-rebuild.mjs';
@@ -338,6 +340,127 @@ export function selfSyncCheckoutPoc({ root, base = 'main', pocBranch, run = gitR
   return { merged: false, commits: 0, reason: 'conflict' };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// #4044 RESTART GATE — restart only when the daemon's OWN code changed, and never more than once per window.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+//
+// LIVE BUG (2026-09-25): every rebuild that moved the clone restarted EVERY daemon running from it — on every
+// main move, every few minutes during drain activity, though most moves only touch `backlog/*.md`. Each restart
+// costs a boot plus a fresh tick; the fix-dispatch daemon's 120s ticks were starved. A daemon's in-memory code
+// is only stale when a file it IMPORTED changed: its children (passes, dispatched sessions) are spawned fresh
+// from disk every time and always see the new tree. So the restart decision is now: which files changed between
+// this process's boot sha and HEAD now, and does any of them sit in this daemon's static import closure?
+
+/** Env var: minimum time (ms) a daemon process runs before a code-change restart is taken. Default 10 min. */
+export const RESTART_MIN_INTERVAL_ENV = 'WE_DAEMON_RESTART_MIN_INTERVAL_MS';
+export const DEFAULT_RESTART_MIN_INTERVAL_MS = 10 * 60 * 1000;
+
+/** PURE: the restart window from env — a non-negative integer, else the default. */
+export function resolveRestartMinIntervalMs(env = process.env) {
+  const raw = env?.[RESTART_MIN_INTERVAL_ENV];
+  const n = raw == null || String(raw).trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_RESTART_MIN_INTERVAL_MS;
+}
+
+const IMPORT_SPEC_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])([^'"\n]+)\1/g;
+const JSON_LITERAL_RE = /['"`]([^'"`\n]*\.json)['"`]/g;
+const NONLITERAL_DYNAMIC_IMPORT_RE = /\bimport\s*\(\s*(?!['"])/;
+
+function resolveRelativeSpec(fromFile, spec, exists) {
+  const base = resolvePath(dirname(fromFile), spec);
+  for (const cand of [base, `${base}.mjs`, `${base}.js`, `${base}.cjs`, `${base}/index.mjs`, `${base}/index.js`]) {
+    if (exists(cand)) return cand;
+  }
+  return null;
+}
+
+/**
+ * The daemon's STATIC import closure, walked from its entry file(s) over relative `import`/`export … from`/
+ * literal `import('…')` specifiers. Returns repo-relative paths. `complete:false` when a closure file has a
+ * NON-literal dynamic `import(expr)` in code (its target can't be known statically) — the caller then falls back
+ * to "any code file changed". `bareDeps` = some file imports a package (a `package*.json` change is relevant).
+ * `jsonNames` = basenames of `.json` string literals in closure files (a config read at runtime by name).
+ * Never throws: an unreadable entry returns `null` (the caller's conservative fallback).
+ * @param {{root:string, entries:string[], readFile?:(p:string)=>string, exists?:(p:string)=>boolean}} o
+ * @returns {{files:Set<string>, complete:boolean, bareDeps:boolean, jsonNames:Set<string>}|null}
+ */
+export function collectImportClosure({
+  root, entries, readFile = (p) => readFileSync(p, 'utf8'),
+  exists = (p) => { try { return statSync(p).isFile(); } catch { return false; } },
+}) {
+  const absRoot = resolvePath(root);
+  const starts = (entries || []).filter(Boolean).map((e) => (isAbsolute(e) ? e : resolvePath(absRoot, e)))
+    .filter((e) => !relative(absRoot, e).startsWith('..') && exists(e));
+  if (!starts.length) return null;
+  const seen = new Set();
+  const jsonNames = new Set();
+  let complete = true;
+  let bareDeps = false;
+  const stack = [...starts];
+  while (stack.length) {
+    const file = stack.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    let src;
+    try { src = readFile(file); } catch { complete = false; continue; }
+    for (const m of src.matchAll(IMPORT_SPEC_RE)) {
+      const spec = m[2];
+      if (spec.startsWith('./') || spec.startsWith('../')) {
+        const hit = resolveRelativeSpec(file, spec, exists);
+        if (hit && !relative(absRoot, hit).startsWith('..')) stack.push(hit);
+      } else if (!spec.startsWith('node:') && /^[@a-z]/i.test(spec) && !/\s/.test(spec)) {
+        bareDeps = true;
+      }
+    }
+    for (const m of src.matchAll(JSON_LITERAL_RE)) jsonNames.add(basename(m[1]));
+    for (const line of src.split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('*') || t.startsWith('//') || t.startsWith('/*')) continue;
+      if (NONLITERAL_DYNAMIC_IMPORT_RE.test(t.replace(/\/\/.*$/, ''))) { complete = false; break; }
+    }
+  }
+  return { files: new Set([...seen].map((f) => relative(absRoot, f))), complete, bareDeps, jsonNames };
+}
+
+/** Files changed between two commits (`git diff --name-only from to`), or `null` on any git failure. */
+export function changedFilesBetween({ root, from, to, run = gitRun, timeoutMs = 60_000 }) {
+  if (!from || !to) return null;
+  const r = run(['diff', '--name-only', from, to], { cwd: root, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+const CODE_FILE_RE = /\.(mjs|cjs|js|ts|json)$/;
+const PACKAGE_MANIFEST_RE = /(^|\/)package(-lock)?\.json$/;
+
+/**
+ * PURE: does the move from boot sha to HEAD-now need this daemon to restart, and may it restart now?
+ *   - `changedFiles: null` (the diff failed — unknown) ⇒ restart NOW, as before this gate (fail safe, never
+ *     throttled: an unknown move is the one case we can't reason about).
+ *   - no changed file the daemon imports ⇒ `{restart:false, reason:'no-imported-change'}` — keep ticking; the
+ *     on-disk tree is current (dispatch staleness reads the checkout, not memory) and children see it anyway.
+ *   - an imported file changed, but this process booted less than `minIntervalMs` ago ⇒
+ *     `{restart:false, reason:'min-interval'}` — taken on a later tick, so a burst of code landings costs at
+ *     most one restart per window.
+ *   - else restart.
+ * @param {{changedFiles:string[]|null, closure:ReturnType<typeof collectImportClosure>, uptimeMs:number, minIntervalMs:number}} s
+ * @returns {{restart:boolean, reason:string, relevant?:string[]}}
+ */
+export function decideRestart({ changedFiles, closure, uptimeMs, minIntervalMs }) {
+  if (changedFiles == null) return { restart: true, reason: 'diff-unknown' };
+  let relevant;
+  if (!closure || !closure.complete) {
+    relevant = changedFiles.filter((f) => CODE_FILE_RE.test(f) && !/(^|\/)__tests__\//.test(f) && !/\.test\.[mc]?js$/.test(f));
+  } else {
+    relevant = changedFiles.filter((f) => closure.files.has(f)
+      || (closure.bareDeps && PACKAGE_MANIFEST_RE.test(f))
+      || (f.endsWith('.json') && closure.jsonNames.has(basename(f))));
+  }
+  if (!relevant.length) return { restart: false, reason: 'no-imported-change', relevant };
+  if (Number.isFinite(minIntervalMs) && uptimeMs < minIntervalMs) return { restart: false, reason: 'min-interval', relevant };
+  return { restart: true, reason: 'imported-change', relevant };
+}
+
 /**
  * Wrap a daemon's `runDaemonLoop` effects so each tick first self-syncs the clone. When new commits arrive,
  * `onRestart` runs in place of the tick (the caller releases its lease and exits); otherwise the tick runs.
@@ -386,6 +509,8 @@ export function withSelfSync(effects, {
   mainOnly = false, rebuild = (o = {}) => rebuildClone({
     root, env, log, mainOnly, ...o,
   }), acquireRead = acquireReadLock, releaseRead = releaseReadLock, readState = readRebuildState,
+  entries = [process.argv[1]], diffFiles = changedFilesBetween, importClosure = collectImportClosure,
+  minRestartIntervalMs = resolveRestartMinIntervalMs(env), now = Date.now,
 }) {
   const tick = effects.tickOnce;
   const resolvedPocBranch = resolvePocSyncBranch({ pocBranch, env });
@@ -404,7 +529,29 @@ export function withSelfSync(effects, {
   // Boot-time HEAD — read ONCE, here, before any tick ever runs. A read failure (null) permanently disables
   // the drift check for this process's lifetime rather than risk comparing against a wrong/stale value.
   const bootSha = readHead(syncOpts());
+  const bootAt = now();
   const cloneLockOpts = () => (env && env.WE_DAEMON_CLONE_LOCK_ROOT ? { lockRoot: env.WE_DAEMON_CLONE_LOCK_ROOT } : {});
+  // #4044 restart gate (see decideRestart). The closure is walked lazily, once, from the BOOT tree's files — the
+  // code actually loaded in memory. (A file newly added to the closure only matters via an edit to an existing
+  // closure file that now imports it, which the gate already catches.)
+  let closure;
+  let closureBuilt = false;
+  const loggedHeads = new Set();
+  const restartGate = (headNow) => {
+    if (!closureBuilt) {
+      closureBuilt = true;
+      try { closure = importClosure({ root, entries }); } catch { closure = null; }
+    }
+    const changedFiles = diffFiles({ root, from: bootSha, to: headNow, ...(timeoutMs != null ? { timeoutMs } : {}) });
+    const d = decideRestart({ changedFiles, closure, uptimeMs: now() - bootAt, minIntervalMs: minRestartIntervalMs });
+    if (!d.restart && !loggedHeads.has(`${headNow}:${d.reason}`)) {
+      loggedHeads.add(`${headNow}:${d.reason}`);
+      log.error?.(d.reason === 'min-interval'
+        ? `daemon-self-sync: clone moved to ${headNow} and ${d.relevant.length} imported file(s) changed — restart deferred until this process has run ${Math.round(minRestartIntervalMs / 1000)}s (#4044 restart gate)`
+        : `daemon-self-sync: clone moved to ${headNow} (${changedFiles.length} file(s) changed since boot, none imported by this daemon) — no restart needed, ticking on (#4044 restart gate)`);
+    }
+    return d;
+  };
   return {
     ...effects,
     // Forwards whatever arguments the caller's own tickOnce takes (e.g. runner.mjs's per-tick bookkeeping
@@ -442,10 +589,11 @@ export function withSelfSync(effects, {
       //    restarts INSTEAD of ticking — the read lock below is never even acquired for this tick.
       const rebuildResult = await rebuild();
       if (rebuildResult && rebuildResult.moved && rebuildResult.adopted) {
-        log.error?.(`daemon-self-sync: rebuilt the clone onto ${rebuildResult.head} — restarting onto the new code (#4044)`);
-        return onRestart(rebuildResult);
-      }
-      if (rebuildResult && rebuildResult.reason && rebuildResult.reason !== 'up-to-date') {
+        if (restartGate(rebuildResult.head).restart) {
+          log.error?.(`daemon-self-sync: rebuilt the clone onto ${rebuildResult.head} — restarting onto the new code (#4044)`);
+          return onRestart(rebuildResult);
+        }
+      } else if (rebuildResult && rebuildResult.reason && rebuildResult.reason !== 'up-to-date') {
         log.error?.(`daemon-self-sync: rebuild did not move the clone (${rebuildResult.reason}) — ticking on the current code`);
       }
 
@@ -478,7 +626,7 @@ export function withSelfSync(effects, {
         // here: any HEAD change visible under the read lock is always an ADOPTED build — a rebuild's writer
         // holds the write lock through its own live smoke, and a rejected build is restored before release.
         const headNow = readHead(syncOpts());
-        if (bootSha != null && headNow != null && headNow !== bootSha) {
+        if (bootSha != null && headNow != null && headNow !== bootSha && restartGate(headNow).restart) {
           releaseOnce();
           log.error?.(`daemon-self-sync: HEAD moved from ${bootSha} to ${headNow} since this process booted (an adopted rebuild) — restarting onto the new code (#4044)`);
           return onRestart({ merged: false, commits: 0, reason: 'head-moved', headSha: headNow });
@@ -495,7 +643,7 @@ export function withSelfSync(effects, {
       //    of `intervalMs` to lose the same race again — always AFTER the read lock above is released.
       if (typeof hasStaleRefusal === 'function' && hasStaleRefusal(tickResult)) {
         const r2 = await rebuild();
-        if (r2 && r2.moved && r2.adopted) {
+        if (r2 && r2.moved && r2.adopted && restartGate(r2.head).restart) {
           log.error?.(`daemon-self-sync: tick hit the stale-main refusal — rebuild adopted ${r2.head} immediately, restarting onto the new code (#3383/#4044), instead of waiting the full interval to lose the same race again`);
           return onRestart(r2);
         }

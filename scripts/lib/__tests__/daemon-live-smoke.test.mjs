@@ -154,6 +154,20 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       if (cwds.includes(root)) expect({ name: check.name, mayBeTransient: check.mayBeTransient }).toEqual({ name: check.name, mayBeTransient: false });
     }
   });
+  // #4044: the live 08:14 ET alert read only `exited 1: node:internal/modules/cjs/loader:1227` — the stack
+  // location, not the error. The gh checks' detail now carries the real error line too.
+  it('a crashed gh (node stack) reports the real Error line, not only the stack location (#4044)', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'gh') throw new Error("exited 1: node:internal/modules/cjs/loader:1227\n  throw err;\n  ^\n\nError: Cannot find module '/gone/lane-9/scripts/lib/gh-throttle.mjs'\n    at Module._resolveFilename");
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+    const gh = smoke.results.find((r) => r.name === 'gh-api-repo');
+    expect(gh.ok).toBe(false);
+    expect(gh.detail).toContain("Cannot find module '/gone/lane-9/scripts/lib/gh-throttle.mjs'");
+  });
   it('an overlay whose lane-pool.mjs prints transient-looking text still gets a code verdict (list and acquire)', async () => {
     for (const verb of ['list', 'acquire']) {
       const runChild = vi.fn(async (cmd, args) => {

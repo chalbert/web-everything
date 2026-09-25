@@ -4,14 +4,16 @@
  *   REAL temporary git repos so the actual fetch/merge/abort commands are proven, not only mocked.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   decideSelfSync, selfSyncCheckout, withSelfSync, readHeadSha, readOriginRefSha,
   DAEMON_SELF_SYNC_BRANCH_ENV, resolvePocSyncBranch, decidePocSelfSync, selfSyncCheckoutPoc,
-  isSafeBranchName,
+  isSafeBranchName, decideRestart, collectImportClosure, changedFilesBetween, resolveRestartMinIntervalMs,
+  DEFAULT_RESTART_MIN_INTERVAL_MS,
 } from '../daemon-self-sync.mjs';
 import { assertMainNotStale, isStaleMainRefusalMessage } from '../main-staleness.mjs';
 
@@ -706,5 +708,148 @@ describe('process.env writes never leak past one test (vitest.setup.ts restore)'
   });
   it('step 2: the next test starts without them', () => {
     expect(process.env.WE_DAEMON_MANAGED_CLONE).toBeUndefined();
+  });
+});
+
+// #4044 LIVE BUG 2 (2026-09-25): every rebuild that moved the clone restarted EVERY daemon on it — each main move,
+// every few minutes during drain activity, though most moves only touch backlog/*.md — starving the fix-dispatch
+// daemon's 120s ticks. The restart gate: restart only when a file the daemon IMPORTS changed, at most once per window.
+describe('decideRestart — pure (#4044 restart gate)', () => {
+  const closure = { files: new Set(['skills-src/conveyor/review-daemon.mjs', 'scripts/lib/x.mjs']), complete: true, bareDeps: true, jsonNames: new Set(['poc-branches.json']) };
+  it('a move touching only files the daemon does not import → no restart', () => {
+    expect(decideRestart({ changedFiles: ['backlog/4143.md', 'scripts/other.mjs'], closure, uptimeMs: 1e9, minIntervalMs: 0 }))
+      .toMatchObject({ restart: false, reason: 'no-imported-change' });
+  });
+  it('an imported file changed, window elapsed → restart', () => {
+    expect(decideRestart({ changedFiles: ['scripts/lib/x.mjs'], closure, uptimeMs: 700_000, minIntervalMs: 600_000 }))
+      .toMatchObject({ restart: true, reason: 'imported-change', relevant: ['scripts/lib/x.mjs'] });
+  });
+  it('an imported file changed inside the window → deferred (min-interval), never dropped', () => {
+    expect(decideRestart({ changedFiles: ['scripts/lib/x.mjs'], closure, uptimeMs: 60_000, minIntervalMs: 600_000 }))
+      .toMatchObject({ restart: false, reason: 'min-interval' });
+  });
+  it('package.json / package-lock.json count when the daemon imports any package', () => {
+    expect(decideRestart({ changedFiles: ['package-lock.json'], closure, uptimeMs: 1e9, minIntervalMs: 0 }).restart).toBe(true);
+  });
+  it('a .json the closure names as a string literal (a runtime-read config) counts', () => {
+    expect(decideRestart({ changedFiles: ['scripts/lib/poc-branches.json'], closure, uptimeMs: 1e9, minIntervalMs: 0 }).restart).toBe(true);
+  });
+  it('an unknown diff (git failed) restarts NOW — the fail-safe, pre-gate behavior, never throttled', () => {
+    expect(decideRestart({ changedFiles: null, closure, uptimeMs: 0, minIntervalMs: 600_000 })).toMatchObject({ restart: true, reason: 'diff-unknown' });
+  });
+  it('an unknown/incomplete closure falls back to "any non-test code file changed"', () => {
+    expect(decideRestart({ changedFiles: ['backlog/1.md', 'scripts/__tests__/a.test.mjs'], closure: null, uptimeMs: 1e9, minIntervalMs: 0 }).restart).toBe(false);
+    expect(decideRestart({ changedFiles: ['backlog/1.md', 'scripts/a.mjs'], closure: { ...closure, complete: false }, uptimeMs: 1e9, minIntervalMs: 0 }).restart).toBe(true);
+  });
+  it('the window reads WE_DAEMON_RESTART_MIN_INTERVAL_MS, defaulting to 10 minutes', () => {
+    expect(resolveRestartMinIntervalMs({})).toBe(DEFAULT_RESTART_MIN_INTERVAL_MS);
+    expect(DEFAULT_RESTART_MIN_INTERVAL_MS).toBe(600_000);
+    expect(resolveRestartMinIntervalMs({ WE_DAEMON_RESTART_MIN_INTERVAL_MS: '0' })).toBe(0);
+    expect(resolveRestartMinIntervalMs({ WE_DAEMON_RESTART_MIN_INTERVAL_MS: 'junk' })).toBe(DEFAULT_RESTART_MIN_INTERVAL_MS);
+  });
+});
+
+describe('collectImportClosure — real tmpdir', () => {
+  it('walks relative static + literal dynamic imports, notes packages and .json literals, stays inside root', () => {
+    const root = mkdtempSync(join(tmpdir(), 'self-sync-closure-'));
+    try {
+      mkdirSync(join(root, 'd'), { recursive: true });
+      mkdirSync(join(root, 'lib'), { recursive: true });
+      writeFileSync(join(root, 'd', 'daemon.mjs'), "import { a } from '../lib/a.mjs';\nimport matter from 'gray-matter';\nconst cfg = 'cfg.json';\n");
+      writeFileSync(join(root, 'lib', 'a.mjs'), "export { b } from './b.mjs';\nexport const a = async () => (await import('./lazy.mjs')).x;\n");
+      writeFileSync(join(root, 'lib', 'b.mjs'), "// import('not-code') in a comment is ignored\nexport const b = 1;\n");
+      writeFileSync(join(root, 'lib', 'lazy.mjs'), 'export const x = 1;\n');
+      writeFileSync(join(root, 'lib', 'unrelated.mjs'), 'export const y = 1;\n');
+      const c = collectImportClosure({ root, entries: [join(root, 'd', 'daemon.mjs')] });
+      expect([...c.files].sort()).toEqual(['d/daemon.mjs', 'lib/a.mjs', 'lib/b.mjs', 'lib/lazy.mjs']);
+      expect(c.complete).toBe(true);
+      expect(c.bareDeps).toBe(true);
+      expect(c.jsonNames.has('cfg.json')).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('a non-literal dynamic import in code marks the closure incomplete', () => {
+    const root = mkdtempSync(join(tmpdir(), 'self-sync-closure-'));
+    try {
+      writeFileSync(join(root, 'e.mjs'), 'const m = await import(process.env.X);\n');
+      expect(collectImportClosure({ root, entries: [join(root, 'e.mjs')] }).complete).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('an entry outside root (or missing) yields null — the caller falls back conservatively', () => {
+    expect(collectImportClosure({ root: '/nonexistent-root-xyz', entries: ['/elsewhere/entry.mjs'] })).toBeNull();
+  });
+  it('the real review/fix/pass daemons each have a complete closure that excludes backlog and tests', () => {
+    const root = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+    for (const entry of ['skills-src/conveyor/review-daemon.mjs', 'skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs', 'skills-src/conveyor/pass-daemon.mjs']) {
+      const c = collectImportClosure({ root, entries: [entry] });
+      expect(c.files.has(entry)).toBe(true);
+      expect(c.files.has('scripts/lib/daemon-self-sync.mjs')).toBe(true);
+      expect(c.complete).toBe(true);
+      expect([...c.files].some((f) => f.startsWith('backlog/') || f.includes('__tests__/'))).toBe(false);
+    }
+  });
+});
+
+describe('changedFilesBetween — injected git', () => {
+  it('lists the diff, or null on failure / missing sha', () => {
+    const run = vi.fn(() => ({ status: 0, stdout: 'a.md\nscripts/x.mjs\n' }));
+    expect(changedFilesBetween({ root: '/x', from: 'a', to: 'b', run })).toEqual(['a.md', 'scripts/x.mjs']);
+    expect(run).toHaveBeenCalledWith(['diff', '--name-only', 'a', 'b'], expect.objectContaining({ cwd: '/x', killSignal: 'SIGKILL' }));
+    expect(changedFilesBetween({ root: '/x', from: 'a', to: 'b', run: () => ({ status: 128, stdout: '' }) })).toBeNull();
+    expect(changedFilesBetween({ root: '/x', from: null, to: 'b', run })).toBeNull();
+  });
+});
+
+describe('withSelfSync — restart gate wiring (#4044 live bug 2)', () => {
+  const emptyState = () => ({ adopted: null, rejected: null, inProgress: null, quarantine: null });
+  const okLock = () => ({ ok: true });
+  const closure = { files: new Set(['skills-src/conveyor/review-daemon.mjs']), complete: true, bareDeps: false, jsonNames: new Set() };
+
+  it('an ADOPTED rebuild that only moved backlog/*.md does NOT restart — the tick runs on (the churn fix)', async () => {
+    const onRestart = vi.fn();
+    const log = { error: vi.fn() };
+    const readHead = vi.fn().mockReturnValueOnce('sha-boot').mockReturnValue('sha-new');
+    const w = withSelfSync({ tickOnce: () => 'ticked' }, {
+      root: '/x', onRestart, log, readHead, acquireRead: okLock, releaseRead: vi.fn(), readState: emptyState,
+      rebuild: async () => ({ moved: true, adopted: true, head: 'sha-new' }),
+      importClosure: () => closure, diffFiles: () => ['backlog/4143.md'], minRestartIntervalMs: 0,
+    });
+    await expect(w.tickOnce()).resolves.toBe('ticked');
+    await expect(w.tickOnce()).resolves.toBe('ticked'); // later ticks too — HEAD != boot is not itself a reason
+    expect(onRestart).not.toHaveBeenCalled();
+    const gateLogs = log.error.mock.calls.filter(([m]) => /no restart needed/.test(m));
+    expect(gateLogs).toHaveLength(1); // logged once per head, not every tick
+  });
+
+  it('an imported file changed → restarts (as before)', async () => {
+    const onRestart = vi.fn(() => 'restarted');
+    const w = withSelfSync({ tickOnce: vi.fn() }, {
+      root: '/x', onRestart, log: { error: vi.fn() }, readHead: () => 'sha-boot', acquireRead: okLock, releaseRead: vi.fn(), readState: emptyState,
+      rebuild: async () => ({ moved: true, adopted: true, head: 'sha-new' }),
+      importClosure: () => closure, diffFiles: () => ['skills-src/conveyor/review-daemon.mjs'], minRestartIntervalMs: 0,
+    });
+    await expect(w.tickOnce()).resolves.toBe('restarted');
+  });
+
+  it('an imported change inside the window is deferred, then taken once the window has elapsed (never dropped)', async () => {
+    let t = 1_000_000;
+    const onRestart = vi.fn(() => 'restarted');
+    const tick = vi.fn(() => 'ticked');
+    const readHead = vi.fn().mockReturnValueOnce('sha-boot').mockReturnValue('sha-new');
+    const w = withSelfSync({ tickOnce: tick }, {
+      root: '/x', onRestart, log: { error: vi.fn() }, readHead, acquireRead: okLock, releaseRead: vi.fn(), readState: emptyState,
+      rebuild: async () => ({ moved: false, reason: 'up-to-date' }), // a SIBLING's rebuild moved HEAD
+      importClosure: () => closure, diffFiles: () => ['skills-src/conveyor/review-daemon.mjs'],
+      minRestartIntervalMs: 600_000, now: () => t,
+    });
+    t += 120_000;
+    await expect(w.tickOnce()).resolves.toBe('ticked');
+    expect(onRestart).not.toHaveBeenCalled();
+    t += 600_000;
+    await expect(w.tickOnce()).resolves.toBe('restarted');
+    expect(onRestart).toHaveBeenCalledWith(expect.objectContaining({ reason: 'head-moved', headSha: 'sha-new' }));
   });
 });

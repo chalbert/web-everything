@@ -132,6 +132,14 @@ export function resolveSmokeBudgets(env = process.env) {
 }
 
 const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+// #4044: a crashed node child's first stderr line is only the stack LOCATION (`node:internal/modules/cjs/
+// loader:1227`) — the live 08:14 ET smoke-rejected alert carried nothing else, hiding that the gh shim's baked
+// throttle path was missing. Keep the first line, and append the first real `…Error:` line when it differs.
+const failureLine = (e) => {
+  const lines = String((e && e.message) || e).split('\n');
+  const err = lines.find((l) => /\b[A-Za-z]*Error\b[:\s]|Cannot find module/.test(l));
+  return err && err !== lines[0] ? `${lines[0]} — ${err.trim()}` : lines[0];
+};
 
 async function checkLanePoolList({ root, budgets, runChild }) {
   try {
@@ -218,7 +226,7 @@ async function checkGhApiRepo({ ghChildEnv, budgets, runChild }) {
     await runChild('gh', ['api', '--method', 'GET', `repos/${slug}`], { env: ghChildEnv, timeoutMs: budgets.ghApiMs });
     return { ok: true, detail: `gh api --method GET repos/${slug} ok` };
   } catch (e) {
-    return { ok: false, detail: `gh api --method GET repos/${slug} failed: ${firstLine(e)}` };
+    return { ok: false, detail: `gh api --method GET repos/${slug} failed: ${failureLine(e)}` };
   }
 }
 
@@ -228,7 +236,7 @@ async function checkGhPrList({ ghChildEnv, budgets, runChild }) {
     await runChild('gh', ['pr', 'list', '--limit', '1', '--repo', slug, '--json', 'number'], { env: ghChildEnv, timeoutMs: budgets.ghPrListMs });
     return { ok: true, detail: `gh pr list --repo ${slug} --limit 1 ok` };
   } catch (e) {
-    return { ok: false, detail: `gh pr list --repo ${slug} --limit 1 failed: ${firstLine(e)}` };
+    return { ok: false, detail: `gh pr list --repo ${slug} --limit 1 failed: ${failureLine(e)}` };
   }
 }
 
