@@ -95,6 +95,11 @@ import { createRestartReader, createRestartRunnerSinks } from './restart-runner-
 // the cards, ported alongside restart-runner from the same snapshot.
 import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from './priority-sync.mjs';
 import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
+// #3856 (epic #3443 graduation slice, last of six) — the land-advance operation's io + CLI wiring, ported
+// from `origin/lane/mechanical-dispatcher` alongside the other five sibling slices already on `main`.
+import { landAdvanceOperation, LAND_ADVANCE_OP } from './land-advance.mjs';
+import { createLandAdvanceReader } from './land-advance-io.mjs';
+import { canonicalRoot as landAdvanceCanonicalRoot } from './land-advance-gate.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -207,6 +212,13 @@ export const OPERATIONS = Object.freeze({
   }),
   [PR_STATUS_OP]: () => ({
     declaration: prStatusOperation({ readPrs: createPrReader() }),
+    sinks: {},
+  }),
+  // #3856 — plan only, no sinks. Every effect the plan can call for (dispatching a delivery agent, a
+  // CI-heal repair, a review, queueing an item) lives behind `land-advance-io.mjs`'s sinks, which this
+  // registration never wires in — see `http-adapter.test.mjs`'s `LAND_ADVANCE_OP` read-only pin.
+  [LAND_ADVANCE_OP]: () => ({
+    declaration: landAdvanceOperation({ readInputs: createLandAdvanceReader({ canonicalRoot: landAdvanceCanonicalRoot().root }) }),
     sinks: {},
   }),
   [PR_RECONCILE_OP]: () => ({
