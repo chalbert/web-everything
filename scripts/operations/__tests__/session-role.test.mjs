@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { WORKER_MARKER_ENV, markWorkerEnv, classifySession } from '../session-role.mjs';
+import { WORKER_MARKER_ENV, markWorkerEnv, classifySession, workerMarkerSettingsEnv } from '../session-role.mjs';
+import { buildAgentArgv } from '../dispatch-lane-io.mjs';
+import { buildInvestigatorArgv } from '../explore-io.mjs';
 import { defaultSpawnAgent, spawnAgentToCompletion } from '../dispatch-lane-io.mjs';
 import { defaultSpawnDetached } from '../detached-dispatch.mjs';
 
@@ -91,5 +93,26 @@ describe('every claude spawn site sets the marker', () => {
       'scripts/operations/dispatch-lane-io.mjs', 'scripts/operations/detached-dispatch.mjs']) {
       expect(readFileSync(join(ROOT, file), 'utf8'), file).toMatch(/markWorkerEnv\(/);
     }
+  });
+});
+
+// xgqz204 — `claude --bg` drops the spawner's ambient env (measured live 2026-09-25), so the `env` a spawn site
+// passes never reaches a `--bg` session. The marker must ride `--settings '{"env":...}'`, which does.
+describe('workerMarkerSettingsEnv — the marker every `claude --bg` spawn carries in --settings', () => {
+  it('adds the marker to null / a caller env, never mutating the input, and always wins over a stray value', () => {
+    expect(workerMarkerSettingsEnv(null)).toEqual({ [WORKER_MARKER_ENV]: '1' });
+    const input = { PATH: '/p', [WORKER_MARKER_ENV]: '0' };
+    expect(workerMarkerSettingsEnv(input)).toEqual({ PATH: '/p', [WORKER_MARKER_ENV]: '1' });
+    expect(input[WORKER_MARKER_ENV]).toBe('0');
+    expect(classifySession(workerMarkerSettingsEnv()).role).toBe('worker');
+  });
+  const settingsEnvOf = (argv) => JSON.parse(argv[argv.indexOf('--settings') + 1]).env;
+  it('every fresh --bg dispatch argv carries it (build/fix/ci-heal/review/stuck-inspect all use buildAgentArgv)', () => {
+    expect(settingsEnvOf(buildAgentArgv({ sessionId: 's', payload: { prompt: 'p', sessionSlug: 'review-1' } })))
+      .toEqual({ [WORKER_MARKER_ENV]: '1' });
+  });
+  it('an explore panelist argv carries it too', () => {
+    expect(settingsEnvOf(buildInvestigatorArgv({ sessionId: 'u', runId: 'r1', payload: { panelist: 'p1' }, prompt: 'go' })))
+      .toEqual({ [WORKER_MARKER_ENV]: '1' });
   });
 });

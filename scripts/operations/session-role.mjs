@@ -16,8 +16,12 @@
  * {@link markWorkerEnv}: `dispatch-lane-io.mjs` (`defaultSpawnAgent`, `spawnAgentToCompletion`),
  * `detached-dispatch.mjs` (`defaultSpawnDetached`), `deliver-item-wrapper.mjs`, `operator/dispatch.mjs` and
  * `lib/judge-spawn.mjs`. A NEW spawn site must do the same, or its child could look like an orchestrator.
- * UNVERIFIED: that `claude --bg` hands the CLI's env on to the daemon-spawned session. This session's own env
- * carries `WE_DISPATCH_AGENT_ARGS`, which is evidence it does, but no live `--bg` run was made to prove it.
+ * MEASURED (xgqz204, 2026-09-25, CLI 2.1.282): `claude --bg` does NOT hand the spawner's ambient env on to the
+ * session — a var set on the spawning shell was absent from the session's hook env. What DOES arrive, in the
+ * hook process env and the Bash tool env alike, is `--settings '{"env":{...}}'`: 5/5 probe sessions, 4 of them
+ * served by pre-warmed spares forked by ANOTHER process (they carried that process's env), still saw it. So a
+ * `claude --bg` spawn must put the marker in `--settings` — {@link workerMarkerSettingsEnv} — not only in the
+ * spawn call's `env`.
  */
 export const WORKER_MARKER_ENV = 'WE_CONVEYOR_WORKER';
 export const WORKER_MARKER_VALUE = '1';
@@ -25,6 +29,13 @@ export const WORKER_MARKER_VALUE = '1';
 /** A copy of `env` with the worker marker set. Pass the result as a spawn's `env`. Never mutates `env`. */
 export function markWorkerEnv(env = process.env) {
   return { ...(env ?? {}), [WORKER_MARKER_ENV]: WORKER_MARKER_VALUE };
+}
+
+/** A copy of a `--settings` env object (or `null`) with the worker marker set — what every `claude --bg` spawn
+ *  folds into `--settings '{"env":...}'` (see the header: the spawn's own `env` never reaches a `--bg` session).
+ *  Never mutates its input. */
+export function workerMarkerSettingsEnv(settingsEnv = null) {
+  return { ...(settingsEnv ?? {}), [WORKER_MARKER_ENV]: WORKER_MARKER_VALUE };
 }
 
 /** @returns {{ role: 'orchestrator'|'worker'|'unknown', reason: string }} */

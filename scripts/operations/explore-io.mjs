@@ -93,6 +93,7 @@ import { runStatus } from './engine.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createRegistry } from './registry.mjs';
 import { isValidRunId } from './run-record.mjs';
+import { workerMarkerSettingsEnv } from './session-role.mjs';
 import {
   DEFAULT_EXPECTED_WITHIN_MINUTES,
   EXPLORE_OP,
@@ -368,6 +369,8 @@ export function buildInvestigatorArgv({ sessionId, runId, payload, prompt, extra
     // together are the only identity this operation has. The id's tail is trimmed of leading separators so the
     // name reads `explore-<tail>-p1` rather than `explore--fixture-p1` when the cut lands on a dash.
     '-n', `explore-${String(runId).slice(-8).replace(/^[^A-Za-z0-9]+/, '')}-${String(payload?.panelist ?? 'p')}`,
+    // xgqz204 — a panelist is a spawned worker; `--bg` drops ambient env, so the marker must ride `--settings`.
+    '--settings', JSON.stringify({ env: workerMarkerSettingsEnv() }),
     ...extraArgs.map(String),
     text,
   ];

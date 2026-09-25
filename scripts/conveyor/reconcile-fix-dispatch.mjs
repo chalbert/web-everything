@@ -84,6 +84,7 @@ import {
 } from '../operations/dispatch-lane-io.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
 import { assertMainNotStale } from '../operations/review-dispatch.mjs';
+import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor } from '../operations/dispatch-lane.mjs';
 import { parseAuthorActorId } from '../lib/review-independence.mjs';
 import { laneRefItemNum } from './lease-reaper.mjs';
@@ -1052,6 +1053,8 @@ export function planFixDispatchClaimStatus({
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
+  // xgqz204 — this CLI may fast-forward its own checkout (#3474); re-execute rather than dispatch on old code.
+  armSelfReexecOnFastForward();
   const flags = {};
   for (const a of process.argv.slice(2)) {
     if (!a.startsWith('--')) continue;

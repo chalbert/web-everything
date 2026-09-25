@@ -149,7 +149,7 @@ import { JUDGE_PROVIDER_NAMES } from './cli-adapter.mjs';
 export const REVIEW_DISPATCH_SYSTEM_PROMPT_FILE = join(
   dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills-src', 'review', 'review-agent-system-prompt.md',
 );
-import { assertMainNotStale } from '../lib/main-staleness.mjs';
+import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
 // #3875 — re-exported so this file's own two existing importers (this module's own `dispatchReview` below,
 // and we:scripts/conveyor/reconcile-fix-dispatch.mjs) need no import change: the implementation moved to
 // we:scripts/lib/main-staleness.mjs (a pure lib, importable by a future daemon with no dependency on this
@@ -441,6 +441,8 @@ export function dispatchReview({
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
+  // xgqz204 — this CLI may fast-forward its own checkout (#3474); re-execute rather than dispatch on old code.
+  armSelfReexecOnFastForward();
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));

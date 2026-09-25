@@ -42,6 +42,7 @@ import {
   agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, findItem, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
+import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit } from '../conveyor/pr-work-unit.mjs';
@@ -270,6 +271,8 @@ export async function runReconcileCiHealDispatch({
 
 const IS_CLI = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
 if (IS_CLI) {
+  // xgqz204 — this CLI may fast-forward its own checkout (#3474); re-execute rather than dispatch on old code.
+  armSelfReexecOnFastForward();
   const flags = {};
   for (const a of process.argv.slice(2)) {
     if (!a.startsWith('--')) continue;
