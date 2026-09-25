@@ -5576,7 +5576,7 @@ premise corrected, clause 3 unchanged), [#poc-branch-declared-delivery-mode](#po
 
 ### Conveyor bot sessions: records outlive their work, bots stop on no net outcome, resume has one owner {#conveyor-session-lifecycle-policy}
 
-**Ratified 2026-09-24** (`4082`, bornAs `xwysd8b`, operator, in session: *"ok fork are ok"* · *"I ratify"*).
+**Ratified 2026-09-24** (`4082`, bornAs `4082`, operator, in session: *"ok fork are ok"* · *"I ratify"*).
 All three forks as prepared; the operator amended Fork 1 so retention has no upper limit, and dropped the
 bot-login / API-key question as out of scope (bots keep the operator's subscription login, per
 [#agent-runner-cli-backend](#agent-runner-cli-backend)). Grounding:
@@ -5605,7 +5605,7 @@ bot-login / API-key question as out of scope (bots keep the operator's subscript
 
 ### A resident health process watches the conveyor from its own failure domain, diagnoses deterministically first, dedups into episodes, and recommends without a session — it never clears readiness or edits code {#automated-health-daemon}
 
-**Ratified 2026-09-24** (`4065`, bornAs `xev8pnf`, operator, in session, in order: *"amend 1 as suggested"* ·
+**Ratified 2026-09-24** (`4065`, bornAs `4065`, operator, in session, in order: *"amend 1 as suggested"* ·
 *"ok to add new kind for fork 4"* · *"I ratify"*). Forks 2, 3 and 5 as prepared; Fork 1 amended by the operator
 (a dedicated clone that may run overlays of its own code, not a `main`-only clone); Fork 4's widening of the
 notification contract accepted explicitly. Grounding: `we:reports/2026-09-24-health-daemon-design.md` and

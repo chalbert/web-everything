@@ -201,9 +201,9 @@ A new anchor `#conveyor-session-lifecycle-policy` in `we:docs/agent/platform-dec
 
 | Child | Scope (predicted) |
 | --- | --- |
-| Retention sweep for finished sessions (Fork 1) → x2ij3r2 | `we:scripts/conveyor/session-reaper.mjs`, `we:scripts/operations/run-store.mjs` |
-| Per-kind no-outcome window + ceiling (Fork 2) → xgkl5ha | `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/session-reaper.mjs` |
-| Stamp the spawning chat on chat-spawned background sessions (cleanup scope) → xltlavt | `we:scripts/conveyor/session-reaper.mjs`, `we:.claude/settings.json` (a SessionStart hook) |
+| Retention sweep for finished sessions (Fork 1) → 4089 | `we:scripts/conveyor/session-reaper.mjs`, `we:scripts/operations/run-store.mjs` |
+| Per-kind no-outcome window + ceiling (Fork 2) → 4090 | `we:scripts/conveyor/hung-session.mjs`, `we:scripts/conveyor/session-reaper.mjs` |
+| Stamp the spawning chat on chat-spawned background sessions (cleanup scope) → 4091 | `we:scripts/conveyor/session-reaper.mjs`, `we:.claude/settings.json` (a SessionStart hook) |
 | Fork 3: "resume is single-owner" → added to #3366 as Done-when 6 | card edit only |
 
 ## Ruling (2026-09-24)
