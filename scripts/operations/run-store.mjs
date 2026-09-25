@@ -20,7 +20,7 @@
  * nothing above the seam changes.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -120,6 +120,80 @@ export function listRunIds(dir = resolveRunsDir()) {
 /** Delete a run's record. A no-op when it is already gone. */
 export function deleteRun(id, dir = resolveRunsDir()) {
   rmSync(runPath(id, dir), { force: true });
+}
+
+/**
+ * #4089 (epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 1) — IS A RUN RECORD SAFE TO
+ * PRUNE? A run with `pending` still set, or any effect still `pending`/`in-flight`, is mid-flight: this file's
+ * own header says a run record "dies when the run is done" — pruning one that is NOT done would discard the
+ * cursor/effects state a resume needs, exactly the loss the `pending`/`in-flight` distinction ({@link
+ * ./run-record.mjs}'s own doc) exists to prevent. `declared`/`applied`/`failed` effects carry no live external
+ * work to lose, so a record whose effects are ALL one of those (or empty) is terminal. A malformed record
+ * (missing `effects`) is treated as NOT terminal — never prune on an unreadable shape.
+ * @param {object} record
+ * @returns {boolean}
+ */
+export function isRunRecordTerminal(record) {
+  if (!record || typeof record !== 'object') return false;
+  if (record.pending !== null && record.pending !== undefined) return false;
+  if (!Array.isArray(record.effects)) return false;
+  return !record.effects.some((e) => e && (e.status === 'pending' || e.status === 'in-flight'));
+}
+
+/**
+ * #4089 — THE ROOT-CAUSE FIX for the gap `#4082`'s own card named verbatim: "Delete helpers exist but nothing
+ * calls them" (`we:scripts/operations/run-store.mjs:121`, i.e. {@link deleteRun} itself) — measured live at 92
+ * `.operations/runs/` entries with nothing ever pruning them. Deletes every TERMINAL ({@link isRunRecordTerminal})
+ * run record whose file is at least `maxAgeMs` old (by mtime — a run record has no `finishedAt` field of its
+ * own to read instead). This is deliberately NOT scoped to any one conveyor session — unlike a completion
+ * record or a delivery report (both keyed 1:1 by session slug), a run record's `id` is minted by whichever
+ * declared operation started it (`newRunId(op)` — `we:scripts/operations/run.mjs`, `land-advance-cli.mjs`,
+ * `backlog.mjs`'s `claim`, …) and carries no reliable back-reference to a conveyor session name, so there is no
+ * honest way to answer "is this run THIS session's run" — see this file's own PR for that reasoning. Pruning by
+ * terminal-state + age is the safe, generic axis this module CAN answer correctly, and it is exactly the axis
+ * the statute's own ceiling setting already describes as a safety valve for state that "dies when the run is
+ * done" — never touches a record still doing anything, and a `maxAgeMs` of `null` (the 'never' setting) turns
+ * this into a no-op read-only pass rather than an implicit always-off default.
+ * `dryRun` (#4089) reports exactly what WOULD be pruned without deleting anything — the same convention
+ * `session-reaper.mjs`'s own `runSessionReaperPass`/`runRetentionSweepPass` use, load-bearing for THAT
+ * caller's own `--dry-run` to stay honest rather than pruning run records unconditionally underneath a
+ * caller that asked for a preview.
+ * @param {{dir?:string, maxAgeMs:number|null, now?:number, statFn?:Function, dryRun?:boolean}} o
+ * @returns {{scanned:number, pruned:string[], kept:string[], corrupt:string[]}}
+ */
+export function pruneTerminalRuns({ dir = resolveRunsDir(), maxAgeMs, now = Date.now(), statFn = statSync, dryRun = false } = {}) {
+  const pruned = [];
+  const kept = [];
+  const corrupt = [];
+  const ids = listRunIds(dir);
+  if (maxAgeMs === null || maxAgeMs === undefined) return { scanned: ids.length, pruned, kept: ids, corrupt };
+  for (const id of ids) {
+    let record;
+    try {
+      record = tryReadRun(id, dir);
+    } catch {
+      corrupt.push(id); // a torn record — never silently deleted, see tryReadRun's own refusal policy
+      continue;
+    }
+    if (!record || !isRunRecordTerminal(record)) {
+      kept.push(id);
+      continue;
+    }
+    let ageMs;
+    try {
+      ageMs = now - statFn(runPath(id, dir)).mtimeMs;
+    } catch {
+      kept.push(id); // file vanished mid-sweep, or an unreadable stat — leave it for the next pass
+      continue;
+    }
+    if (ageMs >= maxAgeMs) {
+      if (!dryRun) deleteRun(id, dir);
+      pruned.push(id);
+    } else {
+      kept.push(id);
+    }
+  }
+  return { scanned: ids.length, pruned, kept, corrupt };
 }
 
 /**
