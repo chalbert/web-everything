@@ -75,7 +75,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
-import { runReconcilePass } from '../../scripts/conveyor/reconcile-pass.mjs';
+import { runReconcilePass, defaultReadPrs, defaultReadAgents } from '../../scripts/conveyor/reconcile-pass.mjs';
 // x26lw6u — the review is dispatched as a deterministic JOB (`review-job.mjs`: acquire → review-loop-cli →
 // report → release, no Claude wrapper session); `WE_REVIEW_DISPATCH_MODE=session` keeps the old `claude --bg`
 // path reachable. The jurors review-loop-cli spawns are the fresh, independent reviewers either way.
@@ -166,6 +166,21 @@ export function runReviewTick({
   holdReconcile = sweepReviewHoldLabels,
   acquirableLanes = () => Infinity,
   repo = WE_SLUG,
+  // #4133 (epic #3383/#4075) — audit `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2: the
+  // tick's OWN single `gh pr list` / `claude agents --json` reads, taken ONCE here and reused two ways —
+  // (1) injected straight into `reconcile` below, so ITS OWN internal `readPrs`/`readAgents` calls become a
+  // no-op reuse of this SAME data rather than a second fetch; (2) passed as `currentLabels`/`agents` into
+  // `tagRound`/`tagStatus`, which otherwise re-fetch the identical facts once PER PR they tag (`we:scripts/
+  // conveyor/review-round-tag.mjs`/`we:scripts/conveyor/review-status-tag.mjs`'s own `currentLabels`/`agents`
+  // params exist for exactly this). DELIBERATELY OPT-IN (`null` default, never `defaultReadPrs`/
+  // `defaultReadAgents` directly): every pre-existing test of this function mocks `reconcile` to skip its real
+  // IO, and a non-null default here would make THIS function's own new pre-fetch step spawn a real `gh`/
+  // `claude` process underneath every one of them regardless — the exact antipode of what this card fixes.
+  // `null` (the default) is BYTE-IDENTICAL to this function's pre-#4133 behavior: `reconcile` is called with
+  // just `{repo}`, and `tagRound`/`tagStatus` get no `currentLabels`/`agents`, falling back to their own
+  // existing fresh reads exactly as before. The real daemon (`buildCliDaemonEffects`, below) opts in.
+  readPrs = null,
+  readAgents = null,
 } = {}) {
   // #x01u7az — runs FIRST and INDEPENDENTLY of `reconcile`'s own plan: it is a plain `gh pr list` + label read
   // over the whole repo, not scoped to whatever this tick's discovery found owed, so a `reconcile` failure
@@ -196,9 +211,22 @@ export function runReviewTick({
   // channel (`reconcileError`) and — the real functional cost of the old behavior — stops it from silently
   // discarding whatever this repo's tick WOULD have dispatched had the read succeeded; the caller can still
   // retry next tick, exactly as before, just without the double, contradictory report.
+  // #4133 — read ONCE, here, and hand the SAME data into `reconcile` (via injected `readPrs`/`readAgents`
+  // closures) so its own internal fetch is a reuse, not a second call. Isolated in the SAME try/catch as
+  // `reconcile` itself always was — a fetch hiccup here is the identical failure class #xvzwiew's own comment
+  // documents (a flaky `claude`/`gh` spawn under load), just now caught one call frame earlier.
+  const sharedReads = typeof readPrs === 'function' && typeof readAgents === 'function';
   let plan;
+  let rawPrs = null;
+  let rawAgents = null;
   try {
-    plan = reconcile({ repo });
+    if (sharedReads) {
+      rawPrs = readPrs({ repo });
+      rawAgents = readAgents({});
+      plan = reconcile({ repo, readPrs: () => rawPrs, readAgents: () => rawAgents });
+    } else {
+      plan = reconcile({ repo });
+    }
   } catch (e) {
     return {
       reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, deferredForLanes: 0,
@@ -206,6 +234,10 @@ export function runReviewTick({
       holdReconcile: holdReconcileResults, holdReconcileError,
     };
   }
+  // Keyed by PR number so `tagRound`/`tagStatus` below can look up EACH PR's own already-fetched labels rather
+  // than asking `gh` again — `undefined` (a PR the tick's own listing somehow missed, a rare open-PR-appeared-
+  // mid-tick race) falls through to each helper's own fresh-read default, never a hard failure.
+  const labelsByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), p?.labels ?? []]));
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
   // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
@@ -240,11 +272,16 @@ export function runReviewTick({
       failed.push({ prNumber: d.prNumber, error: String((e && e.message) || e).split('\n')[0] });
       continue; // no round tag on a failed dispatch — the round did not actually advance
     }
-    try { tagRound({ pr: d.prNumber, repo, round: (d.attempts ?? 0) + 1 }); }
+    try { tagRound({ pr: d.prNumber, repo, round: (d.attempts ?? 0) + 1, currentLabels: labelsByPr.get(Number(d.prNumber)) }); }
     catch { /* cosmetic — a failed tag never fails the tick, see review-round-tag.mjs's own header */ }
   }
+  // A PR dispatched THIS tick is absent from the pre-dispatch `rawAgents` snapshot, yet its review job record
+  // already exists (`dispatchReviewJob` writes it before returning) — reusing the snapshot would tag it "nothing
+  // live" and strip its `review-status:reviewing` until the next tick. Those PRs read fresh (`undefined`).
+  const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
   for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes)) {
-    try { tagStatus({ pr: c.prNumber, repo }); }
+    const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
+    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {
@@ -390,7 +427,12 @@ export function buildCliDaemonEffects({
   // #3383 bug 3 — the real daemon wires the real `acquirableLanes` effect through by default, so production
   // dispatch is bounded by lane reality; `runReviewTick`'s OWN default stays unbounded (`() => Infinity`) so
   // every pre-existing test of it (which fakes reconcile/dispatch directly, never this) is unaffected.
-  runReview = (opts) => runReviewTickAllRepos({ acquirableLanes: defaultAcquirableLaneCount, ...opts }),
+  // #4133 — likewise, the real daemon opts INTO the shared-reads optimization by wiring the real
+  // `defaultReadPrs`/`defaultReadAgents` through; `runReviewTick`'s own default stays `null` (see that
+  // function's own doc for why) so every pre-existing test of it is unaffected here too.
+  runReview = (opts) => runReviewTickAllRepos({
+    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
+  }),
 } = {}) {
   return {
     intervalMs,
