@@ -250,7 +250,7 @@ A generic "review this PR" gets a generic review. Every mandate that found somet
    NAMED test reddens. A test that stays green with the behaviour removed is decorative and is a finding.
 
 Also state the gate (`node scripts/verify-lane.mjs run`, FOREGROUND — the diff-selected tests; a bare full-suite
-run is denied by the Bash guard, xpnhz4o, and CI runs the full suite anyway),
+run is denied by the Bash guard, 4157, and CI runs the full suite anyway),
 and that the findings body is **mandatory** on a bounce.
 
 ## What to do with a verdict
