@@ -110,6 +110,12 @@
  * {@link admissionBypassReason} already reads for the `run` wrapper — is now ALSO checked directly at the top
  * of {@link acquireSlotBlocking} itself, before it ever touches the lock root, so any direct caller of the
  * blocking primitive (not just `run`) gets the escape hatch too.
+ *
+ * THE LOAD-ADMISSION GATE (#4076) — a SECOND, DIFFERENT admission axis this module now also hosts, gating NEW
+ * DISPATCHED SESSIONS (not heavy commands) by the host's actual load. See the "LOAD ADMISSION" section further
+ * down ({@link loadAdmissionDecision}, {@link readLatestLoad}, {@link resolveLoadAdmission}, the `load-status`
+ * CLI mode) for the full reasoning — it is orthogonal to both this module's own heavy-command semaphore above
+ * and `lane-concurrency.mjs`'s fixed lane-count ceiling, and `tick-core.mjs#planTick` is its one consumer.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -121,6 +127,8 @@ import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
 import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { execContainerized, containerCliAvailable, containerImageAvailable, resolveContainerImage, resolveNodeModulesVolume, nodeModulesVolumeAvailable } from '../lib/container-exec.mjs'; // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC; see that module's own header for proven scope (check:standards + test:unit)
+import { resolveHostRoot, readHostToday, extractSamplesByName, utcDayKey } from '../operations/telemetry-summary-io.mjs'; // #4076 — REUSE the host-sampler's own root-resolution + tail-read + metric-extraction primitives (never reimplemented — see loadAdmissionDecision's section header below)
+import { latestValue } from '../lib/telemetry-machine.mjs'; // #4076 — the SAME "latest sample wins" reducer telemetry-machine.mjs#computeMachineNow already uses for host.cpu.busy_pct etc.
 
 /** Conservative default — below measured host capacity, not near-full-utilization (#3456 explicit ruling).
  *  Overridable per machine via `WE_HEAVY_ADMISSION_CAP`. */
@@ -205,6 +213,123 @@ export function resolveCeilingMs(env = process.env) {
  *  there is exactly one regex for this switch rather than two that could drift apart. */
 export function isAdmissionOff(env = process.env) {
   return /^(?:off|0|false|no)$/i.test(String(env[ADMISSION_SWITCH_ENV] || ''));
+}
+
+// ── LOAD ADMISSION (#4076) — a SECOND, per-core-normalized dispatch gate ────────────────────────────────
+//
+// Orthogonal to BOTH existing admission points: this module's own heavy-command semaphore above (a fixed
+// COUNT of concurrent `check:standards`/`test:unit`/Playwright runs, oblivious to how loaded the host already
+// is) and `../lib/lane-concurrency.mjs`'s fixed lane-COUNT ceiling (#3612 — its own header calls it "fixed,
+// conservative, hardware-blind by design"). Neither reads the host's actual load. This gate closes that gap
+// for NEW DISPATCHED SESSIONS — `tick-core.mjs#planTick`'s build / prepare / fix / ci-heal spawns — holding
+// EVERY new launch this tick when the host-sampler's latest `host.cpu.load1` sample, normalized by logical
+// core count, crosses a threshold. It sits BESIDE the fixed lane ceiling, never replacing it: a tick can be
+// held by capacity-cap, load-cap, both, or neither, independently.
+//
+// PER-CORE, NOT ABSOLUTE — the opposite choice from `lane-concurrency.mjs`, deliberately: a bare load1 number
+// means something different on a 4-core laptop and a 64-core server, so the threshold is a RATIO (load1 ÷
+// logical cores) compared against `DEFAULT_LOAD_ADMISSION_MAX_PER_CORE`. The 2026-09-07 cascade (#xupukxa)
+// reached 34.95 / 12 ≈ 2.9 — the default here (1.5) sits comfortably below that incident ratio while staying
+// above this machine's own normal several-lanes-running range (observed ~0.5–0.9 on 2026-09-25 with the
+// conveyor actively dispatching — see `readLatestLoad`'s own doc comment for a live reading), so ordinary
+// operation is never held. Overridable via `WE_LOAD_ADMISSION_MAX_PER_CORE`, mirroring every resolver above.
+// `WE_LOAD_ADMISSION=off` (mirroring `WE_HEAVY_ADMISSION`'s own switch) is the explicit escape hatch.
+//
+// READS, NEVER REIMPLEMENTS the host-sampler's own tail-read (`telemetry-summary-io.mjs#readHostToday`, the
+// SAME bounded read `telemetry-machine.mjs#computeMachineNow` uses for `host.cpu.busy_pct`/etc.) and its
+// "latest sample wins" reducer (`telemetry-machine.mjs#latestValue`) — this module only adds the ONE new
+// metric pair it needs (`host.cpu.load1`, `host.cpu.count`) and the threshold decision on top.
+//
+// A MISSING OR UNREADABLE SAMPLE FAILS OPEN (admits) — the same posture {@link admissionBypassReason} already
+// takes when the lane-pool root doesn't exist: a sampler outage must never itself wedge new dispatch.
+
+/** Conservative default ratio — see the section header above for why 1.5 (below the #xupukxa incident's ~2.9,
+ *  above this machine's own normal operating range). Overridable via `WE_LOAD_ADMISSION_MAX_PER_CORE`. */
+export const DEFAULT_LOAD_ADMISSION_MAX_PER_CORE = 1.5;
+
+/** The env var a machine overrides the default ratio with (mirrors `WE_HEAVY_ADMISSION_CAP`). */
+export const LOAD_ADMISSION_MAX_PER_CORE_ENV = 'WE_LOAD_ADMISSION_MAX_PER_CORE';
+
+/** The off switch: `WE_LOAD_ADMISSION=off` (or `0`/`false`/`no`) makes this gate always admit. Mirrors
+ *  {@link ADMISSION_SWITCH_ENV} / {@link isAdmissionOff} exactly. */
+export const LOAD_ADMISSION_SWITCH_ENV = 'WE_LOAD_ADMISSION';
+
+/** Resolve the per-core load threshold from env, clamped to a sane minimum > 0 (a 0/negative ratio would hold
+ *  every tick unconditionally, which is a config bug, not a valid "always hold" policy — the explicit
+ *  `WE_LOAD_ADMISSION=off` switch is the real way to disable this gate). Mirrors {@link resolveCap}. */
+export function resolveLoadAdmissionMaxPerCore(env = process.env) {
+  const n = Number(env?.[LOAD_ADMISSION_MAX_PER_CORE_ENV]);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LOAD_ADMISSION_MAX_PER_CORE;
+}
+
+/** True when the explicit escape hatch is set. Mirrors {@link isAdmissionOff} exactly, own env var. */
+export function isLoadAdmissionOff(env = process.env) {
+  return /^(?:off|0|false|no)$/i.test(String(env[LOAD_ADMISSION_SWITCH_ENV] || ''));
+}
+
+/**
+ * PURE decision: given the latest sampled `load1` and logical `cores`, decide whether NEW dispatched-session
+ * launches should be held this tick. A missing/non-finite `load1`/`cores`, or a non-positive `cores` (a bad
+ * sample, never a real zero-core host), FAILS OPEN (`held:false`, `reason:'no-sample'`) rather than guessing.
+ * @param {{load1?:number|null, cores?:number|null, maxPerCore?:number}} [o]
+ * @returns {{held:boolean, load1:number|null, cores:number|null, perCore:number|null, maxPerCore:number, reason?:string}}
+ */
+export function loadAdmissionDecision({ load1 = null, cores = null, maxPerCore = DEFAULT_LOAD_ADMISSION_MAX_PER_CORE } = {}) {
+  // `Number(null)` is `0`, not "absent" — a bare `Number()` coercion would turn a genuinely missing sample into
+  // a false reading of zero load/cores (mirrors telemetry-machine.mjs#computeMachineNow's own `fallbackCores`
+  // guard, same reasoning). `== null` catches both `null` and `undefined`.
+  const l = load1 == null ? NaN : Number(load1);
+  const c = cores == null ? NaN : Number(cores);
+  if (!Number.isFinite(l) || !Number.isFinite(c) || c <= 0) {
+    return {
+      held: false,
+      load1: Number.isFinite(l) ? l : null,
+      cores: Number.isFinite(c) && c > 0 ? c : null,
+      perCore: null,
+      maxPerCore,
+      reason: 'no-sample',
+    };
+  }
+  const perCore = l / c;
+  return { held: perCore > maxPerCore, load1: l, cores: c, perCore, maxPerCore };
+}
+
+/**
+ * Read the host-sampler's LATEST `host.cpu.load1` + `host.cpu.count` samples — a bounded tail read of today's
+ * (UTC-keyed) day file, exactly like `telemetry-summary-io.mjs#readHostToday` already does for `machine.now`.
+ * Live reading, 2026-09-25T13:04Z on this 12-logical-core machine with the conveyor actively dispatching:
+ * `load1` ≈ 8.50, `cores` = 12, `perCore` ≈ 0.71 — comfortably under {@link DEFAULT_LOAD_ADMISSION_MAX_PER_CORE}.
+ * A day with no host-sampler file yet (fresh checkout, sampler not running) reads as `{load1:null, cores:null}`
+ * — {@link loadAdmissionDecision} then fails open, never a read error. `root` defaults to the REAL shared
+ * telemetry root ({@link resolveHostRoot}) but is overridable — the same "injectable seam, real default"
+ * shape `readHostToday` itself already has — so a test can point this at a fixture day-file instead of the
+ * live shared workspace store.
+ * @param {{root?:string, now?:Date}} [o]
+ * @returns {{load1:number|null, cores:number|null}}
+ */
+export function readLatestLoad({ root = resolveHostRoot(), now = new Date() } = {}) {
+  const dayKey = utcDayKey(now);
+  const { records } = readHostToday(root, dayKey);
+  return {
+    load1: latestValue(extractSamplesByName(records, 'host.cpu.load1')),
+    cores: latestValue(extractSamplesByName(records, 'host.cpu.count')),
+  };
+}
+
+/**
+ * The full IO-shell decision: bypass (off switch / CI, mirroring {@link admissionBypassReason}'s own reasons)
+ * else read-and-decide via {@link readLatestLoad} + {@link loadAdmissionDecision}. The one function
+ * `tick-core.mjs`'s IO shell needs to shell (via the `load-status` CLI mode below) to get a load-admission
+ * verdict — the pure core itself never touches fs/env directly (see tick-core.mjs's own pure/shell split).
+ * @param {{env?:NodeJS.ProcessEnv, maxPerCore?:number, root?:string, now?:Date}} [o]
+ * @returns {{held:boolean, load1:number|null, cores:number|null, perCore:number|null, maxPerCore:number, reason?:string, bypassed?:string}}
+ */
+export function resolveLoadAdmission({ env = process.env, maxPerCore, root, now = new Date() } = {}) {
+  const cap = maxPerCore ?? resolveLoadAdmissionMaxPerCore(env);
+  if (isLoadAdmissionOff(env)) return { held: false, load1: null, cores: null, perCore: null, maxPerCore: cap, bypassed: 'off' };
+  if (/^(?:true|1)$/i.test(String(env.CI || ''))) return { held: false, load1: null, cores: null, perCore: null, maxPerCore: cap, bypassed: 'ci' };
+  const { load1, cores } = readLatestLoad(root != null ? { root, now } : { now });
+  return loadAdmissionDecision({ load1, cores, maxPerCore: cap });
 }
 
 /** The host-shared lock root for a checkout (lane or primary) — a sibling of every lane clone, never inside
@@ -692,6 +817,23 @@ async function main(argv) {
     emit(admissionStatus({ lockRoot, cap }));
     return;
   }
+  if (mode === 'load-status') {
+    // #4076 — the load-admission gate's live decision. A DIFFERENT axis from `status` above (that reads the
+    // heavy-command semaphore's held slots); this reads the host-sampler's latest load1/cores and decides
+    // whether NEW dispatched-session launches should be held this tick. `tick-core.mjs`'s IO shell shells this
+    // exact mode. `--max-per-core=` overrides `WE_LOAD_ADMISSION_MAX_PER_CORE` for one call (mirrors `--cap=`).
+    // `--load-root=` points at a fixture telemetry root instead of the real shared workspace store — a test seam
+    // (mirrors `--repo=` for the lock root above), never used by a live caller.
+    const maxPerCore = flags['max-per-core'] != null ? Number(flags['max-per-core']) : undefined;
+    const loadRoot = typeof flags['load-root'] === 'string' ? flags['load-root'] : undefined;
+    const decision = resolveLoadAdmission({ maxPerCore, root: loadRoot });
+    if (asJson) { emit(decision); return; }
+    const reading = decision.load1 != null
+      ? `load1 ${decision.load1.toFixed(2)} / ${decision.cores} cores = ${decision.perCore.toFixed(2)} (max ${decision.maxPerCore})`
+      : `no sample${decision.bypassed ? ` (${decision.bypassed})` : ''}`;
+    process.stdout.write(`${decision.held ? 'HELD' : 'admitted'} — ${reading}\n`);
+    return;
+  }
   if (mode === 'reap') {
     // Preview by default; `--apply` removes. `--ttl-minutes=` overrides WAITING_TTL_MINUTES.
     const ttlMin = flags['ttl-minutes'] != null ? Number(flags['ttl-minutes']) : WAITING_TTL_MINUTES;
@@ -774,7 +916,7 @@ async function main(argv) {
     const { exitCode } = await runUnderAdmission(runOpts);
     process.exit(exitCode);
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|load-status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--max-per-core=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

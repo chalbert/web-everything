@@ -319,12 +319,14 @@ describe('#xqa9ttq `--provider` — opt-in JudgeProvider selection, additive ove
     expect(text).toContain('--provider');
   });
 
-  it('accepts exactly the two named providers, and refuses anything else at the parse seam', () => {
+  it('accepts exactly the three named providers, and refuses anything else at the parse seam', () => {
     expect(parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=claude']).ok).toBe(true);
     expect(parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=codex']).ok).toBe(true);
+    // #3383 — the fifth seat's provider, added the same additive way `codex` was.
+    expect(parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=antigravity']).ok).toBe(true);
     const bad = parseOperationArgv(toolBearingOp(), [`--cwd=${lane}`, '--provider=gemini']);
     expect(bad.ok).toBe(false);
-    expect(bad.errors.join('\n')).toMatch(/--provider must be one of claude\|codex/);
+    expect(bad.errors.join('\n')).toMatch(/--provider must be one of claude\|codex\|antigravity/);
   });
 
   it('refuses a `--provider` given twice', () => {

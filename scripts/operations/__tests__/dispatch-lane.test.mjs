@@ -44,6 +44,9 @@ import {
   attemptTagFor,
   canonicalPlaceholder,
   dispatchLaneOperation,
+  // #3168 — the fail-open occupancy warning.
+  KIND_DECLARES_OCCUPANCY_ON_DISPATCH,
+  occupancyFailOpenWarning,
   DISPATCH_GUARD_LISTING_GRACE_MINUTES,
   dispatchStillHolds,
   fillBrief,
@@ -1911,6 +1914,75 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // declined build.
     expect(run.verdict.launchKind).toBe('build');
   });
+
+  // ── #3168 ────────────────────────────────────────────────────────────────────────────────────────────────
+  // Lane occupancy protection (`guard-lane.mjs`'s `isForeignOccupancy` arm) only activates once a lane's lease
+  // carries a DECLARED occupant (`workerSession`), stamped by `lane-pool.mjs acquire --adopt` / `adopt`. Four
+  // of the six dispatched kinds never do that (see `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`'s own docblock for
+  // why flipping the DEFAULT to self-adopt is refused — it would reintroduce the #3107 bounce a real,
+  // currently-used dispatcher→worker flow already hit once). Since the gap cannot be safely closed by force,
+  // this operation names it loud instead, on every dispatch it applies to — asserted here on the SAME real
+  // dispatch fixtures the criteria above already drive through the real declaration + real sink.
+  it('a `prepare`/`prepare-decision` dispatch (self-adopts NEVER) carries the fail-open warning on the run record', async () => {
+    const { run } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnPrepareScope', { num: '3150', lane: 5 }), items: [UNSCOPED],
+    });
+    expect(run.verdict.occupancyFailOpen).toBe(true);
+    expect(run.verdict.occupancyWarning).toMatch(/#3168/);
+    expect(run.verdict.occupancyWarning).toMatch(/lane-5/);
+    expect(run.verdict.occupancyWarning).toMatch(/prepare-scope-agent-brief\.md/);
+    // …and it rides the EFFECT PAYLOAD too — what the sink actually receives, not just the verdict.
+    expect(run.effects[0].payload.occupancyFailOpen).toBe(true);
+    expect(run.effects[0].payload.occupancyWarning).toBe(run.verdict.occupancyWarning);
+
+    const { run: decisionRun } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnPrepareDecision', { num: '3150', lane: 6 }), items: [UNSCOPED],
+    });
+    expect(decisionRun.verdict.occupancyFailOpen).toBe(true);
+    expect(decisionRun.verdict.occupancyWarning).toMatch(/prepare-decision-agent-brief\.md/);
+  });
+
+  it('a `build`/`investigate` dispatch (self-adopts via `--adopt`) carries NO fail-open warning', async () => {
+    const { run: buildRun } = await dispatchThrough({
+      num: '3037', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [SCOPED],
+    });
+    expect(buildRun.verdict.occupancyFailOpen).toBe(false);
+    expect(buildRun.verdict.occupancyWarning).toBeNull();
+    expect(buildRun.effects[0].payload.occupancyFailOpen).toBe(false);
+    expect(buildRun.effects[0].payload.occupancyWarning).toBeNull();
+
+    const { run: investigateRun } = await dispatchThrough({
+      num: '3150', tick: tickWith('spawnInvestigations', { num: '3150', lane: 9 }), items: [UNSCOPED],
+    });
+    expect(investigateRun.verdict.occupancyFailOpen).toBe(false);
+    expect(investigateRun.verdict.occupancyWarning).toBeNull();
+  });
+
+  it('the dispatch SINK prints the fail-open warning to stderr at spawn time — not only in `acquire`\'s own stdout', async () => {
+    const errors = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args.join(' ')));
+    try {
+      await dispatchThrough({
+        num: '3150', tick: tickWith('spawnPrepareScope', { num: '3150', lane: 5 }), items: [UNSCOPED],
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.some((line) => line.includes('#3168') && line.includes('lane-5'))).toBe(true);
+  });
+
+  it('the dispatch SINK prints NOTHING for a self-adopting kind — a build dispatch stays quiet on this axis', async () => {
+    const errors = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args.join(' ')));
+    try {
+      await dispatchThrough({
+        num: '3037', tick: tickWith('spawnBuilds', { num: '3037', lane: 8 }), items: [SCOPED],
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.some((line) => line.includes('#3168'))).toBe(false);
+  });
 });
 
 
@@ -2119,6 +2191,69 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     expect(run.verdict.dispatching).toBe(false);
     expect(run.verdict.reason).toMatch(/spawnFixes/);
     expect(run.verdict.reason).toMatch(/spawnCiHeals/);
+  });
+
+  // #3168 — `fix`/`ci-heal` never self-adopt either (same reason as `prepare`/`prepare-decision`: see
+  // `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`'s docblock), so both carry the fail-open warning too.
+  it('#3168 — `fix`/`ci-heal` dispatches carry the fail-open warning on the run record', async () => {
+    const fix = await dispatchThrough({
+      num: '2608', tick: tickWith('spawnFixes', { pr: 701, num: '2608', lane: 5 }), items: [SCOPED],
+    });
+    expect(fix.run.verdict.occupancyFailOpen).toBe(true);
+    expect(fix.run.verdict.occupancyWarning).toMatch(/#3168/);
+    expect(fix.run.verdict.occupancyWarning).toMatch(/fix-agent-brief\.md/);
+    expect(fix.run.effects[0].payload.occupancyFailOpen).toBe(true);
+
+    const ciHeal = await dispatchThrough({
+      num: '2638', tick: tickWith('spawnCiHeals', { pr: 743, num: '2638', lane: 6, reason: 'red-ci' }), items: [CI_SCOPED],
+    });
+    expect(ciHeal.run.verdict.occupancyFailOpen).toBe(true);
+    expect(ciHeal.run.verdict.occupancyWarning).toMatch(/fix-agent-ci-brief\.md/);
+  });
+});
+
+// ── #3168 — the occupancy fail-open warning, as a PURE fact independent of any one dispatch ──────────────────
+//
+// Backlog #3168: lane occupancy protection (`guard-lane.mjs`'s `isForeignOccupancy` arm) only activates once a
+// lane's lease carries a DECLARED occupant (`lane-pool.mjs acquire --adopt` / `adopt`). The card lays out two
+// possible fixes — make protection immediate on `acquire`, or make the fail-open window LOUD from
+// `dispatch-lane.mjs` itself. The immediate-enforcement option was investigated and RULED OUT (see
+// `guard-lane.mjs`'s KNOWN RESIDUALS header and `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`'s own docblock): a real,
+// currently-used dispatcher→worker flow (`docs/agent/delivery-loop.md`'s review-dispatch) depends on deferring
+// adoption to the spawned worker's own later, self-derived session id — defaulting occupancy to the ACQUIRING
+// session would reintroduce the #3107 bounce that flow was built to avoid. So this operation takes the loud
+// alternative instead, and these are its pure, dispatch-independent facts.
+describe('#3168 — KIND_DECLARES_OCCUPANCY_ON_DISPATCH / occupancyFailOpenWarning (pure)', () => {
+  it('covers exactly the six known launch kinds, no more and no fewer', () => {
+    expect(Object.keys(KIND_DECLARES_OCCUPANCY_ON_DISPATCH).sort()).toEqual([...LAUNCH_KINDS].sort());
+  });
+
+  it('`build` and `investigate` self-adopt (their briefs pass `--adopt`) — every other kind does not', () => {
+    expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH.build).toBe(true);
+    expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH.investigate).toBe(true);
+    for (const kind of ['prepare', 'prepare-decision', 'fix', 'ci-heal']) {
+      expect(KIND_DECLARES_OCCUPANCY_ON_DISPATCH[kind], kind).toBe(false);
+    }
+  });
+
+  it('the two briefs marked TRUE actually pass `--adopt` on disk, and the four marked FALSE actually do not', () => {
+    // The map above is a STATIC claim about the brief files — this is what keeps it from silently drifting the
+    // moment someone edits a brief without touching this table. Real files, real `readFileSync`, no stubbing.
+    for (const [kind, selfAdopts] of Object.entries(KIND_DECLARES_OCCUPANCY_ON_DISPATCH)) {
+      const briefText = readFileSync(briefPath(REPO_ROOT, kind), 'utf8');
+      const passesAdopt = /\s--adopt\b/.test(briefText);
+      expect(passesAdopt, `${kind}'s brief`).toBe(selfAdopts);
+    }
+  });
+
+  it('occupancyFailOpenWarning names the lane and #3168, and is stable per kind', () => {
+    const warning = occupancyFailOpenWarning('prepare', 5);
+    expect(warning).toMatch(/lane-5/);
+    expect(warning).toMatch(/#3168/);
+    expect(warning).toMatch(/prepare/);
+    expect(warning).toMatch(/#3107/); // names the reason it is not fixed the other way, not just that it is open
+    // A different lane number changes only the lane mention, not the shape of the message.
+    expect(occupancyFailOpenWarning('prepare', 12)).toMatch(/lane-12/);
   });
 });
 

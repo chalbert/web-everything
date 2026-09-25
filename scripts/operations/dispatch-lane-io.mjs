@@ -1001,6 +1001,14 @@ export function createDispatchSinks({
   return {
     [DISPATCH_EFFECT]: async (payload) => {
       assertNotALaneCheckout(root);
+      // #3168 — the loudest point in the whole path: right before the agent is actually spawned into the
+      // fail-open lane, printed to THIS process's own stderr rather than left to surface only in the eventual
+      // agent's own `acquire` stdout (which nobody here is watching). `payload.occupancyWarning` is `null` for
+      // every kind whose brief self-adopts (`build`/`investigate` — see `dispatch-lane.mjs`'s
+      // `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`), so this is a no-op on the common path.
+      if (payload?.occupancyWarning) {
+        console.error(`dispatch-lane: ${payload.occupancyWarning}`);
+      }
       const sessionId = String(mintSessionId());
       let handle;
       try {

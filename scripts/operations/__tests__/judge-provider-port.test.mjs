@@ -100,4 +100,37 @@ describe('#3370 createDefaultJudge drives a hand-written JudgeProvider', () => {
     expect(calls[0].cwd).toBe('/tmp/some-lane');
     expect(calls[0].allowedTools).toEqual(['Read']);
   });
+
+  // THE CODEX JUDGE TRANSCRIPT FIX — a provider that reports `transcriptFile` (only `codexJudgeSpawn` does)
+  // has it forwarded into the telemetry `judgeOutcome` wraps, alongside every other metered field; a provider
+  // that reports nothing for it (every existing fake, and the real `judgeSpawn`) sees it silently absent
+  // rather than showing up as `transcriptFile: undefined` — the SAME whitelist-driven drop
+  // `normalizeJudgeTelemetry` (`we:scripts/operations/run-record.mjs`) already applies once the run record is
+  // written, proved here one layer up, at the point this value first enters the telemetry object.
+  it('forwards a provider-reported `transcriptFile` into the telemetry — a PATH, never transcript content', async () => {
+    const calls = [];
+    const provider = async (request) => {
+      calls.push(request);
+      return {
+        value: { ok: true }, sessionId: 's', costUsd: 0, durationMs: 1, wallMs: 1, numTurns: 1,
+        stopReason: 'turn.completed', usage: {}, loadedContextTokens: 0, timedOut: false,
+        transcriptFile: '/Users/x/.codex-judge-transcripts/codex-judge-thread-abc.jsonl',
+      };
+    };
+    const judgeFn = createDefaultJudge({ provider });
+    const returned = await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' } });
+    const { telemetry } = unwrapJudgeOutcome(returned);
+    expect(telemetry.transcriptFile).toBe('/Users/x/.codex-judge-transcripts/codex-judge-thread-abc.jsonl');
+  });
+
+  it('a provider reporting no `transcriptFile` at all (e.g. judgeSpawn) forwards it as `undefined`, not a string', async () => {
+    const { provider } = makeFakeProvider({ ok: true }); // makeFakeProvider's outcome carries no transcriptFile
+    const judgeFn = createDefaultJudge({ provider });
+    const returned = await judgeFn({ mandate: 'm', input: 'i', shape: { type: 'object' } });
+    const { telemetry } = unwrapJudgeOutcome(returned);
+    // `normalizeJudgeTelemetry` (we:scripts/operations/run-record.mjs) is what actually DROPS this key from the
+    // eventual run record (its string-typeof whitelist check), proved directly in run-store.test.mjs — this
+    // layer only needs to prove it never fabricates a string when the provider gave none.
+    expect(telemetry.transcriptFile).toBeUndefined();
+  });
 });

@@ -38,6 +38,28 @@
  *   1. A lane whose occupant was never DECLARED is not protected — an undeclared lease cannot be told from a
  *      dispatcher-acquired one, and denying on the ambiguity locks agents out of their own lanes (above).
  *      Protection is opt-in per lane, via `--adopt`/`adopt`; without it this guard behaves exactly as before.
+ *
+ *      #3168 INVESTIGATED making this immediate-on-acquire (stamp `workerSession` from whoever RUNS `acquire`,
+ *      by default, instead of only under `--adopt`) and RULED IT OUT: `docs/agent/delivery-loop.md`'s
+ *      review-dispatch flow, live and in use today, runs a bare `acquire` (no `--adopt`) BY DESIGN, because the
+ *      driver process is not the session that will edit — a headless reviewer, spawned after, self-adopts under
+ *      its own freshly-derived id in step 3. Defaulting occupancy to the acquiring session would arm this
+ *      guard against that reviewer's own first edit and refuse it as foreign — the EXACT #3107 bounce that
+ *      `we:scripts/lib/lane-lease.mjs`'s own `workerSession` docblock (r2) already records fixing once. A
+ *      second concrete case (`deliver-item-wrapper.mjs`'s `acquireLane`) shows the SAFE version of "claim
+ *      immediately" already exists and is used where it applies: when the future worker's session id IS known
+ *      before `acquire` runs, the caller mints it first and passes `--adopt` with that id overridden into the
+ *      subprocess env — never a bare default-on flip. So the residual stands, unchanged, BY DESIGN.
+ *
+ *      What #3168 DID change: the fail-open window this residual describes is no longer silent. Of the six
+ *      kinds `we:scripts/operations/dispatch-lane.mjs` can dispatch, four (`prepare`, `prepare-decision`,
+ *      `fix`, `ci-heal`) never self-adopt at all — their briefs have no dispatcher→worker split to defer
+ *      adoption FOR, they simply never claim occupancy — and that operation now names the fail-open state
+ *      loud on every such dispatch: on the `read` finding, on the `plan` verdict (so it rides the run record
+ *      and the CLI's own printed `verdict:` dump), on the effect payload, and as a `console.error` from the
+ *      dispatch sink itself at the moment the agent is actually spawned. See
+ *      `KIND_DECLARES_OCCUPANCY_ON_DISPATCH` / `occupancyFailOpenWarning` in `dispatch-lane.mjs`. `build` and
+ *      `investigate` self-adopt already and never carry the warning.
  *   2. Even with a declared occupant, this arm separates SESSIONS, not sibling agents of one session. #2413's
  *      ratified statute is that no ambient env or process property tells siblings apart, so the sibling case is
  *      closed by an asserted minted slug — a per-operation channel the Bash guard has (the command string) and

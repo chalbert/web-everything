@@ -93,10 +93,28 @@ export async function dispatchCiHeal(planned, {
     // #3960 — the repo-aware quintet, computed once from `repo`'s own profile (never re-derived here).
     const tokens = briefTokensForRepo(repo, { itemNum: planned.itemNum, prNum: planned.pr, home, checkoutExists, readPackageJson });
     if (!tokens) throw new Error(`dispatch-lane: no repo profile/gate resolved for "${repo}" — refusing to fill the ci-heal brief`);
+    // #x0mn6x0 (epic #4075/#3383) — SCOPE IS OPTIONAL HERE, unlike `dispatchFix`'s identical-looking call in
+    // the sibling file (`reconcile-fix-dispatch.mjs`): `dispatchFix` is only ever reached once
+    // `planFixesFromReconcile` has ALREADY refused `no-scope` for an entry whose item/diff-derived scope came
+    // back empty (see that function's own `if (!scope.length) refusals.push({..., kind:'no-scope'})` gate) —
+    // `dispatchFix` structurally never sees `planned.scope === []`. `runReconcileCiHealDispatch` has NO
+    // equivalent pre-dispatch gate (its plan and its dispatch are one loop, not two phases), so `planned.scope`
+    // reaches here exactly as `resolvePrWorkUnit` left it — legitimately `[]` when a PR names no backlog item
+    // AND its diff-paths fetch also came back empty (a real `gh` hiccup, not just "no item": live incident
+    // 2026-09-25, PRs #2653/#2636/#2635 — each one resolves a non-empty diff-derived scope once `gh` itself
+    // works, confirmed by re-running `resolvePrWorkUnit` against the real repo). Before this fix, `SCOPE` being
+    // required made that combination throw HERE, uncaught by anything narrower than
+    // `runReconcileCiHealDispatch`'s per-entry `catch` — which reported it as an opaque `dispatch-failed`,
+    // consumed the lane popped for this entry (never returned to the pool, unlike the `held` branch below), and
+    // left the PR's CI red forever, once per tick, until a human noticed. Treating `SCOPE` as optional (falling
+    // back to `''` — an honestly unfenced ci-heal, never a fabricated fence) turns that hard failure into a
+    // degraded-but-working dispatch; the diff-based derivation upstream (`resolvePrWorkUnit`'s
+    // `attribution:'pr'` branch) still fires FIRST and supplies a real fence whenever `gh` cooperates, so this
+    // is the last-resort backstop, not the common path.
     const { prompt, unknownTokens } = fillBrief(readBrief(root), {
       ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
-    }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM'], REPO_AWARE_VALUE_PATTERNS);
+    }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', prompt, sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
       pr: planned.pr, reason, repo,
