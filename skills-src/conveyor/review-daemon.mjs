@@ -275,8 +275,13 @@ export function runReviewTick({
     try { tagRound({ pr: d.prNumber, repo, round: (d.attempts ?? 0) + 1, currentLabels: labelsByPr.get(Number(d.prNumber)) }); }
     catch { /* cosmetic — a failed tag never fails the tick, see review-round-tag.mjs's own header */ }
   }
+  // A PR dispatched THIS tick is absent from the pre-dispatch `rawAgents` snapshot, yet its review job record
+  // already exists (`dispatchReviewJob` writes it before returning) — reusing the snapshot would tag it "nothing
+  // live" and strip its `review-status:reviewing` until the next tick. Those PRs read fresh (`undefined`).
+  const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
   for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes)) {
-    try { tagStatus({ pr: c.prNumber, repo, agents: rawAgents ?? undefined, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
+    const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
+    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {

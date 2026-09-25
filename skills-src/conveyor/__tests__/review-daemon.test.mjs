@@ -386,18 +386,34 @@ describe('runReviewTick — #4133 shared reads (opt-in via readPrs/readAgents)',
     expect(readAgents).toHaveBeenCalledTimes(1);
   });
 
-  it('tagRound/tagStatus receive the dispatched PR\'s own already-fetched labels, and tagStatus receives the tick\'s own agents', () => {
-    const prs = [{ number: 10, labels: [{ name: 'review-round:1' }] }];
-    const agents = [{ name: 'review-10', state: 'blocked' }];
-    const reconcile = vi.fn(() => ({ dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }], refusals: [] }));
+  it('tagRound/tagStatus receive each PR\'s own already-fetched labels, and tagStatus reuses the tick\'s own agents for a PR NOT dispatched this tick', () => {
+    const prs = [{ number: 10, labels: [{ name: 'review-round:1' }] }, { number: 20, labels: [{ name: 'review-status:reviewing' }] }];
+    const agents = [{ name: 'review-20', state: 'blocked' }];
+    const reconcile = vi.fn(() => ({ dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }], refusals: [{ prNumber: 20 }] }));
     const tagRound = vi.fn();
     const tagStatus = vi.fn();
     runReviewTick({
       reconcile, readPrs: () => prs, readAgents: () => agents, dispatch: () => ({ agentId: 'a' }), tagRound, tagStatus,
-      statusCandidates: () => [{ prNumber: 10 }],
+      statusCandidates: () => [{ prNumber: 10 }, { prNumber: 20 }],
     });
     expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 10, currentLabels: prs[0].labels }));
-    expect(tagStatus).toHaveBeenCalledWith(expect.objectContaining({ pr: 10, agents, currentLabels: prs[0].labels }));
+    expect(tagStatus).toHaveBeenCalledWith(expect.objectContaining({ pr: 20, agents, currentLabels: prs[1].labels }));
+  });
+
+  it('a PR dispatched THIS tick gets NO snapshot agents — its fresh job record postdates the pre-dispatch read, so tagStatus must re-list', () => {
+    const prs = [{ number: 10, labels: [{ name: 'review:pending' }] }];
+    const agents = []; // read before dispatch: the new review job is not in it yet
+    const reconcile = vi.fn(() => ({ dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }], refusals: [] }));
+    const tagStatus = vi.fn();
+    runReviewTick({
+      reconcile, readPrs: () => prs, readAgents: () => agents, dispatch: () => ({ mode: 'job', jobPid: 123 }), tagRound: () => {}, tagStatus,
+      statusCandidates: () => [{ prNumber: 10 }],
+    });
+    expect(tagStatus).toHaveBeenCalledTimes(1);
+    const arg = tagStatus.mock.calls[0][0];
+    expect(arg.pr).toBe(10);
+    expect(arg.agents).toBeUndefined(); // → tagReviewStatus falls back to its own fresh, job-aware listing
+    expect(arg.currentLabels).toBe(prs[0].labels);
   });
 
   it('a readPrs/readAgents failure is isolated exactly like a reconcile failure — reconcileError, not a throw', () => {
