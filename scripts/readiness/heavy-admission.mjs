@@ -586,6 +586,71 @@ export function reapHistory(lockRoot) {
   return { count: lines.length, last };
 }
 
+// ── MECHANICAL FAIRNESS — first-come-first-served slot admission (#3383 card xb0iuxq) ─────────────────────
+// Until now `acquireSlotBlocking` let ANY blocked poller win a slot the instant `tryAcquireSlot` found one
+// free — "try slot-0, then slot-1, …, poll every 2s" has no notion of arrival order, so a job that started
+// waiting a minute ago can lose a freed slot to one that started waiting a second ago, purely on which
+// poller's 2s timer happened to land first. Live-observed 2026-09-25: a `check:standards` waiter on lane-16
+// waited 47+ minutes while several newer jobs each took a slot ahead of it. The liveness + lease-TTL reclaim
+// mechanism above (`tryAcquireSlot`/`reclaimDecision`) is UNCHANGED — this only adds a queueing DISCIPLINE in
+// front of it: a poller may attempt `tryAcquireSlot` at all only when it is the OLDEST LIVE waiter, by
+// `requestedAt`, ignoring any marker that is dead or stale. A solo/uncontended caller (no other live marker
+// exists) is always "oldest" and pays no new cost.
+//
+// LIVENESS FOR RANKING IS NOT {@link classifyWaiter}'S REAP VERDICT — an independent review of the first cut
+// of this fix (PR #2692) caught a real starvation regression: `classifyWaiter`'s `ageMs < ttlMs` ⇒ `'fresh'`
+// shortcut skips the pid-liveness probe ENTIRELY for any marker younger than {@link WAITING_TTL_MINUTES}
+// (30min) — appropriate for REAPING (removing stale debris is conservative on purpose), but wrong for RANKING
+// who may attempt a slot next. A waiter that writes its marker and is then SIGKILLed/host-crashed before
+// winning a slot (never reaching its own `finally`'s `clearWaiting` — the exact scenario {@link
+// reapStaleWaiters}'s own header cites as observed 4x in 2.5 weeks) leaves a marker that is FRESH by the clock
+// but DEAD by pid — and under the naive "just reuse classifyWaiter's verdict" version, that dead marker still
+// ranked oldest/live for up to 30 minutes, blocking every other live waiter from even ATTEMPTING a completely
+// free slot (strictly worse than pre-fix behaviour, which had no ranking gate at all). {@link
+// isOldestLiveWaiter} therefore probes pid-liveness directly, independent of age, for every marker recording a
+// same-host pid — a provably-dead pid is excluded from ranking immediately, never after waiting out the TTL —
+// and otherwise still defers to {@link classifyWaiter} (no lease / TTL-stale-with-no-evidence) for every case
+// pid-liveness alone cannot decide.
+
+/**
+ * Does this waiting marker count as a genuinely live waiter for queue ORDER (ranking, and the `heavy-queue`
+ * report's wait projection)? False when {@link classifyWaiter} would reap it, or — even while it is still
+ * fresh — when its recorded pid on THIS host is provably dead (the section header above says why). One rule,
+ * shared by {@link isOldestLiveWaiter} and `heavy-queue`, so the report never counts a waiter the queue skips.
+ * @returns {boolean}
+ */
+export function isRankableWaiter(marker, {
+  nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000,
+  pidLiveness = (pid) => probeSlotHolderLiveness(pid, process.pid), host = hostname(), ...seams
+} = {}) {
+  if (!marker || typeof marker !== 'object') return false;
+  // Same-host pid, independent of the marker's age: a provably-dead owner never ranks as live.
+  if (Number.isInteger(marker.pid) && (!marker.host || marker.host === host) && pidLiveness(marker.pid) === 'dead') return false;
+  return !classifyWaiter(marker, { nowMs, ttlMs, host, pidLiveness, ...seams }).reap;
+}
+
+/**
+ * Is `owner` the one waiter currently permitted to attempt a slot? True when either nobody else holds a live
+ * waiting marker (including `owner`'s own — a caller that has not yet written one, or whose write raced,
+ * defaults to eligible rather than wedging), or `owner`'s own marker is the earliest live `requestedAt`. Ties
+ * (identical timestamps) break on `owner` string so the ranking is deterministic rather than depending on
+ * directory-listing order. Pure over the markers it is handed by {@link listWaiting}, filtered through {@link
+ * isRankableWaiter} (see the section header above for why this cannot simply reuse {@link classifyWaiter}'s
+ * age-gated reap verdict).
+ * @param {{lockRoot:string, owner:string, nowMs:number, ttlMs?:number, pidLiveness?:(pid:number)=>('dead'|'alive'|'unknown'), host?:string}} o
+ * @returns {boolean}
+ */
+export function isOldestLiveWaiter({ lockRoot, owner, nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000, ...seams }) {
+  const live = listWaiting(lockRoot).filter((m) => isRankableWaiter(m, { nowMs, ttlMs, ...seams }));
+  if (live.length === 0) return true;
+  const oldest = [...live].sort((a, b) => {
+    const at = Date.parse(a.requestedAt), bt = Date.parse(b.requestedAt);
+    const an = Number.isNaN(at) ? Infinity : at, bn = Number.isNaN(bt) ? Infinity : bt;
+    return an !== bn ? an - bn : String(a.owner).localeCompare(String(b.owner));
+  })[0];
+  return oldest.owner === owner;
+}
+
 // ── the blocking wait primitive a heavy-command call site uses ─────────────────────────────────────────
 
 /**
@@ -626,26 +691,30 @@ export async function acquireSlotBlocking({
   const startedAt = now();
   // xaipsbs — every admission attempt first clears stale waiters, so debris never outlives the next caller.
   reapStaleWaiters({ lockRoot, nowMs: startedAt, apply: true });
-  const first = tryAcquireSlot({ lockRoot, cap, owner, nowMs: startedAt, nowIso: new Date(startedAt).toISOString(), pid, leaseMinutes });
-  if (first.ok) return { ok: true, slot: first.slot, timedOut: false, waitedMs: 0 };
-
+  // MECHANICAL FAIRNESS (#3383 card xb0iuxq) — mark BEFORE the first attempt, not only after it fails, so
+  // even this caller's very first, otherwise-uncontended attempt is ranked against whoever else is ALREADY
+  // waiting: a caller landing behind an older live waiter must never cut in front of it just because
+  // `tryAcquireSlot` itself would have won a slot for it. A caller with no contention (the common case) still
+  // succeeds with zero wait below — `isOldestLiveWaiter` reports it "oldest" (nothing else live to rank
+  // against) on its very first check.
   markWaiting({ lockRoot, owner, lane, num, pid, repo, nowIso: new Date(startedAt).toISOString() });
   let lastLoggedAt = startedAt;
   try {
     for (;;) {
-      const nowMs = now();
-      if (nowMs - startedAt >= ceilingMs) {
-        log(`⚠⚠ heavy-command admission: HARD CEILING of ${Math.round(ceilingMs / 60_000)}m exceeded waiting for capacity (cap=${cap}) — a slot holder may be wedged; proceeding unslotted. Escape hatch: WE_HEAVY_ADMISSION=off.\n`);
-        return { ok: false, slot: null, timedOut: true, ceilingHit: true, waitedMs: nowMs - startedAt };
-      }
-      await sleep(pollMs);
       const attempt = now();
-      const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes });
-      if (r.ok) return { ok: true, slot: r.slot, timedOut: false, waitedMs: attempt - startedAt };
+      if (attempt - startedAt >= ceilingMs) {
+        log(`⚠⚠ heavy-command admission: HARD CEILING of ${Math.round(ceilingMs / 60_000)}m exceeded waiting for capacity (cap=${cap}) — a slot holder may be wedged; proceeding unslotted. Escape hatch: WE_HEAVY_ADMISSION=off.\n`);
+        return { ok: false, slot: null, timedOut: true, ceilingHit: true, waitedMs: attempt - startedAt };
+      }
+      if (isOldestLiveWaiter({ lockRoot, owner, nowMs: attempt })) {
+        const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes });
+        if (r.ok) return { ok: true, slot: r.slot, timedOut: false, waitedMs: attempt - startedAt };
+      }
       if (attempt - lastLoggedAt >= stillWaitingLogMs) {
         log(`heavy-command admission: still waiting for a free slot (cap=${cap}) after ${Math.round((attempt - startedAt) / 60_000)}m — every held slot's holder still appears alive; will proceed unslotted at the ${Math.round(ceilingMs / 60_000)}m ceiling.\n`);
         lastLoggedAt = attempt;
       }
+      await sleep(pollMs);
     }
   } finally {
     clearWaiting({ lockRoot, owner });

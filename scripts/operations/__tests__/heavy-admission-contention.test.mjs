@@ -87,4 +87,43 @@ describe('heavy-command admission queue — contention regression (#3461, fails 
     expect(listWaiting(lockRoot)).toHaveLength(0); // cleared the instant it won its slot
     releaseOwnedSlot({ lockRoot, cap, owner: 'WAITER' });
   });
+
+  it('MECHANICAL FAIRNESS (#3383 card xb0iuxq): the OLDEST live waiter wins each freed slot, not whoever polls fastest — fails pre-fix', async () => {
+    const cap = 1;
+    const holder = await acquireSlotBlocking({ lockRoot, cap, owner: 'HOLDER', pollMs: 15, ceilingMs: 20_000 });
+    expect(holder.ok).toBe(true);
+
+    const order = [];
+    const tag = (name, p) => p.then((r) => { order.push(name); return r; });
+    // Arrival order W1 → W2 → W3, staggered by real wall-clock time (oldest first). W3 is given the FASTEST
+    // poll interval of the three — the exact shape of the live incident (lane-16's `check:standards` waiter
+    // lost 47+ minutes to NEWER jobs whose polls simply happened to land first): if fairness is broken, W3's
+    // tight 2ms poll wins the very first freed slot regardless of arrival order.
+    const w1 = tag('W1', acquireSlotBlocking({ lockRoot, cap, owner: 'W1', pollMs: 20, ceilingMs: 20_000 }));
+    await new Promise((r) => setTimeout(r, 80));
+    const w2 = tag('W2', acquireSlotBlocking({ lockRoot, cap, owner: 'W2', pollMs: 20, ceilingMs: 20_000 }));
+    await new Promise((r) => setTimeout(r, 80));
+    const w3 = tag('W3', acquireSlotBlocking({ lockRoot, cap, owner: 'W3', pollMs: 2, ceilingMs: 20_000 }));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(listWaiting(lockRoot).map((w) => w.owner).sort()).toEqual(['W1', 'W2', 'W3']);
+
+    // Free exactly one slot at a time and confirm FCFS order — W1, then W2, then W3 — regardless of W3's
+    // much faster poll cadence.
+    releaseOwnedSlot({ lockRoot, cap, owner: 'HOLDER' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(order).toEqual(['W1']);
+
+    releaseOwnedSlot({ lockRoot, cap, owner: 'W1' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(order).toEqual(['W1', 'W2']);
+
+    releaseOwnedSlot({ lockRoot, cap, owner: 'W2' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(order).toEqual(['W1', 'W2', 'W3']);
+
+    const [r1, r2, r3] = await Promise.all([w1, w2, w3]);
+    expect([r1.ok, r2.ok, r3.ok]).toEqual([true, true, true]);
+    releaseOwnedSlot({ lockRoot, cap, owner: 'W3' });
+    expect(listWaiting(lockRoot)).toHaveLength(0);
+  });
 });
