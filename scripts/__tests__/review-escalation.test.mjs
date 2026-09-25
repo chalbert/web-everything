@@ -725,8 +725,9 @@ describe('review-escalation — #984 F2 decideParkReadyStrip (the drain park str
   // un-queued by the widened key.
   it('a legitimately queued PR (review:accepted + ready-to-merge) is NEVER stripped', () => {
     expect(decideParkReadyStrip([REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);
-    // …and it does not even reach a park branch: decideReviewGate merges it.
-    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL] }).action).toBe('merge');
+    // …and it does not even reach a park branch: decideReviewGate merges it. xvzc4v4: a matching accepted/head
+    // SHA — the SHA-coverage gate is a separate concern from what this test is proving.
+    expect(decideReviewGate({ escalate: true, labels: [REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL], acceptedSha: 'abc1234', headSha: 'abc1234' }).action).toBe('merge');
   });
   it('review:accepted clears a leftover review:changes — that accepted PR keeps its go-ahead (#2974)', () => {
     expect(decideParkReadyStrip([REVIEW_LABELS.changes, REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL])).toBe(false);

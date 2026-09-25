@@ -97,6 +97,9 @@ describe('#2423 per-PR --no-review-escalation relief valve', () => {
       // the relief valve must key on the flag, not the shape, or it silently defeats the whole requirement.
       const engineTierPark = decideReviewGate({
         escalate: true, humanRequired: false, labels: [{ name: REVIEW_LABELS.accepted }], engineTier: true,
+        // xvzc4v4: a matching accepted/head SHA so this clears the (separate) SHA-coverage gate and reaches
+        // the engine-tier check this test is actually proving.
+        acceptedSha: 'abc1234', headSha: 'abc1234',
       });
       expect(engineTierPark.applyLabel).toBe(REVIEW_LABELS.pending); // looks like a pending park…
       expect(engineTierPark.awaitingIndependentValidator).toBe(true); // …but it is the #2412 outcome

@@ -3,9 +3,10 @@ bornAs: xn6n5gp
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/backlog/id.mjs", "we:scripts/lane-drain.mjs", "we:scripts/backlog/__tests__/id.test.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 

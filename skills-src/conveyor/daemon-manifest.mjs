@@ -123,6 +123,9 @@ const ORPHAN_CLAIM_INTERVAL_MS = 6 * 60 * 60 * 1000;
  */
 const MERGE_ORPHAN_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
+/** #4077 — the health watch's tick cadence (design: 5 minutes; its GitHub probes self-throttle to 15). */
+const HEALTH_WATCH_INTERVAL_MS = 5 * 60 * 1000;
+
 export const DAEMON_MANIFEST = {
   'orphan-claim-release': { script: 'scripts/conveyor/orphan-claim-release.mjs', args: ['--apply'], intervalMs: ORPHAN_CLAIM_INTERVAL_MS },
   'merge-orphan-sweep': { script: 'scripts/merge-ai-prs.mjs', args: [], intervalMs: MERGE_ORPHAN_SWEEP_INTERVAL_MS },
@@ -163,6 +166,12 @@ export const DAEMON_MANIFEST = {
   // own expected time and dispatches ONE diagnosis-only inspection agent per stuck episode
   // (`we:scripts/conveyor/stuck-pr-watch.mjs`, `we:scripts/conveyor/stuck-pr-watch-core.mjs`).
   ...perRepoEntries('stuck-pr-watch', 'scripts/conveyor/stuck-pr-watch.mjs', ['sweep']),
+  // #4077 (ruling #4065) — the HEALTH WATCH: one host-wide entry (not per-repo — its host smells read every
+  // daemon's log/lease on this machine, and its one `gh pr list` sweep already covers the constellation). A
+  // 5-minute tick; the script's own watchdog caps a tick at 3x its 60 s budget and writes its own
+  // last-tick-completed stamp. Runs from its OWN dedicated clone (4065 Fork 1) with self-sync set explicitly in
+  // its plist — see we:skills-src/conveyor/launchd/com.we.health-watch.plist.example.
+  'health-watch': { script: 'scripts/conveyor/health-watch.mjs', args: ['tick'], intervalMs: HEALTH_WATCH_INTERVAL_MS },
 };
 
 /** A script path may be `undefined` is never intended; it must be a plain repo-relative path with no `..`

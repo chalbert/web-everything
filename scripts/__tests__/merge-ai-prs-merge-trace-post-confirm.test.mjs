@@ -41,12 +41,30 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
   const block = src.slice(blockStart, blockEnd);
 
   it('defines postMergeTrace as a closure (the write is not inlined at the read site)', () => {
-    expect(block).toMatch(/const postMergeTrace = \(\) => \{/);
+    expect(block).toMatch(/postMergeTrace = makeMergeTrace\(traceHeadSha, preread\.comments\);/);
+    expect(src).toMatch(/const makeMergeTrace = \(headSha, prereadComments\) => \(\) => \{/);
+  });
+
+  // xvzc4v4 advisory fix — the closure used to be a `const` INSIDE the per-candidate `try`, so the `catch`
+  // branch's call to it threw a ReferenceError (a sibling lexical scope) and crashed the whole pass. It is now
+  // a `let` declared ABOVE the `try`, assigned inside it. (The crash itself is covered by a real-execution test in
+  // gate-entrypoint-integration.test.mjs — these source checks alone could not see it.) It starts as a REAL
+  // poster for the judged head, never a no-op stub: a stub silently dropped the trace for a PR found already
+  // merged right after revalidation, before the land path rebinds it (real-execution test there too).
+  it('postMergeTrace is declared with `let` ABOVE the per-candidate try, so the catch branch can reach it', () => {
+    const declIdx = src.indexOf('let postMergeTrace = makeMergeTrace(c.listedHeadSha || c.headSha || null, null);');
+    expect(src).not.toMatch(/let postMergeTrace = \(\) => \{\};/);
+    expect(declIdx).toBeGreaterThan(-1);
+    const tryIdx = src.indexOf('try {', declIdx);
+    expect(tryIdx).toBeGreaterThan(declIdx);
+    expect(tryIdx).toBeLessThan(blockStart);
+    expect(block).not.toMatch(/const postMergeTrace\b/);
   });
 
   it('the trace READ (traceHeadSha/traceReason) still happens eagerly, ahead of the merge attempt', () => {
-    const readIdx = block.indexOf('const traceHeadSha = fetchPrHeadSha(');
-    const closureIdx = block.indexOf('const postMergeTrace = ()');
+    // xvzc4v4 advisory fix — the head is the SHA revalidation pinned, not a separate best-effort read.
+    const readIdx = block.indexOf('const traceHeadSha = revalidated.headSha;');
+    const closureIdx = block.indexOf('postMergeTrace = makeMergeTrace(');
     const lockIdx = block.indexOf('const landLock = withLandWriteLock(');
     expect(readIdx).toBeGreaterThan(-1);
     expect(closureIdx).toBeGreaterThan(readIdx);
@@ -60,38 +78,57 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
     expect(afterPush).toMatch(/postMergeTrace\(\);/);
   });
 
-  it('postMergeTrace() is called on the already-merged-by-a-concurrent-lander idempotent path (still a confirmed merge)', () => {
+  // xvzc4v4 (merge-safety review, bug 2 + advisory fix) — every already-merged branch now routes through the one
+  // `recordAlreadyMerged()` helper (merged.push + bookkeeping + `postMergeTrace()`), so these assert the helper
+  // call; the helper's own body is asserted separately below. The windows are wide to fit each branch's comment.
+  it('the already-merged-by-a-concurrent-lander idempotent path records + traces via recordAlreadyMerged() (still a confirmed merge)', () => {
     const idx = block.indexOf("skipped === 'already-merged'");
     expect(idx).toBeGreaterThan(-1);
-    const branch = block.slice(idx, idx + 700);
-    expect(branch).toMatch(/postMergeTrace\(\);/);
+    const branch = block.slice(idx, idx + 2400);
+    expect(branch).toMatch(/recordAlreadyMerged\(\);/);
   });
 
-  it('postMergeTrace() is called on the contended-write-fallback already-merged recovery path (still a confirmed merge)', () => {
+  it('the contended-write-fallback already-merged recovery path records + traces via recordAlreadyMerged() (still a confirmed merge)', () => {
     const catchIdx = block.indexOf('} catch (e) {');
     expect(catchIdx).toBeGreaterThan(-1);
     const afterCatch = block.slice(catchIdx);
     const alreadyMergedIdx = afterCatch.indexOf('if (isPrAlreadyMerged(c.repo, c.num)) {');
     expect(alreadyMergedIdx).toBeGreaterThan(-1);
-    const branch = afterCatch.slice(alreadyMergedIdx, alreadyMergedIdx + 400);
-    expect(branch).toMatch(/postMergeTrace\(\);/);
+    const branch = afterCatch.slice(alreadyMergedIdx, alreadyMergedIdx + 1600);
+    expect(branch).toMatch(/recordAlreadyMerged\(\);/);
   });
 
   it('postMergeTrace() is NEVER called on the genuine merge-failure path that feeds failedMerges (the #2596 bug)', () => {
     // Anchored to START right AFTER the contended-fallback already-merged recovery's own `continue;` (a real
     // confirmed-merge branch this suite already covers above), so this region is exactly the genuine-failure
     // path — never accidentally including the recovery branch's own legitimate `postMergeTrace()` call.
-    const recoveryContinueIdx = block.indexOf('during a contended write — idempotent no-op (#2683)');
+    // xvzc4v4 — the anchor text is this branch's own (post-bug-2-fix) stderr message, unique to it.
+    const recoveryContinueIdx = block.indexOf('confirmed merged despite the gh error above');
     expect(recoveryContinueIdx).toBeGreaterThan(-1);
     const genuineFailureStart = block.indexOf('continue;', recoveryContinueIdx) + 'continue;'.length;
     const failedPushIdx = block.indexOf('failedMerges.push({', genuineFailureStart);
     expect(failedPushIdx).toBeGreaterThan(genuineFailureStart);
     const genuineFailureRegion = block.slice(genuineFailureStart, failedPushIdx);
     expect(genuineFailureRegion).not.toMatch(/postMergeTrace\(\);/);
+    expect(genuineFailureRegion).not.toMatch(/recordAlreadyMerged\(\);/);
   });
 
-  it('exactly 3 call sites of postMergeTrace() total: one per confirmed-merge branch, 0 anywhere else', () => {
-    const calls = block.match(/postMergeTrace\(\);/g) || [];
-    expect(calls).toHaveLength(3);
+  it('exactly 2 call sites of postMergeTrace() in the file: the fresh-merge path and the recordAlreadyMerged helper', () => {
+    expect(block.match(/postMergeTrace\(\);/g) || []).toHaveLength(1);
+    expect(src.match(/postMergeTrace\(\);/g) || []).toHaveLength(2);
+    // the helper's 3 callers: revalidation-found-merged, the in-lock pre-check, and the post-throw re-probe
+    expect(src.match(/recordAlreadyMerged\(\);/g) || []).toHaveLength(3);
+  });
+
+  // xvzc4v4 (merge-safety review, bug 2) — the actual fix: every already-merged branch records the PR into
+  // `merged` (previously only the fresh-merge branch did, on the mistaken theory that "another lander" always
+  // owns the post-land numbering/resolve-on-land/derived-regen follow-up — false whenever nothing else actually
+  // merged it, e.g. our own `gh` call throwing after a real server-side merge, or a GitHub-UI merge).
+  it('bug 2 fix: the recordAlreadyMerged helper records the PR into `merged` and posts the trace', () => {
+    const idx = src.indexOf('const recordAlreadyMerged = () => {');
+    expect(idx).toBeGreaterThan(-1);
+    const body = src.slice(idx, src.indexOf('};', idx));
+    expect(body).toMatch(/merged\.push\(\{ num: c\.num, repo: c\.repo, headSha: c\.headSha \?\? null \}\);/);
+    expect(body).toMatch(/postMergeTrace\(\);/);
   });
 });

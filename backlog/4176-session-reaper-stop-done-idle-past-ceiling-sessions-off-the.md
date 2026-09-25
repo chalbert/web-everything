@@ -1,0 +1,33 @@
+---
+bornAs: xxgmty9
+kind: story
+size: 5
+parent: "4075"
+status: resolved
+scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/hung-session.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
+dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
+tags: []
+---
+
+# Session reaper: stop done/idle-past-ceiling sessions off the record, never off a live process
+
+Live audit 2026-09-25 (epic #3383/#4075) found several daemon-dispatched background sessions neither stopped nor treated as finished, though nothing more was coming from them: 10-day-old `working` fixers, 40+-minute-idle `blocked` reviewers with an already-done completion record, and a fix daemon that keeps logging `reconcile-refused live-process` for PRs whose own bound sessions read done/stopped. Fix: a session whose completion record is done, or whose transcript is idle past its kind's ceiling, gets stopped and never counts as a live holder; cool-offs and retries key off the record, never off a live process; ghosts on closed or merged PRs are stopped too.
+
+## Root causes
+
+Confirmed against the running daemon's own `claude agents --json --all` listing and `fix-dispatch-daemon.log`:
+
+1. we:scripts/conveyor/session-reaper.mjs#makeCompletionResolver held a `blocked-on-infra` completion record to its 15-minute infra-retry cool-off before answering `done:true`, so the OS process was kept alive (never `claude stop`ped) for the whole cool-off even though the record already says the session is finished — the cool-off belongs to the record, never to whether the process is still listed.
+2. Because of (1), once the process is stopped this way, we:scripts/conveyor/reconcile-core.mjs#assessLiveness's `isFinished` treated a bare `state:'stopped'` row as unconditionally finished, bypassing the still-running infra cool-off and freeing the PR for immediate redispatch.
+3. we:scripts/conveyor/session-reaper.mjs#groundTruthForPr (the STOP/reap axis) only ever recognized a MERGED pr as resolved, so a ghost session on a PR CLOSED without merging had no path to ever being confirmed done.
+4. `classifySessionReapWithGroundTruth`'s wrong-cwd short-circuit ran before every axis, including the no-net-outcome ceiling and hung-transcript detection built specifically to catch a stale working/blocked row, so a session dispatched from any checkout other than the daemon's own could never be reaped no matter how many days it sat idle.
+
+## Fix
+
+A session whose completion record is done, or whose transcript has been idle past its kind's ceiling, gets STOPPED and never counts as a live holder. Cool-offs and retries key off the record (a new `awaitingInfraCooloff` flag threaded from `markSelfReportedDone` into `assessLiveness`), never off a live process. Ghosts on closed or merged PRs are stopped (`groundTruthForPr` widened to match `retentionGroundTruthForPr`'s existing "merged or closed" test). Axis -1 (no-outcome) and axis 0 (hung-transcript) now run even when `allowedCwd` does not match, mirroring the existing precedent that both already override `neverReapWorking` for the identical reason. Axis 1/2/3 (completion-record/ground-truth/idle-timeout) remain fully cwd-gated, unchanged.
+
+## Done when
+
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/session-reaper.test.mjs we:scripts/conveyor/__tests__/reconcile-core.test.mjs` fails on `main` (the pre-fix cool-off/wrong-cwd/merged-only assertions) and passes once this lands.
+2. **Live** — loaded into the `wev-review-daemon` clone via `we:scripts/daemon-overlay.mjs`, the reaper stops the lingering ghost sessions (`fix-2003`/`fix-2115`/`fix-2267`, `review-2669`/`review-2678`, `ci-heal-2685`, or whichever are still lingering by then), and the fix daemon stops logging `reconcile-refused live-process` for PR #2672/#2653 once their bound sessions are genuinely finished — `claude agents` before/after.

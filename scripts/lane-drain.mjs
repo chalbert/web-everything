@@ -78,7 +78,7 @@ import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences }
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo)
+import { withNumberingLock, lockResultOr, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo); lockResultOr (#xuqk1vp) safely reads a lock outcome that may have refused to run
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -323,9 +323,6 @@ export function planPostDrain(result) {
   return { deleteManifest: false, reopen: failed };
 }
 
-// Allow importing the pure helpers without running the CLI (the test file imports this module).
-const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-if (IS_CLI) runCli();
 
 // The drain must run in the WE checkout (it reads WE's queued.json + drives WE's backlog.mjs). Resolve WE's
 // git toplevel from cwd and use it as the anchor for EVERY WE-side call — so the WE land targets the real WE
@@ -845,6 +842,54 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
 }
 
 /**
+ * xb94mt5 — cheap, git-only pre-check: does `CWD`'s tree carry ANY tracked provisional (hash-keyed) backlog
+ * file right now? Mirrors the pre-check `scripts/lib/number-pending-hashes-before-push.mjs` already runs
+ * before every push (same regex, same `git ls-files backlog/*.md` call) — kept as an independent, in-scope
+ * copy here rather than importing that file, so this module never depends on a caller-side script. Lets a
+ * caller that runs UNCONDITIONALLY once per pass (not gated on "did a WE PR merge THIS pass") skip the mutex
+ * + the full `numberPendingHashes` corpus read entirely on the overwhelmingly common "nothing pending" tick.
+ * @param {string} CWD
+ * @returns {boolean}
+ */
+export function hasPendingHashFiles(CWD) {
+  const tracked = quietGit(CWD, ['ls-files', 'backlog/*.md']);
+  return tracked != null && /backlog\/x[0-9a-z]{6}-/.test(tracked);
+}
+
+/**
+ * xb94mt5 — number (+ publish) whenever the refreshed tree carries a pending hash file, REGARDLESS of whether
+ * THIS pass itself landed a WE PR. Audit finding A4 (we:reports/2026-09-24-daemon-blocking-antipatterns.md):
+ * the JIT numbering in `scripts/merge-ai-prs.mjs` fires only when `landedLocal` is true (a WE PR merged this
+ * pass), so a killed pass, a failed push, or a couple that landed via a non-WE-carrier path leaves a hash file
+ * on main un-numbered until the next WE PR HAPPENS to land — and the resident drain daemon's own clone-refresh
+ * `reset --hard` (against `#resident-daemon-reload-lifecycle` clause 4) discards any unpushed numbering commit
+ * in between, so the miss can persist indefinitely rather than merely until the next merge.
+ *
+ * This is the SAME `numberPendingHashes` + numbering-mutex machinery `finalizeLand` uses (single source, never
+ * a fork), wired to run on its own "is there anything to do" signal instead of a caller's landed-this-pass
+ * flag — a caller (a drain pass's own top-of-loop, `push-if-green.mjs`'s pre-push hook, a cron sweep) can call
+ * this UNCONDITIONALLY, every pass, and it is a true no-op (no git spawn beyond the one cheap `ls-files`, no
+ * mutex acquisition) whenever {@link hasPendingHashFiles} finds nothing. xuqk1vp: never runs the write
+ * unlocked — a live holder's pass simply finds nothing-to-do-yet and the NEXT pass's cheap check retries.
+ * `lockOpts` passes through to {@link withNumberingLock} (e.g. `lockRoot`/`now`/`sleep`/`waitMs` for a test's
+ * throwaway lock dir + fake clock) — never the mutex's OWN choice to run unlocked, which stays hard-`false`.
+ * @param {string} CWD
+ * @param {object} [lockOpts]
+ * @returns {{ attempted: boolean, numbered?: {assigned: Array<{hash:string,nnn:string}>, committed: boolean}, pushed?: boolean, deferred?: boolean, heldBy?: string|null }}
+ */
+export function numberPendingHashesIfAny(CWD, lockOpts = {}) {
+  if (!hasPendingHashFiles(CWD)) return { attempted: false };
+  const numLock = withNumberingLock((heartbeat) => {
+    const numbered = numberPendingHashes(CWD);
+    heartbeat();
+    const pushed = numbered.committed ? publishMain(CWD) : false;
+    return { numbered, pushed };
+  }, { ...lockOpts, runUnlockedOnContention: false });
+  if (!numLock.ran) return { attempted: true, deferred: true, heldBy: numLock.heldBy ?? null };
+  return { attempted: true, numbered: numLock.result.numbered, pushed: numLock.result.pushed };
+}
+
+/**
  * Resolve a birth-hash to the NNN it LANDED as, by reading the sole cross-clone proof-of-land: the
  * `bornAs:<hash>` line `numberPendingHashes` stamped into a numbered item's frontmatter on origin/main
  * (#2392). Returns the landed NNN string, or null when the hash has no bornAs record on main (it has not
@@ -885,11 +930,14 @@ function publishMain(CWD) {
 // SUCCESS reconcile (#2175): the couple landed via PR onto ORIGIN/main, so sync local main to it, then UNQUEUE
 // + DELETE the `.lane-manifest.json` it carried, in ONE commit, and publish. Best-effort at every step — a
 // leftover manifest / un-pushed unqueue is recoverable cruft, never a reason to unwind a successful landing.
-function finalizeLand(CWD, num) {
+// `deps` is a test seam only (review #2668): `unqueue`/`publish` replace the backlog.mjs + push-if-green spawns,
+// `lockOpts` points the numbering mutex at a throwaway lock root. Production calls pass nothing.
+const unqueueViaBacklog = (CWD, num) => execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+export function finalizeLand(CWD, num, { unqueue = unqueueViaBacklog, publish = publishMain, lockOpts = {} } = {}) {
   syncMain(CWD); // bring the merged origin/main (incl. the manifest the WE lane commit carried) local
   // Clear the queued marker (the single clear point) + stage the manifest deletion if it's tracked on main.
   let unqueued = false;
-  try { execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); unqueued = true; } catch { unqueued = false; }
+  try { unqueue(CWD, num); unqueued = true; } catch { unqueued = false; }
   let manifestDeleted = false;
   if (quietGit(CWD, ['ls-files', MANIFEST_FILENAME])) manifestDeleted = quietGit(CWD, ['rm', '--quiet', MANIFEST_FILENAME]) != null;
   // Commit ONLY this couple's paths via an explicit `-- <pathspec>` — a bare `git commit` would sweep any
@@ -905,16 +953,34 @@ function finalizeLand(CWD, num) {
   // single publish below pushes the unqueue commit and the numbering commit to main together.
   //
   // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Wrap it in the
-  // TTL-bounded numbering mutex so two concurrent lands never both mint an NNN off the same base. A crashed
-  // holder expires by the lease; a pathological live-contention falls through un-locked (reported), never hangs.
-  const numLock = withNumberingLock(() => {
+  // TTL-bounded numbering mutex so two concurrent lands never both mint an NNN off the same base.
+  //
+  // xuqk1vp — `runUnlockedOnContention: false`: a live holder blocked past the budget means this section NEVER
+  // runs unlocked (the old fallback let two writers race main; the #2318 tripwire only ever caught it AFTER the
+  // damage). A refusal defers the NUMBERING this pass (`numLock.ran === false`) while the already-made unqueue
+  // commit is still published below; #xb94mt5's pending-hash sweep (run at the top of every drain pass) numbers
+  // the deferred hash file on the next pass, so nothing strands.
+  // `heartbeat` is threaded through so a genuinely-long section (before #xn6n5gp's linear fix lands, or a slow
+  // push) keeps its own lease fresh instead of racing the 5-minute TTL out from under itself.
+  const numLock = withNumberingLock((heartbeat) => {
     const numbered = numberPendingHashes(CWD);
-    const pushed = (unqueueCommitted || numbered.committed) ? publishMain(CWD) : false;
+    heartbeat(); // refresh — numbering is the long pole; the push below should never find its own lease stale
+    const pushed = (unqueueCommitted || numbered.committed) ? publish(CWD) : false;
     return { numbered, pushed };
-  });
-  const numbered = numLock.result.numbered;
-  pushed = numLock.result.pushed;
-  if (numLock.contended) process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered+published without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
+  }, { ...lockOpts, runUnlockedOnContention: false });
+  const fallback = { numbered: { assigned: [], committed: false }, pushed: false };
+  const outcome = lockResultOr(numLock, fallback);
+  const numbered = outcome.numbered;
+  pushed = outcome.pushed;
+  if (!numLock.ran) {
+    // Review #2668 — only the NUMBERING is deferred. The unqueue+manifest commit above is already made and mints
+    // no NNN, so publish it now (as the pre-lock code always did); otherwise origin keeps showing the couple
+    // queued until some unrelated later push carries it. Best-effort: a non-ff push just reports pushed:false.
+    // Tradeoff: this push is outside the section, so it can beat the holder's own push (which then fails non-ff
+    // and is retried by the next pass's sweep). The pre-xuqk1vp code had the same exposure; it never mints an NNN.
+    if (unqueueCommitted) pushed = publish(CWD);
+    process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex held by ${numLock.heldBy || '?'} — numbering DEFERRED this pass (#2391/#xuqk1vp), never run unlocked; the next pass's pending-hash sweep numbers it${unqueueCommitted ? ` (unqueue commit published: ${pushed})` : ''}\n`);
+  }
   return { unqueued, manifestDeleted, pushed, numbered };
 }
 
@@ -1095,6 +1161,16 @@ function runWatch({ follow }) {
     if (plan.deferred.length) log(`deferred (waits on unlanded dep): ${plan.deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}`);
     const toDrain = plan.ready.filter((num) => !attempted.has(num)); // never re-attempt a couple in one run
     if (DRY_RUN) { log(`dry-run: would drain ${toDrain.map((n) => '#' + n).join(', ') || 'nothing'} (impl-first/WE-last per couple)`); return 0; }
+    // xb94mt5 (review #2668) — the production caller of the any-pass sweep: number a hash file stranded by an
+    // earlier killed/failed/deferred pass, whether or not anything merges this pass. A cheap `ls-files` no-op
+    // when nothing is pending; never numbers unlocked (a live holder defers it to the next pass).
+    // Only on `main`: on any other branch the pull would fast-forward THAT branch and the numbering commit would
+    // land there, never on the main `publishMain` pushes.
+    const onMain = quietGit(CWD, ['rev-parse', '--abbrev-ref', 'HEAD']) === 'main';
+    if (onMain) syncMain(CWD);
+    const sweep = onMain ? numberPendingHashesIfAny(CWD) : { attempted: false };
+    if (sweep.deferred) log(`pending-hash sweep deferred — numbering mutex held by ${sweep.heldBy || '?'}; retrying next pass`);
+    else if (sweep.attempted && sweep.numbered.committed) log(`pending-hash sweep numbered ${sweep.numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} (published: ${sweep.pushed})`);
     let landedThisPass = 0;
     for (const num of toDrain) {
       // #2453 — heartbeat PER COUPLE, not just at the top of the pass: a one-shot sweep with several queued
@@ -1175,3 +1251,10 @@ function runWatch({ follow }) {
   // (it plans, never drains) — its plan is in the JSON.
   process.exit(DRY_RUN || fullyDrained ? 0 : 2);
 }
+
+// Allow importing the pure helpers without running the CLI (the test file imports this module). Kept LAST (review
+// #2668): the CLI runs synchronously, so invoking it any earlier leaves the module-level constants declared below
+// that point (QUEUED_REL, LEDGER_REL, …) in their temporal dead zone — `finalizeLand`/`numberPendingHashes` then
+// threw `Cannot access 'LEDGER_REL' before initialization` on every real CLI numbering path.
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (IS_CLI) runCli();

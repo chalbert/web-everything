@@ -191,3 +191,6 @@ audits/backlog-health-audit.md
 # (scripts/conveyor/run-scorecard-store.mjs#resolveScorecardStorePath) and migrates this file's history there;
 # ignoring the path keeps a copy an older process still writes from ever dirtying a checkout again.
 scripts/conveyor/run-scorecards.json
+# #4077 health watch state (episodes, per-daemon memory, last-tick stamp) — local state under the pinned state
+# root, never committed; the plist example points CONVEYOR_STATE_ROOT at the operator's own checkout.
+.conveyor/health/

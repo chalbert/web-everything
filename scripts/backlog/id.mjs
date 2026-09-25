@@ -95,19 +95,58 @@ export function stampBornAs(content, hash) {
 }
 
 /**
- * Blind, whole-token swap of every ledgered hash → its `NNN` in `text`. `entries` is the ledger's
- * `[hash, nnn]` pairs (already filtered to real hashes). Each hash (`x` + 6 base36) is globally unique
- * and never recurs in prose, so a word-boundary replace is provably safe. Shared by `applyLedger` (both
- * the body-ref rewrite and the path-token `from → to` computation) and the drain's on-disk report rewrite,
- * so all three use ONE definition of "apply the whole ledger" (no drift between them).
+ * A hash TOKEN shape (`x` + 6 base36), global — matches ANY hash-looking run of chars regardless of
+ * whether it is ledgered. Shared by {@link swapWithMap} (the replace) and {@link ANY_HASH_RE}/the
+ * path-rename scan (the detect); ONE pattern, never one-per-ledger-entry (xn6n5gp — audit finding D1).
+ */
+const HASH_TOKEN_RE = /\bx[0-9a-z]{6}\b/g;
+
+/** Non-global sibling of {@link HASH_TOKEN_RE} for a cheap boolean "does this text carry ANY hash token at
+ *  all" pre-check — lets a file/line with nothing to number skip the split/replace/scan work entirely. */
+const ANY_HASH_RE = /\bx[0-9a-z]{6}\b/;
+
+/**
+ * A path-shaped run of characters that embeds AT LEAST ONE hash token and ends in a `.ext` — the on-disk
+ * path-value shape {@link applyLedger}'s `pathRenames` looks for (a `relatedReport`, a body markdown link).
+ * Generalised to "any hash", not one-per-ledger-entry (xn6n5gp finding D1: this specific regex, run once
+ * per ledger entry per file, was ~76% of the pre-fix cost) — the ledger-membership filter is applied
+ * AFTER the single scan, in {@link applyLedger}, not baked into the pattern.
+ */
+const PATH_HASH_RE = /(?<![\w./-])([\w./-]*\bx[0-9a-z]{6}\b[\w./-]*\.[\w]+)/g;
+
+/**
+ * Blind, whole-token swap of every hash in `map` → its `NNN` in `text`, via ONE regex scan + a Map lookup
+ * per match (not one `RegExp` construction + scan per ledger entry, xn6n5gp finding D1). A hash token not
+ * present in `map` is left untouched. Internal to this module — {@link swapHashes} (the public, array-based
+ * API) and {@link applyLedger}'s per-line loop both funnel through this so the map is built ONCE per caller
+ * rather than once per line.
  * @param {string} text
- * @param {[string,string][]} entries
+ * @param {Map<string,string>} map
+ * @returns {string}
+ */
+function swapWithMap(text, map) {
+  if (map.size === 0) return text;
+  return text.replace(HASH_TOKEN_RE, (m) => (map.has(m) ? String(map.get(m)) : m));
+}
+
+/**
+ * Blind, whole-token swap of every ledgered hash → its `NNN` in `text`. `entries` is the ledger's
+ * `[hash, nnn]` pairs (already filtered to real hashes), OR a `Map<hash,nnn>` directly (avoids rebuilding
+ * one when a caller already has it). Each hash (`x` + 6 base36) is globally unique and never recurs in
+ * prose, so a word-boundary replace is provably safe. Shared by `applyLedger` (both the body-ref rewrite
+ * and the path-token `from → to` computation) and the drain's on-disk report rewrite, so all three use ONE
+ * definition of "apply the whole ledger" (no drift between them).
+ *
+ * xn6n5gp (audit finding D1, P0): previously built a FRESH `RegExp` per ledger entry and ran a full
+ * `.replace()` scan per entry — O(entries) regex constructions × O(text) scans, repeated per LINE by
+ * `applyLedger`'s old caller. Now ONE regex, reused via {@link swapWithMap}; behaviour (output) is
+ * byte-identical, only the cost changed.
+ * @param {string} text
+ * @param {[string,string][]|Map<string,string>} entries
  * @returns {string}
  */
 export function swapHashes(text, entries) {
-  let out = text;
-  for (const [hash, nnn] of entries) out = out.replace(new RegExp(`\\b${hash}\\b`, 'g'), String(nnn));
-  return out;
+  return swapWithMap(text, entries instanceof Map ? entries : new Map(entries));
 }
 
 /**
@@ -174,30 +213,46 @@ export function applyLedger(files, ledger) {
   const rewrites = [];
   const pathRenames = [];
   const pathSeen = new Set();
+  if (entries.length === 0) return { renames, rewrites, pathRenames }; // nothing ledgered → nothing to do (no corpus scan at all)
+  const ledgerMap = new Map(entries); // built ONCE for the whole call — xn6n5gp: not once per line/per file
   for (const { name, content } of files) {
-    // Blind whole-token rewrite of every ledgered hash → its NNN, line by line, EXCEPT a `bornAs:` value
-    // line — the birth-hash record must survive numbering. Clobbering it to the assigned NNN would erase
-    // the sole cross-clone proof-of-land and deadlock the permanent strand the adversary found (#2392);
-    // every OTHER hash cross-ref (`blockedBy`/`parent`/`#ref`/body) is still rewritten. Reuses the shared
-    // `swapHashes` helper (#2400) per line so the body rewrite and the path/report rewrites can't drift.
-    let text = content
-      .split('\n')
-      .map((line) => (BORN_AS_RE.test(line) ? line : swapHashes(line, entries)))
-      .join('\n');
-    // Collect on-disk path values embedding ANY ledgered hash (see `pathRenames` in the doc above). Match a
-    // path-shaped run (dir/file chars) that carries a hash AND ends in a `.ext`; scan the ORIGINAL content
-    // (post-swap the hash is gone). Skip `backlog/*` — handled by `renames`. Each `from` is emitted ONCE,
-    // deduped, with a `to` that applies the WHOLE ledger — a filename can embed TWO ledgered hashes
-    // (`reports/<hashA>-<hashB>-notes.md`), and the body ref rewrites BOTH; computing `to` per-iteration
-    // (this hash only) would leave the other hash unswapped → renamed file and rewritten ref disagree,
-    // re-creating the dangling-ref/hidden-report failure this whole path-rename exists to prevent (#2400).
-    for (const [hash] of entries) {
-      const pathRe = new RegExp(`(?<![\\w./-])([\\w./-]*\\b${hash}\\b[\\w./-]*\\.[\\w]+)`, 'g');
-      for (const m of content.matchAll(pathRe)) {
+    // xn6n5gp (audit finding D1, P0): a file whose CONTENT carries no hash token at all needs no per-line
+    // split/replace and no path scan — skip straight to `text = content`. Cheap (one non-global regex test
+    // over the whole file) and, for a corpus where only a small fraction of files ever mention a hash, the
+    // single biggest win: it turns an O(files × ledger-entries) scan into an O(files-that-actually-mention-
+    // a-hash) one. NOTE: this guards only the content scan — the file's OWN leading id token (the rename +
+    // bornAs stamp below) is checked unconditionally, since a file being numbered may have zero OTHER hash
+    // mentions in its body (e.g. a freshly-scaffolded item with no cross-refs yet).
+    let text = content;
+    if (ANY_HASH_RE.test(content)) {
+      // Blind whole-token rewrite of every ledgered hash → its NNN, line by line, EXCEPT a `bornAs:` value
+      // line — the birth-hash record must survive numbering. Clobbering it to the assigned NNN would erase
+      // the sole cross-clone proof-of-land and deadlock the permanent strand the adversary found (#2392);
+      // every OTHER hash cross-ref (`blockedBy`/`parent`/`#ref`/body) is still rewritten. Reuses the shared
+      // map-based swap (#2400) per line, off the ONE map built above, so the body rewrite and the path/report
+      // rewrites can't drift AND never rebuild a Map/RegExp per line (the pre-fix cost).
+      text = content
+        .split('\n')
+        .map((line) => (BORN_AS_RE.test(line) ? line : swapWithMap(line, ledgerMap)))
+        .join('\n');
+      // Collect on-disk path values embedding ANY ledgered hash (see `pathRenames` in the doc above). ONE scan
+      // of the ORIGINAL content (post-swap the hash is gone) with a hash-shape-generic pattern — not one
+      // lookbehind regex re-scanning the WHOLE file per ledger entry (xn6n5gp finding D1: ~76% of the pre-fix
+      // cost). Skip `backlog/*` — handled by `renames`. Each `from` is emitted ONCE, deduped, with a `to` that
+      // applies the WHOLE ledger — a filename can embed TWO ledgered hashes (`reports/<hashA>-<hashB>-notes.md`),
+      // and the body ref rewrites BOTH; computing `to` per-match (this hash only) would leave the other hash
+      // unswapped → renamed file and rewritten ref disagree, re-creating the dangling-ref/hidden-report failure
+      // this whole path-rename exists to prevent (#2400). A path segment may embed a hash that is NOT ledgered
+      // this pass (some other in-flight item) alongside one that IS — check every hash found in the match, not
+      // just the first, and require ANY of them to be ledgered before acting (matches the old per-entry-regex
+      // behaviour exactly: each ledgered entry's own regex independently matched the full span).
+      for (const m of content.matchAll(PATH_HASH_RE)) {
         const from = m[1];
         if (from.startsWith('backlog/') || pathSeen.has(from)) continue;
+        const hashesInPath = from.match(HASH_TOKEN_RE) || [];
+        if (!hashesInPath.some((h) => ledgerMap.has(h))) continue; // path embeds a hash, but none ledgered this pass
         pathSeen.add(from);
-        pathRenames.push({ from, to: swapHashes(from, entries) }); // whole-ledger swap → all embedded hashes numbered
+        pathRenames.push({ from, to: swapWithMap(from, ledgerMap) }); // whole-ledger swap → all embedded hashes numbered
       }
     }
     const idTok = idFromName(name);

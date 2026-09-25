@@ -39,6 +39,13 @@ const stage = (root) => {
   // every marker counter runs a comment through) — stage it too, or the staged copy fails to import and
   // `main()` silently never runs (the exact failure mode this file's own header names).
   copyFileSync(join(dirname(LEAF), 'marker-authorship.mjs'), join(root, 'lib/marker-authorship.mjs'));
+  // #4077 — the HEALTH section (`--with-health`) reads the health store via `../conveyor/health-watch-section.mjs`,
+  // which renders through the pure core (+ its `../lib/secret-scrub.mjs` leaf) and finds the pinned state root
+  // via `./queue-store.mjs` — stage all four, same reason as above.
+  for (const f of ['health-watch-section.mjs', 'health-watch-core.mjs', 'queue-store.mjs']) {
+    copyFileSync(join(dirname(LEAF), '../conveyor', f), join(root, 'conveyor', f));
+  }
+  copyFileSync(join(dirname(LEAF), 'secret-scrub.mjs'), join(root, 'lib/secret-scrub.mjs'));
 };
 
 let dir;

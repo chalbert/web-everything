@@ -57,7 +57,6 @@ import {
   runMarkChatEndedHook,
 } from '../session-reaper.mjs';
 import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
-import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -301,6 +300,18 @@ describe('groundTruthForPr — the bounded, network gh pr view IO helper', () =>
     const exec = () => { throw new Error('gh: command not found'); };
     expect(groundTruthForPr('1862', { exec })).toBeNull();
   });
+
+  // #4149 (epic #3383/#4075) — RATIFIED WIDENING: "Ghosts on closed or merged PRs are stopped." A ghost session
+  // bound to a PR that was closed WITHOUT merging (abandoned/superseded/duplicate) used to have no path to ever
+  // being confirmed done by this axis — never a fix to make, never a merge to detect — so it sat forever.
+  it('resolved:true (and evidence:closed) for a CLOSED, unmerged PR — the new #4149 case', () => {
+    const exec = () => JSON.stringify({ state: 'CLOSED', mergedAt: null });
+    expect(groundTruthForPr('2003', { exec })).toEqual({ resolved: true, evidence: 'pr#2003:closed' });
+  });
+  it('a MERGED pr still reports evidence:merged, never the closed wording, when both could apply', () => {
+    const exec = () => JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-03T11:57:41Z' });
+    expect(groundTruthForPr('1862', { exec })).toEqual({ resolved: true, evidence: 'pr#1862:merged' });
+  });
 });
 
 describe('makeGroundTruthResolver — routing, caching, and the gh pr view call cap', () => {
@@ -471,6 +482,57 @@ describe('classifySessionReap — allowedCwd, a second structural guard (epic #3
   });
   it('an empty-string allowedCwd is treated as "no guard" (never refuses every session with a falsy cwd)', () => {
     expect(classifySessionReap(bg({ state: 'done' }), { allowedCwd: '' })).toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — a `wrong-cwd` session is still reapable by axis -1/0 (#4149)', () => {
+  // LIVE, 2026-09-25: `fix-2003`/`fix-2115`/`fix-2267` were dispatched with a `cwd` other than the review-
+  // daemon's own `allowedCwd` (the primary checkout, a scratch-dispatcher clone) and sat `state: 'working'` for
+  // TEN DAYS — `wrong-cwd` short-circuited every axis, including the ones built specifically to catch a stale
+  // `working` row (no-outcome ceiling, hung-transcript). "Ghosts older than any window never swept."
+  const alwaysStalled = () => ({ stall: true, reason: 'ceiling' });
+  const alwaysHung = () => ({ hung: true, reason: 'stale-no-activity' });
+  const neverStalled = () => ({ stall: false, reason: 'active' });
+  const alwaysResolved = () => ({ resolved: true, evidence: 'x' });
+  const alwaysDone = () => ({ done: true });
+
+  it('axis -1 (no-outcome) reaps a wrong-cwd session — THE LIVE CASE', () => {
+    const session = bg({ state: 'working', name: 'fix-2003', cwd: '/elsewhere' });
+    expect(classifySessionReapWithGroundTruth(session, null, { allowedCwd: '/daemon-clone', noOutcomeFor: alwaysStalled }))
+      .toEqual({ reap: true, reason: 'no-outcome:ceiling' });
+  });
+
+  it('axis 0 (hung-transcript) reaps a wrong-cwd session too', () => {
+    const session = bg({ state: 'blocked', name: 'review-2669', cwd: '/elsewhere' });
+    expect(classifySessionReapWithGroundTruth(session, null, { allowedCwd: '/daemon-clone', hungFor: alwaysHung }))
+      .toEqual({ reap: true, reason: 'hung-transcript:stale-no-activity' });
+  });
+
+  it('neither axis -1 nor axis 0 fires → falls through to `wrong-cwd`, unchanged — the guard still holds for everything else', () => {
+    const session = bg({ state: 'working', name: 'fix-2003', cwd: '/elsewhere' });
+    expect(classifySessionReapWithGroundTruth(session, alwaysResolved, {
+      allowedCwd: '/daemon-clone', noOutcomeFor: neverStalled, completionFor: alwaysDone,
+    })).toEqual({ reap: false, reason: 'wrong-cwd' });
+  });
+
+  it('the completion-record axis (1) and ground-truth axis (2) do NOT bypass a wrong-cwd mismatch — only -1/0 do', () => {
+    const session = bg({ state: 'blocked', name: 'review-1862', cwd: '/elsewhere' });
+    expect(classifySessionReapWithGroundTruth(session, alwaysResolved, { allowedCwd: '/daemon-clone', completionFor: alwaysDone }))
+      .toEqual({ reap: false, reason: 'wrong-cwd' });
+  });
+
+  it('the idle-timeout backstop (axis 3) does NOT bypass a wrong-cwd mismatch either', () => {
+    const now = 10_000_000;
+    const startedAt = now - DEFAULT_IDLE_REAP_THRESHOLD_MS - 1;
+    const session = bg({ state: 'blocked', name: 'test-dontask', cwd: '/elsewhere', startedAt });
+    expect(classifySessionReapWithGroundTruth(session, null, { allowedCwd: '/daemon-clone', idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS, now }))
+      .toEqual({ reap: false, reason: 'wrong-cwd' });
+  });
+
+  it('a matching cwd is completely unaffected — byte-identical to before #4149', () => {
+    const session = bg({ state: 'working', name: 'fix-2003', cwd: '/daemon-clone' });
+    expect(classifySessionReapWithGroundTruth(session, null, { allowedCwd: '/daemon-clone', noOutcomeFor: alwaysStalled }))
+      .toEqual({ reap: true, reason: 'no-outcome:ceiling' });
   });
 });
 
@@ -984,12 +1046,12 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
     expect(resolver('review-999999')).toBeNull();
   });
 
-  describe('#2588/review-loops (epic #3383/#4075) — `blocked-on-infra` cool-off', () => {
+  describe('#4149 (epic #3383/#4075) — `blocked-on-infra` STOPS the process immediately; the record, never the process, holds the cool-off', () => {
     let dir;
     beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cooloff-')); });
     afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-    it('does NOT report done while a `blocked-on-infra` outcome is still inside the cool-off — THE BUG: before this fix, `status: done` alone reaped the session immediately, erasing it from the listing before reconcile-core.mjs\'s own cool-off ever got a row to apply it to (PR re-dispatched ~2 min later)', () => {
+    it('reports done EVEN WHILE a `blocked-on-infra` outcome is still inside the cool-off — THE BUG THIS FIXES: before, `status: done` alone was gated on the cool-off here too, so the live process (and every `claude agents` reader treating it as a live holder) sat un-stopped for the full 15+ minutes; the cool-off itself is now enforced only by reconcile-core.mjs#markSelfReportedDone/assessLiveness, against this SAME record, never by keeping this resolver blind to a done status', () => {
       const startedAt = () => '2026-09-24T23:00:00.000Z';
       const updatedAt = '2026-09-24T23:05:00.000Z'; // 5 min after start — well inside the 15-min cool-off
       const rec = applyCompletionUpdate(
@@ -998,26 +1060,11 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
         () => updatedAt,
       );
       writeCompletion(rec, dir);
-      const nowMs = Date.parse(updatedAt) + 5 * 60 * 1000; // 10 min after the report — still under the 15-min cap
-      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
-      expect(resolver('review-2588')).toEqual({ done: false });
-    });
-
-    it('reports done once the `blocked-on-infra` cool-off has elapsed', () => {
-      const startedAt = () => '2026-09-24T23:00:00.000Z';
-      const updatedAt = '2026-09-24T23:05:00.000Z';
-      const rec = applyCompletionUpdate(
-        newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: startedAt }),
-        { status: 'done', outcome: 'blocked-on-infra' },
-        () => updatedAt,
-      );
-      writeCompletion(rec, dir);
-      const nowMs = Date.parse(updatedAt) + INFRA_RETRY_COOLOFF_MS + 1000; // just past the 15-min cap
-      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
+      const resolver = makeCompletionResolver({ dir });
       expect(resolver('review-2588')).toEqual({ done: true });
     });
 
-    it('a non-infra outcome (a real verdict) reports done immediately — the cool-off applies ONLY to `blocked-on-infra`', () => {
+    it('a non-infra outcome (a real verdict) reports done too — there is no cool-off distinction left in THIS resolver at all', () => {
       const startedAt = () => '2026-09-24T23:00:00.000Z';
       const updatedAt = '2026-09-24T23:05:00.000Z';
       const rec = applyCompletionUpdate(
@@ -1026,12 +1073,18 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
         () => updatedAt,
       );
       writeCompletion(rec, dir);
-      const nowMs = Date.parse(updatedAt) + 1000; // 1 second later
-      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
+      const resolver = makeCompletionResolver({ dir });
       expect(resolver('review-2588')).toEqual({ done: true });
     });
 
-    it('classifySessionReapWithGroundTruth does not upgrade a `blocked`/`working` session to reap while its own completion resolver is still inside the cool-off', () => {
+    it('a NOT-done record still answers `{ done: false }` — this resolver never guesses, it just no longer gates on outcome/cool-off', () => {
+      const rec = newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: () => '2026-09-24T23:00:00.000Z' });
+      writeCompletion(rec, dir); // status stays 'started' — newCompletionRecord's own default
+      const resolver = makeCompletionResolver({ dir });
+      expect(resolver('review-2588')).toEqual({ done: false });
+    });
+
+    it('classifySessionReapWithGroundTruth NOW upgrades a `blocked`/`working` session to reap even inside the cool-off — the process is stopped immediately (#4149); reconcile-core.mjs is what keeps the PR from being redispatched until the SAME window elapses', () => {
       const startedAt = () => '2026-09-24T23:00:00.000Z';
       const updatedAt = '2026-09-24T23:05:00.000Z';
       const rec = applyCompletionUpdate(
@@ -1040,11 +1093,10 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
         () => updatedAt,
       );
       writeCompletion(rec, dir);
-      const nowMs = Date.parse(updatedAt) + 5 * 60 * 1000;
-      const completionFor = makeCompletionResolver({ dir, now: () => nowMs });
+      const completionFor = makeCompletionResolver({ dir });
       const session = { name: 'review-2588', kind: 'background', state: 'blocked', cwd: '/repo' };
       const verdict = classifySessionReapWithGroundTruth(session, () => null, { completionFor });
-      expect(verdict.reap).toBe(false);
+      expect(verdict).toEqual({ reap: true, reason: 'completion-record-done' });
     });
   });
 });
