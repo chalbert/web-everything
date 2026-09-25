@@ -38,10 +38,12 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { scrubReasons } from '../lib/secret-scrub.mjs';
 import { daemonConveyorStateRoot } from '../lib/daemon-rebuild.mjs';
+import { withInfraLock } from './infra-blocked.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -117,51 +119,82 @@ function parseStoreText(text) {
   }
 }
 
-/** Stamped into the shared store's `migrations` once the tracked in-tree history has been carried over. */
+/** Prefix of every stamp the migration writes into the shared store's `migrations`. */
 export const LEGACY_MIGRATION_ID = 'legacy-in-tree-store-4155';
+
+/**
+ * The stamp for ONE legacy source, so a store migrated from checkout A still imports checkout B's history
+ * (review of PR #2684). The git-history source is keyed by checkout: its content is frozen once the untracking
+ * commit is in HEAD, and keying it by path lets a later process skip the git spawn entirely — including when
+ * that checkout turned out to hold no history (a shallow or unrelated clone). The on-disk copy is keyed by a
+ * hash of its content, because an older process may still append to that (now ignored) file.
+ */
+export const legacyGitStamp = (repoRoot) => `${LEGACY_MIGRATION_ID}:git:${repoRoot}`;
+export const legacyFileStamp = (text) => `${LEGACY_MIGRATION_ID}:file:${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
 
 const defaultGit = (repoRoot) => (args) => execFileSync('git', ['-C', repoRoot, ...args], {
   encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
 });
 
 /**
- * Every copy of the OLD tracked store this checkout can still see, as JSON texts: the in-tree file if one is
- * still on disk (a checkout whose copy was never pulled away), plus its last COMMITTED content from git
- * history — so a checkout that already pulled the untracking commit (which deletes the file) still migrates.
- * Never throws; a source it cannot read is skipped.
- * @param {{repoRoot?:string, exists?:Function, read?:Function, git?:(args:string[])=>string}} [o]
- * @returns {string[]}
+ * Every source of the OLD tracked store this checkout can still see, skipping any whose stamp is in `done`:
+ * the in-tree file if one is still on disk (a checkout whose copy was never pulled away), plus its last
+ * COMMITTED content from git history — so a checkout that already pulled the untracking commit (which deletes
+ * the file) still migrates. `stamps` lists every source actually examined — the git source counts once
+ * `rev-list` answered, even with no history, so the search is never repeated. Never throws.
+ * @param {{repoRoot?:string, exists?:Function, read?:Function, git?:(args:string[])=>string, done?:string[]}} [o]
+ * @returns {{texts:string[], stamps:string[]}}
  */
-export function readLegacyStoreTexts({
-  repoRoot = MODULE_REPO_ROOT, exists = existsSync, read = (p) => readFileSync(p, 'utf8'), git = defaultGit(repoRoot),
+export function readLegacySources({
+  repoRoot = MODULE_REPO_ROOT, exists = existsSync, read = (p) => readFileSync(p, 'utf8'), git = defaultGit(repoRoot), done = [],
 } = {}) {
   const texts = [];
+  const stamps = [];
   const onDisk = join(repoRoot, LEGACY_IN_TREE_STORE);
-  try { if (exists(onDisk)) texts.push(read(onDisk)); } catch { /* unreadable — skip */ }
-  let sha = '';
-  try { sha = String(git(['rev-list', '-1', 'HEAD', '--', LEGACY_IN_TREE_STORE])).trim(); } catch { /* no git */ }
-  if (sha) {
-    // The last commit touching the path is either an append (the file is in it) or the untracking commit (the
-    // file is in its parent — first parent for a merge landed onto main, second for the other side).
-    for (const rev of [sha, `${sha}^1`, `${sha}^2`]) {
-      try { texts.push(String(git(['show', `${rev}:${LEGACY_IN_TREE_STORE}`]))); break; } catch { /* next */ }
+  try {
+    if (exists(onDisk)) {
+      const text = read(onDisk);
+      const stamp = legacyFileStamp(text);
+      if (!done.includes(stamp)) { texts.push(text); stamps.push(stamp); }
+    }
+  } catch { /* unreadable — skip */ }
+  if (!done.includes(legacyGitStamp(repoRoot))) {
+    let sha = null;
+    try { sha = String(git(['rev-list', '-1', 'HEAD', '--', LEGACY_IN_TREE_STORE])).trim(); } catch { /* no git — retry next process */ }
+    // Stamp only a settled answer: no history at all, or the history actually read. A failed `show` retries later.
+    if (sha === '') stamps.push(legacyGitStamp(repoRoot));
+    if (sha) {
+      // The last commit touching the path is either an append (the file is in it) or the untracking commit (the
+      // file is in its parent — first parent for a merge landed onto main, second for the other side).
+      for (const rev of [sha, `${sha}^1`, `${sha}^2`]) {
+        try {
+          texts.push(String(git(['show', `${rev}:${LEGACY_IN_TREE_STORE}`])));
+          stamps.push(legacyGitStamp(repoRoot));
+          break;
+        } catch { /* next */ }
+      }
     }
   }
-  return texts;
+  return { texts, stamps };
+}
+
+/** Every legacy JSON text this checkout can still see (see {@link readLegacySources}). */
+export function readLegacyStoreTexts(o = {}) {
+  return readLegacySources(o).texts;
 }
 
 /**
- * PURE: union the legacy history into the shared store. A row already in the target (by exact JSON identity)
- * is never duplicated, nothing in the target is ever dropped or overwritten, and legacy rows it lacks go FIRST
- * (they are older). `null` when no legacy text parsed — the caller then leaves the store unmarked and retries
- * later rather than stamp a migration that carried nothing it could prove.
+ * PURE: union the legacy history into the shared store and add `stamps`. A row already in the target (by exact
+ * JSON identity) is never duplicated, nothing in the target is ever dropped or overwritten, and legacy rows it
+ * lacks go FIRST (they are older). `null` when there is nothing to record — no legacy text parsed and no stamp.
  * @param {{version:number, records:object[], migrations?:string[]}|null} target - the current shared store, or null when absent
  * @param {string[]} legacyTexts
+ * @param {string[]} [stamps]
  */
-export function mergeLegacyStores(target, legacyTexts) {
+export function mergeLegacyStores(target, legacyTexts, stamps = []) {
   const legacy = legacyTexts.map(parseStoreText).filter(Boolean);
-  if (legacy.length === 0) return null;
-  const base = target ?? { version: legacy[0].version ?? 1, records: [], migrations: [] };
+  if (legacy.length === 0 && stamps.length === 0) return null;
+  const base = target ?? { version: legacy[0]?.version ?? 1, records: [], migrations: [] };
   const seen = new Set(base.records.map((r) => JSON.stringify(r)));
   const carried = [];
   for (const store of legacy) {
@@ -174,40 +207,72 @@ export function mergeLegacyStores(target, legacyTexts) {
     store: {
       version: base.version ?? 1,
       records: [...carried, ...base.records],
-      migrations: [...new Set([...(base.migrations ?? []), LEGACY_MIGRATION_ID])],
+      migrations: [...new Set([...(base.migrations ?? []), ...stamps])],
     },
     added: carried.length,
   };
+}
+
+/**
+ * Serialize a read-modify-write of the store across processes (`<path>.lock`, the exclusive-create lock
+ * `infra-blocked.mjs` already uses). Atomic rename alone prevents a partial file, not a lost update: two writers
+ * that each read, change and write drop whichever row landed first (review of PR #2684). The section it guards
+ * must stay fast — no git, no network. Like every user of that lock, it is best-effort: a holder that cannot
+ * get it within 5s (or hits an unexpected fs error) writes unlocked rather than fail a scoring pass, so a lost
+ * update stays possible only under that extreme contention.
+ */
+function withStoreLock(path, fn) {
+  return withInfraLock(path, fn);
 }
 
 let migrationChecked = false;
 
 /**
  * ONE-TIME migration (#4155): carry the old tracked in-tree history into the shared store — a union, never a
- * clobber — and stamp {@link LEGACY_MIGRATION_ID} so it never runs again. Runs lazily on the first real read of
- * the default store in a process; a no-op once the stamp is present. Never throws.
- * @param {{path?:string, repoRoot?:string, exists?:Function, read?:Function, write?:Function, git?:Function}} [o]
+ * clobber — and stamp each source it examined so that source is never read again. Runs lazily on the first
+ * real read of the default store in a process. Never throws.
+ *
+ * The slow part (git) runs BEFORE the lock, and only for sources the store does not stamp yet. The store is
+ * then re-read UNDER the lock and merged, so a row another process appended meanwhile is kept.
+ * @param {{path?:string, repoRoot?:string, exists?:Function, read?:Function, write?:Function, git?:Function, lock?:Function}} [o]
  * @returns {{migrated:boolean, added?:number, reason?:string, path:string}}
  */
 export function migrateLegacyStore({
   path = resolveScorecardStorePath(), repoRoot = MODULE_REPO_ROOT,
-  exists = existsSync, read = (p) => readFileSync(p, 'utf8'), write = atomicWrite, git,
+  exists = existsSync, read = (p) => readFileSync(p, 'utf8'), write = atomicWrite, git, lock = withStoreLock,
 } = {}) {
+  const readTarget = () => {
+    if (!exists(path)) return { target: null };
+    const target = parseStoreText(read(path));
+    // Never overwrite a shared store we cannot read — that would destroy the rows already there.
+    return target ? { target } : { unparsable: true };
+  };
   try {
-    let target = null;
-    if (exists(path)) {
-      target = parseStoreText(read(path));
-      // Never overwrite a shared store we cannot read — that would destroy the rows already there.
-      if (!target) return { migrated: false, reason: 'shared-store-unparsable', path };
-      if (target.migrations.includes(LEGACY_MIGRATION_ID)) return { migrated: false, reason: 'already-migrated', path };
+    const before = readTarget();
+    if (before.unparsable) return { migrated: false, reason: 'shared-store-unparsable', path };
+    const { texts, stamps } = readLegacySources({
+      repoRoot, exists, read, ...(git ? { git } : {}), done: before.target?.migrations ?? [],
+    });
+    if (texts.length === 0 && stamps.length === 0) {
+      return { migrated: false, reason: before.target ? 'already-migrated' : 'no-legacy-history', path };
     }
-    const merged = mergeLegacyStores(target, readLegacyStoreTexts({ repoRoot, exists, read, ...(git ? { git } : {}) }));
-    if (!merged) return { migrated: false, reason: 'no-legacy-history', path };
-    write(path, serializeStore(merged.store));
-    return { migrated: true, added: merged.added, path };
+    return lock(path, () => {
+      const now = readTarget();
+      if (now.unparsable) return { migrated: false, reason: 'shared-store-unparsable', path };
+      const merged = mergeLegacyStores(now.target, texts, stamps);
+      write(path, serializeStore(merged.store));
+      return { migrated: true, added: merged.added, path };
+    });
   } catch (e) {
     return { migrated: false, reason: `error: ${String(e?.message || e).split('\n')[0]}`, path };
   }
+}
+
+/** Run the lazy migration once per process — only for the real default store, never for injected IO. */
+function ensureMigrated(io) {
+  if (migrationChecked || ['path', 'read', 'exists', 'write'].some((k) => io[k] !== undefined)) return;
+  migrationChecked = true;
+  migrateLegacyStore();
 }
 
 function atomicWrite(p, s) {
@@ -231,15 +296,12 @@ function serializeStore(store) {
  * {@link migrateLegacyStore} runs first, so no reader ever sees the history the old tracked file held go
  * missing. An explicit `path` or injected IO reads exactly what it is given.
  */
-export function readStore({ path, read, exists = existsSync } = {}) {
-  if (path === undefined && read === undefined && !migrationChecked) {
-    migrationChecked = true;
-    migrateLegacyStore();
-  }
+export function readStore({ path, read, exists } = {}) {
+  ensureMigrated({ path, read, exists });
   const target = path ?? resolveScorecardStorePath();
   const doRead = read ?? ((p) => readFileSync(p, 'utf8'));
   try {
-    if (!exists(target)) return { version: 1, records: [] };
+    if (!(exists ?? existsSync)(target)) return { version: 1, records: [] };
     return parseStoreText(doRead(target)) ?? { version: 1, records: [] };
   } catch {
     return { version: 1, records: [] };
@@ -265,9 +327,16 @@ export function appendScorecard(row, io = {}) {
   if (!verdict.ok) {
     throw new Error(`run-scorecard-store: refusing to append an invalid scorecard:\n  - ${verdict.errors.join('\n  - ')}`);
   }
-  const store = readStore(io);
-  store.records.push(stamped);
-  writeStore(store, io);
+  // Migrate first (it takes the lock itself), then read-modify-write under the lock so a concurrent append or
+  // migration is never overwritten. Injected in-memory IO has no file to lock.
+  ensureMigrated(io);
+  const appendRow = () => {
+    const store = readStore(io);
+    store.records.push(stamped);
+    writeStore(store, io);
+  };
+  if (io.write !== undefined) appendRow();
+  else withStoreLock(io.path ?? resolveScorecardStorePath(), appendRow);
   return stamped;
 }
 

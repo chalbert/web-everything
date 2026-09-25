@@ -1,8 +1,9 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { join } from 'node:path';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { join, resolve } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import * as storeModule from '../run-scorecard-store.mjs';
 import {
   validateScorecard, readStore, writeStore, appendScorecard, meanScore,
   resolveScorecardStorePath, LEGACY_IN_TREE_STORE, LEGACY_MIGRATION_ID,
@@ -208,10 +209,16 @@ describe('mergeLegacyStores — union, never clobber (#4155)', () => {
   const legacy = JSON.stringify({ version: 1, records: [{ a: 1 }, { b: 2 }] });
 
   it('seeds an absent shared store from the legacy history and stamps it', () => {
-    const { store, added } = mergeLegacyStores(null, [legacy]);
+    const { store, added } = mergeLegacyStores(null, [legacy], ['stamp-a']);
     expect(store.records).toEqual([{ a: 1 }, { b: 2 }]);
-    expect(store.migrations).toEqual([LEGACY_MIGRATION_ID]);
+    expect(store.migrations).toEqual(['stamp-a']);
     expect(added).toBe(2);
+  });
+
+  it('records a stamp even when the source carried no rows', () => {
+    const { store, added } = mergeLegacyStores({ version: 1, records: [{ c: 3 }], migrations: [] }, [], ['stamp-a']);
+    expect(store).toEqual({ version: 1, records: [{ c: 3 }], migrations: ['stamp-a'] });
+    expect(added).toBe(0);
   });
 
   it('keeps every row the shared store already has, adds only the missing legacy rows, first', () => {
@@ -250,7 +257,7 @@ describe('migrateLegacyStore — against a real git repo whose store was untrack
     expect(result).toMatchObject({ migrated: true, added: 2 });
     const store = JSON.parse(readFileSync(target, 'utf8'));
     expect(store.records).toEqual([{ legacy: 1 }, { legacy: 2 }]);
-    expect(store.migrations).toEqual([LEGACY_MIGRATION_ID]);
+    expect(store.migrations).toEqual([storeModule.legacyGitStamp(repo)]);
   });
 
   it('merges into a shared store that already has rows, and runs once', () => {
@@ -276,11 +283,128 @@ describe('migrateLegacyStore — against a real git repo whose store was untrack
     expect(readFileSync(target, 'utf8')).toBe('corrupt');
   });
 
-  it('leaves the store unstamped when there is no legacy history to carry', () => {
+  it('leaves the store unstamped when the checkout is not a git repo (git could not answer — retry later)', () => {
     setup({ untrack: true });
     const empty = join(dir, 'not-a-repo');
     mkdirSync(empty);
     expect(migrateLegacyStore({ path: target, repoRoot: empty })).toMatchObject({ migrated: false, reason: 'no-legacy-history' });
     expect(existsSync(target)).toBe(false);
+  });
+});
+
+// Review of PR #2684 (review:changes, 2026-09-25): four findings against the migration above.
+describe('migrateLegacyStore — review findings on PR #2684', () => {
+  let dir;
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  const git = (repo, ...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  function makeRepo(name, records) {
+    const repo = join(dir, name);
+    mkdirSync(join(repo, 'scripts', 'conveyor'), { recursive: true });
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 't@t'); git(repo, 'config', 'user.name', 't'); git(repo, 'config', 'commit.gpgsign', 'false');
+    if (records) {
+      writeFileSync(join(repo, LEGACY_IN_TREE_STORE), JSON.stringify({ version: 1, records }));
+      git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'tracked store');
+      git(repo, 'rm', '-q', LEGACY_IN_TREE_STORE); git(repo, 'commit', '-qm', 'untrack store');
+    } else {
+      writeFileSync(join(repo, 'README'), 'x');
+      git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'no store ever');
+    }
+    return repo;
+  }
+  const newDir = () => { dir = mkdtempSync(join(tmpdir(), 'scorecard-review-')); return join(dir, 'state', '.conveyor', 'run-scorecards.json'); };
+  const records = (p) => JSON.parse(readFileSync(p, 'utf8')).records;
+
+  it('migration preserves an append made during legacy-history retrieval (no lost update)', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', [{ legacy: 1 }]);
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, JSON.stringify({ version: 1, records: [{ before: 1 }] }));
+    const realGit = (args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    let appended = false;
+    const slowGit = (args) => {
+      // Another process's append lands while this one is still reading the legacy history out of git.
+      if (!appended && args[0] === 'show') { appended = true; appendScorecard({ ...baseRow(), score: 90 }, { path: target }); }
+      return realGit(args);
+    };
+    expect(migrateLegacyStore({ path: target, repoRoot: repo, git: slowGit })).toMatchObject({ migrated: true });
+    expect(appended).toBe(true);
+    const after = records(target);
+    expect(after.map((r) => r.score ?? null)).toContain(90);
+    expect(after).toContainEqual({ legacy: 1 });
+    expect(after).toContainEqual({ before: 1 });
+  });
+
+  it('imports distinct legacy rows from a second checkout after the first migration', () => {
+    const target = newDir();
+    const repoA = makeRepo('a', [{ fromA: 1 }]);
+    const repoB = makeRepo('b', [{ fromB: 1 }]);
+    expect(migrateLegacyStore({ path: target, repoRoot: repoA })).toMatchObject({ migrated: true, added: 1 });
+    expect(migrateLegacyStore({ path: target, repoRoot: repoB })).toMatchObject({ migrated: true, added: 1 });
+    expect(records(target)).toEqual([{ fromB: 1 }, { fromA: 1 }]);
+    expect(migrateLegacyStore({ path: target, repoRoot: repoA })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+    expect(migrateLegacyStore({ path: target, repoRoot: repoB })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+  });
+
+  it('stamps a checkout with no legacy history, so git is not spawned again', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', null);
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, JSON.stringify({ version: 1, records: [{ fresh: 1 }] }));
+    let gitCalls = 0;
+    const countingGit = (args) => { gitCalls += 1; return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    migrateLegacyStore({ path: target, repoRoot: repo, git: countingGit });
+    const callsAfterFirst = gitCalls;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+    expect(migrateLegacyStore({ path: target, repoRoot: repo, git: countingGit })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+    expect(gitCalls).toBe(callsAfterFirst);
+    expect(records(target)).toEqual([{ fresh: 1 }]);
+  });
+
+  it('re-imports an on-disk copy an older process kept appending to', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', [{ legacy: 1 }]);
+    const onDisk = join(repo, LEGACY_IN_TREE_STORE);
+    mkdirSync(join(repo, 'scripts', 'conveyor'), { recursive: true });
+    writeFileSync(onDisk, JSON.stringify({ version: 1, records: [{ legacy: 1 }, { late: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 2 });
+    writeFileSync(onDisk, JSON.stringify({ version: 1, records: [{ legacy: 1 }, { late: 1 }, { later: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 1 });
+    expect(records(target)).toEqual([{ later: 1 }, { legacy: 1 }, { late: 1 }]);
+  });
+});
+
+describe('readStore() — the lazy first-read migration of the DEFAULT store (#4155)', () => {
+  const saved = process.env.CONVEYOR_STATE_ROOT;
+  let dir;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CONVEYOR_STATE_ROOT; else process.env.CONVEYOR_STATE_ROOT = saved;
+    rmSync(dir, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('runs the migration on the first no-argument read, once per process', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'scorecard-lazy-'));
+    process.env.CONVEYOR_STATE_ROOT = dir;
+    vi.resetModules();
+    const fresh = await import('../run-scorecard-store.mjs');
+    const path = fresh.resolveScorecardStorePath();
+    expect(existsSync(path)).toBe(false);
+    fresh.readStore();
+    // This checkout is a git repo, so the migration examined its history and stamped it, whatever it held.
+    const moduleRepoRoot = resolve(import.meta.dirname, '..', '..', '..');
+    expect(JSON.parse(readFileSync(path, 'utf8')).migrations).toContain(fresh.legacyGitStamp(moduleRepoRoot));
+    rmSync(path);
+    fresh.readStore();
+    expect(existsSync(path)).toBe(false);
+  }, 30_000); // real `git rev-list` over this checkout's history
+
+  it('never migrates when the caller injects IO', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'scorecard-lazy-'));
+    process.env.CONVEYOR_STATE_ROOT = dir;
+    vi.resetModules();
+    const fresh = await import('../run-scorecard-store.mjs');
+    fresh.readStore({ exists: () => false });
+    expect(existsSync(fresh.resolveScorecardStorePath())).toBe(false);
   });
 });
