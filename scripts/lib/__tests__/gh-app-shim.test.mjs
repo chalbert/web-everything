@@ -7,8 +7,16 @@
  *   REAL tmpdir round trip, and the rendered shim script is REALLY EXECUTED (as `dispatch-spawn-live.test.mjs`
  *   does for the CLI argv) against a fake "real gh" — the one thing a purely-textual assertion on
  *   {@link renderGhShimScript}'s output could not prove.
+ *
+ *   #4064: the generated shim now routes every real-`gh` call through `gh-throttle.mjs`'s own CLI, which
+ *   derives its cross-process lock root from `defaultPoolRoot` (HOME-based, HOST-SHARED — the same root the
+ *   real conveyor/review daemons write their own live `.admission/gh/calls.jsonl` into). Every "live" test
+ *   below that REALLY EXECUTES the shim now also really spawns that CLI, so `beforeAll`/`afterAll` here pin
+ *   `LANE_POOL_ROOT` to a throwaway tmpdir for the whole file — never the real shared admission root (mirrors
+ *   decision #2274's "ephemeral throwaway clone, never the shared lane pool" discipline, applied to this
+ *   module's own shared lock instead of the lane pool).
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -16,6 +24,7 @@ import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
   buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, sanitizeSpawnEnv,
+  defaultGhThrottleCliPath,
 } from '../gh-app-shim.mjs';
 
 const CONFIGURED_ENV = {
@@ -23,6 +32,22 @@ const CONFIGURED_ENV = {
   WE_GITHUB_APP_INSTALLATION_ID: '163880042',
   WE_GITHUB_APP_PRIVATE_KEY_PATH: '/Users/x/.secrets/github-apps/web-everything.pem',
 };
+
+// #4064 — isolate every "live" test's gh-throttle admission lock from the REAL, host-shared one for the
+// duration of this file (restored after). `LANE_POOL_ROOT` is the existing, already-recognized override
+// `defaultPoolRoot`/`ghThrottleLockRoot` both honor — no new plumbing, just pinning it here.
+let PRE_EXISTING_LANE_POOL_ROOT;
+let THROTTLE_TEST_LOCK_ROOT;
+beforeAll(() => {
+  PRE_EXISTING_LANE_POOL_ROOT = process.env.LANE_POOL_ROOT;
+  THROTTLE_TEST_LOCK_ROOT = mkdtempSync(join(tmpdir(), 'we-gh-shim-throttle-lock-'));
+  process.env.LANE_POOL_ROOT = THROTTLE_TEST_LOCK_ROOT;
+});
+afterAll(() => {
+  if (PRE_EXISTING_LANE_POOL_ROOT === undefined) delete process.env.LANE_POOL_ROOT;
+  else process.env.LANE_POOL_ROOT = PRE_EXISTING_LANE_POOL_ROOT;
+  rmSync(THROTTLE_TEST_LOCK_ROOT, { recursive: true, force: true });
+});
 
 describe('defaultShimDir / shimGhPath — deterministic, always named literally `gh`', () => {
   it('is deterministic for a given home dir', () => {

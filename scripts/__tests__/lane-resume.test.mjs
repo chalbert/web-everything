@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet, deriveItemFromRef, classifyPrMissingRef, planOpenPrMissingRef, submitPrMissingOpen, prMissingOpenArgs } from '../lane-resume.mjs';
 // The drain's own selector — asserted alongside so the enqueue side is PROVEN to read the same entry (#xkfv491).
 import { latestRequiredCheck } from '../merge-ai-prs.mjs';
 
@@ -746,5 +746,185 @@ describe('lane-resume — deriveLandedFromMain (#2396: stackParent landed status
       // The two readers now answer identically for every item in the fixture — the whole point of #2455.
       for (const n of [777, 778, 999]) expect(set.has(n)).toBe(resolvedOnMain(n, repo));
     } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+});
+
+describe('lane-resume — deriveItemFromRef (#xcf4556)', () => {
+  it('the manifest item wins over every other signal', () => {
+    expect(deriveItemFromRef({ manifestItem: 3915, commitSubjects: ['resolve #1'], changedBacklogFiles: ['backlog/2-x.md'] })).toBe(3915);
+  });
+
+  it('falls back to a `resolve #NNN` commit subject when there is no manifest item', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['wip', 'backlog: resolve #3915 — graduate land path'], changedBacklogFiles: [] })).toBe(3915);
+  });
+
+  it('the commit-subject match is case-insensitive', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['RESOLVE #42'] })).toBe(42);
+  });
+
+  it('falls back to a changed backlog/NNN-*.md file id when neither manifest nor commit subject names one', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['unrelated commit'], changedBacklogFiles: ['backlog/3872-credential-scoping.md'] })).toBe(3872);
+  });
+
+  it('returns null when nothing names an item', () => {
+    expect(deriveItemFromRef({ commitSubjects: ['wip', 'more wip'], changedBacklogFiles: ['scripts/foo.mjs'] })).toBeNull();
+  });
+});
+
+describe('lane-resume — classifyPrMissingRef (#xcf4556, the pr-missing discover bucket)', () => {
+  const base = (o) => ({
+    ref: 'lane/x', repo: 'chalbert/web-everything', tipSha: 'abc123', committerDate: new Date().toISOString(),
+    prStates: [], tipOnMain: false, deliversRealChange: true, item: 3915, now: Date.now(), windowDays: 7, ...o,
+  });
+
+  it('a ref with an OPEN PR is not pr-missing — discover\'s labelled-PR sweep already owns it', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'OPEN' }] }))).toBeNull();
+  });
+
+  it('a ref with a MERGED PR is not pr-missing — it already landed through the normal route', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'MERGED' }] }))).toBeNull();
+  });
+
+  it('a ref with a CLOSED PR is not pr-missing — a human deliberately closed it; never silently reopen behind them', () => {
+    expect(classifyPrMissingRef(base({ prStates: [{ number: 1, state: 'CLOSED' }] }))).toBeNull();
+  });
+
+  it('a tip already reachable from main is not pr-missing — nothing left to recover', () => {
+    expect(classifyPrMissingRef(base({ tipOnMain: true }))).toBeNull();
+  });
+
+  it('a lane with no non-manifest delivery is not pr-missing — not a finished delivery', () => {
+    expect(classifyPrMissingRef(base({ deliversRealChange: false }))).toBeNull();
+  });
+
+  it('a ref older than the window is not pr-missing (default 7 days) — reads as abandoned, not mid-flight', () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    expect(classifyPrMissingRef(base({ committerDate: eightDaysAgo }))).toBeNull();
+  });
+
+  it('the SAME stale ref becomes a candidate once --window-days widens past its age', () => {
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    const v = classifyPrMissingRef(base({ committerDate: eightDaysAgo, windowDays: 14 }));
+    expect(v).not.toBeNull();
+    expect(v.disposition).toBe('pr-missing');
+  });
+
+  it('a fresh, PR-less, off-main, real-delivery ref within the window IS pr-missing, naming its item', () => {
+    const v = classifyPrMissingRef(base({}));
+    expect(v).toMatchObject({ ref: 'lane/x', repo: 'chalbert/web-everything', item: 3915, tip: 'abc123', disposition: 'pr-missing' });
+    expect(v.reason).toMatch(/#3915/);
+  });
+
+  it('the live case: lane/batch-2026-09-25-waveB4-3915 classifies pr-missing with item #3915 (before/after proof fixture)', () => {
+    const v = classifyPrMissingRef(base({
+      ref: 'lane/batch-2026-09-25-waveB4-3915', tipSha: 'a9a6d8a78a171fe42bd769c1f1446f21a7aa3d83',
+      item: 3915, prStates: [], tipOnMain: false, deliversRealChange: true,
+    }));
+    expect(v.disposition).toBe('pr-missing');
+    expect(v.item).toBe(3915);
+    expect(v.reason).toMatch(/open lane\/batch-2026-09-25-waveB4-3915/);
+  });
+
+  it('an undeliverable item still classifies pr-missing, but says so instead of a number', () => {
+    const v = classifyPrMissingRef(base({ item: null }));
+    expect(v.item).toBeNull();
+    expect(v.reason).toMatch(/item not derivable/);
+  });
+});
+
+describe('lane-resume — planOpenPrMissingRef (#xcf4556, the `open <laneRef>` refusal rules)', () => {
+  const base = (o) => ({ ref: 'lane/x', existingPr: null, tipOnMain: false, item: 3915, resolvedOnMainByOtherCommit: false, ...o });
+
+  it('refuses when a PR already exists for this head, naming its number and state', () => {
+    const v = planOpenPrMissingRef(base({ existingPr: { number: 42, state: 'CLOSED' } }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/#42/);
+    expect(v.reason).toMatch(/CLOSED/);
+  });
+
+  it('refuses when the tip is already reachable from main', () => {
+    const v = planOpenPrMissingRef(base({ tipOnMain: true }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/already reachable from main/);
+  });
+
+  it('refuses when the card it resolves is already resolved on main by a different commit', () => {
+    const v = planOpenPrMissingRef(base({ resolvedOnMainByOtherCommit: true }));
+    expect(v.ok).toBe(false);
+    expect(v.reason).toMatch(/#3915/);
+    expect(v.reason).toMatch(/different commit/);
+  });
+
+  it('does NOT refuse on a resolved-elsewhere item when no item was derivable at all', () => {
+    // resolvedOnMainByOtherCommit is meaningless without an item — guard against a caller passing it true by
+    // accident with item:null; the rule is scoped to "the identified card" and must not misfire generically.
+    expect(planOpenPrMissingRef(base({ item: null, resolvedOnMainByOtherCommit: true })).ok).toBe(true);
+  });
+
+  it('proceeds (ok:true) when no PR exists, the tip is off main, and the item is not resolved elsewhere', () => {
+    expect(planOpenPrMissingRef(base({}))).toEqual({ ok: true });
+  });
+
+  it('proceeds even with an item, as long as that item is not resolved-on-main-by-another-commit', () => {
+    expect(planOpenPrMissingRef(base({ item: 3915, resolvedOnMainByOtherCommit: false })).ok).toBe(true);
+  });
+});
+
+describe('lane-resume — submitPrMissingOpen (#xcf4556 review: the spawn + report-reading IO glue)', () => {
+  const o = { ref: 'lane/x', tipSha: 'abc123', bodyFile: '/b/body.md', dir: '/repo', prLandScript: '/we/scripts/pr-land.mjs' };
+  // Replays execFileSync's own shape: a zero exit returns stdout; a non-zero exit THROWS with status/stdout.
+  const exitWith = (status, report, calls = []) => (cmd, args) => {
+    calls.push([cmd, ...args]);
+    const stdout = JSON.stringify(report) + '\n';
+    if (status === 0) return stdout;
+    throw Object.assign(new Error(`Command failed: exit ${status}`), { status, signal: null, stdout, stderr: '' });
+  };
+
+  it('spawns pr-land.mjs --label-on-green (never a raw `gh pr create`), with --no-require-verified only alongside it', () => {
+    const calls = [];
+    submitPrMissingOpen({ ...o, exec: exitWith(0, { merged: false, reason: 'labelled-on-green', pr: 7 }, calls) });
+    expect(calls).toHaveLength(1);
+    const [cmd, ...args] = calls[0];
+    expect(cmd).toBe('node');
+    expect(args[0]).toMatch(/pr-land\.mjs$/);
+    expect(args).toContain('--label-on-green');
+    expect(args).toContain('--no-require-verified');
+    expect(args).toEqual(expect.arrayContaining(['--ref=lane/x', '--sha=abc123', '--body-file=/b/body.md', '--repo=/repo', '--json']));
+    expect(calls.flat()).not.toContain('gh');
+    expect(prMissingOpenArgs(o)).toEqual(args);
+  });
+
+  it('a clean label-on-green open is ok, naming the PR', () => {
+    const v = submitPrMissingOpen({ ...o, exec: exitWith(0, { merged: false, reason: 'labelled-on-green', pr: 7 }) });
+    expect(v).toMatchObject({ ok: true, prOpened: true, outcome: 'opened', pr: 7 });
+  });
+
+  // pr-land's POST-OPEN stops: the PR exists, then pr-land exits non-zero. The live proof run hit check-timeout
+  // on PR #2636 — the pre-fix glue reported that as ok:false / "refused".
+  for (const reason of ['check-timeout', 'check-red', 'behind', 'conflict']) {
+    it(`a post-open ${reason} (exit 3, pr named) reports the PR as OPENED, not refused`, () => {
+      const v = submitPrMissingOpen({ ...o, exec: exitWith(3, { merged: false, reason, pr: 2636, detail: 'leaving for a later drain pass' }) });
+      expect(v.ok).toBe(true);
+      expect(v.prOpened).toBe(true);
+      expect(v.pr).toBe(2636);
+      expect(v.reason).toBe(reason);
+      expect(v.outcome).not.toBe('opened'); // pr-land's own stop is still surfaced, not hidden
+    });
+  }
+
+  it('a pre-open guard refusal (no pr) is NOT ok', () => {
+    const v = submitPrMissingOpen({ ...o, exec: exitWith(3, { merged: false, reason: 'bad-ref', detail: 'no such ref' }) });
+    expect(v).toMatchObject({ ok: false, prOpened: false, outcome: 'refused', pr: null, reason: 'bad-ref' });
+  });
+
+  it('a crash with no parseable report is NOT ok and is unrun (never claimed as an answer)', () => {
+    const exec = () => { throw Object.assign(new Error('boom'), { status: 1, signal: null, stdout: 'TypeError: x\n', stderr: '' }); };
+    const v = submitPrMissingOpen({ ...o, exec });
+    expect(v).toMatchObject({ ok: false, prOpened: false, outcome: 'unrun' });
+  });
+
+  it('a spawn failure (no status/stdout at all) is unrun, not refused', () => {
+    const exec = () => { throw new Error('spawn node ENOENT'); };
+    expect(submitPrMissingOpen({ ...o, exec })).toMatchObject({ ok: false, outcome: 'unrun' });
   });
 });

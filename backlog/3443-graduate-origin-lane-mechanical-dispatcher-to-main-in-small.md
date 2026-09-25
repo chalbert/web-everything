@@ -392,3 +392,35 @@ How each slice (a child of this item) graduates, per the statute
   → merged `33fdc6cdb` at 2026-09-24T19:55:31Z. Resolved via the drain's own auto-resolve-on-land plus this
   session's own `we:scripts/operations/run.mjs resolve --ref=3854 --graduatedTo=none` call (idempotent with
   it): `status: resolved`, `dateResolved: 2026-09-24`.
+
+- **2026-09-25 (#3865 built: item-pull, single-flight lease, gate, Stop hook — then superseded by a concurrent
+  duplicate).** Ported `we:scripts/operations/land-advance-items-io.mjs`, `we:scripts/operations/land-advance-gate.mjs`
+  and `we:scripts/land-advance-hook.mjs` byte-identical from snapshot `600acc14f` (branch commits `c32f875e8`,
+  `4347ff960`, `93374ff86`) plus their tests, confirming per file that `main` had not moved any of them since
+  the merge-base — no diff-apply needed. Restored the two test cases `#3854` deferred in
+  `we:scripts/operations/__tests__/land-advance.test.mjs` (`priorityQueue`/`reconcileHolds`), now that
+  `we:scripts/operations/land-advance-items-io.mjs` exists on `main`; deferred one new forward-dependent case in
+  `we:scripts/operations/__tests__/land-advance-items-io.test.mjs` (`createLandAdvanceApplier`, needs `#3856`'s
+  `we:scripts/operations/land-advance-io.mjs`) with a comment, same pattern.
+
+  **Lane-sharing collision, twice.** First, the acquired lane (`lane-27`, `--adopt`ed) turned out to be
+  concurrently in use by another session building `#3892` in the same local `main` branch: mid-session the
+  clone was hard-reset to `origin/main` (visible in `git reflog`) and this item's own new untracked files were
+  wiped, discarding uncommitted work with no error surfaced. Recovered by recreating the port from the same
+  snapshot and committing immediately in a narrower `git add` (only this item's files) to avoid the sibling
+  item's stray untracked state. Second: after pushing `lane/3865-graduate-3720-s-remainder-item-pull-single-flight-lease-cano`,
+  full gate green (`test:unit` 595/595 files, `check:standards` 0 errors, `verify-lane` green) and a PR opened
+  (`#2632`), a **separate concurrent batch session** (`lane/batch-2026-09-25-waveB4-3865`) turned out to have
+  independently ported the identical scope from the same snapshot and opened its own PR (`#2631`, carrying the
+  backlog resolve) — this is the known "picked up the same unclaimed item twice" pattern also seen on sibling
+  items today. Diffed both: content-identical except `#2631`'s `we:scripts/land-advance-hook.mjs` fixes a real
+  bug the byte-identical branch source carries — `Number(env.WE_LAND_ADVANCE_COOLDOWN_MS) || DEFAULT_COOLDOWN_MS`
+  silently falls back to the default on an explicit `0` override (JS falsy-zero), caught by `#2631`'s own
+  pre-PR review (its dismissed-findings note references `#2170`) and fixed with
+  `Number.isFinite(cooldownOverride) ? cooldownOverride : DEFAULT_COOLDOWN_MS` plus a new regression test.
+  Closed `#2632` in favor of `#2631` (no unique content lost) rather than land a redundant, inferior copy.
+  `#2631` was still `review:pending`/`checking` (normal pre-review CI state, not a stall) as of this note —
+  landing and `#3865`'s resolve are left to its own pipeline. **Not filed as a new backlog item this pass**
+  (time-boxed to this item's own delivery), but worth a fresh card: the lane pool's `--adopt` exclusivity
+  guarantee (#2997) did not hold for `lane-27` under concurrent load, and nothing currently stops two sessions
+  from building the same unclaimed item in parallel before either claims it.

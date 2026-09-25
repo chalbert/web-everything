@@ -56,7 +56,9 @@ const execFileAsync = promisify(execFile);
 
 import { normNum } from '../conveyor/queue-store.mjs';
 import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../conveyor/lease-reaper.mjs';
+import { parseSessionSlug } from '../conveyor/session-slug.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
+import { deleteCompletion } from './completion-store.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
@@ -1047,6 +1049,22 @@ export function createDispatchSinks({
  * @returns {string}
  */
 export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts) } = {}) {
+  // #x2psfwz — a PR_KIND session name (`review-`/`fix-`/`ci-heal-`/`inspect-<PR>`) carries NO attempt suffix
+  // (session-slug.mjs's `mintSessionSlug` forbids one for these kinds), so a round-2 dispatch for the SAME PR
+  // reuses the EXACT name round 1 used. Round 1's own agent brief wrote a completion record under that name
+  // (`we:scripts/operations/completion-cli.mjs`, `status: done` at whichever exit it took) — a fact about ROUND
+  // 1, not round 2. Left in place, any reader of that record (session-reaper.mjs's proposed completion-record
+  // axis, #3721; a human `completion-cli.mjs show`) would read round 2 as already finished before it has even
+  // started, purely because it inherited round 1's name. Deleting any existing record for this exact name HERE
+  // — at the moment this new round is actually spawned, not relying on round 2's own agent brief to get around
+  // to overwriting it (a crash before that first action would leave round 1's stale `done` in place the whole
+  // time) — closes the window at its source. Best-effort: a delete failure must never block a real dispatch.
+  if (typeof request.sessionSlug === 'string' && request.sessionSlug) {
+    const parsed = parseSessionSlug(request.sessionSlug);
+    if (parsed && !parsed.itemKind) {
+      try { deleteCompletion(request.sessionSlug); } catch { /* best-effort — see comment above */ }
+    }
+  }
   const argv = buildAgentArgv({
     sessionId: request.sessionId,
     payload: { prompt: request.prompt, sessionSlug: request.sessionSlug, num: request.num },

@@ -3,9 +3,11 @@ bornAs: xyjdnck
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/lane-litter.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 

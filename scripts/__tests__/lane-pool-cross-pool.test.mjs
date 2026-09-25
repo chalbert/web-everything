@@ -151,14 +151,24 @@ describe('lane-pool #2748 — release --all-pools --item sweeps every pool BY IT
     expect(existsSync(LEASE_FILE(a1))).toBe(false);
   });
 
-  it('also matches a fix-<num> / retry-suffix session for the same item', () => {
-    const a1 = acquire('poolA', 1, 'fix-7777');
+  it('a retry-suffix session for the same item still matches', () => {
     const b1 = acquire('poolB', 1, 'conveyor-7777b'); // retry suffix collapses to 7777
     const r = runPool(['release', '--all-pools', '--item=7777', '--json']);
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.out).released).toBe(2);
-    expect(existsSync(LEASE_FILE(a1))).toBe(false);
+    expect(JSON.parse(r.out).released).toBe(1);
     expect(existsSync(LEASE_FILE(b1))).toBe(false);
+  });
+
+  // #x5wm9ot (bug #1) — `fix-<PR>`'s number IS A PR NUMBER (mintSessionSlug mints it FROM a PR number), a
+  // DIFFERENT namespace from a true backlog item number. This used to ALSO match `--item=N` here (the exact
+  // bug: landing item 7777 could drop an unrelated `fix-7777` session's lane just because its PR happened to
+  // be numbered 7777) — now it correctly does not.
+  it('does NOT match a fix-<PR> session even when its PR number equals the item number (bug #1 fix)', () => {
+    const a1 = acquire('poolA', 1, 'fix-7777');
+    const r = runPool(['release', '--all-pools', '--item=7777', '--json']);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out).released).toBe(0);
+    expect(existsSync(LEASE_FILE(a1))).toBe(true); // the fix session's own lease survives, untouched
   });
 
   it('NEVER releases a reserved lane in the by-item sweep', () => {
