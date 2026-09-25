@@ -52,6 +52,8 @@ import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
+import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
+import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -227,6 +229,13 @@ export const OPERATIONS = Object.freeze({
   }),
   [RUNNER_ACTIVITY_OP]: () => ({
     declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
+  // #4067 (epic #4075, under #3383) — the live daemon status page. Read-only, same no-sinks reasoning as
+  // `runner-activity`/`gate-health`/`suggest-next`: every step is `compute`, so no effect exists for a sink
+  // to apply. `collectDaemonStatus`'s real launchd/lease/log/git reads are bound here, and ONLY here.
+  [DAEMON_STATUS_OP]: () => ({
+    declaration: daemonStatusOperation({ collect: collectDaemonStatus }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({
