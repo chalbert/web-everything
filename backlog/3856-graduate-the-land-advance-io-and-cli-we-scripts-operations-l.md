@@ -65,7 +65,7 @@ Other divergences found and fixed IN THIS SLICE while porting (main's shared mod
 
 - `we:scripts/conveyor/reconcile-fix-dispatch.mjs`'s `planFixesFromReconcile` itemless-PR branch (a bounced PR
   whose head ref names no backlog item) moved to the shared `resolvePrWorkUnit` (`we:scripts/conveyor/pr-work-unit.mjs`,
-  #xdx3ifb/#xcla4iv) via an injected, UN-prefixed `fetchItemlessDiffPaths(pr)` — no longer the old (pre-prefixed)
+  #3959/#4022) via an injected, UN-prefixed `fetchItemlessDiffPaths(pr)` — no longer the old (pre-prefixed)
   `resolveFallbackScope(pr, itemNum)` this module's branch snapshot used for that case, and the `planned` entry
   it returns no longer carries `attributionKind`/`attributionNum` (`dispatchFix`/`dispatchCiHeal` already derive
   both from `itemNum`/`pr` when absent). Added `fetchItemlessDiffPaths` as its own injected port in
