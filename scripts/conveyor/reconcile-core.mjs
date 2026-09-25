@@ -125,6 +125,11 @@ import {
 } from './advisory-fix-mark.mjs';
 import { CONFLICT_LABEL } from './conflict-label.mjs';
 import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
+// we:backlog/x5uqim1-*.md (parent #4075, epic #3383) — LIVE INCIDENT 2026-09-25: a `ci-red` PR whose required
+// check failed only because `origin/main`'s own CI was red at that moment must never be handed to `ci-heal`,
+// which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
+// (see its own docblock for the full incident and the two facts it needs); this file only calls it.
+import { isPrCiFailureOwedRerun } from './main-red-recovery.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
@@ -166,12 +171,24 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          rather than re-deriving a second one — never a manual `~/.claude/jobs/<id>/` move.
  *   `owed-elsewhere`     — real work is owed, by a job this pass does not run (a human clear, a CI heal, a
  *                          rebase). Named rather than dropped, so the PR is visible in the report.
+ *   `owed-ci-rerun`      — we:backlog/x5uqim1-*.md (#4075/#3383): the required check failed while `main`'s OWN
+ *                          CI was red (`we:scripts/conveyor/main-red-recovery.mjs#isPrCiFailureOwedRerun`) and
+ *                          this PR's head has not yet been refreshed onto the now-recovered `main`. Owed a
+ *                          mechanical rebase onto `main` (`we:scripts/conveyor/ci-red-recovery-watch.mjs`, via
+ *                          the SAME proven `we:scripts/lib/rebase-drop-manifest.mjs` plumbing the drain itself
+ *                          uses), NEVER a `ci-heal` — a ci-heal agent dispatched here would misdiagnose `main`'s
+ *                          own breakage as a defect in code that was never broken. NAMED `owed-ci-rerun` for the
+ *                          population it covers (a red-`main`-caused CI failure), not the literal mechanism —
+ *                          see the leaf's own file header for why a REBASE, not a rerun of the same stale
+ *                          commit, is what actually resolves it. Once the head already contains `main`'s
+ *                          current tip and is STILL red, this refusal no longer fires and the PR falls through
+ *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
  */
 export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
-  'owed-elsewhere', 'nothing-owed',
+  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed',
 ]);
 
 /**
@@ -631,11 +648,17 @@ export function assessLiveness(bound) {
  *   PR whose `baseRefName` differs from this is STACKED (built on another lane/PR) — see the STACKED-BASE
  *   CONFLICT branch below for why that population needs its own dispatch rather than the generic
  *   `owed-elsewhere` refusal.
+ * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows] - we:backlog/x5uqim1-*.md: the repo's
+ *   `main`'s own red-CI windows (`we:scripts/conveyor/main-red-recovery.mjs#computeMainRedWindows`), read by
+ *   the IO shell from `gh run list --branch <defaultBranch>` ONLY when at least one PR is `ci-red` (never paid
+ *   for otherwise). Defaults to `[]` — a caller that never reads `main`'s own history sees byte-identical
+ *   behaviour to before this param existed (every `ci-red` PR falls straight through to the `ci-heal` path).
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
 export function planReconcile({
   repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
   conflictFixCap = CONFLICT_FIX_ROUND_CAP, advisoryFixCap = ADVISORY_FIX_ROUND_CAP, defaultBranch = 'main',
+  mainRedWindows = [],
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -661,6 +684,15 @@ export function planReconcile({
       // the row" reason `transcriptMtimeMs` does. `reconcile-fix-dispatch.mjs` reads the `authored-by-actor`
       // stamp off it, ONLY for a `fix` dispatch that also carries the `merge-status:conflicting` label.
       body: typeof pr?.body === 'string' ? pr.body : null,
+      // we:backlog/x5uqim1-*.md — the two facts `isPrCiFailureOwedRerun` needs, injected by the IO shell ONLY
+      // for a PR whose required check is currently failing (reconcile-pass.mjs never pays for these reads on a
+      // PR with nothing red). EVIDENCE ONLY here; the `ci-red` branch below is the one decision that reads them.
+      // `aheadByOnMain` is `main`'s own current tip's `ahead_by` against this PR's head (0 once it already
+      // contains that tip) — REPLACES an earlier `requiredCheckAttempt` design, corrected mid-build: see
+      // `main-red-recovery.mjs`'s own file header for why a GitHub Actions rerun of the same stale commit does
+      // not actually resolve a red-main-caused failure, live-measured on this exact incident.
+      requiredCheckCompletedAt: pr?.requiredCheckCompletedAt ?? null,
+      aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
 
@@ -733,6 +765,23 @@ export function planReconcile({
     // reads this plan (`we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`, mirroring
     // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own capability gate for `fix`).
     if (phase === 'ci-red') {
+      // we:backlog/x5uqim1-*.md — LIVE INCIDENT 2026-09-25 (see `main-red-recovery.mjs`'s own header for the
+      // full measured shape): a required check that failed only because `main`'s own CI was red at that moment
+      // is not this PR's own defect. Checked BEFORE the `ci-heal` cap below (and skips it entirely) — this is
+      // not one more round spent against that cap, it is a DIFFERENT job this pass does not run itself
+      // (`we:scripts/conveyor/ci-red-recovery-watch.mjs` does), the same "owed elsewhere, never dispatched
+      // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
+      if (isPrCiFailureOwedRerun({
+        requiredCheckCompletedAt: base.requiredCheckCompletedAt,
+        aheadBy: base.aheadByOnMain,
+        mainRedWindows,
+      })) {
+        refuse('owed-ci-rerun', {
+          ...withPhase,
+          why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
+        });
+        continue;
+      }
       const ciHealAttempts = countCiHealComments(pr?.comments);
       if (ciHealAttempts >= ciHealCap) {
         refuse('cap-exhausted', {

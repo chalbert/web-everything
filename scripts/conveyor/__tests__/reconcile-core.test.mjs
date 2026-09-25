@@ -809,6 +809,54 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
   });
 });
 
+// we:backlog/x5uqim1-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: a `ci-red` PR whose required check failed
+// only because `origin/main`'s own CI was red at that moment must refuse `owed-ci-rerun`, never dispatch
+// `ci-heal` — a heal agent would "repair" code that was never broken. Fixture shapes measured live off
+// `chalbert/web-everything`: PR #2635 (33 commits behind main, never refreshed, failed inside main's real
+// 01:30:55Z–02:31:25Z red window) and PR #2596 (`ahead_by: 0` — the operator's own manual branch refresh, still
+// red) — see `main-red-recovery.test.mjs` for the same real window, and that module's own file header for why a
+// rebase onto main (not a `gh run rerun`) is the real mechanism.
+describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {
+  const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
+  const prRedAttributable = (over = {}) => pr1563({
+    number: 2635, labels: [], statusCheckRollup: redRollup, comments: [],
+    requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33,
+    ...over,
+  });
+
+  it('refuses owed-ci-rerun (never ci-heal) for a main-red failure whose head is still behind main', () => {
+    const plan = planReconcile({ prs: [prRedAttributable()], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2635, phase: 'ci-red' })]);
+  });
+
+  it('falls through to the ordinary ci-heal path once the head already contains main\'s tip and is still red (PR #2596\'s real shape)', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ number: 2596, requiredCheckCompletedAt: '2026-09-25T02:02:29Z', aheadByOnMain: 0 })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2596, attempts: 0 })]);
+  });
+
+  it('a ci-red PR outside every red-main window still gets ci-heal, unaffected (PR #2636\'s real shape)', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ number: 2636, requiredCheckCompletedAt: '2026-09-25T08:03:45Z', aheadByOnMain: 33 })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2636 })]);
+  });
+
+  it('no mainRedWindows supplied at all (byte-identical to before this item) never blocks ci-heal', () => {
+    const plan = planReconcile({ prs: [prRedAttributable()], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635 })]);
+  });
+
+  it('REFUSAL_KINDS names owed-ci-rerun — an unnamed refusal is a bug', () => {
+    expect(REFUSAL_KINDS).toContain('owed-ci-rerun');
+  });
+});
+
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
   // `chalbert/web-everything#2549`, shape measured live 2026-09-24: `bounced` (review:changes present, wins
   // `classifyPr`'s precedence over `review:human`), ALSO carrying `merge-status:conflicting` (the mechanical
