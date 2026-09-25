@@ -4,7 +4,9 @@
  * (`guessCardIds`) — the PURE decision core `lane-whois.mjs` shells out to. No fs/git/gh anywhere here.
  */
 import { describe, it, expect } from 'vitest';
-import { guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard } from '../lane-whois-core.mjs';
+import {
+  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies,
+} from '../lane-whois-core.mjs';
 
 describe('guessCardIds', () => {
   it('reads a numeric card id from a backlog/ path', () => {
@@ -109,5 +111,45 @@ describe('holderPresumedAlive', () => {
     const staleFn = () => false;
     expect(holderPresumedAlive({ x: 1 }, staleFn, 0, 0)).toBe(true);
     expect(holderPresumedAlive(null, staleFn, 0, 0)).toBe(false);
+  });
+});
+
+// #4139 — keepMarkerApplies: the "keep" decision is scoped to a FINGERPRINT of the lane's content at the time
+// it was recorded, never a bare boolean, so it self-invalidates the moment that content changes.
+describe('keepMarkerApplies', () => {
+  const fp = { headSha: 'abc123', dirtyPaths: ['a.txt', 'b.txt'], aheadShas: ['sha1', 'sha2'] };
+
+  it('no marker at all → does not apply', () => {
+    expect(keepMarkerApplies(null, fp)).toBe(false);
+    expect(keepMarkerApplies(undefined, fp)).toBe(false);
+  });
+
+  it('a marker with no fingerprint at all → does not apply (fail-safe, never trust a bare keep)', () => {
+    expect(keepMarkerApplies({ reason: 'looked at it' }, fp)).toBe(false);
+  });
+
+  it('an exact-matching fingerprint → applies', () => {
+    const marker = { fingerprint: { headSha: 'abc123', dirtyPaths: ['a.txt', 'b.txt'], aheadShas: ['sha1', 'sha2'] } };
+    expect(keepMarkerApplies(marker, fp)).toBe(true);
+  });
+
+  it('HEAD moved (a fresh acquire reset this lane) → stale, does not apply', () => {
+    const marker = { fingerprint: { ...fp, headSha: 'different-sha' } };
+    expect(keepMarkerApplies(marker, fp)).toBe(false);
+  });
+
+  it('a dirty path was added/removed since the marker was recorded → stale', () => {
+    const marker = { fingerprint: { ...fp, dirtyPaths: ['a.txt'] } };
+    expect(keepMarkerApplies(marker, fp)).toBe(false);
+  });
+
+  it('the SAME dirty paths in a different order still count as changed — order is part of the fingerprint', () => {
+    const marker = { fingerprint: { ...fp, dirtyPaths: ['b.txt', 'a.txt'] } };
+    expect(keepMarkerApplies(marker, fp)).toBe(false);
+  });
+
+  it('a new ahead commit landed since the marker was recorded → stale', () => {
+    const marker = { fingerprint: { ...fp, aheadShas: ['sha1', 'sha2', 'sha3'] } };
+    expect(keepMarkerApplies(marker, fp)).toBe(false);
   });
 });

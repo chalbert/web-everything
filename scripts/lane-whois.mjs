@@ -46,7 +46,9 @@ import { guardedPoolRoot } from './lib/lane-pool-paths.mjs';
 import { LEASE_FILENAME, isLeaseStale, describeLease, laneHolderSlug, DEFAULT_LEASE_TTL_MINUTES } from './lib/lane-lease.mjs';
 import { readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
 import { claudeProjectsRoot, scanLaneTranscripts, summarizeLaneTouches } from './lib/lane-transcript-attribution.mjs';
-import { guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard } from './lib/lane-whois-core.mjs';
+import {
+  guessCardIds, classifyLaneVerdict, holderPresumedAlive, prsMatchingCard, keepMarkerApplies,
+} from './lib/lane-whois-core.mjs';
 import { readField } from './backlog/frontmatter.mjs';
 import { execFileSyncThrottled } from './lib/gh-throttle.mjs';
 
@@ -96,6 +98,20 @@ function tryGit(dir, args, opts = {}) {
 function readLease(dir) {
   try {
     const parsed = JSON.parse(readFileSync(LEASE_MARKER(dir), 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// #4139 — the KEEP marker `we:scripts/lane-pool.mjs keep --lane=N` writes (same `.git/`-internal home as
+// `LEASE_MARKER`, for the same reasons: never tracked, never `git clean`-ed, invisible to `git status`).
+// Read-only here, matching this whole file's read-only contract — only `lane-pool.mjs` ever writes it.
+const KEEP_MARKER = (dir) => join(dir, '.git', '.lane-keep');
+
+function readKeepMarker(dir) {
+  try {
+    const parsed = JSON.parse(readFileSync(KEEP_MARKER(dir), 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
     return null;
@@ -368,6 +384,17 @@ export function whoisForLane({
   const commits = aheadCommits(dir, branchRef);
   const commitPreserved = aheadCommitsPreserved(dir, branchRef, commits);
 
+  // #4139 — is a `keep` decision (`we:scripts/lane-pool.mjs keep --lane=N`) still on record for this lane's
+  // CURRENT content? Re-derived fresh every call — never trusts a cached verdict — via the SAME pure
+  // fingerprint comparison `keep`'s own marker is built to feed ({@link keepMarkerApplies}). A stale marker
+  // (content changed since it was recorded) reads as NOT kept, so the lane resurfaces on its own with no
+  // active cleanup needed.
+  const keepMarker = readKeepMarker(dir);
+  const headSha = tryGit(dir, ['rev-parse', 'HEAD']) || null;
+  const kept = keepMarkerApplies(keepMarker, {
+    headSha, dirtyPaths: [...dirtyPaths].sort(), aheadShas: commits.map((c) => c.sha).sort(),
+  });
+
   // Transcript attribution — the strongest inference signal when the ledger has nothing (a lane worked on
   // before this card wired up history-recording). Ranked by which session's edited-file set matches this
   // lane's ACTUAL dirty paths, per #3383's own coordination note.
@@ -423,6 +450,12 @@ export function whoisForLane({
     unpreservedFiles,
     verdict,
     reason,
+    // #4139 — `kept`: does an operator's `keep --lane=N` decision still apply to this lane's CURRENT content?
+    // `keptInfo` carries the marker's own record (reason/keptAt/keptBy) when `kept` is true, purely for the
+    // human-facing report — `laneReclaimQueue` (`we:scripts/operations/operator-queue.mjs`) filters on `kept`
+    // alone.
+    kept,
+    keptInfo: kept ? { reason: keepMarker.reason ?? null, keptAt: keepMarker.keptAt ?? null, keptBy: keepMarker.keptBy ?? null } : null,
   };
 }
 
@@ -486,8 +519,12 @@ export function whois({
  */
 export function lanesNeedingDecision(report) {
   return (report.lanes || [])
-    .filter((row) => row.exists && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
-    .map((row) => ({ lane: row.lane, path: row.path, verdict: row.verdict, reason: row.reason }));
+    // #4139 — `!row.kept`: an operator's recorded `keep` call (still fresh — its fingerprint matches this
+    // lane's CURRENT content) excludes the lane from this list until that content changes again.
+    .filter((row) => row.exists && !row.kept && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
+    .map((row) => ({
+      lane: row.lane, path: row.path, verdict: row.verdict, reason: row.reason, preserved: row.preserved,
+    }));
 }
 
 function printReport(report) {
@@ -507,6 +544,9 @@ function printReport(report) {
     if (row.cards.length) console.log(`  cards: ${row.cards.map((c) => `${c.id}=${c.status || 'unknown'}`).join(', ')}`);
     if (row.prs.length) console.log(`  prs: ${row.prs.map((p) => `#${p.number}(${p.state}) for ${p.card}`).join(', ')}`);
     if (!row.preserved) console.log(`  NOT provably preserved: ${row.unpreservedFiles.join(', ') || '(some ahead commits)'}`);
+    if (row.kept) {
+      console.log(`  KEPT (#4139): ${row.keptInfo.reason || '(no reason recorded)'} — recorded ${row.keptInfo.keptAt || 'unknown time'}; excluded from LANE RECLAIM until this content changes`);
+    }
   }
 }
 
