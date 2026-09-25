@@ -250,12 +250,19 @@ async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
 /** THE ONE LIST — every live check the gate runs, in order. Each `run(ctx)` gets `{ root, budgets, repos,
  *  sessionSlug, ghChildEnv, runChild }` and must never throw (a throw is still caught by {@link runLiveSmoke},
  *  but a check should report `{ ok:false, detail }` itself so the detail is specific). */
+// `mayBeTransient:false` — a failure of this check is ALWAYS `'code'` ({@link classifySmokeFailure}), whatever its
+// text says. `reconcile-dry-run` runs `reconcile-pass.mjs` FROM THE TREE UNDER TEST, and anything that script prints
+// flows into `detail`; if its text could buy a `'transient'` verdict, a broken overlay could print one of
+// {@link TRANSIENT_FAILURE_PATTERNS} and dodge the reject record every tick. The lane-pool rows also run code from
+// the tree, but they stay eligible: a momentarily exhausted pool is the transient case Module D exists for.
+// Cost, accepted: a real gh/network blip inside the reconcile dry-run now records a rejection too (as every
+// failure did before Module D); it clears as soon as main or the overlay inputs move.
 export const SMOKE_CHECKS = Object.freeze([
-  { name: 'lane-pool-list', run: checkLanePoolList },
-  { name: 'lane-acquire-release', run: checkLaneAcquireRelease },
-  { name: 'gh-api-repo', run: checkGhApiRepo },
-  { name: 'gh-pr-list', run: checkGhPrList },
-  { name: 'reconcile-dry-run', run: checkReconcileDryRun },
+  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: true },
+  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: true },
+  { name: 'gh-api-repo', run: checkGhApiRepo, mayBeTransient: true },
+  { name: 'gh-pr-list', run: checkGhPrList, mayBeTransient: true },
+  { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false },
 ]);
 
 /** PURE: does a completed set of check results pass the gate? Every single check must have passed. */
@@ -287,7 +294,7 @@ export async function runLiveSmoke({
     } catch (e) {
       result = { ok: false, detail: `threw: ${firstLine(e)}` };
     }
-    results.push({ name: check.name, ms: Date.now() - startedAt, ...result });
+    results.push({ name: check.name, ms: Date.now() - startedAt, ...result, mayBeTransient: check.mayBeTransient !== false });
   }
   return { pass: decideSmokeVerdict(results), disabled: false, results, sessionSlug };
 }
@@ -307,8 +314,12 @@ export const TRANSIENT_FAILURE_PATTERNS = Object.freeze([
   /ECONNRESET/i,
   /ENOTFOUND/i,
   /EAI_AGAIN/i,
-  /timed out/i,
-  /timeout/i,
+  // `bounded-child.mjs#runBounded`'s OWN hard-timeout rejection: the WHOLE detail must be `<check prefix> failed:
+  // timed out after Nms (process group killed)`, anchored at both ends (no check prefix contains a `:`).
+  // NOT a bare /timeout|timed out/: those match ordinary code-failure text ("timed out waiting for #submit",
+  // an assertion naming a `timeout` option) and would launder a real regression through the retry path. A child
+  // that merely PRINTS this text reaches `detail` as `<prefix> failed: exited N: …`, so it cannot match.
+  /^[^:]+ failed: timed out after \d+ms \(process group killed\)$/,
   /no free lane/i, // lane-pool.mjs#cmdAcquire's exhausted-pool message, e.g. `no free lane in pool "we" (12 all held/dirty) — release one or \`provision\` more`
   /all lanes (are )?busy/i,
   /pool (is )?(full|exhausted)/i,
@@ -324,7 +335,9 @@ function isTransientDetail(detail) {
  * PURE: classify a completed {@link runLiveSmoke} `results` array as one of:
  *  - `'pass'` — every check ok.
  *  - `'transient'` — at least one check failed, and EVERY failure's `detail` matches
- *    {@link TRANSIENT_FAILURE_PATTERNS} (an auth/network/pool-capacity fault the old code would hit identically).
+ *    {@link TRANSIENT_FAILURE_PATTERNS} (an auth/network/pool-capacity fault the old code would hit identically)
+ *    AND came from a check that may be transient (a row with `mayBeTransient:false` — see {@link SMOKE_CHECKS} —
+ *    always counts as code; a row without the field is eligible).
  *  - `'code'` — at least one failure does NOT match (a genuinely code-shaped failure), OR no checks ran at all
  *    (an empty result set is never "just env noise" — same fail-closed posture as {@link decideSmokeVerdict}).
  * A single non-transient failure pulls the WHOLE verdict to `'code'`: a mix of one real bug and one flaky 401
@@ -336,7 +349,7 @@ export function classifySmokeFailure(results) {
   if (!Array.isArray(results) || results.length === 0) return 'code';
   const failures = results.filter((r) => !r.ok);
   if (failures.length === 0) return 'pass';
-  return failures.every((r) => isTransientDetail(r.detail)) ? 'transient' : 'code';
+  return failures.every((r) => r.mayBeTransient !== false && isTransientDetail(r.detail)) ? 'transient' : 'code';
 }
 
 /** Default retry cap for {@link runLiveSmokeWithRetry} — the number of EXTRA attempts after the first, once a

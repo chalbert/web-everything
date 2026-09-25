@@ -74,6 +74,14 @@ describe('readOverlays / readOverlayState', () => {
     expect(readOverlayState(cloneRoot, { env: env() }).corrupt).toBe(true);
   });
 
+  it('addOverlay / removeOverlay throw on a corrupt file instead of overwriting it with a fresh list', () => {
+    const file = overlayFilePath(cloneRoot, env());
+    writeFileSync(file, '{not json', 'utf8');
+    expect(() => addOverlay(cloneRoot, { ref: 'lane/x' }, { env: env() })).toThrow(/corrupt/);
+    expect(() => removeOverlay(cloneRoot, 'lane/x', { env: env() })).toThrow(/corrupt/);
+    expect(readFileSync(file, 'utf8')).toBe('{not json');
+  });
+
   it('wrong-shaped JSON (overlays not an array) ⇒ [] and corrupt:true', () => {
     writeFileSync(overlayFilePath(cloneRoot, env()), JSON.stringify({ clone: cloneRoot, overlays: 'nope' }), 'utf8');
     const state = readOverlayState(cloneRoot, { env: env() });
@@ -181,6 +189,21 @@ describe('CLI (spawnSync, --no-lock — never imports daemon-clone-lock.mjs)', (
     expect(out).toEqual({ removed: true, list: [] });
     const events = readFileSync(join(overlayDir, `${cloneKey(cloneRoot)}.events.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(events.map((e) => e.kind)).toEqual(['added', 'removed']);
+  });
+
+  // Advisory 2026-09-25 (PR #2625): a corrupt file read as an empty list everywhere, silently.
+  it('list on a corrupt file reports corrupt:true and exits 1, add/remove refuse and leave the file untouched', () => {
+    const file = overlayFilePath(cloneRoot, env());
+    writeFileSync(file, '{not json', 'utf8');
+    const listed = run(['list', `--clone=${cloneRoot}`, '--json']);
+    expect(listed.status).toBe(1);
+    expect(JSON.parse(listed.stdout)).toEqual({ list: [], corrupt: true });
+    for (const args of [['add', '--ref=lane/x'], ['remove', '--ref=lane/x']]) {
+      const r = run([...args, `--clone=${cloneRoot}`, '--no-lock', '--json']);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/corrupt/);
+    }
+    expect(readFileSync(file, 'utf8')).toBe('{not json');
   });
 
   it('bad usage exits 2 and never writes anything', () => {

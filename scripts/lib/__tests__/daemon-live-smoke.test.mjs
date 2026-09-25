@@ -96,12 +96,41 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
     const samples = [
       '401 Unauthorized', 'Bad credentials', 'HTTP 503', 'secondary rate limit exceeded', 'connect ETIMEDOUT',
       'read ECONNRESET', 'getaddrinfo ENOTFOUND api.github.com', 'getaddrinfo EAI_AGAIN api.github.com',
-      'the operation timed out', 'context deadline: timeout', 'no free lane in pool "we" (12 all held/dirty)',
+      'x failed: timed out after 30000ms (process group killed)', 'no free lane in pool "we" (12 all held/dirty)',
       'all lanes are busy right now', 'pool is exhausted', 'could not resolve host: github.com',
     ];
     for (const re of TRANSIENT_FAILURE_PATTERNS) {
       expect(samples.some((s) => re.test(s)), `no sample matched ${re}`).toBe(true);
     }
+  });
+  // Advisory 2026-09-25 (PR #2625): a bare /timeout|timed out/ matched ordinary code-failure text, so a real
+  // regression rolled back as 'transient' with no reject record and was re-smoked every tick.
+  it.each([
+    'lane-pool list --acquirable failed: exited 1: Error: operation timed out waiting for element #submit-button',
+    'gh pr list --repo x --limit 1 failed: exited 1: AssertionError: expected timeout to be 30000',
+    'lane-pool list --acquirable failed: exited 1: timed out after 5ms (process group killed)', // child PRINTED the marker
+    'lane-pool list --acquirable failed: exited 1: x failed: timed out after 5ms (process group killed)', // …with its own prefix
+  ])('code-shaped text that merely mentions a timeout → code: %s', (detail) => {
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('code');
+  });
+  it("runBounded's own hard-timeout rejection still → transient", () => {
+    const detail = 'gh api --method GET repos/x failed: timed out after 30000ms (process group killed)';
+    expect(classifySmokeFailure([{ ok: false, detail }])).toBe('transient');
+  });
+  it('a failure from a mayBeTransient:false check is code even when its text looks transient', () => {
+    expect(classifySmokeFailure([{ ok: false, mayBeTransient: false, detail: 'failed: connect ETIMEDOUT' }])).toBe('code');
+  });
+  it('reconcile-dry-run (runs code from the tree under test) can never buy a transient verdict with its own output', async () => {
+    expect(SMOKE_CHECKS.find((c) => c.name === 'reconcile-dry-run').mayBeTransient).toBe(false);
+    const runChild = vi.fn(async (cmd, args) => {
+      if (args[0] === 'scripts/conveyor/reconcile-pass.mjs') throw new Error('exited 1: connect ETIMEDOUT (printed by overlay code)');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+    expect(smoke.pass).toBe(false);
+    expect(classifySmokeFailure(smoke.results)).toBe('code');
   });
   it("the real lane-pool.mjs cmdAcquire 'no free lane' message classifies as transient", () => {
     // The exact shape lane-pool.mjs#cmdAcquire fails with when its bounded --wait-ms poll never finds a

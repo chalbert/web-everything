@@ -17,7 +17,11 @@
  *
  * CORRUPTION IS FAIL-CLOSED, NEVER FAIL-LOUD. A hand-edited or half-written overlay file must never crash a
  * daemon tick: {@link readOverlayState} treats an unparsable or wrong-shaped file exactly like a missing one
- * (empty list) and only additionally flags `corrupt:true` so a caller CAN alert on it — it never throws.
+ * (empty list) and only additionally flags `corrupt:true` so a caller CAN alert on it — it never throws. The
+ * callers that act on the list MUST check that flag (`daemon-rebuild.mjs` refuses to move with an
+ * `overlay-state-corrupt` alert, the CLI `list` exits 1): reading a corrupt file as "no overlays" and building
+ * on it would silently drop every registered fix. {@link addOverlay}/{@link removeOverlay} throw on a corrupt
+ * file rather than overwrite it with a fresh list, so the damaged file is left for a person to inspect.
  * {@link writeOverlays} writes `<file>.tmp-<pid>` then `renameSync`s over the real path, so a write that dies
  * mid-flight (kill -9, disk full) either fully lands or leaves the OLD file untouched — never a half-written
  * `.json` a later read would have to treat as corrupt in the first place. This module never itself takes the
@@ -121,6 +125,15 @@ export function readOverlays(root, { env = process.env } = {}) {
   return readOverlayState(root, { env }).overlays;
 }
 
+/** The list to MUTATE — like {@link readOverlays}, but throws on a corrupt file so a write never replaces it. */
+function readOverlaysForWrite(root, env) {
+  const state = readOverlayState(root, { env });
+  if (state.corrupt) {
+    throw new Error(`daemon-overlays: overlay state file ${overlayFilePath(root, env)} is corrupt — refusing to overwrite it; fix or remove it by hand`);
+  }
+  return state.overlays;
+}
+
 /**
  * Atomically replace the overlay list: write `<file>.tmp-<pid>` then `renameSync` over the real path, so a
  * reader never sees a half-written file and a killed write never corrupts the previous good one. `clone` is
@@ -154,7 +167,7 @@ export function addOverlay(root, { ref, pr = null, addedBy = null, reason = null
   if (!isSafeBranchName(ref)) {
     throw new TypeError(`daemon-overlays: ref ${JSON.stringify(ref)} is not a safe branch name — refusing to add it`);
   }
-  const list = readOverlays(root, { env }).slice();
+  const list = readOverlaysForWrite(root, env).slice();
   const idx = list.findIndex((o) => o && o.ref === ref);
   if (idx === -1) {
     list.push({ ref, pr: pr ?? null, addedAt: now || new Date().toISOString(), addedBy: addedBy ?? null, reason: reason ?? null });
@@ -176,7 +189,7 @@ export function addOverlay(root, { ref, pr = null, addedBy = null, reason = null
  */
 export function removeOverlay(root, ref, { env = process.env, why } = {}) {
   void why; // caller bookkeeping only — see JSDoc above.
-  const list = readOverlays(root, { env });
+  const list = readOverlaysForWrite(root, env);
   const idx = list.findIndex((o) => o && o.ref === ref);
   if (idx === -1) return { removed: false, list };
   const next = list.slice(0, idx).concat(list.slice(idx + 1));

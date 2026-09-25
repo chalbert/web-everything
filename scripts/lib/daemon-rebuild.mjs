@@ -71,7 +71,7 @@ import { createHash } from 'node:crypto';
 
 import { withWriteLock } from './daemon-clone-lock.mjs';
 import {
-  cloneKey, overlayFilePath, readOverlays, removeOverlay, appendOverlayEvent,
+  cloneKey, overlayFilePath, readOverlayState, removeOverlay, appendOverlayEvent,
 } from './daemon-overlays.mjs';
 import { runLiveSmokeWithRetry } from './daemon-live-smoke.mjs';
 import { isSafeBranchName } from './daemon-self-sync.mjs';
@@ -559,6 +559,11 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     alert(unsafe.reason, unsafe.detail);
     return finish({ moved: false, reason: unsafe.reason });
   }
+  // Report kept untracked paths on EVERY tick that gets this far — including no-op (`up-to-date`,
+  // `still-rejected`) ticks — not only when the tree moves. `reset --hard` never removes them, so an
+  // unexpected file (nothing daemon-written should be here: `.conveyor/` and host-local settings are
+  // gitignored, and ignored paths are not listed) keeps showing up in the alert log for as long as it stays.
+  if (unsafe.untracked.length > 0) alert('untracked-kept', { paths: unsafe.untracked });
 
   const prevHead = verifyRev(git, 'HEAD');
   if (!prevHead) {
@@ -567,7 +572,14 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
   }
 
   // ── Step 2: fetch ────────────────────────────────────────────────────────────────────────────────────
-  const overlaysBefore = readOverlays(root, { env });
+  // A corrupt overlay file reads as an empty list. Building on that would quietly rebuild onto main alone and
+  // drop every registered fix, so refuse and alert instead (mainOnly ignores overlays anyway, so it proceeds).
+  const overlayState = readOverlayState(root, { env });
+  if (overlayState.corrupt) {
+    alert('overlay-state-corrupt', { file: overlayFilePath(root, env) });
+    if (!mainOnly) return finish({ moved: false, reason: 'overlay-state-corrupt' });
+  }
+  const overlaysBefore = overlayState.overlays;
   const fetchResult = fetchMainAndOverlays({ git, overlays: overlaysBefore });
   if (!fetchResult.ok) {
     alert('fetch-failed');
@@ -610,7 +622,8 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
 
   // ── Step 4.5: untracked-collision guard — a `reset --hard` keeps untracked files, but SILENTLY OVERWRITES
   //    one if the incoming tree has real content at that same path. Check every untracked path from Step 1's
-  //    `unsafe.untracked` against the target tree; anything not present there is harmless and only reported.
+  //    `unsafe.untracked` against the target tree; anything not present there is harmless (already reported as
+  //    `untracked-kept` after Step 1).
   if (unsafe.untracked.length > 0) {
     const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
     if (colliding.length > 0) {
@@ -619,7 +632,6 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
         moved: false, reason: 'untracked-collision', untracked: colliding, plan,
       });
     }
-    alert('untracked-kept', { paths: unsafe.untracked });
   }
 
   // ── Step 5: move the tree (the ONLY `reset --hard` in this module) ──────────────────────────────────
@@ -706,7 +718,7 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
  *   originUrl?:string, run?:typeof gitRun, extraOverlays?:Array<{ref:string, pr?:number|null}>}} o
  * @returns {Promise<{dryRun:true, head:string|null, onMain:boolean|null, unsafe:object, plan:object,
  *   wouldDo:'nothing'|'nothing (still-rejected)'|'rebuild-and-smoke'|'refuse', overlayFile:string,
- *   overlays:Array<object>, state:object, stillRejected:boolean}>}
+ *   overlays:Array<object>, overlayStateCorrupt:boolean, state:object, stillRejected:boolean}>}
  */
 export async function dryRunRebuild({
   root, env = process.env, prState, originUrl, run = gitRun, extraOverlays = [],
@@ -719,7 +731,9 @@ export async function dryRunRebuild({
   const unsafe = findUnsafeLocalState({ git: rootGit });
 
   const overlayFile = overlayFilePath(root, env);
-  const overlays = readOverlays(root, { env }).concat(extraOverlays);
+  const overlayState = readOverlayState(root, { env });
+  const overlayStateCorrupt = overlayState.corrupt;
+  const overlays = overlayState.overlays.concat(extraOverlays);
   const state = readRebuildState(root, env);
 
   let url = originUrl;
@@ -784,14 +798,15 @@ export async function dryRunRebuild({
 
   let wouldDo = 'refuse';
   if (unsafe.safe && onMain === true && plan.ok) {
-    if (untrackedCollision.length > 0) wouldDo = 'refuse';
+    if (untrackedCollision.length > 0 || overlayStateCorrupt) wouldDo = 'refuse'; // mirrors doRebuild's refusals
     else if (plan.finalSha === head) wouldDo = 'nothing';
     else if (stillRejected) wouldDo = 'nothing (still-rejected)';
     else wouldDo = 'rebuild-and-smoke';
   }
 
   return {
-    dryRun: true, head, onMain, unsafe, plan, wouldDo, overlayFile, overlays, state, stillRejected, untrackedCollision,
+    dryRun: true, head, onMain, unsafe, plan, wouldDo, overlayFile, overlays, overlayStateCorrupt, state,
+    stillRejected, untrackedCollision,
   };
 }
 

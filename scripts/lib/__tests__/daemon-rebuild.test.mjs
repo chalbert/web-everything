@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process';
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
 } from '../daemon-rebuild.mjs';
-import { addOverlay, readOverlays } from '../daemon-overlays.mjs';
+import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
 
 const tempDirs = [];
 
@@ -388,6 +388,50 @@ describe('rebuildClone', () => {
     expect(result.alerts.some((a) => a.kind === 'index-lock-recovered')).toBe(true);
     expect(existsSync(lockPath)).toBe(false);
     expect(result.moved).toBe(true);
+  });
+
+  // Advisory 2026-09-25 (PR #2625): a corrupt overlay file read as "no overlays", so the next rebuild silently
+  // built main alone and dropped every registered fix, with no alert anywhere.
+  it('a corrupt overlay-state file refuses the rebuild with an alert, never builds main alone', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/kept', (dir) => writeFile(dir, 'kept.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/kept' }, { env });
+    const first = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(first.adopted).toBe(true);
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    advanceMain(originDir, (dir) => writeFile(dir, 'main-next.txt', 'y\n'));
+    writeFileSync(overlayFilePath(cloneDir, env), '{ not json');
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('overlay-state-corrupt');
+    expect(result.alerts.some((a) => a.kind === 'overlay-state-corrupt')).toBe(true);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(existsSync(join(cloneDir, 'kept.txt'))).toBe(true);
+    expect(readFileSync(overlayFilePath(cloneDir, env), 'utf8')).toBe('{ not json'); // left for a person to inspect
+
+    const preview = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(preview.overlayStateCorrupt).toBe(true);
+    expect(preview.wouldDo).toBe('refuse');
+  });
+
+  // Advisory 2026-09-25 (PR #2625): a kept untracked file was reported only on ticks that moved the tree, so it
+  // could sit in the clone through every no-op tick with no signal.
+  it('a kept untracked file is re-reported on every tick, including an up-to-date one', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/tick', (dir) => writeFile(dir, 'tick.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/tick' }, { env });
+    writeFile(cloneDir, 'planted.txt', 'untracked\n');
+    const opts = { root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS };
+    expect((await rebuildClone(opts)).adopted).toBe(true);
+
+    const second = await rebuildClone(opts);
+    expect(second.reason).toBe('up-to-date');
+    expect(second.alerts.some((a) => a.kind === 'untracked-kept' && a.detail?.paths?.includes('planted.txt'))).toBe(true);
+    expect(existsSync(join(cloneDir, 'planted.txt'))).toBe(true);
   });
 
   it('mainOnly ignores every overlay', async () => {

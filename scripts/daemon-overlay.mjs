@@ -27,7 +27,7 @@
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { addOverlay, removeOverlay, readOverlays, appendOverlayEvent } from './lib/daemon-overlays.mjs';
+import { addOverlay, removeOverlay, readOverlayState, appendOverlayEvent } from './lib/daemon-overlays.mjs';
 
 function parseFlags(argv) {
   const flags = {};
@@ -82,7 +82,13 @@ async function main() {
 
   let output;
   if (cmd === 'list') {
-    output = { list: readOverlays(root, { env }) };
+    // A corrupt file must not read as a plain empty list: flag it and exit 1 (add/remove throw on it instead).
+    const state = readOverlayState(root, { env });
+    output = state.corrupt ? { list: [], corrupt: true } : { list: state.overlays };
+    if (state.corrupt) {
+      process.stderr.write('daemon-overlay: overlay state file is corrupt — fix or remove it by hand\n');
+      process.exitCode = 1;
+    }
   } else if (cmd === 'add') {
     const locked = await withLockIfNeeded(() => {
       const list = addOverlay(root, { ref: flags.ref, pr, addedBy: by, reason }, { env });
