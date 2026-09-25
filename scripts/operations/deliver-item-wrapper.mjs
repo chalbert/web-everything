@@ -80,6 +80,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 // REAL — every one of these is an existing exported function this session read directly.
 import { defaultSpawnAgent, findItem, defaultLoadItems } from './dispatch-lane-io.mjs';
+// #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
+import { markWorkerEnv } from './session-role.mjs';
 import { fillBrief } from './dispatch-lane.mjs';
 import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-report-store.mjs';
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
@@ -1205,7 +1207,7 @@ export function runConvergeEdit(
   const settingsFile = ensureSettingsFile();
   const sessionId = newSessionId();
   const argv = buildConvergeEditorArgv({ sessionId, prompt: editInstruction.prompt, settingsFile });
-  const out = runFn('claude', argv, { cwd: lane, env: { ...process.env, WE_DISPATCH_KIND: 'delivery' } });
+  const out = runFn('claude', argv, { cwd: lane, env: markWorkerEnv({ ...process.env, WE_DISPATCH_KIND: 'delivery' }) });
   return parseConvergeEditResult(out);
 }
 
