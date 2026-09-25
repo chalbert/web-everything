@@ -49,6 +49,7 @@ const SHIM = `#!/usr/bin/env node
 // A stand-in for the \`claude\` CLI. Records every invocation, emulates the two sub-commands the delivery
 // loop actually uses, and exits fast. Written by fake-claude.mjs — see that file for why.
 const { readFileSync, writeFileSync, existsSync } = require('node:fs');
+const { randomUUID } = require('node:crypto');
 const LOG = process.env.FAKE_CLAUDE_LOG;
 const argv = process.argv.slice(2);
 
@@ -94,6 +95,15 @@ for (let i = 0; i < argv.length; i += 1) {
   // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
   // acceptance (the real CLI's own --help lists this flag), not file contents.
   if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; extraFlagCount += 1; continue; }
+  // #3730 — the two flags dispatch-task adds. Both are real claude --help options. --permission-mode takes
+  // a separate value; --allowedTools is VARIADIC in the real CLI, so the dispatcher passes it as ONE
+  // --allowedTools=<list> token (a separate list would swallow the prompt), and only that spelling is accepted
+  // here. Recorded through the call log's argv, not interpreted.
+  if (a === '--permission-mode') { i += 1; extraFlagCount += 1; continue; }
+  if (a.startsWith('--allowedTools=') || a.startsWith('--allowed-tools=')) { extraFlagCount += 1; continue; }
+  // #3857 — the model-tier table's chosen (or reasoned-override) model, injected by buildAgentArgv. A real
+  // claude --help flag (takes a separate value); recorded through the call log's argv, not interpreted.
+  if (a === '--model' || a === '-m') { i += 1; extraFlagCount += 1; continue; }
   // NO \`--\` END-OF-OPTIONS BRANCH, deliberately. \`buildAgentArgv\` never emits one, so a branch here would
   // model the very escape hatch dispatch-lane-io.mjs says it DECLINED to bet on — a fidelity claim with
   // nothing checking it. The guard it chose instead (refuse a leading-dash brief) is what gets exercised.
@@ -136,23 +146,23 @@ if (bg && resumeId) {
 }
 
 if (bg) {
-  // The real CLI returns IMMEDIATELY and the session may not be listed yet. It is listed here so the round
-  // trip is assertable; the not-yet-listed grace window is the dispatcher's own concern and is unit-tested.
-  //
-  // #3331 — \`--bg\` IGNORES \`--session-id\` AND SAYS SO. This shim used to honour it (\`sessionId || generated-N\`)
-  // and that cooperativeness is precisely how the defect survived: the round-trip test below was green
-  // against an assumption the real CLI had never honoured, for as long as the assumption was wrong. The real
-  // 2.1.269 behaviour, measured, is this warning on stderr followed by a session under an id of the CLI's own
-  // choosing. Only the \`--bg\` branch is changed — \`-p\` (the foreground branch) genuinely DOES honour
-  // \`--session-id\`, which is what \`judge-spawn.mjs\`'s jurors rely on.
-  if (sessionId) {
-    process.stderr.write('warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)\\n');
-  }
-  const id = 'generated-' + state.sessions.length;
-  state.sessions.push({ id: id.slice(0, 8), sessionId: id, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
+  // THE REAL CLI IGNORES \`--session-id\` on a \`--bg\` spawn and mints its OWN id — confirmed against CLI
+  // 2.1.246, three runs, three mismatches, its own stderr warning (#3331 probe). Honouring the passed-in
+  // \`sessionId\` here was the exact drift that let dispatch-lane-io.mjs's now-corrected assumption go
+  // unnoticed by this suite; the shim must not repeat it, so the real id is always CLI-minted, never the
+  // caller's.
+  const realId = randomUUID();
+  const shortId = realId.slice(0, 8);
+  state.sessions.push({ id: shortId, sessionId: realId, name, systemPromptFile, kind: 'background', state: 'running', cwd: process.cwd() });
   write(state);
-  process.stdout.write('backgrounded · ' + id.slice(0, 8) + (name ? ' · ' + name : '') + '\\n');
-  process.stdout.write('  claude attach ' + id.slice(0, 8) + '    open in this terminal\\n');
+  process.stderr.write('warning: --bg manages the session id; ignoring --session-id (use --resume <id> to continue an existing session)\\n');
+  // The one line dispatch-lane-io.mjs's \`parseBackgroundedHandle\` reads — shape and separator (U+00B7)
+  // matched against a real 2.1.246 spawn, not invented.
+  process.stdout.write('backgrounded · ' + shortId + (name ? ' · ' + name : '') + '\\n');
+  process.stdout.write('  claude agents             list sessions\\n');
+  process.stdout.write('  claude attach ' + shortId + '    open in this terminal\\n');
+  process.stdout.write('  claude logs ' + shortId + '      show recent output\\n');
+  process.stdout.write('  claude stop ' + shortId + '      stop this session\\n');
   process.exit(0);
 }
 
