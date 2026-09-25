@@ -66,7 +66,9 @@ import {
   evidenceStrength,
   isReproCommand,
   classifyFindingEvidence,
-  admitFindingsByEvidence
+  admitFindingsByEvidence,
+  FLOOR_MAX_FINDINGS,
+  recordFloorRun
 } from '../jury-core.mjs';
 
 describe('jury-ledger event vocabulary (#2654)', () => {
@@ -1524,5 +1526,42 @@ describe('#3312 — evidenceKind is NOT FORGEABLE', () => {
     expect(n.evidenceKind).toBe('repro');
     expect(normalizeFinding({ summary: 's', evidenceKind: 'invented' }).evidenceKind).toBeUndefined();
     expect(normalizeFinding({ summary: 's', evidenceKind: 'constructor' }).evidenceKind).toBeUndefined();
+  });
+});
+
+// #3887 — Rule 7 of #3690 at `spot-check`: a floor-depth run records its OWN verdict AND its cost (juror
+// count, rounds, tokens or wall-time) in a field a report can read later — pure, and deliberately NOT a
+// `VERDICTS` member (that vocabulary is the BLOCKING panel's; the floor is structurally non-blocking, #3313).
+describe('recordFloorRun — the floor pass records its verdict and its cost (#3887, rule 7)', () => {
+  it('a clean pass (no findings) records `outcome: "clean"` and the default cost shape', () => {
+    const record = recordFloorRun({});
+    expect(record.runKind).toBe('floor');
+    expect(record.outcome).toBe('clean');
+    expect(record.findings).toEqual([]);
+    expect(record.truncatedCount).toBe(0);
+    expect(record.cost).toEqual({ jurorCount: 1, rounds: 1, tokens: null, wallTimeMs: null });
+  });
+
+  it('a pass with findings records `outcome: "findings"`, the findings themselves, and a measured cost', () => {
+    const record = recordFloorRun({
+      findings: ['the retry loop never backs off'], jurorCount: 1, rounds: 1, tokens: 812, wallTimeMs: 4300,
+    });
+    expect(record.outcome).toBe('findings');
+    expect(record.findings).toEqual(['the retry loop never backs off']);
+    expect(record.cost).toEqual({ jurorCount: 1, rounds: 1, tokens: 812, wallTimeMs: 4300 });
+  });
+
+  it('caps findings at FLOOR_MAX_FINDINGS and reports how many it truncated, never silently drops the rest', () => {
+    const findings = Array.from({ length: FLOOR_MAX_FINDINGS + 2 }, (_, i) => `finding ${i}`);
+    const record = recordFloorRun({ findings });
+    expect(record.findings).toHaveLength(FLOOR_MAX_FINDINGS);
+    expect(record.truncatedCount).toBe(2);
+  });
+
+  it('the record is frozen — a caller cannot mutate a floor pass\'s own recorded verdict or cost', () => {
+    const record = recordFloorRun({ findings: ['x'] });
+    expect(Object.isFrozen(record)).toBe(true);
+    expect(Object.isFrozen(record.cost)).toBe(true);
+    expect(Object.isFrozen(record.findings)).toBe(true);
   });
 });

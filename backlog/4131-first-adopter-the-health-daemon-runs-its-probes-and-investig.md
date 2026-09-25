@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-blockedBy: ["4120"]
+blockedBy: ["4125"]
 scope: ["we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs"]
 dateOpened: "2026-09-24"
 tags: []

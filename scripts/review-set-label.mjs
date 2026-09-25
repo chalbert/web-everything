@@ -96,7 +96,7 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 import { computeNetDiffText } from './merge-ai-prs.mjs';
 import { parseDelegationMarker } from './lib/delegation-marker.mjs';
 import { isDelegationTripleGraduated } from './conveyor/delegation-trial-gate.mjs';
-import { readStore } from './conveyor/run-scorecard-store.mjs';
+import { readStore, resolveScorecardStorePath, DEFAULT_SCORECARD_STORE_PATH } from './conveyor/run-scorecard-store.mjs';
 import { logDelegationTrial } from './conveyor/log-delegation-trial.mjs';
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 // #x01u7az — the advisory:* label pair `clear-human` must strip: an advisory only means something on a
@@ -500,6 +500,15 @@ export const bodyFileRoots = (cwd = process.cwd(), tmp = tmpdir()) => [cwd, tmp,
  * recovery warning, never an exception that could turn a completed accept into a failed verdict.
  */
 export function publishDelegationTrialCommit({ provider, model, taskType, pr, cwd } = {}) {
+  // #4052 — once `CONVEYOR_STATE_ROOT` pins the scorecard store outside this repo's git tree (Ruling #3681
+  // Fork 4 condition (iii)), the row this call would publish already lives at the operator's pinned root and
+  // was never written to `scripts/conveyor/run-scorecards.json` in the first place — every daemon pinned to
+  // that same root reads/writes the one physical file directly, with no git round-trip needed. Committing and
+  // pushing a file this checkout no longer writes would either no-op confusingly or, worse, resurrect a stale
+  // git-tracked copy nothing keeps in sync. Skip cleanly instead.
+  if (resolveScorecardStorePath() !== DEFAULT_SCORECARD_STORE_PATH) {
+    return { committed: false, pushed: false, reason: 'scorecard store is pinned outside the repo (CONVEYOR_STATE_ROOT) — nothing to commit' };
+  }
   let committed = false;
   let stage = 'could not resolve repo root';
   const firstLine = (e) => String((e && (e.stderr || e.message)) || e).trim().split('\n')[0];

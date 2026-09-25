@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "4075"
 status: open
-blockedBy: ["4120"]
+blockedBy: ["4124"]
 scope: ["we:skills-src/conveyor/runner.mjs", "we:scripts/conveyor/infra-blocked.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs"]
 dateOpened: "2026-09-24"
 tags: []

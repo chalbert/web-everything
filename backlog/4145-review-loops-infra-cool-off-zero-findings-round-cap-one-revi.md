@@ -1,11 +1,13 @@
 ---
+bornAs: xmcmvnk
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 

@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "4075"
 status: open
-blockedBy: ["4120"]
+blockedBy: ["4125", "4127", "4134", "4121"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lane-drain.mjs", "we:scripts/readiness/drain-lock.mjs"]
 dateOpened: "2026-09-24"
 tags: []

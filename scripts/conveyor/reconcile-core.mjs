@@ -575,11 +575,30 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * it already trusts `selfReportedDone` — as an upstream fact, not a raw timestamp it would otherwise have to
  * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
  * as `live-process` and free its PR to be reconciled again.
+ *
+ * `state === 'stopped'` is ALSO finished — live-caught 2026-09-25 (PR #2647/#2625, both `chalbert/web-everything`,
+ * both stuck at an informative `review-status:review-stalled`/`reviewing` label with nothing live and nothing
+ * retrying). Root cause, confirmed against a real `claude agents --json --all` listing off the running review
+ * daemon's own checkout: `we:scripts/conveyor/session-reaper.mjs` calls `claude stop` on every `done`/`failed`/
+ * hung session it reaps (its own `TERMINAL_REAP_STATES`/`ALREADY_STOPPED_STATES`), which flips that session's OWN
+ * listed `state` to `'stopped'` — a state THIS function's `isFinished` never checked. `we:scripts/conveyor/
+ * reconcile-pass.mjs#enrichAgents` OMITS `pidAlive` entirely once `pid` itself is no longer on the row (measured:
+ * every `stopped`/`done` row in that same live listing carries no `pid` at all — only a currently-`working` row
+ * does), so an unfiltered `stopped` row reaches rank 3 (`pidAlive !== false`) and returns `liveness-unknown` —
+ * REFUSING a fresh dispatch for a PR whose bound session cannot possibly become live again. `bindAgents` binds
+ * every historical session sharing a PR's `review-<pr>`/`fix-<pr>` name, live or not (no `startedAt` filter), so
+ * ONE such stale `stopped` row is enough to freeze the PR even while every other bound row is cleanly `done`. A
+ * `stopped` session, by session-reaper's own definition (`ALREADY_STOPPED_STATES`), never resumes and never
+ * produces another `state` transition on its own — mirroring that finality here, the same way `done` already is,
+ * is what frees the PR to be reconciled again rather than parking it at `liveness-unknown` forever.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
-  const isFinished = (agent) => String(agent?.state ?? '').toLowerCase() === 'done' || agent?.selfReportedDone === true || agent?.hung === true;
+  const isFinished = (agent) => {
+    const state = String(agent?.state ?? '').toLowerCase();
+    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
+  };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
     kind,
@@ -775,13 +794,28 @@ export function planReconcile({
     // reads this plan (`we:scripts/operations/ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`, mirroring
     // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own capability gate for `fix`).
     if (phase === 'ci-red') {
+      // we:backlog/x9wz0ir-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: PRs #2635/#2636 are BOTH `owed-ci-
+      // rerun` (their required check failed inside one of `main`'s own red windows) AND `mergeStateStatus:
+      // 'DIRTY'` (real conflicts with `main`, confirmed live via `gh pr view --json mergeStateStatus,mergeable`
+      // → `DIRTY`/`CONFLICTING` for both). `owed-ci-rerun`'s whole premise is "a MECHANICAL rebase onto main
+      // clears this" (`ci-red-recovery-watch.mjs#planMainRedRebases`'s own `rebase-onto-main` dispatch, via
+      // `rebaseDropManifest`) — that premise is FALSE for a DIRTY PR: a no-checkout rebase cannot resolve a
+      // real conflict, so refusing `owed-ci-rerun` here left these two PRs stuck forever (no rebase watch can
+      // ever clear them, and this refusal pre-empted the only OTHER path — `ci-heal`, which DOES rebase/merge
+      // main AND resolve the conflict — from ever being planned for them). `merge === 'DIRTY'` is read straight
+      // off `pr.mergeStateStatus`, the SAME field `classifyPr` above already reads for the `conflicted` phase;
+      // it just never gets there for a PR whose checks are ALSO failing, since `classifyPr`'s `ci-red` check
+      // runs first (see that function's own precedence). Skipping `owed-ci-rerun` for a DIRTY PR falls straight
+      // through to the ordinary `ci-heal` cap-check/dispatch below — the correct owner once a mechanical rebase
+      // cannot possibly succeed.
+      const mergeDirty = String(pr?.mergeStateStatus ?? '').toUpperCase() === 'DIRTY';
       // we:backlog/x5uqim1-*.md — LIVE INCIDENT 2026-09-25 (see `main-red-recovery.mjs`'s own header for the
       // full measured shape): a required check that failed only because `main`'s own CI was red at that moment
       // is not this PR's own defect. Checked BEFORE the `ci-heal` cap below (and skips it entirely) — this is
       // not one more round spent against that cap, it is a DIFFERENT job this pass does not run itself
       // (`we:scripts/conveyor/ci-red-recovery-watch.mjs` does), the same "owed elsewhere, never dispatched
       // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
-      if (isPrCiFailureOwedRerun({
+      if (!mergeDirty && isPrCiFailureOwedRerun({
         requiredCheckCompletedAt: base.requiredCheckCompletedAt,
         aheadBy: base.aheadByOnMain,
         mainRedWindows,

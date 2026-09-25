@@ -4,7 +4,7 @@ kind: story
 size: 3
 parent: "4075"
 status: open
-blockedBy: ["4120"]
+blockedBy: ["4131"]
 scope: ["we:scripts/lib/daemon-self-sync.mjs", "we:scripts/lib/daemon-live-smoke.mjs", "plateau-app:tools/drain-daemon/daemon.mjs"]
 dateOpened: "2026-09-24"
 tags: []

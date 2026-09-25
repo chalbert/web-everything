@@ -29,8 +29,12 @@ import { fileURLToPath } from 'node:url';
 import { createRegistry } from './registry.mjs';
 import { createFileRunStore, createMemoryRunStore, newRunId } from './run-store.mjs';
 import { createFileCallLogStore } from './call-log-store.mjs';
-import { createDefaultJudge, runOperationCli, buildCliSpec, hasJsonFlag } from './cli-adapter.mjs';
-import { reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv } from './review-pr.mjs';
+import {
+  createDefaultJudge, runOperationCli, buildCliSpec, cwdFlagValue, hasJsonFlag,
+} from './cli-adapter.mjs';
+import {
+  reviewPrOperation, REVIEW_PR_OP, codexAdvisoryFromEnv, correctnessAdvisoryFromEnv, antigravityReviewFromEnv,
+} from './review-pr.mjs';
 import { createReviewPrReader, createReviewPrSinks, PR_VIEW_FIELDS, prViewFileName } from './review-pr-io.mjs';
 import { stagePrViewOperation, STAGE_PR_VIEW_OP } from './stage-pr-view.mjs';
 import { createPayloadReader, createStagePrViewSinks, defaultViewDir } from './stage-pr-view-io.mjs';
@@ -52,6 +56,8 @@ import { prReconcileOperation, PR_RECONCILE_OP } from './pr-reconcile.mjs';
 import { createPrReconcileReader } from './pr-status-io.mjs';
 import { runnerActivityOperation, RUNNER_ACTIVITY_OP } from './runner-activity.mjs';
 import { createRunnerActivityReader, createRunnerActivityCliStores } from './runner-activity-io.mjs';
+import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
+import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -117,13 +123,26 @@ export const OPERATIONS = Object.freeze({
   // var and not a CLI `--flag` (the step list is fixed here, before any run's argv is parsed) and why
   // `record-verdict-io.mjs`'s resume registration now reads the SAVED RUN's roster instead (`codexAdvisoryFromRun`,
   // PR #2117 review) - the env var only decides how a NEW run is started here.
+  // #x8n4crp / #3383 — `correctnessAdvisory` (`REVIEW_PR_CODEX_CORRECTNESS_ADVISORY`) and `antigravityReview`
+  // (`REVIEW_PR_ANTIGRAVITY_REVIEW`) are the fourth and fifth seats, each read off its OWN env var by the same
+  // reasoning (`correctnessAdvisoryFromEnv`/`antigravityReviewFromEnv`, `we:scripts/operations/review-pr.mjs`).
   // `json` is the ONE operation-table entry that reads its `resolveOperation(name, opts)` opts at all — every
   // other builder below still takes none, and passing the extra argument to a zero-arg arrow is a harmless
   // no-op for them. See `createReviewPrSinks`'s own `json` doc (`we:scripts/operations/review-pr-io.mjs`) for
   // WHY this exists: a `--json` caller's stdout must stay pure JSON even when the `record` step's notice
   // effect fires mid-run.
-  [REVIEW_PR_OP]: ({ json = false } = {}) => ({
-    declaration: reviewPrOperation({ readPr: createReviewPrReader(), codexAdvisory: codexAdvisoryFromEnv() }),
+  // #xu2pp2m — `cwd` IS THREADED INTO THE READER, not only into the judge factory. See
+  // `we:scripts/operations/cli-adapter.mjs#cwdFlagValue` for the live PR #2122 false-accept this closes: the
+  // reader used to be built with NO arguments, so `--cwd=<lane>` steered the jurors' working tree while the
+  // DIFF still came from `REPO_ROOT`. `createReviewPrReader`'s own `cwd` default is `REPO_ROOT`, so an
+  // invocation with no `--cwd` is byte-identical to before.
+  [REVIEW_PR_OP]: ({ json = false, cwd = null } = {}) => ({
+    declaration: reviewPrOperation({
+      readPr: createReviewPrReader(cwd ? { cwd } : {}),
+      codexAdvisory: codexAdvisoryFromEnv(),
+      correctnessAdvisory: correctnessAdvisoryFromEnv(),
+      antigravityReview: antigravityReviewFromEnv(),
+    }),
     sinks: createReviewPrSinks({ json }),
   }),
   // backlog/xzdi27a-* — the sibling of `review-pr` for a BACKLOG CARD instead of a PR diff (no `gh`, no diff,
@@ -227,6 +246,13 @@ export const OPERATIONS = Object.freeze({
   }),
   [RUNNER_ACTIVITY_OP]: () => ({
     declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
+  // #4067 (epic #4075, under #3383) — the live daemon status page. Read-only, same no-sinks reasoning as
+  // `runner-activity`/`gate-health`/`suggest-next`: every step is `compute`, so no effect exists for a sink
+  // to apply. `collectDaemonStatus`'s real launchd/lease/log/git reads are bound here, and ONLY here.
+  [DAEMON_STATUS_OP]: () => ({
+    declaration: daemonStatusOperation({ collect: collectDaemonStatus }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({
@@ -447,7 +473,9 @@ if (IS_CLI) {
   try {
     // `rest` is this invocation's OWN argv, known before the declaration is — see `hasJsonFlag`'s doc for why
     // a full `parseOperationArgv` pass cannot run yet at this point.
-    resolved = resolveOperation(name, { json: hasJsonFlag(rest) });
+    // #xu2pp2m — `cwd` rides alongside `json` for the SAME pre-parse reason (see `cwdFlagValue`): the
+    // review-pr reader is built here, before the operation's own argv is parsed.
+    resolved = resolveOperation(name, { json: hasJsonFlag(rest), cwd: cwdFlagValue(rest) });
   } catch (e) {
     writeAllSync(1, `error: ${String(e.message ?? e)}\n\n${rootUsage()}\n`);
     process.exit(2);
