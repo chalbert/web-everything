@@ -11,13 +11,13 @@ import { describe, it, expect } from 'vitest';
 import { laneReclaimQueue } from '../operator-queue.mjs';
 
 describe('laneReclaimQueue', () => {
-  it('filters a real whois report down to finished-needs-review / unknown-work rows', () => {
+  it('filters a real whois report down to finished-needs-review / unknown-work rows, carrying `preserved` through', () => {
     const fakeReport = {
       lanes: [
         { exists: true, lane: 1, path: '/p/lane-1', verdict: 'in-use', reason: 'x' },
         { exists: true, lane: 2, path: '/p/lane-2', verdict: 'finished-reclaimable', reason: 'x' },
-        { exists: true, lane: 3, path: '/p/lane-3', verdict: 'finished-needs-review', reason: 'not preserved' },
-        { exists: true, lane: 4, path: '/p/lane-4', verdict: 'unknown-work', reason: 'no card/PR' },
+        { exists: true, lane: 3, path: '/p/lane-3', verdict: 'finished-needs-review', reason: 'not preserved', preserved: false },
+        { exists: true, lane: 4, path: '/p/lane-4', verdict: 'unknown-work', reason: 'no card/PR', preserved: true },
         { exists: false, lane: 5, path: '/p/lane-5' },
       ],
     };
@@ -28,9 +28,24 @@ describe('laneReclaimQueue', () => {
       return JSON.stringify(fakeReport);
     };
     expect(laneReclaimQueue({ exec })).toEqual([
-      { lane: 3, path: '/p/lane-3', verdict: 'finished-needs-review', reason: 'not preserved' },
-      { lane: 4, path: '/p/lane-4', verdict: 'unknown-work', reason: 'no card/PR' },
+      { lane: 3, path: '/p/lane-3', verdict: 'finished-needs-review', reason: 'not preserved', preserved: false },
+      { lane: 4, path: '/p/lane-4', verdict: 'unknown-work', reason: 'no card/PR', preserved: true },
     ]);
+  });
+
+  // #4139 — a lane the operator has explicitly `keep`-ed (its keep marker's fingerprint still matches the
+  // lane's current content) is excluded from this queue entirely, however it verdicts, until that content
+  // changes and the marker goes stale on its own (`we:scripts/lib/lane-whois-core.mjs#keepMarkerApplies`).
+  it('excludes a KEPT lane from the queue, whatever its verdict', () => {
+    const fakeReport = {
+      lanes: [
+        { exists: true, lane: 3, path: '/p/lane-3', verdict: 'finished-needs-review', reason: 'not preserved', preserved: false, kept: false },
+        { exists: true, lane: 6, path: '/p/lane-6', verdict: 'finished-needs-review', reason: 'not preserved', preserved: false, kept: true },
+        { exists: true, lane: 7, path: '/p/lane-7', verdict: 'unknown-work', reason: 'no card/PR', preserved: true, kept: true },
+      ],
+    };
+    const exec = () => JSON.stringify(fakeReport);
+    expect(laneReclaimQueue({ exec }).map((d) => d.lane)).toEqual([3]);
   });
 
   it('degrades to [] — never throws — when the subprocess fails (no pool, no lane-whois.mjs sibling, etc.)', () => {

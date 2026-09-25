@@ -171,3 +171,53 @@ describe('lane-pool reclaim — AFTER', () => {
     expect(r.err).toMatch(/--lane/);
   });
 });
+
+// #4139 — the operator override: an explicit, logged escape hatch past the preservation gate for a
+// `finished-needs-review` lane a human has looked at, wired from operator-queue.mjs's LANE RECLAIM section.
+describe('lane-pool reclaim --override (#4139)', () => {
+  it('WITHOUT --override, unpreserved content still refuses exactly as before (no behavior change for the default path)', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(1), 'orphan.txt'), 'never pushed anywhere\n');
+    expect(runPool(['release', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    const r = runPool(['reclaim', '--lane=1', '--json', ...poolArgs()]);
+    expect(JSON.parse(r.out).reclaimed).toBe(false);
+    expect(existsSync(join(lanePath(1), 'orphan.txt'))).toBe(true);
+  });
+
+  it('WITH --override, the SAME unpreserved content is force-reclaimed — logged as an override, not silent', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(1), 'orphan.txt'), 'never pushed anywhere\n');
+    expect(runPool(['release', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+
+    const r = runPool(['reclaim', '--lane=1', '--override', '--json', ...poolArgs()]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.reclaimed).toBe(true);
+    expect(report.override).toBe(true);
+    expect(report.preserved).toBe(false); // the proof genuinely failed — override is what pushed it through
+    expect(r.err).toMatch(/OVERRIDE/);
+    expect(existsSync(join(lanePath(1), 'orphan.txt'))).toBe(false); // discarded — by explicit operator call
+  });
+
+  it('--override --dry-run still NEVER writes or resets — dry-run always wins over override', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(1), 'orphan.txt'), 'never pushed anywhere\n');
+    expect(runPool(['release', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+
+    const r = runPool(['reclaim', '--lane=1', '--override', '--dry-run', '--json', ...poolArgs()]);
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.wouldReclaim).toBe(true);
+    expect(report.reclaimed).toBe(false);
+    expect(report.override).toBe(true);
+    expect(existsSync(join(lanePath(1), 'orphan.txt'))).toBe(true); // untouched
+  });
+
+  it('--override NEVER bypasses the live-lease guard — reuses that existing reclaim guard unchanged', () => {
+    expect(runPool(['acquire', '--lane=1', '--session=s', ...poolArgs()]).code).toBe(0);
+    const r = runPool(['reclaim', '--lane=1', '--override', '--json', ...poolArgs()]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toMatch(/held/i);
+    expect(existsSync(leaseMarker(1))).toBe(true); // untouched — override never reaches a live lease
+  });
+});

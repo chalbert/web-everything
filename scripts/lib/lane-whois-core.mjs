@@ -131,3 +131,32 @@ export function classifyLaneVerdict({
       : 'no card or PR evidence at all for this content - needs a human look',
   };
 }
+
+/**
+ * #4139 — PURE: does a lane's `keep` marker still apply to its CURRENT state? `lane-pool.mjs keep --lane=N`
+ * records an operator's "I looked at this, leave it" call alongside a FINGERPRINT of the lane's content at
+ * that moment (its HEAD sha, sorted dirty paths, sorted ahead-commit shas) — never a bare boolean — so the
+ * decision is scoped to the exact content it was made about. The moment that content changes (a fresh
+ * `acquire` resets the lane and it picks up new work, a new commit lands, a file changes), the OLD marker no
+ * longer describes what is on disk, and this returns `false` so `we:scripts/lane-whois.mjs`'s report — and
+ * downstream, `we:scripts/operations/operator-queue.mjs#laneReclaimQueue`'s "needs your decision" filter —
+ * resurfaces the lane instead of trusting a stale call forever. This is the ONE place that comparison is made
+ * (never re-derived at either call site), mirroring this file's own "PURE decision core, unit-tested with no
+ * fs/git" convention.
+ * @param {{fingerprint?: {headSha?: string, dirtyPaths?: string[], aheadShas?: string[]}}|null|undefined} marker
+ *   the marker read from disk (`JSON.parse`d `.git/.lane-keep`), or `null`/`undefined` when none exists.
+ * @param {{headSha: string, dirtyPaths: string[], aheadShas: string[]}} fingerprint the lane's CURRENT state,
+ *   computed fresh by the caller (never trust a caller's stale copy — same discipline as
+ *   {@link classifyLaneVerdict}'s own `preserved` re-derivation elsewhere in this codebase).
+ * @returns {boolean}
+ */
+export function keepMarkerApplies(marker, fingerprint) {
+  if (!marker || typeof marker !== 'object' || !marker.fingerprint || typeof marker.fingerprint !== 'object') return false;
+  const sameArray = (a, b) => (
+    Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])
+  );
+  const m = marker.fingerprint;
+  return m.headSha === fingerprint.headSha
+    && sameArray(m.dirtyPaths, fingerprint.dirtyPaths)
+    && sameArray(m.aheadShas, fingerprint.aheadShas);
+}

@@ -167,11 +167,53 @@ describe('lane-whois — AFTER', () => {
       lanes: [
         { exists: true, lane: 1, verdict: 'in-use' },
         { exists: true, lane: 2, verdict: 'finished-reclaimable' },
-        { exists: true, lane: 3, verdict: 'finished-needs-review', reason: 'x', path: '/a' },
-        { exists: true, lane: 4, verdict: 'unknown-work', reason: 'y', path: '/b' },
+        { exists: true, lane: 3, verdict: 'finished-needs-review', reason: 'x', path: '/a', preserved: false },
+        { exists: true, lane: 4, verdict: 'unknown-work', reason: 'y', path: '/b', preserved: true },
+        // #4139 — a KEPT lane, however it verdicts, is excluded until its content changes again.
+        { exists: true, lane: 5, verdict: 'finished-needs-review', reason: 'z', path: '/c', kept: true },
       ],
     });
     expect(decisions.map((d) => d.lane)).toEqual([3, 4]);
+    expect(decisions.find((d) => d.lane === 3).preserved).toBe(false);
+    expect(decisions.find((d) => d.lane === 4).preserved).toBe(true);
+  });
+
+  // #4139 — the KEEP marker, read live off a real lane through `lane-pool.mjs keep` + `lane-whois.mjs`.
+  it('a lane KEPT by the operator reports kept:true with the recorded reason, and is dropped from lanesNeedingDecision', async () => {
+    const { lanesNeedingDecision } = await import('../lane-whois.mjs');
+    pushCard('4203', 'resolved');
+    expect(runPool(['acquire', '--lane=2', '--session=conveyor-4203', '--item=4203', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(2), 'litter.log'), 'scratch, safe to lose\n');
+    expect(runPool(['release', '--lane=2', '--session=conveyor-4203', ...poolArgs()]).code).toBe(0);
+
+    // Before `keep`: a normal finished-needs-review row, surfaced.
+    const before = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    expect(before.lanes[0].verdict).toBe('finished-needs-review');
+    expect(before.lanes[0].kept).toBe(false);
+    expect(lanesNeedingDecision(before).map((d) => d.lane)).toEqual([2]);
+
+    expect(runPool(['keep', '--lane=2', '--reason=litter.log is scratch, safe to leave', ...poolArgs()]).code).toBe(0);
+
+    const after = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    expect(after.lanes[0].kept).toBe(true);
+    expect(after.lanes[0].keptInfo.reason).toBe('litter.log is scratch, safe to leave');
+    expect(lanesNeedingDecision(after)).toEqual([]); // dropped from the operator-queue feed
+  });
+
+  it('a KEPT decision goes stale the moment the lane\'s content changes — it resurfaces, never silenced forever', () => {
+    pushCard('4204', 'resolved');
+    expect(runPool(['acquire', '--lane=2', '--session=conveyor-4204', '--item=4204', ...poolArgs()]).code).toBe(0);
+    writeFileSync(join(lanePath(2), 'litter.log'), 'scratch\n');
+    expect(runPool(['release', '--lane=2', '--session=conveyor-4204', ...poolArgs()]).code).toBe(0);
+    expect(runPool(['keep', '--lane=2', ...poolArgs()]).code).toBe(0);
+
+    const kept = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    expect(kept.lanes[0].kept).toBe(true);
+
+    // New content appears — the SAME lane, but the fingerprint the marker recorded no longer matches.
+    writeFileSync(join(lanePath(2), 'new-file.txt'), 'fresh, never reviewed\n');
+    const stale = JSON.parse(runWhois(['--lane=2', '--json', `--repo=${referenceDir}`, '--name=whoispool', `--pool-root=${poolRoot}`]).out);
+    expect(stale.lanes[0].kept).toBe(false);
   });
 
   it('#3383-perf: a lane with MANY genuinely-unpushed ahead commits is scanned in bounded time (speed regression guard)', () => {

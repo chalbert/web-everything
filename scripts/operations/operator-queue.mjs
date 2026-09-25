@@ -168,8 +168,17 @@ export function laneReclaimQueue({ exec = execFileSync, scriptDir = dirname(file
     const out = exec('node', [script, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20 * 60_000 });
     const report = JSON.parse(out);
     return (report.lanes || [])
-      .filter((row) => row.exists && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
-      .map((row) => ({ lane: row.lane, path: row.path, verdict: row.verdict, reason: row.reason }));
+      // #4139 — `!row.kept`: an operator's `lane-pool.mjs keep --lane=N` call (still fresh — its fingerprint
+      // matches this lane's CURRENT content, see `we:scripts/lib/lane-whois-core.mjs#keepMarkerApplies`)
+      // excludes the lane from this list until its content changes again.
+      .filter((row) => row.exists && !row.kept && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
+      .map((row) => ({
+        lane: row.lane, path: row.path, verdict: row.verdict, reason: row.reason,
+        // #4139 — carried through so the CLI print below can offer the RIGHT one-click reclaim command: plain
+        // `reclaim` for a lane whose content is already provably preserved (true for some `unknown-work` rows
+        // — preservation doesn't gate that verdict), `reclaim --override` only when it's actually needed.
+        preserved: row.preserved,
+      }));
   } catch {
     return []; // no pool on this host, no gh/claude available, or the sibling module isn't staged — never fail the PR queue over this
   }
@@ -314,7 +323,17 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     console.log(report.stuck.map((pr) => `${pr.repo}#${pr.number}  ${pr.title}  `
       + `[${pr.episodes} episode${pr.episodes === 1 ? '' : 's'}, last ${pr.lastEpisode}]`).join('\n') || '(none)');
     console.log('LANE RECLAIM — needs your decision (#3383, see `node scripts/lane-whois.mjs`):');
-    console.log(report.laneDecisions.map((d) => `lane-${d.lane}  [${d.verdict}]  ${d.reason}  ${d.path}`).join('\n') || '(none)');
+    // #4139 — ONE-CLICK actions, printed ready to paste: this file stays READ-ONLY (per its own header) and
+    // never runs either of these itself. `reclaim` needs `--override` only when the lane's content is not
+    // ALREADY provably preserved (`d.preserved` — some `unknown-work` rows are preserved; every
+    // `finished-needs-review` row, by construction, is not). `keep` records the operator's own call so this
+    // lane drops out of this list until its content changes (`we:scripts/lib/lane-whois-core.mjs#keepMarkerApplies`).
+    console.log(report.laneDecisions.map((d) => (
+      `lane-${d.lane}  [${d.verdict}]  ${d.reason}  ${d.path}\n`
+      + `    reclaim: node scripts/lane-pool.mjs reclaim --lane=${d.lane}${d.preserved ? '' : ' --override'} --json\n`
+      + '    keep:    node scripts/lane-pool.mjs keep --lane='
+      + `${d.lane} --reason='<why>'`
+    )).join('\n') || '(none)');
     if (args.includes('--with-backpressure')) {
       console.log('BACKPRESSURE — open-PR limit reached (we:xniq7xs; land/review the existing PRs, or override `node scripts/operations/pr-limit.mjs allow|off`):');
       console.log(report.backpressure.map((b) => `${b.repo}  ${b.count}/${b.limit} open agent PR(s) not yet review:accepted  (#${b.prNumbers.join(', #')})`).join('\n') || '(none)');
