@@ -122,6 +122,9 @@ import {
 } from '../operations/delivery-report-store.mjs';
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import {
+  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
+} from './hung-session.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
 // #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
@@ -218,6 +221,14 @@ export const UNREPORTED_EXIT_OUTCOME = 'unreported-exit';
  *  would have, when the transcript shows that is what actually happened. See {@link transcriptShowsIntendedBlockedOnInfra}. */
 export const BLOCKED_ON_INFRA_OUTCOME = 'blocked-on-infra';
 
+/** #4090 (epic #3383/#4075, statute clause 2) — "a no-outcome stop counts as a loop and is relaunched, never
+ *  resumed." Distinct from BOTH outcomes above: this is not "we don't know what happened" ({@link
+ *  UNREPORTED_EXIT_OUTCOME}) or "a transient outage" ({@link BLOCKED_ON_INFRA_OUTCOME}) — it is a definite
+ *  verdict THIS reaper reached on its own evidence (no real outcome within the kind's window/ceiling), for
+ *  whichever future reader (#3366's resume-vs-relaunch logic, not yet built) needs to tell a genuine crash
+ *  apart from a bot correctly stopped for looping. */
+export const STALLED_OUTCOME = 'stalled';
+
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
  *  actually accepts. `ci-heal` is a real PR-kind session name but has NO completion-record kind at all (its own
@@ -260,16 +271,22 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
  *   with the wrong label. `false` (the default) is byte-identical to this function's pre-existing behavior —
  *   the CALLER ({@link runSessionReaperPass}, via {@link transcriptShowsIntendedBlockedOnInfra}) decides this;
  *   this function stays pure and takes the verdict as a plain boolean, never touching a transcript itself.
+ * @param {boolean} [stalled] - #4090: the reap reason was this file's own no-net-outcome axis (a looping bot,
+ *   never a crash) — mints {@link STALLED_OUTCOME} instead. Takes precedence over `blockedOnInfra` when both
+ *   are somehow true (a no-outcome verdict is this reaper's OWN definite conclusion; a transcript's stray
+ *   mention of infra trouble is comparatively weaker evidence and never overrides it). Only `review`/`fix`
+ *   sessions can carry either — item-kind sessions (`conveyor`/`prepare`/`prepare-decision`) still have no
+ *   completion-record schema at all, unchanged from before this card.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
-  const outcome = blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME;
+  const outcome = stalled ? STALLED_OUTCOME : (blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
   return applyCompletionUpdate(base, { status: 'done', outcome }, now);
 }
 
@@ -405,6 +422,15 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  * caller — never called for a session missing `cwd`/`sessionId`, and any read failure answers "not hung",
  * never a guess.
  *
+ * AXIS -1 — NO-NET-OUTCOME STALL (#4090, epic #3383/#4075 continuation, statute clause 2), checked FIRST OF
+ * ALL, ahead of even axis 0. Same reasoning as axis 0's own doc for why it must outrank `neverReapWorking`: its
+ * entire premise is that `state: 'working'` can be HONEST about the process while still being the WRONG
+ * ANSWER to "is this bot doing anything useful" — a looping bot is genuinely, busily `working`, producing
+ * transcript activity axis 0 would never flag, while never advancing the actual job it was dispatched for. A
+ * daemon mode that trusts the listing's `state` above every other signal (`neverReapWorking: true`) still needs
+ * this axis, because the listing's `state` was never wrong about liveness here — only about progress. Injected
+ * as `noOutcomeFor(session)`, mirroring every other resolver's try/catch-to-null discipline.
+ *
  * @param {object|null} session
  * @param {((target:{kind:'item'|'pr', id:string}) => ({resolved:boolean, evidence?:string}|null))|null} [groundTruthFor]
  * @param {{
@@ -414,13 +440,21 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   idleThresholdMs?: number,
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
+ *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
-  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(), hungFor = null } = opts || {};
+  const { allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(), hungFor = null, noOutcomeFor = null } = opts || {};
   const base = classifySessionReap(session, { allowedCwd });
   if (base.reap || base.reason !== 'not-terminal') return base;
+
+  // Axis -1 — no-net-outcome stall. See doc above for why this runs BEFORE axis 0 and BEFORE `neverReapWorking`.
+  if (typeof noOutcomeFor === 'function') {
+    let info = null;
+    try { info = noOutcomeFor(session); } catch { info = null; }
+    if (info && info.stall === true) return { reap: true, reason: `no-outcome:${info.reason || 'stalled'}` };
+  }
 
   // Axis 0 — hung-transcript detection. See doc above for why this runs BEFORE `neverReapWorking` below, and
   // why that override is safe: it is independently confirming the listing's `state` is wrong, not ignoring it.
@@ -478,6 +512,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   idleThresholdMs?: number,
  *   now?: number,
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
+ *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -662,6 +697,143 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
     }
+  };
+}
+
+// ── NO-NET-OUTCOME STALL — THE IO SHELL (#4090, epic #3383/#4075, statute clause 2) ────────────────────────────
+// Resolves "when did this session last produce a real outcome" per {@link NO_OUTCOME_KINDS}'s own table (see
+// `hung-session.mjs`'s file header for the full per-kind mapping). Every resolver below answers `null` ONLY for a
+// successful read that found no outcome yet, and `OUTCOME_UNREADABLE` on any read failure — unreadable git
+// state, no `gh`, a missing file. The two must never collapse (PR #2676 review): "no outcome yet" lets the
+// window run from `startedAt`, but "we could not look" may never authorize a window stop — only the ceiling.
+
+/** How long ONE `git log` call here may run before it counts as unreadable — mirrors this file's own
+ *  `prListTimeoutMs`-scale bounds (a local git op, but a lane clone on a network mount can still hang). */
+const NO_OUTCOME_GIT_TIMEOUT_MS = 10_000;
+
+/**
+ * `conveyor` (build) / `fix` outcome: the timestamp of the newest commit ahead of `base` in the session's own
+ * lane (`session.cwd`) — a real diff change, per the statute's own wording for both kinds ("the lane's net diff
+ * against its base changed" / "commit or push that changes the net diff": a push is only possible once a
+ * commit exists, so the commit itself is the earlier, sufficient signal). `null` when there is no commit ahead
+ * of base yet (nothing to report — the classifier's own start-time fallback applies); `OUTCOME_UNREADABLE` when
+ * the read fails.
+ * @param {string} cwd
+ * @param {{exec?:Function, base?:string}} [io]
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
+ */
+export function lastCommitAheadOfBaseMs(cwd, { exec = execFileSync, base = 'main' } = {}) {
+  if (!cwd) return OUTCOME_UNREADABLE;
+  try {
+    const out = String(exec('git', ['log', '-1', '--format=%ct', `${base}..HEAD`], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: NO_OUTCOME_GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
+    })).trim();
+    if (!out) return null; // no commit ahead of base yet — not an error, just nothing to report
+    const epochSeconds = Number(out);
+    return Number.isFinite(epochSeconds) ? epochSeconds * 1000 : OUTCOME_UNREADABLE;
+  } catch {
+    return OUTCOME_UNREADABLE; // unreadable lane / not a git repo / `base` unknown there — unknown, never a guess
+  }
+}
+
+/**
+ * `review` outcome: the newest comment's `createdAt` on the target PR — the statute's own "a review comment or
+ * label" signal, scoped to comments (the dominant, always-present half of that pair in this codebase's own
+ * review-core convention: every label change this repo's tooling makes is accompanied by a comment, so a
+ * comment-only read misses no real case in practice — a documented scope, not silently assumed complete).
+ * Reuses `dispatch-lane-io.mjs`'s own `prListTimeoutMs` bound, same convention as {@link groundTruthForPr}.
+ * @param {string|number} pr
+ * @param {{exec?:Function, env?:object, repo?:string}} [io]
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
+ */
+export function lastReviewCommentMs(pr, { exec = execFileSync, env = process.env, repo = 'we' } = {}) {
+  const slug = Object.hasOwn(CONSTELLATION_REPOS, repo) ? CONSTELLATION_REPOS[repo].slug : null;
+  if (!slug) return OUTCOME_UNREADABLE;
+  try {
+    const out = exec('gh', ['pr', 'view', String(pr), '--repo', slug, '--json', 'comments'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024,
+      timeout: prListTimeoutMs(env), killSignal: 'SIGKILL',
+    });
+    const comments = JSON.parse(String(out || '{}'))?.comments;
+    if (!Array.isArray(comments)) return OUTCOME_UNREADABLE; // a malformed/empty response is not "no comments"
+    if (comments.length === 0) return null;
+    let newest = null;
+    for (const c of comments) {
+      const t = Date.parse(c?.createdAt ?? '');
+      if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
+    }
+    return newest ?? OUTCOME_UNREADABLE; // comments exist but none carried a parseable time — malformed, not empty
+  } catch {
+    return OUTCOME_UNREADABLE;
+  }
+}
+
+/**
+ * `prepare` / `prepare-decision` outcome: the target item's own backlog file's mtime, INSIDE the session's own
+ * lane (`session.cwd` + `backlog/`) — the statute's "the target item's own backlog file changing" signal. Same
+ * id-prefix match `groundTruthForItem` already uses (`<id>.md` or `<id>-*.md`), scoped to the lane's own
+ * checkout rather than this process's own `DEFAULT_BACKLOG_DIR` (a prepare session edits ITS lane's copy, not
+ * this one's).
+ * @param {string} cwd
+ * @param {string} id
+ * @param {{readdirSyncFn?:Function, statFn?:Function}} [io]
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
+ */
+export function lastItemFileChangeMs(cwd, id, { readdirSyncFn = readdirSync, statFn = statSync } = {}) {
+  if (!cwd || !id) return OUTCOME_UNREADABLE;
+  const dir = join(cwd, 'backlog');
+  let entries;
+  try {
+    entries = readdirSyncFn(dir);
+  } catch {
+    return OUTCOME_UNREADABLE;
+  }
+  const fname = entries.find((f) => f.endsWith('.md') && (f === `${id}.md` || f.startsWith(`${id}-`)));
+  if (!fname) return null; // no card at all in this lane yet — not an error, nothing to report
+  try {
+    return statFn(join(dir, fname)).mtimeMs;
+  } catch {
+    return OUTCOME_UNREADABLE;
+  }
+}
+
+/**
+ * Build a `noOutcomeFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}
+ * (#4090). Routes by `parseSessionSlug`'s own `kind` (never `sessionTarget`'s collapsed `'item'`/`'pr'` shape,
+ * which loses exactly the distinction — `conveyor` vs `prepare` — this resolver needs) to the matching
+ * outcome-timestamp function above, resolves that kind's window/ceiling settings once per call, and hands both
+ * to {@link classifyNoOutcomeStall}. A kind {@link NO_OUTCOME_KINDS} does not cover (`ci-heal`/`inspect`, or an
+ * unparseable name) answers `null` — this axis simply does not apply, never a guess.
+ * @param {{exec?:Function, env?:object, readdirSyncFn?:Function, statFn?:Function, now?:()=>number}} [io]
+ * @returns {(session:object) => ({stall:boolean, reason?:string}|null)}
+ */
+export function makeNoOutcomeResolver({
+  exec = execFileSync,
+  env = process.env,
+  readdirSyncFn = readdirSync,
+  statFn = statSync,
+  now = Date.now,
+} = {}) {
+  return function noOutcomeFor(session) {
+    const parsed = parseSessionSlug(session?.name);
+    if (!parsed) return null;
+    const kind = parsed.kind;
+    if (!NO_OUTCOME_KINDS.includes(kind)) return null; // ci-heal/inspect — the statute never named these
+    const windowMs = resolveNoOutcomeWindowMs(kind, env);
+    const ceilingMs = resolveNoOutcomeCeilingMs(kind, env);
+    const startedAtMs = typeof session?.startedAt === 'number' ? session.startedAt : null;
+    if (!Number.isFinite(startedAtMs)) return null; // no known start — never a guessed baseline
+
+    let lastOutcomeAtMs = null;
+    if (kind === 'conveyor' || kind === 'fix') {
+      lastOutcomeAtMs = lastCommitAheadOfBaseMs(session?.cwd, { exec });
+    } else if (kind === 'review') {
+      lastOutcomeAtMs = lastReviewCommentMs(parsed.id, { exec, env, repo: parsed.repo });
+    } else if (kind === 'prepare' || kind === 'prepare-decision') {
+      lastOutcomeAtMs = lastItemFileChangeMs(session?.cwd, parsed.id, { readdirSyncFn, statFn });
+    }
+
+    return classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs, nowMs: now(), windowMs, ceilingMs });
   };
 }
 
@@ -1120,6 +1292,7 @@ function parseFlags(argv) {
  *   stop?: Function,
  *   log?: (msg:string) => void,
  *   hungFor?: ((session:object) => object|null)|null,
+ *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
@@ -1142,6 +1315,9 @@ export function runSessionReaperPass({
   stop = stopSessionWithRetry,
   log: logFn = log,
   hungFor = makeHungResolver(),
+  // #4090 (epic #3383/#4075, statute clause 2) — the no-net-outcome axis. Default ON, same convention as
+  // hung-detection: this is meant to actually run, not merely exist. `null` is the rollback escape hatch.
+  noOutcomeFor = makeNoOutcomeResolver(),
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -1178,7 +1354,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -1197,11 +1373,15 @@ export function runSessionReaperPass({
     let backstopRecord = null;
     if (backstopCompletion) {
       try {
+        // #4090 — a no-outcome reap is THIS reaper's own definite verdict (see STALLED_OUTCOME's own doc for
+        // why it outranks a transcript's stray blocked-on-infra mention); derived from the reap `reason` string
+        // {@link classifySessionReapWithGroundTruth}'s axis -1 stamps, never re-derived from the session itself.
+        const stalled = typeof reason === 'string' && reason.startsWith('no-outcome:');
         let blockedOnInfra = false;
-        if (typeof blockedOnInfraFor === 'function') {
+        if (!stalled && typeof blockedOnInfraFor === 'function') {
           try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
         }
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra);
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled);
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -1299,6 +1479,10 @@ function main(argv) {
   // `--no-backstop-completion` is the same kind of rollback escape hatch, for the xbv32pg follow-up (epic
   // #3383) root-cause fix — default ON, same as every other axis this epic ships.
   const backstopCompletion = !flags['no-backstop-completion'];
+  // `--no-stall-detection` is the same kind of rollback escape hatch, for the #4090 no-net-outcome axis —
+  // default ON, since a looping bot that is never stopped is exactly the gap this axis exists to close. (Named
+  // "stall", not "no-outcome", so the flag itself doesn't read as a double negative.)
+  const noOutcomeFor = flags['no-stall-detection'] ? null : makeNoOutcomeResolver();
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -1307,7 +1491,7 @@ function main(argv) {
   // relying on this flag. Shares this CLI's own `--dry-run`.
   const runRetention = !!flags['retention-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {

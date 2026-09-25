@@ -3,9 +3,10 @@ bornAs: xgkl5ha
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/hung-session.mjs", "we:scripts/conveyor/session-reaper.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 
@@ -15,4 +16,4 @@ Build clause 2 of #conveyor-session-lifecycle-policy (#4082). Today a bot stops 
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/hung-session.test.mjs we:scripts/conveyor/__tests__/session-reaper.test.mjs` fails before this item lands (missing `classifyNoOutcomeStall`/`resolveNoOutcomeWindowMs`/`resolveNoOutcomeCeilingMs`/`makeNoOutcomeResolver` exports, and `classifySessionReapWithGroundTruth` never reaps a `working` session for lack of a real outcome) and passes after. Live: `node we:scripts/conveyor/session-reaper.mjs --dry-run --json` against a real `claude agents --json --all` listing reports `no-outcome:*` candidates it previously never flagged.

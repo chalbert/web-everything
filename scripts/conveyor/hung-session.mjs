@@ -63,6 +63,7 @@
 import { statSync } from 'node:fs';
 import { tailLines, summarizeEntry, detectBlockedOnChild } from '../../skills-src/inspect-agent-health/agent-health.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
+import { DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 
 /** Default hung threshold (30 minutes) when `WE_HUNG_TRANSCRIPT_MINUTES` is unset/invalid. */
 export const DEFAULT_HUNG_THRESHOLD_MS = 30 * 60 * 1000;
@@ -163,4 +164,103 @@ export function readHungInfo(agent, nowMs, thresholdMs) {
   const pendingToolUse = detectBlockedOnChild(entries).pending === true;
   const verdict = classifyHungSession({ lastActivityMs, nowMs, thresholdMs, pendingToolUse });
   return { ...verdict, transcriptPath: file };
+}
+
+// ── NO-NET-OUTCOME STALL (#4090, epic #3383/#4075, statute `#conveyor-session-lifecycle-policy` clause 2) ─────
+// A DIFFERENT axis from hung-transcript detection above: hung-transcript asks "did this session stop WRITING
+// anything" (a crash/deadlock signal); this asks "is this session writing PLENTY, but producing no real
+// outcome" — a looping bot that churns transcript activity forever without ever advancing its own work.
+// Modeled on Temporal's own heartbeat (WINDOW, reset by an outcome) vs start-to-close (CEILING, absolute) pair,
+// named explicitly in the ratified statute. Per-kind, because "an outcome" means something different per kind:
+//
+//   | kind (this repo's session-slug grammar) | statute's name | outcome signal                              |
+//   | ---------------------------------------- | -------------- | -------------------------------------------- |
+//   | `conveyor`                                | build           | a new commit ahead of the lane's base (a real diff change) |
+//   | `fix`                                     | fix             | a new commit ahead of the lane's base (same signal — a fix IS a commit) |
+//   | `review`                                  | review          | a new comment posted on the target PR         |
+//   | `prepare` / `prepare-decision`            | prepare         | the target item's own backlog file changing   |
+//
+// `ci-heal`/`inspect` are NOT covered — the statute names exactly four kinds, and this axis follows it exactly
+// rather than guessing an outcome shape for a kind it never named.
+
+/** The kinds this axis covers — see the table above. Never `ci-heal`/`inspect`: the statute names exactly
+ *  these four (with `prepare-decision` folded into `prepare`'s own outcome shape — the same "item file change"
+ *  test applies to a decision-prep item exactly as it does to an ordinary one). */
+export const NO_OUTCOME_KINDS = Object.freeze(['conveyor', 'fix', 'review', 'prepare', 'prepare-decision']);
+
+/** Fallback defaults (minutes) when #3368's own step-timing data has not yet been read back into real
+ *  per-kind numbers — the ratified statute's own stated fallback ("about 2x p95… until that data is read, the
+ *  values are: build 45/240, fix 30/120, review 30/60, prepare 45/180"). `prepare-decision` mirrors `prepare`. */
+const NO_OUTCOME_DEFAULT_MINUTES = Object.freeze({
+  conveyor: Object.freeze({ window: 45, ceiling: 240 }),
+  fix: Object.freeze({ window: 30, ceiling: 120 }),
+  review: Object.freeze({ window: 30, ceiling: 60 }),
+  prepare: Object.freeze({ window: 45, ceiling: 180 }),
+  'prepare-decision': Object.freeze({ window: 45, ceiling: 180 }),
+});
+
+function noOutcomeEnvKey(kind, field) {
+  return `WE_NO_OUTCOME_${kind.toUpperCase().replace(/-/g, '_')}_${field.toUpperCase()}_MIN`;
+}
+
+/** `WE_NO_OUTCOME_<KIND>_WINDOW_MIN` → ms for `kind`, or `null` for a kind this axis does not cover (never a
+ *  guessed window — see {@link NO_OUTCOME_KINDS}). An unparsable/non-positive override falls back to the
+ *  named default rather than silently disabling the axis. */
+export function resolveNoOutcomeWindowMs(kind, env = process.env) {
+  const defaults = NO_OUTCOME_DEFAULT_MINUTES[kind];
+  if (!defaults) return null;
+  const raw = env?.[noOutcomeEnvKey(kind, 'window')];
+  const n = raw !== undefined ? Number(raw) : defaults.window;
+  return (Number.isFinite(n) && n > 0 ? n : defaults.window) * 60_000;
+}
+
+/** `WE_NO_OUTCOME_<KIND>_CEILING_MIN` → ms for `kind`, or `null` for an uncovered kind. Statute: "the ceiling
+ *  never exceeds the lane lease TTL" — CLAMPED to {@link DEFAULT_LEASE_TTL_MINUTES} (240, `lane-lease.mjs`'s
+ *  own default) regardless of what an operator configures, so a stuck bot can never legitimately outlive the
+ *  very lane lease that would otherwise reclaim its lane out from under it. */
+export function resolveNoOutcomeCeilingMs(kind, env = process.env) {
+  const defaults = NO_OUTCOME_DEFAULT_MINUTES[kind];
+  if (!defaults) return null;
+  const raw = env?.[noOutcomeEnvKey(kind, 'ceiling')];
+  const n = raw !== undefined ? Number(raw) : defaults.ceiling;
+  const minutes = Number.isFinite(n) && n > 0 ? n : defaults.ceiling;
+  return Math.min(minutes, DEFAULT_LEASE_TTL_MINUTES) * 60_000;
+}
+
+/** An outcome resolver's answer when the READ ITSELF failed (git/gh error, timeout, unreadable file) — distinct
+ *  from `null`, which means "read fine, no outcome yet". See {@link classifyNoOutcomeStall} for why the two must
+ *  never collapse (PR #2676 review). */
+export const OUTCOME_UNREADABLE = 'unreadable';
+
+/**
+ * we:scripts/conveyor/hung-session.mjs#classifyNoOutcomeStall — PURE. Two independent triggers, checked in
+ * this order (mirrors {@link classifyHungSession}'s own "ceiling wins" precedent, and `session-reaper.mjs
+ * #classifyRetention`'s path-B-first ordering for the identical reason — an absolute cap must never be masked
+ * by a still-ticking window):
+ *   1. CEILING — `nowMs - startedAtMs >= ceilingMs`, regardless of how recently an outcome landed. A bot that
+ *      DOES occasionally produce outcomes but never actually finishes still gets cut off eventually.
+ *   2. WINDOW — `nowMs - baseline >= windowMs`, where `baseline` is the LAST outcome's own timestamp, or
+ *      `startedAtMs` when there has been no outcome yet at all (never treats "no outcome ever" as automatically
+ *      fresh — the window still counts from the bot's own start in that case). The baseline is CLAMPED to
+ *      `startedAtMs`: an outcome older than the session (a fix session's lane already carrying the original
+ *      build commit, a PR's pre-dispatch comments) is someone else's work, never this bot's, so it can never
+ *      shorten a fresh session's own window (PR #2676 review).
+ * `lastOutcomeAtMs === OUTCOME_UNREADABLE` (the outcome read FAILED — git/gh error, timeout, unreadable file)
+ * disables the WINDOW only: "we could not look" is not "nothing happened", so it may never authorize a stop by
+ * itself. The CEILING still applies, since it never depended on the outcome read at all.
+ * `windowMs`/`ceilingMs` of `null` (an uncovered kind, see {@link resolveNoOutcomeWindowMs}) disables that
+ * trigger — never a guessed value standing in for "this kind was never named".
+ * @param {{startedAtMs:number, lastOutcomeAtMs?:number|null|typeof OUTCOME_UNREADABLE, nowMs:number, windowMs:number|null, ceilingMs:number|null}} o
+ * @returns {{stall:boolean, reason:('ceiling'|'no-outcome-window'|'active'|'no-signal')}}
+ */
+export function classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs = null, nowMs, windowMs, ceilingMs }) {
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(nowMs)) return { stall: false, reason: 'no-signal' };
+  if (typeof ceilingMs === 'number' && ceilingMs > 0 && (nowMs - startedAtMs) >= ceilingMs) {
+    return { stall: true, reason: 'ceiling' };
+  }
+  if (lastOutcomeAtMs === OUTCOME_UNREADABLE) return { stall: false, reason: 'no-signal' };
+  if (typeof windowMs !== 'number' || windowMs <= 0) return { stall: false, reason: 'active' };
+  const baseline = Number.isFinite(lastOutcomeAtMs) ? Math.max(startedAtMs, lastOutcomeAtMs) : startedAtMs;
+  if ((nowMs - baseline) >= windowMs) return { stall: true, reason: 'no-outcome-window' };
+  return { stall: false, reason: 'active' };
 }

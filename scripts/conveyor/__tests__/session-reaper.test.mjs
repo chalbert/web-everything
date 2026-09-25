@@ -29,7 +29,12 @@ import {
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
   BLOCKED_ON_INFRA_OUTCOME,
+  STALLED_OUTCOME,
   transcriptShowsIntendedBlockedOnInfra,
+  lastCommitAheadOfBaseMs,
+  lastReviewCommentMs,
+  lastItemFileChangeMs,
+  makeNoOutcomeResolver,
   classifyRetention,
   retentionGroundTruthForItem,
   retentionGroundTruthForPr,
@@ -42,6 +47,7 @@ import {
   RETENTION_GRACE_MS_DEFAULT,
   RETENTION_CEILING_MS_DEFAULT,
 } from '../session-reaper.mjs';
+import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
@@ -725,6 +731,13 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(planBackstopCompletion({ name: 'review-2647' }, null, now)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
     expect(planBackstopCompletion({ name: 'review-2647' }, null, now, false)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME });
   });
+
+  // #4090 (epic #3383/#4075, statute clause 2) — a no-outcome stop is a definite verdict, not a guess.
+  it('mints STALLED_OUTCOME when the 5th `stalled` param is true — outranks `blockedOnInfra`', () => {
+    const now = () => '2026-09-25T15:00:00.000Z';
+    expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, false, true)).toMatchObject({ outcome: STALLED_OUTCOME });
+    expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, true, true)).toMatchObject({ outcome: STALLED_OUTCOME });
+  });
 });
 
 describe('transcriptShowsIntendedBlockedOnInfra — reading the crashed session\'s own last words (PR #2647/#2625, 2026-09-25)', () => {
@@ -1267,3 +1280,192 @@ describe('runRetentionSweepPass — the IO shell', () => {
 function tryReadCompletionSafe(dir, session) {
   return existsSync(join(dir, `${session}.json`));
 }
+
+// #4090 (epic #3383/#4075, statute clause 2) — the no-net-outcome outcome-timestamp resolvers.
+describe('lastCommitAheadOfBaseMs — the build/fix outcome signal', () => {
+  it('returns the newest ahead-of-base commit time, converted to ms', () => {
+    const exec = () => '1758000000\n'; // an epoch-seconds `%ct` value
+    expect(lastCommitAheadOfBaseMs('/lane-9', { exec })).toBe(1758000000 * 1000);
+  });
+  it('null when there is no commit ahead of base yet — not an error', () => {
+    const exec = () => '';
+    expect(lastCommitAheadOfBaseMs('/lane-9', { exec })).toBeNull();
+  });
+  it('OUTCOME_UNREADABLE on any git failure or a missing cwd — distinct from "no commit yet", never a guess', () => {
+    expect(lastCommitAheadOfBaseMs('/lane-9', { exec: () => { throw new Error('not a git repo'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastCommitAheadOfBaseMs(null, { exec: () => '123' })).toBe(OUTCOME_UNREADABLE);
+  });
+});
+
+describe('lastReviewCommentMs — the review outcome signal', () => {
+  it('returns the newest comment createdAt, in ms', () => {
+    const exec = () => JSON.stringify({ comments: [{ createdAt: '2026-09-25T10:00:00Z' }, { createdAt: '2026-09-25T12:00:00Z' }] });
+    expect(lastReviewCommentMs('2647', { exec })).toBe(Date.parse('2026-09-25T12:00:00Z'));
+  });
+  it('null when there are no comments yet', () => {
+    const exec = () => JSON.stringify({ comments: [] });
+    expect(lastReviewCommentMs('2647', { exec })).toBeNull();
+  });
+  it('OUTCOME_UNREADABLE on any gh failure, unknown repo, or a response with no comments array — never a guess', () => {
+    expect(lastReviewCommentMs('2647', { exec: () => { throw new Error('gh: not found'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => '{}', repo: 'not-a-real-repo' })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => '{}' })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => JSON.stringify({ comments: [{ createdAt: 'garbage' }] }) })).toBe(OUTCOME_UNREADABLE);
+  });
+});
+
+describe('lastItemFileChangeMs — the prepare/prepare-decision outcome signal', () => {
+  it('returns the matching item file\'s own mtime', () => {
+    const io = {
+      readdirSyncFn: () => ['4090-fixture-item.md'],
+      statFn: () => ({ mtimeMs: 1758000000000 }),
+    };
+    expect(lastItemFileChangeMs('/lane-9', '4090', io)).toBe(1758000000000);
+  });
+  it('null when no card matches the id in this lane\'s own backlog dir — not an error', () => {
+    const io = { readdirSyncFn: () => ['9999-other.md'], statFn: () => ({ mtimeMs: 1 }) };
+    expect(lastItemFileChangeMs('/lane-9', '4090', io)).toBeNull();
+  });
+  it('OUTCOME_UNREADABLE on an unreadable dir/file, or a missing cwd/id — never a guess', () => {
+    expect(lastItemFileChangeMs('/lane-9', '4090', { readdirSyncFn: () => { throw new Error('ENOENT'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs('/lane-9', '4090', {
+      readdirSyncFn: () => ['4090-fixture-item.md'], statFn: () => { throw new Error('EACCES'); },
+    })).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs(null, '4090')).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs('/lane-9', null)).toBe(OUTCOME_UNREADABLE);
+  });
+});
+
+describe('makeNoOutcomeResolver — routes by kind, resolves settings, classifies', () => {
+  it('routes a `fix-<pr>` session to the commit-ahead-of-base signal', () => {
+    const commitMs = 1758000000 * 1000;
+    const exec = () => '1758000000\n';
+    const now = () => commitMs + 5 * 60 * 1000; // 5 min after the commit — well inside the fix window (30 min)
+    const resolver = makeNoOutcomeResolver({ exec, now });
+    const session = { name: 'fix-2647', cwd: '/lane-9', startedAt: commitMs - 60 * 60 * 1000 };
+    const result = resolver(session);
+    expect(result.stall).toBe(false); // a fresh commit within the fix window (30 min default)
+  });
+
+  it('routes a `review-<pr>` session to the comment signal, and stalls once the window elapses with none', () => {
+    const exec = () => JSON.stringify({ comments: [] });
+    const now = () => Date.now();
+    const resolver = makeNoOutcomeResolver({ exec, now });
+    const staleStart = now() - 31 * 60 * 1000; // past the review kind's 30-minute default window
+    const result = resolver({ name: 'review-2647', cwd: '/lane-9', startedAt: staleStart });
+    expect(result).toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+
+  it('routes a `prepare-<item>` session to the item-file-mtime signal', () => {
+    const readdirSyncFn = () => ['4090-fixture-item.md'];
+    const nowMs = Date.now();
+    const statFn = () => ({ mtimeMs: nowMs }); // just changed — fresh outcome
+    const resolver = makeNoOutcomeResolver({ readdirSyncFn, statFn, now: () => nowMs });
+    const result = resolver({ name: 'prepare-4090', cwd: '/lane-9', startedAt: nowMs - 60 * 60 * 1000 });
+    expect(result.stall).toBe(false);
+  });
+
+  it('null for a `conveyor-<item>`/`prepare-decision-<item>` session too — routed, not skipped', () => {
+    const exec = () => ''; // no ahead-of-base commit
+    const now = () => Date.now();
+    const resolver = makeNoOutcomeResolver({ exec, now });
+    const staleStart = now() - 46 * 60 * 1000; // past the conveyor kind's 45-minute default window
+    expect(resolver({ name: 'conveyor-4090', cwd: '/lane-9', startedAt: staleStart })).toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+
+  // PR #2676 review — the realistic case: a fix/review session's target already carries OLDER history.
+  it('a fresh `fix-<pr>` session on a lane whose newest commit PREDATES its start is not stalled (baseline clamps)', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const exec = () => `${(startedAt - 180 * MIN) / 1000}\n`; // the original build commit, 3h before dispatch
+    const resolver = makeNoOutcomeResolver({ exec, now: () => startedAt + 5 * MIN });
+    expect(resolver({ name: 'fix-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('a fresh `review-<pr>` session on a PR whose comments all PREDATE its start is not stalled', () => {
+    const MIN = 60_000;
+    const startedAt = Date.parse('2026-09-25T12:00:00Z');
+    const exec = () => JSON.stringify({ comments: [{ createdAt: '2026-09-24T09:00:00Z' }] }); // yesterday
+    const resolver = makeNoOutcomeResolver({ exec, now: () => startedAt + 5 * MIN });
+    expect(resolver({ name: 'review-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('a fresh `prepare-<item>` session whose card mtime PREDATES its start is not stalled', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const resolver = makeNoOutcomeResolver({
+      readdirSyncFn: () => ['4090-fixture-item.md'],
+      statFn: () => ({ mtimeMs: startedAt - 24 * 60 * MIN }), // last edited a day before dispatch
+      now: () => startedAt + 5 * MIN,
+    });
+    expect(resolver({ name: 'prepare-4090', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('an unreadable outcome source does not trigger the window before the ceiling (git and gh failures)', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const now = () => startedAt + 45 * MIN; // past the fix/review 30-min window, before either ceiling (120/60)
+    const failing = () => { throw new Error('gh: HTTP 401 / git: timed out'); };
+    const resolver = makeNoOutcomeResolver({ exec: failing, now });
+    expect(resolver({ name: 'fix-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'no-signal' });
+    expect(resolver({ name: 'review-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'no-signal' });
+    // …and the same failure composed through the reaper verdict leaves a `working` row alone.
+    const verdict = classifySessionReapWithGroundTruth(
+      { name: 'fix-2647', kind: 'background', state: 'working', cwd: '/lane-9', sessionId: 's1', startedAt },
+      () => null,
+      { noOutcomeFor: resolver, neverReapWorking: true },
+    );
+    expect(verdict.reap).toBe(false);
+  });
+
+  it('null for an uncovered kind (ci-heal/inspect), an unparseable name, or a missing startedAt', () => {
+    const resolver = makeNoOutcomeResolver();
+    expect(resolver({ name: 'ci-heal-2647', cwd: '/lane-9', startedAt: Date.now() })).toBeNull();
+    expect(resolver({ name: 'inspect-2647', cwd: '/lane-9', startedAt: Date.now() })).toBeNull();
+    expect(resolver({ name: 'my terminal', cwd: '/lane-9', startedAt: Date.now() })).toBeNull();
+    expect(resolver({ name: 'review-2647', cwd: '/lane-9' })).toBeNull(); // no startedAt at all
+  });
+});
+
+describe('classifySessionReapWithGroundTruth — axis -1 (no-net-outcome), wired end to end', () => {
+  it('reaps a `working` session via the no-outcome axis, reason prefixed `no-outcome:`', () => {
+    const session = { name: 'review-2647', kind: 'background', state: 'working', cwd: '/lane-9', sessionId: 's1' };
+    const noOutcomeFor = () => ({ stall: true, reason: 'no-outcome-window' });
+    const verdict = classifySessionReapWithGroundTruth(session, () => null, { noOutcomeFor });
+    expect(verdict).toEqual({ reap: true, reason: 'no-outcome:no-outcome-window' });
+  });
+
+  it('fires even under `neverReapWorking: true` — same reasoning as the hung-transcript axis', () => {
+    const session = { name: 'review-2647', kind: 'background', state: 'working', cwd: '/lane-9', sessionId: 's1' };
+    const noOutcomeFor = () => ({ stall: true, reason: 'ceiling' });
+    const verdict = classifySessionReapWithGroundTruth(session, () => null, { noOutcomeFor, neverReapWorking: true });
+    expect(verdict).toEqual({ reap: true, reason: 'no-outcome:ceiling' });
+  });
+
+  it('a resolver that answers not-stalled, throws, or is absent leaves the row untouched by this axis', () => {
+    const session = { name: 'review-2647', kind: 'background', state: 'working', cwd: '/lane-9', sessionId: 's1' };
+    expect(classifySessionReapWithGroundTruth(session, () => null, { noOutcomeFor: () => ({ stall: false }) }).reap).toBe(false);
+    expect(classifySessionReapWithGroundTruth(session, () => null, { noOutcomeFor: () => { throw new Error('unreadable'); } }).reap).toBe(false);
+    expect(classifySessionReapWithGroundTruth(session, () => null, {}).reap).toBe(false);
+  });
+});
+
+describe('runSessionReaperPass — the #4090 no-outcome axis writes a STALLED_OUTCOME backstop', () => {
+  it('a review session reaped via no-outcome gets outcome:stalled, never the generic one', () => {
+    const written = [];
+    const result = runSessionReaperPass({
+      listAgents: () => [{ id: 'r1', sessionId: 'r1-full', cwd: '/lane-9', kind: 'background', state: 'working', name: 'review-2647' }],
+      groundTruthFor: () => null,
+      completionFor: () => null,
+      hungFor: () => null,
+      noOutcomeFor: () => ({ stall: true, reason: 'no-outcome-window' }),
+      neverReapWorking: true,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      readCompletionRecord: () => null,
+      writeCompletionRecord: (rec) => { written.push(rec); },
+      log: () => {},
+    });
+    expect(result.stopped).toBe(1);
+    expect(written[0]).toMatchObject({ session: 'review-2647', status: 'done', outcome: STALLED_OUTCOME });
+  });
+});
