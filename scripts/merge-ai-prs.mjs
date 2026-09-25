@@ -4577,16 +4577,20 @@ async function runCli() {
             process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} could not read PR comments — review coverage NOT assessed (unknown, not clean; #3308)\n`);
           }
           // #2412 Gap 2 — the before-land trace: the exact head SHA about to land, plus the merging
-          // caller/session, stamped on EVERY landing PR — manifest-carrying or not, review-gap or not. Read
-          // fresh (not reused from earlier in the pass) so the SHA names the commit actually about to merge.
-          // Best-effort and decision-preserving, same as the two stamps above: `postDrainReasonComment`
-          // swallows every `gh` error internally, so a failed read/post can neither block nor alter the merge.
-          {
-            const traceHeadSha = fetchPrHeadSha(c.repo, c.num);
-            const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
+          // caller/session. Read fresh (not reused from earlier in the pass) so the SHA names the commit
+          // actually about to merge. #xngv3vn — the WRITE is deferred until the merge is CONFIRMED
+          // (`postMergeTrace()`, called only from a success path below): this used to post the comment
+          // right here, UNCONDITIONALLY, before the merge write even ran — so a PR whose merge attempt then
+          // failed (a real conflict, `gh pr merge` refusing) permanently carried a false "landed head ... —
+          // merged by drain" claim while the PR sat OPEN. Confirmed live on chalbert/web-everything#2596,
+          // 2026-09-24: the trace posted at 23:53Z while the PR stayed OPEN/CONFLICTING. The READ stays eager
+          // (it still names the exact commit this pass is about to attempt); only the write moved.
+          const traceHeadSha = fetchPrHeadSha(c.repo, c.num);
+          const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
+          const postMergeTrace = () => {
             const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, traceReason, null, preread.comments);
             if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${traceHeadSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
-          }
+          };
           // #3383 — BEFORE the merge below (which lands with `--delete-branch`, or the repo may auto-delete
           // the head branch on merge either way), retarget any OPEN PR stacked on THIS branch to the repo's
           // default branch. Left unguarded, GitHub CLOSES (never retargets) a PR whose base branch just
@@ -4623,11 +4627,13 @@ async function runCli() {
             remaining = remaining.filter((x) => !sameCand(x, c));
             for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
             progressed = true;
+            postMergeTrace(); // #xngv3vn — confirmed merged (just by a concurrent lander, not this call)
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged by a concurrent lander — idempotent no-op (#2683)\n`);
             continue;
           }
           merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
+          postMergeTrace(); // #xngv3vn — the merge write above is CONFIRMED to have succeeded; safe to claim "landed" now
           // #2393 — a WE-carrier merge (the PR carrying its OWN manifest = the resolve carrier + where `bornAs`
           // is stamped) PROVES the couple landed this run: record its item so a descendant that stackParents on
           // it becomes ready next pass. Keyed on `hasManifest` (NOT an inherited impl PR) so a green impl PR of
@@ -4647,9 +4653,16 @@ async function runCli() {
             remaining = remaining.filter((x) => !sameCand(x, c));
             for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
             progressed = true;
+            postMergeTrace(); // #xngv3vn — confirmed merged (raced past the mutex, but genuinely landed)
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} merged by a concurrent lander during a contended write — idempotent no-op (#2683)\n`);
             continue;
           }
+          // #xngv3vn — a REAL merge failure (not the idempotent-already-merged case just above): the trace
+          // built earlier is NEVER posted here — `postMergeTrace` is simply not called on this path — so this
+          // PR never carries a "landed head ... — merged by drain" claim it did not earn. The failure is
+          // still fully reported: `failedMerges` below drives both the per-pass stderr line and the sweep's
+          // own JSON `failed` array (a non-zero exit when any fill), which is what a false-positive trace
+          // comment used to silently paper over (confirmed live on chalbert/web-everything#2596, 2026-09-24).
           const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
           // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate
           // merge is EXPECTED to bounce on pending checks. That is not a hard failure — the watch re-sweeps and

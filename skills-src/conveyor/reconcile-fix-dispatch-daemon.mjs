@@ -37,6 +37,7 @@ import {
   acquireRunnerLease, heartbeatRunnerLease, releaseRunnerLeaseIfOwned,
 } from './runner-lock.mjs';
 import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
+import { runReconcileCiHealDispatch } from '../../scripts/operations/ci-heal-pr-dispatch.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
@@ -131,6 +132,54 @@ export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_RE
 }
 
 /**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runReconcileCiHealDispatchAllRepos — #xngv3vn (epic
+ * #3383/#4075): CI-HEAL HAD NO CALLER IN ANY RUNNING DAEMON. `we:scripts/operations/ci-heal-pr-dispatch.mjs
+ * #runReconcileCiHealDispatch` already existed (#2666, repo-tagged in #3967 multi-repo slice 7) and already
+ * reads the SAME `reconcile-core.mjs` plan this daemon's `fix` half reads (`runReconcilePass`), with its OWN
+ * repo-capability gate and the SAME durable retry cap (`reconcile-core.mjs#planReconcile`'s own `ciHealCap`) —
+ * but an adversarial review found nothing in the tree ever called it: a red PR opened by hand, by a sibling
+ * process, or orphaned by a runner restart never got healed. This is that caller, per repo, with every existing
+ * cap left exactly as `runReconcileCiHealDispatch` already enforces it (never re-derived here).
+ *
+ * Mirrors {@link runReconcileFixDispatchAllRepos}'s own per-repo fan-out and per-repo failure isolation, with
+ * ONE necessary difference: {@link runReconcileCiHealDispatch} is `async` ({@link dispatchCiHeal} awaits its
+ * dispatch sink), and the shared {@link forEachRepo} helper does not await a per-repo promise — reusing it here
+ * unchanged would race every repo's dispatch concurrently and silently swallow a rejected promise as a
+ * "successful" `{repo, result: <pending Promise>}` entry. So this loop awaits each repo SEQUENTIALLY instead,
+ * giving the identical "one repo's failure never blocks the rest" isolation `forEachRepo` gives synchronously.
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
+ *   `runReconcileCiHealDispatch`); every other option is forwarded to it for EVERY repo except `repo` itself.
+ * @returns {Promise<{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
+ *   refusals:Array<object>}>}
+ */
+export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = runReconcileCiHealDispatch, ...tickOpts } = {}) {
+  const perRepo = [];
+  for (const repo of repos) {
+    try {
+      // eslint-disable-next-line no-await-in-loop -- sequential by design (see this fn's own docblock): one
+      // repo's ci-heal tick must finish (or fail) before the next repo's is attempted, so a rejection is
+      // captured per repo instead of racing every repo's dispatch concurrently.
+      const result = await tick({ ...tickOpts, repo });
+      perRepo.push({ repo, result });
+    } catch (e) {
+      perRepo.push({ repo, error: String((e && e.message) || e).split('\n')[0] });
+    }
+  }
+  const dispatched = [];
+  const refusals = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    for (const d of (result.dispatched ?? [])) dispatched.push({ ...d, repo });
+    for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+  }
+  return { repos: perRepo, dispatched, refusals };
+}
+
+/**
  * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one repo?
  * (see `runReconcileFixDispatchAllRepos`: a whole-repo tick failure — including the stale-main refusal thrown
  * near the top of `runReconcileFixDispatch` — lands in `refusals` as `{repo, prNumber:null, kind:'tick-failed',
@@ -153,13 +202,40 @@ export function hasStaleMainRefusal(tickResult) {
 // reason this process stays alive between ticks, not incidental background bookkeeping safe to drop on exit.
 export function realSleep(ms) { return new Promise((resolve) => { setTimeout(resolve, ms); }); }
 
-/** Build the real effects for {@link runDaemonLoop}: a real tick of `runReconcileFixDispatch`, a real
- *  interval sleep, and a real keyed lease heartbeat. Kept as its own factory (mirroring
- *  `buildCliTickEffects` in runner.mjs) so `main()` stays a thin wire-up. */
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runTickAllRepos — #xngv3vn (epic #3383/#4075): the
+ * daemon's WHOLE per-tick unit of work, composing BOTH halves this daemon now owns — the pre-existing `fix`
+ * dispatch ({@link runReconcileFixDispatchAllRepos}) and the previously-uncalled `ci-heal` dispatch
+ * ({@link runReconcileCiHealDispatchAllRepos}, per this daemon's own docblock above: nothing in the tree ever
+ * invoked it) — into ONE merged result. `onTick`'s log line and `hasStaleMainRefusal`'s scan (wired against
+ * `withSelfSync`, below) both read `result.refusals`, so merging here — rather than bolting ci-heal on as a
+ * SEPARATE, unobserved side effect — is what makes a ci-heal-side stale-main refusal trigger the SAME
+ * self-resync `fix` already gets, and what makes ci-heal's own dispatch/refusal counts show up in the ordinary
+ * tick log at all. Each half keeps its OWN per-repo isolation internally; a `fix`-side failure for one repo
+ * never skips that SAME repo's `ci-heal` attempt, and vice versa — two independent per-repo ticks, merged only
+ * for reporting.
+ * @param {{repos?:string[], fixTick?:Function, ciHealTick?:Function}} [o] - both ticks default to the real
+ *   dispatch functions; injecting either is for tests only.
+ * @returns {Promise<{repos:Array<object>, dispatched:Array<object>, refusals:Array<object>, ciHeal:object}>}
+ */
+export async function runTickAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick } = {}) {
+  const fix = runReconcileFixDispatchAllRepos({ repos, ...(fixTick ? { tick: fixTick } : {}) });
+  const ciHeal = await runReconcileCiHealDispatchAllRepos({ repos, ...(ciHealTick ? { tick: ciHealTick } : {}) });
+  return {
+    repos: fix.repos, // same repo list both halves ticked — the shape onTick's log already reads from
+    dispatched: [...fix.dispatched, ...ciHeal.dispatched],
+    refusals: [...fix.refusals, ...ciHeal.refusals],
+    ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
+  };
+}
+
+/** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runTickAllRepos} (`fix` +
+ *  `ci-heal`, #xngv3vn), a real interval sleep, and a real keyed lease heartbeat. Kept as its own factory
+ *  (mirroring `buildCliTickEffects` in runner.mjs) so `main()` stays a thin wire-up. */
 export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
   return {
     intervalMs,
-    tickOnce: () => runReconcileFixDispatchAllRepos(),
+    tickOnce: () => runTickAllRepos(),
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
