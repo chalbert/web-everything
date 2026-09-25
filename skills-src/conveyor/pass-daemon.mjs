@@ -91,13 +91,16 @@ export function passDaemonSelfSyncEnabled(env = process.env) {
   return pocBranch !== '';
 }
 
-/** #4044 Module E — passes whose own job IS landing onto `main` (the resident drain watch, and the periodic
- *  orphan merge sweep `merge-orphan-sweep` runs — see `daemon-manifest.mjs`'s own header for why that one is
- *  NOT the drain role) must never self-sync onto an OVERLAY: an overlay is unreviewed, unmerged code, and
- *  landing decisions have to be made from `origin/main` alone. `withSelfSync`'s `mainOnly` option (which the
- *  underlying rebuild — `daemon-rebuild.mjs#rebuildClone` — refuses every registered overlay for, Module C)
- *  is how this daemon asks for that; see {@link main} for the POC-mode refusal this implies. */
-export const MAIN_ONLY_PASSES = new Set(['drain', 'merge-orphan-sweep']);
+/** #4044 Module E — passes whose own job IS landing onto `main` (the periodic orphan merge sweep
+ *  `merge-orphan-sweep` runs — see `daemon-manifest.mjs`'s own header for why that one is NOT the drain role)
+ *  must never self-sync onto an OVERLAY: an overlay is unreviewed, unmerged code, and landing decisions have to
+ *  be made from `origin/main` alone. `withSelfSync`'s `mainOnly` option (which the underlying rebuild —
+ *  `daemon-rebuild.mjs#rebuildClone` — refuses every registered overlay for, Module C) is how this daemon asks
+ *  for that; see {@link main} for the POC-mode refusal this implies. Every entry MUST be a `DAEMON_MANIFEST`
+ *  key — any other name can never reach this check. The resident drain watch (`merge-ai-prs.mjs --watch`) is
+ *  deliberately NOT a manifest pass and has no self-sync wiring at all; a future change that wires it into
+ *  `withSelfSync` must pass `mainOnly: true` at that call site itself. */
+export const MAIN_ONLY_PASSES = new Set(['merge-orphan-sweep']);
 
 // ── PURE CORE (no IO — every effect is injected; unit-tested directly) ─────────────────────────────────────
 

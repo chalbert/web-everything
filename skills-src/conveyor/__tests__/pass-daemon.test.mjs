@@ -8,6 +8,7 @@ import {
   runPassDaemonLoop, passDaemonLeaseKey, realSleep, DEFAULT_HEARTBEAT_INTERVAL_MS,
   PASS_DAEMON_SELF_SYNC_ENV, passDaemonSelfSyncEnabled, MAIN_ONLY_PASSES,
 } from '../pass-daemon.mjs';
+import { DAEMON_MANIFEST } from '../daemon-manifest.mjs';
 import { withSelfSync, DAEMON_SELF_SYNC_BRANCH_ENV } from '../../../scripts/lib/daemon-self-sync.mjs';
 
 describe('runPassDaemonLoop — the pure run/sleep control flow', () => {
@@ -178,14 +179,21 @@ describe('the self-sync wiring pattern main() uses — proven against the real w
   });
 });
 
-describe('MAIN_ONLY_PASSES — #4044 Module E, drain/merge-orphan-sweep never self-sync onto an overlay', () => {
+describe('MAIN_ONLY_PASSES — #4044 Module E, merge-orphan-sweep never self-syncs onto an overlay', () => {
   it('contains exactly the landing passes', () => {
-    expect(MAIN_ONLY_PASSES.has('drain')).toBe(true);
-    expect(MAIN_ONLY_PASSES.has('merge-orphan-sweep')).toBe(true);
+    expect([...MAIN_ONLY_PASSES]).toEqual(['merge-orphan-sweep']);
+  });
+  // A name that is not a DAEMON_MANIFEST key can never reach `MAIN_ONLY_PASSES.has(passName)` —
+  // `resolveManifestEntry` throws first — so listing it would only look like a guarantee that isn't enforced.
+  it('every entry is a real --pass= name (a DAEMON_MANIFEST key)', () => {
+    for (const name of MAIN_ONLY_PASSES) expect(Object.keys(DAEMON_MANIFEST)).toContain(name);
   });
   it('an ordinary watcher pass is NOT main-only', () => {
     expect(MAIN_ONLY_PASSES.has('branch-drift')).toBe(false);
-    expect(MAIN_ONLY_PASSES.has('lane-pool-health-watch')).toBe(false);
+    expect(MAIN_ONLY_PASSES.has('lane-pool-health-watch-we')).toBe(false);
+    for (const name of Object.keys(DAEMON_MANIFEST)) {
+      if (name !== 'merge-orphan-sweep') expect(MAIN_ONLY_PASSES.has(name)).toBe(false);
+    }
   });
 });
 

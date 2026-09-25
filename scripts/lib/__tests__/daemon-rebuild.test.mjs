@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, utimesSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -22,6 +22,7 @@ import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
+import { gitRun } from '../main-staleness.mjs';
 
 const tempDirs = [];
 
@@ -542,6 +543,220 @@ describe('rebuildClone', () => {
     expect(result.reason).toBe('quarantined');
     expect(readRebuildState(cloneDir, env).quarantine).not.toBeNull();
     expect(readFileSync(join(cloneDir, 'collide.txt'), 'utf8')).toBe('untracked local content\n');
+  });
+
+  // ── Step 0: interrupted-rebuild recovery (`state.inProgress`) ──────────────────────────────────────────────
+
+  /** Seed `state.inProgress` exactly as Step 5 writes it just before its `reset --hard`. */
+  function seedInProgress(cloneDir, env, inProgress) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ inProgress }));
+  }
+  /** A pid on this host that has certainly exited (the child is reaped before spawnSync returns). */
+  function deadPid() {
+    return spawnSync(process.execPath, ['-e', '']).pid;
+  }
+  const OTHER_SHA = 'f'.repeat(40);
+  const interruptedAlerts = (result) => result.alerts.filter((a) => a.kind.startsWith('rebuild-interrupted-'));
+
+  it('recovers an interrupted rebuild whose owner died after its reset landed (HEAD == target)', async () => {
+    const { cloneDir, env } = makeFixture();
+    const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: head, startedAt: new Date().toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
+    expect(result.reason).toBe('up-to-date');
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  it('recovers an aged interrupted rebuild from another host when HEAD is back at a clean prevHead', async () => {
+    const { cloneDir, env: baseEnv } = makeFixture();
+    const env = { ...baseEnv, WE_DAEMON_REBUILD_STALE_MS: String(30 * 60_000) }; // never the host shell's value
+    const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: 1, host: 'some-other-host', prevHead: head, target: OTHER_SHA,
+      startedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  it('refuses as unrecoverable when the owner is dead and HEAD is neither prevHead nor target', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'pending.txt', 'x\n'));
+    const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const inProgress = {
+      pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: 'e'.repeat(40), startedAt: new Date().toISOString(),
+    };
+    seedInProgress(cloneDir, env, inProgress);
+
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('rebuild-interrupted-unrecoverable');
+    expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-unrecoverable']);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+    expect(readRebuildState(cloneDir, env).inProgress).toEqual(inProgress); // never silently cleared
+  });
+
+  it('refuses as unrecoverable when HEAD is at prevHead but a tracked file is dirty', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead: gitOk(cloneDir, ['rev-parse', 'HEAD']).trim(), target: OTHER_SHA,
+      startedAt: new Date().toISOString(),
+    });
+    writeFile(cloneDir, 'README.md', 'half-reset edit\n');
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('rebuild-interrupted-unrecoverable');
+    expect(readRebuildState(cloneDir, env).inProgress).not.toBeNull();
+    expect(readFileSync(join(cloneDir, 'README.md'), 'utf8')).toBe('half-reset edit\n');
+  });
+
+  it('leaves a fresh inProgress owned by a live pid alone (no recovery verdict either way)', async () => {
+    const { cloneDir, env } = makeFixture();
+    seedInProgress(cloneDir, env, {
+      pid: process.pid, host: hostname(), prevHead: OTHER_SHA, target: 'e'.repeat(40), startedAt: new Date().toISOString(),
+    });
+
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(interruptedAlerts(result)).toEqual([]);
+    expect(result.reason).toBe('up-to-date');
+    expect(readRebuildState(cloneDir, env).inProgress).toMatchObject({ pid: process.pid });
+  });
+
+  // ── Step 5/6: rollback failures on the live rebuildClone path (injected failing `run`) ──────────────────────
+
+  /** The real git runner, except `reset --hard <sha>` for any of `failShas` exits non-zero. With `applyFirst`
+   *  the real reset still runs before the failure is reported, so the tree really moves (a partial reset). */
+  function failingResetRun(failShas, { applyFirst = false } = {}) {
+    const fail = new Set([].concat(failShas));
+    return vi.fn((args, opts) => {
+      if (args[0] === 'reset' && args[1] === '--hard' && fail.has(args[2])) {
+        if (applyFirst) gitRun(args, opts);
+        return { status: 1, stdout: '', stderr: 'injected reset failure' };
+      }
+      return gitRun(args, opts);
+    });
+  }
+  const resetCalls = (run) => run.mock.calls.map((c) => c[0]).filter((a) => a[0] === 'reset').map((a) => a[2]);
+
+  it.each([
+    ['code', 'smoke-code-rollback-failed'],
+    ['transient', 'smoke-transient-rollback-failed'],
+  ])('a failed rollback after a "%s" smoke verdict quarantines the clone and records no rejection', async (verdict, reason) => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, `lane/rollback-${verdict}`, (dir) => writeFile(dir, 'r.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}` }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const runSmoke = vi.fn(async () => ({
+      verdict, attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
+    }));
+    const result = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(false);
+    expect(result.reason).toBe('rollback-failed');
+    expect(result.quarantine).toBe(true);
+    expect(result.alerts.some((a) => a.kind === 'rollback-failed' && a.detail?.prevHead === prevHead)).toBe(true);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.quarantine).toEqual({ prevHead, reason });
+    expect(state.inProgress).toBeNull();
+    expect(state.rejected).toBeNull();
+
+    // The next tick refuses to build anything on the unknown tree while the rollback keeps failing.
+    const next = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(next.reason).toBe('quarantined');
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('a smoke that throws, followed by a failed rollback, quarantines with reason rebuild-threw', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/throws', (dir) => writeFile(dir, 't.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/throws' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const result = await rebuildClone({
+      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke: vi.fn(async () => { throw new Error('smoke crashed'); }),
+      prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('rollback-failed');
+    expect(result.quarantine).toBe(true);
+    expect(readRebuildState(cloneDir, env).quarantine).toEqual({ prevHead, reason: 'rebuild-threw' });
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  it('a failed reset onto the target never smokes, rolls back, and clears inProgress', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/reset-fails', (dir) => writeFile(dir, 'u.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/reset-fails' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const plan = (await dryRunRebuild({ root: cloneDir, env, prState: async () => null })).plan;
+
+    // The failing reset really moves the tree first, so only the rollback can bring HEAD back.
+    const run = failingResetRun(plan.finalSha, { applyFirst: true });
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({
+      root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).toBe('reset-failed');
+    expect(result.rolledBack).toBe(true);
+    expect(resetCalls(run)).toEqual([plan.finalSha, prevHead]);
+    expect(runSmoke).not.toHaveBeenCalled();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(existsSync(join(cloneDir, 'u.txt'))).toBe(false);
+    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+    expect(readRebuildState(cloneDir, env).quarantine).toBeNull();
+  });
+
+  it('a failed reset onto the target whose rollback ALSO fails quarantines the clone', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/reset-and-rollback-fail', (dir) => writeFile(dir, 'v.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/reset-and-rollback-fail' }, { env });
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const plan = (await dryRunRebuild({ root: cloneDir, env, prState: async () => null })).plan;
+
+    const run = failingResetRun([plan.finalSha, prevHead]);
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.reason).toBe('reset-failed');
+    expect(result.rolledBack).toBe(false);
+    expect(result.quarantine).toBe(true);
+    expect(runSmoke).not.toHaveBeenCalled();
+    const state = readRebuildState(cloneDir, env);
+    expect(state.quarantine).toEqual({ prevHead, reason: 'reset-rollback-failed' });
+    expect(state.inProgress).toBeNull();
+
+    const next = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(next.reason).toBe('quarantined');
+    expect(runSmoke).not.toHaveBeenCalled();
   });
 });
 

@@ -644,10 +644,16 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     resetOk = reset.status === 0;
     if (!resetOk) {
       const rollback = git(['reset', '--hard', prevHead]);
+      const rolledBack = rollback.status === 0;
+      // A failed reset may have half-moved the tree; if the rollback also failed, its state is unknown —
+      // quarantine exactly like a failed post-smoke rollback, so no later tick builds or runs on it.
+      if (!rolledBack) state.quarantine = { prevHead, reason: 'reset-rollback-failed' };
       state.inProgress = null;
       writeState();
-      alert('reset-failed', { target: plan.finalSha, rolledBack: rollback.status === 0 });
-      return finish({ moved: false, reason: 'reset-failed', rolledBack: rollback.status === 0, plan });
+      alert('reset-failed', { target: plan.finalSha, rolledBack });
+      return finish({
+        moved: false, reason: 'reset-failed', rolledBack, ...(rolledBack ? {} : { quarantine: true }), plan,
+      });
     }
 
     // ── Step 6: live smoke ─────────────────────────────────────────────────────────────────────────────
