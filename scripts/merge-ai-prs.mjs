@@ -625,15 +625,32 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
  * `freshPr: null` (the caller's `gh` re-read failed, or returned a reply this couldn't even confirm was the
  * right PR) is treated as `decision: 'skip'` — FAIL CLOSED: a read miss must never be read as "still fine",
  * only as "cannot confirm, so do not merge on stale pass-start data".
+ *
+ * HEAD PIN (xvzc4v4 advisory fix). `classifyPr` checks label PRESENCE, not which commit a label vouches for — so
+ * a `review:accepted` granted for head X still reads as accepted after a push of Y, and the pass-start
+ * `decideReviewGate` SHA-coverage check (the PR #368 hole) is never re-run here. Rather than re-run that whole
+ * gate, `expectedHeadSha` pins the merge to the exact head the pass-start decision judged: when the option is
+ * given, the fresh `headRefOid` must equal it, or the merge is refused (the next pass re-judges the new head
+ * from scratch, review gate included). An unknown expected head or an unread fresh head also refuses — fail
+ * closed. On a `'merge'` decision the pinned SHA is returned as `headSha`, and the caller passes THAT (not a
+ * second, separate read) to `gh pr merge --match-head-commit`, so the commit that merges is the commit judged.
+ * Omitting `expectedHeadSha` entirely (undefined) skips the pin — for callers that have no pass-start head.
  * @param {object|null} freshPr
- * @param {{requiredCheck?:string, allowPendingReview?:boolean, defaultBranch?:(string|null)}} [o]
- * @returns {{decision:string, reason:string}}
+ * @param {{requiredCheck?:string, allowPendingReview?:boolean, defaultBranch?:(string|null), expectedHeadSha?:(string|null)}} [o]
+ * @returns {{decision:string, reason:string, headSha?:string}}
  */
-export function revalidateForMerge(freshPr, { requiredCheck = 'test', allowPendingReview = false, defaultBranch = null } = {}) {
+export function revalidateForMerge(freshPr, { requiredCheck = 'test', allowPendingReview = false, defaultBranch = null, expectedHeadSha = undefined } = {}) {
   if (!freshPr || freshPr.number == null) {
     return { decision: 'skip', reason: 'could not re-read the PR fresh right before merging — refusing to merge on stale pass-start data' };
   }
-  return classifyPr(freshPr, { requiredCheck, allowPendingReview, defaultBranch });
+  if (expectedHeadSha !== undefined) {
+    const freshHead = typeof freshPr.headRefOid === 'string' ? freshPr.headRefOid : '';
+    if (!expectedHeadSha) return { decision: 'skip', reason: 'the head SHA the pass-start decision judged is unknown — refusing to merge an unpinned head' };
+    if (!freshHead) return { decision: 'skip', reason: 'the fresh re-read carried no head SHA — refusing to merge an unpinned head' };
+    if (freshHead !== expectedHeadSha) return { decision: 'skip', reason: `head moved since the pass-start decision (${expectedHeadSha.slice(0, 9)} → ${freshHead.slice(0, 9)}) — the new head is re-judged next pass, review gate included` };
+  }
+  const verdict = classifyPr(freshPr, { requiredCheck, allowPendingReview, defaultBranch });
+  return expectedHeadSha !== undefined && verdict.decision === 'merge' ? { ...verdict, headSha: expectedHeadSha } : verdict;
 }
 
 /**
@@ -1339,6 +1356,10 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       // never re-sorts `pr.commits` either).
       const tipOid = p.commits.length ? p.commits[p.commits.length - 1]?.oid : null;
       v.headSha = typeof tipOid === 'string' && tipOid ? tipOid : null;
+      // xvzc4v4 advisory fix — the LISTING's head (the commit whose labels/statusCheckRollup/mergeability this
+      // verdict scored). The pre-merge revalidation pins the merge to it; it does not depend on the commits read
+      // returning the whole history (a capped connection would leave `headSha` short of the real tip).
+      v.listedHeadSha = typeof p.headRefOid === 'string' && p.headRefOid ? p.headRefOid : null;
       // #3308 (round-2 correctness fix) — the PASS-WIDE half of the relief valve, recorded HERE because it is the
       // only place it is knowable. The scoped `=<pr#>` form stamps `v.reliefWaived` down in the escalation loop,
       // but that whole loop is gated on `REVIEW_ESCALATION = label && !escalationRelief.passWide` — so under a BARE
@@ -3254,21 +3275,14 @@ async function runCli() {
     catch { return false; }
   };
 
-  // #2412 Gap 2 — the PR's LIVE head SHA, read fresh right at the merge site (not reused from earlier in the
-  // pass) so the trace comment below names the EXACT commit landing. Best-effort, matching `fetchPrComments`:
-  // a `gh` miss yields `null`, which `buildMergeTraceReason` renders as `unknown` rather than failing the
-  // merge — this is provenance layered on top of the land, never a precondition for it.
-  const fetchPrHeadSha = (repo, num) => {
-    try {
-      const data = JSON.parse(execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'headRefOid'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
-      return typeof data.headRefOid === 'string' ? data.headRefOid : null;
-    } catch { return null; }
-  };
-
   // xvzc4v4 (merge-safety review, bug 1) — the SAME fields `classifyPr` scored at pass-start (labels,
   // statusCheckRollup, mergeable, mergeStateStatus, baseRefName, body) plus `commits` (the AI-generated gate),
   // read FRESH right before merging. A `gh` miss (or a malformed/numberless reply) returns `null`, which
   // `revalidateForMerge` below treats as "cannot confirm — do not merge" (fail closed), never as "still fine".
+  // Its `headRefOid` is also the ONE head read the merge site uses — for the `--match-head-commit` pin and the
+  // #2412 merge-trace comment alike (a separate best-effort head read used to feed both, and when it missed the
+  // pin was silently dropped; xvzc4v4 advisory fix). `author` is deliberately absent, as in the pass-start
+  // listing: `classifyPr`'s AI gate reads each commit's own `authors` (from `commits`), never the PR author.
   const fetchFreshPrForRevalidation = (repo, num) => {
     try {
       const raw = execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json',
@@ -4551,6 +4565,21 @@ async function runCli() {
       if (!plan.ready.length) break;
       let progressed = false;
       for (const c of plan.ready) {
+        // xvzc4v4 advisory fix — declared OUTSIDE the `try` because the `catch` below calls it too: as a `const`
+        // inside the `try` it was out of scope there, so the contended-write recovery path threw a ReferenceError
+        // that killed the whole pass. A no-op until the trace is built (a throw before that point posts no trace).
+        let postMergeTrace = () => {};
+        // xvzc4v4 advisory fix — the ONE "confirmed merged, run its follow-up" bookkeeping, shared by every path
+        // that finds the PR already MERGED (the in-lock pre-check, the post-throw re-probe, and a failed
+        // revalidation). Recorded into `merged` so its numbering / resolve-on-land / derived regen runs this pass —
+        // those steps are idempotent, and once merged a PR drops off every later pass's open-PR listing.
+        const recordAlreadyMerged = () => {
+          merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
+          progressed = true;
+          remaining = remaining.filter((x) => !sameCand(x, c));
+          for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
+          postMergeTrace(); // #xngv3vn — only ever called on a CONFIRMED merge
+        };
         try {
           // xvzc4v4 (merge-safety review, bug 1) — `c`'s `decision === 'merge'` was computed ONCE at PASS-START
           // (`prepareDrainVerdicts`, before this whole cascade began), but this cascade is a SERIAL loop that can
@@ -4559,12 +4588,32 @@ async function runCli() {
           // FIRST thing this candidate's turn does (ahead of the land-side comment stamps below, so a PR that
           // fails this re-check gets no "acted-on manifest" / "review coverage" stamp implying it is landing).
           // `revalidateForMerge` fails CLOSED on a `gh` miss — never merges on unconfirmed data.
+          // xvzc4v4 advisory fix — `expectedHeadSha` PINS the merge to the head the pass-start decision
+          // (review gate included) actually judged; a push since then refuses the merge instead of landing an
+          // unjudged head under a still-present `review:accepted` label. `revalidated.headSha` is that pinned SHA.
           const reliefAllowsPendingNow = (escalationRelief.prs || []).includes(Number(c.num)) || (!!escalationRelief.passWide && !!label);
           const revalidated = revalidateForMerge(fetchFreshPrForRevalidation(c.repo, c.num), {
             requiredCheck: REQUIRED, allowPendingReview: reliefAllowsPendingNow, defaultBranch: defaultBranchOf(c.repo),
+            expectedHeadSha: c.listedHeadSha || c.headSha || null,
           });
           if (revalidated.decision !== 'merge') {
+            // xvzc4v4 advisory fix — a PR merged out-of-band before its turn (the GitHub UI, another process) can
+            // fail revalidation (a MERGED PR is not landable, or the fresh read itself missed); it still needs its
+            // follow-up, and this is its only chance. Probe before refusing.
+            if (isPrAlreadyMerged(c.repo, c.num)) {
+              recordAlreadyMerged();
+              if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged before its turn (out-of-band, e.g. the GitHub UI) — running its numbering/resolve/regen follow-up now, idempotently (xvzc4v4)\n`);
+              continue;
+            }
             const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; re-read live next pass
+            // #2198 — a PR this pass just rebuilt has a new head and re-running CI, so it is EXPECTED to fail the
+            // re-check; it keeps its "land on a later pass" bucket rather than reading as an aborted merge. Only
+            // for THOSE two reasons — any other refusal (a hold added mid-pass, a conflict) is reported as such.
+            if (c.rebaseDrop === 'rebased' && /^head moved|^required check/.test(revalidated.reason || '')) {
+              pendingRebased.push(c.num);
+              if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(c.repo)}${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
+              continue;
+            }
             revalidationAborted.push({ num: c.num, repo: c.repo, reason: revalidated.reason });
             if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${c.num} no longer safe to merge on a fresh re-read (${revalidated.reason}) — the pass-start decision is stale; refusing to merge this pass (xvzc4v4)\n`);
             continue;
@@ -4625,9 +4674,11 @@ async function runCli() {
           // merged by drain" claim while the PR sat OPEN. Confirmed live on chalbert/web-everything#2596,
           // 2026-09-24: the trace posted at 23:53Z while the PR stayed OPEN/CONFLICTING. The READ stays eager
           // (it still names the exact commit this pass is about to attempt); only the write moved.
-          const traceHeadSha = fetchPrHeadSha(c.repo, c.num);
+          // xvzc4v4 advisory fix — the SHA is the one revalidation just pinned (fresh `headRefOid` == the head the
+          // pass-start decision judged), not a second best-effort read that could miss or see a newer head.
+          const traceHeadSha = revalidated.headSha;
           const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
-          const postMergeTrace = () => {
+          postMergeTrace = () => {
             const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, traceReason, null, preread.comments);
             if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${traceHeadSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
           };
@@ -4649,9 +4700,10 @@ async function runCli() {
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
           // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
           // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).
-          // xvzc4v4 — `matchHeadCommit: traceHeadSha` (the freshest possible head read, taken immediately above)
-          // is now threaded through so `gh` itself refuses the merge if the PR's head moved again in the razor-
-          // thin window between that read and this exact call (bug 1 of the merge-safety review).
+          // xvzc4v4 — `matchHeadCommit: traceHeadSha` (the head revalidation pinned to the pass-start decision)
+          // is threaded through so `gh` itself refuses the merge if the PR's head moved again in the window
+          // between that fresh read and this exact call (bug 1 of the merge-safety review). It is never null
+          // here: revalidation refuses to return `'merge'` without a pinned head, so the flag is never dropped.
           // #2683 — the write is now SERIALIZED by the serial-writer mutex (drain-lock, shared with the numbering
           // section) and GUARDED by a per-PR idempotency re-check. The mutex is the ONLY lock a `--only` fast drain
           // shares with a concurrent resident-daemon sweep (the fast drain bypasses the whole-process lease), so
@@ -4682,11 +4734,7 @@ async function runCli() {
             // PENDING — nothing, if a genuine concurrent lander already did it), so running them again here is a
             // safe no-op in the true-race case and the ONLY chance to run them at all otherwise. "Exactly once"
             // is delivered by that idempotency, not by this branch trying to guess which case it is in.
-            merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
-            progressed = true;
-            remaining = remaining.filter((x) => !sameCand(x, c));
-            for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
-            postMergeTrace(); // #xngv3vn — confirmed merged (just by a concurrent lander, not this call)
+            recordAlreadyMerged(); // #xngv3vn — confirmed merged (just not by this call) → merged + trace
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} already merged (by us, a concurrent lander, or out-of-band, e.g. the GitHub UI) — running its numbering/resolve/regen follow-up now, idempotently (xvzc4v4)\n`);
             continue;
           }
@@ -4716,11 +4764,7 @@ async function runCli() {
             // one who merged it. As with the pre-check branch above, record it into `merged` so the numbering/
             // resolve-on-land/derived-regen this pass runs for it — those steps are idempotent, so this is a
             // safe no-op in the genuine-race case too and the ONLY chance to run them at all in this one.
-            merged.push({ num: c.num, repo: c.repo, headSha: c.headSha ?? null });
-            progressed = true;
-            remaining = remaining.filter((x) => !sameCand(x, c));
-            for (const id of landedIdsForCandidate(c, { isLocalRepo })) landedThisPass.add(id);
-            postMergeTrace(); // #xngv3vn — confirmed merged (raced past the mutex, but genuinely landed)
+            recordAlreadyMerged(); // #xngv3vn — confirmed merged despite the throw → merged + trace
             if (!AS_JSON) process.stderr.write(`  ✓ ${repoTag(c.repo)}${c.num} confirmed merged despite the gh error above (local branch-delete/network failure, or a concurrent lander) — running its numbering/resolve/regen follow-up now, idempotently (xvzc4v4)\n`);
             continue;
           }

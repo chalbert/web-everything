@@ -195,6 +195,38 @@ describe('merge-ai-prs — revalidateForMerge (bug 1: re-check the merge decisio
     expect(revalidateForMerge(pending, { allowPendingReview: false }).decision).toBe('skip');
     expect(revalidateForMerge(pending, { allowPendingReview: true }).decision).toBe('merge');
   });
+
+  // xvzc4v4 advisory fix — HEAD PIN. `classifyPr` sees label PRESENCE only: a `review:accepted` granted for head X
+  // still reads as accepted after a push of Y. The merge is pinned to the head the pass-start decision judged.
+  describe('expectedHeadSha pins the merge to the head the pass-start decision judged', () => {
+    const accepted = (headRefOid) => aiPr({ headRefOid, labels: [{ name: 'review:accepted' }] });
+    it('same head → merge, and the pinned SHA is returned for --match-head-commit', () => {
+      const r = revalidateForMerge(accepted('aaa111'), { expectedHeadSha: 'aaa111' });
+      expect(r.decision).toBe('merge');
+      expect(r.headSha).toBe('aaa111');
+    });
+    it('a push since the pass-start decision (head moved) REFUSES, even with review:accepted still on the PR', () => {
+      const r = revalidateForMerge(accepted('bbb222'), { expectedHeadSha: 'aaa111' });
+      expect(r.decision).toBe('skip');
+      expect(r.reason).toMatch(/head moved/);
+      expect(r.headSha).toBeUndefined();
+    });
+    it('an unknown judged head (null) fails CLOSED', () => {
+      expect(revalidateForMerge(accepted('aaa111'), { expectedHeadSha: null }).decision).toBe('skip');
+    });
+    it('a fresh read with no headRefOid fails CLOSED', () => {
+      expect(revalidateForMerge(accepted(undefined), { expectedHeadSha: 'aaa111' }).decision).toBe('skip');
+    });
+    it('the pin never overrides a hold: same head but review:changes still refuses', () => {
+      const r = revalidateForMerge(aiPr({ headRefOid: 'aaa111', labels: [{ name: 'review:changes' }] }), { expectedHeadSha: 'aaa111' });
+      expect(r.decision).toBe('skip');
+    });
+    it('omitting expectedHeadSha skips the pin (and returns no headSha)', () => {
+      const r = revalidateForMerge(accepted('bbb222'), {});
+      expect(r.decision).toBe('merge');
+      expect(r.headSha).toBeUndefined();
+    });
+  });
 });
 
 describe('merge-ai-prs — #2820 hold-integrity: an unsatisfied review hold blocks merge regardless of ready-to-merge', () => {
