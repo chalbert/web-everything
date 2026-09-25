@@ -208,6 +208,7 @@ describe('main', () => {
       errors: ['owner/broken: unavailable'],
       unsupported: [],
       laneDecisions: [],
+      backpressure: [],
     });
     expect(execFileSync).toHaveBeenLastCalledWith('gh', [
       'pr', 'list', '--repo', 'owner/good', '--state', 'open', '--limit', '200', '--json',
@@ -223,7 +224,7 @@ describe('main', () => {
       .mockReturnValueOnce(JSON.stringify({ mergeable: 'MERGEABLE' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [], laneDecisions: [],
+      ready: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [], laneDecisions: [], backpressure: [],
     });
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([1000, 2000]);
   });
@@ -235,7 +236,7 @@ describe('main', () => {
     vi.mocked(execFileSync).mockReturnValue(JSON.stringify({ mergeable: 'UNKNOWN' }));
     main(['--repo=o/n', '--json'], { sleep, unsupportedPath: NO_UNSUPPORTED });
     expect(JSON.parse(log.mock.calls[0][0])).toEqual({
-      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [], laneDecisions: [],
+      ready: [], pending: [{ repo: 'o/n', number: 43, title: 'Ready for review' }], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported: [], laneDecisions: [], backpressure: [],
     });
     expect(sleep).toHaveBeenCalledTimes(4);
   });

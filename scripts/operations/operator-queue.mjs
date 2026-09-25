@@ -175,6 +175,36 @@ export function laneReclaimQueue({ exec = execFileSync, scriptDir = dirname(file
   }
 }
 
+/**
+ * we:xniq7xs — the live per-repo pr-limit counts, via a CHILD PROCESS to `node scripts/lib/pr-limit.mjs
+ * status` — mirrors {@link laneReclaimQueue}'s own subprocess pattern immediately above, same reason: that
+ * module's own dependencies (the throttled-gh admission chain, the review-label rubric) are real and
+ * legitimately heavier than this report's, so shelling it out (rather than statically importing it) keeps
+ * THIS file's own module graph light and its checkout-staging contract unchanged — a host/checkout without
+ * `pr-limit.mjs` degrades to an EMPTY count list rather than failing this whole report.
+ */
+export function prLimitCounts({ exec = execFileSync, scriptDir = dirname(fileURLToPath(import.meta.url)) } = {}) {
+  try {
+    const script = join(scriptDir, '..', 'lib', 'pr-limit.mjs');
+    const out = exec('node', [script, 'status'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000 });
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed?.counts) ? parsed.counts : [];
+  } catch {
+    return [];
+  }
+}
+
+/** we:xniq7xs — of the live per-repo pr-limit counts ({@link prLimitCounts}'s own shape), the ones actually
+ *  AT/OVER their cap — the operator-queue BACKPRESSURE alert line's row shape. Pure — no gh, no fs, no
+ *  child-process; the live IO is {@link prLimitCounts}'s job. Skips a repo whose count is `unavailable` (a
+ *  gh read failed) — there is nothing to alert on from an unknown count, and a transient gh hiccup must
+ *  never manufacture a false alarm. */
+export function backpressureRows(counts) {
+  return (Array.isArray(counts) ? counts : [])
+    .filter((c) => c && c.unavailable !== true && Number.isFinite(c.limit) && Number(c.count) >= c.limit)
+    .map((c) => ({ repo: c.repoKey, count: c.count, limit: c.limit, prNumbers: Array.isArray(c.prNumbers) ? c.prNumbers : [] }));
+}
+
 /** Blocking sleep — `main` is synchronous, and this only runs on the rare UNKNOWN-mergeability path. */
 const blockingSleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -212,7 +242,13 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
   // queued per expected gh call, and an unconditional extra call here would silently consume one of those
   // slots and cascade-fail every assertion after it. Real operator usage passes the flag explicitly.
   const laneDecisions = args.includes('--with-lanes') ? laneReclaimQueue() : [];
-  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions };
+  // we:xniq7xs — BACKPRESSURE is opt-in via `--with-backpressure`, mirroring `--with-lanes` just above and for
+  // the SAME reason (see that flag's own comment): it is a real extra `gh` round-trip (one throttled `pr list`
+  // per constellation repo, `countOpenPrsAllRepos`), and a bare `main()` call must stay side-effect-free over
+  // this file's own PR-queue `execFileSync('gh', …)` sequence so the shared-mock call-queue tests above are
+  // never silently thrown off by an uncounted extra call.
+  const backpressure = args.includes('--with-backpressure') ? backpressureRows(prLimitCounts()) : [];
+  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions, backpressure };
   for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
@@ -279,6 +315,10 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
       + `[${pr.episodes} episode${pr.episodes === 1 ? '' : 's'}, last ${pr.lastEpisode}]`).join('\n') || '(none)');
     console.log('LANE RECLAIM — needs your decision (#3383, see `node scripts/lane-whois.mjs`):');
     console.log(report.laneDecisions.map((d) => `lane-${d.lane}  [${d.verdict}]  ${d.reason}  ${d.path}`).join('\n') || '(none)');
+    if (args.includes('--with-backpressure')) {
+      console.log('BACKPRESSURE — open-PR limit reached (we:xniq7xs; land/review the existing PRs, or override `node scripts/operations/pr-limit.mjs allow|off`):');
+      console.log(report.backpressure.map((b) => `${b.repo}  ${b.count}/${b.limit} open agent PR(s) not yet review:accepted  (#${b.prNumbers.join(', #')})`).join('\n') || '(none)');
+    }
   }
 }
 
