@@ -1,4 +1,5 @@
 ---
+bornAs: xb0iuxq
 kind: story
 size: 5
 parent: "4075"
@@ -44,7 +45,7 @@ run, lane-21 and lane-24 were both classified `kind: FULL` (running `node we:scr
 --repo=.` unconditionally), while lane-11/13/20 were `selected` (the diff-driven default gate, PR #2680). A
 direct check confirms why: `git -C lane-21 merge-base --is-ancestor 14a3d0dff HEAD` and the same for lane-24
 both fail — those two clones are 111-120 commits behind `origin/main` and were forked BEFORE PR #2680
-(`lane/xpnhz4o-local-gate-selected-tests`, merge `14a3d0dff`) merged the diff-driven default gate (#3372).
+(`lane/4157-local-gate-selected-tests`, merge `14a3d0dff`) merged the diff-driven default gate (#3372).
 lane-11/13/20 all pass the same check.
 
 **Root cause: every hook and script a session runs is loaded from that session's OWN checkout, and nothing
