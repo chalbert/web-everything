@@ -3,11 +3,12 @@ bornAs: xv71n7k
 kind: story
 size: 8
 parent: "4075"
-status: active
+status: resolved
 blockedBy: ["4065", "4052"]
 scope: ["we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-smells/", "we:skills-src/conveyor/daemon-manifest.mjs", "we:scripts/operations/operator-queue.mjs", "we:skills-src/conveyor/launchd/com.we.health-watch.plist.example", "we:scripts/conveyor/__tests__/health-watch-core.test.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:skills-src/conveyor/__tests__/daemon-manifest.test.mjs", "we:scripts/operations/daemon-status-io.mjs", "we:scripts/operations/daemon-status.mjs", "we:scripts/operations/__tests__/daemon-status-io.test.mjs", "we:scripts/operations/__tests__/daemon-status.test.mjs", "we:.gitignore", "we:scripts/conveyor/health-watch-section.mjs", "we:scripts/operations/__tests__/operator-queue-health.test.mjs", "we:scripts/operations/__tests__/operator-queue-entry.test.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: [health-daemon]
 ---
 
