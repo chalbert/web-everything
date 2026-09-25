@@ -12,6 +12,7 @@ import {
   runDaemonLoop, buildCliDaemonEffects, realSleep, RECONCILE_FIX_DISPATCH_LEASE_KEY, DEFAULT_INTERVAL_MS,
   runReconcileFixDispatchAllRepos, FIX_DISPATCH_DAEMON_REPOS, hasStaleMainRefusal,
   runReconcileCiHealDispatchAllRepos, runTickAllRepos, formatRefusalLine,
+  runHungCiRecoveryAllRepos, formatHungActionLine,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -338,11 +339,20 @@ describe('runReconcileCiHealDispatchAllRepos — one runReconcileCiHealDispatch 
   });
 });
 
+// xd1sfms (#4075/#3383) — `runTickAllRepos` now defaults its THIRD tick (hung-ci-recovery) to the REAL
+// `sweepHungCiRecovery` too, exactly as it already defaults `fixTick`/`ciHealTick` to their real dispatch
+// functions. Every pre-existing test below that supplies fakes for the other two halves must supply one for
+// this third half as well, or it falls through to the real (network-calling) implementation — this no-op fake
+// is the shared "nothing hung, nothing to do" stand-in for tests that aren't exercising this half at all.
+const noopHungCiTick = () => ({ dispatch: [], refusals: [], applied: [] });
+
 describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal dispatch, merged (#xngv3vn)', () => {
   it('awaits the async ci-heal half and merges both halves\' dispatched/refusals into one result', async () => {
     const fixTick = vi.fn(({ repo }) => ({ dispatched: repo === 'repo-a' ? [{ pr: 1 }] : [], refusals: [] }));
     const ciHealTick = vi.fn(async ({ repo }) => ({ dispatched: repo === 'repo-b' ? [{ pr: 2 }] : [], refusals: [] }));
-    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick });
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+    });
     expect(fixTick).toHaveBeenCalledTimes(2);
     expect(ciHealTick).toHaveBeenCalledTimes(2);
     expect(out.dispatched).toEqual([{ pr: 1, repo: 'repo-a' }, { pr: 2, repo: 'repo-b' }]);
@@ -357,7 +367,9 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
       if (repo === 'repo-b') throw new Error('ci-heal broke');
       return { dispatched: [{ pr: 9, repo }], refusals: [] };
     });
-    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick });
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+    });
     expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' }); // ci-heal still ran for repo-a despite fix's own failure there
     expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-b' }); // fix still ran for repo-b despite ci-heal's own failure there
     expect(out.refusals).toEqual(expect.arrayContaining([
@@ -379,7 +391,9 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
       dispatched: [], refusals: [],
       reconcileRefusalDetails: repo === 'repo-b' ? [{ prNumber: 2, kind: 'nothing-owed', why: 'ci-heal-side' }] : [],
     }));
-    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick });
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+    });
     expect(out.reconcileRefusals).toEqual([
       { repo: 'repo-a', prNumber: 1, kind: 'owed-ci-rerun', why: 'fix-side' },
       { repo: 'repo-b', prNumber: 2, kind: 'nothing-owed', why: 'ci-heal-side' },
@@ -394,7 +408,9 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
     // The ci-heal half throws the REAL `assertMainNotStale` refusal — `ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch`
     // calls that same guard near its own top, exactly as `runReconcileFixDispatch` already does.
     const ciHealTick = vi.fn(async () => { throw new Error(message); });
-    const out = await runTickAllRepos({ repos: ['chalbert/web-everything'], fixTick, ciHealTick });
+    const out = await runTickAllRepos({
+      repos: ['chalbert/web-everything'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+    });
     // Proves the WIRING: hasStaleMainRefusal reads whatever `runTickAllRepos` puts in `.refusals`, regardless
     // of which half (fix or ci-heal) produced it — a ci-heal-side entry is never dropped or siloed from the
     // SAME self-resync signal (`withSelfSync`'s `hasStaleRefusal` option) a fix-side one already triggers.
@@ -424,5 +440,125 @@ describe('buildCliDaemonEffects — tickOnce is wired to runTickAllRepos, not th
     const body = src.slice(start, src.indexOf('\n}\n', start));
     expect(body).toMatch(/runReconcileFixDispatchAllRepos\(/);
     expect(body).toMatch(/await runReconcileCiHealDispatchAllRepos\(/);
+  });
+});
+
+// xd1sfms (epic #4075/#3383) — LIVE INCIDENT 2026-09-25: PR #2636's `test-shard (1)` job (run 36161558017) sat
+// `in_progress` 3h+ with NO daemon ever noticing, because `we:scripts/conveyor/ci-red-recovery-watch.mjs
+// #sweepHungCiRecovery` (the hung-run cancel+rerun pass) had no live caller — its own `daemon-manifest.mjs`
+// entry has no launchd job installed. This daemon (confirmed live and ticking) is where it now runs instead.
+// Mirrors `runReconcileCiHealDispatchAllRepos`'s own per-repo fan-out test shape exactly.
+describe('runHungCiRecoveryAllRepos — one sweepHungCiRecovery call per watched repo, apply always true (xd1sfms)', () => {
+  it('calls tick once per repo, ALWAYS with apply:true — a daemon\'s whole point is to actually act', () => {
+    const tick = vi.fn(() => ({ dispatch: [], refusals: [], applied: [] }));
+    runHungCiRecoveryAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-a', apply: true });
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-b', apply: true });
+  });
+
+  it('maps each applied action to a repo-tagged dispatched row, kind reflecting ok vs the failed action', () => {
+    const tick = vi.fn(({ repo }) => ({
+      dispatch: [], refusals: [],
+      applied: repo === 'repo-a'
+        ? [{ prNumber: 1, runId: 10, ok: true, action: 'cancelled-and-rerun', why: 'stuck' }]
+        : [{ prNumber: 2, runId: 20, ok: false, action: 'cancel-failed', error: 'boom', why: 'stuck too' }],
+    }));
+    const out = runHungCiRecoveryAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(out.dispatched).toEqual([
+      { prNumber: 1, runId: 10, ok: true, action: 'cancelled-and-rerun', why: 'stuck', repo: 'repo-a', kind: 'hung-cancel-rerun' },
+      { prNumber: 2, runId: 20, ok: false, action: 'cancel-failed', error: 'boom', why: 'stuck too', repo: 'repo-b', kind: 'hung-cancel-failed' },
+    ]);
+  });
+
+  it('drops the ordinary not-hung refusal (the expected case for almost every PR on almost every tick) but keeps a real one', () => {
+    const tick = vi.fn(() => ({
+      dispatch: [], applied: [],
+      refusals: [
+        { prNumber: 1, kind: 'not-hung', why: 'fine' },
+        { prNumber: 2, kind: 'hung-cap-exhausted', why: 'cap hit' },
+      ],
+    }));
+    const out = runHungCiRecoveryAllRepos({ repos: ['repo-a'], tick });
+    expect(out.refusals).toEqual([{ prNumber: 2, kind: 'hung-cap-exhausted', why: 'cap hit', repo: 'repo-a' }]);
+  });
+
+  it('one repo\'s sweep failure never blocks another repo\'s — reported as tick-failed', () => {
+    const tick = vi.fn(({ repo }) => { if (repo === 'repo-bad') throw new Error('gh outage'); return { dispatch: [], refusals: [], applied: [] }; });
+    const out = runHungCiRecoveryAllRepos({ repos: ['repo-bad', 'repo-good'], tick });
+    expect(out.refusals).toEqual([{ repo: 'repo-bad', prNumber: null, kind: 'tick-failed', why: 'gh outage' }]);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-good', apply: true });
+  });
+
+  it('defaults repos to FIX_DISPATCH_DAEMON_REPOS — every watched repo, not just WE', () => {
+    const tick = vi.fn(() => ({ dispatch: [], refusals: [], applied: [] }));
+    runHungCiRecoveryAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(FIX_DISPATCH_DAEMON_REPOS.length);
+  });
+});
+
+describe('runTickAllRepos — now runs THREE halves: fix, ci-heal, and hung-ci-recovery (xd1sfms)', () => {
+  it('merges the hung-ci half\'s dispatched/refusals into the tick\'s own top-level arrays, and keeps its own detail at .hungCi', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const hungCiTick = vi.fn(({ repo }) => ({
+      dispatch: [], refusals: [],
+      applied: repo === 'repo-a' ? [{ prNumber: 5, runId: 50, ok: true, action: 'cancelled-and-rerun', why: 'stuck' }] : [],
+    }));
+    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick });
+    expect(out.dispatched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ prNumber: 5, runId: 50, repo: 'repo-a', kind: 'hung-cancel-rerun' }),
+    ]));
+    expect(out.hungCi.dispatched).toEqual([
+      expect.objectContaining({ prNumber: 5, runId: 50, repo: 'repo-a' }),
+    ]);
+  });
+
+  it('a hung-ci-side failure for one repo does not skip that SAME repo\'s fix/ci-heal attempt, and vice versa', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const hungCiTick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('hung-ci broke'); return { dispatch: [], refusals: [], applied: [] }; });
+    const out = await runTickAllRepos({ repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick });
+    expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(out.refusals).toEqual(expect.arrayContaining([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'hung-ci broke' }]));
+  });
+});
+
+describe('formatHungActionLine — one printable line per hung-run action, with its reason (xd1sfms)', () => {
+  it('prints a successful action with its reason', () => {
+    const line = formatHungActionLine({
+      repo: 'chalbert/web-everything', prNumber: 2636, runId: 36161558017, ok: true, action: 'cancelled-and-rerun', why: 'stuck 3h',
+    });
+    expect(line).toContain('PR #2636');
+    expect(line).toContain('run 36161558017');
+    expect(line).toContain('applied cancelled-and-rerun');
+    expect(line).toContain('stuck 3h');
+  });
+
+  it('prints a FAILED action with its error AND its reason — never silently dropped', () => {
+    const line = formatHungActionLine({
+      repo: 'chalbert/web-everything', prNumber: 2636, runId: 1, ok: false, action: 'cancel-failed', error: 'gh: not found', why: 'stuck 3h',
+    });
+    expect(line).toContain('FAILED cancel-failed');
+    expect(line).toContain('gh: not found');
+    expect(line).toContain('stuck 3h');
+  });
+});
+
+// SOURCE-CONTRACT proof, mirroring this file's own existing `buildCliDaemonEffects` wiring suite above: proves
+// `runTickAllRepos` really calls `runHungCiRecoveryAllRepos`, not just that a test CAN inject a fake for it.
+describe('runTickAllRepos — source contract: really calls runHungCiRecoveryAllRepos (xd1sfms)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
+
+  it('runTickAllRepos itself calls runHungCiRecoveryAllRepos', () => {
+    const start = src.indexOf('export async function runTickAllRepos(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toMatch(/runHungCiRecoveryAllRepos\(/);
+  });
+
+  it('onTick logs one line per hung-run action via formatHungActionLine', () => {
+    expect(src).toMatch(/for \(const a of \(hungCi\?\.dispatched \?\? \[\]\)\) log\.error\(formatHungActionLine\(a\)\);/);
   });
 });

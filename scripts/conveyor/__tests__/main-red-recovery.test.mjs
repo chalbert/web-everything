@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest';
 import {
   MAIN_RED_CONCLUSIONS, computeMainRedWindows, isWithinRedWindow, isMainCurrentlyRed,
   classifyCiFailureAttribution, isPrCiFailureOwedRerun, planMainRedRebases,
+  DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
+  runIdFromDetailsUrl, isRunHung, buildHungCandidates, planHungCiRecoveries,
 } from '../main-red-recovery.mjs';
 
 // ── fixtures — measured off chalbert/web-everything, 2026-09-25 ────────────────────────────────────────────────
@@ -173,5 +175,124 @@ describe('main-red-recovery — planMainRedRebases', () => {
 
   it('MAIN_RED_CONCLUSIONS deliberately excludes cancelled — the ordinary drain-traffic case', () => {
     expect(MAIN_RED_CONCLUSIONS).not.toContain('cancelled');
+  });
+});
+
+// ── HUNG-CI-RUN RECOVERY (xd1sfms, #4075/#3383) ─────────────────────────────────────────────────────────────
+// Fixtures mirror PR #2636's REAL statusCheckRollup shape, read live 2026-09-25 off run 36161558017: shard 1
+// stuck `IN_PROGRESS` since 16:34:28Z while shards 2-4 and `smoke` had already completed — and the required
+// `test` check had NO entry at all yet (it `needs: test-shard`, which had not finished).
+const runningCheck = (name, startedAt, detailsUrl) => ({
+  __typename: 'CheckRun', name, workflowName: 'CI', status: 'IN_PROGRESS', conclusion: '', startedAt, detailsUrl,
+});
+const doneCheck = (name, startedAt, completedAt, detailsUrl) => ({
+  __typename: 'CheckRun', name, workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt, completedAt, detailsUrl,
+});
+const RUN_URL = (job) => `https://github.com/chalbert/web-everything/actions/runs/36161558017/job/${job}`;
+
+const PR_2636_HUNG = {
+  number: 2636,
+  headRefName: 'lane/batch-...-3915',
+  headRefOid: 'deadbeef2636',
+  statusCheckRollup: [
+    runningCheck('test-shard (1)', '2026-09-25T16:34:28Z', RUN_URL('108159093983')),
+    doneCheck('test-shard (2)', '2026-09-25T16:33:54Z', '2026-09-25T16:35:34Z', RUN_URL('108159093444')),
+    doneCheck('test-shard (3)', '2026-09-25T16:33:54Z', '2026-09-25T16:36:33Z', RUN_URL('108159093969')),
+    doneCheck('test-shard (4)', '2026-09-25T16:33:55Z', '2026-09-25T16:35:42Z', RUN_URL('108159093890')),
+    doneCheck('smoke', '2026-09-25T16:33:56Z', '2026-09-25T16:36:27Z', RUN_URL('108159094044')),
+    // the required `test` check itself has NO entry — it `needs: test-shard` and never started.
+  ],
+};
+
+const PR_QUIET_CI = {
+  number: 4001,
+  headRefName: 'lane/quiet',
+  headRefOid: 'cafe4001',
+  statusCheckRollup: [doneCheck('test', '2026-09-25T10:00:00Z', '2026-09-25T10:05:00Z', RUN_URL('1'))],
+};
+
+const NOW = Date.parse('2026-09-25T20:10:00Z'); // ~3h36m after shard 1 started — well past any real threshold.
+
+describe('main-red-recovery — runIdFromDetailsUrl', () => {
+  it('pulls the numeric run id out of a real detailsUrl', () => {
+    expect(runIdFromDetailsUrl(RUN_URL('108159093983'))).toBe(36161558017);
+  });
+  it('returns null for a missing/unparseable url', () => {
+    expect(runIdFromDetailsUrl(null)).toBeNull();
+    expect(runIdFromDetailsUrl('not-a-url')).toBeNull();
+  });
+});
+
+describe('main-red-recovery — isRunHung', () => {
+  it('true once a run has been open past the threshold', () => {
+    expect(isRunHung({ startedAt: '2026-09-25T16:34:28Z', now: NOW, thresholdMs: DEFAULT_HUNG_THRESHOLD_MS })).toBe(true);
+  });
+  it('false for a run well inside the threshold (a genuine, ordinary-length run)', () => {
+    expect(isRunHung({ startedAt: '2026-09-25T16:34:28Z', now: Date.parse('2026-09-25T16:40:00Z'), thresholdMs: DEFAULT_HUNG_THRESHOLD_MS })).toBe(false);
+  });
+  it('false for an unparseable startedAt — never guessed hung', () => {
+    expect(isRunHung({ startedAt: null, now: NOW })).toBe(false);
+  });
+});
+
+describe('main-red-recovery — buildHungCandidates', () => {
+  it("builds PR #2636's real candidate: the run id + the EARLIEST startedAt among its still-open checks (shard 1)", () => {
+    const candidates = buildHungCandidates([PR_2636_HUNG]);
+    expect(candidates).toEqual([{
+      prNumber: 2636, headRefName: 'lane/batch-...-3915', headSha: 'deadbeef2636',
+      runId: 36161558017, startedAt: '2026-09-25T16:34:28.000Z',
+    }]);
+  });
+
+  it('never builds a candidate once the required check has itself concluded — settled, not this pass\'s job', () => {
+    expect(buildHungCandidates([PR_QUIET_CI])).toEqual([]);
+  });
+
+  it('never builds a candidate for a head with no CI run at all yet', () => {
+    expect(buildHungCandidates([{ number: 1, statusCheckRollup: [] }])).toEqual([]);
+  });
+});
+
+describe('main-red-recovery — planHungCiRecoveries', () => {
+  it('every candidate yields a dispatch or a refusal — never neither', () => {
+    const candidates = buildHungCandidates([PR_2636_HUNG]);
+    const plan = planHungCiRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch.length + plan.refusals.length).toBe(candidates.length);
+  });
+
+  it('dispatches hung-cancel-rerun for #2636\'s real shape, attempt 1/N, once past the threshold', () => {
+    const candidates = buildHungCandidates([PR_2636_HUNG]);
+    const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: DEFAULT_MAX_HUNG_RETRIES_PER_SHA });
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      prNumber: 2636, runId: 36161558017, headSha: 'deadbeef2636', kind: 'hung-cancel-rerun', attempts: 0,
+    })]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('refuses not-hung for a run still well inside the threshold', () => {
+    const candidates = buildHungCandidates([PR_2636_HUNG]);
+    const plan = planHungCiRecoveries({ candidates, now: Date.parse('2026-09-25T16:40:00Z') });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'not-hung' })]);
+    expect(plan.dispatch).toEqual([]);
+  });
+
+  it('refuses hung-cap-exhausted once a head sha has already used up its cap — never a third try', () => {
+    const candidates = [{
+      prNumber: 2636, headRefName: 'lane/x', headSha: 'deadbeef2636', runId: 36161558017,
+      startedAt: '2026-09-25T16:34:28Z', hungAttemptsForSha: 2,
+    }];
+    const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
+    expect(plan.dispatch).toEqual([]);
+  });
+
+  it('a candidate the caller never counted (hungAttemptsForSha omitted) defaults to 0 — a fresh candidate, never pre-exhausted', () => {
+    const candidates = [{ prNumber: 9, headSha: 'x', runId: 1, startedAt: '2026-09-25T16:00:00Z' }];
+    const plan = planHungCiRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 9, attempts: 0 })]);
+  });
+
+  it('DEFAULT_HUNG_THRESHOLD_MS is well above every real p95 measured 2026-09-25 (test-shard 249s, test 380s, smoke 146s)', () => {
+    expect(DEFAULT_HUNG_THRESHOLD_MS).toBeGreaterThan(380 * 1000 * 3);
   });
 });

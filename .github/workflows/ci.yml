@@ -64,6 +64,15 @@ jobs:
   # FILE, so every file (incl. the poolMatchGlobs singleFork one) lands in exactly one shard.
   test-shard:
     runs-on: ubuntu-latest
+    # xd1sfms (#4075/#3383) — LIVE 2026-09-25: PR #2636's `test-shard (1)` (run 36161558017) hung
+    # `in_progress` 3h+ while its 3 sibling shards finished in ~90-260s; with no `timeout-minutes` set,
+    # GitHub's 360-min job default applied, so a single hung shard blocked the PR for 6 hours. Sized at
+    # ~3x the measured p95: 15 successful runs sampled 2026-09-25 gave min=87s max=258s p50=138s
+    # p95=249s per shard — 3x249s≈12.5min, rounded up for headroom. A GENUINE slow run stays well inside
+    # this; a HUNG one now gets killed by GitHub itself within the hour instead of waiting 6h, and the
+    # new `scripts/conveyor/ci-red-recovery-watch.mjs` hung-run sweep (see its own header) no longer has
+    # to out-wait this job to reclaim the PR.
+    timeout-minutes: 15
     strategy:
       # Don't cancel sibling shards when one fails — the `test` aggregator reports the combined red, and
       # cancelling would hide which other shards also failed.
@@ -142,6 +151,10 @@ jobs:
     needs: test-shard
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    # xd1sfms (#4075/#3383) — same measurement pass as `test-shard` above: 15 successful runs sampled
+    # 2026-09-25 gave this job (merge coverage + check:standards + the real-git integration suite)
+    # min=243s max=380s p50=343s p95=380s — 3x380s≈19min, rounded up.
+    timeout-minutes: 20
     steps:
       - name: Gate on shard results
         run: |
@@ -222,6 +235,10 @@ jobs:
   # runner-minutes, not wall-clock. The `visual` job (below, disabled) already duplicates the same setup.
   smoke:
     runs-on: ubuntu-latest
+    # xd1sfms (#4075/#3383) — same measurement pass: 15 successful runs sampled 2026-09-25 gave this job
+    # (docs build + Playwright install + the interaction lane) min=129s max=146s p50=135s p95=146s —
+    # 3x146s≈7.3min, rounded up to 10min.
+    timeout-minutes: 10
     steps:
       # Same sibling layout as `test` / deploy.yml — WE's `build:docs` shells out to FUI's render CLI.
       #   $GITHUB_WORKSPACE/web-everything  (this repo)
@@ -307,6 +324,13 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || vars.WE_MEASURE_TEST_SELECTION == '1' }}
     runs-on: ubuntu-latest
     continue-on-error: true
+    # xd1sfms (#4075/#3383) — this lane is OFF by default today (see the `if:` above), so no successful
+    # run in the 2026-09-25 sample ever executed it (every sampled run shows it `skipped`) — no real p95
+    # exists yet. Sized conservatively off its own steps instead: it runs the FULL unsharded unit suite
+    # once (unlike `test-shard`'s 1/4 split) plus the full real-git integration suite, so budget well
+    # above a single shard's 15min. `continue-on-error: true` already keeps a genuine timeout here from
+    # ever reddening CI; this only stops a hang from tying up a runner for the 360-min default.
+    timeout-minutes: 30
     steps:
       # Same sibling layout as `test` — the unit suite needs the FUI sibling for the `@frontierui/*` alias.
       # fetch-depth: 0 so `git merge-base origin/main HEAD` has the history the pinned-base diff needs (#2681).
@@ -407,6 +431,13 @@ jobs:
     # re-enabling is gated on #2240's readiness (container-pinned baselines + PR-based refresh).
     if: ${{ false }}
     runs-on: ubuntu-latest
+    # xd1sfms (#4075/#3383) — this job is DISABLED (`if: false` above), so no successful run exists in
+    # the 2026-09-25 sample to measure a p95 from; the closest real data point (this same docs-build +
+    # container-Playwright shape run via update-visual-baselines.yml) only ever reached a :3000-timeout
+    # failure at ~2min15s before concluding, never a real full pass. Sized conservatively off the
+    # `smoke` job's own docs-build+Playwright p95 (146s) plus real container-startup overhead, well
+    # under the 360-min default; re-measure with real data once #2240 re-enables this job for real.
+    timeout-minutes: 20
     # Version-locked Playwright container (#2234): pinned to the exact `@playwright/test` version in
     # package-lock.json so browsers + OS font/AA stack are byte-identical every run, on any host. The
     # image ships chromium pre-installed at this same version, so no separate browser-install step is

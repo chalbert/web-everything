@@ -267,3 +267,196 @@ export function planMainRedRebases({ candidates = [], mainRedWindows = [] } = {}
 
   return { dispatch, refusals };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// HUNG-CI-RUN RECOVERY — we:backlog/xd1sfms-*.md (parent #4075, epic #3383). LIVE INCIDENT 2026-09-25: PR #2636
+// (run 36161558017) had its `test-shard (1)` job sit `IN_PROGRESS` for 3h+ while its 3 sibling shards completed
+// in ~90-260s. `we:.github/workflows/ci.yml` set no `timeout-minutes` on any job, so GitHub's own 360-min
+// per-job default applied — a single hung runner blocked the PR for up to 6 hours. Worse: the fix-dispatch
+// daemon's own tick logged `nothing-owed` for #2636 the whole time, because every existing classifier in this
+// file ({@link classifyCiFailureAttribution}, {@link isPrCiFailureOwedRerun}) — and `we:scripts/conveyor/
+// reconcile-core.mjs`'s `ci-red` → `ci-heal` path downstream of them — reasons ONLY about a required check that
+// has already CONCLUDED failed. A check stuck `IN_PROGRESS`/`QUEUED` has no conclusion at all yet, so none of
+// that machinery ever looks at it; a genuinely hung run was invisible to every automated recovery this repo had.
+//
+// WHY THE REQUIRED CHECK ITSELF NEVER SHOWS UP HUNG (the reason {@link buildHungCandidates} watches the whole
+// CI *workflow run*, not just the named required check). Confirmed live on #2636's own `statusCheckRollup`:
+// the required `test` job `needs: test-shard` and does not even START until every shard job finishes (or is
+// cancelled) — so while shard 1 sat hung, `test` had NO check-run entry at all, not even `QUEUED`. Watching
+// only the named required check would therefore never see anything to classify; this pass instead looks at
+// EVERY check whose `workflowName` matches the CI workflow and asks "has this PR's run, as a whole, failed to
+// conclude for far longer than any real run ever takes?" — exactly the invariant a hung PR actually violates.
+//
+// THE FIX THIS FILE PROVIDES IS DELIBERATELY THE SAME SHAPE AS `isPrCiFailureOwedRerun` ABOVE: a pure
+// classify/plan pair, no fs/gh/clock/process, consumed by an IO shell
+// ({@link module:./ci-red-recovery-watch.mjs}) that does the one real write this pass ever performs — cancel
+// the stuck run and ask GitHub to re-run it (`gh run cancel` then `gh run rerun`, never a raw retry of the same
+// still-hung attempt, and never per-shard — a single workflow run id covers every job in it, confirmed live:
+// `test-shard (1..4)`, `test`, and `smoke` on #2636 all shared ONE `detailsUrl` run id, 36161558017).
+//
+// THE ATTEMPT CAP IS DURABLE AND PER HEAD SHA, deliberately narrower than `we:scripts/conveyor/ci-heal-
+// mark.mjs`'s own PER-PR cap: a hung run is bad luck tied to ONE specific commit's CI attempt, not evidence
+// about the PR's code, so a NEW push (a new head sha) must start this cap fresh rather than inheriting a
+// count run up against a completely different tree. Counted the same restart-survives way every other durable
+// cap in this repo already is — off the PR's own comment thread, via a marker this file's IO-shell sibling
+// posts on every completed cancel+rerun ({@link module:./ci-red-recovery-watch.mjs#HUNG_CI_COMMENT_MARKER}) —
+// never a parallel in-memory store a conveyor restart would wipe.
+//
+// ESCALATION PAST THE CAP NEEDS NO NEW CODE PATH. Once a head sha has been cancelled+rerun
+// {@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA} times, this pass refuses (`hung-cap-exhausted`) and stops touching
+// it — deliberately. The NEW `timeout-minutes` on every `we:.github/workflows/ci.yml` job (this same card,
+// xd1sfms) means a run this pass has given up on will now be force-failed by GitHub itself within, at most,
+// the slowest job's own timeout (20min for `test`) rather than hanging for the 360-min default — at which
+// point the required check genuinely CONCLUDES failed, and the EXISTING `ci-red` → `ci-heal` path
+// (`we:scripts/conveyor/reconcile-core.mjs`) picks it up exactly as it already does for any other red PR. The
+// two halves of this card compose: bounded job timeouts are what make "escalate to ci-heal" true without this
+// file inventing a second escalation mechanism of its own.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_HUNG_THRESHOLD_MS — a required-check RUN (see
+ *  {@link buildHungCandidates}'s own docblock for why this watches the whole run, not the named check alone)
+ *  that has sat with at least one job `IN_PROGRESS`/`QUEUED` for at least this long counts HUNG. 45 minutes is
+ *  comfortably above every real duration measured live on 2026-09-25 across 15 successful `we:.github/
+ *  workflows/ci.yml` runs (`test-shard` p95 249s, `test` p95 380s, `smoke` p95 146s — all under 6.5 minutes),
+ *  while still catching a genuinely stuck run (#2636 sat 3h+) long before GitHub's own 360-min per-job
+ *  default would ever act. Configurable — the IO shell's CLI takes `--threshold-ms=`. */
+export const DEFAULT_HUNG_THRESHOLD_MS = 45 * 60 * 1000;
+
+/** we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_MAX_HUNG_RETRIES_PER_SHA — how many times ONE PR head sha
+ *  may be cancelled + re-run before this pass gives up and lets the ordinary `ci-heal` path take over (see the
+ *  section header above for why giving up needs no new escalation code). Mirrors the SHAPE of `we:scripts/
+ *  conveyor/ci-heal-mark.mjs`'s own durable per-PR cap — small, because a run that hangs twice in a row on the
+ *  identical tree is no longer "bad luck", it is a real signal this pass should stop absorbing. */
+export const DEFAULT_MAX_HUNG_RETRIES_PER_SHA = 2;
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#runIdFromDetailsUrl — pull the numeric GitHub Actions RUN id out of
+ * a check-run's own `detailsUrl` (`gh pr list/view --json statusCheckRollup` never surfaces a bare `runId`
+ * field directly — only this URL, shaped `.../actions/runs/<runId>/job/<jobId>`). PURE string parsing, no IO.
+ * @param {string|null|undefined} detailsUrl
+ * @returns {number|null}
+ */
+export function runIdFromDetailsUrl(detailsUrl) {
+  const m = typeof detailsUrl === 'string' ? detailsUrl.match(/\/actions\/runs\/(\d+)/) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#isRunHung — has a still-open CI run been going since further back
+ * than `thresholdMs`? PURE.
+ * @param {{startedAt?:(string|null), now?:number, thresholdMs?:number}} o
+ * @returns {boolean}
+ */
+export function isRunHung({ startedAt, now = Date.now(), thresholdMs = DEFAULT_HUNG_THRESHOLD_MS } = {}) {
+  const started = Date.parse(startedAt);
+  if (!Number.isFinite(started)) return false;
+  return (now - started) >= thresholdMs;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#buildHungCandidates — narrow a `gh pr list --json
+ * statusCheckRollup` listing to one row per PR whose CI workflow run has NOT yet concluded — the population
+ * {@link isRunHung}/{@link planHungCiRecoveries} reason about. PURE.
+ *
+ * Deliberately does NOT filter on the single named `requiredCheck` (see the section header's own "why the
+ * required check itself never shows up hung") — it reads every check whose `workflowName` matches, and treats
+ * the PR as still-open whenever the required check either has no entry yet or has not completed, AND at least
+ * one of the run's own checks is itself not yet `COMPLETED`. `startedAt` on the returned row is the EARLIEST
+ * `startedAt` among the run's still-open checks — the run's own age, not any one job's.
+ * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup` returns.
+ * @param {{requiredCheck?:string, workflowName?:string}} [o]
+ * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null), runId:(number|null),
+ *   startedAt:(string|null)}>}
+ */
+export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHECK, workflowName = DEFAULT_MAIN_WORKFLOW_NAME } = {}) {
+  const out = [];
+  for (const pr of Array.isArray(prs) ? prs : []) {
+    const prNumber = Number(pr?.number);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
+    const rollup = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
+    const ciChecks = rollup.filter((c) => c?.workflowName === workflowName);
+    if (!ciChecks.length) continue; // this PR's head has no CI run at all yet — nothing to watch.
+    const requiredEntry = ciChecks.find((c) => c?.name === requiredCheck);
+    // the required check already concluded (success OR failure) — settled, owned by the ci-red/ci-green paths
+    // above/elsewhere, never this pass.
+    if (requiredEntry && String(requiredEntry.status).toUpperCase() === 'COMPLETED') continue;
+
+    let runId = null;
+    let earliestStart = null;
+    let stillOpen = false;
+    for (const c of ciChecks) {
+      if (runId == null) runId = runIdFromDetailsUrl(c?.detailsUrl);
+      if (String(c?.status).toUpperCase() === 'COMPLETED') continue;
+      stillOpen = true;
+      const started = Date.parse(c?.startedAt);
+      if (Number.isFinite(started) && (earliestStart == null || started < earliestStart)) earliestStart = started;
+    }
+    if (!stillOpen) continue; // every check the rollup knows about already finished; required just hasn't been created yet (e.g. queued behind `needs`) with nothing itself running — nothing to cancel.
+
+    out.push({
+      prNumber,
+      headRefName: pr?.headRefName ?? null,
+      headSha: pr?.headRefOid ?? null,
+      runId,
+      startedAt: earliestStart != null ? new Date(earliestStart).toISOString() : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#planHungCiRecoveries — THE PASS `ci-red-recovery-watch.mjs` runs
+ * to decide which open, not-yet-concluded CI runs are owed a cancel+rerun right now. PURE, total — every
+ * candidate yields exactly one dispatch or refusal, mirroring {@link planMainRedRebases}'s own discipline.
+ *
+ * ORDER OF THE CHECKS:
+ *   1. Not actually hung yet ({@link isRunHung} false) → `not-hung` (the ordinary, expected case for almost
+ *      every open PR on almost every tick).
+ *   2. Hung, but this exact head sha already used up its cap → `hung-cap-exhausted` (see the section header
+ *      above for why this needs no separate escalation step — bounded job `timeout-minutes` does the rest).
+ *   3. Otherwise → `hung-cancel-rerun` dispatch.
+ * @param {object} o
+ * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null), runId?:(number|null),
+ *   startedAt?:(string|null), hungAttemptsForSha?:number}>} [o.candidates] - `hungAttemptsForSha` is the
+ *   CALLER's durable count (see `ci-red-recovery-watch.mjs#countHungCiComments`) for THIS candidate's
+ *   `headSha`; omitted/non-finite is treated as 0 (a candidate the caller never bothered counting is one this
+ *   pass has not yet tried, the same safe default {@link planMainRedRebases} uses for an unresolved `aheadBy`
+ *   in the OPPOSITE direction it needs here — 0 is the correct floor, not the correct ceiling, for a brand-new
+ *   candidate).
+ * @param {number} [o.now]
+ * @param {number} [o.thresholdMs]
+ * @param {number} [o.maxRetriesPerSha]
+ * @returns {{dispatch:Array<object>, refusals:Array<object>}}
+ */
+export function planHungCiRecoveries({
+  candidates = [], now = Date.now(), thresholdMs = DEFAULT_HUNG_THRESHOLD_MS, maxRetriesPerSha = DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
+} = {}) {
+  const dispatch = [];
+  const refusals = [];
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const prNumber = Number(c?.prNumber);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
+    const base = {
+      prNumber, headRefName: c?.headRefName ?? null, headSha: c?.headSha ?? null, runId: c?.runId ?? null,
+    };
+    const minutes = Math.round(thresholdMs / 60000);
+    if (!isRunHung({ startedAt: c?.startedAt, now, thresholdMs })) {
+      refusals.push({ ...base, kind: 'not-hung', why: `PR #${prNumber}'s CI run (${base.runId ?? '?'}) has not been open past the ${minutes}min hung threshold` });
+      continue;
+    }
+    const attempts = Number.isFinite(c?.hungAttemptsForSha) ? c.hungAttemptsForSha : 0;
+    if (attempts >= maxRetriesPerSha) {
+      refusals.push({
+        ...base, kind: 'hung-cap-exhausted',
+        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} was already cancelled+re-run ${attempts} time(s) (cap ${maxRetriesPerSha}) — leaving it for GitHub's own job timeout-minutes to conclude it, at which point the ordinary ci-heal path takes over`,
+      });
+      continue;
+    }
+    dispatch.push({
+      ...base, attempts,
+      kind: 'hung-cancel-rerun',
+      why: `PR #${prNumber}'s CI run ${base.runId ?? '?'} has been open since ${c?.startedAt}, past the ${minutes}min hung threshold — cancelling and re-running (attempt ${attempts + 1}/${maxRetriesPerSha})`,
+    });
+  }
+  return { dispatch, refusals };
+}
