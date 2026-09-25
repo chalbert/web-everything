@@ -485,10 +485,21 @@ export const INFRA_RETRY_COOLOFF_MS = 15 * 60 * 1000;
  * started. Records are keyed by session NAME and a name is reused for every re-dispatch, so the timestamp is
  * what keeps a fresh run from being read as the old one's completion. A `blocked-on-infra` outcome counts only
  * after {@link INFRA_RETRY_COOLOFF_MS}.
+ *
+ * #4149 (epic #3383/#4075) — `we:scripts/conveyor/session-reaper.mjs#makeCompletionResolver` no longer keeps a
+ * `blocked-on-infra` session's OS PROCESS alive for the cool-off (it now `claude stop`s it as soon as the record
+ * says `done`, regardless of outcome — that function's own doc has the full incident). The RECORD, not the
+ * process, is what must still hold the line during the cool-off, so a row still inside the window is now marked
+ * `awaitingInfraCooloff: true` — DISTINCT from `selfReportedDone` — so {@link assessLiveness} can tell "this
+ * session is done and its process is gone, but the cool-off it reported is still running" apart from "genuinely
+ * finished, available for redispatch", REGARDLESS of whether the listing's own `state` already reads `'stopped'`
+ * (which it now typically will, immediately, rather than staying `blocked`/`working` for the cool-off's
+ * duration).
  * @param {Array<object>} agents - the `claude agents --json` rows
  * @param {(name:string)=>({status?:string, outcome?:string, updatedAt?:string}|null)} completionFor
  * @param {number} nowMs
- * @returns {Array<object>} the same rows; finished ones gain `selfReportedDone: true` and `selfReportedOutcome`
+ * @returns {Array<object>} the same rows; finished ones gain `selfReportedDone: true` and `selfReportedOutcome`;
+ *   a row still inside its own `blocked-on-infra` cool-off gains `awaitingInfraCooloff: true` instead
  */
 export function markSelfReportedDone(agents, completionFor, nowMs) {
   return (Array.isArray(agents) ? agents : []).map((a) => {
@@ -500,7 +511,11 @@ export function markSelfReportedDone(agents, completionFor, nowMs) {
     const updatedMs = Date.parse(rec.updatedAt ?? '');
     const startedMs = startedAtMs(a?.startedAt);
     if (!Number.isFinite(updatedMs) || !Number.isFinite(startedMs) || updatedMs < startedMs) return a;
-    if (rec.outcome === 'blocked-on-infra' && !(nowMs - updatedMs >= INFRA_RETRY_COOLOFF_MS)) return a;
+    if (rec.outcome === 'blocked-on-infra' && !(nowMs - updatedMs >= INFRA_RETRY_COOLOFF_MS)) {
+      // #4149 — the process may already be `stopped` (or on its way there) this very tick; the cool-off must
+      // outrank that, since it is keyed off the RECORD, never off whether a process happens to still be listed.
+      return { ...a, awaitingInfraCooloff: true };
+    }
     return { ...a, selfReportedDone: true, selfReportedOutcome: rec.outcome ?? null };
   });
 }
@@ -591,11 +606,20 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * `stopped` session, by session-reaper's own definition (`ALREADY_STOPPED_STATES`), never resumes and never
  * produces another `state` transition on its own — mirroring that finality here, the same way `done` already is,
  * is what frees the PR to be reconciled again rather than parking it at `liveness-unknown` forever.
+ *
+ * THE ONE EXCEPTION TO `state === 'stopped'` MEANING FINISHED (#4149, epic #3383/#4075): a row
+ * {@link markSelfReportedDone} marked `awaitingInfraCooloff: true` is NOT finished, even though session-reaper
+ * now stops that process immediately (see that function's own doc) and the listing may therefore already read
+ * `'stopped'` here. The cool-off is a fact about the RECORD (a persistent outage should not be retried every
+ * tick), never about whether an OS process is still around to babysit it — so this check is read FIRST, ahead
+ * of the blanket `state === 'stopped'` clause below, the same "an upstream fact outranks a raw listing read"
+ * precedent `selfReportedDone`/`hung` already established.
  * @param {Array<{agent:object, cwd:string, sha:string}>} bound
  * @returns {{kind:string, pid:number|null, cwd:string, sha:string, sessionId:string|null, why:string}|null}
  */
 export function assessLiveness(bound) {
   const isFinished = (agent) => {
+    if (agent?.awaitingInfraCooloff === true) return false; // #4149 — the record's cool-off outranks `state`
     const state = String(agent?.state ?? '').toLowerCase();
     return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
   };
