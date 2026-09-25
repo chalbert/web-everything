@@ -40,14 +40,37 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { scrubReasons } from '../lib/secret-scrub.mjs';
+import { pinnedStateRoot } from './queue-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** The store file this module reads and writes. An append-only JSON array — matches `poc-branches.json` /
- *  `model-probation.json`'s existing small-registry IO shape rather than introducing a THIRD file format
- *  (JSONL) for what is, at this run-quality volume, still a modest read-modify-write file. Re-derive as
- *  JSONL if/when volume makes read-modify-write the bottleneck — a v1 concern deliberately deferred. */
-export const SCORECARD_STORE_PATH = join(__dirname, 'run-scorecards.json');
+/** TODAY's location — colocated with this script, git-tracked. Stays the DEFAULT (unset `CONVEYOR_STATE_ROOT`)
+ *  so nothing already running changes behavior (#4052). An append-only JSON array — matches
+ *  `poc-branches.json` / `model-probation.json`'s existing small-registry IO shape rather than introducing a
+ *  THIRD file format (JSONL) for what is, at this run-quality volume, still a modest read-modify-write file.
+ *  Re-derive as JSONL if/when volume makes read-modify-write the bottleneck — a v1 concern deliberately
+ *  deferred. */
+export const DEFAULT_SCORECARD_STORE_PATH = join(__dirname, 'run-scorecards.json');
+
+/** @deprecated kept for callers that read the module-load-time default; prefer {@link resolveScorecardStorePath}
+ *  (re-reads `CONVEYOR_STATE_ROOT` live) for anything that must honor a pin set after import. Identical value
+ *  to {@link DEFAULT_SCORECARD_STORE_PATH} — this binding predates #4052's pinned-root support. */
+export const SCORECARD_STORE_PATH = DEFAULT_SCORECARD_STORE_PATH;
+
+/**
+ * Where the store file lives RIGHT NOW (#4052, Ruling #3681 Fork 4 condition (iii)): under the pinned daemon
+ * state root ({@link ../queue-store.mjs}'s `CONVEYOR_STATE_ROOT`) once an operator sets one — OUT of any
+ * daemon's own git-managed clone, so a self-syncing daemon's rebuild/reset (#3681 Fork 4 sub-fork) can never
+ * wipe or fork it, and every daemon clone pinned to the SAME root reads/writes the one physical file instead
+ * of N divergent per-clone copies. Unset, it is {@link DEFAULT_SCORECARD_STORE_PATH} — today's in-tree,
+ * script-colocated, git-tracked location — unchanged.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function resolveScorecardStorePath(env = process.env) {
+  const root = pinnedStateRoot(env);
+  return root ? join(root, '.conveyor', 'run-scorecards.json') : DEFAULT_SCORECARD_STORE_PATH;
+}
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim() !== '';
 
@@ -82,7 +105,7 @@ export function validateScorecard(row) {
  * Read the store off disk. Never throws — an unreadable/malformed file degrades to an empty store, so a
  * caller always gets a usable (if empty) history rather than a crash mid-scoring-pass.
  */
-export function readStore({ path = SCORECARD_STORE_PATH, read = (p) => readFileSync(p, 'utf8'), exists = existsSync } = {}) {
+export function readStore({ path = resolveScorecardStorePath(), read = (p) => readFileSync(p, 'utf8'), exists = existsSync } = {}) {
   try {
     if (!exists(path)) return { version: 1, records: [] };
     const parsed = JSON.parse(read(path));
@@ -93,7 +116,7 @@ export function readStore({ path = SCORECARD_STORE_PATH, read = (p) => readFileS
 }
 
 /** Write the store back to disk, pretty-printed. */
-export function writeStore(store, { path = SCORECARD_STORE_PATH, write = (p, s) => writeFileSync(p, s) } = {}) {
+export function writeStore(store, { path = resolveScorecardStorePath(), write = (p, s) => writeFileSync(p, s) } = {}) {
   write(path, `${JSON.stringify({ version: store.version ?? 1, records: store.records ?? [] }, null, 2)}\n`);
 }
 
