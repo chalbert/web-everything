@@ -170,6 +170,23 @@ describe('startIndependentHeartbeat — #4130: a real timer, decoupled from any 
       global.setInterval = real;
     }
   });
+
+  it('PR #2664 review finding: a THROWING heartbeat effect is treated as lease-lost, never left to crash the process', () => {
+    vi.useFakeTimers();
+    try {
+      const onLost = vi.fn();
+      const heartbeat = vi.fn(() => { throw new Error('disk full'); });
+      const { isAlive, stop } = startIndependentHeartbeat({ owner: 'x', intervalMs: 1000, heartbeat, onLost });
+      expect(() => vi.advanceTimersByTime(1000)).not.toThrow();
+      expect(isAlive()).toBe(false);
+      expect(onLost).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(5000); // once lost, the timer stops calling heartbeat at all — never re-throws either
+      expect(heartbeat).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('#4130 live-shaped proof: a stubbed 20-minute gate tick against a REAL 15-minute runner-lock lease', () => {

@@ -153,6 +153,14 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
  * Deliberately `.unref()`'d — unlike the daemon LOOP's own sleep timer (which must stay ref'd to keep the
  * process alive between ticks, see `realSleep`'s own comment), this timer is a side-channel signal, never
  * itself a reason for the process to keep running.
+ * REVIEW FINDING (PR #2664, correctness, confirmed): the injected `heartbeat` effect runs inside a bare
+ * `setInterval` callback — before this fix, an exception it threw (e.g. `heartbeatRunnerLease`'s underlying
+ * `writeFileSync` racing a concurrent reclaim, or hitting ENOSPC/EACCES) was an UNCAUGHT exception that
+ * crashed the whole process, bypassing `main()`'s top-level `.catch()` entirely. That window is new and worse
+ * than the OLD shape this item replaces: the old awaited-heartbeat call only ever ran between ticks, where a
+ * throw WAS caught by `main()`'s `.catch()`; this timer instead beats every `intervalMs` for the full duration
+ * of a possibly 20+ minute in-flight tick, so the exposure is far larger. A throwing heartbeat is now treated
+ * exactly like a `false` return (lease lost) — never propagated.
  * @param {{
  *   lockRoot?: string,
  *   owner: string,
@@ -171,7 +179,12 @@ export function startIndependentHeartbeat({
   if (!owner) throw new TypeError('startIndependentHeartbeat requires an owner');
   let alive = true;
   const timer = setInterval(() => {
-    const ok = heartbeat({ key });
+    let ok;
+    try {
+      ok = heartbeat({ key });
+    } catch {
+      ok = false; // a throwing heartbeat is treated as lease-lost, never left to crash the process (PR #2664 review finding)
+    }
     if (!ok) {
       alive = false;
       clearInterval(timer);
