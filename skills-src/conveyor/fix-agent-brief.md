@@ -45,7 +45,7 @@
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) — for an item-less PR, its own already-changed files under its repo's prefix instead |
 | `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
 | `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
-| `{{GATE_COMMAND}}` | the target repo's own gate command (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) |
+| `{{GATE_COMMAND}}` | the diff-selected gate for the target repo — `node <WE_ROOT>/scripts/verify-lane.mjs run --repo=.` (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`; xpnhz4o) |
 | `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`rearm-review.mjs`, `stand-down.mjs`, …) |
 | `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less fix |
 
@@ -298,8 +298,15 @@ The same holds after you re-push (step 6): do not wait on CI or the merge — re
 If the repair also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
 anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
 `{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
-(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already **is** `npm run test:unit && npm run check:standards`, so this is a
-no-op today.
+(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already includes WE's own check:standards (scoped to your diff), so this is
+a no-op today.
+
+**`{{GATE_COMMAND}}` is the diff-selected gate** (`verify-lane.mjs run`, xpnhz4o): it runs **only the tests your
+diff reaches** (`vitest related` on the files changed vs `origin/main`, working tree included, plus the tests that
+name a changed file) and a check:standards scoped to those files. It falls back to the full suite **by itself** —
+and prints `FULL SUITE (fallback)` with the reason — when a config / setup / dependency / shared-test-helper file
+changed. **Never run the full suite yourself** (`npm run test:unit`, `npm test`, a bare `vitest run`): it takes
+10+ minutes, several fixers doing it at once starved the host, CI runs it anyway, and the Bash guard denies it.
 
 A green gate proves the **checks** pass; it does not, by itself, prove the reviewer's finding is actually fixed.
 Re-run the SAME test from step 2 — it must now be green — and, where the finding had a real-surface probe,

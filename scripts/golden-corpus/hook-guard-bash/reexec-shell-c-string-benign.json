@@ -1,10 +1,10 @@
 {
   "id": "reexec-shell-c-string-benign",
-  "cmd": "bash -c \"npm run test:unit\"",
+  "cmd": "bash -c \"npm run test:unit -- scripts/__tests__/a.test.mjs\"",
   "ctx": {
     "primaryCwd": true
   },
-  "basis": "r5 F1 precision mirror — the recursion reads a lot of new text at command position, so a nested command that writes nothing must stay allowed.",
+  "basis": "r5 F1 precision mirror — the recursion reads a lot of new text at command position, so a nested command that writes nothing must stay allowed. (xpnhz4o: a TARGETED run — a bare full-suite run is now denied for its own reason, pinned by full-suite-*.json.)",
   "expect": {
     "reason": null
   }

@@ -21,11 +21,12 @@
  * a materially different, and much smaller, risk than the "post-land red under the sole writer" scenario
  * #2681/#3361 (still open, dispatch-freeze dormant) exists to guard against.
  *
- * WHAT verify-lane's OWN diff can never do: edits to `scripts/verify-lane.mjs` (or this module) are themselves a
- * blast-radius surface (`isBlastRadiusPath` — `scripts/`), so a PR that changes verify-lane's own gate logic is
- * itself deny-by-default UNSHRINKABLE — the fail-safe applies to its own future changes, not only to callers'.
- * That UNSHRINKABLE rule is about the VITEST half only (module-graph soundness); see below for why the
- * check:standards half is scoped independently of it.
+ * xpnhz4o (2026-09-25) — THE VITEST HALF NOW USES THE LOCAL POLICY. #3372 first reused the CI deny-by-default
+ * allow-list here, under which every `scripts/` edit is a blast-radius surface ⇒ full suite — i.e. almost every
+ * real PR. Several fixers each running the 10+ minute suite at once drove host load to 1.8/core and starved lane
+ * pickup and reviews. The vitest half now uses `test-selection.mjs#decideLocalSelection`, which shrinks by
+ * default and falls back to full only where the module graph is blind (config / setup / dependencies / shared
+ * test helpers / deleted sources); the reasoning above for why a local shrink is safe applies unchanged.
  *
  * THE check:standards HALF (#1937/#3395). #1937 (`#gate-on-merged-tree-lane-fast-fail`) already ruled that a
  * lane gate is not the authority for whole-repo/cross-lane invariants — those belong on the merged tree, in CI —
@@ -57,8 +58,11 @@
  * `scripts` omitted/unknown ⇒ assumed WE-shaped, so a WE checkout's command is byte-for-byte unchanged. frontierui
  * has both `test:unit` and `check:standards`, so it too gets today's gate unchanged.
  */
-import { decideSelection, selectTests } from '../readiness/test-selection.mjs';
+import { SELECTION_FLAG, pinnedMergeBase, decideLocalSelection, referencedTestNeedles } from '../readiness/test-selection.mjs';
 import { isPolicyCorePath } from './gate-config.mjs';
+
+/** Above this many `vitest related` targets the local gate runs the full suite instead (argv size; little saving). */
+export const MAX_RELATED_TARGETS = 300;
 
 /** The historical, always-safe fallback gate: the full unit suite plus the repo health gate. */
 export const FULL_GATE = 'npm run test:unit && npm run check:standards';
@@ -117,56 +121,103 @@ export function canScopeCheckStandards(changedFiles) {
 
 /**
  * Decide verify-lane's DEFAULT gate command from the actual diff against `base` (default `origin/main`).
- *   - the VITEST half: `shrink` ⇒ `npx vitest related <selected files> --run` — only the tests the PR's real diff
- *     affects, via vitest's own module graph (mirrors `test-selection.mjs`'s own CLI shell,
- *     `vitestRelatedSelectedFiles`, for consistency); `full` ⇒ `npm run test:unit` — the fail-safe direction: a
- *     sensitive/glob-edge/unlisted diff, an empty or unknown (git failure) changed set, or the selection flag
- *     explicitly off, ALL resolve here unchanged.
+ *   - the VITEST half (xpnhz4o — the LOCAL policy, `test-selection.mjs#decideLocalSelection`, NOT the CI
+ *     deny-by-default one): `shrink` ⇒ `npx vitest related <changed files + tests naming them> --run
+ *     --passWithNoTests`; `full` ⇒ `npm run test:unit` — only when a config / setup / dependency / shared-test-
+ *     helper file changed, a source file was deleted, the diff is empty or unknown, or `WE_DIFF_TEST_SELECTION=0`.
+ *     The CI deny-by-default list is deliberately NOT reused here: it made every `scripts/` change a full local
+ *     run, and CI (the authority) still runs the full suite regardless. {@link describeGate} states which it was.
  *   - the check:standards half: scoped to `--local --files=<changedFiles>` whenever
  *     {@link canScopeCheckStandards} allows it (#1937) — independently of the vitest half's mode, since it is a
  *     separately-safe, already-ratified mechanism, not gated behind the vitest shrink's not-yet-defaulted flag.
- * The selection flag defaults ON for this call site specifically (unless the ambient environment explicitly sets
- * it) — verify-lane does not require the operator to separately export `WE_DIFF_TEST_SELECTION` for its own
- * local gate; an explicit override (e.g. `WE_DIFF_TEST_SELECTION=0`) still wins. It governs only the vitest half.
+ * Selection is ON by default here; only an explicit `WE_DIFF_TEST_SELECTION=0` turns it off (vitest half only).
  * `scripts` (#3919): the target checkout's npm script names; omitted ⇒ WE-shaped (unchanged). See {@link composeGate}.
  * @param {{base?: string, runGit: (args:string[]) => string, env?: Record<string,string|undefined>, scripts?: Iterable<string>|null}} args
  * @returns {{ command: string, gateReasons: string[], decision: import('../readiness/test-selection.mjs').SelectionDecision & {changedFiles: string[]|null} }}
  */
 export function resolveDefaultGate({ base = 'origin/main', runGit, env = process.env, scripts } = {}) {
-  // The committed diff cannot account for staged or unstaged tracked edits (#3389).
-  // Like an unresolvable diff, dirty or unknown status must keep BOTH halves unscoped.
-  let statusReason;
-  try {
-    if (runGit(['status', '--porcelain', '--untracked-files=no']).trim()) {
-      statusReason = 'tracked working tree is dirty — full gate (committed diff omits uncommitted edits)';
-    }
-  } catch {
-    statusReason = 'could not read tracked working tree status — full gate (never shrink on unknown status)';
-  }
-  if (statusReason) {
-    return {
-      ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts }),
-      decision: {
-        changedFiles: null,
-        ...decideSelection({ changedFiles: [], flagEnabled: false }),
-        reasons: [statusReason],
-      },
-    };
-  }
-
-  const selectionEnv = { ...env };
-  if (selectionEnv.WE_DIFF_TEST_SELECTION === undefined) selectionEnv.WE_DIFF_TEST_SELECTION = '1';
-  const decision = selectTests({ base, runGit, env: selectionEnv });
+  // xpnhz4o — the changed set is the WORKING TREE against the pinned merge-base (tracked edits, staged or not,
+  // plus untracked files), not HEAD's committed diff. The gate runs against the working tree, so that is the set
+  // it must key on — and a fixer runs the gate BEFORE committing, which under the old "dirty ⇒ full" rule (#3389)
+  // meant every fixer gate was a full-suite run.
+  const diff = localChangedSet({ base, runGit });
+  const changedFiles = diff ? diff.changedFiles : null;
+  const optOut = String(env?.[SELECTION_FLAG] ?? '') === '0';
+  const local = decideLocalSelection({ changedFiles, deletedFiles: diff ? diff.deletedFiles : [], optOut });
 
   // #1937: scope only the local, non-authoritative fast-fail — the central, unscoped check:standards CI runs
   // against the real merged tree remains the actual authority and is untouched by this local shrink.
-  const checkStandardsCmd = canScopeCheckStandards(decision.changedFiles)
-    ? `npm run check:standards -- --local --files=${shellQuote(decision.changedFiles.join(','))}`
+  const checkStandardsCmd = canScopeCheckStandards(changedFiles)
+    ? `npm run check:standards -- --local --files=${shellQuote(changedFiles.join(','))}`
     : 'npm run check:standards';
 
-  if (decision.mode === 'shrink' && decision.selectedFiles.length > 0) {
-    const files = decision.selectedFiles.map(shellQuote).join(' ');
-    return { ...composeGate({ vitestCmd: `npx vitest related ${files} --run`, checkStandardsCmd, scripts }), decision };
+  if (local.mode === 'shrink') {
+    const referencedTests = testsNaming(referencedTestNeedles(local.relatedFiles), runGit);
+    const targets = Array.from(new Set([...local.relatedFiles, ...referencedTests])).sort();
+    // xpnhz4o review — a huge diff (a mass rename) would build a command line past the OS argv limit; at that
+    // size the selection saves little anyway, so fall back to the full suite cleanly and say so.
+    if (targets.length > MAX_RELATED_TARGETS) {
+      const reasons = [`${targets.length} selection targets (over ${MAX_RELATED_TARGETS}) — full suite (too large to pass to \`vitest related\`; the selection would save little)`];
+      return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision: { ...local, mode: 'full', reasons, changedFiles, referencedTests, targets: [] } };
+    }
+    const decision = { ...local, changedFiles, referencedTests, targets };
+    // `--passWithNoTests`: a diff whose files no test reaches (docs, a backlog card) is a pass, not a failure.
+    const vitestCmd = `npx vitest related ${targets.map(shellQuote).join(' ')} --run --passWithNoTests`;
+    return { ...composeGate({ vitestCmd, checkStandardsCmd, scripts }), decision };
   }
-  return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision };
+  return { ...composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd, scripts }), decision: { ...local, changedFiles, referencedTests: [], targets: [] } };
+}
+
+/**
+ * The working-tree changed set against the pinned merge-base: `{changedFiles, deletedFiles}`, or `null` when git
+ * cannot answer (the caller then runs the full suite). Pure given `runGit`.
+ * @param {{base: string, runGit: (args: string[]) => string}} args
+ * @returns {{changedFiles: string[], deletedFiles: string[]}|null}
+ */
+export function localChangedSet({ base = 'origin/main', runGit }) {
+  const mergeBase = pinnedMergeBase({ base, runGit });
+  if (!mergeBase) return null;
+  const lines = (out) => String(out).split('\n').map((s) => s.trim()).filter(Boolean);
+  try {
+    const tracked = lines(runGit(['diff', '--name-only', mergeBase]));
+    const deletedFiles = lines(runGit(['diff', '--name-only', '--diff-filter=D', mergeBase]));
+    const untracked = lines(runGit(['ls-files', '--others', '--exclude-standard']));
+    return { changedFiles: Array.from(new Set([...tracked, ...untracked])).sort(), deletedFiles };
+  } catch {
+    return null;
+  }
+}
+
+/** The vitest test files that contain any of `needles` as a fixed string (`git grep -l -F`). `git grep` exits 1
+ *  on no match, which `runGit` surfaces as a throw — that is "no referencing tests", not an error. Pure given
+ *  `runGit`. */
+export function testsNaming(needles, runGit) {
+  if (!needles.length) return [];
+  const args = ['grep', '-l', '-F'];
+  for (const n of needles) args.push('-e', n);
+  args.push('--', '*.test.ts', '*.test.tsx', '*.test.js', '*.test.mjs', '*.test.cjs', '*.test.mts');
+  try {
+    return String(runGit(args)).split('\n').map((s) => s.trim()).filter(Boolean).sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * One human-readable block describing what the default gate decided — printed by `verify-lane.mjs` before the
+ * gate runs, so an agent (and the operator reading its transcript) can see whether this was a SELECTED run or a
+ * FULL-SUITE fallback, and why. Pure.
+ * @param {{command: string, decision: object}} gate - `resolveDefaultGate`'s return value
+ * @returns {string}
+ */
+export function describeGate({ command, decision }) {
+  const out = [];
+  if (decision.mode === 'shrink') {
+    out.push(`verify-lane gate: SELECTED tests only — ${decision.changedFiles.length} changed path(s) → \`vitest related\` on ${decision.targets.length} target(s) (${decision.referencedTests.length} added because they name a changed file). CI still runs the full suite.`);
+  } else {
+    out.push('verify-lane gate: FULL SUITE (fallback) — the diff could not be safely scoped:');
+  }
+  for (const r of decision.reasons || []) out.push(`  - ${r}`);
+  out.push(`  command: ${command}`);
+  return out.join('\n');
 }

@@ -1,0 +1,9 @@
+{
+  "id": "full-suite-escape-leading",
+  "cmd": "WE_FULL_SUITE_OK=1 npm run test:unit",
+  "ctx": {},
+  "basis": "xpnhz4o — the logged escape, as a LEADING assignment only.",
+  "expect": {
+    "reason": null
+  }
+}

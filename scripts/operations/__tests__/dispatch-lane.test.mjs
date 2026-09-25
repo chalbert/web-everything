@@ -2278,7 +2278,9 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     const { prompt } = fillBrief(FIX_BRIEF, { ...BASE_FIX_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
     // The exact literal `fix-agent-brief.md` hardcoded before #3960 (`"WE #{{ITEM_NUM}}: address …"`).
     expect(prompt).toContain('printf \'%s\\n\' "WE #2608: address review:changes on PR #701 — <one-line what you fixed>"');
-    expect(prompt).toContain('npm run test:unit && npm run check:standards');
+    // xpnhz4o — the gate is the diff-selected verify-lane run, never the bare full suite.
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate`);
+    expect(prompt).not.toContain('npm run test:unit && npm run check:standards');
     expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/lane-pool.mjs" acquire --repo=. --lane=5`);
     expect(prompt).toContain('gh pr view 701 --json title,body,comments --repo chalbert/web-everything');
   });
@@ -2287,7 +2289,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     const tokens = briefTokensForRepo('we', { itemNum: '2638', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
     const { prompt } = fillBrief(CI_HEAL_BRIEF, { ...BASE_CI_HEAL_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS);
     expect(prompt).toContain('printf \'%s\\n\' "WE #2638: CI-heal PR #743 — rebase onto main + repair the failing check"');
-    expect(prompt).toContain('npm run test:unit && npm run check:standards');
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate`);
   });
 
   it('for plateau-app, every tool call is qualified with the WE checkout root, never the plateau checkout', () => {
@@ -2296,7 +2298,7 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     });
     expect(tokens.REPO).toBe('chalbert/plateau-app');
     expect(tokens.LANE_REPO).toBe('/home/test/workspace/plateau-app');
-    expect(tokens.GATE_COMMAND).toBe('npm test');
+    expect(tokens.GATE_COMMAND).toBe(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.`); // verify-lane picks `npm test` itself (#3919)
     const { prompt, unknownTokens } = fillBrief(FIX_BRIEF, { ...BASE_FIX_VALUES, ...tokens }, BRIEF_REQUIRED_BY_KIND.fix, undefined, REPO_AWARE_VALUE_PATTERNS);
     for (const name of BRIEF_REQUIRED_BY_KIND.fix) expect(prompt).not.toContain(`{{${name}}}`);
     expect(unknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
@@ -2306,8 +2308,8 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/conveyor/rearm-review.mjs" 701 --repo=chalbert/plateau-app`);
     expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/operations/completion-cli.mjs" report --repo=chalbert/plateau-app`);
     expect(prompt).not.toContain('node "/home/test/workspace/plateau-app/scripts');
-    // The plateau gate runs, not WE's hardcoded `check:standards`.
-    expect(prompt).toContain('npm test          # this repo\'s own gate');
+    // The gate runs against the plateau lane (`--repo=.`), with WE's own verify-lane choosing plateau's scripts.
+    expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate (chalbert/plateau-app's package.json`);
     expect(prompt).toContain('printf \'%s\\n\' "PLATEAU #2608: address review:changes on PR #701 — <one-line what you fixed>"');
   });
 });

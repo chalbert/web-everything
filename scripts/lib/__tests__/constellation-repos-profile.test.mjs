@@ -9,7 +9,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { repoProfile, gateFor, briefTokensForRepo } from '../repo-profile.mjs';
-import { composeGate } from '../verify-lane-gate.mjs';
 
 const HOME = '/home/test';
 
@@ -105,35 +104,20 @@ describe('gateFor', () => {
     expect(result).toBeNull();
   });
 
-  it('builds the gate from the checkout\'s OWN package.json scripts via composeGate — never a second derivation', () => {
-    const packageJson = JSON.stringify({ scripts: { test: 'vitest run' } });
-    const result = gateFor('plateau-app', {
+  it('xpnhz4o — the gate is WE\'s diff-selected verify-lane `run` against the agent\'s cwd, for every repo (never the bare full suite)', () => {
+    const plateau = gateFor('plateau-app', {
       home: HOME,
       checkoutExists: (p) => { expect(p).toBe(`${HOME}/workspace/plateau-app`); return true; },
-      readPackageJson: (p) => { expect(p).toBe(`${HOME}/workspace/plateau-app/package.json`); return packageJson; },
     });
-    const expected = composeGate({
-      vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts: ['test'],
-    }).command;
-    expect(result).toBe(expected);
-    expect(result).toBe('npm test'); // plateau-app has no test:unit/check:standards today — full-fallback + skip
+    expect(plateau).toMatch(/^node \/\S+\/scripts\/verify-lane\.mjs run --repo=\.$/);
+    const we = gateFor('we', { checkoutExists: () => true });
+    expect(we).toBe(plateau);
+    expect(we).not.toContain('test:unit');
+    expect(gateFor('we', { checkoutExists: () => true, weRoot: '/opt/we' })).toBe('node /opt/we/scripts/verify-lane.mjs run --repo=.');
   });
 
-  it('a WE-shaped checkout (both scripts) gets the unabridged historical gate', () => {
-    const packageJson = JSON.stringify({ scripts: { 'test:unit': 'vitest run', 'check:standards': 'node scripts/check-standards.mjs' } });
-    const result = gateFor('we', {
-      checkoutExists: () => true,
-      readPackageJson: () => packageJson,
-    });
-    expect(result).toBe('npm run test:unit && npm run check:standards');
-  });
-
-  it('falls back gracefully when package.json is missing/unreadable (treated as WE-shaped, unchanged default)', () => {
-    const result = gateFor('we', {
-      checkoutExists: () => true,
-      readPackageJson: () => { throw new Error('ENOENT'); },
-    });
-    expect(result).toBe('npm run test:unit && npm run check:standards');
+  it('the gate string is brief-safe (no quote / backtick / $ — BRIEF_FREE_TEXT_VALUE_RE)', () => {
+    expect(gateFor('we', { checkoutExists: () => true })).toMatch(/^[^`$"\\\n]+$/);
   });
 });
 
@@ -152,7 +136,7 @@ describe('briefTokensForRepo', () => {
     expect(tokens).toEqual({
       REPO: 'chalbert/web-everything',
       LANE_REPO: '.',
-      GATE_COMMAND: 'npm run test:unit && npm run check:standards',
+      GATE_COMMAND: expect.stringMatching(/\/scripts\/verify-lane\.mjs run --repo=\.$/),
       WE_ROOT: expect.any(String),
       ATTRIBUTION: 'WE #3960',
     });
@@ -174,7 +158,7 @@ describe('briefTokensForRepo', () => {
     });
     expect(tokens.REPO).toBe('chalbert/plateau-app');
     expect(tokens.LANE_REPO).toBe('/home/test/workspace/plateau-app');
-    expect(tokens.GATE_COMMAND).toBe('npm test'); // no test:unit/check:standards script — see `gateFor`'s own tests
+    expect(tokens.GATE_COMMAND).toBe(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.`); // verify-lane picks `npm test` itself (#3919)
     expect(tokens.ATTRIBUTION).toBe('PLATEAU #3960');
     expect(tokens.WE_ROOT.startsWith('/')).toBe(true);
     expect(tokens.WE_ROOT).not.toBe(tokens.LANE_REPO);

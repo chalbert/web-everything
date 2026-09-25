@@ -249,7 +249,8 @@ A generic "review this PR" gets a generic review. Every mandate that found somet
 4. **The mutation instruction**: for every guarantee stated in prose, break the guarded line and confirm a
    NAMED test reddens. A test that stays green with the behaviour removed is decorative and is a finding.
 
-Also state the gate (`npm run test:unit -- --shard=1/2` then `2/2`, FOREGROUND — `npm test` is watch mode),
+Also state the gate (`node scripts/verify-lane.mjs run`, FOREGROUND — the diff-selected tests; a bare full-suite
+run is denied by the Bash guard, xpnhz4o, and CI runs the full suite anyway),
 and that the findings body is **mandatory** on a bounce.
 
 ## What to do with a verdict
