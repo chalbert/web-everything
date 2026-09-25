@@ -30,7 +30,9 @@ import { fileURLToPath } from 'node:url';
 // skips the #3461 admission queue) than every arm that predates it. Older corpora asserting "always allowed"
 // or "untouched in a lane" for a raw command never anticipated this new denial, so both this predicate and the
 // exclusion pattern it powers are shared module-wide rather than re-derived per describe block.
-const isRawHeavyVerdict = (verdict) => /heavy-command admission queue/.test(String(verdict || ''));
+const isRawHeavyVerdict = (verdict) => /heavy-command admission queue|bare FULL-SUITE unit run/.test(String(verdict || ''));
+/** xpnhz4o — the bare full-suite deny specifically. */
+const isFullSuiteVerdict = (verdict) => /bare FULL-SUITE unit run/.test(String(verdict || ''));
 
 describe('guard-bash — backgrounded direct tasks are denied (#3383)', () => {
   it('isDirectTaskInvocation matches either exact script operand, not a mention or a different script', () => {
@@ -181,7 +183,10 @@ describe('guard-bash — the raw heavy spellings join the verification set (xaip
       expect(backgroundedVerificationReason(`${c} &`)).toMatch(/never backgrounded/);
     }
     expect(backgroundedVerificationReason('node scripts/readiness/heavy-admission.mjs run -- npx vitest run', true)).toMatch(/never backgrounded/);
-    expect(decide('node scripts/readiness/heavy-admission.mjs run -- npx vitest run')).toBeNull();
+    // xpnhz4o — the wrapped WHOLE-suite run is now denied in the foreground too (bare full suite); a wrapped
+    // targeted run is still allowed.
+    expect(decide('node scripts/readiness/heavy-admission.mjs run -- npx vitest run')).toMatch(/bare FULL-SUITE/);
+    expect(decide('node scripts/readiness/heavy-admission.mjs run -- npx vitest run a.test.mjs')).toBeNull();
   });
   it('xxna58l (#3383): the RAW entries it denies in the foreground are denied for the admission-queue reason specifically, and backgrounding them is STILL separately refused too', () => {
     const nowDeniedInForeground = RAW.filter((c) => isRawHeavyVerdict(decide(c)));
@@ -190,7 +195,9 @@ describe('guard-bash — the raw heavy spellings join the verification set (xaip
       'npx playwright test', 'npx playwright test tests/a11y',
     ]);
     for (const c of nowDeniedInForeground) {
-      expect(decide(c)).toMatch(/heavy-admission\.mjs run/);
+      // xpnhz4o — a whole-suite `vitest run` now hits the bare-full-suite arm (which names the diff-selected
+      // gate); playwright keeps the admission-queue message.
+      expect(decide(c)).toMatch(isFullSuiteVerdict(decide(c)) ? /verify-lane\.mjs run/ : /heavy-admission\.mjs run/);
       expect(backgroundedVerificationReason(c, true)).toMatch(/never backgrounded/); // still ALSO true
     }
   });
@@ -1573,7 +1580,7 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'echo hi > /tmp/out.log', 'echo hi > /dev/null', 'echo hi > "/private/tmp/claude-501/s.txt"',
     ],
     'non-writes that merely LOOK like writes': [
-      'git commit -m "fix > bug"', 'git commit -m "npm run build"', 'npm test 2>&1',
+      'git commit -m "fix > bug"', 'git commit -m "npm run build"', 'npm test -- a.test.mjs 2>&1',
       'echo "a > b"', 'sed -n "1,5p" config/app.json', 'grep -rn ">" src/',
       'node scripts/backlog.mjs list', 'git status', 'vite dev', 'vite preview',
       'perl -Mlist::Util -e "print 1" data.txt',
@@ -1660,7 +1667,7 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       "printf '%s\\n' \"a\\\"b\"",
       'echo "a\\"b" > /tmp/out.log',
       'git commit -m "guard: reject \\"a|b\\" input" && npm run build:check',
-      "echo $'a\\'b' && npm run test:unit",
+      "echo $'a\\'b' && npm run test:unit -- a.test.mjs",
     ],
     // #2994 r2 precision mirror — the exec/dlx rewrite must not turn every flagged runner form into a deny:
     // what matters is the TOOL it lands on, not that a flag was present.
@@ -1686,7 +1693,7 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'N=$(gh pr list --json number --jq "length"); echo $N',
       'test -n "$(git status --porcelain)" && echo dirty',
       'echo `git rev-parse HEAD`', 'X=`date +%s`; echo $X',
-      'bash -c "npm run test:unit"', 'sh -c "git status"', 'bash -lc "node --version"',
+      'bash -c "npm run test:unit -- a.test.mjs"', 'sh -c "git status"', 'bash -lc "node --version"',
       'bash scripts/setup.sh', 'eval "$(direnv hook bash)"', 'eval "echo hi"',
       'echo "$(npm run build:check)"', 'for f in $(ls scripts); do echo $f; done',
       // a `"…"` script string arrives with its `\"` escapes RESOLVED, exactly as the inner shell sees it —
@@ -1701,12 +1708,12 @@ describe('guard-bash — #2788 r3: equivalent spellings decide identically', () 
       'MAIN_PUSH_OK=1 bash -c "git push origin main"',
     ],
     'a subshell with a trailing token whose command writes NOTHING (r5 F2)': [
-      '(cd /tmp && ls) >/dev/null', '(npm run test:unit) 2>&1', '(git status; git diff) | head -40',
+      '(cd /tmp && ls) >/dev/null', '(npm run test:unit -- a.test.mjs) 2>&1', '(git status; git diff) | head -40',
       '{ echo a; echo b; } > /tmp/out.txt', '(eleventy --version) >/dev/null',
       '(eleventy --dryrun) 2>/dev/null', '(npm run build:check) >/dev/null', '(git status) #x',
     ],
     'a runner exec/dlx form whose tool writes nothing (#2994 r2)': [
-      'npm exec --package=vitest vitest run', 'npm exec -- tsc --noEmit', 'pnpm exec eslint src/',
+      'npm exec --package=vitest vitest run a.test.mjs', 'npm exec -- tsc --noEmit', 'pnpm exec eslint src/',
       'npm exec --package=vite vite preview', 'yarn workspace web test', 'pnpm --filter web exec eslint .',
       'npm run --workspace=web test:unit', "npm exec -c 'echo build'",
       'npm exec --package=esbuild esbuild --version',
@@ -2308,7 +2315,7 @@ describe('commit identity override (#3269)', () => {
     // A `git config` write on its own is legitimate — the machine's identity is the operator's to set.
     for (const cmd of [
       'git add file.txt && git commit -m hi',
-      'npm test && git commit -m ok',
+      'npm test -- a.test.mjs && git commit -m ok',
       'git config user.email noreply@anthropic.com',
       'git config user.email x@y && git log',
     ]) expect(decide(cmd, {}), cmd).toBeNull();
@@ -2795,8 +2802,8 @@ describe('guard-bash — a delivery agent may never run the mechanical lifecycle
 
   it('does NOT over-block ordinary build/test/git commands for a delivery-agent session', () => {
     const ordinary = [
-      'npm test',
-      'npm run test:unit',
+      'npm test -- scripts/operations/__tests__/deliver-item-wrapper.test.mjs', // xpnhz4o: a BARE full suite is denied for every session
+      'npm run test:unit -- scripts/operations/__tests__/deliver-item-wrapper.test.mjs',
       'npm run check:standards',
       'node --test scripts/operations/__tests__/deliver-item-wrapper.test.mjs',
       'git status',
@@ -3036,7 +3043,7 @@ describe('rawHeavyCommandReason — a direct vitest/playwright/eleventy run skip
 
   it('denies a raw whole-suite `vitest run` (no files named), bare or via npx', () => {
     expect(rawHeavyCommandReason('vitest run')).toMatch(/WHOLE suite/);
-    expect(rawHeavyCommandReason('npx vitest run')).toMatch(/npm run test:unit/);
+    expect(rawHeavyCommandReason('npx vitest run')).toMatch(/verify-lane\.mjs run/); // xpnhz4o — never steers to the (denied) bare test:unit
     expect(rawHeavyCommandReason('npx vitest run --coverage')).toMatch(/WHOLE suite/); // a flag alone names no file
   });
 
@@ -3087,11 +3094,11 @@ describe('rawHeavyCommandReason — a direct vitest/playwright/eleventy run skip
   });
 
   it('reaches decide() and reason() — the real enforcement points', () => {
-    expect(String(decide('npx vitest run'))).toMatch(/npm run test:unit/);
+    expect(String(decide('npx vitest run'))).toMatch(/bare FULL-SUITE.*verify-lane\.mjs run/s); // xpnhz4o arm runs first
     expect(String(reason('npx playwright test'))).toMatch(/heavy-admission\.mjs run/);
     expect(decide('npx vitest run scripts/foo.test.mjs')).toBeNull();
     // chained: the deny fires even alongside an otherwise-benign command
-    expect(String(decide('git status && npx vitest run'))).toMatch(/WHOLE suite/);
+    expect(String(decide('git status && npx vitest run'))).toMatch(/bare FULL-SUITE/);
   });
 });
 

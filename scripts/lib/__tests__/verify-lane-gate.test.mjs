@@ -13,132 +13,144 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { resolveDefaultGate, canScopeCheckStandards, composeGate, FULL_GATE } from '../verify-lane-gate.mjs';
+import { resolveDefaultGate, canScopeCheckStandards, composeGate, describeGate, FULL_GATE, MAX_RELATED_TARGETS } from '../verify-lane-gate.mjs';
 
-/** A synthetic git runner: `status` returns tracked status; `merge-base` resolves to a fixed sha; `diff --name-only` returns the configured
- *  changed-file list. Mirrors test-selection.test.mjs's injectable-runGit convention — no real git process. */
-function fakeGit(changedFiles, trackedStatus = '') {
+/** A synthetic git runner for the xpnhz4o working-tree changed set: `merge-base` resolves to a fixed sha;
+ *  `diff --name-only <sha>` returns the (working-tree) changed files; `--diff-filter=D` the deleted ones;
+ *  `ls-files --others` the untracked ones; `grep -l -F -e <needle>…` the test files naming a needle (exit 1 —
+ *  a throw — when none do, exactly as real `git grep`). No real git process. */
+function fakeGit(changedFiles, { deleted = [], untracked = [], grepHits = {} } = {}) {
   return (args) => {
-    if (args[0] === 'status') {
-      expect(args).toEqual(['status', '--porcelain', '--untracked-files=no']);
-      return trackedStatus;
-    }
     if (args[0] === 'merge-base') return 'deadbeef';
-    if (args[0] === 'diff') return changedFiles.join('\n');
+    if (args[0] === 'diff' && args.includes('--diff-filter=D')) return deleted.join('\n');
+    if (args[0] === 'diff') {
+      expect(args).toEqual(['diff', '--name-only', 'deadbeef']);
+      return changedFiles.join('\n');
+    }
+    if (args[0] === 'ls-files') return untracked.join('\n');
+    if (args[0] === 'grep') {
+      const needles = args.filter((_, i) => args[i - 1] === '-e');
+      const hits = Array.from(new Set(needles.flatMap((n) => grepHits[n] || [])));
+      if (!hits.length) throw new Error('git grep: exit 1 (no match)');
+      return hits.join('\n');
+    }
     throw new Error(`unexpected git invocation in test: ${args.join(' ')}`);
   };
 }
 
-describe('resolveDefaultGate (#3372) — verify-lane default gate wired to diff-driven selection', () => {
-  it('a shrinkable diff (docs only) invokes `vitest related` AND scopes check:standards (#1937)', () => {
+describe('resolveDefaultGate (xpnhz4o) — the LOCAL gate runs only the diff-selected tests', () => {
+  it('a scripts/ change (the everyday PR) SELECTS: vitest related on it + the tests naming it, never `npm run test:unit`', () => {
+    const { command, decision } = resolveDefaultGate({
+      runGit: fakeGit(['scripts/verify-lane.mjs'], { grepHits: { 'verify-lane.mjs': ['scripts/__tests__/verify-lane.test.mjs'] } }),
+      env: {},
+    });
+    expect(decision.mode).toBe('shrink');
+    expect(decision.referencedTests).toEqual(['scripts/__tests__/verify-lane.test.mjs']);
+    expect(command).toBe("npx vitest related 'scripts/__tests__/verify-lane.test.mjs' 'scripts/verify-lane.mjs' --run --passWithNoTests && npm run check:standards -- --local --files='scripts/verify-lane.mjs'");
+    expect(command).not.toContain('test:unit');
+  });
+
+  it('a docs-only diff selects (and passes with no tests) and scopes check:standards (#1937)', () => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md']), env: {} });
     expect(decision.mode).toBe('shrink');
-    expect(command).toContain('vitest related');
-    expect(command).toContain("'docs/readme.md'");
-    expect(command).not.toContain('npm run test:unit');
-    expect(command).toContain("npm run check:standards -- --local --files='docs/readme.md'");
+    expect(command).toBe("npx vitest related 'docs/readme.md' --run --passWithNoTests && npm run check:standards -- --local --files='docs/readme.md'");
   });
 
-  it('FAIL-SAFE (vitest half only): a blast-radius surface with no allow-list entry still runs `npm run test:unit`, but check:standards SCOPES — it is not on the gate-self/policy-core list (#3395)', () => {
-    // scripts/verify-lane.mjs is a blast-radius (broad `scripts/`) surface for the VITEST shrink's module-graph
-    // soundness concern, but it is not in gate-config.mjs's narrow policy-core roster — so per #1937 the
-    // check:standards half, whose --local --files= mode never skips a check on a file IN the given set, may
-    // still scope to it.
-    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['scripts/verify-lane.mjs']), env: {} });
-    expect(decision.mode).toBe('full');
-    expect(decision.humanRequired).toBe(true);
-    expect(command).toBe("npm run test:unit && npm run check:standards -- --local --files='scripts/verify-lane.mjs'");
-    expect(command).not.toBe(FULL_GATE);
-  });
-
-  it('FAIL-SAFE (vitest half only): an unlisted surface (neither sensitive nor allow-listed) still runs `npm run test:unit`, but check:standards SCOPES (deny-by-default only gates the vitest half)', () => {
-    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['src/components/widget.ts']), env: {} });
-    expect(decision.mode).toBe('full');
-    expect(command).toBe("npm run test:unit && npm run check:standards -- --local --files='src/components/widget.ts'");
-  });
-
-  it('a mixed diff (one shrinkable + one supply-chain file) runs `npm run test:unit` in full, but check:standards still SCOPES to both — neither is `backlog/` nor gate-self/policy-core', () => {
-    const { command, decision } = resolveDefaultGate({
-      runGit: fakeGit(['docs/readme.md', 'package.json']),
-      env: {},
-    });
-    expect(decision.mode).toBe('full'); // package.json is supply-chain-sensitive for the vitest shrink
-    expect(command).toBe("npm run test:unit && npm run check:standards -- --local --files='docs/readme.md,package.json'");
-  });
-
-  it('FAIL-SAFE (both halves): a diff touching `backlog/` keeps check:standards unscoped — the stranded-hash false-red surface #1937/#3395 routes around (own diff, extra margin)', () => {
-    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['backlog/100-example.md']), env: {} });
-    expect(canScopeCheckStandards(decision.changedFiles)).toBe(false);
-    expect(command).toBe(FULL_GATE);
-  });
-
-  it('FAIL-SAFE (both halves): a diff touching a gate-self/policy-core path keeps check:standards unscoped — the gate must see the unscoped signal on a change to itself', () => {
-    // review-escalation.mjs is `policy` tier in gate-config.mjs's TRUST_CHAIN — isGateSelfPath/isPolicyCorePath.
-    const { command, decision } = resolveDefaultGate({
-      runGit: fakeGit(['scripts/lib/review-escalation.mjs']),
-      env: {},
-    });
-    expect(canScopeCheckStandards(decision.changedFiles)).toBe(false);
-    expect(command).toBe(FULL_GATE);
-  });
-
-  it('defaults the selection flag ON for its own decision even when the ambient env has not set it', () => {
-    // verify-lane must not require the operator to separately export WE_DIFF_TEST_SELECTION for its own gate.
-    const { decision } = resolveDefaultGate({ runGit: fakeGit(['research/topic.md']), env: {} });
+  it('keys on the WORKING TREE: uncommitted and untracked files are in the selection (a fixer gates before committing)', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs'], { untracked: ['scripts/__tests__/a-new.test.mjs'] }), env: {} });
     expect(decision.mode).toBe('shrink');
+    expect(decision.changedFiles).toEqual(['scripts/__tests__/a-new.test.mjs', 'scripts/a.mjs']);
+    expect(command).toContain("'scripts/__tests__/a-new.test.mjs' 'scripts/a.mjs'");
   });
 
-  it('an explicit ambient opt-out (WE_DIFF_TEST_SELECTION=0) still runs `npm run test:unit` in full, but check:standards still SCOPES — #1937 scoping is independent of the not-yet-defaulted vitest-selection flag', () => {
-    const { command, decision } = resolveDefaultGate({
-      runGit: fakeGit(['docs/readme.md']),
-      env: { WE_DIFF_TEST_SELECTION: '0' },
-    });
+  it.each([
+    ['package.json'], ['package-lock.json'], ['vitest.config.ts'], ['vitest.setup.ts'], ['vitest.shared.ts'],
+    ['tsconfig.json'], ['scripts/__tests__/helpers/fake-gh.mjs'], ['scripts/operations/__tests__/import-graph.mjs'],
+  ])('FALLBACK: %s (config / setup / dependency / shared test helper) runs the FULL suite and says why', (file) => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs', file]), env: {} });
+    expect(decision.mode).toBe('full');
+    expect(decision.triggerFiles).toEqual([file]);
+    expect(decision.reasons.join(' ')).toContain(file);
+    expect(command.startsWith('npm run test:unit && ')).toBe(true);
+  });
+
+  it('FALLBACK: a deleted source file runs the full suite (its importers are unfindable); a deleted TEST file does not', () => {
+    const src = resolveDefaultGate({ runGit: fakeGit(['scripts/gone.mjs'], { deleted: ['scripts/gone.mjs'] }), env: {} });
+    expect(src.decision.mode).toBe('full');
+    expect(src.decision.deletedSourceFiles).toEqual(['scripts/gone.mjs']);
+    const test = resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs', 'scripts/__tests__/gone.test.mjs'], { deleted: ['scripts/__tests__/gone.test.mjs'] }), env: {} });
+    expect(test.decision.mode).toBe('shrink');
+    expect(test.command.split(' && ')[0]).toBe("npx vitest related 'scripts/a.mjs' --run --passWithNoTests");
+  });
+
+  it('PR #2680 review — a diff of ONLY deleted non-source files never emits a target-less `vitest related` (a false red)', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['docs/obsolete.md'], { deleted: ['docs/obsolete.md'] }), env: {} });
+    expect(decision.mode).toBe('shrink');
+    expect(decision.targets).toEqual([]);
+    expect(command).not.toMatch(/vitest related\s+--run/);
+    expect(command.split(' && ')[0]).toMatch(/^echo .*vitest half skipped/);
+  });
+
+  it('PR #2680 review — reference discovery greps every vitest test suffix (jsx / cts included)', () => {
+    let seen = null;
+    const git = fakeGit(['scripts/tool.mjs']);
+    resolveDefaultGate({ runGit: (args) => { if (args[0] === 'grep') seen = args; return git(args); }, env: {} });
+    for (const spec of ['*.test.ts', '*.test.tsx', '*.test.jsx', '*.test.mjs', '*.test.cjs', '*.test.cts']) expect(seen).toContain(spec);
+  });
+
+  it('a backlog/ card selects for vitest but keeps check:standards UNSCOPED (the #1937/#3395 margin), and never greps ~140 fixture tests for `backlog`', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['backlog/100-example.md'], { grepHits: { backlog: ['x.test.mjs'] } }), env: {} });
+    expect(decision.mode).toBe('shrink');
+    expect(decision.referencedTests).toEqual([]);
+    expect(command).toBe("npx vitest related 'backlog/100-example.md' --run --passWithNoTests && npm run check:standards");
+  });
+
+  it('a change under a glob-discovered root (demos/) adds the tests that name the root', () => {
+    const { decision } = resolveDefaultGate({ runGit: fakeGit(['demos/loan/app.ts'], { grepHits: { demos: ['scripts/__tests__/demo-registry.test.mjs'] } }), env: {} });
+    expect(decision.referencedTests).toEqual(['scripts/__tests__/demo-registry.test.mjs']);
+  });
+
+  it('a gate-self/policy-core path keeps check:standards unscoped (the gate sees the whole-repo signal on a change to itself)', () => {
+    const { command } = resolveDefaultGate({ runGit: fakeGit(['scripts/lib/review-escalation.mjs']), env: {} });
+    expect(command).toMatch(/--passWithNoTests && npm run check:standards$/);
+  });
+
+  it('an explicit opt-out (WE_DIFF_TEST_SELECTION=0) runs the full suite; check:standards still scopes', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md']), env: { WE_DIFF_TEST_SELECTION: '0' } });
     expect(decision.mode).toBe('full');
     expect(command).toBe("npm run test:unit && npm run check:standards -- --local --files='docs/readme.md'");
   });
 
-  it('FAIL-SAFE (both halves): a git failure (no computable diff) falls back to the FULL suite, never silently shrinks or scopes', () => {
-    const throwingGit = (args) => {
-      if (args[0] === 'status') return '';
-      throw new Error('no such ref');
-    };
-    const { command, decision } = resolveDefaultGate({ runGit: throwingGit, env: {} });
+  it('FAIL-SAFE: a git failure (no computable diff) falls back to FULL_GATE, never shrinks or scopes', () => {
+    const { command, decision } = resolveDefaultGate({ runGit: () => { throw new Error('no such ref'); }, env: {} });
     expect(decision.mode).toBe('full');
     expect(decision.changedFiles).toBe(null);
     expect(command).toBe(FULL_GATE);
   });
 
-  it('FAIL-SAFE (both halves): an empty changed set falls back to the FULL suite, never scopes on nothing', () => {
+  it('FAIL-SAFE: an empty changed set falls back to FULL_GATE', () => {
     const { command, decision } = resolveDefaultGate({ runGit: fakeGit([]), env: {} });
     expect(decision.mode).toBe('full');
     expect(decision.changedFiles).toEqual([]);
     expect(command).toBe(FULL_GATE);
   });
 
-  it.each([' M src/components/widget.ts\n', 'M  src/components/widget.ts\n'])(
-    'FAIL-SAFE (both halves): dirty tracked status %j forces FULL_GATE despite a shrinkable committed diff (#3389)',
-    (trackedStatus) => {
-      const { command, decision } = resolveDefaultGate({
-        runGit: fakeGit(['docs/readme.md'], trackedStatus),
-        env: {},
-      });
-      expect(decision.mode).toBe('full');
-      expect(decision.selectedFiles).toEqual([]);
-      expect(decision.changedFiles).toBe(null);
-      expect(command).toBe(FULL_GATE);
-    },
-  );
-
-  it('FAIL-SAFE (both halves): unreadable tracked status forces FULL_GATE despite a shrinkable committed diff', () => {
-    const cleanGit = fakeGit(['docs/readme.md']);
-    const runGit = (args) => {
-      if (args[0] === 'status') throw new Error('cannot read status');
-      return cleanGit(args);
-    };
-    const { command, decision } = resolveDefaultGate({ runGit, env: {} });
+  it('a diff too large to pass to `vitest related` (over MAX_RELATED_TARGETS) falls back to the full suite and says so', () => {
+    const many = Array.from({ length: MAX_RELATED_TARGETS + 1 }, (_, i) => `scripts/m${i}.mjs`);
+    const { command, decision } = resolveDefaultGate({ runGit: fakeGit(many), env: {} });
     expect(decision.mode).toBe('full');
-    expect(decision.changedFiles).toBe(null);
-    expect(command).toBe(FULL_GATE);
+    expect(decision.reasons.join(' ')).toMatch(/over 300/);
+    expect(command.startsWith('npm run test:unit && ')).toBe(true);
+  });
+
+  it('describeGate SAYS which it was: SELECTED with counts, or FULL SUITE (fallback) with the reason', () => {
+    const sel = describeGate(resolveDefaultGate({ runGit: fakeGit(['scripts/a.mjs']), env: {} }));
+    expect(sel).toMatch(/^verify-lane gate: SELECTED tests only — 1 changed path/);
+    expect(sel).toContain('CI still runs the full suite');
+    const full = describeGate(resolveDefaultGate({ runGit: fakeGit(['package.json']), env: {} }));
+    expect(full).toMatch(/^verify-lane gate: FULL SUITE \(fallback\)/);
+    expect(full).toContain('package.json');
+    expect(full).toContain('command: npm run test:unit');
   });
 });
 
@@ -150,7 +162,7 @@ const PLATEAU_APP_SCRIPTS = ['start', 'build', 'preview', 'test', 'check:render-
 describe('resolveDefaultGate per-repo scripts (#3919) — only run the npm scripts the checkout actually has', () => {
   const cases = [
     { name: 'shrinkable diff', files: ['docs/readme.md'] },
-    { name: 'full + scoped', files: ['src/components/widget.ts'] },
+    { name: 'full + scoped', files: ['package.json'] },
     { name: 'full + unscoped (backlog)', files: ['backlog/100-example.md'] },
     { name: 'empty diff', files: [] },
   ];
@@ -180,8 +192,8 @@ describe('resolveDefaultGate per-repo scripts (#3919) — only run the npm scrip
     expect(gateReasons.join(' ')).toMatch(/no `check:standards`/);
   });
 
-  it('a plateau-app checkout with a dirty tree also gets `npm test` (the dirty fallback is script-aware too)', () => {
-    const { command } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md'], ' M src/x.ts\n'), env: {}, scripts: PLATEAU_APP_SCRIPTS });
+  it('a plateau-app checkout with an uncommitted edit also gets `npm test` (the selection is WE-shaped; script-aware)', () => {
+    const { command } = resolveDefaultGate({ runGit: fakeGit(['docs/readme.md'], { untracked: ['src/x.ts'] }), env: {}, scripts: PLATEAU_APP_SCRIPTS });
     expect(command).toBe('npm test');
   });
 
@@ -222,6 +234,13 @@ describe('canScopeCheckStandards (#3395) — the check:standards-scoping predica
 });
 
 describe('verify-lane.mjs source wiring — the default gate actually calls resolveDefaultGate', () => {
+  it('xpnhz4o — prints describeGate before running, and `run` mode records no marker', () => {
+    const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
+    expect(src).toMatch(/process\.stderr\.write\(describeGate\(resolved\)/);
+    expect(src).toMatch(/if \(MODE !== 'run'\) writeMarker\(verifyStartBody/);
+    expect(src).toMatch(/const preStart = MODE === 'run' \? null : readMarker\(\)/);
+  });
+
   it('imports resolveDefaultGate from ./lib/verify-lane-gate.mjs and uses it to build the default GATE', () => {
     const src = readFileSync(resolve(process.cwd(), 'scripts/verify-lane.mjs'), 'utf8');
     expect(src).toMatch(/from ['"]\.\/lib\/verify-lane-gate\.mjs['"]/);

@@ -157,7 +157,7 @@
  * (guard-bash.test.mjs), and the whole table is differentially fuzzed against `origin/main` across the
  * three cwd/lease contexts.
  */
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, appendFileSync, mkdirSync } from 'node:fs';
 import { DECLARED_HOMES } from './operations/declared-homes.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -2229,14 +2229,30 @@ export function vitestRunFileTargetCount(tail) {
     // operator and its target is the next word — and neither is the separately-worded VALUE of a flag that takes
     // one (`--root <dir>`, `-t <name>`). Counting them pushed a one-file run over the limit.
     if (op) { i += 1; continue; }
-    if (t.startsWith('-')) { if (VITEST_VALUE_FLAGS.has(t)) i += 1; continue; }
+    if (t.startsWith('-')) {
+      if (VITEST_VALUE_FLAGS.has(t)) { i += 1; continue; }
+      // PR #2680 review — the value-flag list can never be complete, so also treat the word after an UNKNOWN
+      // `--flag` (no `=`) as its value when that word cannot be a file target anyway: a number / boolean, or the
+      // value of a dotted option (`--typecheck.tsconfig x.json`). Errs toward "not a target" (a deny).
+      const next = toks[i + 1];
+      if (next && !next.op && next.text && !next.text.startsWith('-') && !t.includes('=')
+        && (t.startsWith('--') && t.slice(2).includes('.') || /^(?:\d+(?:\.\d+)?%?|true|false)$/.test(next.text))) i += 1;
+      continue;
+    }
+    if (/^(?:\d+(?:\.\d+)?|true|false)$/.test(t)) continue;
+    // xpnhz4o review — `.`, `./`, `..`, `*`, `**` filter NOTHING (vitest substring-matches every path), so they
+    // are not a target: `npx vitest run .` is the whole suite and must count as zero.
+    if (/^[./*]+$/.test(t)) continue;
     n += 1;
   }
   return n;
 }
 
 /** The vitest flags whose value may be a separate word. A value written `--flag=value` is one token and needs no entry. */
-const VITEST_VALUE_FLAGS = new Set(['--root', '-r', '--dir', '--config', '-c', '--testNamePattern', '-t', '--reporter', '--project', '--outputFile', '--environment', '--shard', '--pool']);
+const VITEST_VALUE_FLAGS = new Set(['--root', '-r', '--dir', '--config', '-c', '--testNamePattern', '-t', '--reporter', '--project', '--outputFile', '--environment', '--shard', '--pool',
+  // xpnhz4o review — a missing value flag let its VALUE read as a file target (`vitest run --exclude x/**`).
+  '--exclude', '--testTimeout', '--hookTimeout', '--maxWorkers', '--minWorkers', '--retry', '--bail', '--mode', '--sequence.seed', '--browser.name', '--coverage.provider', '--coverage.reporter',
+  '--maxConcurrency', '--slowTestThreshold', '--teardownTimeout']);
 
 /**
  * Does a direct (unqueued) invocation of vitest/playwright/eleventy skip the #3461 admission queue? Pure,
@@ -2272,7 +2288,7 @@ export function rawHeavyCommandReason(segment, { primaryCwd = false } = {}) {
     if (vitestMatch) {
       const targets = vitestRunFileTargetCount(vitestMatch[1]);
       if (targets > 0 && targets <= RAW_VITEST_TARGETED_FILE_LIMIT) return null; // targeted — allowed directly
-      return `a direct \`vitest run\` of ${targets === 0 ? 'the WHOLE suite' : `${targets} files (over the ${RAW_VITEST_TARGETED_FILE_LIMIT}-file targeted limit)`} skips the #3461 heavy-command admission queue (xxna58l, #3383) — with several lanes contending for one host, an unqueued full run is exactly the load spike the queue exists to cap. Use the wrapped script instead: \`npm run test:unit\` (routes through \`node scripts/readiness/heavy-admission.mjs run\`). A targeted run of ${RAW_VITEST_TARGETED_FILE_LIMIT} or fewer explicit test files stays allowed directly, e.g. \`npx vitest run path/to/one.test.mjs\`.`;
+      return `a direct \`vitest run\` of ${targets === 0 ? 'the WHOLE suite' : `${targets} files (over the ${RAW_VITEST_TARGETED_FILE_LIMIT}-file targeted limit)`} skips the #3461 heavy-command admission queue (xxna58l, #3383) — with several lanes contending for one host, an unqueued full run is exactly the load spike the queue exists to cap. Use the diff-selected gate instead: \`node scripts/verify-lane.mjs run\` (runs only the tests your diff reaches, inside the admission queue — xpnhz4o), or queue your explicit list: \`node scripts/readiness/heavy-admission.mjs run -- npx vitest run <files>\`. A targeted run of ${RAW_VITEST_TARGETED_FILE_LIMIT} or fewer explicit test files stays allowed directly, e.g. \`npx vitest run path/to/one.test.mjs\`.`;
     }
     if (PLAYWRIGHT_TEST_HEAD.test(h)) {
       return 'a direct `playwright test` run skips the #3461 heavy-command admission queue (xxna58l, #3383). Use the wrapped script instead — `npm run test:integration` / `test:e2e` / `test:smoke` / `test:a11y` / `test:interaction`, whichever matches what you need (each already routes through `node scripts/readiness/heavy-admission.mjs run`). No targeted-run exception here: playwright has no fast single-spec mode cheap enough to justify skipping the queue.';
@@ -2293,6 +2309,104 @@ export function rawHeavyCommandReason(segment, { primaryCwd = false } = {}) {
     }
   }
   return null;
+}
+
+// ── xpnhz4o — a BARE FULL-SUITE run from an agent session ─────────────────────────────────────────────────
+// Operator instruction 2026-09-25: "run the minimum of unit tests … and ideally enforce". Observed that day:
+// dispatched fixers each ran `npm run test:unit` (10+ minutes), several at once, host load 1.8/core — lane pickup
+// starved and every review blocked. The admission queue (#3461) only SERIALISES that cost; this arm removes it:
+// the local gate is `verify-lane` (diff-selected tests, `test-selection.mjs#decideLocalSelection`, full-suite
+// fallback stated in its own output), and CI runs the full suite on every PR as the backstop.
+//
+// SCOPE — every session this hook runs in. A PreToolUse hook only ever runs inside a Claude Code session, so CI,
+// the drain, the verify runner (`verify-lane` spawns the suite as its own child, never through a Bash tool call)
+// and the operator's own terminal are untouched by construction. The existing `WE_DISPATCH_KIND` signal is NOT
+// enough here: the live offenders (reconcile-dispatched fixers) carry no `WE_DISPATCH_KIND` at all.
+//
+// ESCAPE — `WE_FULL_SUITE_OK=1` as a LEADING assignment on the segment (`hasLeadingEnvEscape`, so a mention
+// never disarms it). Every use is logged by the CLI (stderr, the hook's systemMessage, and a JSON line in the
+// gitignored `.conveyor/full-suite-escape.log`).
+
+/** The npm scripts that run the whole unit suite when given no file target. */
+const FULL_SUITE_SCRIPTS = new Set(['test', 'test:unit', 'test:coverage']);
+/** vitest subcommands that are not a suite run (or already select by diff). */
+const VITEST_NON_RUN_SUBCOMMANDS = new Set(['related', 'list', 'bench', 'init', 'typecheck']);
+const VITEST_INFO_FLAG = /^(?:--version|-v|--help|-h|--changed(?:=.*)?)$/;
+const HEAVY_ADMISSION_SCRIPT = /(?:^|\/)heavy-admission\.mjs$/;
+
+/**
+ * Does this canonical command head run the WHOLE unit suite (no file target)? Pure. Recognises `npm test` /
+ * `npm run test:unit` / `test:coverage` (and the pnpm/yarn/bun spellings), `vitest` / `vitest run` / `vitest
+ * watch` with no positional file filter, and any of those behind `heavy-admission.mjs run [--]`. A positional
+ * file target (after `--` for a runner) makes it a targeted run and it is NOT matched.
+ * @param {string} head a `canonicalCommand` result
+ * @returns {boolean}
+ */
+export function isFullSuiteHead(head, depth = 0) {
+  const h = String(head || '');
+  const words = headWords(h);
+  if (!words.length || depth > 3) return false;
+  const w = words.map((x) => x.text);
+  if (w[0] === 'node' && HEAVY_ADMISSION_SCRIPT.test(w[1] || '') && w[2] === 'run') {
+    const k = w[3] === '--' ? 4 : 3;
+    return k < words.length && isFullSuiteHead(canonicalCommand(h.slice(words[k].start)), depth + 1);
+  }
+  // PR #2680 review — `run-s test:unit` / `npm-run-all --parallel lint test:unit` run the same whole suite; a
+  // multi-script runner cannot forward a file target to one of its scripts, so any full-suite name is a deny.
+  if (MULTI_SCRIPT_RUNNERS.has(w[0])) {
+    const inv = runnerInvocation(h);
+    return !!(inv && Array.isArray(inv.names) && inv.names.some((n) => FULL_SUITE_SCRIPTS.has(n)));
+  }
+  if (RUNNER_NAMES.has(w[0])) {
+    let idx = -1;
+    if (w[0] === 'npm' && ['test', 't', 'tst'].includes(w[1])) { idx = 1; w[1] = 'test'; }
+    else {
+      const inv = runnerInvocation(h);
+      const name = inv && Array.isArray(inv.names) && inv.names.length === 1 ? inv.names[0] : null;
+      if (name) idx = w.indexOf(name, 1);
+      if (idx > 0 && (name === 't' || name === 'tst')) w[idx] = 'test';
+    }
+    if (idx < 0 || !FULL_SUITE_SCRIPTS.has(w[idx])) return false;
+    // `npm test -- run` forwards vitest's own `run` subcommand — a mode word, not a file target.
+    let from = idx + 1;
+    if (w[from] === '--') from += 1;
+    if (['run', 'watch', 'dev'].includes(w[from])) from += 1;
+    return vitestRunFileTargetCount(from < words.length ? h.slice(words[from].start) : '') === 0;
+  }
+  if (w[0] === 'vitest') {
+    if (VITEST_NON_RUN_SUBCOMMANDS.has(w[1])) return false;
+    if (w.slice(1).some((t) => VITEST_INFO_FLAG.test(t))) return false;
+    const from = ['run', 'watch', 'dev'].includes(w[1]) ? words[1].end : words[0].end;
+    return vitestRunFileTargetCount(h.slice(from)) === 0;
+  }
+  return false;
+}
+
+/**
+ * Deny reason for a bare full-suite run, or null. Pure. See the block comment above for scope and escape.
+ * @param {string} segment
+ * @returns {string|null}
+ */
+export function fullSuiteRunReason(segment) {
+  const s = String(segment || '').trim();
+  if (!s || hasLeadingEnvEscape(s, FULL_SUITE_ESCAPE_ENV)) return null;
+  const stripped = s.replace(/^(?:\w+=\S*\s+)*/, '');
+  const canon = canonicalCommand(s);
+  if (!isFullSuiteHead(stripped) && !isFullSuiteHead(canon)) return null;
+  return 'a bare FULL-SUITE unit run (`npm run test:unit` / `npm test` / `vitest` or `vitest run` with no file target, raw or through heavy-admission.mjs) is not allowed from an agent session (xpnhz4o). It takes 10+ minutes; several at once starved the host on 2026-09-25; CI already runs the full suite on every PR as the backstop. Run the diff-selected gate instead: `node scripts/verify-lane.mjs run` — only the tests your diff reaches, plus a scoped check:standards; it falls back to the full suite BY ITSELF, and says so, when a config / setup / dependency / shared-test-helper file changed (use plain `node scripts/verify-lane.mjs` to also record the landing marker). For one or two files: `npx vitest run <file>`. Escape, only when you truly need the whole suite here (logged): prefix the command with `WE_FULL_SUITE_OK=1`.';
+}
+
+/** The leading-assignment escape for {@link fullSuiteRunReason}. */
+export const FULL_SUITE_ESCAPE_ENV = 'WE_FULL_SUITE_OK';
+
+/** Did this (allowed) command use the full-suite escape on a segment that would otherwise be denied? Pure. */
+export function fullSuiteEscapeUsed(command) {
+  const { segments } = parseSegments(heredocScan(String(command || '')).text);
+  return segments.some((seg) => {
+    const s = String(seg || '').trim();
+    if (!hasLeadingEnvEscape(s, FULL_SUITE_ESCAPE_ENV)) return false;
+    return isFullSuiteHead(s.replace(/^(?:env\s+)?(?:\w+=\S*\s+)*/, '')) || isFullSuiteHead(canonicalCommand(s));
+  });
 }
 
 /** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
@@ -2551,6 +2665,11 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // context (unlike the arms below, which are gated on primaryCwd or a specific WE_DISPATCH_KIND value).
   const usageSecret = usageReportSecretReadReason(s, dispatchKind);
   if (usageSecret) return usageSecret;
+
+  // xpnhz4o — a bare full-suite run. Before the raw-heavy arm so a bare `vitest run` gets THIS message (which
+  // names the selected gate) rather than one steering to `npm run test:unit`, itself now denied here.
+  const fullSuite = fullSuiteRunReason(s);
+  if (fullSuite) return fullSuite;
 
   // xxna58l (#3383) — a raw, unqueued vitest/playwright/eleventy invocation. Checked next, right after the
   // usage-report check above: cheap, unconditional (the only cwd-gating is eleventy's own, INSIDE
@@ -3522,5 +3641,21 @@ if (IS_CLI) {
       process.stderr.write('guard-bash: ' + nudge + '\n');
     }
   } catch { /* never wedge on a nudge-computation fault */ }
+  // xpnhz4o — the full-suite escape is never silent: a line on stderr (the hook log) and a JSON line in the
+  // gitignored `.conveyor/full-suite-escape.log` of this checkout (`WE_FULL_SUITE_ESCAPE_LOG` overrides). Not on
+  // stdout: that channel carries at most ONE JSON document per call (the deny or the nudge above). try/catch: an
+  // audit-log fault must never wedge the agent.
+  try {
+    if (!r && fullSuiteEscapeUsed(cmd)) {
+      process.stderr.write(`guard-bash: ESCAPE — ${FULL_SUITE_ESCAPE_ENV}=1 allowed a bare full-suite unit run (xpnhz4o; logged): ${cmd.trim().slice(0, 300)}\n`);
+      const logPath = process.env.WE_FULL_SUITE_ESCAPE_LOG
+        || join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), '.conveyor', 'full-suite-escape.log');
+      mkdirSync(dirname(logPath), { recursive: true });
+      appendFileSync(logPath, JSON.stringify({
+        at: new Date().toISOString(), session: process.env.CLAUDE_CODE_SESSION_ID || null,
+        dispatchKind: dispatchKind || null, command: cmd.trim().slice(0, 500),
+      }) + '\n');
+    }
+  } catch { /* never wedge on an audit-log fault */ }
   process.exit(0);
 }

@@ -19,9 +19,10 @@
  *
  * THE DEFAULT GATE IS DIFF-DRIVEN (#3372). Rather than an unconditional `npm run test:unit`, the default gate
  * decides off the lane's actual `git diff` against `origin/main` via `scripts/readiness/test-selection.mjs`
- * (#2681): a diff that is entirely shrinkable (docs/research/test files, no sensitive surface, no glob-edge) runs
- * only `npx vitest related <changed files>`; anything else — a sensitive surface, an unlisted surface, a
- * glob-discovered fixture root, or an unresolvable diff — falls back to the FULL `npm run test:unit`, unchanged.
+ * (#2681), using its LOCAL policy (xpnhz4o, `decideLocalSelection`): the working-tree diff runs only
+ * `npx vitest related <changed files + tests naming them>`; only a config / setup / dependency / shared-test-helper
+ * change, a deleted source file, or an empty/unresolvable diff falls back to the FULL `npm run test:unit` — and
+ * the gate prints which of the two it chose, and why, before it starts. CI still runs the full suite.
  * See `scripts/lib/verify-lane-gate.mjs` for the decision core and why defaulting the shrink at THIS call site
  * does not conflict with #2681's own "not defaulted [on the CI merge gate]" DoD.
  *
@@ -29,6 +30,7 @@
  *   node scripts/verify-lane.mjs                      # run the default gate (diff-driven selection + check:standards; #3372) foreground, record green/red for HEAD
  *   node scripts/verify-lane.mjs --gate="npm run test:unit"   # override the suite command (skips diff-driven selection entirely)
  *   node scripts/verify-lane.mjs --repo=~/workspace/.lanes/web-everything/lane-3   # verify a specific lane clone
+ *   node scripts/verify-lane.mjs run                  # xpnhz4o — run the SAME default gate foreground, but record NO marker (the fix/ci-heal gate)
  *   node scripts/verify-lane.mjs --json              # machine-readable {sha, status, exitCode} on stdout
  *   node scripts/verify-lane.mjs check               # READ-ONLY: print the current marker's gate verdict for HEAD, run nothing
  *   node scripts/verify-lane.mjs check --require-verified   # exit non-zero unless HEAD has a fresh GREEN marker (the gate pr-land applies)
@@ -56,7 +58,7 @@ import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision,
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { resolveDefaultGate } from './lib/verify-lane-gate.mjs';
+import { resolveDefaultGate, describeGate } from './lib/verify-lane-gate.mjs';
 import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
@@ -78,7 +80,7 @@ const AS_JSON = !!flags.json;
 // read only `flags['require-verified']`, so the same env produced two different verdicts at the two call sites.
 const { requireVerified: REQUIRE_VERIFIED, breakGlass: VERIFY_BREAK_GLASS } = resolveVerifyOptions({ flags, env: process.env });
 const MODE = positionals[0] === 'check' ? 'check' : positionals[0] === 'reset' ? 'reset'
-  : positionals[0] === 'request' ? 'request' : 'verify';
+  : positionals[0] === 'request' ? 'request' : positionals[0] === 'run' ? 'run' : 'verify';
 
 const git = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const tryGit = (args) => { try { return git(args); } catch { return null; } };
@@ -196,8 +198,15 @@ if (MODE === 'reset') {
 function readCheckoutScripts() {
   try { return Object.keys(JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')).scripts || {}); } catch { return undefined; }
 }
-const GATE = typeof flags.gate === 'string' ? flags.gate
-  : resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() }).command;
+let GATE;
+if (typeof flags.gate === 'string') GATE = flags.gate;
+else {
+  const resolved = resolveDefaultGate({ runGit: git, env: process.env, scripts: readCheckoutScripts() });
+  GATE = resolved.command;
+  // xpnhz4o — always SAY whether this is a selected run or a full-suite fallback, and why (stderr, so `--json`
+  // stdout stays one parseable document).
+  process.stderr.write(describeGate(resolved) + '\n');
+}
 
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
 //    unfinished) marker rather than nothing.
@@ -208,7 +217,10 @@ const GATE = typeof flags.gate === 'string' ? flags.gate
 //    record for a foreign sha (a `running`/absent/own-sha marker is fine to overwrite: re-verifying is legitimate).
 //    #3538: a terminal record already merged into origin/main is spent. Only a successful ancestry check
 //    permits replacing it; tryGit returns null for non-ancestors and errors (including a missing ref).
-const preStart = readMarker();
+ // xpnhz4o — `run` mode never touches the marker: it is the plain "run my selected gate now" call (the fix /
+// ci-heal briefs' `{{GATE_COMMAND}}`), whose caller never lands through pr-land's finish-guard, so recording (or
+// being refused by) a marker would only couple it to whatever a previous occupant of this clone left behind.
+const preStart = MODE === 'run' ? null : readMarker();
 if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha
     && tryGit(['merge-base', '--is-ancestor', preStart.sha, 'origin/main']) === null) {
   emit(
@@ -219,7 +231,7 @@ if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.st
     3,
   );
 }
-writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
+if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
 
 // #3105 — `request` stops HERE: the marker is stamped, nothing has run yet, and this call already returns
 // (`emit` calls `process.exit`). The actual suite run is picked up by `scripts/conveyor/verify-dispatch.mjs`
@@ -270,6 +282,10 @@ try {
   exitCode = Number.isFinite(e && e.status) ? e.status : 2;
 } finally {
   if (admission.ok) releaseOwnedSlot({ lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO });
+}
+
+if (MODE === 'run') {
+  emit({ sha: headSha, status: exitCode === 0 ? 'green' : 'red', reason: 'run', exitCode, detail: exitCode === 0 ? 'gate passed (run mode — no marker recorded).' : `gate FAILED (exit ${exitCode}) — run mode, no marker recorded.` }, exitCode === 0 ? 0 : 2);
 }
 
 // 4. Rewrite the marker to its terminal green/red form — for the sha THIS run actually verified.

@@ -22,13 +22,12 @@
  * from there — a re-export would be its own `from`-clause and the same static scanner would still follow it,
  * defeating the split.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CONSTELLATION_REPOS, repoKeyForSlug } from './constellation-repos.mjs';
-import { composeGate } from './verify-lane-gate.mjs';
 
 // This module's OWN checkout root — the `we` entry's `path: ''` means "wherever this file is physically
 // checked out" (the primary checkout or a lane clone of it), never a fixed location. Computed once from
@@ -123,26 +122,24 @@ export function repoProfile(keyOrSlugOrPrefix, { home = homedir() } = {}) {
 }
 
 /**
- * The gate command for a constellation repo, reusing `verify-lane-gate.mjs#composeGate` against the profile's
- * `checkoutPath` — never a second gate-derivation. `composeGate` itself is pure; the only IO here is checking the
- * checkout exists and reading its `package.json` for the npm script names it actually has (mirrors
- * `scripts/verify-lane.mjs#readCheckoutScripts`), both injectable so a test never touches the real filesystem.
- * Returns `null` when the profile is unknown OR the checkout does not exist (never throws).
+ * The gate command a dispatched fix / ci-heal agent runs in its lane (`{{GATE_COMMAND}}`) for a constellation
+ * repo. xpnhz4o — it is `node <WE root>/scripts/verify-lane.mjs run --repo=.`: WE's own diff-selected gate
+ * (`verify-lane-gate.mjs#resolveDefaultGate`, which already builds only the halves the target checkout's npm
+ * scripts support, #3919), run against the agent's cwd, with no verification marker. Before this it was the
+ * bare `npm run test:unit && npm run check:standards`, i.e. the FULL suite for every fix — observed 2026-09-25 as
+ * several 10+ minute runs at once starving the host. The WE root is always this checkout's own root (the
+ * dispatcher's current code), so a lane on an older base still gets today's selection policy.
+ * Returns `null` when the profile is unknown OR the checkout does not exist (never throws). `readPackageJson`
+ * is still accepted (and ignored) for call-site compatibility — script detection now happens inside verify-lane.
  * @param {unknown} keyOrSlugOrPrefix
- * @param {{home?: string, checkoutExists?: (p: string) => boolean, readPackageJson?: (p: string) => string}} [o]
+ * @param {{home?: string, checkoutExists?: (p: string) => boolean, readPackageJson?: (p: string) => string, weRoot?: string}} [o]
  * @returns {string|null}
  */
-export function gateFor(keyOrSlugOrPrefix, { home, checkoutExists = existsSync, readPackageJson = (p) => readFileSync(p, 'utf8') } = {}) {
+export function gateFor(keyOrSlugOrPrefix, { home, checkoutExists = existsSync, weRoot = WE_CHECKOUT_ROOT } = {}) {
   const profile = repoProfile(keyOrSlugOrPrefix, { home });
   if (!profile) return null;
   if (!checkoutExists(profile.checkoutPath)) return null;
-  let scripts;
-  try {
-    scripts = Object.keys(JSON.parse(readPackageJson(join(profile.checkoutPath, 'package.json'))).scripts || {});
-  } catch {
-    scripts = undefined;
-  }
-  return composeGate({ vitestCmd: 'npm run test:unit', checkStandardsCmd: 'npm run check:standards', scripts }).command;
+  return `node ${join(weRoot, 'scripts', 'verify-lane.mjs')} run --repo=.`;
 }
 
 /**

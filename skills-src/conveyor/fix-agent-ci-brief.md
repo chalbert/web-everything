@@ -34,7 +34,7 @@
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
 | `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
 | `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
-| `{{GATE_COMMAND}}` | the target repo's own gate command (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`) |
+| `{{GATE_COMMAND}}` | the diff-selected gate for the target repo — `node <WE_ROOT>/scripts/verify-lane.mjs run --repo=.` (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`; xpnhz4o) |
 | `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`ci-heal-mark.mjs`, `lane-pool.mjs`, …) |
 | `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less heal |
 
@@ -125,8 +125,15 @@ After the re-push, do NOT wait for the new CI run to go green (no `gh pr checks 
 If the heal also touches a WE-side file (docs, the backlog item itself, WE-side glue) — i.e. `{{SCOPE}}` names
 anything outside `{{REPO}}` — additionally run `npm run check:standards` from `{{WE_ROOT}}` before re-pushing:
 `{{GATE_COMMAND}}` is `{{REPO}}`'s own gate and does not check WE's cross-repo invariants. For WE itself
-(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already **is** `npm run test:unit && npm run check:standards`, so this is a
-no-op today.
+(`{{REPO}}` == WE), `{{GATE_COMMAND}}` already includes WE's own check:standards (scoped to your diff), so this is
+a no-op today.
+
+**`{{GATE_COMMAND}}` is the diff-selected gate** (`verify-lane.mjs run`, xpnhz4o): it runs **only the tests your
+diff reaches** (`vitest related` on the files changed vs `origin/main`, working tree included, plus the tests that
+name a changed file) and a check:standards scoped to those files. It falls back to the full suite **by itself** —
+and prints `FULL SUITE (fallback)` with the reason — when a config / setup / dependency / shared-test-helper file
+changed. **Never run the full suite yourself** (`npm run test:unit`, `npm test`, a bare `vitest run`): it takes
+10+ minutes, several fixers doing it at once starved the host, CI runs it anyway, and the Bash guard denies it.
 
 A red gate is a hard stop: do **not** re-push, and report `#{{ITEM_NUM}} → ci-heal gate-red`.
 

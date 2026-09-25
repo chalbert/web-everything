@@ -299,6 +299,114 @@ export function selectTests({ base = 'origin/main', runGit, env = process.env } 
   return { changedFiles, ...decideSelection({ changedFiles, flagEnabled }) };
 }
 
+// ── the LOCAL agent-gate policy (xpnhz4o) — a DIFFERENT, wider shrink than the CI one above ─────────────────
+//
+// WHY A SECOND POLICY. {@link decideSelection} governs a shrink of the AUTHORITATIVE gate (CI), so it is
+// deny-by-default: only docs/research/test-file diffs may shrink, and every `scripts/` change is sensitive ⇒ full.
+// Reused for the LOCAL agent gate (`verify-lane`, #3372), that meant nearly every real PR fell back to the full
+// suite — observed 2026-09-25: several fixers each running the 10+ minute suite at once, host load 1.8/core,
+// starving lane pickup and every review. The local gate is NOT the authority: CI still runs the full, unshrunk
+// suite on every PR and on `main`, so a local miss costs one CI round-trip, never a merged regression. The local
+// policy therefore shrinks by default and falls back to the full suite ONLY where `vitest related`'s static
+// module graph genuinely cannot see the effect of a change:
+//   • supply chain — `package.json` / a lockfile (every test's dependency set moves);
+//   • test/build config — `*.config.*`, `vitest.*` (setup / shared / workspace), `tsconfig*.json`;
+//   • shared test helpers and fixtures — any NON-test file under `__tests__/`, `__fixtures__/`, `__mocks__/`,
+//     `test-utils/`, `test-helpers/` (read by path or shared by many tests; the graph under-reports them);
+//   • a DELETED non-test source file — its importers can no longer be found through the graph.
+// Everything else runs `vitest related` on the changed files plus the tests that NAME a changed file (the
+// spawn-the-CLI and read-the-file edges the graph misses — computed by the IO shell, {@link referencedTestNeedles}).
+
+/** Non-test paths whose change forces the local FULL suite — see the block comment above. */
+export const LOCAL_FULL_SUITE_TRIGGERS = [
+  /(^|\/)package\.json$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)npm-shrinkwrap\.json$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)[^/]+\.config\.(c|m)?[jt]s$/,
+  /(^|\/)vitest\.[^/]+\.(c|m)?[jt]s$/,
+  /(^|\/)tsconfig[^/]*\.json$/,
+];
+
+/** Directory names whose NON-test files are shared test helpers / fixtures (a local full-suite trigger). */
+const SHARED_TEST_DIRS = /(^|\/)(__tests__|__fixtures__|__mocks__|test-utils|test-helpers)\//;
+const TEST_FILE = /(^|\/)[^/]+\.(test|spec)\.(c|m)?[jt]sx?$/;
+const SNAPSHOT_FILE = /(^|\/)__snapshots__\/([^/]+)\.snap$/;
+
+/** Is this a test file itself (`*.test.*` / `*.spec.*`)? Pure. */
+export function isTestFile(path) {
+  return TEST_FILE.test(String(path || ''));
+}
+
+/** Does a change to this path force the LOCAL full suite? Pure. A snapshot is NOT a trigger (it maps to its test). */
+export function isLocalFullSuiteTrigger(path) {
+  const p = String(path || '');
+  if (!p) return true;
+  if (SNAPSHOT_FILE.test(p)) return false;
+  if (LOCAL_FULL_SUITE_TRIGGERS.some((re) => re.test(p))) return true;
+  return SHARED_TEST_DIRS.test(p) && !isTestFile(p);
+}
+
+/**
+ * Decide the LOCAL agent gate's vitest half from the actual changed set. Pure.
+ *   • `optOut` (`WE_DIFF_TEST_SELECTION=0`) ⇒ full.
+ *   • `changedFiles === null` (the diff could not be computed) or empty ⇒ full (no sound selection basis).
+ *   • any {@link isLocalFullSuiteTrigger} path, or any deleted non-test file ⇒ full, naming the paths.
+ *   • otherwise ⇒ shrink: `relatedFiles` = the changed, still-present files (a `__snapshots__/x.snap` maps to its
+ *     test `x`), handed to `vitest related` by the caller.
+ * @param {{changedFiles: string[]|null, deletedFiles?: string[], optOut?: boolean}} args
+ * @returns {{mode: 'full'|'shrink', relatedFiles: string[], triggerFiles: string[], deletedSourceFiles: string[], reasons: string[]}}
+ */
+export function decideLocalSelection({ changedFiles, deletedFiles = [], optOut = false } = {}) {
+  const full = (reasons, extra = {}) => ({ mode: 'full', relatedFiles: [], triggerFiles: [], deletedSourceFiles: [], reasons, ...extra });
+  if (optOut) return full([`${SELECTION_FLAG}=0 — full suite (explicit opt-out of the local diff selection)`]);
+  if (changedFiles === null || changedFiles === undefined) return full(['could not compute the diff against the merge-base — full suite (never shrink on an unknown diff)']);
+  const files = Array.from(new Set(changedFiles.map(String).filter(Boolean))).sort();
+  if (files.length === 0) return full(['empty diff against the merge-base — full suite (no selection basis)']);
+  const deleted = new Set((deletedFiles || []).map(String));
+  const triggerFiles = files.filter(isLocalFullSuiteTrigger);
+  const deletedSourceFiles = files.filter((f) => deleted.has(f) && !isTestFile(f) && !SNAPSHOT_FILE.test(f) && /\.(c|m)?[jt]sx?$/.test(f));
+  const reasons = [];
+  if (triggerFiles.length) reasons.push(`config / setup / dependency / shared-test-helper file(s) changed (${triggerFiles.join(', ')}) — full suite (the module graph cannot scope these)`);
+  if (deletedSourceFiles.length) reasons.push(`source file(s) deleted (${deletedSourceFiles.join(', ')}) — full suite (their importers are no longer findable through the module graph)`);
+  if (reasons.length) return full(reasons, { triggerFiles, deletedSourceFiles });
+  const relatedFiles = Array.from(new Set(files
+    .filter((f) => !deleted.has(f))
+    .map((f) => { const m = SNAPSHOT_FILE.exec(f); return m ? f.replace(SNAPSHOT_FILE, `$1${m[2]}`) : f; }))).sort();
+  return {
+    mode: 'shrink', relatedFiles, triggerFiles: [], deletedSourceFiles: [],
+    reasons: [`${files.length} changed path(s), none a config/setup/dependency/shared-helper trigger — running only the tests they reach (\`vitest related\`) plus tests that name them; CI still runs the full suite`],
+  };
+}
+
+/** Basenames too generic to identify a file by name (would pull in unrelated tests). */
+const GENERIC_BASENAME = /^(index|main|types|type|utils|util|constants|config|README|CHANGELOG|package)\.[^.]+$/i;
+
+/** Glob-discovered roots whose tests find files by DIRECTORY; a change under one adds the tests naming the root.
+ *  `backlog/` is deliberately absent: its content is validated by `check:standards`, which the gate runs UNSCOPED
+ *  whenever `backlog/` is touched (`verify-lane-gate.mjs#canScopeCheckStandards`), and ~140 fixture tests name it. */
+const LOCAL_GLOB_ROOT_NEEDLES = GLOB_FIXTURE_ROOTS.filter((r) => r !== 'backlog/').map((r) => r.replace(/\/$/, ''));
+
+/**
+ * The fixed strings whose occurrence in a test file marks that test as reaching a changed file by NAME rather
+ * than by import — a test that spawns `node scripts/foo.mjs`, or reads `skills-src/x/brief.md` off disk. Pure.
+ * The IO shell greps the test files for these and adds the hits to the `vitest related` set. Non-test changed
+ * files only (a changed test is selected directly); generic / very short basenames are skipped.
+ * @param {string[]} relatedFiles
+ * @returns {string[]}
+ */
+export function referencedTestNeedles(relatedFiles = []) {
+  const needles = new Set();
+  for (const f of relatedFiles) {
+    if (isTestFile(f)) continue;
+    const base = f.split('/').pop();
+    if (base && base.length >= 6 && !GENERIC_BASENAME.test(base)) needles.add(base);
+    for (const root of LOCAL_GLOB_ROOT_NEEDLES) if (f.startsWith(`${root}/`)) needles.add(root);
+  }
+  return Array.from(needles).sort();
+}
+
 // ── the SHADOW FULL-SUITE COMPARE — the FALSE-GREEN signal (round-2) ─────────────────────────────────────────
 
 /**

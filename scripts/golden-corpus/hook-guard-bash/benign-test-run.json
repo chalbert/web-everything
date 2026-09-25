@@ -1,8 +1,8 @@
 {
   "id": "benign-test-run",
-  "cmd": "npm test -- run",
+  "cmd": "npm test -- run scripts/__tests__/a.test.mjs",
   "ctx": {},
-  "basis": "allowed baseline",
+  "basis": "allowed baseline (xpnhz4o: targeted — `npm test -- run` alone is the bare full suite, see full-suite-npm-test-run.json)",
   "expect": {
     "reason": null
   }
