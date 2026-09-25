@@ -163,3 +163,127 @@ describe('parallel-execute workflow — #3383 LANE FULL-SUITE GATE routes throug
     expect(gateBlock).not.toMatch(/-- npm test`/); // never wraps a bare `npm test` (no ` -- run` tail)
   });
 });
+
+describe('parallel-execute workflow — #3892/#3916/#3917 queue over free lanes instead of dropping items', () => {
+  // The workflow script runs in the Workflow JS sandbox (top-level await/return, injected globals) so it is NOT
+  // an importable module. To exercise the ACTUAL shipped scheduling algorithm (not a hand-reimplementation that
+  // could silently drift from it), extract the exact function/const text for the pieces `buildLaneSchedule`
+  // depends on and evaluate them together, matching the closures the real script builds them under
+  // (`lanePlan = repoLanePlan(workItems)`, `lanePools` set by Provision, both closed over by buildLaneSchedule).
+  function extractBraceBlock(declStart, braceStart) {
+    let depth = 0, i = braceStart;
+    for (; i < SRC.length; i++) {
+      if (SRC[i] === '{') depth++;
+      else if (SRC[i] === '}') { depth--; if (depth === 0) { i++; break; } }
+    }
+    return SRC.slice(declStart, i);
+  }
+  function extractFunction(name) {
+    const start = SRC.indexOf(`function ${name}(`);
+    if (start === -1) throw new Error(`function ${name} not found in SRC`);
+    return extractBraceBlock(start, SRC.indexOf('{', start));
+  }
+  function extractConstStatement(name) {
+    const start = SRC.indexOf(`const ${name} =`);
+    if (start === -1) throw new Error(`const ${name} not found in SRC`);
+    let depth = 0, i = start;
+    for (; i < SRC.length; i++) {
+      const c = SRC[i];
+      if (c === '{' || c === '[' || c === '(') depth++;
+      else if (c === '}' || c === ']' || c === ')') depth--;
+      else if (c === ';' && depth === 0) { i++; break; }
+    }
+    return SRC.slice(start, i);
+  }
+
+  // Builds a `run(workItems, lanePools) -> Map` matching the real script's `buildLaneSchedule(workItems)`, with
+  // `lanePlan` computed the same way (`repoLanePlan(workItems)`) and `lanePools` injected per test.
+  function makeScheduler() {
+    const body = [
+      extractConstStatement('REPOS'),
+      extractConstStatement('INTEGRATION_ORDER'),
+      extractFunction('affectedReposOf'),
+      extractFunction('repoLanePlan'),
+      extractFunction('laneIndexOf'),
+      extractFunction('laneNumFromDir'),
+      'let lanePlan = {};',
+      'let lanePools = {};',
+      extractFunction('buildLaneSchedule'),
+      'return function run(workItems, pools) {',
+      '  lanePools = pools;',
+      '  lanePlan = repoLanePlan(workItems);',
+      '  return buildLaneSchedule(workItems);',
+      '};',
+    ].join('\n');
+    // eslint-disable-next-line no-new-func -- deliberately evaluating the SHIPPED source, not new logic
+    return new Function(body)();
+  }
+
+  // Runs every item's schedule entry to completion, recording (item, laneDir) execution order and asserting no
+  // two items are ever concurrently occupying the same lane dir — the exact clobber the old `idx % pool.length`
+  // ban was written to prevent, now made safe by queueing instead of dropping.
+  async function execute(schedule, workItems, repo = 'we') {
+    const busy = new Set();
+    const order = [];
+    await Promise.all(workItems.map(async (it) => {
+      const assign = schedule.get(it);
+      if (!assign) { order.push({ item: it.num, dir: null }); return; }
+      await Promise.all(Object.values(assign.perRepo).map((p) => p.waitFor));
+      const dir = assign.perRepo[repo].dir;
+      if (busy.has(dir)) throw new Error(`CLOBBER: two items concurrently on ${dir} (item ${it.num})`);
+      busy.add(dir);
+      order.push({ item: it.num, dir });
+      await new Promise((res) => setTimeout(res, 1)); // simulate in-flight lane work
+      busy.delete(dir);
+      for (const p of Object.values(assign.perRepo)) p.release();
+    }));
+    return order;
+  }
+
+  it('4 items over 1 lane: all 4 run — sequentially — on that lane', async () => {
+    const run = makeScheduler();
+    const workItems = [1, 2, 3, 4].map((i) => ({ num: String(i) }));
+    const schedule = run(workItems, { we: ['/lanes/lane-9'] });
+    // none dropped
+    expect(workItems.every((it) => schedule.get(it) !== null)).toBe(true);
+    const order = await execute(schedule, workItems);
+    expect(order.map((o) => o.dir)).toEqual(['/lanes/lane-9', '/lanes/lane-9', '/lanes/lane-9', '/lanes/lane-9']);
+    // items 2-4 are NOT first in the lane-9 queue → each logs/records queued-behind
+    expect(schedule.get(workItems[1]).queuedBehind).toEqual(['we lane-9']);
+    expect(schedule.get(workItems[2]).queuedBehind).toEqual(['we lane-9']);
+    expect(schedule.get(workItems[3]).queuedBehind).toEqual(['we lane-9']);
+    // item 1 is first — nothing to queue behind
+    expect(schedule.get(workItems[0]).queuedBehind).toEqual([]);
+  });
+
+  it('3 items over 2 lanes: lane A runs 2, lane B runs 1 — never two items on one lane at once', async () => {
+    const run = makeScheduler();
+    const workItems = [1, 2, 3].map((i) => ({ num: String(i) }));
+    const schedule = run(workItems, { we: ['/lanes/lane-1', '/lanes/lane-2'] });
+    const order = await execute(schedule, workItems); // throws on any clobber
+    const perLane = {};
+    for (const o of order) perLane[o.dir] = (perLane[o.dir] || 0) + 1;
+    expect(perLane).toEqual({ '/lanes/lane-1': 2, '/lanes/lane-2': 1 });
+    // the 2nd item onto lane-1 (item 3, round-robin position 2) is queued; item 2 (alone on lane-2) is not
+    expect(schedule.get(workItems[2]).queuedBehind).toEqual(['we lane-1']);
+    expect(schedule.get(workItems[1]).queuedBehind).toEqual([]);
+  });
+
+  it('0 lanes: every item is dropped for lack of a lane, none silently coupled onto a phantom one', () => {
+    const run = makeScheduler();
+    const workItems = [1, 2, 3, 4].map((i) => ({ num: String(i) }));
+    const schedule = run(workItems, { we: [] });
+    expect(workItems.every((it) => schedule.get(it) === null)).toBe(true);
+  });
+
+  it('the orchestrator maps a null schedule entry to ledger drop:"no-lane", never "no-result"', () => {
+    // "no-result" must stay reserved for a genuinely-dead agent; a structurally lane-less item is a distinct,
+    // definite outcome the ledger must be able to tell apart (per-item log line required too).
+    expect(SRC).toMatch(/drop:\s*'no-lane'/);
+    expect(SRC).toMatch(/NO acquirable lane provisioned/);
+  });
+
+  it('logs that a waiting item is queued behind a specific lane', () => {
+    expect(SRC).toMatch(/queued behind \$\{assign\.queuedBehind\.join\(', '\)\}/);
+  });
+});
