@@ -26,6 +26,16 @@
  * being up). `execFileSync` is never replaced — only its `env`/`cwd` are, the same shape
  * `dispatch-spawn-live.test.mjs`'s `spawnVia` uses on the real `defaultSpawnAgent`.
  *
+ * ONE MORE THING PATH-CLEARING ALONE DOES NOT COVER (live-caught 2026-09-25, xpc3krl): a fleet Mac running
+ * daemon dispatches opts into `we:scripts/lib/gh-app-shim.mjs`'s GitHub App shim — a small wrapper script
+ * installed under `~/.claude/github-app-token/gh-shim(.d/<key>)` that answers `gh` calls from its OWN cached
+ * App-installation token file, never from `GH_TOKEN`/`GH_CONFIG_DIR`. If that directory sits ahead of the real
+ * `gh` on THIS test's own inherited `PATH` (true on a host mid-dispatch, never in CI), a bare `execFileSync('gh',
+ * ...)` resolves to the shim instead — which authenticates fine regardless of the env clearing above, and the
+ * "unauthenticated failure" this test exists to prove never happens. `resolveRealGhBinary` (the same helper
+ * `buildGhShimSettingsEnv` uses to find what to shadow) walks `PATH` and skips every directory under the shim
+ * root, so `bin` below is always the real binary, never whatever shim happens to be ahead of it.
+ *
  * A REAL GIT REPO (`withRealRepo`) roots the call in a genuine directory rather than this test file's own cwd —
  * not because `gh pr view --repo <slug>` needs git context (it does not; the target repo is named explicitly),
  * but because it is the realistic shape a production caller's `cwd` takes, and it is the harness this repo's
@@ -41,16 +51,20 @@ import { join } from 'node:path';
 
 import { withRealRepo } from './helpers/real-repo.mjs';
 import { createRouteOutcomeReader } from '../route-pr-outcome-io.mjs';
+import { resolveRealGhBinary } from '../../lib/gh-app-shim.mjs';
 
 describe('createRouteOutcomeReader — against the real `gh` binary', () => {
   it('a real, unauthenticated `gh` failure THROWS out of the reader, never a safe-looking empty read', async () => {
     await withRealRepo(async (repo) => {
       const ghConfigDir = mkdtempSync(join(tmpdir(), 'we-gh-config-'));
+      // Skip the App shim if this host's PATH already has one ahead of the real binary (see the file header) —
+      // falls back to the bare command on a host with no real `gh` outside PATH at all (never expected here).
+      const realGh = resolveRealGhBinary() || 'gh';
       try {
         const read = createRouteOutcomeReader({
           // The REAL `execFileSync`, not a fake — only `cwd`/`env` are supplied, the same shape
           // `dispatch-spawn-live.test.mjs`'s `spawnVia` uses on the real `defaultSpawnAgent`.
-          run: (bin, argv, opts) => execFileSync(bin, argv, {
+          run: (bin, argv, opts) => execFileSync(bin === 'gh' ? realGh : bin, argv, {
             ...opts,
             cwd: repo.root,
             env: {

@@ -45,6 +45,26 @@ if (process.env.WE_TELEMETRY === undefined) {
   process.env.WE_TELEMETRY = '0';
 }
 
+// #xpc3krl (ci-heal-2684, 2026-09-25) — sanitize known daemon/host env leaks ONCE, before the per-test
+// snapshot/restore below captures its baseline. That restore (PR #2625) only guards a write LEAKING from one
+// test into a LATER one in the same run; it does nothing about the run's own STARTING point, which is
+// whatever ambient env the launching process already had. A vitest run started from inside (or by) a live
+// daemon-managed clone inherits `WE_DAEMON_MANAGED_CLONE=1` (set by
+// `scripts/lib/daemon-self-sync.mjs#withSelfSync` at wrapper construction) or a host that has opted into
+// GitHub App auth inherits the three `WE_GITHUB_APP_*` vars (see
+// `scripts/lib/github-app-auth-env.mjs#resolveGithubAppEnvConfig`) as that baseline for EVERY test — and
+// `main-staleness.mjs#assertMainNotStale` / `gh-app-shim.mjs#buildGhShimSettingsEnv` both read these directly,
+// so a polluted baseline silently flips branches in tests that assume the unconfigured default and never set
+// these vars themselves. Live-caught on this Mac: 6 tests across main-staleness.test.mjs,
+// review-dispatch.test.mjs and reconcile-fix-dispatch.test.mjs failed with the real ambient values set, never
+// in CI (which never carries them). A test that means to exercise the CONFIGURED path sets these itself,
+// inside its own test body — that always wins, since it runs after this.
+for (const key of [
+  'WE_DAEMON_MANAGED_CLONE', 'WE_GITHUB_APP_ID', 'WE_GITHUB_APP_INSTALLATION_ID', 'WE_GITHUB_APP_PRIVATE_KEY_PATH',
+]) {
+  delete process.env[key];
+}
+
 // PR #2625 advisory (correctness/test-pollution): a test that writes `process.env` must never leak that write
 // into LATER tests. Worker threads are reused across many files, so a leaked `WE_DAEMON_MANAGED_CLONE=1` (set
 // on purpose by `daemon-self-sync.mjs#withSelfSync`, whose real children must inherit it) silently flipped
