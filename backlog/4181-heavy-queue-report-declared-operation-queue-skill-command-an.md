@@ -3,9 +3,10 @@ bornAs: xb0iuxq
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/operations/heavy-queue.mjs", "we:scripts/operations/heavy-queue-io.mjs", "we:scripts/operations/run.mjs", "we:skills-src/queue/SKILL.md", "we:.claude/commands/queue.md", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/readiness/__tests__/heavy-admission.test.mjs", "we:scripts/operations/__tests__/heavy-admission-contention.test.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
