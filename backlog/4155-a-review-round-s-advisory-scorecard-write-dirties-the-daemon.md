@@ -3,9 +3,10 @@ bornAs: xt1ljei
 kind: story
 size: 2
 parent: "3383"
-status: open
-scope: ["we:scripts/conveyor/run-scorecard-store.mjs", "we:skills-src/conveyor/launchd/", "we:skills-src/conveyor/review-daemon.mjs"]
+status: active
+scope: ["we:scripts/conveyor/run-scorecard-store.mjs", "we:skills-src/conveyor/launchd/", "we:scripts/lib/daemon-rebuild.mjs", "we:scripts/review-set-label.mjs", "we:scripts/gen-dispatch-routing-table.mjs", "we:.gitignore"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-25"
 tags: []
 ---
 
@@ -15,4 +16,9 @@ Live 2026-09-25 16:31Z on the review daemon clone: review-pr's codex advisory-re
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — run from a checkout root. Before: exits 1 (the store resolves to the tracked in-tree file). After: exits 0 (the store resolves outside the checkout, and the old file is no longer tracked).
+
+   ```sh
+   node --input-type=module -e "import {resolveScorecardStorePath as r} from './scripts/conveyor/run-scorecard-store.mjs'; process.exit(r().startsWith(process.cwd()) ? 1 : 0)" && ! git ls-files --error-unmatch scripts/conveyor/run-scorecards.json 2>/dev/null
+   ```
+2. **Proof** — a real `appendScorecard` in a clean checkout leaves `git status --porcelain` empty and the row lands in the shared store under the daemon state directory in the home folder (`resolveScorecardStorePath`); the old tracked history is unioned in once (stamp `legacy-in-tree-store-4155`).

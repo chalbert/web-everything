@@ -12,7 +12,7 @@
  *
  * PURE MODULE ARCHITECTURE (per [docs/agent/platform-decisions.md#deterministic-core-thin-judgment]):
  *   • Zero filesystem (fs) or process environment reads at import or execution time.
- *   • Callers explicitly load and pass in scorecard records (from scripts/conveyor/run-scorecards.json
+ *   • Callers explicitly load and pass in scorecard records (from the shared scorecard store — `run-scorecard-store.mjs#readStore`, #4155
  *     or in-memory fixtures) and backdown thresholds.
  *   • Fully deterministic: identical arguments produce byte-identical return objects every time.
  *   • No Date.now(), Math.random(), or implicit time reads. Timestamps in scorecards are treated as
@@ -159,7 +159,7 @@ export const DEFAULT_BACKDOWN_THRESHOLDS = Object.freeze({
 
 /**
  * Proven trial envelopes grounded in the empirical trials recorded in
- * `scripts/conveyor/run-scorecards.json` and documented in `backlog/3690`:
+ * the shared scorecard store (`run-scorecard-store.mjs#resolveScorecardStorePath`, #4155) and documented in `backlog/3690`:
  *
  * - `doc-fix`: Observed trials were small single-file text fixes (e.g. #3539).
  *   Proven envelope: max 100 LOC, max 2 files.
@@ -256,7 +256,7 @@ export function workerTierFor({ kind, taskType, scopePaths, tags } = {}) {
 
 /**
  * Check if a task scope fits within the proven historical envelope for that taskType.
- * Grounded in the real trial observations in `scripts/conveyor/run-scorecards.json`.
+ * Grounded in the real trial observations in the shared scorecard store (`run-scorecard-store.mjs`).
  * Unit for estimatedSize: net changed lines of code (LOC).
  * @param {string} taskType
  * @param {number} estimatedSize

@@ -7,7 +7,7 @@
  * progressive-delivery systems (Spinnaker Kayenta's per-metric Mann-Whitney test, wrapped by Argo Rollouts as
  * an AnalysisTemplate) compare a canary against a CONCURRENT BASELINE instead. The equivalent here: run the
  * SAME task through Claude and through a delegated provider, and record both outcomes as one linked pair in
- * `we:scripts/conveyor/run-scorecards.json`, so a same-task comparison — not two independent trials of
+ * the shared scorecard store (`we:scripts/conveyor/run-scorecard-store.mjs`), so a same-task comparison — not two independent trials of
  * dissimilar tasks — becomes readable evidence. Two rows already exist by hand (claude-native vs
  * antigravity/claude-sonnet-4-6 reviewing the same PR 2223 diff, both `scoredAt` 2026-09-15T14:35) — this
  * module is the mechanization of producing that shape, not a re-derivation of it.

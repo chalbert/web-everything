@@ -36,50 +36,41 @@
  * hard requirement on the build, per the card's own Fork 2 amendment, not a nicety either layer could skip.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { scrubReasons } from '../lib/secret-scrub.mjs';
-import { pinnedStateRoot } from './queue-store.mjs';
-import { isDaemonManagedClone, daemonConveyorStateRoot } from '../lib/daemon-rebuild.mjs';
+import { daemonConveyorStateRoot } from '../lib/daemon-rebuild.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** TODAY's location — colocated with this script, git-tracked. Stays the DEFAULT (unset `CONVEYOR_STATE_ROOT`)
- *  so nothing already running changes behavior (#4052). An append-only JSON array — matches
- *  `poc-branches.json` / `model-probation.json`'s existing small-registry IO shape rather than introducing a
- *  THIRD file format (JSONL) for what is, at this run-quality volume, still a modest read-modify-write file.
- *  Re-derive as JSONL if/when volume makes read-modify-write the bottleneck — a v1 concern deliberately
- *  deferred. */
-export const DEFAULT_SCORECARD_STORE_PATH = join(__dirname, 'run-scorecards.json');
-
-/** The checkout this module runs from — the one whose tracked copy {@link DEFAULT_SCORECARD_STORE_PATH} is. */
+/** The checkout this module runs from. */
 const MODULE_REPO_ROOT = resolve(__dirname, '..', '..');
 
-/** @deprecated kept for callers that read the module-load-time default; prefer {@link resolveScorecardStorePath}
- *  (re-reads `CONVEYOR_STATE_ROOT` live) for anything that must honor a pin set after import. Identical value
- *  to {@link DEFAULT_SCORECARD_STORE_PATH} — this binding predates #4052's pinned-root support. */
-export const SCORECARD_STORE_PATH = DEFAULT_SCORECARD_STORE_PATH;
+/** Repo-relative path of the store's OLD home: a git-TRACKED file next to this script. It is no longer
+ *  tracked (#4155) and nothing writes it — it is named only so {@link migrateLegacyStore} can carry the
+ *  history it held into the shared store. */
+export const LEGACY_IN_TREE_STORE = 'scripts/conveyor/run-scorecards.json';
 
 /**
- * Where the store file lives RIGHT NOW (#4052, Ruling #3681 Fork 4 condition (iii)), in precedence order:
- *   1. the pinned daemon state root ({@link ../queue-store.mjs}'s `CONVEYOR_STATE_ROOT`) once an operator sets
- *      one — OUT of any daemon's own git-managed clone, one physical file every pinned clone shares;
- *   2. when this module runs FROM a daemon-managed clone (one the rebuild moves with `reset --hard` —
- *      `daemon-rebuild.mjs#isDaemonManagedClone`), that rebuild's own out-of-tree conveyor state root. A row
- *      appended to the tracked in-tree copy there dirtied the clone, the rebuild refused to move it, and every
- *      review/fix dispatch then refused as STALE (live 2026-09-25 13:36 ET). A daemon clone never needs an env
- *      var to be safe;
- *   3. otherwise {@link DEFAULT_SCORECARD_STORE_PATH} — the in-tree, script-colocated, git-tracked file.
+ * Where the store file lives — ONE shared file outside every git tree (#4155):
+ * `<conveyor state root>/.conveyor/run-scorecards.json`, where the root is
+ * `daemon-rebuild.mjs#daemonConveyorStateRoot` — the operator's `CONVEYOR_STATE_ROOT` pin when set (#4052),
+ * else `~/.claude/daemon-self-sync-state/conveyor-state` (`WE_DAEMON_STATE_DIR` moves the parent).
+ *
+ * WHY NOT THE OLD IN-TREE DEFAULT: the store used to default to the tracked `scripts/conveyor/run-scorecards.json`
+ * of whatever checkout ran the write. Every review round's codex advisory seat (#3907) appended a row there, so
+ * the review-daemon clone went dirty, its self-sync refused to move a dirty clone, the clone fell behind
+ * `origin/main`, and every review dispatch refused as stale (live 2026-09-25). A daemon-only special case
+ * (#4044) still let lanes and the primary checkout dirty themselves and split the history per checkout. One
+ * machine-wide file needs no env var to be safe and every checkout, lane and daemon clone reads the same rows.
+ * Every reader and writer resolves the path HERE — never a hard-coded path.
  * @param {NodeJS.ProcessEnv} [env]
- * @param {{repoRoot?:string, isDaemonClone?:(root:string, env:NodeJS.ProcessEnv)=>boolean}} [o] - test seams
  * @returns {string}
  */
-export function resolveScorecardStorePath(env = process.env, { repoRoot = MODULE_REPO_ROOT, isDaemonClone = isDaemonManagedClone } = {}) {
-  const root = pinnedStateRoot(env);
-  if (root) return join(root, '.conveyor', 'run-scorecards.json');
-  if (isDaemonClone(repoRoot, env)) return join(daemonConveyorStateRoot(env), '.conveyor', 'run-scorecards.json');
-  return DEFAULT_SCORECARD_STORE_PATH;
+export function resolveScorecardStorePath(env = process.env) {
+  return join(daemonConveyorStateRoot(env), '.conveyor', 'run-scorecards.json');
 }
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim() !== '';
@@ -111,40 +102,153 @@ export function validateScorecard(row) {
   return { ok: errors.length === 0, errors };
 }
 
+/** `{version, records, migrations}` from store JSON text; `null` when it is not that shape (never guessed). */
+function parseStoreText(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || !Array.isArray(parsed.records)) return null;
+    return {
+      version: parsed.version ?? 1,
+      records: parsed.records,
+      migrations: Array.isArray(parsed.migrations) ? parsed.migrations : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Stamped into the shared store's `migrations` once the tracked in-tree history has been carried over. */
+export const LEGACY_MIGRATION_ID = 'legacy-in-tree-store-4155';
+
+const defaultGit = (repoRoot) => (args) => execFileSync('git', ['-C', repoRoot, ...args], {
+  encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024,
+});
+
+/**
+ * Every copy of the OLD tracked store this checkout can still see, as JSON texts: the in-tree file if one is
+ * still on disk (a checkout whose copy was never pulled away), plus its last COMMITTED content from git
+ * history — so a checkout that already pulled the untracking commit (which deletes the file) still migrates.
+ * Never throws; a source it cannot read is skipped.
+ * @param {{repoRoot?:string, exists?:Function, read?:Function, git?:(args:string[])=>string}} [o]
+ * @returns {string[]}
+ */
+export function readLegacyStoreTexts({
+  repoRoot = MODULE_REPO_ROOT, exists = existsSync, read = (p) => readFileSync(p, 'utf8'), git = defaultGit(repoRoot),
+} = {}) {
+  const texts = [];
+  const onDisk = join(repoRoot, LEGACY_IN_TREE_STORE);
+  try { if (exists(onDisk)) texts.push(read(onDisk)); } catch { /* unreadable — skip */ }
+  let sha = '';
+  try { sha = String(git(['rev-list', '-1', 'HEAD', '--', LEGACY_IN_TREE_STORE])).trim(); } catch { /* no git */ }
+  if (sha) {
+    // The last commit touching the path is either an append (the file is in it) or the untracking commit (the
+    // file is in its parent — first parent for a merge landed onto main, second for the other side).
+    for (const rev of [sha, `${sha}^1`, `${sha}^2`]) {
+      try { texts.push(String(git(['show', `${rev}:${LEGACY_IN_TREE_STORE}`]))); break; } catch { /* next */ }
+    }
+  }
+  return texts;
+}
+
+/**
+ * PURE: union the legacy history into the shared store. A row already in the target (by exact JSON identity)
+ * is never duplicated, nothing in the target is ever dropped or overwritten, and legacy rows it lacks go FIRST
+ * (they are older). `null` when no legacy text parsed — the caller then leaves the store unmarked and retries
+ * later rather than stamp a migration that carried nothing it could prove.
+ * @param {{version:number, records:object[], migrations?:string[]}|null} target - the current shared store, or null when absent
+ * @param {string[]} legacyTexts
+ */
+export function mergeLegacyStores(target, legacyTexts) {
+  const legacy = legacyTexts.map(parseStoreText).filter(Boolean);
+  if (legacy.length === 0) return null;
+  const base = target ?? { version: legacy[0].version ?? 1, records: [], migrations: [] };
+  const seen = new Set(base.records.map((r) => JSON.stringify(r)));
+  const carried = [];
+  for (const store of legacy) {
+    for (const r of store.records) {
+      const key = JSON.stringify(r);
+      if (!seen.has(key)) { seen.add(key); carried.push(r); }
+    }
+  }
+  return {
+    store: {
+      version: base.version ?? 1,
+      records: [...carried, ...base.records],
+      migrations: [...new Set([...(base.migrations ?? []), LEGACY_MIGRATION_ID])],
+    },
+    added: carried.length,
+  };
+}
+
+let migrationChecked = false;
+
+/**
+ * ONE-TIME migration (#4155): carry the old tracked in-tree history into the shared store — a union, never a
+ * clobber — and stamp {@link LEGACY_MIGRATION_ID} so it never runs again. Runs lazily on the first real read of
+ * the default store in a process; a no-op once the stamp is present. Never throws.
+ * @param {{path?:string, repoRoot?:string, exists?:Function, read?:Function, write?:Function, git?:Function}} [o]
+ * @returns {{migrated:boolean, added?:number, reason?:string, path:string}}
+ */
+export function migrateLegacyStore({
+  path = resolveScorecardStorePath(), repoRoot = MODULE_REPO_ROOT,
+  exists = existsSync, read = (p) => readFileSync(p, 'utf8'), write = atomicWrite, git,
+} = {}) {
+  try {
+    let target = null;
+    if (exists(path)) {
+      target = parseStoreText(read(path));
+      // Never overwrite a shared store we cannot read — that would destroy the rows already there.
+      if (!target) return { migrated: false, reason: 'shared-store-unparsable', path };
+      if (target.migrations.includes(LEGACY_MIGRATION_ID)) return { migrated: false, reason: 'already-migrated', path };
+    }
+    const merged = mergeLegacyStores(target, readLegacyStoreTexts({ repoRoot, exists, read, ...(git ? { git } : {}) }));
+    if (!merged) return { migrated: false, reason: 'no-legacy-history', path };
+    write(path, serializeStore(merged.store));
+    return { migrated: true, added: merged.added, path };
+  } catch (e) {
+    return { migrated: false, reason: `error: ${String(e?.message || e).split('\n')[0]}`, path };
+  }
+}
+
+function atomicWrite(p, s) {
+  mkdirSync(dirname(p), { recursive: true });
+  const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, s);
+  renameSync(tmp, p);
+}
+
+function serializeStore(store) {
+  const out = { version: store.version ?? 1, records: store.records ?? [] };
+  if (Array.isArray(store.migrations) && store.migrations.length) out.migrations = store.migrations;
+  return `${JSON.stringify(out, null, 2)}\n`;
+}
+
 /**
  * Read the store off disk. Never throws — an unreadable/malformed file degrades to an empty store, so a
  * caller always gets a usable (if empty) history rather than a crash mid-scoring-pass.
  *
- * A store resolved OUTSIDE the tree that does not exist yet reads the in-tree tracked history instead
- * (`seedPath`), so moving the store never makes a reader see an empty history — the first append then writes
- * that history plus the new row to the out-of-tree file. Only on the default path: an explicit `path` reads
- * exactly that file.
+ * On the first real read of the DEFAULT store in a process (no `path`, no injected `read`), the one-time
+ * {@link migrateLegacyStore} runs first, so no reader ever sees the history the old tracked file held go
+ * missing. An explicit `path` or injected IO reads exactly what it is given.
  */
-export function readStore({
-  path, seedPath, read = (p) => readFileSync(p, 'utf8'), exists = existsSync,
-} = {}) {
+export function readStore({ path, read, exists = existsSync } = {}) {
+  if (path === undefined && read === undefined && !migrationChecked) {
+    migrationChecked = true;
+    migrateLegacyStore();
+  }
   const target = path ?? resolveScorecardStorePath();
-  const seed = seedPath !== undefined ? seedPath
-    : (path === undefined && target !== DEFAULT_SCORECARD_STORE_PATH ? DEFAULT_SCORECARD_STORE_PATH : null);
-  const parse = (p) => {
-    const parsed = JSON.parse(read(p));
-    return { version: parsed?.version ?? 1, records: Array.isArray(parsed?.records) ? parsed.records : [] };
-  };
+  const doRead = read ?? ((p) => readFileSync(p, 'utf8'));
   try {
-    if (exists(target)) return parse(target);
-    if (seed && exists(seed)) return parse(seed);
-    return { version: 1, records: [] };
+    if (!exists(target)) return { version: 1, records: [] };
+    return parseStoreText(doRead(target)) ?? { version: 1, records: [] };
   } catch {
     return { version: 1, records: [] };
   }
 }
 
-/** Write the store back to disk, pretty-printed (creating the out-of-tree root's directory on first write). */
-export function writeStore(store, {
-  path = resolveScorecardStorePath(),
-  write = (p, s) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, s); },
-} = {}) {
-  write(path, `${JSON.stringify({ version: store.version ?? 1, records: store.records ?? [] }, null, 2)}\n`);
+/** Write the store back to disk, pretty-printed and atomically (creating the directory on first write). */
+export function writeStore(store, { path = resolveScorecardStorePath(), write = atomicWrite } = {}) {
+  write(path, serializeStore(store));
 }
 
 /**

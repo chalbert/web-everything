@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   decideSetLabel, presentRemoveLabels, buildVerdictComment, neutralizeCommentMarkers, normalizeChannel,
   runReviewLabelCli, projectVerdictCommentLength, REVIEW_LABEL_TARGETS, GH_COMMENT_MAX,
-  checkBodyFileLocation, bodyFileRoots, publishDelegationTrialCommit,
+  checkBodyFileLocation, bodyFileRoots,
   // #x9krtkb — the restamp path's carried-human-clearance decision (bug 1) and its CLI wiring (bug 2's
   // `--new-head`, exercised through `runReviewLabelCli` below with a stub provider).
   decideRestampHumanClearance,
@@ -1929,7 +1929,6 @@ describe('runReviewLabelCli — a changes verdict must carry its findings (#xd6m
 describe('the write arc and its #2964 ordering', () => {
   const CFG = {
     // Memory-store tests must never commit/push the running checkout. Real git tests override this.
-    publishTrialFn: vi.fn(() => ({ committed: true, pushed: true })),
     defaultActor: 'test',
     usage: 'usage: test',
     buildComment: () => '# verdict body',
@@ -2015,7 +2014,6 @@ describe('the write arc and its #2964 ordering', () => {
     }
     beforeEach(() => {
       vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'independent-reviewer');
-      CFG.publishTrialFn.mockClear();
     });
     afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
@@ -2033,8 +2031,6 @@ describe('the write arc and its #2964 ordering', () => {
       expect(result.exitCode).toBe(0);
       expect(result.payload.ok).toBe(true);
       expect(readTrialStore).toHaveBeenCalledTimes(1);
-      expect(CFG.publishTrialFn).toHaveBeenCalledTimes(1);
-      expect(CFG.publishTrialFn).toHaveBeenCalledWith({ ...triple, pr: 1048 });
       expect(readStore(io).records).toHaveLength(1);
       expect(readStore(io).records[0]).toMatchObject({
         ...triple, dispatchKind: 'session-delegation', pr: 1048,
@@ -2051,7 +2047,6 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readStore(io).records).toEqual(records);
       expect(readStore(io).records).toHaveLength(6);
       expect(logTrialFn).not.toHaveBeenCalled();
-      expect(CFG.publishTrialFn).not.toHaveBeenCalled();
     });
 
     it('does not append a second session-delegation trial when the same PR is re-accepted', () => {
@@ -2063,7 +2058,6 @@ describe('the write arc and its #2964 ordering', () => {
       expect(records).toHaveLength(1);
       readTrialStore.mockClear();
       logTrialFn.mockClear();
-      CFG.publishTrialFn.mockClear();
       const write = vi.spyOn(io, 'write');
       expect(run(stubProvider({ body, labels: ['review:accepted'] }), argv,
         { trialLogIo: io, readTrialStore, logTrialFn }).exitCode).toBe(0);
@@ -2071,7 +2065,6 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readTrialStore).toHaveBeenCalledTimes(1);
       expect(logTrialFn).not.toHaveBeenCalled();
       expect(write).not.toHaveBeenCalled();
-      expect(CFG.publishTrialFn).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -2165,27 +2158,6 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readStore(io).records).toEqual([]);
     });
 
-    it.each([false, true])('warns distinctly and preserves acceptance when publishing fails (committed=%s)', (committed) => {
-      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-      const io = memIo();
-      const publishTrialFn = vi.fn(() => ({ committed, pushed: false, reason: 'publication unavailable' }));
-      const p = stubProvider({ body });
-      const result = run(p, argv, { trialLogIo: io, publishTrialFn });
-      expect(result.exitCode).toBe(0);
-      expect(result.payload.ok).toBe(true);
-      expect(p.calls).toContain('postComment');
-      expect(p.calls).toContain('setLabels');
-      expect(readStore(io).records).toHaveLength(1);
-      expect(publishTrialFn).toHaveBeenCalledTimes(1);
-      expect(publishTrialFn).toHaveBeenCalledWith({ ...triple, pr: 1048 });
-      const warning = stderr.mock.calls.flat().join('');
-      expect(warning).toContain('WRITTEN LOCALLY BUT NOT ON SHARED HISTORY');
-      expect(warning).toContain('publication unavailable');
-      expect(warning).toContain(committed ? 'a local commit' : "this checkout's working tree");
-      expect(warning).toContain('commit+push scripts/conveyor/run-scorecards.json by hand');
-      expect(warning).not.toContain('delegation trial append failed');
-    });
-
     describe('against real local and bare remote git fixtures', () => {
       let repo, remote;
       const path = 'scripts/conveyor/run-scorecards.json';
@@ -2198,7 +2170,6 @@ describe('the write arc and its #2964 ordering', () => {
       const git = (...args) => execFileSync('git', args, {
         cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
       }).trim();
-      const publish = () => publishDelegationTrialCommit({ ...triple, pr: 1048, cwd: repo });
       const append = () => logDelegationTrial({
         ...triple, pr: 1048, taskDescription: 'Fix launch wrapper', outcome: 'landed',
         verifiedBy: 'independent-claude', findings: null,
@@ -2281,52 +2252,6 @@ describe('the write arc and its #2964 ordering', () => {
         expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(localHead);
       });
 
-      it('accepts, appends, commits, and publishes the actual row to shared history', () => {
-        const p = stubProvider({ labels: ['review:pending'], body, title: 'Fix launch wrapper' });
-        const result = run(p, argv, {
-          trialLogIo: { path: join(repo, path) },
-          publishTrialFn: (args) => publishDelegationTrialCommit({ ...args, cwd: repo }),
-        });
-        expect(result.exitCode).toBe(0);
-        expect(result.payload.ok).toBe(true);
-        expect(JSON.parse(readFileSync(join(repo, '.git/gate-args.json'), 'utf8'))).toEqual(gateTests);
-        const log = git('log', '--oneline', '--', path).split('\n');
-        expect(log).toHaveLength(2);
-        expect(log[0]).toContain('conveyor: log codex/gpt-6-astra bugfix trial for PR #1048 (#3690)');
-        expect(git('status', '--porcelain')).toBe('');
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(git('rev-parse', 'HEAD'));
-        const store = JSON.parse(readFileSync(join(repo, path), 'utf8'));
-        expect(store.records).toHaveLength(1);
-        expect(store.records[0]).toMatchObject({ ...triple, pr: 1048, outcome: 'landed', findings: null });
-        expect(JSON.parse(git(`--git-dir=${remote}`, 'show', `main:${path}`))).toEqual(store);
-      });
-
-      it('commits only the scorecard even with an unrelated staged change', () => {
-        writeFileSync(join(repo, 'unrelated.txt'), 'leave staged\n');
-        git('add', '--', 'unrelated.txt');
-        append();
-        expect(publish()).toMatchObject({ committed: true, pushed: true });
-        expect(git('diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD')).toBe(path);
-        expect(git('status', '--porcelain')).toBe('A  unrelated.txt');
-      });
-
-      it('refuses diverged local main without committing or shipping another process\'s stray commit', () => {
-        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
-        writeFileSync(join(repo, 'stray-from-another-process.txt'), 'unrelated\n');
-        git('add', '--', 'stray-from-another-process.txt');
-        git('commit', '-qm', 'stray unrelated commit');
-        const straySha = git('rev-parse', 'HEAD');
-        append();
-        const result = publish();
-        expect(result).toEqual({ committed: false, pushed: false, reason: expect.stringContaining('diverged history') });
-        expect(result.reason).toContain(straySha.slice(0, 8));
-        expect(result.reason).toContain(remoteHead.slice(0, 8));
-        expect(git('rev-parse', 'HEAD')).toBe(straySha);
-        expect(git('status', '--porcelain')).toBe(`M ${path}`);
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
-        expect(() => git(`--git-dir=${remote}`, 'show', 'main:stray-from-another-process.txt')).toThrow();
-      });
-
       it('pushes exactly --sha even when a later unrelated commit has advanced local main', () => {
         append();
         git('commit', '-qm', 'trial commit (the ONE we intend to publish)', '--', path);
@@ -2362,77 +2287,9 @@ describe('the write arc and its #2964 ordering', () => {
         expect(existsSync(join(repo, '.git/gate-args.json'))).toBe(false);
         expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
       });
-
-      it('leaves the committed trial local when the scoped gate is red', () => {
-        const remoteHead = git(`--git-dir=${remote}`, 'rev-parse', 'main');
-        writeFileSync(join(repo, '.git/gate-red'), 'red');
-        append();
-        expect(publish()).toMatchObject({ committed: true, pushed: false, reason: expect.stringContaining('is RED') });
-        expect(JSON.parse(readFileSync(join(repo, '.git/gate-args.json'), 'utf8'))).toEqual(gateTests);
-        expect(git('rev-parse', 'HEAD')).not.toBe(remoteHead);
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(remoteHead);
-      });
-
-      it.each(['lane/test', 'detached'])('refuses to commit or push on %s before changing history', (branch) => {
-        if (branch === 'detached') git('checkout', '--detach');
-        else git('checkout', '-b', branch);
-        const head = git('rev-parse', 'HEAD');
-        append();
-        const result = publish();
-        expect(result).toMatchObject({ committed: false, pushed: false });
-        expect(result.reason).toContain('commit skipped');
-        expect(git('rev-parse', 'HEAD')).toBe(head);
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(head);
-        expect(git('status', '--porcelain')).toBe(`M ${path}`);
-      });
-
-      it('reports a commit failure without throwing', () => {
-        expect(publish()).toMatchObject({ committed: false, pushed: false, reason: expect.stringContaining('git commit failed') });
-      });
-
-      it('recovers the real push helper JSON on a non-zero exit', () => {
-        // Fetch succeeds; the remote rejects only the final push, after the commit and green gate.
-        writeFileSync(join(remote, 'hooks/pre-receive'), '#!/bin/sh\nexit 1\n');
-        chmodSync(join(remote, 'hooks/pre-receive'), 0o755);
-        append();
-        const result = publish();
-        expect(result).toMatchObject({ committed: true, pushed: false });
-        expect(result.reason).toContain('origin unchanged');
-        expect(git('status', '--porcelain')).toBe('');
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).not.toBe(git('rev-parse', 'HEAD'));
-      });
-
-      it('refuses to commit when fetching origin/main fails', () => {
-        const head = git('rev-parse', 'HEAD');
-        git('remote', 'set-url', 'origin', join(repo, 'missing-remote'));
-        append();
-        expect(publish()).toMatchObject({ committed: false, pushed: false, reason: expect.stringContaining('could not fetch origin/main') });
-        expect(git('rev-parse', 'HEAD')).toBe(head);
-        expect(git(`--git-dir=${remote}`, 'rev-parse', 'main')).toBe(head);
-      });
     });
   });
 
-});
-
-describe('publishDelegationTrialCommit — CONVEYOR_STATE_ROOT skip (#4052)', () => {
-  const savedEnv = { ...process.env };
-  afterEach(() => {
-    if (savedEnv.CONVEYOR_STATE_ROOT === undefined) delete process.env.CONVEYOR_STATE_ROOT;
-    else process.env.CONVEYOR_STATE_ROOT = savedEnv.CONVEYOR_STATE_ROOT;
-  });
-
-  it('skips cleanly (no git touched) once the scorecard store is pinned outside the repo', () => {
-    process.env.CONVEYOR_STATE_ROOT = '/tmp/some-pinned-operator-root';
-    const result = publishDelegationTrialCommit({
-      provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', pr: 1, cwd: '/definitely/not/a/real/git/repo',
-    });
-    expect(result).toEqual({
-      committed: false,
-      pushed: false,
-      reason: 'scorecard store is pinned outside the repo (CONVEYOR_STATE_ROOT) — nothing to commit',
-    });
-  });
 });
 
 /**

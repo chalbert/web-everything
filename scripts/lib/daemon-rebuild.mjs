@@ -417,7 +417,10 @@ export function isDaemonManagedClone(root, env = process.env) {
  * rebuild carries each such file's rows into {@link daemonConveyorStateRoot} (a union — no row is lost, none
  * is duplicated), restores the tracked copy, and proceeds. `pinned` is the path under that root; the store
  * module itself (`run-scorecard-store.mjs#resolveScorecardStorePath`) writes to the same place in a daemon
- * clone, so this is the recovery path for rows written by older code, not the normal one.
+ * clone, so this is the recovery path for rows written by older code, not the normal one. Since #4155 the file
+ * is no longer tracked at all and the store writes out-of-tree from every checkout; this entry stays for the one
+ * window that still matters — a clone whose tracked copy an OLD-code process modified before the untracking
+ * commit reached it: the carry restores it to HEAD so the rebuild can move onto the commit that deletes it.
  */
 export const DAEMON_STATE_FILES = Object.freeze([
   Object.freeze({ path: 'scripts/conveyor/run-scorecards.json', pinned: '.conveyor/run-scorecards.json' }),
@@ -427,7 +430,12 @@ export const DAEMON_STATE_FILES = Object.freeze([
 function parseRecordsStore(text) {
   try {
     const parsed = JSON.parse(text);
-    return parsed && Array.isArray(parsed.records) ? { version: parsed.version ?? 1, records: parsed.records } : null;
+    if (!parsed || !Array.isArray(parsed.records)) return null;
+    // `migrations` (run-scorecard-store.mjs's one-time-migration stamps, #4155) rides along so a carry never
+    // strips them and re-arms a migration that already ran.
+    return Array.isArray(parsed.migrations)
+      ? { version: parsed.version ?? 1, records: parsed.records, migrations: parsed.migrations }
+      : { version: parsed.version ?? 1, records: parsed.records };
   } catch {
     return null;
   }
@@ -495,7 +503,7 @@ export function migrateDaemonStateFiles({ git, root, dirty, env = process.env, f
       const add = working.records.filter((r) => !seen.has(JSON.stringify(r)));
       if (add.length > 0) {
         try {
-          fs.write(target, `${JSON.stringify({ version: pinned.version ?? 1, records: [...pinned.records, ...add] }, null, 2)}\n`);
+          fs.write(target, `${JSON.stringify({ ...pinned, version: pinned.version ?? 1, records: [...pinned.records, ...add] }, null, 2)}\n`);
         } catch { return { ok: false, reason: 'pinned-write-failed', migrated }; }
       }
       let after;
