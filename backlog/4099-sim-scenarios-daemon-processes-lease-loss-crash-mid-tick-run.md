@@ -1,7 +1,8 @@
 ---
+bornAs: xb6sj32
 kind: story
 size: 8
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:skills-src/conveyor/runner.mjs", "we:skills-src/conveyor/pass-daemon.mjs", "we:skills-src/conveyor/supervisor.mjs"]
 dateOpened: "2026-09-24"

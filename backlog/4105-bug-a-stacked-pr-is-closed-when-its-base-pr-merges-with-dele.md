@@ -1,6 +1,7 @@
 ---
+bornAs: xrderc3
 kind: task
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/lib/pr-merge-gate.mjs", "we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-24"

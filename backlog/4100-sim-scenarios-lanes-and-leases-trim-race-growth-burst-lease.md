@@ -1,7 +1,8 @@
 ---
+bornAs: xfl3tv3
 kind: story
 size: 8
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/lib/lane-lease.mjs"]
 dateOpened: "2026-09-24"

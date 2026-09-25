@@ -1,7 +1,8 @@
 ---
+bornAs: xaujhc2
 kind: story
 size: 8
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/pr-merge-gate.mjs"]
 dateOpened: "2026-09-24"

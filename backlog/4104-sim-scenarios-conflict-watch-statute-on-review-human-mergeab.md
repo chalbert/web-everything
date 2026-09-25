@@ -1,7 +1,8 @@
 ---
+bornAs: xngm6pq
 kind: story
 size: 5
-parent: "x95yxvd"
+parent: "4097"
 status: open
 scope: ["we:scripts/conveyor/parked-pr-conflict-watch.mjs"]
 dateOpened: "2026-09-24"
