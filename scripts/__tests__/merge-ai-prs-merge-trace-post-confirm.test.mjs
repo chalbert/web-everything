@@ -41,15 +41,19 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
   const block = src.slice(blockStart, blockEnd);
 
   it('defines postMergeTrace as a closure (the write is not inlined at the read site)', () => {
-    expect(block).toMatch(/postMergeTrace = \(\) => \{/);
+    expect(block).toMatch(/postMergeTrace = makeMergeTrace\(traceHeadSha, preread\.comments\);/);
+    expect(src).toMatch(/const makeMergeTrace = \(headSha, prereadComments\) => \(\) => \{/);
   });
 
   // xvzc4v4 advisory fix — the closure used to be a `const` INSIDE the per-candidate `try`, so the `catch`
   // branch's call to it threw a ReferenceError (a sibling lexical scope) and crashed the whole pass. It is now
   // a `let` declared ABOVE the `try`, assigned inside it. (The crash itself is covered by a real-execution test in
-  // gate-entrypoint-integration.test.mjs — these source checks alone could not see it.)
+  // gate-entrypoint-integration.test.mjs — these source checks alone could not see it.) It starts as a REAL
+  // poster for the judged head, never a no-op stub: a stub silently dropped the trace for a PR found already
+  // merged right after revalidation, before the land path rebinds it (real-execution test there too).
   it('postMergeTrace is declared with `let` ABOVE the per-candidate try, so the catch branch can reach it', () => {
-    const declIdx = src.indexOf('let postMergeTrace = () => {};');
+    const declIdx = src.indexOf('let postMergeTrace = makeMergeTrace(c.listedHeadSha || c.headSha || null, null);');
+    expect(src).not.toMatch(/let postMergeTrace = \(\) => \{\};/);
     expect(declIdx).toBeGreaterThan(-1);
     const tryIdx = src.indexOf('try {', declIdx);
     expect(tryIdx).toBeGreaterThan(declIdx);
@@ -60,7 +64,7 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
   it('the trace READ (traceHeadSha/traceReason) still happens eagerly, ahead of the merge attempt', () => {
     // xvzc4v4 advisory fix — the head is the SHA revalidation pinned, not a separate best-effort read.
     const readIdx = block.indexOf('const traceHeadSha = revalidated.headSha;');
-    const closureIdx = block.indexOf('postMergeTrace = ()');
+    const closureIdx = block.indexOf('postMergeTrace = makeMergeTrace(');
     const lockIdx = block.indexOf('const landLock = withLandWriteLock(');
     expect(readIdx).toBeGreaterThan(-1);
     expect(closureIdx).toBeGreaterThan(readIdx);

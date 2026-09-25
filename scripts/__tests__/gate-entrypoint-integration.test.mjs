@@ -322,21 +322,25 @@ describe('the real drain entrypoint consults the gate before merging', () => {
   function runDrainLiveRecordingMerges(fixture) {
     const fxPath = join(workDir, `fixture-${fixture._id}.json`);
     const mergeLog = join(workDir, `merges-${fixture._id}.log`);
+    const commentLog = join(workDir, `comments-${fixture._id}.log`);
     writeFileSync(fxPath, JSON.stringify(fixture));
     writeFileSync(mergeLog, '');
+    writeFileSync(commentLog, '');
     let stdout;
     try {
       stdout = execFileSync('node', [SCRIPT, '--label=ready-to-merge', '--no-reconcile-labels', '--no-drain-lease', '--this-repo', '--json'], {
         cwd: workDir,
-        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath, GATE_MERGE_LOG: mergeLog },
+        env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, GATE_FIXTURE: fxPath, GATE_MERGE_LOG: mergeLog, GATE_COMMENT_LOG: commentLog },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (e) { stdout = String(e.stdout || ''); }
     const line = stdout.trim().split('\n').filter(Boolean).pop();
-    const merges = readFileSync(mergeLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
-    return { result: line ? JSON.parse(line) : null, merges };
+    const readLog = (p) => readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    return { result: line ? JSON.parse(line) : null, merges: readLog(mergeLog), comments: readLog(commentLog) };
   }
+  /** The #2412 merge-trace comments the drain posted for PR `num`. */
+  const traceCommentsFor = (comments, num) => comments.filter((c) => Number(c.num) === num && /Merge trace/.test(c.body));
 
   it('xvzc4v4: the merge is pinned (--match-head-commit) to the head SHA the pass-start decision judged', () => {
     const { result, merges } = runDrainLiveRecordingMerges({ _id: 'pin-head', prs: [liveLeaf(921)] });
@@ -369,10 +373,22 @@ describe('the real drain entrypoint consults the gate before merging', () => {
   });
 
   it('xvzc4v4: a candidate merged out-of-band whose fresh re-read fails still gets its follow-up (recorded merged)', () => {
-    const { result, merges } = runDrainLiveRecordingMerges({ _id: 'merged-oob-read-fail', prs: [liveLeaf(925, { _freshReadFail: true, _state: 'MERGED' })] });
+    const { result, merges, comments } = runDrainLiveRecordingMerges({ _id: 'merged-oob-read-fail', prs: [liveLeaf(925, { _freshReadFail: true, _state: 'MERGED' })] });
     expect(merges).toHaveLength(0);
     expect(nums(result.merged)).toContain(925);
     expect(nums(result.revalidationAborted || [])).not.toContain(925);
+    // …and its merge-trace comment, like every other already-merged path (a no-op stub used to swallow it here).
+    const traces = traceCommentsFor(comments, 925);
+    expect(traces).toHaveLength(1);
+    expect(traces[0].body).toMatch(/landed head `sha-925`/);
+  });
+
+  it('xvzc4v4: the confirmed-merge paths each post exactly one merge trace naming the pinned head', () => {
+    const { comments } = runDrainLiveRecordingMerges({ _id: 'trace-paths', prs: [liveLeaf(928), liveLeaf(929, { _mergeFailButLands: true })] });
+    expect(traceCommentsFor(comments, 928)).toHaveLength(1);
+    expect(traceCommentsFor(comments, 928)[0].body).toMatch(/landed head `sha-928`/);
+    expect(traceCommentsFor(comments, 929)).toHaveLength(1);
+    expect(traceCommentsFor(comments, 929)[0].body).toMatch(/landed head `sha-929`/);
   });
 
   it('xvzc4v4: a failed fresh re-read on a still-OPEN PR fails closed (not merged, reported)', () => {

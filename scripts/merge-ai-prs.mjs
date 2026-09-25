@@ -4567,8 +4567,16 @@ async function runCli() {
       for (const c of plan.ready) {
         // xvzc4v4 advisory fix — declared OUTSIDE the `try` because the `catch` below calls it too: as a `const`
         // inside the `try` it was out of scope there, so the contended-write recovery path threw a ReferenceError
-        // that killed the whole pass. A no-op until the trace is built (a throw before that point posts no trace).
-        let postMergeTrace = () => {};
+        // that killed the whole pass. Only ever CALLED on a confirmed merge (#xngv3vn), so it starts as a real
+        // poster naming the head the pass-start decision judged (it reads the PR's comments itself for the
+        // dedupe) — not a no-op stub, which silently dropped the trace for a PR found already merged before
+        // the land path below rebinds it (the out-of-band branch right after revalidation).
+        const makeMergeTrace = (headSha, prereadComments) => () => {
+          const reason = buildMergeTraceReason({ headSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
+          const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, reason, null, prereadComments);
+          if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${headSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
+        };
+        let postMergeTrace = makeMergeTrace(c.listedHeadSha || c.headSha || null, null);
         // xvzc4v4 advisory fix — the ONE "confirmed merged, run its follow-up" bookkeeping, shared by every path
         // that finds the PR already MERGED (the in-lock pre-check, the post-throw re-probe, and a failed
         // revalidation). Recorded into `merged` so its numbering / resolve-on-land / derived regen runs this pass —
@@ -4677,11 +4685,7 @@ async function runCli() {
           // xvzc4v4 advisory fix — the SHA is the one revalidation just pinned (fresh `headRefOid` == the head the
           // pass-start decision judged), not a second best-effort read that could miss or see a newer head.
           const traceHeadSha = revalidated.headSha;
-          const traceReason = buildMergeTraceReason({ headSha: traceHeadSha, caller: 'drain', sessionId: process.env.CLAUDE_CODE_SESSION_ID || null });
-          postMergeTrace = () => {
-            const posted = postDrainReasonComment(c.repo, c.num, MERGE_TRACE_KIND, traceReason, null, preread.comments);
-            if (!AS_JSON) process.stderr.write(`  💬 ${repoTag(c.repo)}${c.num} merge trace stamped (head ${traceHeadSha || 'unknown'})${posted ? '' : ' (already stamped / post failed)'}\n`);
-          };
+          postMergeTrace = makeMergeTrace(traceHeadSha, preread.comments);
           // #3383 — BEFORE the merge below (which lands with `--delete-branch`, or the repo may auto-delete
           // the head branch on merge either way), retarget any OPEN PR stacked on THIS branch to the repo's
           // default branch. Left unguarded, GitHub CLOSES (never retargets) a PR whose base branch just

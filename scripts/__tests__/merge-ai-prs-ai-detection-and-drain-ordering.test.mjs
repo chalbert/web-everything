@@ -194,6 +194,16 @@ describe('merge-ai-prs — revalidateForMerge (bug 1: re-check the merge decisio
     const pending = aiPr({ labels: [{ name: 'review:pending' }] });
     expect(revalidateForMerge(pending, { allowPendingReview: false }).decision).toBe('skip');
     expect(revalidateForMerge(pending, { allowPendingReview: true }).decision).toBe('merge');
+    // requiredCheck: the fixture's rollup is green on `test` only, so a nondefault required check must refuse —
+    // dropping the forwarding would fall back to the default `test` and merge.
+    expect(revalidateForMerge(aiPr(), { requiredCheck: 'lint' }).decision).toBe('skip');
+    expect(revalidateForMerge(aiPr(), { requiredCheck: 'lint' }).reason).toMatch(/required check "lint"/);
+    // defaultBranch: a PR based on `main` in a repo whose default branch is `develop` is off-default-base —
+    // dropping the forwarding would fall back to `null` (no base check) and merge.
+    const onMain = aiPr({ baseRefName: 'main' });
+    expect(revalidateForMerge(onMain, {}).decision).toBe('merge');
+    expect(revalidateForMerge(onMain, { defaultBranch: 'develop' }).decision).toBe('skip');
+    expect(revalidateForMerge(onMain, { defaultBranch: 'develop' }).reason).toMatch(/base is not develop/);
   });
 
   // xvzc4v4 advisory fix — HEAD PIN. `classifyPr` sees label PRESENCE only: a `review:accepted` granted for head X
