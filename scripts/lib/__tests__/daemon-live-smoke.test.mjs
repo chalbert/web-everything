@@ -22,9 +22,9 @@
  *   bug this item removes).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, cpSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import {
@@ -33,7 +33,24 @@ import {
   smokeStatePath, gateMergedCommit, ghDispatchedSessionEnv,
   TRANSIENT_FAILURE_PATTERNS, classifySmokeFailure, runLiveSmokeWithRetry,
   SMOKE_TRANSIENT_RETRIES_ENV, SMOKE_RETRY_BACKOFF_MS_ENV,
+  DISPATCH_DRY_RUN_SCRIPT, DISPATCH_DRY_RUN_CODE_ENTRIES,
 } from '../daemon-live-smoke.mjs';
+
+/**
+ * xp4lw2v — every pre-existing `runChild` fixture in this file predates the two new checks
+ * (`dispatch-dry-run`/`tree-stays-clean`) and knows nothing about them. Wrapping a fixture with this makes it
+ * answer both trivially (a PASSING dispatch-dry-run row, a CLEAN git status) so a test written to assert
+ * something about the original five checks keeps meaning what it always meant — without every fixture in this
+ * file having to learn about two checks it isn't testing. Tests that DO exercise the new checks build their own
+ * `runChild` instead of using this (see the `dispatch-dry-run` / `tree-stays-clean` describe blocks below).
+ */
+function withNewCheckDefaults(fn) {
+  return vi.fn(async (cmd, args, opts) => {
+    if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+    if (cmd === 'git' && args[0] === 'status') return '';
+    return fn(cmd, args, opts);
+  });
+}
 
 describe('decideSmokeVerdict — pure', () => {
   it('every check passing → pass', () => expect(decideSmokeVerdict([{ ok: true }, { ok: true }])).toBe(true));
@@ -166,17 +183,22 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
       return '';
     });
     const ran = (runChild) => runChild.mock.calls.map(([cmd, args]) => (cmd === 'gh' ? `gh ${args[0]}` : `${args[0]} ${args[1] ?? ''}`.trim()));
-    it('a backlog-only move runs only the gh checks; the rest report skipped + ok', async () => {
+    it('a backlog-only move runs only the gh checks; the rest report skipped + ok — tree-stays-clean still runs (never skipped) and so does the beforePorcelain snapshot', async () => {
       const runChild = runChildFor();
       const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['backlog/4143.md'], closureOf });
       expect(smoke.pass).toBe(true);
-      expect(ran(runChild)).toEqual(['gh api', 'gh pr']);
-      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run']);
+      // xp4lw2v — `dispatch-dry-run`'s codeEntries fall into the SAME `closureOf` else-branch as
+      // `reconcile-dry-run` in this fixture (its own `entries[0]` is never `scripts/lane-pool.mjs`), so a
+      // backlog-only move skips it too — correct: neither runs code the diff touched. `tree-stays-clean`
+      // has no `codeEntries` at all, so it (and the `beforePorcelain` snapshot `runLiveSmoke` takes up front,
+      // unconditionally, before any skip logic) both still call through to `runChild` with a real `git status`.
+      expect(ran(runChild)).toEqual(['status --porcelain', 'gh api', 'gh pr', 'status --porcelain']);
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['lane-pool-list', 'lane-acquire-release', 'reconcile-dry-run', 'dispatch-dry-run']);
     });
     it('a move touching lane-pool code re-runs the lane checks (and only those tree checks)', async () => {
       const runChild = runChildFor();
       const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['scripts/lib/lane-pool-paths.mjs'], closureOf });
-      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run']);
+      expect(smoke.results.filter((r) => r.skipped).map((r) => r.name)).toEqual(['reconcile-dry-run', 'dispatch-dry-run']);
     });
     it('an unknown diff (null) or an incomplete closure runs everything, as before', async () => {
       for (const opts of [{ changedFiles: null, closureOf }, { changedFiles: ['backlog/1.md'], closureOf: () => ({ files: new Set(), complete: false, bareDeps: false, jsonNames: new Set() }) }]) {
@@ -186,11 +208,13 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
     });
     it('runLiveSmokeWithRetry forwards changedFiles', async () => {
       const runChild = runChildFor();
-      // Real closure of this repo: a backlog-only change touches none of the three tree scripts.
+      // Real closure of this repo: a backlog-only change touches none of the four tree-code checks
+      // (lane-pool-list, lane-acquire-release, reconcile-dry-run, dispatch-dry-run) — `tree-stays-clean` has no
+      // `codeEntries` and is never skipped.
       const root = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
       const r = await runLiveSmokeWithRetry({ root, env: {}, runChild, changedFiles: ['backlog/4143.md'] });
       expect(r.verdict).toBe('pass');
-      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(3);
+      expect(r.smoke.results.filter((x) => x.skipped)).toHaveLength(4);
     });
   });
 
@@ -242,7 +266,7 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
 });
 
 describe('runLiveSmoke — injected runChild', () => {
-  const passingRunChild = vi.fn(async (cmd, args) => {
+  const passingRunChild = withNewCheckDefaults(async (cmd, args) => {
     if (cmd === 'node' && args[0] === 'scripts/lane-pool.mjs' && args[1] === 'list') return '[]';
     if (cmd === 'node' && args[1] === 'acquire') return JSON.stringify({ lane: 7 });
     return '';
@@ -309,7 +333,7 @@ describe('runLiveSmoke — injected runChild', () => {
   });
 
   it('a single failing check fails the WHOLE gate, but every other check still runs (no fail-fast)', async () => {
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'node' && args[1] === 'list') throw new Error('boom: list failed');
       if (cmd === 'node' && args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
@@ -404,7 +428,7 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
 
   it('a transient failure on attempt 1 that passes on attempt 2 → pass, attempts:2, one sleep', async () => {
     let call = 0;
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'api') {
         call += 1;
         if (call === 1) throw new Error('HTTP 503 Service Unavailable');
@@ -423,7 +447,7 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
   });
 
   it('a persistently transient failure exhausts the retry cap → verdict stays transient, attempts = retries+1', async () => {
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'api') throw new Error('rate limit exceeded');
       if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
@@ -437,7 +461,7 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
   });
 
   it('a code-shaped failure never retries at all', async () => {
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (args[1] === 'list') throw new Error('SyntaxError: Unexpected token');
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
@@ -450,7 +474,7 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
   });
 
   it('retries and backoff default from env (WE_DAEMON_SMOKE_TRANSIENT_RETRIES / _RETRY_BACKOFF_MS) when not passed explicitly', async () => {
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
       if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
@@ -474,6 +498,8 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
       import { runLiveSmokeWithRetry } from ${JSON.stringify(moduleUrl)};
       let call = 0;
       const runChild = async (cmd, args) => {
+        if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+        if (cmd === 'git') return '';
         if (cmd === 'gh' && args[0] === 'api') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
         if (args[1] === 'list') return '[]';
         if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
@@ -571,7 +597,7 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
   it('smoke passes → adopts, and clears any prior rejection for this clone', async () => {
     const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir };
     recordRejectedSha('/x', 'some-older-bad-sha', { env });
-    const runChild = vi.fn(async () => JSON.stringify({ lane: 1 }));
+    const runChild = withNewCheckDefaults(async () => JSON.stringify({ lane: 1 }));
     const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'good-sha', env, runChild, run: cleanRun });
     expect(verdict.adopt).toBe(true);
     expect(readRejectedSha('/x', env)).toBeNull();
@@ -605,7 +631,7 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
   it('a DIFFERENT sha than the one on record re-runs the smoke (main moved) rather than short-circuiting', async () => {
     const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir };
     recordRejectedSha('/x', 'old-bad-sha', { env });
-    const runChild = vi.fn(async () => JSON.stringify({ lane: 1 }));
+    const runChild = withNewCheckDefaults(async () => JSON.stringify({ lane: 1 }));
     const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre', mergedIdentitySha: 'a-new-sha', env, runChild, run: cleanRun });
     expect(runChild).toHaveBeenCalled();
     expect(verdict.adopt).toBe(true);
@@ -616,7 +642,7 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     const resetCalls = [];
     const run = (args) => { if (args[0] === 'reset') resetCalls.push(args); return { status: 0, stdout: '' }; };
     // every attempt fails the SAME transient way (a 401) — retry cap is reached, never promoted to 'code'
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'api') throw new Error('HTTP 401: Bad credentials');
       if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
@@ -632,7 +658,7 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
   it('a transient verdict whose rollback itself fails reports quarantine:true', async () => {
     const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
     const run = (args) => (args[0] === 'reset' ? { status: 1, stdout: '' } : { status: 0, stdout: '' });
-    const runChild = vi.fn(async (cmd, args) => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
       if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
       if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
@@ -755,4 +781,250 @@ describe("the gate's gh-api-repo / gh-pr-list checks — must FAIL exactly like 
     expect(ghChildEnv.GH_TOKEN).toBeUndefined();
     expect(ghChildEnv.PATH).toBe('/shim:/opt/homebrew/bin');
   });
+});
+
+// ── xp4lw2v (epic #4075/#3383) — the two new checks: dispatch-dry-run + tree-stays-clean ─────────────────────
+
+const dispatchDryRunCheck = SMOKE_CHECKS.find((c) => c.name === 'dispatch-dry-run').run;
+const treeStaysCleanCheck = SMOKE_CHECKS.find((c) => c.name === 'tree-stays-clean').run;
+
+describe('dispatch-dry-run — injected runChild', () => {
+  it('every row passing → ok:true', async () => {
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'node' && args[0] === '--input-type=module') {
+        return JSON.stringify([
+          { kind: 'review', pr: 900001, ok: true }, { kind: 'fix', pr: 900002, ok: true },
+          { kind: 'ci-heal-worst-case', pr: 900003, ok: true }, { kind: 'ci-heal-ordinary', pr: 900004, ok: true },
+          { kind: 'reconcile-fix-pass', pr: null, ok: true }, { kind: 'reconcile-ci-heal-pass', pr: null, ok: true },
+          { kind: 'reconcile-review-pass', pr: null, ok: true },
+        ]);
+      }
+      return '';
+    });
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result).toEqual({ ok: true, detail: expect.stringContaining('dispatch dry-run ok') });
+  });
+
+  it('the child throwing (e.g. the bounded timeout) fails the check', async () => {
+    const runChild = vi.fn(async () => { throw new Error('timed out after 45000ms (process group killed)'); });
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/timed out/);
+  });
+
+  // The exact live shape a6cbfced4 fixed: dispatchCiHeal threw "no value for the brief placeholder {{SCOPE}}"
+  // for an item-less PR with an empty diff-derived scope. This is what the CHECK reports when the child script
+  // hands back that one row failed — naming both the kind and the PR, never just "something failed".
+  it('a single kind failing (an unfilled required placeholder, or any other dispatch throw) fails the WHOLE check and names the kind + PR', async () => {
+    const runChild = vi.fn(async () => JSON.stringify([
+      { kind: 'review', pr: 900001, ok: true },
+      { kind: 'fix', pr: 900002, ok: true },
+      { kind: 'ci-heal-worst-case', pr: 900003, ok: false, error: 'dispatch-lane: no value for the brief placeholder {{SCOPE}} — refusing to fill it with nothing' },
+      { kind: 'ci-heal-ordinary', pr: 900004, ok: true },
+    ]));
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('ci-heal-worst-case');
+    expect(result.detail).toContain('900003');
+    expect(result.detail).toContain('{{SCOPE}}');
+  });
+
+  it('a filled prompt still containing an unfilled REQUIRED placeholder fails, naming the kind + PR', async () => {
+    const runChild = vi.fn(async () => JSON.stringify([
+      { kind: 'review', pr: 900001, ok: false, error: "review PR #900001: required placeholder {{SESSION_SLUG}} left unfilled in the filled prompt (matched {{ SESSION_SLUG }})" },
+    ]));
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('SESSION_SLUG');
+    expect(result.detail).toContain('900001');
+  });
+
+  it('unparsable child output fails the check', async () => {
+    const runChild = vi.fn(async () => 'not json');
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/unparsable/);
+  });
+
+  it('an empty result array is never a pass — "nothing ran" is not "everything ran clean"', async () => {
+    const runChild = vi.fn(async () => '[]');
+    const result = await dispatchDryRunCheck({ root: '/x', budgets: { dispatchDryRunMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/no rows/);
+  });
+
+  it('is mayBeTransient:false and declares DISPATCH_DRY_RUN_CODE_ENTRIES as its codeEntries', () => {
+    const check = SMOKE_CHECKS.find((c) => c.name === 'dispatch-dry-run');
+    expect(check.mayBeTransient).toBe(false);
+    expect(check.codeEntries).toEqual(DISPATCH_DRY_RUN_CODE_ENTRIES);
+  });
+
+  it('skip-unchanged (#4044): skipped when none of its codeEntries changed — tree-stays-clean (no codeEntries) still runs and its own child is still invoked', async () => {
+    const closureOf = ({ entries }) => ({
+      files: new Set(entries[0] === DISPATCH_DRY_RUN_CODE_ENTRIES[0] ? [...DISPATCH_DRY_RUN_CODE_ENTRIES] : ['scripts/lane-pool.mjs']),
+      complete: true, bareDeps: false, jsonNames: new Set(),
+    });
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'git') return '';
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['backlog/9999.md'], closureOf });
+    const dispatchRow = smoke.results.find((r) => r.name === 'dispatch-dry-run');
+    const treeRow = smoke.results.find((r) => r.name === 'tree-stays-clean');
+    expect(dispatchRow.skipped).toBe(true);
+    expect(dispatchRow.ok).toBe(true);
+    expect(treeRow.skipped).toBeUndefined();
+    expect(runChild.mock.calls.some(([cmd, args]) => cmd === 'node' && args[0] === '--input-type=module')).toBe(false);
+    expect(runChild.mock.calls.some(([cmd, args]) => cmd === 'git' && args[0] === 'status')).toBe(true);
+  });
+
+  it('a move touching one of its OWN codeEntries re-runs dispatch-dry-run', async () => {
+    const closureOf = ({ entries }) => ({
+      files: new Set(entries[0] === DISPATCH_DRY_RUN_CODE_ENTRIES[0] ? [...DISPATCH_DRY_RUN_CODE_ENTRIES] : ['scripts/lane-pool.mjs']),
+      complete: true, bareDeps: false, jsonNames: new Set(),
+    });
+    const runChild = vi.fn(async (cmd, args) => {
+      if (cmd === 'git') return '';
+      if (cmd === 'node' && args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: [DISPATCH_DRY_RUN_CODE_ENTRIES[1]], closureOf });
+    const dispatchRow = smoke.results.find((r) => r.name === 'dispatch-dry-run');
+    expect(dispatchRow.skipped).toBeUndefined();
+    expect(runChild.mock.calls.some(([cmd, args]) => cmd === 'node' && args[0] === '--input-type=module')).toBe(true);
+  });
+});
+
+describe('tree-stays-clean — injected runChild', () => {
+  it('an empty git status → ok:true', async () => {
+    const runChild = vi.fn(async () => '');
+    const result = await treeStaysCleanCheck({ root: '/x', budgets: { treeStaysCleanMs: 1000 }, runChild, env: {}, beforePorcelain: null });
+    expect(result).toEqual({ ok: true, detail: 'git status --porcelain empty — tree stayed clean' });
+  });
+
+  it('is LAST in SMOKE_CHECKS and declares no codeEntries at all, so #4044 skip-unchanged can never skip it', () => {
+    expect(SMOKE_CHECKS[SMOKE_CHECKS.length - 1].name).toBe('tree-stays-clean');
+    expect(SMOKE_CHECKS.find((c) => c.name === 'tree-stays-clean').codeEntries).toBeUndefined();
+    expect(SMOKE_CHECKS.find((c) => c.name === 'tree-stays-clean').mayBeTransient).toBe(false);
+  });
+
+  it('is never skipped even when changedFiles/closureOf would skip every other tree-code check', async () => {
+    const runChild = vi.fn(async (cmd) => (cmd === 'git' ? '' : ''));
+    const closureOf = () => ({ files: new Set(), complete: true, bareDeps: false, jsonNames: new Set() });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild, changedFiles: ['backlog/1.md'], closureOf });
+    const row = smoke.results.find((r) => r.name === 'tree-stays-clean');
+    expect(row.skipped).toBeUndefined();
+    expect(row.ok).toBe(true);
+  });
+
+  // Live 2026-09-25: a state writer left `.conveyor/unsupported-repo.json` and
+  // `scripts/conveyor/run-scorecards.json` dirty in the candidate tree — this is what would have caught it.
+  it('a dirty tree fails, naming the dirty paths in detail', async () => {
+    const runChild = vi.fn(async () => ' M scripts/conveyor/run-scorecards.json\n?? .conveyor/unsupported-repo.json\n');
+    const result = await treeStaysCleanCheck({ root: '/x', budgets: { treeStaysCleanMs: 1000 }, runChild, env: {}, beforePorcelain: null });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('run-scorecards.json');
+    expect(result.detail).toContain('unsupported-repo.json');
+  });
+
+  it('distinguishes pre-existing dirt (present before this smoke ran) from dirt newly introduced by this smoke\'s own checks — but still fails on either', async () => {
+    const runChild = vi.fn(async () => ' M pre-existing-file.txt\n?? new-file.txt\n');
+    const result = await treeStaysCleanCheck({
+      root: '/x', budgets: { treeStaysCleanMs: 1000 }, runChild, env: {}, beforePorcelain: ' M pre-existing-file.txt\n',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/pre-existing dirty path.*pre-existing-file\.txt/);
+    expect(result.detail).toMatch(/newly dirtied.*new-file\.txt/);
+  });
+
+  it('all dirt pre-existing (nothing new) still fails, and is reported as entirely pre-existing', async () => {
+    const runChild = vi.fn(async () => ' M pre-existing-file.txt\n');
+    const result = await treeStaysCleanCheck({
+      root: '/x', budgets: { treeStaysCleanMs: 1000 }, runChild, env: {}, beforePorcelain: ' M pre-existing-file.txt\n',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('pre-existing dirty path');
+    expect(result.detail).not.toContain('newly dirtied');
+  });
+
+  it('a failed git status call fails the check', async () => {
+    const runChild = vi.fn(async () => { throw new Error('git: command not found'); });
+    const result = await treeStaysCleanCheck({ root: '/x', budgets: { treeStaysCleanMs: 1000 }, runChild, env: {} });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/git status --porcelain failed/);
+  });
+
+  it('runLiveSmoke snapshots the porcelain BEFORE any check runs (best-effort), and it reaches the check as beforePorcelain', async () => {
+    const calls = [];
+    const runChild = vi.fn(async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === 'git') return ' M already-here.txt\n';
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      if (args[0] === '--input-type=module') return '[{"kind":"stub","pr":null,"ok":true}]';
+      return '';
+    });
+    const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+    // First call overall must be the beforePorcelain snapshot — before ANY check in SMOKE_CHECKS runs.
+    expect(calls[0]).toEqual(['git', ['status', '--porcelain']]);
+    const row = smoke.results.find((r) => r.name === 'tree-stays-clean');
+    // Every path in the (unchanging, in this fixture) `git status` output is pre-existing, so it should read
+    // as such rather than "newly dirtied" — proving beforePorcelain actually reached the check.
+    expect(row.ok).toBe(false);
+    expect(row.detail).toContain('pre-existing dirty path');
+    expect(row.detail).not.toContain('newly dirtied');
+  });
+});
+
+describe('DISPATCH_DRY_RUN_SCRIPT — real child, proves it catches the pre-fix a6cbfced4 shape (direct dispatch calls only — no GitHub reads)', () => {
+  it('fails ci-heal-worst-case on a tree where a6cbfced4 is reverted (SCOPE required again), and passes on the real tree', () => {
+    const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..', '..');
+    // Both sides run from temp copies: the real checkout may itself be a `lane-N` clone, which the dispatch
+    // functions refuse to start from (`assertNotALaneCheckout`). Only the dirs the dispatch graph reads are
+    // copied, and the pass-level part (live `gh` reads) is skipped — this test needs no GitHub credential.
+    const copyTree = () => {
+      const dest = mkdtempSync(join(tmpdir(), 'dispatch-dry-run-'));
+      for (const rel of ['scripts', 'skills-src', 'src/_data', 'package.json', '.gitignore']) {
+        cpSync(join(REPO_ROOT, rel), join(dest, rel), {
+          recursive: true,
+          filter: (src) => !src.includes(`${sep}node_modules`) && !src.includes(`${sep}.git${sep}`) && !src.endsWith(`${sep}.git`),
+        });
+      }
+      symlinkSync(join(REPO_ROOT, 'node_modules'), join(dest, 'node_modules'));
+      return dest;
+    };
+    const childEnv = { ...process.env, WE_SMOKE_DISPATCH_PASSES: '0' };
+    const tmpRoot = copyTree();
+    const realRoot = copyTree();
+    try {
+      const ciHealPath = join(tmpRoot, 'scripts', 'operations', 'ci-heal-pr-dispatch.mjs');
+      const original = readFileSync(ciHealPath, 'utf8');
+      const NEEDLE = "[...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE']";
+      const REVERTED = "[...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM']";
+      expect(original).toContain(NEEDLE); // sanity: the fix is really there to revert
+      writeFileSync(ciHealPath, original.replace(NEEDLE, REVERTED));
+
+      const preFixOut = execFileSync(process.execPath, ['--input-type=module', '-e', DISPATCH_DRY_RUN_SCRIPT], { cwd: tmpRoot, encoding: 'utf8', env: childEnv });
+      const preFixRows = JSON.parse(preFixOut);
+      const preFixCiHeal = preFixRows.find((r) => r.kind === 'ci-heal-worst-case');
+      expect(preFixCiHeal.ok).toBe(false);
+      expect(preFixCiHeal.error).toContain('{{SCOPE}}');
+      // the item-less-but-non-empty-scope case is NOT affected by this revert — SCOPE has a real value there.
+      const preFixCiHealOrdinary = preFixRows.find((r) => r.kind === 'ci-heal-ordinary');
+      expect(preFixCiHealOrdinary.ok).toBe(true);
+
+      const realOut = execFileSync(process.execPath, ['--input-type=module', '-e', DISPATCH_DRY_RUN_SCRIPT], { cwd: realRoot, encoding: 'utf8', env: childEnv });
+      const realRows = JSON.parse(realOut);
+      expect(realRows.length).toBeGreaterThan(0);
+      const failures = realRows.filter((r) => !r.ok);
+      expect(failures).toEqual([]);
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+      rmSync(realRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
