@@ -7,7 +7,7 @@
  * annotation, housekeeping, filing and batch-slug shapes that name an item without delivering it.
  */
 import { describe, it, expect } from 'vitest';
-import { readFrontmatterField, idTokenOf, isAnnotationPr, prDeliveredItem, sweepStrandings } from '../backlog-stranded-sweep.mjs';
+import { readFrontmatterField, idTokenOf, isAnnotationPr, prDeliveredItem, sweepStrandings, commitSubjectDeliversItem, autoResolvableStrandings } from '../backlog-stranded-sweep.mjs';
 
 const card = (stem, fm) => ({ stem, body: `---\n${fm}\n---\n\n# Title\n\nBody.\n` });
 
@@ -142,5 +142,103 @@ describe('#2899 jury — the sweep must not fabricate matches or hide its own bo
     expect(prDeliveredItem({ headRefName: 'lane/close-2026-08-02-findings' }, { id: '2026' }).matched).toBe(false);
     // a genuine id in the same ref still matches
     expect(prDeliveredItem({ headRefName: 'lane/2899-fix-2026-08-02' }, { id: '2899' }).matched).toBe(true);
+  });
+});
+
+describe('#3916 — commitSubjectDeliversItem: the STRICT, git-ground-truth auto-resolve signal', () => {
+  it('matches the live #3916 delivery commit exactly (092df91c4, the real regression this item fixes)', () => {
+    expect(commitSubjectDeliversItem(
+      'Graduate test setup, heavy-command admission and file-locks from lane/mechanical-dispatcher (#3916)',
+      '3916',
+    )).toBe(true);
+  });
+
+  it('matches the "WE #NNN: subject" convention too, as long as it TRAILS the subject', () => {
+    expect(commitSubjectDeliversItem('Ship the thing (#2450)', '2450')).toBe(true);
+  });
+
+  it('does NOT match a bare mention that is not the TRAILING parenthetical', () => {
+    expect(commitSubjectDeliversItem('WE #3916: prep notes, see also (#2450) for context', '3916')).toBe(false);
+  });
+
+  it('does NOT credit an unrelated id', () => {
+    expect(commitSubjectDeliversItem('Graduate the port (#3916)', '3917')).toBe(false);
+  });
+
+  it('excludes EVERY `drain: …` commit — its trailing (#NNNN) cites the enabling epic, never a delivery', () => {
+    // Real commits from this repo's own history: neither delivers #3917 or #2288, whatever their trailer reads.
+    expect(commitSubjectDeliversItem('drain: resolve #3917 on land (#2748)', '2748')).toBe(false);
+    expect(commitSubjectDeliversItem('drain: JIT-number x9ytnq8→#3916 at land (#2288)', '2288')).toBe(false);
+  });
+
+  it('is inert on empty/nullish input', () => {
+    expect(commitSubjectDeliversItem('', '3916')).toBe(false);
+    expect(commitSubjectDeliversItem('Graduate the port (#3916)', '')).toBe(false);
+    expect(commitSubjectDeliversItem(undefined, undefined)).toBe(false);
+  });
+
+  // #3916 review round 1 — the id comes from a raw backlog FILENAME (untrusted input to a regex compiler, the
+  // same #2899 reasoning `prDeliveredItem` already applies). A non-id token is rejected, never compiled.
+  it('rejects a malformed card id instead of throwing (`(evil-x.md` → id `(evil`)', () => {
+    expect(() => commitSubjectDeliversItem('Ship it (#(evil)', '(evil')).not.toThrow();
+    expect(commitSubjectDeliversItem('Ship it (#(evil)', '(evil')).toBe(false);
+    expect(commitSubjectDeliversItem('Ship it (#1234)', '.*')).toBe(false);
+    expect(commitSubjectDeliversItem('Ship it (#12a)', '12a')).toBe(false);
+  });
+
+  it('still accepts both real id shapes (numeric and provisional hash)', () => {
+    expect(commitSubjectDeliversItem('Ship it (#x9k9bg5)', 'x9k9bg5')).toBe(true);
+    expect(commitSubjectDeliversItem('Ship it (#0042)', '0042')).toBe(true);
+  });
+});
+
+describe('#3916 — autoResolvableStrandings: the strict AUTO-RESOLVE subset, never a guess', () => {
+  const mainLog = [
+    'Merge pull request #2612 from chalbert/lane/xah96oj-multi-instance-daemons-prep',
+    'Graduate test setup, heavy-command admission and file-locks from lane/mechanical-dispatcher (#3916)',
+    'drain: JIT-number x9ytnq8→#3916 at land (#2288)',
+    'drain: resolve #3917 on land (#2748)',
+  ];
+
+  it('the live case: #3916 active with its delivery commit on main → auto-resolvable', () => {
+    const cards = [card('3916-graduate-test-setup', 'kind: story\nstatus: active\nbornAs: x9ytnq8')];
+    expect(autoResolvableStrandings(cards, mainLog)).toEqual([
+      { id: '3916', status: 'active', via: 'commit-subject "Graduate test setup, heavy-command admission and file-locks from lane/mechanical-dispatcher (#3916)"' },
+    ]);
+  });
+
+  it('never credits #2748/#2288 off the drain housekeeping commits that merely cite them', () => {
+    const cards = [
+      card('2748-on-land-cleanup', 'kind: story\nstatus: active'),
+      card('2288-jit-numbering', 'kind: story\nstatus: active'),
+    ];
+    expect(autoResolvableStrandings(cards, mainLog)).toEqual([]);
+  });
+
+  it('leaves an already-resolved or epic card out, same as sweepStrandings', () => {
+    const cards = [
+      card('3916-graduate', 'kind: story\nstatus: resolved\nbornAs: x9ytnq8'),
+      card('3915-graduate', 'kind: epic\nstatus: open'),
+    ];
+    expect(autoResolvableStrandings([...cards, card('9999-x', 'kind: story\nstatus: active')], ['Ship it (#9999)'])).toEqual([
+      { id: '9999', status: 'active', via: 'commit-subject "Ship it (#9999)"' },
+    ]);
+  });
+
+  it('never guesses: a card with NO matching commit is left out entirely', () => {
+    const cards = [card('4000-untouched', 'kind: story\nstatus: open')];
+    expect(autoResolvableStrandings(cards, mainLog)).toEqual([]);
+  });
+
+  it('tolerates junk input', () => {
+    expect(autoResolvableStrandings()).toEqual([]);
+    expect(autoResolvableStrandings([null, undefined], null)).toEqual([]);
+  });
+
+  it('a non-conforming backlog filename never crashes the whole run (#3916 review round 1)', () => {
+    const cards = [card('(evil-x', 'kind: story\nstatus: active'), card('9999-x', 'kind: story\nstatus: active')];
+    expect(autoResolvableStrandings(cards, ['Ship it (#9999)'])).toEqual([
+      { id: '9999', status: 'active', via: 'commit-subject "Ship it (#9999)"' },
+    ]);
   });
 });

@@ -17,18 +17,27 @@
  * item**, matched on the lane ref / title / manifest the drain itself writes. One `gh pr list` for the whole
  * corpus, then pure matching — no per-item network call.
  *
- * REPORT, NEVER BULK-FLIP. A genuinely broader-scoped item may legitimately outlive its first PR: it landed a
- * slice and has more to do. That is indistinguishable from a stranding without reading the item, so this writes
- * nothing and hands the triage to a human — exactly as A4 requires.
+ * REPORT, NEVER BULK-FLIP — for the general `gh`-sourced match above. A genuinely broader-scoped item may
+ * legitimately outlive its first PR: it landed a slice and has more to do. That is indistinguishable from a
+ * stranding without reading the item, so THAT signal writes nothing and hands the triage to a human.
  *
- * The core (`prDeliveredItem` / `sweepStrandings`) is PURE; the CLI is the only thing that touches fs/network.
+ * #3916 — ONE exception, `--apply`: a card whose id is the trailing `(#NNNN)` of a real commit already
+ * reachable from `main` (never a `drain: ...` housekeeping commit — see `commitSubjectDeliversItem`'s own doc)
+ * is unambiguous enough to flip automatically, through the drain's own `resolveLandedItem`
+ * (`scripts/lane-drain.mjs`, #2748) — never a second resolver. Everything short of that bar stays report-only.
+ *
+ * The core (`prDeliveredItem` / `sweepStrandings` / `commitSubjectDeliversItem` / `autoResolvableStrandings`)
+ * is PURE; the CLI is the only thing that touches fs/network/git.
  *
  * Usage:
- *   node scripts/backlog-stranded-sweep.mjs [--json] [--limit=N]
+ *   node scripts/backlog-stranded-sweep.mjs [--json] [--limit=N]             # report only (default)
+ *   node scripts/backlog-stranded-sweep.mjs --apply [--json]                 # ALSO auto-resolve the strict subset
+ *     [--log-limit=N]  cap the origin/main commit-log window the strict check reads (default 400)
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { resolveLandedItem } from './lane-drain.mjs'; // #3916 — the ONE resolve-on-land home (#2899 A5); never a second resolver
 
 /** Frontmatter-strict single-field read (#2603) — only the leading `---` block, never a body line. Pure. */
 export function readFrontmatterField(body, field) {
@@ -39,6 +48,13 @@ export function readFrontmatterField(body, field) {
   const m = text.slice(3, end).match(new RegExp(`^${field}:\\s*(.+)$`, 'm'));
   return m ? m[1].trim().replace(/^["']|["']$/g, '') : null;
 }
+
+/**
+ * #2899 jury — card-derived id tokens (a filename stem, a `bornAs` value) are interpolated into `new RegExp`, so
+ * they are untrusted input to a regex compiler. Accept only the two real id shapes; anything else is dropped
+ * rather than escaped, because a card id that is not an id is a data error, not something to pattern-match.
+ */
+const isCardId = (t) => /^\d{1,6}$/.test(t) || /^x[0-9a-z]{6}$/.test(t);
 
 /** The id token of a `backlog/<id>-<slug>.md` stem — `2899-jit-…` → `2899`. Pure. */
 export function idTokenOf(stem) {
@@ -90,12 +106,9 @@ export function isAnnotationPr({ headRefName = '', title = '' } = {}) {
  * @returns {{matched:boolean, via:(string|null)}}
  */
 export function prDeliveredItem(pr = {}, item = {}) {
-  // #2899 jury — tokens come from a CARD (the filename stem and its `bornAs` frontmatter) and are interpolated
-  // into `new RegExp` below, so they are untrusted input to a regex compiler. Accept only the two real id
-  // shapes; anything else is dropped rather than escaped, because a card id that is not an id is a data error,
-  // not something to pattern-match. This also stops a stray token from matching half the corpus.
-  const isId = (t) => /^\d{1,6}$/.test(t) || /^x[0-9a-z]{6}$/.test(t);
-  const tokens = [String(item.id || ''), String(item.bornAs || '')].filter((t) => t && t !== 'null' && isId(t));
+  // Tokens come from a CARD, so only real id shapes pass (`isCardId`, #2899 jury). This also stops a stray
+  // token from matching half the corpus.
+  const tokens = [String(item.id || ''), String(item.bornAs || '')].filter((t) => t && t !== 'null' && isCardId(t));
   if (!tokens.length) return { matched: false, via: null };
   if (isAnnotationPr(pr)) return { matched: false, via: null };
   const ref = String(pr.headRefName || '');
@@ -159,11 +172,93 @@ export function sweepStrandings(cards = [], mergedPrs = [], { limitPerItem = 3 }
   return out.sort((a, b) => Number(a.id) - Number(b.id) || String(a.id).localeCompare(String(b.id)));
 }
 
+/**
+ * #3916 — AUTO-RESOLVE, the one exception to "REPORT, NEVER BULK-FLIP" above. Pure.
+ *
+ * WHY THIS EXISTS. `#3916` graduated onto `main` (commit `092df91c4`, "Graduate test setup, heavy-command
+ * admission and file-locks from lane/mechanical-dispatcher (#3916)") but the resolve-on-land path
+ * (`scripts/merge-ai-prs.mjs`'s `deliveredItemNumsFromPr`, #2899) never even saw it: a guard meant to exclude a
+ * doc-only PR misfired on a QUOTED citation inside the PR body ("... 'already landed, no code change' precedent
+ * ...") and dropped the credited id before it ever reached `landedThisPass`, so the card sat `status: active`
+ * indefinitely with real, merged, on-`main` work. That extractor bug is fixed at its source
+ * (`scripts/lib/open-pr-items.mjs`), but resolve-on-land is inherently heuristic (it reads PR ref/title/body
+ * text), so this sweep is the backstop for the NEXT heuristic miss, not just this one.
+ *
+ * WHY THIS ONE SIGNAL IS SAFE TO ACT ON AUTOMATICALLY (unlike `sweepStrandings` above, which only ever
+ * reports). `commitSubjectDeliversItem` requires a commit **reachable from `main` itself** (ground truth, no
+ * `gh` staleness/window-truncation risk) whose subject names the card's OWN id as the delivery-commit
+ * convention this repo already uses (`Graduate ... (#3916)`, `WE #NNN: ...`) — never a bare mention. Excluding
+ * every `drain: ...` commit matters: `drain: resolve #3917 on land (#2748)` / `drain: JIT-number x…→#4053 at
+ * land (#2288)` are MECHANICAL housekeeping whose trailing `(#NNNN)` cites the EPIC that authorized the
+ * automation, not something that commit delivers — without the exclusion, every routine drain commit would
+ * misread as "delivering" #2748/#2288 forever.
+ *
+ * NEVER GUESS. A card with no matching commit is left OUT of this set — it still surfaces in
+ * `sweepStrandings`'s general (report-only, hand-triaged) output exactly as before. This function decides
+ * WHICH cards are safe to flip; the actual flip is the drain's own `resolveLandedItem`
+ * (`scripts/lane-drain.mjs`, #2748) — this module never re-implements that mutation.
+ *
+ * @param {string} subject  one `git log` commit subject line, reachable from `main`
+ * @param {string|number} id  the card's own id (its `backlog/<id>-*.md` stem token)
+ * @returns {boolean}
+ */
+export function commitSubjectDeliversItem(subject, id) {
+  const s = String(subject || '');
+  if (/^drain:/i.test(s)) return false; // mechanical housekeeping — its trailing (#NNNN) cites the enabling epic, not a delivery
+  const idStr = String(id ?? '').trim();
+  if (!isCardId(idStr)) return false; // #3916 review round 1 — a card-derived token, never compiled unvalidated
+  return new RegExp(`\\(#${idStr}\\)\\s*$`).test(s);
+}
+
+/**
+ * The STRICT subset of open/active `cards` safe to resolve AUTOMATICALLY — cross-referenced against `mainLog`
+ * (an array of commit subject strings reachable from `main`, caller-supplied so this stays pure/testable
+ * without touching a real git repo). Same card filtering as `sweepStrandings` (skip anything not open/active,
+ * skip epics — they legitimately outlive any one slice's PR). Pure.
+ * @param {Array<{stem:string, body:string}>} cards
+ * @param {string[]} mainLog
+ * @returns {Array<{id:string, status:string, via:string}>}
+ */
+export function autoResolvableStrandings(cards = [], mainLog = []) {
+  const subjects = Array.isArray(mainLog) ? mainLog : [];
+  const out = [];
+  for (const c of (Array.isArray(cards) ? cards : [])) {
+    if (!c) continue;
+    const id = idTokenOf(c.stem);
+    const status = readFrontmatterField(c.body, 'status');
+    if (status !== 'open' && status !== 'active') continue;
+    if (readFrontmatterField(c.body, 'kind') === 'epic') continue;
+    const hit = subjects.find((subj) => commitSubjectDeliversItem(subj, id));
+    if (hit) out.push({ id, status, via: `commit-subject "${hit}"` });
+  }
+  return out.sort((a, b) => Number(a.id) - Number(b.id) || String(a.id).localeCompare(String(b.id)));
+}
+
+// #3916 — commit subjects reachable from `origin/main`, for `autoResolvableStrandings`'s ground-truth check.
+// Best-effort: no `git`/no network/detached-from-a-remote → `null`, and the caller degrades `--apply`/
+// `--dry-run` to "unavailable" rather than guessing off a possibly-stale local branch.
+function readMainLog(limit) {
+  try { execFileSync('git', ['fetch', 'origin', 'main', '--quiet'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch { /* best-effort — a stale local origin/main still degrades safely below */ }
+  try {
+    const out = execFileSync('git', ['log', '--pretty=%s', ...(limit ? [`-n${limit}`] : []), 'origin/main'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    return out.split('\n').filter(Boolean);
+  } catch { return null; }
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const asJson = argv.includes('--json');
+  const apply = argv.includes('--apply');
+  const dryRun = argv.includes('--dry-run');
+  const wantAuto = apply || dryRun; // #3916 — a dry run previews exactly what --apply would do, never a guess
   const limitArg = (argv.find((a) => a.startsWith('--limit=')) || '').slice('--limit='.length);
   const limit = Number(limitArg) > 0 ? Number(limitArg) : 400;
+  // #3916 review round 1 — the commit-log window has its own `--log-limit` (default 400, the prior shared value),
+  // separate from the merged-PR `--limit`. Deliberately NOT widened to the whole history by default: a wider
+  // window multiplies the strict bar's known false positives (a trailing `(#NNN)` that is not the item — see the
+  // PR thread), so it stays bounded and the truncation warning below says so honestly.
+  const logLimitArg = (argv.find((a) => a.startsWith('--log-limit=')) || '').slice('--log-limit='.length);
+  const logLimit = Number(logLimitArg) > 0 ? Number(logLimitArg) : 400;
   const dir = join(process.cwd(), 'backlog');
   let files;
   try { files = readdirSync(dir).filter((f) => f.endsWith('.md')); }
@@ -179,6 +274,37 @@ function main() {
     process.exit(2); return;
   }
   const hits = sweepStrandings(cards, prs);
+
+  // #3916 — the STRICT, git-ground-truth subset, computed independently of the `gh`-sourced `hits` above (never
+  // guesses off it). `--dry-run` computes and reports this WITHOUT resolving anything; `--apply` (without
+  // `--dry-run`) also flips each one through the drain's own `resolveLandedItem`.
+  let autoHits = [];
+  let mainLogUnavailable = false;
+  let mainLogTruncated = false;
+  let mainLogLen = 0;
+  if (wantAuto) {
+    const mainLog = readMainLog(logLimit);
+    if (mainLog == null) mainLogUnavailable = true;
+    else {
+      autoHits = autoResolvableStrandings(cards, mainLog);
+      mainLogLen = mainLog.length;
+      // #3916 review round 1 — NO SILENT CAPS here either (same rule as the `gh` window below): a full log page
+      // means a delivery commit older than it was never checked, so "0 candidates" would be a false all-clear.
+      mainLogTruncated = mainLog.length >= logLimit;
+    }
+  }
+  const applied = [];
+  if (apply && !dryRun) {
+    for (const h of autoHits) {
+      try {
+        const flip = resolveLandedItem(process.cwd(), h.id);
+        applied.push({ id: h.id, flipped: !!flip.flipped, alreadyResolved: !!flip.alreadyResolved, ...(flip.reason ? { reason: flip.reason } : {}) });
+      } catch (e) {
+        applied.push({ id: h.id, flipped: false, alreadyResolved: false, reason: String((e && e.message) || e).split('\n')[0] });
+      }
+    }
+  }
+
   // #2899 jury — NO SILENT CAPS. `gh pr list --limit N` returns at most N, and a full page means the window may
   // be truncated: strandings older than it are simply absent from a report whose whole job is to find the ones
   // already stranded. An unqualified "no candidates" over a truncated window is a false all-clear, which is the
@@ -187,11 +313,35 @@ function main() {
   const window = truncated
     ? `the most recent ${prs.length} merged PRs — WINDOW FULL, older strandings are NOT covered; re-run with --limit=<bigger>`
     : `all ${prs.length} merged PRs`;
-  if (asJson) { process.stdout.write(`${JSON.stringify({ scannedCards: cards.length, scannedPrs: prs.length, windowTruncated: truncated, limit, candidates: hits }, null, 2)}\n`); return; }
+  // Drop anything the strict auto-resolve check above already covered (flagged or, under --apply, already
+  // flipped) — it would otherwise re-appear as a "hand-triage" candidate for work already accounted for.
+  const autoIds = new Set(autoHits.map((h) => String(h.id)));
+  const handTriage = hits.filter((h) => !autoIds.has(String(h.id)));
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify({ scannedCards: cards.length, scannedPrs: prs.length, windowTruncated: truncated, limit, candidates: handTriage, ...(wantAuto ? { autoResolvable: autoHits, mainLogUnavailable, mainLogWindowTruncated: mainLogTruncated } : {}), ...(apply && !dryRun ? { applied } : {}) }, null, 2)}\n`);
+    return;
+  }
   if (truncated) process.stderr.write(`stranded-sweep ⚠ merged-PR window is FULL at --limit=${limit} — this report covers only the most recent ${prs.length}; older strandings are NOT covered. Re-run with a larger --limit for a complete sweep.\n`);
-  if (!hits.length) { process.stdout.write(`stranded-sweep ✓ no candidates (${cards.length} cards × ${window})\n`); return; }
-  process.stdout.write(`stranded-sweep — ${hits.length} candidate(s) (${cards.length} cards × ${prs.length} merged PRs, #2899 A4). REPORT ONLY; nothing was written.\n\n`);
-  for (const h of hits) {
+  if (wantAuto && mainLogTruncated) process.stderr.write(`stranded-sweep ⚠ origin/main commit-log window is FULL at --log-limit=${logLimit} — the strict auto-resolve check covers only the most recent ${mainLogLen} commits; an item delivered earlier is NOT covered. Re-run with a larger --log-limit for a wider check.\n`);
+  if (wantAuto) {
+    if (mainLogUnavailable) process.stdout.write(`stranded-sweep ⚠ could not read \`origin/main\`'s commit log — the --apply/--dry-run auto-resolve check is UNAVAILABLE this run; falling back to report-only\n\n`);
+    else if (autoHits.length) {
+      process.stdout.write(`stranded-sweep — ${autoHits.length} candidate(s) with STRICT commit-subject proof (#3916):\n`);
+      for (const h of autoHits) process.stdout.write(`  #${h.id}  status:${h.status}  ← ${h.via}\n`);
+      if (apply && !dryRun) {
+        process.stdout.write('\n');
+        for (const a of applied) process.stdout.write(`  ${a.flipped ? '✓ resolved' : a.alreadyResolved ? '· already resolved' : '⚠ FAILED'} #${a.id}${a.reason ? ` (${a.reason})` : ''}\n`);
+      } else {
+        process.stdout.write(`\n  DRY RUN — nothing written. Re-run with --apply to resolve these through the drain's own resolveLandedItem.\n`);
+      }
+      process.stdout.write('\n');
+    } else {
+      process.stdout.write(`stranded-sweep — 0 candidates meet the strict commit-subject bar (#3916) ${mainLogTruncated ? `in the most recent ${mainLogLen} origin/main commits — WINDOW FULL, older deliveries are NOT covered` : `across all ${mainLogLen} origin/main commits`}; nothing auto-resolved\n\n`);
+    }
+  }
+  if (!handTriage.length) { process.stdout.write(`stranded-sweep ✓ no further candidates (${cards.length} cards × ${window})\n`); return; }
+  process.stdout.write(`stranded-sweep — ${handTriage.length} candidate(s) (${cards.length} cards × ${prs.length} merged PRs, #2899 A4). REPORT ONLY; nothing was written.\n\n`);
+  for (const h of handTriage) {
     process.stdout.write(`  #${h.id}  status:${h.status}${h.dateStarted ? `  started:${h.dateStarted}` : ''}${h.bornAs ? `  bornAs:${h.bornAs}` : ''}\n`);
     for (const p of h.mergedPrs) process.stdout.write(`        ← merged PR #${p.pr} via ${p.via}\n`);
   }

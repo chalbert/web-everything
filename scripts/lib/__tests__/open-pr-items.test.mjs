@@ -260,6 +260,44 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
       { body: 'This fix requires no code review sign-off beyond CI, and lands the feature end to end.' },
     )).toEqual(['3412']);
   });
+
+  it('#3916 (live case) — guard 8 must not fire on a QUOTED citation of another item\'s "no code change" precedent; PR #2594 was a real, large multi-.mjs-file port whose body cited #3894/#3482\'s own already-landed characterization of a DIFFERENT, narrower deviation, and the unguarded quote match wiped its credited id entirely — the exact silent skip resolve-on-land\'s totality report (#2899 J2/J3) cannot see, because it never reaches `landedThisPass` in the first place', () => {
+    const body = 'matching the `#3894`/`#3482` "already landed, no code change" precedent in #3443\'s own Progress log. Likewise the branch\'s test coverage is already superseded.';
+    expect(deliveredItemNumsFromPr(
+      'lane/3916-graduate-test-setup-heavy-command-admission-and-file-locks-c',
+      'Graduate test setup, heavy-command admission and file-locks from lane/mechanical-dispatcher (#3916)',
+      { body },
+    )).toEqual(['3916']);
+  });
+
+  it('#3916 — guard 8 still fires when the SAME phrase describes THIS PR unquoted, even alongside an unrelated quoted mention', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/split-3096',
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      { body: 'Splits #3096 along its two scope: entries. No code changes — two backlog files. (cf. "some other quoted note")' },
+    )).toEqual([]);
+  });
+
+  // #3916 review round 1 — the quote-strip must remove only an ATTRIBUTED citation (a citation cue word AND a
+  // `#NNN` reference to the cited item, outside the quote, on the same line), never any double-quoted text: a
+  // PR stating its OWN disclaimer inside quotation marks must still trip guard 8. Four-quadrant matrix.
+  describe('#3916 review round 1 — guard 8 quote-handling matrix', () => {
+    const ref = 'lane/4200-some-real-change';
+    const title = 'Ship the real thing (#4200)';
+    it.each([
+      ['quoted citation of another item (the live #2594 shape)', 'Follows the "already landed, no code change" precedent in #3443\'s own Progress log.', ['4200']],
+      ['unquoted own disclaimer', 'No code changes — this PR only touches docs.', []],
+      ['fully self-quoted own disclaimer', '"No code changes — this PR only touches docs."', []],
+      ['self-quoted own disclaimer mid-body', 'Summary: refactor. "No code changes here" - just cleanup.', []],
+      ['curly-quoted own disclaimer', '“No code changes here.”', []],
+      ['self-quoted disclaimer next to an item ref but no citation cue', '"No code changes" — see #4200 for details.', []],
+      ['self-quoted disclaimer next to a citation cue but no item ref', '"No code changes", as cited above.', []],
+      ['self-quoted disclaimer next to a citation cue and only THIS PR\'s own ref', 'Closes #4200. "No code changes" as cited in the card.', []],
+      ['mixed: quoted citation AND an unquoted own disclaimer', 'Per the "no code change" precedent cited in #3443: No code changes — two backlog files.', []],
+    ])('%s', (_label, body, expected) => {
+      expect(deliveredItemNumsFromPr(ref, title, { body })).toEqual(expected);
+    });
+  });
 });
 
 describe('extractItemNums', () => {
