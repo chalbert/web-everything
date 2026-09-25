@@ -856,6 +856,30 @@ describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable
   it('REFUSAL_KINDS names owed-ci-rerun — an unnamed refusal is a bug', () => {
     expect(REFUSAL_KINDS).toContain('owed-ci-rerun');
   });
+
+  // we:backlog/xudx8ff-*.md (#4075/#3383) — LIVE INCIDENT 2026-09-25: PRs #2635/#2636 are BOTH owed-ci-rerun
+  // (their failure falls inside a real main-red window) AND mergeStateStatus: 'DIRTY' (a genuine conflict with
+  // main, confirmed live via `gh pr view --json mergeStateStatus,mergeable`). A mechanical rebase can never
+  // clear a real conflict, so refusing owed-ci-rerun here left them stuck forever — no other pass ever plans a
+  // fixer for a PR this branch refuses. A DIRTY PR must fall through to the ordinary ci-heal path instead.
+  it('#xudx8ff — a DIRTY (conflicting) PR falls through to ci-heal instead of owed-ci-rerun, even inside a real main-red window', () => {
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY' })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2635, attempts: 0 })]);
+  });
+
+  it('#xudx8ff — a DIRTY PR still respects the ci-heal cap once its own durable attempt count is exhausted', () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [prRedAttributable({ mergeStateStatus: 'DIRTY', comments })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2635, cap: CI_HEAL_ROUND_CAP })]);
+  });
 });
 
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
@@ -1419,6 +1443,63 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── live-caught 2026-09-25, PR #2647/#2625 — a `stopped` session must free its PR, not freeze it ──────────────
+describe('assessLiveness — `state: stopped` is finished too (PR #2647/#2625, live 2026-09-25)', () => {
+  // The REAL shape measured off the running review daemon's own `claude agents --json --all`: a `stopped` (or
+  // `done`) row carries NO `pid` field at all — only a currently-`working` row does. `enrichAgents` (reconcile-
+  // pass.mjs) then OMITS `pidAlive` entirely (probePid(null) → null → key omitted), so this fixture's `stopped`
+  // row is exactly what `assessLiveness` actually receives in production, not an approximation of it.
+  const stoppedNoPid = {
+    name: 'review-2647', state: 'stopped', kind: 'background', cwd: '/wev-review-daemon',
+    sessionId: 's-2647-old', startedAt: 1_000,
+  };
+
+  it('a SINGLE stopped, pid-less bound session frees the PR (returns null, not liveness-unknown)', () => {
+    expect(assessLiveness([{ agent: stoppedNoPid, cwd: '/c', sha: 'abc' }])).toBeNull();
+  });
+
+  it('the bug this fixes: without the `stopped` check, the identical row reads as liveness-unknown', () => {
+    // Proves the fixture actually exercises the trap this fix closes — a row that is NEITHER `done` nor
+    // otherwise marked finished, with `pidAlive` absent, hits rank 3 on its own.
+    const notDone = String(stoppedNoPid.state).toLowerCase() !== 'done';
+    const noPidAlive = stoppedNoPid.pidAlive === undefined;
+    expect(notDone && noPidAlive).toBe(true);
+  });
+
+  it('several historical rows for the same PR, ALL stopped/done, still free it — bindAgents keeps every one', () => {
+    const rows = [
+      { ...stoppedNoPid, sessionId: 's-1' },
+      { ...stoppedNoPid, sessionId: 's-2' },
+      { ...stoppedNoPid, state: 'done', sessionId: 's-3' },
+    ];
+    const bound = rows.map((agent) => ({ agent, cwd: '/c', sha: 'abc' }));
+    expect(assessLiveness(bound)).toBeNull();
+  });
+
+  it('a genuinely LIVE session among stale `stopped` siblings still wins — stopped never masks a real live one', () => {
+    const live = { ...stoppedNoPid, state: 'working', pid: 555, pidAlive: true, sessionId: 's-live' };
+    const bound = [
+      { agent: { ...stoppedNoPid, sessionId: 's-old' }, cwd: '/c', sha: 'abc' },
+      { agent: live, cwd: '/c', sha: 'abc' },
+    ];
+    expect(assessLiveness(bound)).toMatchObject({ kind: 'live-process' });
+  });
+
+  it('end to end: a review:pending PR bound only to stale `stopped` reviewer sessions is owed a review again', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [stoppedNoPid], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2647 })]);
+  });
+
+  it('the same PR with a `blocked` (never-stopped) sibling still correctly refuses — this fix does not widen ANY other state', () => {
+    const pr = pr1563({ number: 2647, labels: lbl('review:pending'), comments: [] });
+    const stillBlocked = { ...stoppedNoPid, state: 'blocked', sessionId: 's-blocked' };
+    const plan = planReconcile({ prs: [pr], agents: [stillBlocked], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'liveness-unknown', prNumber: 2647 });
   });
 });
 

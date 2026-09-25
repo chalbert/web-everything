@@ -35,6 +35,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { newCompletionRecord, writeCompletion } from '../../operations/completion-store.mjs';
+import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REAPER_CLI = resolve(HERE, '..', 'session-reaper.mjs');
@@ -500,5 +501,96 @@ describe('--idle-hours — the idle-timeout backstop, end to end (epic #3383)', 
     const report = JSON.parse(out);
     expect(report.wouldStop).toEqual([]);
     expect(report.kept).toBe(1);
+  }, EXEC_TIMEOUT_MS);
+});
+
+describe('--retention-sweep — the #4089 opt-in retention pass, end to end through the real CLI', () => {
+  // Fully isolated from this checkout's OWN real `.operations/*` state (`OPERATION_*_DIR` overrides) — the
+  // pass is destructive (deletes files, calls `claude rm`), so these tests never touch a real directory the
+  // way the base-axis tests above are free to (they only ever read/stop against a STUBBED `claude`).
+  let completionsDir;
+  let deliveryDir;
+  let runsDir;
+  let backlogDir;
+  beforeEach(() => {
+    completionsDir = mkdtempSync(join(tmpdir(), 'we-retention-cli-completions-'));
+    deliveryDir = mkdtempSync(join(tmpdir(), 'we-retention-cli-delivery-'));
+    runsDir = mkdtempSync(join(tmpdir(), 'we-retention-cli-runs-'));
+    backlogDir = mktempBacklogDir();
+  });
+  afterEach(() => {
+    rmSync(completionsDir, { recursive: true, force: true });
+    rmSync(deliveryDir, { recursive: true, force: true });
+    rmSync(runsDir, { recursive: true, force: true });
+    rmSync(backlogDir, { recursive: true, force: true });
+  });
+
+  function mktempBacklogDir() {
+    return mkdtempSync(join(tmpdir(), 'we-retention-cli-backlog-'));
+  }
+
+  it('is OFF by default — the ordinary reap pass touches no completion/delivery-report record', () => {
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9001', kind: 'review', pr: '1' }), completionsDir);
+    runReaperCli(['--dry-run', '--json'], {
+      agents: '[]',
+      env: { OPERATION_COMPLETIONS_DIR: completionsDir, OPERATION_DELIVERY_REPORTS_DIR: deliveryDir, OPERATION_RUNS_DIR: runsDir },
+    });
+    expect(existsSync(join(completionsDir, 'conveyor-9001.json'))).toBe(true); // untouched — retention never ran
+  }, EXEC_TIMEOUT_MS);
+
+  it('with `--retention-sweep`, a confirmed-resolved item\'s session records are deleted end to end', () => {
+    writeFileSync(join(backlogDir, '9001-fixture-item.md'), '---\nstatus: resolved\ndateResolved: "2020-01-01"\n---\n# Fixture 9001\n');
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9001', kind: 'review', pr: '1' }), completionsDir);
+    writeDeliveryReport(newDeliveryReport({ session: 'conveyor-9001', item: '9001' }), deliveryDir);
+
+    const out = runReaperCli(['--retention-sweep', '--json'], {
+      agents: '[]',
+      env: {
+        OPERATION_COMPLETIONS_DIR: completionsDir,
+        OPERATION_DELIVERY_REPORTS_DIR: deliveryDir,
+        OPERATION_RUNS_DIR: runsDir,
+        WE_BACKLOG_DIR: backlogDir,
+      },
+    });
+    const report = JSON.parse(out);
+    expect(report.retention.deleted).toBe(1);
+    expect(existsSync(join(completionsDir, 'conveyor-9001.json'))).toBe(false);
+    expect(existsSync(join(deliveryDir, 'conveyor-9001.json'))).toBe(false);
+  }, EXEC_TIMEOUT_MS);
+
+  it('with `--retention-sweep`, a session whose item is still open is left untouched', () => {
+    writeFileSync(join(backlogDir, '9002-fixture-item.md'), '---\nstatus: active\n---\n# Fixture 9002\n');
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9002', kind: 'review', pr: '1' }), completionsDir);
+
+    const out = runReaperCli(['--retention-sweep', '--json'], {
+      agents: '[]',
+      env: {
+        OPERATION_COMPLETIONS_DIR: completionsDir,
+        OPERATION_DELIVERY_REPORTS_DIR: deliveryDir,
+        OPERATION_RUNS_DIR: runsDir,
+        WE_BACKLOG_DIR: backlogDir,
+      },
+    });
+    const report = JSON.parse(out);
+    expect(report.retention.deleted).toBe(0);
+    expect(existsSync(join(completionsDir, 'conveyor-9002.json'))).toBe(true);
+  }, EXEC_TIMEOUT_MS);
+
+  it('`--retention-sweep --dry-run` reports without deleting anything', () => {
+    writeFileSync(join(backlogDir, '9003-fixture-item.md'), '---\nstatus: resolved\ndateResolved: "2020-01-01"\n---\n# Fixture 9003\n');
+    writeCompletion(newCompletionRecord({ session: 'conveyor-9003', kind: 'review', pr: '1' }), completionsDir);
+
+    const out = runReaperCli(['--retention-sweep', '--dry-run', '--json'], {
+      agents: '[]',
+      env: {
+        OPERATION_COMPLETIONS_DIR: completionsDir,
+        OPERATION_DELIVERY_REPORTS_DIR: deliveryDir,
+        OPERATION_RUNS_DIR: runsDir,
+        WE_BACKLOG_DIR: backlogDir,
+      },
+    });
+    const report = JSON.parse(out);
+    expect(report.retention.wouldDelete).toEqual([{ session: 'conveyor-9003', reason: 'grace-after-done' }]);
+    expect(existsSync(join(completionsDir, 'conveyor-9003.json'))).toBe(true); // still there — dry run
   }, EXEC_TIMEOUT_MS);
 });

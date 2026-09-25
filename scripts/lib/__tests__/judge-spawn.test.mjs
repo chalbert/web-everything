@@ -540,7 +540,7 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     const { fn, seen } = fakeSpawn(okJson);
     await judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, cwd: '/tmp/juror', env: { A: '1' }, spawnFn: fn });
     expect(seen.opts.cwd).toBe('/tmp/juror');
-    expect(seen.opts.env).toEqual({ A: '1' });
+    expect(seen.opts.env).toEqual({ A: '1', WE_CONVEYOR_WORKER: '1' }); // #3383: a juror is a worker, marked so tick-once refuses in it
   });
 
   it('throws the juror\'s OWN failure text rather than a paraphrase', async () => {
