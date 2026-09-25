@@ -3,6 +3,12 @@
  * @file scripts/operations/review-dispatch.mjs
  * @description `#3279` — DISPATCH AN INDEPENDENT REVIEW OF A PR TO A FRESH SESSION.
  *
+ * x26lw6u — THE DEFAULT IS NOW A JOB, NOT A SESSION. `we:scripts/operations/review-job.mjs` runs the brief's
+ * fixed arc as code (the review daemon and this CLI both default to it); `dispatchReview` below is the opt-in
+ * `claude --bg` path (`--mode=session` / `WE_REVIEW_DISPATCH_MODE=session`). The independence argument below
+ * still holds for both: the judging happens in the fresh jurors `review-loop-cli.mjs` spawns, and the job mints
+ * its own fresh actor id per round where this path relies on the `--bg` session's.
+ *
  *   node scripts/operations/review-dispatch.mjs --pr=1234 --repo=chalbert/web-everything
  *
  * THE GAP THIS CLOSES, PRECISELY. `review-pr` (via `we:scripts/operations/review-loop-cli.mjs`, #3072) already
@@ -440,7 +446,24 @@ if (IS_CLI) {
     const hit = argv.find((a) => a.startsWith(`--${name}=`));
     return hit ? hit.slice(name.length + 3) : undefined;
   };
-  try {
+  // x26lw6u — the DEFAULT is now the deterministic review JOB (`we:scripts/operations/review-job.mjs`): the arc
+  // this file's brief describes, run as code, with no Claude wrapper session. `--mode=session` (or
+  // `WE_REVIEW_DISPATCH_MODE=session`) keeps the `claude --bg` + brief path below. Imported lazily: review-job.mjs
+  // itself imports this module.
+  const { resolveReviewDispatchMode, dispatchReviewJob } = await import('./review-job.mjs');
+  const mode = flag('mode') === 'session' || flag('mode') === 'job' ? flag('mode') : resolveReviewDispatchMode();
+  if (mode === 'job') {
+    try {
+      const r = dispatchReviewJob({ pr: flag('pr'), repo: flag('repo') });
+      writeAllSync(1, r.skipped
+        ? `dispatch-review: ${r.repo}#${r.pr} not started — ${r.skipped}${r.jobPid ? ` (job pid ${r.jobPid})` : ''}\n`
+        : `dispatch-review: started review job pid ${r.jobPid} (slug ${r.sessionSlug}) for ${r.repo}#${r.pr} — no Claude wrapper session\n`
+          + `log: ${r.logPath}\nresult: node scripts/operations/completion-cli.mjs show --session=${r.sessionSlug}\n`);
+    } catch (e) {
+      writeLineSync(2, `error: ${String(e?.message ?? e)}`);
+      process.exitCode = 1;
+    }
+  } else try {
     // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): with `extraArgs` now actually forwarded (see `dispatchReview`),
     // the CLI still had no way to SUPPLY any — `dispatch-lane.mjs`'s own CLI wiring reads `WE_DISPATCH_AGENT_ARGS`
     // (`agentArgsFromEnv`) so an operator can pass a restrictive `--permission-mode` to a dispatched agent; this

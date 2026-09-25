@@ -1,0 +1,460 @@
+#!/usr/bin/env node
+/**
+ * @file scripts/operations/review-job.mjs
+ * @description x26lw6u (epic #3383) — RUN THE INDEPENDENT-REVIEW ARC AS A DETERMINISTIC JOB, NOT A CLAUDE
+ * WRAPPER SESSION.
+ *
+ *   node scripts/operations/review-job.mjs run --pr=1234 --repo=chalbert/web-everything   # the arc, foreground
+ *
+ * THE WASTE THIS REMOVES (measured 2026-09-24 → 25, the review daemon's own transcripts). The review daemon
+ * (`we:skills-src/conveyor/review-daemon.mjs`) used to start one `claude --bg` session per owed review
+ * (`we:scripts/operations/review-dispatch.mjs#dispatchReview`), handing it `we:skills-src/review/
+ * review-agent-brief.md` — a FIXED five-step arc with no judgment in it: report `started`, acquire a lane, run
+ * `we:scripts/operations/review-loop-cli.mjs` once, report `done`, release the lane. The brief forbids the
+ * session from acting on the result. 388 such sessions cost ~27 active hours (~11.3h of it idle-waiting on the
+ * loop), 213 of them never reached the loop at all, and each held ~0.7 GB RSS. This file is that arc as code.
+ *
+ * WHY THE WRAPPER SESSION WAS NOT LOAD-BEARING (verified from source before this file was written):
+ *   1. THE JUDGING IS ALREADY FRESH WITHOUT IT. `review-loop-cli.mjs` drives `review-pr`, whose jurors are
+ *      spawned by `we:scripts/lib/judge-spawn.mjs` as separate `claude -p` processes with their OWN derived
+ *      `--session-id` — independent of whoever called the CLI. The wrapper session never judged anything.
+ *   2. THE ONE THING IT DID SUPPLY IS AN ACTOR ID. `we:scripts/lib/review-independence.mjs#currentActorId`
+ *      reads `CLAUDE_CODE_SESSION_ID` off plain `process.env`; `review-pr`'s `read` step and
+ *      `we:scripts/review-set-label.mjs` compare it with the PR's `authored-by-actor` stamp. A `--bg` session's
+ *      id is a random value the harness mints — "independent" only in the sense that it is not the author's.
+ *      This job mints its own fresh random UUID per round and hands it to its children the same way, so the
+ *      clearer is still a real, distinct, per-round identity (never '' — an unset id would downgrade every
+ *      clear to `unknown-clearer`, "Independence NOT established", which is why this is set, not skipped).
+ *      The job never authors a PR, so its id can never equal an author stamp.
+ *   3. THE PROMPT-INJECTION RESIDUAL SHRINKS. A session reading the reviewed diff could in principle be talked
+ *      into running something other than the arc (`#3433`'s deny list exists for that). A script has no prompt.
+ *
+ * WHAT STAYS A SESSION. Nothing in this arc needs judgment, so nothing here spawns one. The fix and ci-heal
+ * dispatches (`we:scripts/conveyor/reconcile-fix-dispatch.mjs`, `we:scripts/operations/ci-heal-pr-dispatch.mjs`)
+ * do real code-editing work and are untouched. A `review:human` park is still parked by `review-pr` itself and
+ * cleared only by a human (`--to=clear-human`); this job never clears, merges or re-runs anything. The old
+ * session path stays reachable behind {@link REVIEW_DISPATCH_MODE_ENV}`=session` (or `--mode=session` on
+ * `review-dispatch.mjs`'s CLI).
+ *
+ * LIVENESS WITHOUT A TRANSCRIPT. Everything that decided "is a review already running on this PR" read
+ * `claude agents --json` and bound a row by its `review-<pr>` NAME (`we:scripts/conveyor/reconcile-core.mjs
+ * #bindAgents`, `we:scripts/conveyor/review-status-tag.mjs#deriveReviewStatus`). A job has no listing row, so
+ * it writes a JOB RECORD (`<root>/.operations/review-jobs/<slug>.json`: slug, pid, startedAt, cwd) and
+ * {@link listReviewJobAgents} turns every record whose pid is still alive into a row of the SAME shape
+ * (`name`, `state: 'working'`, `pid`, `startedAt`, `cwd`, `kind: 'review-job'`). Those two readers merge the
+ * rows in ({@link listAgentsWithReviewJobs}), so double-dispatch refusal and the `review-status:reviewing`
+ * label keep working with no change to either pure core. A dead pid is pruned, never read as live. The job
+ * row carries no `sessionId`, so `we:scripts/conveyor/hung-session.mjs` answers `no-signal` for it (it never
+ * guesses hung without a transcript) — the job bounds ITSELF instead: the loop runs under a hard timeout
+ * ({@link resolveLoopTimeoutMs}). `we:scripts/conveyor/session-reaper.mjs` reads its own listing and never
+ * sees a job row, so it can never try to `claude stop` one.
+ *
+ * NO LANE → NEXT TICK, BOUNDED. The daemon already caps each tick's dispatches by how many lanes are acquirable
+ * (`review-daemon.mjs#defaultAcquirableLaneCount`). If the job still finds none after a short bounded wait, it
+ * reports `deferred-no-lane`, exits, and the PR is simply owed again on the next tick — no session was burned.
+ * After {@link MAX_LANE_DEFERRALS} deferrals in a row the outcome escalates to `blocked-on-infra`, and
+ * {@link dispatchReviewJob} then declines to spawn for that PR until the same 15-minute cool-off reconcile
+ * already uses for `blocked-on-infra` (`reconcile-core.mjs#INFRA_RETRY_COOLOFF_MS`) has passed.
+ *
+ * NOTIFICATION. The completion record (`we:scripts/operations/completion-cli.mjs`'s store, #3436) is written
+ * `started` then `done` exactly as the brief's steps 0/3 wrote it — same session slug, same outcome words
+ * (`bounced` / `auto-cleared` / `parked` / `blocked-on-infra`) — so `markSelfReportedDone`, telemetry and every
+ * `completion-cli.mjs show` reader see no difference. The label/comment on the PR is written by
+ * `review-loop-cli.mjs` itself, unchanged. One telemetry trace per round (`telemetry-store.mjs#recorderFor`).
+ *
+ * WHY A PLAIN MODULE, NOT AN `op()` DECLARATION. The judged work already IS a declared operation (`review-pr`,
+ * driven by `review-loop-cli.mjs`). This file is the harness around it — acquire, run, report, release — the
+ * same standalone shape `review-dispatch.mjs` and `dispatch-abort.mjs` argue for in their headers, and the one
+ * the prototype `review-dispatch-wrapper.mjs` (origin/lane/mechanical-dispatcher, #3908) used. Its
+ * outcome classifier is ported from there, with #3647's fix folded in: a non-zero exit whose stdout still
+ * parses as a finished review reports the review's real outcome, never a blanket `blocked-on-infra`.
+ *
+ * IMPURE, but every effect goes through an injected `io` so the whole arc is unit-tested with fakes.
+ */
+
+import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { assertNotALaneCheckout, REPO_ROOT, resolveGhShimSettingsEnv } from './dispatch-lane-io.mjs';
+import {
+  decideJobClaim, jobLogPath, pidAlive, readJobRecord, removeJobRecord, reviewJobsDir, writeJobRecord,
+} from './review-job-store.mjs';
+import { assertMainNotStale, dispatchReview, planReviewDispatch } from './review-dispatch.mjs';
+import { runReport } from './completion-cli.mjs';
+import { tryReadCompletion } from './completion-store.mjs';
+import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
+import { ACTOR_ENV } from '../lib/review-independence.mjs';
+import { INFRA_RETRY_COOLOFF_MS } from '../conveyor/reconcile-core.mjs';
+import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+
+const THIS_FILE = fileURLToPath(import.meta.url);
+
+// The job-record store, re-exported so a caller has one import for the whole review-job surface.
+export * from './review-job-store.mjs';
+
+/** `job` (default) or `session` — which dispatch path the review daemon takes. */
+export const REVIEW_DISPATCH_MODE_ENV = 'WE_REVIEW_DISPATCH_MODE';
+
+/** The lane-pool `--purpose` — the brief's own `review-loop`, so the pool's accounting is unchanged. */
+export const REVIEW_LOOP_LANE_PURPOSE = 'review-loop';
+
+/** Bounded acquire wait. Shorter than the brief's 180s on purpose: the next tick (120s later) IS the retry, and
+ *  a waiting job costs a sleeping node process, not a session. */
+export const REVIEW_JOB_LANE_WAIT_MS = 60_000;
+
+/** Consecutive no-lane deferrals before the outcome escalates to `blocked-on-infra` and dispatch cools off. */
+export const MAX_LANE_DEFERRALS = 5;
+
+export const DEFERRED_NO_LANE = 'deferred-no-lane';
+export const BLOCKED_ON_INFRA = 'blocked-on-infra';
+const LANE_DEFERRALS_LABEL = 'lane-deferrals:';
+
+/** Hard ceiling on one review-loop round. Measured jurors: correctness ~333s, security ~112s on average; the
+ *  slowest recent wrapper sessions ran ~21 min end to end. 45 min is a hang, not a slow review. */
+export const DEFAULT_LOOP_TIMEOUT_MS = 45 * 60 * 1000;
+export const LOOP_TIMEOUT_ENV = 'WE_REVIEW_JOB_TIMEOUT_MS';
+
+/** @param {object} [env] @returns {number} */
+export function resolveLoopTimeoutMs(env = process.env) {
+  const n = Number(env?.[LOOP_TIMEOUT_ENV]);
+  return Number.isFinite(n) && n >= 60_000 ? n : DEFAULT_LOOP_TIMEOUT_MS;
+}
+
+/** @param {object} [env] @returns {'job'|'session'} — anything unrecognised reads as the default `job`. */
+export function resolveReviewDispatchMode(env = process.env) {
+  const raw = String(env?.[REVIEW_DISPATCH_MODE_ENV] ?? '').trim().toLowerCase();
+  return raw === 'session' ? 'session' : 'job';
+}
+
+// ── PURE CLASSIFIERS ───────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * PURE — `review-loop-cli.mjs --json`'s payload → the brief's own outcome words (ported from the prototype
+ * `review-dispatch-wrapper.mjs#classifyReviewLoopOutcome`):
+ *   queued accept (`accept-needs-human`) → `parked`; `preventionFiled` → `auto-cleared`;
+ *   `stopped: complete|effect-in-flight` → `auto-cleared` on an `accept` verdict, else `bounced`;
+ *   `stopped: confirm` → `parked` (a `review:human` park); anything else → `blocked-on-infra`.
+ */
+export function classifyReviewLoopOutcome(parsed) {
+  const runId = typeof parsed?.runId === 'string' ? parsed.runId : null;
+  const verdict = typeof parsed?.verdict?.verdict === 'string' ? parsed.verdict.verdict : null;
+  const loopOutcome = typeof parsed?.verdict?.loop?.outcome === 'string' ? parsed.verdict.loop.outcome : null;
+  const base = { verdict, loopOutcome, runId };
+  if (parsed?.queued === 'accept-needs-human') return { outcome: 'parked', ...base };
+  if (Array.isArray(parsed?.preventionFiled)) return { outcome: 'auto-cleared', ...base };
+  const stopped = typeof parsed?.stopped === 'string' ? parsed.stopped : null;
+  if (stopped === 'complete' || stopped === 'effect-in-flight') {
+    return { outcome: verdict === 'accept' ? 'auto-cleared' : 'bounced', ...base };
+  }
+  if (stopped === 'confirm') return { outcome: 'parked', ...base };
+  return { outcome: BLOCKED_ON_INFRA, ...base };
+}
+
+/**
+ * PURE — pull the JSON payload out of the loop's stdout. `--json` prints ONE pretty-printed object, but a
+ * stray leading line must not lose a finished review (#3647's lesson), so fall back to the first line that
+ * opens an object and parse from there.
+ * @returns {object|null}
+ */
+export function parseReviewLoopStdout(stdout) {
+  const text = String(stdout ?? '').trim();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { /* fall through */ }
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].startsWith('{')) continue;
+    try { return JSON.parse(lines.slice(i).join('\n')); } catch { /* keep looking */ }
+  }
+  return null;
+}
+
+/**
+ * PURE — the outcome of THIS no-lane deferral, counting the previous ones off the prior completion record.
+ * @returns {{count:number, outcome:string, label:string}}
+ */
+export function nextLaneDeferral(prev, max = MAX_LANE_DEFERRALS) {
+  const prevCount = (prev?.outcome === DEFERRED_NO_LANE && typeof prev.label === 'string' && prev.label.startsWith(LANE_DEFERRALS_LABEL))
+    ? Number(prev.label.slice(LANE_DEFERRALS_LABEL.length)) || 0
+    : 0;
+  const count = prevCount + 1;
+  return { count, outcome: count >= max ? BLOCKED_ON_INFRA : DEFERRED_NO_LANE, label: `${LANE_DEFERRALS_LABEL}${count}` };
+}
+
+/** PURE — is this PR in the post-escalation cool-off (its last round exhausted the lane deferrals recently)? */
+export function laneCooloffActive(record, nowMs, cooloffMs = INFRA_RETRY_COOLOFF_MS) {
+  if (!record || record.status !== 'done' || record.outcome !== BLOCKED_ON_INFRA) return false;
+  if (typeof record.label !== 'string' || !record.label.startsWith(LANE_DEFERRALS_LABEL)) return false;
+  const at = Date.parse(record.updatedAt ?? '');
+  return Number.isFinite(at) && nowMs - at < cooloffMs;
+}
+
+// ── THE ARC ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The real effects, each one command. `root` is the checkout the arc runs from (the daemon's clone). */
+export function createReviewJobIo({ root = REPO_ROOT, env = process.env, dir = reviewJobsDir(env, root) } = {}) {
+  const node = (args, { actorId, timeoutMs } = {}) => spawnSync(process.execPath, args, {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    env: { ...env, ...(actorId ? { [ACTOR_ENV]: actorId } : {}) },
+    ...(timeoutMs ? { timeout: timeoutMs, killSignal: 'SIGKILL' } : {}),
+  });
+  return {
+    root,
+    now: () => Date.now(),
+    newActorId: () => randomUUID(),
+    readPrevCompletion: (slug) => { try { return tryReadCompletion(slug); } catch { return null; } },
+    report: (flags) => runReport(flags),
+    claim: (slug, record) => {
+      const verdict = decideJobClaim(readJobRecord(slug, dir), record.pid, pidAlive);
+      if (verdict.ok) writeJobRecord(record, dir);
+      return verdict;
+    },
+    updateRecord: (record) => writeJobRecord(record, dir),
+    unclaim: (slug, pid) => removeJobRecord(slug, pid, dir),
+    acquireLane: ({ laneRepo, slug, actorId, waitMs }) => {
+      const r = node([
+        'scripts/lane-pool.mjs', 'acquire', `--repo=${laneRepo}`, `--purpose=${REVIEW_LOOP_LANE_PURPOSE}`,
+        `--session=${slug}`, `--wait-ms=${waitMs}`, '--adopt',
+      ], { actorId, timeoutMs: waitMs + 10 * 60 * 1000 });
+      const path = String(r.stdout ?? '').trim().split('\n').filter(Boolean).pop() ?? '';
+      if (r.status === 0 && path.startsWith('/') && existsSync(path)) return { lanePath: path };
+      return { lanePath: null, error: String(r.stderr || r.error?.message || `exit ${r.status}`).trim().split('\n').slice(-3).join(' | ').slice(0, 500) };
+    },
+    runLoop: ({ pr, repo, lanePath, actorId, timeoutMs }) => {
+      const r = node([
+        'scripts/operations/review-loop-cli.mjs', `--pr=${pr}`, `--repo=${repo}`, `--cwd=${lanePath}`,
+        '--provider=claude', '--json',
+      ], { actorId, timeoutMs });
+      return {
+        status: r.status, signal: r.signal ?? null, stdout: String(r.stdout ?? ''), stderr: String(r.stderr ?? ''),
+        timedOut: r.error?.code === 'ETIMEDOUT' || (r.signal === 'SIGKILL' && r.status === null),
+      };
+    },
+    releaseLane: (slug) => node(['scripts/lane-pool.mjs', 'release', '--all-pools', `--session=${slug}`], { timeoutMs: 5 * 60 * 1000 }),
+    log: (line) => writeLineSync(2, `[${new Date().toISOString()}] ${line}`),
+  };
+}
+
+function tail(text, n = 400) {
+  const t = String(text ?? '').trim();
+  return t.length > n ? t.slice(-n) : t;
+}
+
+/**
+ * THE ARC — one review round for `repo#pr`, start to finish, no Claude wrapper session:
+ *   0. claim the job slot (refuse if a live job already holds it) and report `started`;
+ *   1. acquire a lane (bounded wait);
+ *   2. run `review-loop-cli.mjs --json` ONCE under a fresh actor id and a hard timeout;
+ *   3. report `done` with the classified outcome / loop verdict / run id;
+ *   4. release the lane and drop the job record — in `finally`, so every exit path cleans up.
+ * @param {{pr:number|string, repo:string, laneWaitMs?:number, loopTimeoutMs?:number}} o
+ * @param {ReturnType<typeof createReviewJobIo>} [io]
+ * @returns {{pr:number, repo:string, sessionSlug:string, outcome:string, verdict:(string|null),
+ *   loopOutcome:(string|null), runId:(string|null), lanePath:(string|null), label:(string|null), refused?:boolean,
+ *   timings:{acquireMs:(number|null), loopMs:(number|null), totalMs:number}}}
+ */
+export function runReviewJob({
+  pr, repo, laneWaitMs = REVIEW_JOB_LANE_WAIT_MS, loopTimeoutMs = resolveLoopTimeoutMs(), pid = process.pid,
+} = {}, io = createReviewJobIo()) {
+  const planned = planReviewDispatch({ pr, repo });
+  const slug = planned.sessionSlug;
+  const t0 = io.now();
+  const timings = { acquireMs: null, loopMs: null, totalMs: 0 };
+  const result = (fields) => ({
+    pr: planned.pr, repo: planned.repo, sessionSlug: slug, lanePath: null, verdict: null, loopOutcome: null, runId: null,
+    label: null, ...fields, timings: { ...timings, totalMs: io.now() - t0 },
+  });
+
+  const record = { slug, pr: planned.pr, repo: planned.repo, pid, startedAt: new Date(t0).toISOString(), cwd: io.root };
+  const claim = io.claim(slug, record);
+  if (!claim.ok) {
+    io.log(`review-job ${slug}: refused — a live job (pid ${claim.heldBy}) already holds this PR's slot`);
+    return result({ outcome: 'refused-live-job', refused: true });
+  }
+
+  let tel = null;
+  let root = null;
+  try {
+    tel = recorderFor({ kind: 'review', pr: planned.pr, attributes: { pr: planned.pr, repo: planned.repo, sessionSlug: slug, mode: 'job' } });
+    setActiveRecorder(tel);
+    root = tel.startRoot({ pr: planned.pr, repo: planned.repo, mode: 'job' });
+  } catch { tel = null; root = null; }
+  const span = (name) => { try { return root ? root.child(name) : null; } catch { return null; } };
+
+  let classified = null;
+  let lanePath = null;
+  try {
+    const prev = io.readPrevCompletion(slug);
+    io.report({ session: slug, kind: 'review', pr: String(planned.pr), repo: planned.repo, status: 'started' });
+
+    // NO pre-release of this slug's lease. The job slot above proves no live JOB owns the slug, but not that no
+    // live SESSION does (the `--mode=session` path, or a session dispatched just before a switch-over and not yet
+    // in `claude agents --json`) — releasing by slug here would pull a lane out from under it. Live-caught on the
+    // daemon overlay 2026-09-25. A killed job's leftover lease is the lane pool's own reaper's job (#2748).
+    const actorId = io.newActorId();
+    io.log(`review-job ${slug}: actor ${actorId}; acquiring a lane (wait ≤ ${laneWaitMs}ms)`);
+    const acquireSpan = span('lane.acquire');
+    const tA = io.now();
+    const acq = io.acquireLane({ laneRepo: planned.laneRepo, slug, actorId, waitMs: laneWaitMs });
+    timings.acquireMs = io.now() - tA;
+    if (!acq.lanePath) {
+      const d = nextLaneDeferral(prev);
+      classified = { outcome: d.outcome, verdict: null, loopOutcome: null, runId: null, label: d.label };
+      try { acquireSpan?.fail(new Error(acq.error || 'no free lane'), { outcome: d.outcome }); } catch { /* telemetry never throws */ }
+      io.log(`review-job ${slug}: no lane (${acq.error || 'pool full'}) — ${d.outcome} (${d.label}); the next tick retries`);
+      return result({ ...classified });
+    }
+    try { acquireSpan?.ok({ lanePath: acq.lanePath }); } catch { /* telemetry */ }
+    lanePath = acq.lanePath;
+    io.updateRecord({ ...record, cwd: lanePath, actorId });
+
+    io.log(`review-job ${slug}: running review-loop-cli in ${lanePath}`);
+    const loopSpan = span('review.loop');
+    const tL = io.now();
+    const loop = io.runLoop({ pr: planned.pr, repo: planned.repo, lanePath, actorId, timeoutMs: loopTimeoutMs });
+    timings.loopMs = io.now() - tL;
+    const parsed = parseReviewLoopStdout(loop.stdout);
+    if (loop.timedOut) {
+      classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: parsed?.runId ?? null, label: `review-loop timed out after ${loopTimeoutMs}ms` };
+    } else if (parsed) {
+      // #3647 — classify what the loop PRINTED even on a non-zero exit: a finished review whose secondary
+      // filing step failed is still that review's real outcome.
+      classified = { ...classifyReviewLoopOutcome(parsed), label: loop.status === 0 ? null : `exit ${loop.status}` };
+    } else {
+      classified = {
+        outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null,
+        label: `review-loop exit ${loop.status}: ${tail(loop.stderr || loop.stdout, 300)}`.slice(0, 500),
+      };
+    }
+    try {
+      if (classified.outcome === BLOCKED_ON_INFRA) loopSpan?.fail(new Error(classified.label || 'blocked-on-infra'), { outcome: classified.outcome });
+      else loopSpan?.ok({ outcome: classified.outcome, verdict: classified.verdict, loopOutcome: classified.loopOutcome, runId: classified.runId });
+    } catch { /* telemetry */ }
+    io.log(`review-job ${slug}: loop finished in ${timings.loopMs}ms — ${classified.outcome} (verdict ${classified.verdict ?? '-'}, loop ${classified.loopOutcome ?? '-'}, run ${classified.runId ?? '-'})`);
+    return result({ ...classified, lanePath });
+  } catch (e) {
+    classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null, label: tail(e?.message ?? e, 500) };
+    io.log(`review-job ${slug}: crashed — ${classified.label}`);
+    return result({ ...classified, lanePath });
+  } finally {
+    const done = classified ?? { outcome: BLOCKED_ON_INFRA, label: 'review-job exited without an outcome' };
+    try {
+      io.report({
+        session: slug, status: 'done', outcome: done.outcome,
+        ...(done.loopOutcome ? { verdict: done.loopOutcome } : {}),
+        ...(done.runId ? { runId: done.runId } : {}),
+        ...(done.label ? { label: String(done.label).slice(0, 500) } : {}),
+      });
+    } catch (e) { io.log(`review-job ${slug}: FAILED to write the done completion record — ${tail(e?.message ?? e, 200)}`); }
+    if (lanePath) { try { io.releaseLane(slug); } catch { /* reported by the lane pool's own reaper */ } }
+    try { io.unclaim(slug, pid); } catch { /* a stale record is pruned by pid next read */ }
+    try { tel?.closeRoot({ outcome: done.outcome, label: done.label ?? null, attributes: { verdict: done.verdict ?? null, runId: done.runId ?? null } }); } catch { /* telemetry */ }
+  }
+}
+
+// ── THE DISPATCH (what the daemon calls) ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Start ONE review job for `repo#pr`, detached, and return at once — the daemon never waits on a review. Same
+ * guards as the session path (`planReviewDispatch`, `assertNotALaneCheckout`, `assertMainNotStale`), plus two
+ * of its own: a live job already on this PR refuses (belt to reconcile's braces), and a PR in the lane
+ * cool-off is skipped. The child's env carries the GitHub App `gh` shim on `PATH` (the same override
+ * `review-dispatch.mjs` hands a session through `--settings`), so every `gh` call the loop makes reads the fresh
+ * shared token.
+ * @returns {{mode:'job', pr:number, repo:string, sessionSlug:string, agentId:null, jobPid:(number|null),
+ *   logPath:string, skipped?:string}}
+ */
+export function dispatchReviewJob({
+  pr, repo, root = REPO_ROOT, env = process.env, now = Date.now(), checkStaleness,
+  dir = reviewJobsDir(env, root),
+  spawnJob = defaultSpawnJob,
+  readCompletion = (slug) => { try { return tryReadCompletion(slug); } catch { return null; } },
+  resolveSettingsEnv = () => resolveGhShimSettingsEnv(undefined),
+  isAlive = pidAlive,
+  checkoutExists = existsSync, home = homedir(),
+} = {}) {
+  const planned = planReviewDispatch({ pr, repo, checkoutExists, home });
+  assertNotALaneCheckout(root);
+  assertMainNotStale(root, checkStaleness);
+  const slug = planned.sessionSlug;
+  const logPath = jobLogPath(slug, dir);
+  const base = { mode: 'job', pr: planned.pr, repo: planned.repo, repoKey: planned.repoKey, sessionSlug: slug, agentId: null, logPath };
+
+  const existing = readJobRecord(slug, dir);
+  if (existing && Number.isInteger(existing.pid) && isAlive(existing.pid)) {
+    return { ...base, jobPid: existing.pid, skipped: 'live-job' };
+  }
+  if (laneCooloffActive(readCompletion(slug), now)) {
+    return { ...base, jobPid: null, skipped: 'lane-cooloff' };
+  }
+
+  const settingsEnv = resolveSettingsEnv() || {};
+  const childEnv = { ...env, ...settingsEnv };
+  // The dispatcher's own actor id (if it happens to run inside a session) must never leak into the job — the
+  // job mints its own per round.
+  delete childEnv[ACTOR_ENV];
+  mkdirSync(dir, { recursive: true });
+  const jobPid = spawnJob({
+    argv: [THIS_FILE, 'run', `--pr=${planned.pr}`, `--repo=${planned.repo}`], cwd: root, env: childEnv, logPath,
+  });
+  // Claim the slot for the child NOW, so the very next reader (a tick 120s later, or a status tag this same
+  // tick) sees it — the child's own claim then finds its own pid already recorded and proceeds.
+  if (Number.isInteger(jobPid)) {
+    writeJobRecord({ slug, pr: planned.pr, repo: planned.repo, pid: jobPid, startedAt: new Date(now).toISOString(), cwd: root }, dir);
+  }
+  return { ...base, jobPid: Number.isInteger(jobPid) ? jobPid : null };
+}
+
+/** The real detached spawn: stdout/stderr appended to the job's own log, the child unref'd so the daemon's
+ *  event loop never waits on it. */
+export function defaultSpawnJob({ argv, cwd, env, logPath }) {
+  const fd = openSync(logPath, 'a');
+  try {
+    const child = spawn(process.execPath, argv, { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+    child.unref();
+    return child.pid;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The daemon's dispatch: the job by default, the old `claude --bg` session only when
+ * {@link REVIEW_DISPATCH_MODE_ENV}`=session` asks for it.
+ */
+export function dispatchReviewByMode({ mode = resolveReviewDispatchMode(), ...opts } = {}) {
+  if (mode === 'session') return { mode: 'session', ...dispatchReview(opts) };
+  return dispatchReviewJob(opts);
+}
+
+// ── CLI ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(THIS_FILE);
+if (IS_CLI) {
+  const [sub, ...rest] = process.argv.slice(2);
+  const flag = (name) => {
+    const hit = rest.find((a) => a.startsWith(`--${name}=`));
+    return hit ? hit.slice(name.length + 3) : undefined;
+  };
+  if (sub !== 'run') {
+    writeLineSync(2, 'usage: review-job.mjs run --pr=<n> --repo=<owner/repo>');
+    process.exitCode = 2;
+  } else {
+    // No signal handler: the arc is synchronous, so a handler could not run before the in-flight child returns
+    // anyway. A killed job leaves a record with a dead pid (pruned on the next read) and, at worst, a lease under
+    // its slug, which the lane pool's ghost-lease reaper reclaims (#2748).
+    try {
+      const out = runReviewJob({ pr: flag('pr'), repo: flag('repo') });
+      writeAllSync(1, `${JSON.stringify(out)}\n`);
+      process.exitCode = out.refused ? 75 : 0;
+    } catch (e) {
+      writeLineSync(2, `review-job: error: ${String(e?.message ?? e)}`);
+      process.exitCode = 1;
+    }
+  }
+}

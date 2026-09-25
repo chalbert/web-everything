@@ -113,9 +113,32 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(dispatch).toHaveBeenCalledWith({ pr: 10, repo: 'chalbert/web-everything' });
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
     expect(out).toEqual({
-      reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], refusals: 0,
+      reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], notStarted: [], refusals: 0,
       reconcileError: null, deferredForLanes: 0, holdReconcile: [], holdReconcileError: null,
     });
+  });
+
+  // x26lw6u — the job dispatch: the row carries the mode and the job pid, and a declined start (a live job
+  // already on the PR, or the lane cool-off) is reported as skipped with no round tag, never as dispatched.
+  // Live-caught 2026-09-25 on the daemon overlay: the first cut named this field `skipped`, which collides with
+  // withSelfSync's own `{skipped: true}` whole-tick shape and crashed onTick ("boolean true is not iterable").
+  it('onTick survives withSelfSync\'s skipped-tick shape ({skipped: true})', () => {
+    const lines = [];
+    const fx = buildCliDaemonEffects({ owner: 'o', log: { error: (l) => lines.push(l) }, reapSessions: () => null, runReview: () => ({}) });
+    expect(() => fx.onTick({ skipped: true, reason: 'tick-in-progress', repos: [], dispatched: [], failed: [], refusals: [], reconcileFailed: [], reviewsOwed: 0 })).not.toThrow();
+  });
+
+  it('a job dispatch records mode + jobPid; a skipped job start gets no round tag and lands in notStarted', () => {
+    const reconcile = vi.fn(() => owedPlan([{ kind: 'review', prNumber: 10, attempts: 0 }, { kind: 'review', prNumber: 20, attempts: 0 }]));
+    const dispatch = vi.fn(({ pr }) => (pr === 10
+      ? { mode: 'job', agentId: null, jobPid: 4242 }
+      : { mode: 'job', agentId: null, jobPid: 77, skipped: 'live-job' }));
+    const tagRound = vi.fn();
+    const out = runReviewTick({ reconcile, dispatch, tagRound, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(out.dispatched).toEqual([{ prNumber: 10, agentId: null, mode: 'job', jobPid: 4242 }]);
+    expect(out.notStarted).toEqual([{ prNumber: 20, reason: 'live-job' }]);
+    expect(tagRound).toHaveBeenCalledTimes(1);
+    expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 10 }));
   });
 
   it('a failed dispatch is isolated: no round tag, recorded in failed, does not stop the tick', () => {

@@ -1,12 +1,12 @@
 # Independent-review agent brief (template) — review ONE PR, then exit (#3279)
 
-> **THE FALLBACK PATH, NOT THE DEFAULT ONE (as of 2026-09-12, `#xu2pp2m`).** An unflagged
-> `review-dispatch.mjs --pr=<n>` no longer spawns an agent with this brief at all: it runs the SAME three
-> commands below itself, as pure Node (`we:scripts/operations/review-dispatch-wrapper.mjs`), because this
-> brief's whole sanctioned arc — acquire a lane, run `review-loop-cli.mjs` once, release — is mechanical and
-> step 2 already forbids you from interpreting, improvising or retrying anything. You are reading this because
-> somebody passed `--agent`. Everything below still applies to you, unchanged.
->
+> **Opt-in path only (x26lw6u).** The review daemon no longer starts a session with this brief by default: the
+> same arc runs as a deterministic job, `we:scripts/operations/review-job.mjs` (claim → `started` → lane acquire →
+> `review-loop-cli.mjs` once → `done` → release), with no Claude wrapper session. The jurors that
+> `review-loop-cli.mjs` spawns are the fresh, independent reviewers either way; the job mints its own fresh
+> `CLAUDE_CODE_SESSION_ID` per round as the clearing actor. This brief is used only when
+> `WE_REVIEW_DISPATCH_MODE=session` (or `review-dispatch.mjs --mode=session`) asks for the old path.
+
 > **This is a TEMPLATE, not a runnable skill.** `we:scripts/operations/review-dispatch.mjs` instantiates it —
 > filling the `{{PLACEHOLDERS}}` below with the PR this dispatch was asked to review — and passes the result as
 > the prompt for **one background session**, started fresh (`claude --bg --session-id=<a brand-new UUID>`),
