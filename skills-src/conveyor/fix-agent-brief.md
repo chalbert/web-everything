@@ -483,6 +483,15 @@ re-push, re-arm-never-clear shape is identical — which is the point (#2630).
 - **STACKED-BASE MODE never touches any `review:*` label** (#3383) — its only output is the fix itself and the
   durable marker via `conflict-fix-mark.mjs` (never `rearm-review.mjs`, there is no `review:changes` to swap);
   it counts against the SAME `CONFLICT_FIX_ROUND_CAP` the ordinary main-base conflict-fix round uses.
+- **A daemon bug fix adds its real-world case to the daemon soak harness** (#4075, card xg6m4i5). If your repair
+  fixes a bug in daemon code — anything under `we:skills-src/conveyor/`, `we:scripts/conveyor/`,
+  `we:scripts/lib/daemon-*`, `we:scripts/lane-pool*`, `we:scripts/review-set-label.mjs` or
+  `we:scripts/operations/*dispatch*` — add the live case as a scenario in `we:scripts/conveyor/soak/breaks/`
+  (one module + its `.soak.test.mjs` wrapper, registered in `we:scripts/conveyor/soak/breaks/index.mjs`), and
+  post the proof with your before/after evidence: `node "$LANE/scripts/conveyor/soak/red-green.mjs" --break=<id>`
+  (the copy in YOUR WE lane — it tests the tree it lives in) must print RED on the tree before your fix and GREEN
+  with it. A unit test alone is not enough: seven live daemon
+  breaks on 2026-09-25 were all green in unit tests.
 - **If you stop, say so ON THE PR** — every escalation exit runs `stand-down.mjs` before it returns (#3296). A
   refusal that leaves no durable trace is indistinguishable from a crash, and gets re-dispatched forever. The
   marker changes no label; it is terminal for the auto-fix loop and cleared by a human.

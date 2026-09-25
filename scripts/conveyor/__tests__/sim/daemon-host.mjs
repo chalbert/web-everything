@@ -98,12 +98,19 @@ async function bootInProcess(modulePath) {
       error = String((e && e.message) || e);
     }
     if (restartInfo) return { restart: true, info: restartInfo, logs };
+    // A logging callback throwing must never hide the real tick outcome — but it must never be SWALLOWED either:
+    // in production `runDaemonLoop` routes an `onTick` throw into `onTickError`, so a tick whose result shape
+    // the daemon's own `onTick` cannot log (live 2026-09-25: a skipped tick crashing on `undefined.map`) is a
+    // real, recurring failure. Reported as `onTickError` so the soak harness's no-onTick-crash invariant sees it.
+    let onTickError = null;
     try {
       if (error) effects.onTickError?.(new Error(error), tickCount);
       else effects.onTick?.(result, tickCount);
-    } catch { /* a logging callback throwing must never hide the real tick outcome */ }
+    } catch (e) {
+      onTickError = String((e && e.message) || e);
+    }
     tickCount += 1;
-    return { restart: false, result: jsonSafe(result), error, logs };
+    return { restart: false, result: jsonSafe(result), error, onTickError, logs };
   };
 }
 
@@ -154,7 +161,7 @@ async function main() {
         process.exit(0);
         return;
       }
-      send({ type: 'result', result: out.result ?? null, error: out.error ?? null, logs: out.logs ?? [] });
+      send({ type: 'result', result: out.result ?? null, error: out.error ?? null, onTickError: out.onTickError ?? null, logs: out.logs ?? [] });
     } catch (e) {
       send({ type: 'result', result: null, error: String((e && e.message) || e), logs: [] });
     }

@@ -193,6 +193,7 @@ export async function runScenario(def, { timeoutMs = 60_000 } = {}) {
   }
 
   async function tickDaemon(name) {
+    const startedAt = Date.now();
     const child = await ensureHost(name);
     const tail = tailFor(name);
     const msg = await new Promise((res, rej) => {
@@ -217,10 +218,10 @@ export async function runScenario(def, { timeoutMs = 60_000 } = {}) {
     if (msg.type === 'restart') {
       hosts.delete(name);
       bump(name, 'restarts');
-      trace.push({ daemon: name, restart: true, info: msg.info ?? null, logs: msg.logs ?? [] });
+      trace.push({ daemon: name, restart: true, info: msg.info ?? null, logs: msg.logs ?? [], ms: Date.now() - startedAt });
       return;
     }
-    trace.push({ daemon: name, result: msg.result ?? null, error: msg.error ?? null, logs: msg.logs ?? [] });
+    trace.push({ daemon: name, result: msg.result ?? null, error: msg.error ?? null, onTickError: msg.onTickError ?? null, logs: msg.logs ?? [], ms: Date.now() - startedAt });
   }
 
   function buildAgentsCtx() {
@@ -240,7 +241,10 @@ export async function runScenario(def, { timeoutMs = 60_000 } = {}) {
   }
 
   async function runStep(step) {
-    if (typeof step === 'function') { await step(w); return; }
+    // #4075 soak harness (x0zg44l) — a function step also gets a read-only view of the run so far, so a caller
+    // (the soak runner, `we:scripts/conveyor/soak/soak.mjs`) can check invariants after EVERY tick instead of
+    // only once at the end. Existing one-arg steps ignore the second argument.
+    if (typeof step === 'function') { await step(w, { trace, snapshot: buildSnapshot }); return; }
     const s = String(step).trim();
     const mTick = /^tick\s+(\S+)$/.exec(s);
     if (mTick) { await tickDaemon(mTick[1]); return; }

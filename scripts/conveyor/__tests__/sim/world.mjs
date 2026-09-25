@@ -237,6 +237,17 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
     OPERATION_COMPLETIONS_DIR: completionsDir,
     WE_BACKLOG_DIR: backlogDir,
     WE_DAEMON_SMOKE_STATE_DIR: smokeStateDir,
+    // #4075 soak harness gap: on lane/4044 EVERY daemon tick's `withSelfSync` unconditionally drives the real
+    // rebuild (`daemon-rebuild.mjs#rebuildClone`/`doRebuild`), which persists its own per-clone state
+    // (`isDaemonManagedClone`'s own marker, `state.rejected`/`retryAt`, …) under
+    // `<WE_DAEMON_STATE_DIR || ~/.claude/daemon-self-sync-state>/<cloneKey>.rebuild.json` — the SAME real
+    // directory the operator's actual resident daemon uses for its OWN state. Left unset, every soak run on
+    // lane/4044 leaves a permanent `<hash>.rebuild.json`/`.alerts.jsonl` pair there (found live: confirmed empty
+    // collision risk only because the sim clone's realpath happens to hash differently from the real daemon's,
+    // but the accumulation itself is real and never cleaned up by `w.cleanup()`, which only removes `root`).
+    // Scoped here exactly like `WE_DAEMON_SMOKE_STATE_DIR` just above, which already isolates the smoke
+    // reject-cache the same way.
+    WE_DAEMON_STATE_DIR: join(root, 'daemon-self-sync-state'),
     GH_TOKEN: 'sim-token-1',
     // tuning knobs, pinned short so a real failure surfaces fast instead of the suite waiting out production
     // defaults (bounded-child.mjs#CHILD_TIMEOUT_ENV, lane-pool.mjs's own list-cache/scan-timeout env vars).
@@ -273,7 +284,12 @@ export function createWorld({ repos = ['we'], lanes = 3, clockStartOffsetMs = 0 
   // ALL gated on `!flags['no-install']`) — the deps marker (`.git/.lane-pool-deps`) is the OTHER route
   // (pre-seed it with the lockfile hash so `depsReady` reads 'ok'), left undocumented-but-available below in
   // case a future scenario needs `ensureDeps` to actually run without a real `npm ci`.
-  execFileSync(process.execPath, [join(simClone, 'scripts', 'lane-pool.mjs'), 'provision', `--count=${lanes}`, '--acquirable', '--no-install'], {
+  // #4075 soak harness gap — `provision --acquirable` caps NEW clones per call at
+  // `ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT` (4, `we:scripts/lane-pool.mjs`), so `createWorld({lanes: N})` for
+  // N > 4 silently provisioned only 4 lanes (found building `breaks/lane-acquire-under-load.mjs`, which needs a
+  // larger pool to saturate). `--max-new=${lanes}` lifts that cap to exactly what THIS call asked for — never
+  // more, and a no-op for every existing scenario (`lanes <= 4`).
+  execFileSync(process.execPath, [join(simClone, 'scripts', 'lane-pool.mjs'), 'provision', `--count=${lanes}`, '--acquirable', `--max-new=${lanes}`, '--no-install'], {
     cwd: simClone, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
   });
 

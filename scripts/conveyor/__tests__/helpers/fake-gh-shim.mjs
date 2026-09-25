@@ -83,6 +83,13 @@ try {
 const HTTP_401 = "HTTP 401: Bad credentials (https://api.github.com/graphql)\n";
 const HTTP_RATE_LIMIT = 'API rate limit exceeded for user ID 1\n';
 const HTTP_5XX = 'HTTP 502: Bad Gateway\n';
+// #4075 soak harness gap (break `sticky-smoke-rejection`): `gh` is a Go binary — a real network failure prints
+// Go's net/http error text, never one of the HTTP_* fixtures above. Live 2026-09-25 08:14 ET both gh smoke checks
+// failed together with exactly this shape (`daemon-live-smoke.mjs#TRANSIENT_FAILURE_PATTERNS` added
+// `error connecting to api\.github\.com` / `dial tcp` / `i\/o timeout` for it); no existing fault `kind` could
+// reproduce that text (`fault()`'s only kinds were rate-limit/5xx/401/timeout/push-to-main[-diverge]), so this
+// scenario could not drive the real daemon code through a genuinely Go-shaped network fault without one.
+const GO_NETWORK_ERROR = 'error connecting to api.github.com\ndial tcp 140.82.112.6:443: i/o timeout\n';
 
 /** `argv[0] argv[1]` when `argv[0]` has subcommands (`pr`, `label`) and `argv[1]` is one of them; otherwise
  *  just `argv[0]` (`api`, `auth`). Matches the `verb` shape `createFakeGithub().fault({verb, ...})` takes. */
@@ -355,6 +362,23 @@ function handlePrChecks(store, rest) {
   });
 }
 
+/** `gh run list --branch <b> [--limit N] --json <fields> [--repo]` — #4075 soak harness gap: `reconcile-pass.mjs`
+ *  reads main's own CI runs (`x5uqim1`, main-red windows) whenever a PR's CI is red, and this verb was missing, so
+ *  EVERY reconcile over a red-CI PR failed in the simulator. Runs live on `repoState.runs` (default none = main was
+ *  never red); a scenario seeds them via `createFakeGithub#setRuns`. */
+function handleRunList(store, rest) {
+  return guarded(() => {
+    const slug = resolveRepoSlug(store, flagValue(rest, '--repo'));
+    const repoState = requireRepo(store, slug);
+    const branch = flagValue(rest, '--branch');
+    const limit = Number(flagValue(rest, '--limit')) || 20;
+    const rows = (repoState.runs ?? []).filter((r) => !branch || r.headBranch === branch).slice(0, limit);
+    const json = flagValue(rest, '--json');
+    const picked = json ? rows.map((r) => pickFields(r, json)) : rows;
+    return jsonResult(picked, flagValue(rest, '--jq'));
+  });
+}
+
 function handleLabelCreate(store, rest) {
   return guarded(() => {
     const name = rest[0];
@@ -485,6 +509,7 @@ function dispatch(store) {
     if (sub === 'reopen') return handlePrReopen(store, rest);
     if (sub === 'checks') return handlePrChecks(store, rest);
   }
+  if (argv[0] === 'run' && argv[1] === 'list') return handleRunList(store, argv.slice(2));
   if (argv[0] === 'label' && argv[1] === 'create') return handleLabelCreate(store, argv.slice(2));
   if (argv[0] === 'api') return handleApi(store, argv.slice(1));
   return { stderr: `fake-gh: unsupported verb "${argv.join(' ')}"\n`, exitCode: 1 };
@@ -509,6 +534,8 @@ const result = withStore(STORE_PATH, (store) => {
     if (f.kind === '5xx') return { stderr: HTTP_5XX, exitCode: 1 };
     if (f.kind === '401') return { stderr: HTTP_401, exitCode: 1 };
     if (f.kind === 'timeout') return { sleepMs: 120_000 };
+    // #4075 soak harness gap — see GO_NETWORK_ERROR's own comment above.
+    if (f.kind === 'network') return { stderr: GO_NETWORK_ERROR, exitCode: 1 };
     // #3383 scenario A2 — NOT a failure: a real side-effecting push, mid-call, then fall through to the
     // ordinary verb handler below so THIS call still answers normally. See `fake-gh.mjs#pushCommitToRef`'s own
     // docblock for why this must live here (inside the shim's own dispatch) rather than a scenario play step.

@@ -207,6 +207,50 @@ jobs:
         working-directory: web-everything
         run: npm run test:integration:vitest
 
+  # #4075 DAEMON SOAK HARNESS (card x0zg44l) — `npm run test:soak`: the REAL review + fix daemons, the real
+  # rebuild/self-sync + live smoke gate, a real bare remote with main moving, fake GitHub + fake sessions, the
+  # invariants (clone clean, <=1 main move behind, tick bounded, no onTick crash, owed work dispatched) checked
+  # after EVERY tick — plus one regression scenario per live daemon break (scripts/conveyor/soak/breaks/). Minutes,
+  # not seconds, so it runs ONLY on PRs that touch daemon code (the path check below; a PR outside it passes this
+  # job in seconds) and on a manual dispatch. WE-only: no FUI sibling needed. Not a required check today — adding
+  # it to branch protection is a repo-admin action.
+  daemon-soak:
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Does this PR touch daemon code?
+        id: scope
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}' HEAD)"
+          hits="$(printf '%s\n' "$changed" | grep -E '^(skills-src/conveyor/|scripts/conveyor/|scripts/lib/daemon-|scripts/lib/gh-app-shim|scripts/lib/main-staleness|scripts/lane-pool|scripts/review-set-label\.mjs$|scripts/operations/[^/]*dispatch[^/]*$|vitest\.soak\.config\.ts$)' || true)"
+          if [ -n "$hits" ]; then
+            echo "Daemon code touched — running the soak:"; printf '  %s\n' $hits
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No daemon code touched — soak not needed."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.scope.outputs.run == 'true'
+        run: npm ci
+
+      - name: Daemon soak (50 ticks + one scenario per live break)
+        if: steps.scope.outputs.run == 'true'
+        run: npm run test:soak
+
   # Deploy-smoke + deterministic interaction lane. Split OUT of `test` so the fast correctness
   # lane (coverage + gate) no longer waits on the ~25s docs build and the ~54s Playwright install +
   # interaction run — the two now run on parallel runners, cutting CI wall-clock from ~3m to ~1m50s.
