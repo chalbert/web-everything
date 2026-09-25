@@ -253,7 +253,16 @@ function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
   if (Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every((f) => /\.md$/i.test(String(f?.path ?? f)))) return true;
   // #3473 guard 8 — a blanket "no code changes" disclaimer in the PR's own body excludes it entirely,
   // independent of (and a backstop for) guard 7's changed-file check, which a stale `gh` files list can defeat.
-  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(String(body || ''))) return true;
+  // #3916 — PR #2594 (a real, large multi-`.mjs`-file graduation port) was silently dropped from
+  // `landedThisPass` — and so never even entered resolve-on-land's totality report (#2899 J2/J3), the exact
+  // silent-skip class that report was built to catch — because its body CITES another item's own characterization
+  // of a DIFFERENT, narrower deviation: `"already landed, no code change" precedent in #3443's own Progress
+  // log`. That is a quoted reference to someone else's disclaimer, not this PR's own claim about itself — PR
+  // #1599's `No code behaviour changes — …` and #1613's `No code changes — …` (this guard's real, intended
+  // catches) both state the disclaimer unquoted, in the PR's own voice. Strip double-quoted spans before
+  // testing so a cited precedent can never trip the blanket guard; inert for #1599/#1613 (still unquoted).
+  const bodyForGuard8 = String(body || '').replace(/"[^"]*"/g, '');
+  if (/\bno\s+code\s+(behaviou?r\s+)?changes?\b/i.test(bodyForGuard8)) return true;
   return isAnnotationPr({ headRefName: ref, title }); // scope-authoring / prepare-decision — not a build
 }
 

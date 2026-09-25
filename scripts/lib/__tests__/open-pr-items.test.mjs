@@ -260,6 +260,23 @@ describe('deliveredItemNumsFromPr (#3441 — the STRICT extractor feeding an aut
       { body: 'This fix requires no code review sign-off beyond CI, and lands the feature end to end.' },
     )).toEqual(['3412']);
   });
+
+  it('#3916 (live case) — guard 8 must not fire on a QUOTED citation of another item\'s "no code change" precedent; PR #2594 was a real, large multi-.mjs-file port whose body cited #3894/#3482\'s own already-landed characterization of a DIFFERENT, narrower deviation, and the unguarded quote match wiped its credited id entirely — the exact silent skip resolve-on-land\'s totality report (#2899 J2/J3) cannot see, because it never reaches `landedThisPass` in the first place', () => {
+    const body = 'matching the `#3894`/`#3482` "already landed, no code change" precedent in #3443\'s own Progress log. Likewise the branch\'s test coverage is already superseded.';
+    expect(deliveredItemNumsFromPr(
+      'lane/3916-graduate-test-setup-heavy-command-admission-and-file-locks-c',
+      'Graduate test setup, heavy-command admission and file-locks from lane/mechanical-dispatcher (#3916)',
+      { body },
+    )).toEqual(['3916']);
+  });
+
+  it('#3916 — guard 8 still fires when the SAME phrase describes THIS PR unquoted, even alongside an unrelated quoted mention', () => {
+    expect(deliveredItemNumsFromPr(
+      'lane/split-3096',
+      'WE #3096: split along its two scope entries — skill rewiring vs liveness hardening',
+      { body: 'Splits #3096 along its two scope: entries. No code changes — two backlog files. (cf. "some other quoted note")' },
+    )).toEqual([]);
+  });
 });
 
 describe('extractItemNums', () => {
