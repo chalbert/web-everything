@@ -319,13 +319,15 @@ describe('ci-red-recovery-watch — sweepHungCiRecovery', () => {
     ];
     const cancelAndRerun = vi.fn();
     const cancelOnly = vi.fn(() => ({ ok: true, action: 'cancelled-no-rerun' }));
+    const postComment = vi.fn();
     const result = sweepHungCiRecovery({
-      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, now: NOW, apply: true, maxRetriesPerSha: 2,
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, postComment, now: NOW, apply: true, maxRetriesPerSha: 2,
     });
     expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-escalate' })]);
     expect(result.refusals).toEqual([]);
     expect(cancelAndRerun).not.toHaveBeenCalled();
     expect(cancelOnly).toHaveBeenCalledWith(36161558017, expect.objectContaining({ repo: null }));
+    expect(postComment).toHaveBeenCalled();
   });
 
   it('dispatches hung-cap-escalate (cancelOnly, never cancelAndRerun) once the durable per-sha comment count already hit the cap', () => {
@@ -335,13 +337,15 @@ describe('ci-red-recovery-watch — sweepHungCiRecovery', () => {
     ];
     const cancelAndRerun = vi.fn();
     const cancelOnly = vi.fn(() => ({ ok: true, action: 'cancelled-no-rerun' }));
+    const postComment = vi.fn();
     const result = sweepHungCiRecovery({
-      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, now: NOW, apply: true, maxRetriesPerSha: 2,
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, postComment, now: NOW, apply: true, maxRetriesPerSha: 2,
     });
     expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-escalate' })]);
     expect(result.refusals).toEqual([]);
     expect(cancelAndRerun).not.toHaveBeenCalled();
     expect(cancelOnly).toHaveBeenCalledTimes(1);
+    expect(postComment).toHaveBeenCalled();
   });
 
   it('a NEW push (different head sha) starts the SHA cap fresh — the old sha\'s exhausted count never carries over', () => {
