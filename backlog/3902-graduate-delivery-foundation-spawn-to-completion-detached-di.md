@@ -3,10 +3,13 @@ bornAs: xb9av7z
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3901", "3895", "3897", "3890"]
 scope: ["we:scripts/lib/__tests__/spawn-to-completion.test.mjs", "we:scripts/lib/spawn-to-completion.mjs", "we:scripts/operations/__tests__/codex-delivery-provider.test.mjs", "we:scripts/operations/__tests__/fix-report-cli.test.mjs", "we:scripts/operations/__tests__/fix-report-record.test.mjs", "we:scripts/operations/__tests__/fix-report-store.test.mjs", "we:scripts/operations/__tests__/minimal-context-provider.test.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/operations/detached-dispatch.mjs", "we:scripts/operations/fix-report-cli.mjs", "we:scripts/operations/fix-report-record.mjs", "we:scripts/operations/fix-report-store.mjs", "we:scripts/operations/minimal-context-provider.mjs", "we:scripts/operations/__tests__/session-role.test.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: main
 tags: []
 ---
 
