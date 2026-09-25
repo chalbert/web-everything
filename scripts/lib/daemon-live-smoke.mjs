@@ -101,10 +101,19 @@ export function resolveSmokeBudgets(env = process.env) {
 
 const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
 
-async function checkLanePoolList({ root, budgets, runChild }) {
+async function checkLanePoolList({ root, budgets, runChild, env }) {
   try {
+    // #4139 live bug (test litter reaching the real pool, card 4061 row 1 — `lane-999999` a "test-fixture id
+    // reaching the real pool"): this call used to omit `env` entirely, so `runBounded`'s underlying `spawn`
+    // fell back to ITS OWN calling process's ambient env rather than whatever isolated `env` (a private
+    // `LANE_POOL_ROOT`, in the daemon-scenario-simulator's case — see `we:scripts/conveyor/__tests__/sim/`)
+    // the caller of {@link runLiveSmoke} explicitly constructed. That silently re-targeted the REAL shared
+    // `~/workspace/.lanes/web-everything` pool from inside a supposedly-isolated simulated world. Forwarding
+    // `env` here is a no-op in production (the default `env = process.env` at `runLiveSmoke`'s own boundary
+    // already IS the real ambient env), so this only changes behavior for a caller that deliberately passed a
+    // different one — exactly the case that was silently being dropped.
     const out = await runChild('node', ['scripts/lane-pool.mjs', 'list', '--acquirable', '--no-cache', '--limit=1', '--json'], {
-      cwd: root, timeoutMs: budgets.lanePoolListMs,
+      cwd: root, timeoutMs: budgets.lanePoolListMs, env,
     });
     JSON.parse(out);
     return { ok: true, detail: 'lane-pool list --acquirable --no-cache --limit=1 ok' };
@@ -113,11 +122,13 @@ async function checkLanePoolList({ root, budgets, runChild }) {
   }
 }
 
-async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild }) {
+async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild, env }) {
   let laneNum = null;
   try {
+    // #4139 — see {@link checkLanePoolList}'s own comment just above: `env` must reach every lane-pool child
+    // this gate spawns, never just some of them, or an isolated caller's pool override is only PARTLY honored.
     const out = await runChild('node', ['scripts/lane-pool.mjs', 'acquire', '--purpose=smoke', `--session=${sessionSlug}`, '--json'], {
-      cwd: root, timeoutMs: budgets.laneAcquireMs,
+      cwd: root, timeoutMs: budgets.laneAcquireMs, env,
     });
     const parsed = JSON.parse(out);
     laneNum = Number.isInteger(parsed?.lane) ? parsed.lane : null;
@@ -127,7 +138,7 @@ async function checkLaneAcquireRelease({ root, budgets, sessionSlug, runChild })
   }
   try {
     await runChild('node', ['scripts/lane-pool.mjs', 'release', `--lane=${laneNum}`, `--session=${sessionSlug}`], {
-      cwd: root, timeoutMs: budgets.laneReleaseMs,
+      cwd: root, timeoutMs: budgets.laneReleaseMs, env,
     });
     return { ok: true, detail: `acquired + released lane-${laneNum}`, lane: laneNum };
   } catch (e) {
@@ -234,7 +245,10 @@ export async function runLiveSmoke({
   const budgets = resolveSmokeBudgets(env);
   const sessionSlug = `smoke-${now}-${randomUUID().slice(0, 8)}`;
   const ghChildEnv = ghDispatchedSessionEnv(env);
-  const ctx = { root, budgets, repos, sessionSlug, ghChildEnv, runChild };
+  // #4139 — `env` (the caller's OWN, possibly-isolated env) rides alongside `ghChildEnv` (the derived,
+  // sanitized-for-gh one) so the lane-pool checks can use the former while the gh checks keep using the
+  // latter; see {@link checkLanePoolList}'s comment for why dropping this here silently escaped isolation.
+  const ctx = { root, budgets, repos, sessionSlug, env, ghChildEnv, runChild };
   const results = [];
   for (const check of SMOKE_CHECKS) {
     const startedAt = Date.now();

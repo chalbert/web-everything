@@ -1140,6 +1140,36 @@ const ACQUIRABLE_PROVISION_MAX_NEW_DEFAULT = 4;
 function cmdProvision(repo) {
   const count = Number(flags.count);
   if (!Number.isInteger(count) || count < 1) fail('provision needs --count=<positive integer>');
+  // #4139 live bug (2026-09-25): `provision --count=86 --dry-run` IGNORED `--dry-run` and really cloned lanes
+  // 72-86 — `--dry-run` is in `KNOWN_FLAGS` (accepted, never rejected) but this function never actually READ
+  // it anywhere below, in either the `--acquirable` branch or the plain count loop, so both always cloned for
+  // real. Fixed by returning a REPORT-ONLY answer before touching disk at all — no `mkdirSync`, no
+  // `provisionLane`/`cloneLane`/`refreshLane`, no `ensureDeps` (npm ci), nothing — the exact contract
+  // `reclaim --dry-run` already holds elsewhere in this file (see `cmdReclaim`).
+  if (flags['dry-run']) {
+    const existingCount = existingLanes(repo).length;
+    if (flags.acquirable) {
+      log(
+        `DRY RUN — would provision up to ${count} ACQUIRABLE lane(s) for "${repo.name}" under ${repo.poolDir} ` +
+        `(branch ${repo.branch}); ${existingCount} lane(s) exist today. Creates/resets NOTHING (#4139 fix — ` +
+        `--dry-run was previously silently ignored here).`,
+      );
+      if (flags.json) {
+        process.stdout.write(`${JSON.stringify({ dryRun: true, acquirable: true, count, existingCount }, null, 2)}\n`);
+      }
+      return;
+    }
+    const wouldCreate = Math.max(0, count - existingCount);
+    log(
+      `DRY RUN — would provision ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch}); ` +
+      `${existingCount} exist today, ${wouldCreate} would be newly cloned. Creates/resets NOTHING (#4139 fix — ` +
+      `--dry-run was previously silently ignored here).`,
+    );
+    if (flags.json) {
+      process.stdout.write(`${JSON.stringify({ dryRun: true, acquirable: false, count, existingCount, wouldCreate }, null, 2)}\n`);
+    }
+    return;
+  }
   mkdirSync(repo.poolDir, { recursive: true });
   const force = !!flags.force;
   const resetLanes = []; // only lanes actually reset lose their stale mapping — a skipped lane still serves it
@@ -3179,6 +3209,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
       '  # acquire (auto-pick, no --lane): on a full pool, grows it by up to --growth-max-new=N new lanes (default 4, env ' +
       'LANE_POOL_ACQUIRE_GROWTH_MAX_NEW) up to a --hard-max=N ceiling (default 90 for web-everything/30 for siblings, env LANE_POOL_HARD_MAX) ' +
       'before failing — refuses to grow on a live remote-probe failure (#3383)\n' +
+      '  # provision --count=N [--dry-run]: --dry-run reports what WOULD be provisioned and creates/resets nothing (#4139)\n' +
       '  # reclaim --lane=N [--dry-run] [--json]: reset ONE unleased lane to origin/<branch>, only once this call\'s ' +
       'OWN re-check proves every uncommitted/ahead change is still provably preserved (#3383 gap 2 — the mutation ' +
       'half of lane-whois.mjs\'s finished-reclaimable verdict)\n',
