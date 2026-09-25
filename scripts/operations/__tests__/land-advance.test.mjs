@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { planLandAdvance, capacityFor, followUpVerdict, OWED_ACTIONS, repoKeyFromSlug, sessionMatch, renderTable, decideMode } from '../land-advance.mjs';
-// priorityQueue/reconcileHolds live in land-advance-items-io.mjs, which is #3865's scope (blockedBy THIS item,
-// so it cannot land first). The two cases below that exercised them are deferred to #3865 rather than ported
-// here dropped-silently — see this slice's PR notes and #3865's card for the restore.
+import { priorityQueue, reconcileHolds } from '../land-advance-items-io.mjs';
 import { dispatchPlan } from '../../readiness/dispatch-plan.mjs';
 import { CONSTELLATION_REPOS } from '../../lib/constellation-repos.mjs';
 const today = JSON.parse(readFileSync('scripts/operations/__fixtures__/land-advance/today.json'));
@@ -129,6 +127,7 @@ describe('session verdict rows (#3383 item 11)', () => {
 // #3720 remainder — the card's own Done-when 1 cases for the item-pull half, the budget, and the mode decision.
 // Item plans come from the REAL `dispatchPlan` core, so scope refusal and overlap are its rules, never a copy.
 describe('#3720 item-pull, budget and mode (the card\'s Done-when cases)', () => {
+  const tracker = (lines) => ['# t', '', '## Priority order', '', ...lines, '', '## Next', ''].join('\n');
   const items = (queue, extra = {}) => ({ queue: queue.map(({ num }, i) => ({ num, rank: i + 1 })), skipped: [], itemPlan: dispatchPlan({ queue, leases: [], freeLanes: [31, 32, 33] }), ...extra });
   it('budget 0 when free lanes are 0 — nothing proposed, PR or item', () => {
     const p = plan({ freeLanes: 0, prs: [pr(1)], items: items([{ num: '10', scope: ['scripts/a.mjs'] }]) });
@@ -162,7 +161,21 @@ describe('#3720 item-pull, budget and mode (the card\'s Done-when cases)', () =>
     expect(p.items.deferred).toMatchObject([{ num: '12', reason: 'capacity' }]);
     expect(plan({ freeLanes: 8, items: q }).items.deferred).toMatchObject([{ num: '12', reason: 'per-call-cap' }]);
   });
-  // 'the queue source is the Priority order...' deferred to #3865 (needs priorityQueue from land-advance-items-io.mjs).
+  it('the queue source is the Priority order: claimed, design-first, operator and in-flight lines are skipped', () => {
+    const text = tracker([
+      '1. #3768 · 5 · B · Clears: design first.',
+      '2. #3653 · 3 · A · Clears: CI.',
+      '3. #3658 · decision · C · Clears: a ruling.',
+      '4. #3674 · 3 · A · Clears: needs-operator-fast-forward before it can run.',
+      '5. #3486 · 3 · A · Graduation slice.',
+      '6. #3720 · 5 · A · Removes: queueing by hand.',
+      '- #3443 · epic · claimed · not ordered',
+    ]);
+    const { queue, skipped } = priorityQueue(text, { inFlight: ['3486'] });
+    expect(queue).toEqual([{ num: '3653', rank: 2 }, { num: '3720', rank: 6 }]);
+    expect(skipped.map((s) => [s.num, s.reason])).toEqual([['3443', 'claimed'], ['3768', 'design-first'], ['3658', 'operator-decision'], ['3674', 'needs-operator-fast-forward'], ['3486', 'in-flight']]);
+    expect(() => priorityQueue('# no section')).toThrow(/Priority order/);
+  });
   it('mode: plan by default; dispatch only with an operator opt-in AND no pause marker', () => {
     const optIn = { prs: true, items: false };
     expect(decideMode({})).toMatchObject({ mode: 'plan', prs: false, items: false });
@@ -172,5 +185,14 @@ describe('#3720 item-pull, budget and mode (the card\'s Done-when cases)', () =>
     expect(decideMode({ requested: 'dispatch', gate: { optIn } })).toMatchObject({ mode: 'dispatch', prs: true, items: false });
   });
 });
-// 'describe #3720 owed PR work honours reconcile-pass refusals' deferred to #3865
-// (needs reconcileHolds from land-advance-items-io.mjs).
+describe('#3720 owed PR work honours reconcile-pass refusals', () => {
+  it('a live-process refusal holds a review; no-findings holds a fix but not a review', () => {
+    const p = plan({ prs: [pr(2419), pr(2421), pr(2170, { labels: ['review:changes'] })], fixPlans: { 'we#2170': { planned: { pr: 2170 } } },
+      reconcileRefusals: reconcileHolds([{ prNumber: 2419, kind: 'live-process', why: 'a bound session has a LIVE pid' }, { prNumber: 2421, kind: 'no-findings', why: 'none' }, { prNumber: 2170, kind: 'no-findings', why: 'none' }, { prNumber: 9, kind: 'invented', why: 'x' }]) });
+    const row = (n) => p.rows.find((r) => r.pr === n);
+    expect(row(2419)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: false, refusal: { kind: 'live-process' } });
+    expect(row(2421)).toMatchObject({ owedAction: 'dispatch-review', dispatchable: true });
+    expect(row(2170)).toMatchObject({ owedAction: 'dispatch-fix', dispatchable: false, refusal: { kind: 'no-findings' } });
+    expect(p.proposed.map((r) => r.pr)).toEqual([2421]);
+  });
+});

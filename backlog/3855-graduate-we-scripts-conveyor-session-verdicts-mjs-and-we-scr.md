@@ -3,10 +3,13 @@ bornAs: x76ggt5
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3853", "3854"]
 scope: ["we:scripts/conveyor/session-verdicts.mjs", "we:scripts/conveyor/session-verdicts-io.mjs", "we:scripts/conveyor/__tests__/session-verdicts.test.mjs", "we:scripts/conveyor/__tests__/session-verdicts-io.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
+graduatedTo: main
 tags: []
 ---
 
