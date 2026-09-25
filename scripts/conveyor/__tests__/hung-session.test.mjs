@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyHungSession, resolveHungThresholdMs, DEFAULT_HUNG_THRESHOLD_MS, PENDING_CALL_GRACE_MULTIPLIER } from '../hung-session.mjs';
 import {
-  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall,
+  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from '../hung-session.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 
@@ -146,6 +146,19 @@ describe('classifyNoOutcomeStall — PURE, the two-trigger verdict (window vs ce
   it('no-signal when startedAtMs/nowMs are not finite numbers — never a guess', () => {
     expect(classifyNoOutcomeStall({ startedAtMs: null, nowMs: T0, windowMs: 1, ceilingMs: 1 })).toEqual({ stall: false, reason: 'no-signal' });
     expect(classifyNoOutcomeStall({ startedAtMs: T0, nowMs: undefined, windowMs: 1, ceilingMs: 1 })).toEqual({ stall: false, reason: 'no-signal' });
+  });
+  it('historical outcomes grant a new session its full window — an outcome OLDER than startedAtMs clamps to the start', () => {
+    // PR #2676 review: a fix session dispatched onto a lane whose build commit is 3h old, 5 min into its own run.
+    const MIN = 60_000;
+    const o = { startedAtMs: T0, lastOutcomeAtMs: T0 - 180 * MIN, windowMs: 30 * MIN, ceilingMs: 120 * MIN };
+    expect(classifyNoOutcomeStall({ ...o, nowMs: T0 + 5 * MIN })).toEqual({ stall: false, reason: 'active' });
+    // …and the window still runs from its OWN start, so it stalls once that elapses with nothing new.
+    expect(classifyNoOutcomeStall({ ...o, nowMs: T0 + 30 * MIN })).toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+  it('an UNREADABLE outcome source never authorizes a WINDOW stop — only the ceiling can stop on it', () => {
+    const o = { startedAtMs: T0, lastOutcomeAtMs: OUTCOME_UNREADABLE, windowMs: 10_000, ceilingMs: 100_000 };
+    expect(classifyNoOutcomeStall({ ...o, nowMs: T0 + 50_000 })).toEqual({ stall: false, reason: 'no-signal' });
+    expect(classifyNoOutcomeStall({ ...o, nowMs: T0 + 100_000 })).toEqual({ stall: true, reason: 'ceiling' });
   });
 });
 

@@ -123,7 +123,7 @@ import {
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 import {
-  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall,
+  NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from './hung-session.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
@@ -702,9 +702,10 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
 
 // ── NO-NET-OUTCOME STALL — THE IO SHELL (#4090, epic #3383/#4075, statute clause 2) ────────────────────────────
 // Resolves "when did this session last produce a real outcome" per {@link NO_OUTCOME_KINDS}'s own table (see
-// `hung-session.mjs`'s file header for the full per-kind mapping). Every resolver below answers `null` on any
-// read failure — unreadable git state, no `gh`, a missing file — never a guess; `classifyNoOutcomeStall` then
-// falls back to measuring from the session's own `startedAt`, exactly as it does for "no outcome yet at all".
+// `hung-session.mjs`'s file header for the full per-kind mapping). Every resolver below answers `null` ONLY for a
+// successful read that found no outcome yet, and `OUTCOME_UNREADABLE` on any read failure — unreadable git
+// state, no `gh`, a missing file. The two must never collapse (PR #2676 review): "no outcome yet" lets the
+// window run from `startedAt`, but "we could not look" may never authorize a window stop — only the ceiling.
 
 /** How long ONE `git log` call here may run before it counts as unreadable — mirrors this file's own
  *  `prListTimeoutMs`-scale bounds (a local git op, but a lane clone on a network mount can still hang). */
@@ -715,22 +716,23 @@ const NO_OUTCOME_GIT_TIMEOUT_MS = 10_000;
  * lane (`session.cwd`) — a real diff change, per the statute's own wording for both kinds ("the lane's net diff
  * against its base changed" / "commit or push that changes the net diff": a push is only possible once a
  * commit exists, so the commit itself is the earlier, sufficient signal). `null` when there is no commit ahead
- * of base yet (nothing to report — the classifier's own start-time fallback applies) OR the read fails.
+ * of base yet (nothing to report — the classifier's own start-time fallback applies); `OUTCOME_UNREADABLE` when
+ * the read fails.
  * @param {string} cwd
  * @param {{exec?:Function, base?:string}} [io]
- * @returns {number|null}
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
  */
 export function lastCommitAheadOfBaseMs(cwd, { exec = execFileSync, base = 'main' } = {}) {
-  if (!cwd) return null;
+  if (!cwd) return OUTCOME_UNREADABLE;
   try {
     const out = String(exec('git', ['log', '-1', '--format=%ct', `${base}..HEAD`], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: NO_OUTCOME_GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
     })).trim();
     if (!out) return null; // no commit ahead of base yet — not an error, just nothing to report
     const epochSeconds = Number(out);
-    return Number.isFinite(epochSeconds) ? epochSeconds * 1000 : null;
+    return Number.isFinite(epochSeconds) ? epochSeconds * 1000 : OUTCOME_UNREADABLE;
   } catch {
-    return null; // unreadable lane / not a git repo / `base` unknown there — unknown, never a guess
+    return OUTCOME_UNREADABLE; // unreadable lane / not a git repo / `base` unknown there — unknown, never a guess
   }
 }
 
@@ -742,26 +744,27 @@ export function lastCommitAheadOfBaseMs(cwd, { exec = execFileSync, base = 'main
  * Reuses `dispatch-lane-io.mjs`'s own `prListTimeoutMs` bound, same convention as {@link groundTruthForPr}.
  * @param {string|number} pr
  * @param {{exec?:Function, env?:object, repo?:string}} [io]
- * @returns {number|null}
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
  */
 export function lastReviewCommentMs(pr, { exec = execFileSync, env = process.env, repo = 'we' } = {}) {
   const slug = Object.hasOwn(CONSTELLATION_REPOS, repo) ? CONSTELLATION_REPOS[repo].slug : null;
-  if (!slug) return null;
+  if (!slug) return OUTCOME_UNREADABLE;
   try {
     const out = exec('gh', ['pr', 'view', String(pr), '--repo', slug, '--json', 'comments'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024,
       timeout: prListTimeoutMs(env), killSignal: 'SIGKILL',
     });
     const comments = JSON.parse(String(out || '{}'))?.comments;
-    if (!Array.isArray(comments) || comments.length === 0) return null;
+    if (!Array.isArray(comments)) return OUTCOME_UNREADABLE; // a malformed/empty response is not "no comments"
+    if (comments.length === 0) return null;
     let newest = null;
     for (const c of comments) {
       const t = Date.parse(c?.createdAt ?? '');
       if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
     }
-    return newest;
+    return newest ?? OUTCOME_UNREADABLE; // comments exist but none carried a parseable time — malformed, not empty
   } catch {
-    return null;
+    return OUTCOME_UNREADABLE;
   }
 }
 
@@ -774,23 +777,23 @@ export function lastReviewCommentMs(pr, { exec = execFileSync, env = process.env
  * @param {string} cwd
  * @param {string} id
  * @param {{readdirSyncFn?:Function, statFn?:Function}} [io]
- * @returns {number|null}
+ * @returns {number|null|typeof OUTCOME_UNREADABLE}
  */
 export function lastItemFileChangeMs(cwd, id, { readdirSyncFn = readdirSync, statFn = statSync } = {}) {
-  if (!cwd || !id) return null;
+  if (!cwd || !id) return OUTCOME_UNREADABLE;
   const dir = join(cwd, 'backlog');
   let entries;
   try {
     entries = readdirSyncFn(dir);
   } catch {
-    return null;
+    return OUTCOME_UNREADABLE;
   }
   const fname = entries.find((f) => f.endsWith('.md') && (f === `${id}.md` || f.startsWith(`${id}-`)));
   if (!fname) return null; // no card at all in this lane yet — not an error, nothing to report
   try {
     return statFn(join(dir, fname)).mtimeMs;
   } catch {
-    return null;
+    return OUTCOME_UNREADABLE;
   }
 }
 

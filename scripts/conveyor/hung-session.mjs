@@ -227,6 +227,11 @@ export function resolveNoOutcomeCeilingMs(kind, env = process.env) {
   return Math.min(minutes, DEFAULT_LEASE_TTL_MINUTES) * 60_000;
 }
 
+/** An outcome resolver's answer when the READ ITSELF failed (git/gh error, timeout, unreadable file) — distinct
+ *  from `null`, which means "read fine, no outcome yet". See {@link classifyNoOutcomeStall} for why the two must
+ *  never collapse (PR #2676 review). */
+export const OUTCOME_UNREADABLE = 'unreadable';
+
 /**
  * we:scripts/conveyor/hung-session.mjs#classifyNoOutcomeStall — PURE. Two independent triggers, checked in
  * this order (mirrors {@link classifyHungSession}'s own "ceiling wins" precedent, and `session-reaper.mjs
@@ -236,10 +241,16 @@ export function resolveNoOutcomeCeilingMs(kind, env = process.env) {
  *      DOES occasionally produce outcomes but never actually finishes still gets cut off eventually.
  *   2. WINDOW — `nowMs - baseline >= windowMs`, where `baseline` is the LAST outcome's own timestamp, or
  *      `startedAtMs` when there has been no outcome yet at all (never treats "no outcome ever" as automatically
- *      fresh — the window still counts from the bot's own start in that case).
+ *      fresh — the window still counts from the bot's own start in that case). The baseline is CLAMPED to
+ *      `startedAtMs`: an outcome older than the session (a fix session's lane already carrying the original
+ *      build commit, a PR's pre-dispatch comments) is someone else's work, never this bot's, so it can never
+ *      shorten a fresh session's own window (PR #2676 review).
+ * `lastOutcomeAtMs === OUTCOME_UNREADABLE` (the outcome read FAILED — git/gh error, timeout, unreadable file)
+ * disables the WINDOW only: "we could not look" is not "nothing happened", so it may never authorize a stop by
+ * itself. The CEILING still applies, since it never depended on the outcome read at all.
  * `windowMs`/`ceilingMs` of `null` (an uncovered kind, see {@link resolveNoOutcomeWindowMs}) disables that
  * trigger — never a guessed value standing in for "this kind was never named".
- * @param {{startedAtMs:number, lastOutcomeAtMs?:number|null, nowMs:number, windowMs:number|null, ceilingMs:number|null}} o
+ * @param {{startedAtMs:number, lastOutcomeAtMs?:number|null|typeof OUTCOME_UNREADABLE, nowMs:number, windowMs:number|null, ceilingMs:number|null}} o
  * @returns {{stall:boolean, reason:('ceiling'|'no-outcome-window'|'active'|'no-signal')}}
  */
 export function classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs = null, nowMs, windowMs, ceilingMs }) {
@@ -247,8 +258,9 @@ export function classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs = null, no
   if (typeof ceilingMs === 'number' && ceilingMs > 0 && (nowMs - startedAtMs) >= ceilingMs) {
     return { stall: true, reason: 'ceiling' };
   }
+  if (lastOutcomeAtMs === OUTCOME_UNREADABLE) return { stall: false, reason: 'no-signal' };
   if (typeof windowMs !== 'number' || windowMs <= 0) return { stall: false, reason: 'active' };
-  const baseline = Number.isFinite(lastOutcomeAtMs) ? lastOutcomeAtMs : startedAtMs;
+  const baseline = Number.isFinite(lastOutcomeAtMs) ? Math.max(startedAtMs, lastOutcomeAtMs) : startedAtMs;
   if ((nowMs - baseline) >= windowMs) return { stall: true, reason: 'no-outcome-window' };
   return { stall: false, reason: 'active' };
 }

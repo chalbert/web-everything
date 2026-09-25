@@ -47,6 +47,7 @@ import {
   RETENTION_GRACE_MS_DEFAULT,
   RETENTION_CEILING_MS_DEFAULT,
 } from '../session-reaper.mjs';
+import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
@@ -1290,9 +1291,9 @@ describe('lastCommitAheadOfBaseMs — the build/fix outcome signal', () => {
     const exec = () => '';
     expect(lastCommitAheadOfBaseMs('/lane-9', { exec })).toBeNull();
   });
-  it('null on any git failure, or a missing cwd — never a guess', () => {
-    expect(lastCommitAheadOfBaseMs('/lane-9', { exec: () => { throw new Error('not a git repo'); } })).toBeNull();
-    expect(lastCommitAheadOfBaseMs(null, { exec: () => '123' })).toBeNull();
+  it('OUTCOME_UNREADABLE on any git failure or a missing cwd — distinct from "no commit yet", never a guess', () => {
+    expect(lastCommitAheadOfBaseMs('/lane-9', { exec: () => { throw new Error('not a git repo'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastCommitAheadOfBaseMs(null, { exec: () => '123' })).toBe(OUTCOME_UNREADABLE);
   });
 });
 
@@ -1305,9 +1306,11 @@ describe('lastReviewCommentMs — the review outcome signal', () => {
     const exec = () => JSON.stringify({ comments: [] });
     expect(lastReviewCommentMs('2647', { exec })).toBeNull();
   });
-  it('null on any gh failure or unknown repo — never a guess', () => {
-    expect(lastReviewCommentMs('2647', { exec: () => { throw new Error('gh: not found'); } })).toBeNull();
-    expect(lastReviewCommentMs('2647', { exec: () => '{}', repo: 'not-a-real-repo' })).toBeNull();
+  it('OUTCOME_UNREADABLE on any gh failure, unknown repo, or a response with no comments array — never a guess', () => {
+    expect(lastReviewCommentMs('2647', { exec: () => { throw new Error('gh: not found'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => '{}', repo: 'not-a-real-repo' })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => '{}' })).toBe(OUTCOME_UNREADABLE);
+    expect(lastReviewCommentMs('2647', { exec: () => JSON.stringify({ comments: [{ createdAt: 'garbage' }] }) })).toBe(OUTCOME_UNREADABLE);
   });
 });
 
@@ -1323,10 +1326,13 @@ describe('lastItemFileChangeMs — the prepare/prepare-decision outcome signal',
     const io = { readdirSyncFn: () => ['9999-other.md'], statFn: () => ({ mtimeMs: 1 }) };
     expect(lastItemFileChangeMs('/lane-9', '4090', io)).toBeNull();
   });
-  it('null on an unreadable dir, or a missing cwd/id — never a guess', () => {
-    expect(lastItemFileChangeMs('/lane-9', '4090', { readdirSyncFn: () => { throw new Error('ENOENT'); } })).toBeNull();
-    expect(lastItemFileChangeMs(null, '4090')).toBeNull();
-    expect(lastItemFileChangeMs('/lane-9', null)).toBeNull();
+  it('OUTCOME_UNREADABLE on an unreadable dir/file, or a missing cwd/id — never a guess', () => {
+    expect(lastItemFileChangeMs('/lane-9', '4090', { readdirSyncFn: () => { throw new Error('ENOENT'); } })).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs('/lane-9', '4090', {
+      readdirSyncFn: () => ['4090-fixture-item.md'], statFn: () => { throw new Error('EACCES'); },
+    })).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs(null, '4090')).toBe(OUTCOME_UNREADABLE);
+    expect(lastItemFileChangeMs('/lane-9', null)).toBe(OUTCOME_UNREADABLE);
   });
 });
 
@@ -1365,6 +1371,51 @@ describe('makeNoOutcomeResolver — routes by kind, resolves settings, classifie
     const resolver = makeNoOutcomeResolver({ exec, now });
     const staleStart = now() - 46 * 60 * 1000; // past the conveyor kind's 45-minute default window
     expect(resolver({ name: 'conveyor-4090', cwd: '/lane-9', startedAt: staleStart })).toEqual({ stall: true, reason: 'no-outcome-window' });
+  });
+
+  // PR #2676 review — the realistic case: a fix/review session's target already carries OLDER history.
+  it('a fresh `fix-<pr>` session on a lane whose newest commit PREDATES its start is not stalled (baseline clamps)', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const exec = () => `${(startedAt - 180 * MIN) / 1000}\n`; // the original build commit, 3h before dispatch
+    const resolver = makeNoOutcomeResolver({ exec, now: () => startedAt + 5 * MIN });
+    expect(resolver({ name: 'fix-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('a fresh `review-<pr>` session on a PR whose comments all PREDATE its start is not stalled', () => {
+    const MIN = 60_000;
+    const startedAt = Date.parse('2026-09-25T12:00:00Z');
+    const exec = () => JSON.stringify({ comments: [{ createdAt: '2026-09-24T09:00:00Z' }] }); // yesterday
+    const resolver = makeNoOutcomeResolver({ exec, now: () => startedAt + 5 * MIN });
+    expect(resolver({ name: 'review-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('a fresh `prepare-<item>` session whose card mtime PREDATES its start is not stalled', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const resolver = makeNoOutcomeResolver({
+      readdirSyncFn: () => ['4090-fixture-item.md'],
+      statFn: () => ({ mtimeMs: startedAt - 24 * 60 * MIN }), // last edited a day before dispatch
+      now: () => startedAt + 5 * MIN,
+    });
+    expect(resolver({ name: 'prepare-4090', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'active' });
+  });
+
+  it('an unreadable outcome source does not trigger the window before the ceiling (git and gh failures)', () => {
+    const MIN = 60_000;
+    const startedAt = 1758000000 * 1000;
+    const now = () => startedAt + 45 * MIN; // past the fix/review 30-min window, before either ceiling (120/60)
+    const failing = () => { throw new Error('gh: HTTP 401 / git: timed out'); };
+    const resolver = makeNoOutcomeResolver({ exec: failing, now });
+    expect(resolver({ name: 'fix-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'no-signal' });
+    expect(resolver({ name: 'review-2647', cwd: '/lane-9', startedAt })).toEqual({ stall: false, reason: 'no-signal' });
+    // …and the same failure composed through the reaper verdict leaves a `working` row alone.
+    const verdict = classifySessionReapWithGroundTruth(
+      { name: 'fix-2647', kind: 'background', state: 'working', cwd: '/lane-9', sessionId: 's1', startedAt },
+      () => null,
+      { noOutcomeFor: resolver, neverReapWorking: true },
+    );
+    expect(verdict.reap).toBe(false);
   });
 
   it('null for an uncovered kind (ci-heal/inspect), an unparseable name, or a missing startedAt', () => {
