@@ -32,7 +32,7 @@ say so, and #3681 clause 7 is closed.
 checkout. Codified as the 2026-09-24 amendment to
 [#drain-daemon-self-hosting-boundary](/docs/agent/platform-decisions/#drain-daemon-self-hosting-boundary)
 clause 3; [#resident-daemon-reload-lifecycle](/docs/agent/platform-decisions/#resident-daemon-reload-lifecycle)
-clause 7 now points to it. Build: story `xoeyi0b` (blockedBy #4044).
+clause 7 now points to it. Build: story `4088` (blockedBy #4044).
 
 ## Grounding — how review actually runs today
 

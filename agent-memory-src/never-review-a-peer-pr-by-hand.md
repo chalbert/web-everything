@@ -14,7 +14,7 @@ corrected it: "we have a review daemon, you should never review random pr like t
 **Why:** a hand-run review from an unrelated session sidesteps the daemon: its queue, its routing, its records.
 It is exactly the kind of manual workaround that hides the real failure. Under the operator's standing rule
 (failures improve the product, never manual fixes), a PR stuck in review means the daemon or its dispatch is
-broken. That breakage is what must be fixed, e.g. the #xkse05k token bug.
+broken. That breakage is what must be fixed, e.g. the #4039 token bug.
 
 **How to apply:** when a peer asks you to review, clear, or label its PR, decline. Point it at the review daemon
 and at the tooling failure that blocks it, and tell your own user. This does not apply to reviewing your OWN
