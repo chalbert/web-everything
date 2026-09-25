@@ -30,6 +30,11 @@
  * own clone (its cwd, inherited by every `gh` child it spawns) — so the checkout is genuinely ahead-and-behind,
  * not merely stale.
  *
+ * #4044 UPDATE: the default self-sync path now REBUILDS a managed clone instead of merging on top of it, and a
+ * managed clone's `assertMainNotStale` refuses a plain behind-only checkout rather than fast-forwarding it. So A2 now
+ * arms the plain `push-to-main` fault: behind-only is enough to refuse, and a local-only ahead commit (what
+ * `-diverge` adds) is refused by the rebuild as local work, never merged. The paragraph above is the pre-#4044 story.
+ *
  * LIVE SMOKE GATE (`scripts/lib/daemon-live-smoke.mjs`, landed separately as `2a53302d8`, already on `main`
  * ahead of this build): every successful tick-start self-sync merge now runs a real smoke (lane-pool
  * list/acquire/release, two `gh` reads, a `reconcile-pass.mjs --json` dry run per constellation repo) before
@@ -113,8 +118,12 @@ function a2Def() {
       // `FIX_DISPATCH_DAEMON_REPOS` iteration order) — see this file's own header for why `-diverge`, not a
       // bare push, is what is needed to make `assertMainNotStale` actually refuse rather than silently heal.
       (w) => {
+        // #4044: a plain push, not `-diverge`. The clone is now MANAGED (rebuilt fresh from origin/main + its
+        // overlay list; `withSelfSync` sets WE_DAEMON_MANAGED_CLONE=1), so `assertMainNotStale` REFUSES a
+        // behind-only clone instead of fast-forwarding it past the smoke gate. A local-only ahead commit is no
+        // longer how a daemon clone runs ahead (overlays are); the rebuild refuses such a commit as local work.
         w.gh.raw.fault({
-          verb: 'pr list', kind: 'push-to-main-diverge', times: 1, repo: 'chalbert/web-everything',
+          verb: 'pr list', kind: 'push-to-main', times: 1, repo: 'chalbert/web-everything',
           files: { 'a2-mid-tick.txt': 'origin advanced mid-tick\n' }, message: 'sim: a2 mid-tick origin advance',
         });
       },
@@ -141,14 +150,10 @@ function a2Def() {
       expect(ticks[2].error).toBeNull();
       expect(ticks[2].result?.refusals ?? []).toEqual([]);
 
-      // Converged means "origin's new tip was actually adopted", not byte-for-byte equal HEAD shas: A2's own
-      // `push-to-main-diverge` fault ALSO committed a real local-only (never pushed) commit directly into the
-      // shared clone, so the clone's post-merge HEAD is a genuine merge commit descending from BOTH that local
-      // commit and origin's new tip — never equal to origin's tip alone (unlike A1, which never diverges
-      // locally, so ITS clone converges to an EXACT match — see that scenario's own assertion above).
+      // Converged: the rebuild moved the clone to EXACTLY origin's new tip (no overlays registered, no merge on
+      // top) — the same exact match A1 asserts.
       const originMainSha = w.git.headOf('we', 'main');
-      expect(() => execFileSync('git', ['-C', w.simCloneRoot, 'merge-base', '--is-ancestor', originMainSha, 'HEAD']))
-        .not.toThrow();
+      expect(headOfClone(w.simCloneRoot)).toBe(originMainSha);
     },
   });
 }

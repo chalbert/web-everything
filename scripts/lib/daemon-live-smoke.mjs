@@ -251,15 +251,18 @@ async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
  *  sessionSlug, ghChildEnv, runChild }` and must never throw (a throw is still caught by {@link runLiveSmoke},
  *  but a check should report `{ ok:false, detail }` itself so the detail is specific). */
 // `mayBeTransient:false` — a failure of this check is ALWAYS `'code'` ({@link classifySmokeFailure}), whatever its
-// text says. `reconcile-dry-run` runs `reconcile-pass.mjs` FROM THE TREE UNDER TEST, and anything that script prints
-// flows into `detail`; if its text could buy a `'transient'` verdict, a broken overlay could print one of
-// {@link TRANSIENT_FAILURE_PATTERNS} and dodge the reject record every tick. The lane-pool rows also run code from
-// the tree, but they stay eligible: a momentarily exhausted pool is the transient case Module D exists for.
-// Cost, accepted: a real gh/network blip inside the reconcile dry-run now records a rejection too (as every
-// failure did before Module D); it clears as soon as main or the overlay inputs move.
+// text says. THE RULE: any check that runs code FROM THE TREE UNDER TEST (`cwd: root` — `reconcile-pass.mjs`,
+// `lane-pool.mjs`) is `mayBeTransient:false`. Anything that code prints flows into `detail`; if its text could buy
+// a `'transient'` verdict, a broken (or hostile) overlay could print one of {@link TRANSIENT_FAILURE_PATTERNS}
+// ("no free lane", "ETIMEDOUT") and dodge the reject record every tick, re-smoking forever under the WRITE lock
+// (PR #2625 advisory, security/reject-cache-bypass). Only checks that run external tools (`gh`) stay eligible.
+// A test in daemon-live-smoke.test.mjs enforces the rule by running every row and watching its `cwd`.
+// Cost, accepted: a genuinely exhausted pool (after `--wait-ms` gave it 180s to free up) or a gh/network blip
+// inside the reconcile dry-run records a rejection, as every failure did before Module D; it clears as soon as
+// main or the overlay inputs move.
 export const SMOKE_CHECKS = Object.freeze([
-  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: true },
-  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: true },
+  { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: false },
+  { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: false },
   { name: 'gh-api-repo', run: checkGhApiRepo, mayBeTransient: true },
   { name: 'gh-pr-list', run: checkGhPrList, mayBeTransient: true },
   { name: 'reconcile-dry-run', run: checkReconcileDryRun, mayBeTransient: false },

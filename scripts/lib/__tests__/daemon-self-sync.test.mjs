@@ -691,3 +691,20 @@ describe('POC-mode branch validation — every entry point fails closed', () => 
     for (const f of fetches) expect(f.indexOf('--')).toBeLessThan(f.indexOf('origin'));
   });
 });
+
+// Advisory finding (PR #2625, correctness/test-pollution): withSelfSync sets WE_DAEMON_MANAGED_CLONE /
+// GIT_OPTIONAL_LOCKS on process.env (on purpose — the real daemon's children must inherit them). In a reused
+// vitest worker that leaked into LATER test files and flipped assertMainNotStale into managed-clone mode there.
+// vitest.setup.ts now restores process.env after every test; these two tests prove it (order matters: the
+// first deliberately leaves the vars set, the second must not see them).
+describe('process.env writes never leak past one test (vitest.setup.ts restore)', () => {
+  it('step 1: a bare withSelfSync call sets the managed-clone vars and does NOT restore them', () => {
+    withSelfSync({ tickOnce: vi.fn() }, {
+      root: '/x', onRestart: vi.fn(), rebuild: async () => ({ moved: false, reason: 'up-to-date' }),
+    });
+    expect(process.env.WE_DAEMON_MANAGED_CLONE).toBe('1');
+  });
+  it('step 2: the next test starts without them', () => {
+    expect(process.env.WE_DAEMON_MANAGED_CLONE).toBeUndefined();
+  });
+});

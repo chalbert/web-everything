@@ -132,6 +132,38 @@ describe('classifySmokeFailure — pure, transient vs. code', () => {
     expect(smoke.pass).toBe(false);
     expect(classifySmokeFailure(smoke.results)).toBe('code');
   });
+  // PR #2625 advisory (security/reject-cache-bypass): THE RULE — every check that runs code from the tree under
+  // test (a runChild call with `cwd: root`) must be mayBeTransient:false. Enforced by running every row and
+  // watching its cwd, so a future check added without the flag fails here.
+  it('every SMOKE_CHECKS row that runs code from the tree under test (cwd: root) is mayBeTransient:false', async () => {
+    const root = '/tree-under-test';
+    for (const check of SMOKE_CHECKS) {
+      const cwds = [];
+      const runChild = vi.fn(async (cmd, args, opts = {}) => {
+        cwds.push(opts.cwd);
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+        if (args[1] === 'list') return '[]';
+        return '';
+      });
+      await check.run({
+        root, budgets: {}, repos: ['o/r'], sessionSlug: 's', ghChildEnv: {}, runChild,
+      });
+      if (cwds.includes(root)) expect({ name: check.name, mayBeTransient: check.mayBeTransient }).toEqual({ name: check.name, mayBeTransient: false });
+    }
+  });
+  it('an overlay whose lane-pool.mjs prints transient-looking text still gets a code verdict (list and acquire)', async () => {
+    for (const verb of ['list', 'acquire']) {
+      const runChild = vi.fn(async (cmd, args) => {
+        if (args[1] === verb) throw new Error('no free lane in pool "we" (42 all held/dirty) — printed by overlay code');
+        if (args[1] === 'list') return '[]';
+        if (args[1] === 'acquire') return JSON.stringify({ lane: 2 });
+        return '';
+      });
+      const smoke = await runLiveSmoke({ root: '/x', env: {}, runChild });
+      expect(smoke.pass).toBe(false);
+      expect(classifySmokeFailure(smoke.results)).toBe('code');
+    }
+  });
   it("the real lane-pool.mjs cmdAcquire 'no free lane' message classifies as transient", () => {
     // The exact shape lane-pool.mjs#cmdAcquire fails with when its bounded --wait-ms poll never finds a
     // candidate: `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or...`.
@@ -261,6 +293,8 @@ describe('runLiveSmoke — injected runChild', () => {
   });
 });
 
+// Transient vehicle below is a `gh api` failure: since PR #2625's advisory fix only checks that run EXTERNAL tools
+// (gh) may earn 'transient' — lane-pool.mjs runs from the tree under test and is always 'code'.
 describe('runLiveSmokeWithRetry — retries a transient verdict, never a code one', () => {
   it('the kill switch short-circuits without spending an attempt', async () => {
     const runChild = vi.fn();
@@ -274,11 +308,12 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
   it('a transient failure on attempt 1 that passes on attempt 2 → pass, attempts:2, one sleep', async () => {
     let call = 0;
     const runChild = vi.fn(async (cmd, args) => {
-      if (args[1] === 'list') {
+      if (cmd === 'gh' && args[0] === 'api') {
         call += 1;
         if (call === 1) throw new Error('HTTP 503 Service Unavailable');
         return '[]';
       }
+      if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
     });
@@ -292,7 +327,8 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
 
   it('a persistently transient failure exhausts the retry cap → verdict stays transient, attempts = retries+1', async () => {
     const runChild = vi.fn(async (cmd, args) => {
-      if (args[1] === 'list') throw new Error('rate limit exceeded');
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('rate limit exceeded');
+      if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
     });
@@ -318,7 +354,8 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
 
   it('retries and backoff default from env (WE_DAEMON_SMOKE_TRANSIENT_RETRIES / _RETRY_BACKOFF_MS) when not passed explicitly', async () => {
     const runChild = vi.fn(async (cmd, args) => {
-      if (args[1] === 'list') throw new Error('ETIMEDOUT');
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
+      if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
     });
@@ -340,7 +377,8 @@ describe('runLiveSmokeWithRetry — retries a transient verdict, never a code on
       import { runLiveSmokeWithRetry } from ${JSON.stringify(moduleUrl)};
       let call = 0;
       const runChild = async (cmd, args) => {
-        if (args[1] === 'list') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
+        if (cmd === 'gh' && args[0] === 'api') { call += 1; if (call === 1) throw new Error('HTTP 503 Service Unavailable'); return '[]'; }
+        if (args[1] === 'list') return '[]';
         if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
         return '';
       };
@@ -482,7 +520,8 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     const run = (args) => { if (args[0] === 'reset') resetCalls.push(args); return { status: 0, stdout: '' }; };
     // every attempt fails the SAME transient way (a 401) — retry cap is reached, never promoted to 'code'
     const runChild = vi.fn(async (cmd, args) => {
-      if (args[1] === 'list') throw new Error('HTTP 401: Bad credentials');
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('HTTP 401: Bad credentials');
+      if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
     });
@@ -497,7 +536,8 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     const env = { WE_DAEMON_SMOKE_STATE_DIR: stateDir, [SMOKE_RETRY_BACKOFF_MS_ENV]: '1' };
     const run = (args) => (args[0] === 'reset' ? { status: 1, stdout: '' } : { status: 0, stdout: '' });
     const runChild = vi.fn(async (cmd, args) => {
-      if (args[1] === 'list') throw new Error('ETIMEDOUT');
+      if (cmd === 'gh' && args[0] === 'api') throw new Error('ETIMEDOUT');
+      if (args[1] === 'list') return '[]';
       if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
       return '';
     });

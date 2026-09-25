@@ -430,14 +430,17 @@ function alertsFilePath(root, env = process.env) {
   return join(stateDir(env), `${cloneKey(root)}.alerts.jsonl`);
 }
 
-const EMPTY_STATE = Object.freeze({ adopted: null, rejected: null, inProgress: null, quarantine: null });
+const EMPTY_STATE = Object.freeze({
+  adopted: null, rejected: null, inProgress: null, quarantine: null, unverified: null,
+});
 
 /**
  * Read the per-clone rebuild state, never throwing — a missing or corrupt file reads as the empty state (fail
  * closed to "nothing adopted, nothing rejected, nothing in progress", never a crash).
  * @param {string} root
  * @param {NodeJS.ProcessEnv} [env]
- * @returns {{adopted:object|null, rejected:object|null, inProgress:object|null, quarantine:object|null}}
+ * @returns {{adopted:object|null, rejected:object|null, inProgress:object|null, quarantine:object|null,
+ *   unverified:{head:string, prevHead:string}|null}}
  */
 export function readRebuildState(root, env = process.env) {
   try {
@@ -447,6 +450,7 @@ export function readRebuildState(root, env = process.env) {
       rejected: parsed?.rejected ?? null,
       inProgress: parsed?.inProgress ?? null,
       quarantine: parsed?.quarantine ?? null,
+      unverified: parsed?.unverified ?? null,
     };
   } catch {
     return { ...EMPTY_STATE };
@@ -582,10 +586,13 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
       const headNow = verifyRev(git, 'HEAD');
       const clean = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) }).safe;
       if (headNow === state.inProgress.target || (headNow === state.inProgress.prevHead && clean)) {
-        const { target } = state.inProgress;
+        const { target, prevHead: interruptedPrev } = state.inProgress;
+        // HEAD == target means the reset landed but the live smoke never finished (PR #2625 advisory): the tree
+        // is UNVERIFIED. Remember it, so Step 4 below smokes it instead of calling it `up-to-date` and adopting it.
+        if (headNow === target && headNow !== interruptedPrev) state.unverified = { head: target, prevHead: interruptedPrev };
         state.inProgress = null;
         writeState();
-        alert('rebuild-interrupted-recovered', { target, headNow });
+        alert('rebuild-interrupted-recovered', { target, headNow, unverified: !!state.unverified });
       } else {
         alert('rebuild-interrupted-unrecoverable', { inProgress: state.inProgress, headNow });
         return finish({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
@@ -673,7 +680,15 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
   for (const kind of plan.alerts) alert(kind.kind, kind.detail);
 
   // ── Step 4: up-to-date / still-rejected short-circuits ──────────────────────────────────────────────
-  if (plan.upToDate) {
+  // `smokeOnly`: HEAD already sits at the planned build, but that build was never smoked (a rebuild died between
+  // its reset and its smoke — see Step 0). Never adopt it on the `up-to-date` path; smoke it in place instead, and
+  // roll back to the pre-interrupt head if it fails.
+  const smokeOnly = !!(plan.upToDate && state.unverified && state.unverified.head === plan.finalSha);
+  if (state.unverified && !smokeOnly) {
+    state.unverified = null; // the tree has moved on (or the plan changed) — the old marker no longer applies
+    writeState();
+  }
+  if (plan.upToDate && !smokeOnly) {
     if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
       state.adopted = {
         head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
@@ -682,7 +697,7 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     }
     return finish({ moved: false, reason: 'up-to-date', plan });
   }
-  if (state.rejected?.inputsKey === plan.inputsKey) {
+  if (!smokeOnly && state.rejected?.inputsKey === plan.inputsKey) {
     return finish({ moved: false, reason: 'still-rejected', plan });
   }
 
@@ -690,7 +705,7 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
   //    one if the incoming tree has real content at that same path. Check every untracked path from Step 1's
   //    `unsafe.untracked` against the target tree; anything not present there is harmless (already reported as
   //    `untracked-kept` after Step 1).
-  if (unsafe.untracked.length > 0) {
+  if (!smokeOnly && unsafe.untracked.length > 0) {
     const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
     if (colliding.length > 0) {
       alert('untracked-collision', { paths: colliding });
@@ -701,12 +716,15 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
   }
 
   // ── Step 5: move the tree (the ONLY `reset --hard` in this module) ──────────────────────────────────
-  state.inProgress = { pid: process.pid, host: hostname(), prevHead, target: plan.finalSha, startedAt: nowIso() };
+  // In smokeOnly mode the tree is already at the target; a failed smoke rolls back to the pre-interrupt head.
+  const rollbackTo = smokeOnly ? state.unverified.prevHead : prevHead;
+  state.inProgress = { pid: process.pid, host: hostname(), prevHead: rollbackTo, target: plan.finalSha, startedAt: nowIso() };
+  state.unverified = null;
   writeState();
 
   let resetOk = false;
   try {
-    const reset = git(['reset', '--hard', plan.finalSha]);
+    const reset = smokeOnly ? { status: 0 } : git(['reset', '--hard', plan.finalSha]);
     resetOk = reset.status === 0;
     if (!resetOk) {
       const rollback = git(['reset', '--hard', prevHead]);
@@ -731,15 +749,17 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
       state.rejected = null;
       state.inProgress = null;
       writeState();
+      // smokeOnly: the tree did not move THIS call (it was already there), so no restart is owed for it.
+      if (smokeOnly) return finish({ moved: false, adopted: true, reason: 'verified-after-interrupt', head: plan.finalSha, plan });
       return finish({ moved: true, adopted: true, head: plan.finalSha, prevHead, plan });
     }
 
-    const rollback = git(['reset', '--hard', prevHead]);
+    const rollback = git(['reset', '--hard', rollbackTo]);
     if (rollback.status !== 0) {
-      state.quarantine = { prevHead, reason: smokeResult.verdict === 'code' ? 'smoke-code-rollback-failed' : 'smoke-transient-rollback-failed' };
+      state.quarantine = { prevHead: rollbackTo, reason: smokeResult.verdict === 'code' ? 'smoke-code-rollback-failed' : 'smoke-transient-rollback-failed' };
       state.inProgress = null;
       writeState();
-      alert('rollback-failed', { prevHead });
+      alert('rollback-failed', { prevHead: rollbackTo });
       return finish({ moved: false, reason: 'rollback-failed', quarantine: true, plan });
     }
 
@@ -759,12 +779,12 @@ async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, ma
     return finish({ moved: false, reason: 'smoke-transient', rolledBack: true, plan });
   } catch (e) {
     if (resetOk) {
-      const rollback = git(['reset', '--hard', prevHead]);
+      const rollback = git(['reset', '--hard', rollbackTo]);
       if (rollback.status !== 0) {
-        state.quarantine = { prevHead, reason: 'rebuild-threw' };
+        state.quarantine = { prevHead: rollbackTo, reason: 'rebuild-threw' };
         state.inProgress = null;
         writeState();
-        alert('rollback-failed', { prevHead, error: String(e?.message || e) });
+        alert('rollback-failed', { prevHead: rollbackTo, error: String(e?.message || e) });
         return finish({ moved: false, reason: 'rollback-failed', quarantine: true, plan });
       }
     }

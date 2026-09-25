@@ -572,8 +572,49 @@ describe('rebuildClone', () => {
     });
 
     expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
-    expect(result.reason).toBe('up-to-date');
+    // The reset landed but the smoke never ran — so it smokes now instead of adopting as `up-to-date`.
+    expect(result.reason).toBe('verified-after-interrupt');
+    expect(result.adopted).toBe(true);
     expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+  });
+
+  // PR #2625 advisory (correctness): a rebuild killed AFTER its `reset --hard <target>` but BEFORE its live smoke
+  // resolved left HEAD == target. The next call used to clear the marker, see `up-to-date`, and adopt the build
+  // without ever smoking it. These replay that crash window with real git.
+  function crashAfterReset(cloneDir, env) {
+    writeFile(cloneDir, 'new-code.txt', 'unsmoked\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'the build the dead rebuild reset onto']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    const target = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD~1']).trim();
+    seedInProgress(cloneDir, env, {
+      pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString(),
+    });
+    return { target, prevHead };
+  }
+
+  it('crash between reset and smoke: the next call SMOKES the build before adopting it (never adopts unverified)', async () => {
+    const { cloneDir, env } = makeFixture();
+    const { target } = crashAfterReset(cloneDir, env);
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.adopted).toBe(true);
+    expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
+    expect(readRebuildState(cloneDir, env).unverified).toBeNull();
+  });
+
+  it('crash between reset and smoke: a failing smoke rolls back to the pre-crash head and records the rejection', async () => {
+    const { cloneDir, env } = makeFixture();
+    const { prevHead } = crashAfterReset(cloneDir, env);
+    const runSmoke = vi.fn(async () => ({ verdict: 'code', attempts: 1, smoke: { results: [{ name: 'x', ok: false }] } }));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.reason).toBe('smoke-rejected');
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    expect(readRebuildState(cloneDir, env).adopted).toBeNull();
+    expect(readRebuildState(cloneDir, env).rejected).not.toBeNull();
   });
 
   it('recovers an aged interrupted rebuild from another host when HEAD is back at a clean prevHead', async () => {
