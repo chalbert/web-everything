@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   FIXED_PROCESS_CATEGORIES, parsePsOutput, categorizeProcess, buildProcessSnapshot, processSnapshotMetrics,
-  readProcessSample, DEFAULT_PROCESS_CPU_PCT, DEFAULT_PROCESS_MEM_BYTES,
+  readProcessSample, DEFAULT_PROCESS_CPU_PCT, DEFAULT_PROCESS_MEM_BYTES, PS_TIMEOUT_MS,
 } from '../host-process-sample.mjs';
 import { METRIC_NAMES, METRIC_UNITS } from '../telemetry.mjs';
 
@@ -264,6 +264,13 @@ describe('readProcessSample — the one IO edge, with `ps` MOCKED (no real shell
     const throwingExec = () => { throw new Error('ps: command not found'); };
     expect(() => readProcessSample({ exec: throwingExec })).not.toThrow();
     expect(readProcessSample({ exec: throwingExec })).toEqual([]);
+  });
+
+  it('bounds the `ps` call in time — a synchronous exec that never returns would wedge its caller for good', () => {
+    let seenOpts;
+    readProcessSample({ exec: (_file, _args, opts) => { seenOpts = opts; return ''; } });
+    expect(seenOpts.timeout).toBe(PS_TIMEOUT_MS);
+    expect(seenOpts.killSignal).toBe('SIGKILL');
   });
 
   it('calls the real `ps` by default and returns a sane, parseable snapshot on this host', () => {

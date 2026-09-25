@@ -273,6 +273,9 @@ export function processSnapshotMetrics(snapshot) {
   return out;
 }
 
+/** Upper bound on one `ps` call — see {@link readProcessSample}. A healthy call takes well under a second. */
+export const PS_TIMEOUT_MS = 10_000;
+
 /**
  * IO EDGE — the one place this feature shells `ps`, kept to exactly this so every function above stays pure.
  * Never throws: a `ps` failure (missing binary, non-Darwin host with a differently-shaped `ps`, a transient
@@ -291,6 +294,11 @@ export function processSnapshotMetrics(snapshot) {
  * EVERY process (this machine: ~950 rows, a real capture used to size {@link DEFAULT_PROCESS_CPU_PCT}) is the
  * cheap part — one `ps` call regardless of row count; the storage floor in {@link buildProcessSnapshot} exists
  * to bound what gets WRITTEN, not what `ps` itself returns.
+ *
+ * BOUNDED IN TIME, NOT JUST IN FAILURE (PR #2636 CI-heal) — `execFileSync` blocks its thread until the child
+ * exits, and nothing above it (the runner tick, a vitest per-test timeout) can interrupt a synchronous call.
+ * A `ps` that never returns would wedge its caller for good, so the call carries {@link PS_TIMEOUT_MS}: a
+ * timed-out `ps` is killed and degrades to the same empty sample as any other `ps` failure.
  * @param {{exec?: Function}} [io] - injectable for tests; defaults to a real `execFileSync`.
  * @returns {Array<{pid: number, pcpu: number, rssKb: number, command: string}>}
  */
@@ -298,6 +306,7 @@ export function readProcessSample({ exec = execFileSync } = {}) {
   try {
     const out = exec('ps', ['-Awwo', 'pid=,pcpu=,rss=,command='], {
       encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: PS_TIMEOUT_MS, killSignal: 'SIGKILL',
     });
     return parsePsOutput(out);
   } catch {
