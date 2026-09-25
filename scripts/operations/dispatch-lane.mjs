@@ -168,6 +168,67 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   'ci-heal': ['ITEM_NUM', 'PR_NUM', 'LANE_REF', 'LANE', 'SESSION_SLUG', 'SCOPE', 'REASON', 'REPO', 'LANE_REPO', 'GATE_COMMAND', 'WE_ROOT', 'ATTRIBUTION'],
 });
 
+/**
+ * #3168 — WHICH KIND'S BRIEF SELF-ADOPTS (`lane-pool.mjs acquire --adopt`) BEFORE it ever edits, versus which
+ * one leaves the freshly-leased lane's `Edit`/`Write` occupancy guard (`guard-lane.mjs` / `isForeignOccupancy`)
+ * FAIL-OPEN for its entire run. This is a STATIC fact about each brief file (`we:scripts/operations/
+ * dispatch-lane-io.mjs`'s `BRIEF_FILE_BY_KIND`), checked here once rather than re-derived per call, and it is
+ * NOT a residual this operation can close by itself — see the #3168 investigation, below.
+ *
+ * `build` (`delivery-agent-brief.md`) and `investigate` (`investigation-agent-brief.md`) pass `--adopt` in
+ * their own step-1 `acquire`, because in both topologies the SAME session that runs `acquire` is the one that
+ * then edits — so occupancy can be claimed immediately with no ambiguity.
+ *
+ * `prepare` / `prepare-decision` / `fix` / `ci-heal` do NOT — not an oversight, but the exact dispatcher→worker
+ * split `--adopt`'s own doc comment exists for (`lane-lease.mjs`'s `workerSession` docblock): nothing here runs
+ * `acquire` at all — a DISPATCHED AGENT does, later, under a session id THIS operation cannot predict (the
+ * agent's own CLI session, minted at spawn). Defaulting those briefs to self-adopt at dispatch time would need
+ * this operation to stamp occupancy under ITS OWN session before the agent exists, which is the exact defect
+ * `docs/agent/delivery-loop.md`'s review-dispatch flow already documents and works around (#3107 bounce: a
+ * driver that adopts on its own id arms the guard against the very agent it is about to spawn, and that
+ * agent's own first edit is then refused as foreign). So this table does not "fix" the four unmarked kinds by
+ * flipping them to self-adopt — it names the fail-open window loud, on every dispatch it applies to, per the
+ * #3168 card's alternative Done-when (`dispatch-lane.mjs` surfaces it, not just `acquire`'s own stdout).
+ */
+export const KIND_DECLARES_OCCUPANCY_ON_DISPATCH = Object.freeze({
+  build: true,
+  prepare: false,
+  'prepare-decision': false,
+  investigate: true,
+  fix: false,
+  'ci-heal': false,
+});
+
+// #3168 — a DISPLAY-ONLY copy of the kind→brief-filename mapping the io shell owns (`dispatch-lane-io.mjs`'s
+// `BRIEF_FILE_BY_KIND`). Duplicated rather than imported: this module is asserted to reach nothing that can
+// act (see the "DECLARATION module reaches nothing" test), so it cannot import the io shell to read the real
+// map. Only used to name the brief in the warning string below; if a filename ever drifts the message is
+// stale-but-harmless prose, not a wrong VERDICT — `KIND_DECLARES_OCCUPANCY_ON_DISPATCH` above is the one fact
+// that actually gates the warning firing at all.
+const BRIEF_FILE_BY_LAUNCH_KIND_DISPLAY = Object.freeze({
+  build: 'delivery-agent-brief.md',
+  prepare: 'prepare-scope-agent-brief.md',
+  'prepare-decision': 'prepare-decision-agent-brief.md',
+  investigate: 'investigation-agent-brief.md',
+  fix: 'fix-agent-brief.md',
+  'ci-heal': 'fix-agent-ci-brief.md',
+});
+
+/** #3168 — the human-readable warning `shapeDispatchRead` attaches to a dispatch whose kind is NOT in
+ *  {@link KIND_DECLARES_OCCUPANCY_ON_DISPATCH}'s true set, so it rides both the run record (`read` finding +
+ *  `plan` verdict) and the dispatch sink's own printed output — never only `acquire`'s stdout. Pure string
+ *  build so the exact wording is asserted once, here, rather than duplicated at each of its three call sites. */
+export function occupancyFailOpenWarning(launchKind, lane) {
+  return (
+    `lane-${lane}'s Edit/Write occupancy guard stays FAIL-OPEN for this whole ${launchKind} dispatch (#3168): `
+    + `${BRIEF_FILE_BY_LAUNCH_KIND_DISPLAY[launchKind] || `the ${launchKind} brief`} never runs `
+    + '`lane-pool.mjs acquire --adopt` (or `adopt --lane=`), so `guard-lane.mjs` has no declared occupant to '
+    + `protect and allows Edit/Write from ANY other session into lane-${lane} for the life of this dispatch — `
+    + 'this is by design (the dispatcher here cannot claim occupancy on the dispatched agent\'s not-yet-minted '
+    + 'session id without reintroducing the #3107 bounce), not a bug this operation can silently close.'
+  );
+}
+
 /** #3637 — the delivery target this dispatch forks from and lands on, as the brief's `{{DELIVERY_BASE}}`.
  *  `main` unless the item declares a REGISTERED POC branch. PURE, and deliberately trusting: the REGISTRY
  *  LOOKUP (and the refusal for an undeclared branch) happens in the io shell's `findItem`
@@ -767,6 +828,11 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // #3462 — the item's still-open `blockedBy` targets, or `[]` on every exit except the one branch below
     // that actually refuses on them.
     openBlockers: [],
+    // #3168 — does THIS dispatch leave the lane's Edit/Write occupancy guard fail-open (see
+    // `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`)? `false`/`null` on every non-dispatching exit — there is no lane
+    // live yet to warn about — overwritten on the one branch below that actually dispatches.
+    occupancyFailOpen: false,
+    occupancyWarning: null,
   };
 
   // THIS OPERATION'S OWN IN-FLIGHT DISPATCHES, checked BEFORE the launch — because the case it covers is
@@ -1021,6 +1087,13 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     // second time. `null` for build/prepare/prepare-decision, which never have a `launch.pr` to report.
     pr: launch.pr != null ? Number(launch.pr) : null,
     reason: launch.reason != null ? String(launch.reason) : null,
+    // #3168 — see `KIND_DECLARES_OCCUPANCY_ON_DISPATCH`'s docblock for why this is a STATIC per-kind fact, not
+    // something re-derived from the tick. Carried onto the finding on the one branch that actually dispatches,
+    // so `plan`'s verdict and the effect payload below both see it without re-deriving it from `launchKind`.
+    occupancyFailOpen: !KIND_DECLARES_OCCUPANCY_ON_DISPATCH[launchKind],
+    occupancyWarning: KIND_DECLARES_OCCUPANCY_ON_DISPATCH[launchKind]
+      ? null
+      : occupancyFailOpenWarning(launchKind, launch.lane),
   };
 }
 
@@ -1106,6 +1179,12 @@ export function dispatchLaneOperation({ readTick } = {}) {
           guardsFrom: read.bookkeepingSource,
           droppedBookkeeping: read.droppedBookkeeping,
           statusLine: read.statusLine,
+          // #3168 — carried from `read` onto the VERDICT (not just the finding), because the verdict is what a
+          // caller reading `run.verdict` sees and what the CLI's own non-JSON printer dumps in full (see
+          // `cli-adapter.mjs`'s `verdict:` line) — the fail-open window must be visible there, not only in
+          // `acquire`'s own stdout the dispatched agent will print later.
+          occupancyFailOpen: read.occupancyFailOpen,
+          occupancyWarning: read.occupancyWarning,
         };
       },
     }),
@@ -1152,6 +1231,12 @@ export function dispatchLaneOperation({ readTick } = {}) {
             // the tick. `null` for build/prepare/prepare-decision, same as on `read`.
             pr: read.pr,
             reason: read.reason,
+            // #3168 — carried onto the EFFECT PAYLOAD too, not just `read`/`verdict`: the payload is what the
+            // sink (`we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`) actually receives at the
+            // moment it spawns the agent, and is where the sink prints the warning to its own stderr — the most
+            // visible point in the whole path, live, at the exact moment the fail-open lane goes live.
+            occupancyFailOpen: read.occupancyFailOpen,
+            occupancyWarning: read.occupancyWarning,
           },
         }];
       },
