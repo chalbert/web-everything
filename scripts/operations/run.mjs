@@ -88,6 +88,12 @@ import { clearStuckSessionOperation, CLEAR_STUCK_SESSION_OP } from './clear-stuc
 import { createClearStuckSessionReader, createClearStuckSessionSinks } from './clear-stuck-session-io.mjs';
 import { docketRefreshOperation, DOCKET_REFRESH_OP, finishDocketOutcome } from './docket-refresh.mjs';
 import { createDocketRefreshReader, createDocketRefreshSinks } from './docket-refresh-io.mjs';
+// #3892 (graduated from origin/lane/mechanical-dispatcher, epic #3383) — this slice's own two operations,
+// appended rather than interleaved so parallel graduation slices touching this same shared file merge cleanly.
+import { restartRunnerOperation, RESTART_RUNNER_OP, classifyLease } from './restart-runner.mjs';
+import { createRestartReader, createRestartRunnerSinks } from './restart-runner-io.mjs';
+import { prioritySyncOperation, PRIORITY_SYNC_OP, finishPriorityOutcome } from './priority-sync.mjs';
+import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sync-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -321,6 +327,28 @@ export const OPERATIONS = Object.freeze({
     declaration: docketRefreshOperation({ readFacts: createDocketRefreshReader() }),
     sinks: createDocketRefreshSinks(),
     finish: finishDocketOutcome,
+  }),
+  // #3383 — the SAFE conveyor restart: refuse under a just-spawned build agent, SIGTERM the process that
+  // actually owns the loop, confirm it went down by EVIDENCE, sweep a leaked lease, start fresh. The one
+  // operation whose effects SIGNAL and SPAWN processes, which is why its declaration is asserted to hold
+  // neither (`restart-runner.mjs`'s import graph) and every verb lives in the io shell.
+  //
+  // `classifyLease` is handed to the SINKS from the declaration rather than re-imported inside the io shell:
+  // the "a lease is stale only when the heartbeat is past its TTL AND the pid is dead" rule decides both
+  // whether to sweep and whether a launch may proceed, and a second implementation of it on the io side is
+  // precisely the drift this wiring exists to prevent.
+  [RESTART_RUNNER_OP]: () => ({
+    declaration: restartRunnerOperation({ readRestartFacts: createRestartReader() }),
+    sinks: createRestartRunnerSinks({ classifyLease }),
+  }),
+  // #3383 — keeps the `## Priority order` section of the epic's tracker card in step with the cards: drops resolved
+  // lines, adds unlisted ones with an unwritten `why`, renumbers, and flags cards that landed but are still open.
+  // A dry run by default; `--apply` rewrites the section in the checkout it is run from and never commits or pushes.
+  // `finish` prints the plan as a readable diff first (plain mode); `--json` carries the same plan as `verdict`.
+  [PRIORITY_SYNC_OP]: () => ({
+    declaration: prioritySyncOperation({ readFacts: createPrioritySyncReader() }),
+    sinks: createPrioritySyncSinks(),
+    finish: finishPriorityOutcome,
   }),
 });
 

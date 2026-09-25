@@ -65,6 +65,10 @@ import { STALE_STATE_OP } from '../stale-state.mjs';
 import { STAGE_PR_VIEW_OP } from '../stage-pr-view.mjs';
 import { GAP_SWEEP_STATUS_OP } from '../gap-sweep-status.mjs';
 import { TELEMETRY_SUMMARY_OP } from '../telemetry-summary.mjs';
+// #3892 (graduated from origin/lane/mechanical-dispatcher, epic #3383) — appended rather than interleaved so
+// parallel graduation slices touching this same shared file merge cleanly.
+import { RESTART_RUNNER_OP } from '../restart-runner.mjs';
+import { PRIORITY_SYNC_OP } from '../priority-sync.mjs';
 import {
   DEFAULT_BASE_PATH,
   assertReadOnlyDeclaration,
@@ -392,6 +396,15 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // lives in `docket-refresh-io.mjs`, behind the injected `readFacts` reader and the sink `../run.mjs`
     // wires through.
     [DOCKET_REFRESH_OP]: 'docket-refresh.mjs',
+    // #3383 — the SAFE conveyor restart. Three of its six steps are effects, so it is emphatically NOT
+    // read-only; listed here for map coverage. The declaring module reaching nothing that can act matters
+    // MORE here than anywhere else on this list: this operation's verbs are SIGNAL A PROCESS and SPAWN ONE,
+    // and every one of them lives in `restart-runner-io.mjs` behind the three sinks `../run.mjs` wires
+    // through. Its own suite pins that graph property directly.
+    [RESTART_RUNNER_OP]: 'restart-runner.mjs',
+    // #3383 — `priority-sync`'s `apply` step is an effect (it rewrites the tracker card's section), so it is NOT
+    // read-only; listed for map coverage. Its declaring module is itself a leaf (asserted in `priority-sync.test.mjs`).
+    [PRIORITY_SYNC_OP]: 'priority-sync.mjs',
   });
 
   it('the module map covers every operation the repo declares — a new one cannot slip past this file', () => {

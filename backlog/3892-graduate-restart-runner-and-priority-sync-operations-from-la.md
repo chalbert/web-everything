@@ -3,10 +3,11 @@ bornAs: x0mu20g
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: active
 blockedBy: ["3891"]
 scope: ["we:scripts/operations/__tests__/priority-sync-real.test.mjs", "we:scripts/operations/__tests__/priority-sync.test.mjs", "we:scripts/operations/__tests__/restart-runner-io-real.test.mjs", "we:scripts/operations/__tests__/restart-runner.test.mjs", "we:scripts/operations/priority-sync-io.mjs", "we:scripts/operations/priority-sync.mjs", "we:scripts/operations/restart-runner-io.mjs", "we:scripts/operations/restart-runner.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
 tags: []
 ---
 
