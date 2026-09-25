@@ -257,9 +257,14 @@ export function renderResolutionBasisBanner(basis) {
  * of the verdict, so a backlog-only graduatedTo resolve explains itself before anyone reads the file list. Absent
  * ⇒ no line, and the body is byte-identical to before.
  *
+ * `lensProviders` (optional, `{ [lens]: providerName }`) NAMES a non-Claude juror's seat inline in the per-lens
+ * table (#xqa9ttq) — e.g. a Codex advisory seat renders `simplicity (codex)` instead of a bare `simplicity`
+ * indistinguishable from a Claude row. Threaded straight into `renderPanelVerdictTable`; omitted entirely, the
+ * table renders exactly as it did before this param existed.
+ * @param {{findings?: Array<object>, verdict?: string, disposition?: {mode?: string, autoLand?: boolean}|string,
  * @param {{findings?: Array<object>, verdict?: string, disposition?: {mode?: string, autoLand?: boolean}|string,
  *   lensVerdicts?: Object<string, string>, mandatoryLenses?: string[], lenses?: string[], heading?: string,
- *   resolutionBasis?: {graduatedTo: string, ref: string}|null}} [o]
+ *   resolutionBasis?: {graduatedTo: string, ref: string}|null, lensProviders?: Object<string, string>}} [o]
  * @returns {string} the markdown PR-comment body.
  */
 export function renderPanelComment({
@@ -269,6 +274,7 @@ export function renderPanelComment({
   lensVerdicts,
   mandatoryLenses = MANDATORY_LENSES,
   lenses = PANEL_LENSES,
+  lensProviders,
   heading = 'PR review',
   resolutionBasis = null,
 } = {}) {
@@ -288,7 +294,7 @@ export function renderPanelComment({
 
   // The per-lens table (extends renderPanelVerdictTable) — only when per-lens verdicts are supplied.
   if (lensVerdicts && typeof lensVerdicts === 'object') {
-    lines.push('', '### Panel verdicts', '', renderPanelVerdictTable({ lensVerdicts, mandatoryLenses, lenses }));
+    lines.push('', '### Panel verdicts', '', renderPanelVerdictTable({ lensVerdicts, mandatoryLenses, lenses, lensProviders }));
   }
 
   // Findings section — grouped by category (the lens tag), in first-seen order; tolerant of none.

@@ -6,15 +6,29 @@
  * one, so a reader does not have to cross-reference the probe record to see what a given test is pinning.
  */
 
-import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  describe, it, expect, vi,
+} from 'vitest';
+import {
+  existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// #3383 mechanical-dispatcher Bug 2 fix — `codexJudgeSpawn` now calls `recordCodexRunScorecard` (real default:
+// `../conveyor/run-quality-record.mjs`) after every real spawn. That real default's own real default, in
+// turn, appends to the tracked `we:scripts/conveyor/run-scorecards.json` — exactly the kind of disk side
+// effect this suite (and every other suite that exercises `codexJudgeSpawn` without naming its own
+// `recordScorecard` override) must never touch. Mocked at the MODULE level, once, rather than threading a
+// `recordScorecard: vi.fn()` override into every one of this file's many direct `codexJudgeSpawn({...})`
+// calls — the dedicated `recordCodexRunScorecard` coverage lives in `run-quality-record.test.mjs`, not here.
+vi.mock('../../conveyor/run-quality-record.mjs', () => ({ recordCodexRunScorecard: vi.fn(() => null) }));
 import {
   CODEX_CLI,
   CODEX_EFFORT_MAP,
+  CODEX_MODEL,
   CODEX_SPAWN_ENV_ALLOWLIST,
   CodexInvalidSchemaError,
-  assertNoCodexTools,
+  assertNoCodexToolAllowlist,
   buildCodexJudgeArgv,
   buildCodexPrompt,
   parseCodexJudgeOutcome,
@@ -23,6 +37,9 @@ import {
   defaultCodexSpawnEnv,
   requireAllProperties,
   stripNulls,
+  resolveCodexJudgeTranscriptDir,
+  extractCodexJudgeThreadId,
+  persistCodexJudgeTranscript,
 } from '../codex-judge-spawn.mjs';
 import { JudgeTimeoutError } from '../judge-spawn.mjs';
 
@@ -52,6 +69,8 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
       '--skip-git-repo-check',
       '--ephemeral',
       '-C', '/tmp/scratch',
+      // #3635 Fork 1 — the pin is part of the BASELINE argv now, not an optional tail.
+      '-m', CODEX_MODEL,
     ]);
     expect(argv.join(' ')).not.toContain('--json-schema');
     expect(argv.join(' ')).not.toContain('--append-system-prompt');
@@ -72,13 +91,72 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
     }
   });
 
-  it('adds -m <model> only when a model is given', () => {
-    expect(buildCodexJudgeArgv(base)).not.toContain('-m');
-    expect(buildCodexJudgeArgv({ ...base, model: 'gpt-5-codex' })).toEqual(expect.arrayContaining(['-m', 'gpt-5-codex']));
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // #3635 Fork 1, RATIFIED — "Every Codex invocation names its model explicitly."
+  //
+  // THE DEFECT THESE REPLACE. The two tests that used to sit here asserted the OPPOSITE contract: `adds -m
+  // <model> only when a model is given` PINNED the omission (`expect(buildCodexJudgeArgv(base)).not
+  // .toContain('-m')`). Since no caller in the repo ever passed `model`, that assertion was a green test
+  // guarding the exact hole #3635 was opened to close — the judge seat riding `codex exec`'s implicit
+  // default, which resolves server-side and is recorded nowhere.
+  //
+  // These assert the real argv, not merely that the call survives.
+  // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+  it('ALWAYS emits -m, with the ratified pin, when the caller names no model', () => {
+    const argv = buildCodexJudgeArgv(base);
+    const at = argv.indexOf('-m');
+    expect(at, 'the judge seat must never ride the CLI\'s implicit default').toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe(CODEX_MODEL);
+    // The pin is the RATIFIED value, not merely "some string" — a rename of the constant that silently
+    // changed the model would still have to face this.
+    expect(CODEX_MODEL).toBe('gpt-6-astra');
+  });
+
+  it('emits -m exactly ONCE — the pin is a default, never appended on top of a caller\'s model', () => {
+    expect(buildCodexJudgeArgv(base).filter((a) => a === '-m')).toHaveLength(1);
+    expect(buildCodexJudgeArgv({ ...base, model: 'gpt-5.6-sol' }).filter((a) => a === '-m')).toHaveLength(1);
+  });
+
+  it('an explicit model still WINS over the pin — this is a default, not a hardcode', () => {
+    const argv = buildCodexJudgeArgv({ ...base, model: 'gpt-5.6-sol' });
+    expect(argv[argv.indexOf('-m') + 1]).toBe('gpt-5.6-sol');
+    expect(argv).not.toContain(CODEX_MODEL);
+  });
+
+  it('trims a padded model rather than sending whitespace as the operand', () => {
+    const argv = buildCodexJudgeArgv({ ...base, model: '  gpt-5.6-sol  ' });
+    expect(argv[argv.indexOf('-m') + 1]).toBe('gpt-5.6-sol');
+  });
+
+  it('REGRESSION — no reachable input makes buildCodexJudgeArgv omit -m', () => {
+    // The old contract's own inputs: omitted, and explicitly `undefined`. Both must now carry the pin.
+    for (const opts of [base, { ...base, model: undefined }, { ...base, effort: 'high' }]) {
+      expect(buildCodexJudgeArgv(opts), JSON.stringify(opts)).toContain('-m');
+    }
   });
 
   it('refuses a model shaped like a flag', () => {
+    // Load-bearing: `-x` as `-m`'s operand would be parsed by `codex` as a FLAG, silently changing the
+    // command instead of failing it.
     expect(() => buildCodexJudgeArgv({ ...base, model: '-x' })).toThrow(/plain non-empty string/);
+  });
+
+  it('refuses an empty or non-string model rather than falling back to the implicit default', () => {
+    for (const bad of ['', '   ', null, 42, {}]) {
+      expect(() => buildCodexJudgeArgv({ ...base, model: bad }), JSON.stringify(bad))
+        .toThrow(/plain non-empty string/);
+    }
+  });
+
+  it('the pin is the SHARED ratified constant, not a third local copy of the literal', async () => {
+    // The whole point of #3635's follow-up: one source, so a re-ratification cannot miss a call site.
+    const routing = await import('../codex-model-routing.mjs');
+    const direct = await import('../../codex-direct-task.mjs');
+    const delivery = await import('../../operations/codex-delivery-provider.mjs');
+    expect(CODEX_MODEL).toBe(routing.CODEX_MODEL);
+    expect(direct.CODEX_MODEL).toBe(routing.CODEX_MODEL);
+    expect(delivery.CODEX_DELIVERY_MODEL).toBe(routing.CODEX_MODEL);
   });
 
   it('maps effort through CODEX_EFFORT_MAP, via -c model_reasoning_effort=…', () => {
@@ -88,9 +166,21 @@ describe('buildCodexJudgeArgv — the argv translation, per #3371\'s table', () 
     }
   });
 
-  it('clamps xhigh/max DOWN to high — Codex has no level above it', () => {
-    expect(CODEX_EFFORT_MAP.xhigh).toBe('high');
-    expect(CODEX_EFFORT_MAP.max).toBe('high');
+  it('does NOT clamp xhigh/max/ultra — the map is an identity over every real level', () => {
+    // SUPERSEDES `clamps xhigh/max DOWN to high — Codex has no level above it`. That premise was measured and
+    // refuted by #3635's 2026-09-12 follow-up: `gpt-6-astra`'s catalogued `supported_reasoning_levels` are
+    // `low·medium·high·xhigh·max·ultra`, and a live `codex exec -c model_reasoning_effort=<level>` ping at
+    // each of the top three completed normally. The clamp was silently DOWNGRADING an explicit request.
+    for (const level of ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      expect(CODEX_EFFORT_MAP[level], level).toBe(level);
+    }
+  });
+
+  it('sends the UNCLAMPED level through to the argv, not just through the map', () => {
+    for (const level of ['xhigh', 'max', 'ultra']) {
+      expect(buildCodexJudgeArgv({ ...base, effort: level }), level)
+        .toEqual(expect.arrayContaining(['-c', `model_reasoning_effort=${level}`]));
+    }
   });
 
   it('refuses an unrecognised effort rather than passing it through silently', () => {
@@ -113,15 +203,15 @@ describe('buildCodexPrompt — folding the mandate into prompt text (no --append
   });
 });
 
-describe('assertNoCodexTools — TOOL-FREE ONLY (probe 9, #3581 sequencing)', () => {
+describe('assertNoCodexToolAllowlist — no configurable allow-list, not "tool-free" (probe 9, #3581 sequencing)', () => {
   it('passes for null/undefined/empty', () => {
-    expect(() => assertNoCodexTools(null)).not.toThrow();
-    expect(() => assertNoCodexTools(undefined)).not.toThrow();
-    expect(() => assertNoCodexTools([])).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist(null)).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist(undefined)).not.toThrow();
+    expect(() => assertNoCodexToolAllowlist([])).not.toThrow();
   });
 
   it('refuses any non-empty tool list', () => {
-    expect(() => assertNoCodexTools(['Read'])).toThrow(/TOOL-FREE panelist only/);
+    expect(() => assertNoCodexToolAllowlist(['Read'])).toThrow(/no configurable tool allow-list/);
   });
 });
 
@@ -275,6 +365,84 @@ describe('defaultCodexSpawnEnv — ALLOWLISTED env, not raw process.env (round-2
   });
 });
 
+describe('resolveCodexJudgeTranscriptDir — env override, else the home-dir default (mirrors resolveCodexHome)', () => {
+  it('honours CODEX_JUDGE_TRANSCRIPT_DIR when set', () => {
+    expect(resolveCodexJudgeTranscriptDir({ CODEX_JUDGE_TRANSCRIPT_DIR: '/tmp/custom-judge-transcripts' }))
+      .toBe('/tmp/custom-judge-transcripts');
+  });
+
+  it('falls back to a home-dir default when unset/blank', () => {
+    expect(resolveCodexJudgeTranscriptDir({})).toMatch(/\.codex-judge-transcripts$/);
+    expect(resolveCodexJudgeTranscriptDir({ CODEX_JUDGE_TRANSCRIPT_DIR: '   ' })).toMatch(/\.codex-judge-transcripts$/);
+  });
+});
+
+describe('extractCodexJudgeThreadId — the thread_id off `thread.started`, independent of parse success', () => {
+  it('extracts the thread_id from a clean stream', () => {
+    const stdout = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-xyz' }),
+      JSON.stringify({ type: 'turn.completed', usage: {} }),
+    ].join('\n');
+    expect(extractCodexJudgeThreadId(stdout)).toBe('thread-xyz');
+  });
+
+  it('returns null when there is no thread.started event at all (e.g. a spawn that produced nothing)', () => {
+    expect(extractCodexJudgeThreadId('')).toBeNull();
+    expect(extractCodexJudgeThreadId(JSON.stringify({ type: 'turn.completed' }))).toBeNull();
+  });
+
+  it('still finds the thread_id even when the stream goes on to a turn.failed — the transcript-persistence case', () => {
+    const stdout = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-failed-run' }),
+      JSON.stringify({ type: 'turn.failed', error: { message: 'boom' } }),
+    ].join('\n');
+    expect(extractCodexJudgeThreadId(stdout)).toBe('thread-failed-run');
+  });
+});
+
+describe('persistCodexJudgeTranscript — THE FIX: the raw JSONL is written to a durable local file', () => {
+  it('writes the exact stdout bytes to <dir>/codex-judge-<threadId>.jsonl and returns that path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    try {
+      const stdout = JSON.stringify({ type: 'thread.started', thread_id: 'sess-1' }) + '\n' + JSON.stringify({ type: 'turn.completed' });
+      const file = persistCodexJudgeTranscript({ stdout, threadId: 'sess-1', dir });
+      expect(file).toBe(join(dir, 'codex-judge-sess-1.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe(stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a random `unknown-<id>` name when no threadId is available, never silently dropping the run', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    try {
+      const file = persistCodexJudgeTranscript({ stdout: 'whatever', threadId: null, dir, mkId: () => 'fixed-id' });
+      expect(file).toBe(join(dir, 'codex-judge-unknown-fixed-id.jsonl'));
+      expect(readFileSync(file, 'utf8')).toBe('whatever');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates the directory if it does not exist yet', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-test-'));
+    const dir = join(parent, 'nested', 'deeper');
+    try {
+      const file = persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir });
+      expect(existsSync(file)).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('NEVER throws — a write failure is a best-effort loss, returning null, not a crashed judge call', () => {
+    const boom = () => { throw new Error('disk is full'); };
+    expect(() => persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir: '/nonexistent', ensureDir: boom }))
+      .not.toThrow();
+    expect(persistCodexJudgeTranscript({ stdout: 'x', threadId: 't', dir: '/nonexistent', ensureDir: boom })).toBeNull();
+  });
+});
+
 describe('codexJudgeSpawn — exercised over an injected spawn (real temp files, fake process)', () => {
   /** A fake `child_process.spawn` that writes the last-message file (as the real CLI does) and replays JSONL. */
   function fakeSpawn({ stdout, code = 0, writeLastMessage = null }) {
@@ -370,12 +538,30 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     expect(seen.opts.env).toEqual({ CUSTOM: 'yes' });
   });
 
+  // #3383 mechanical-dispatcher Bug 2 fix — THE regression test: a real judge call must score + record its
+  // own run. `recordScorecard` is overridden here (module-level mock covers every OTHER test in this file);
+  // this is the one test that actually asserts the call happens, with the right stamped fields.
+  it('scores + records this run via recordScorecard, stamped as the advisory-review role/kind', async () => {
+    const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+    const recordScorecard = () => null;
+    let seen = null;
+    const spy = (o) => { seen = o; return recordScorecard(o); };
+    await codexJudgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, model: 'gpt-6-astra', effort: 'medium', spawnFn: fn, recordScorecard: spy,
+    });
+    expect(seen).toMatchObject({
+      dispatchKind: 'advisory-review', kind: 'review', role: 'advisory-review', provider: 'codex',
+      model: 'gpt-6-astra', effort: 'medium',
+    });
+    expect(seen.stdout).toBe(okJsonl);
+  });
+
   it('refuses a tool-bearing request before ever spawning', async () => {
     const { fn } = fakeSpawn({ stdout: okJsonl });
     let called = false;
     const spy = (...a) => { called = true; return fn(...a); };
     await expect(codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, allowedTools: ['Read'], spawnFn: spy }))
-      .rejects.toThrow(/TOOL-FREE panelist only/);
+      .rejects.toThrow(/no configurable tool allow-list/);
     expect(called).toBe(false);
   });
 
@@ -395,6 +581,71 @@ describe('codexJudgeSpawn — exercised over an injected spawn (real temp files,
     };
     await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
     expect(existsSync(workDirSeen)).toBe(false);
+  });
+
+  // THE FIX — #3649's run-quality recording mechanism could not score this seat's runs because the raw
+  // JSONL was captured only to parse the answer, then discarded. These prove it is now durably persisted,
+  // OUTSIDE the temp working directory the test right above proves gets deleted (so the transcript survives
+  // that cleanup), keyed by the same thread id the outcome reports as `sessionId`.
+  describe('THE FIX — the raw JSONL is now persisted to a durable file, independent of workDir cleanup', () => {
+    it('persists the transcript and returns its path as `transcriptFile`, via the real (non-injected) writer', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'codex-judge-transcript-integration-'));
+      try {
+        const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+        const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, transcriptDir: dir });
+        expect(r.transcriptFile).toBe(join(dir, 'codex-judge-sess-1.jsonl'));
+        // THE EXACT SAME BYTES the outcome was parsed from — not a paraphrase, not a summary.
+        expect(readFileSync(r.transcriptFile, 'utf8')).toBe(okJsonl);
+        // Survives the workDir cleanup the test above proves happens — a DIFFERENT directory entirely.
+        expect(existsSync(r.transcriptFile)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('calls the injected `persistTranscript` with the captured stdout and the extracted thread id', async () => {
+      const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/transcript/path.jsonl'; };
+      const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].threadId).toBe('sess-1');
+      expect(calls[0].stdout).toBe(okJsonl);
+      expect(r.transcriptFile).toBe('/fake/transcript/path.jsonl');
+    });
+
+    it('persists the transcript even when the run goes on to a `turn.failed` — never lost on failure', async () => {
+      const failedJsonl = [
+        JSON.stringify({ type: 'thread.started', thread_id: 'sess-failed' }),
+        JSON.stringify({ type: 'turn.failed', error: { message: 'boom' } }),
+      ].join('\n');
+      const { fn } = fakeSpawn({ stdout: failedJsonl });
+      const calls = [];
+      const persistTranscript = (o) => { calls.push(o); return '/fake/failed.jsonl'; };
+      await expect(codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript }))
+        .rejects.toThrow(/the juror failed/);
+      expect(calls).toHaveLength(1); // persisted BEFORE the parse threw, not skipped because of the throw
+      expect(calls[0].threadId).toBe('sess-failed');
+    });
+
+    it('a transcript-write failure never crashes an otherwise-successful judge call — best effort only', async () => {
+      const { fn } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      const persistTranscript = () => null; // simulates a disk-write failure
+      const r = await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn, persistTranscript });
+      expect(r.value).toEqual({ verdict: 'accept', finding: 'ok' });
+      expect(r.transcriptFile).toBeNull();
+    });
+
+    // THE EXPLICIT CONFIRMATION THE TASK ASKS FOR: `--ephemeral` is UNTOUCHED by this fix. It protects
+    // actor-identity/non-resumability (unrelated to transcript persistence) and removing it would reintroduce
+    // a real risk — this module's own transcript file is what closes the observability gap instead.
+    it('still passes `--ephemeral` on every real spawn — the fix persists OUR OWN copy, it does not touch the flag', async () => {
+      const { fn, seen } = fakeSpawn({ stdout: okJsonl, writeLastMessage: '{"verdict":"accept","finding":"ok"}' });
+      await codexJudgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, spawnFn: fn });
+      expect(seen.argv).toContain('--ephemeral');
+      // and it is not, say, `--no-ephemeral` or a value-taking flag masquerading as it:
+      expect(seen.argv[seen.argv.indexOf('--ephemeral') + 1]).not.toBe('false');
+    });
   });
 
   describe('a juror that hits the wall (probe 6 — no CLI timeout flag; the parent kills it)', () => {
