@@ -3,10 +3,11 @@ bornAs: x3y6aek
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: active
 blockedBy: ["3854", "3891"]
 scope: ["we:scripts/operations/land-advance-items.mjs", "we:scripts/operations/land-advance-items-io.mjs", "we:scripts/operations/land-advance-gate.mjs", "we:scripts/land-advance-hook.mjs", "we:scripts/operations/__tests__/land-advance-hook.test.mjs", "we:scripts/operations/__tests__/land-advance.test.mjs"]
 dateOpened: "2026-09-21"
+dateStarted: "2026-09-24"
 tags: []
 ---
 
