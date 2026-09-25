@@ -26,7 +26,7 @@
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json] [--acquirable [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N]]  # existing lane paths (for the orchestrator to dispatch into); --acquirable filters out foreign-leased / busy lanes (#2426); #xn432dz: lease-first (no git in a live-leased lane), SINGLE-FLIGHT + cached for --cache-ttl-ms (env LANE_POOL_LIST_CACHE_TTL_MS, default 30000; 0 disables) so concurrent callers share one scan, --no-cache forces a fresh one, --limit=N stops at N (never cached), and the scan fails cleanly past --scan-timeout-ms (env LANE_POOL_LIST_SCAN_TIMEOUT_MS, default 120000)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
- *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--item=NNN[,NNN…]] [--ttl-minutes=N] [--no-reset] [--no-reap] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--wait-ms=N] [--no-free-list] [--free-list-max-age-ms=N] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main (or, with #2386 --base=<ref>, to a predecessor lane's pushed tip); stdout = its path. #4122: auto-pick tries `we:scripts/conveyor/lane-pool-health-watch.mjs`'s pre-computed free-lane list FIRST (near-zero git) when it exists and is fresh (< --free-list-max-age-ms / LANE_POOL_FREE_LIST_MAX_AGE_MS, default 10min) — every candidate is still atomically claimed + re-verified fresh before it's ever handed out, so a stale entry costs at most a lost race, never a clobbered lane; --no-free-list opts out. Falls back to today's shared, single-flight, cached full-pool scan (#xn432dz/#3383) unchanged, only when the list is missing, stale or exhausted. #x3jmao3: auto-pick (no --lane) OPT-IN bounded retry — --wait-ms=<total> polls (ACQUIRE_POLL_MS spacing, no busy-wait) for up to that many ms before the "no free lane" failure, instead of failing on the very first full-pool reading (omitted ⇒ today's instant-fail, unchanged); a genuinely-exhausted pool still fails with the identical message once the bound elapses. #2748: BEFORE selecting, a reaper backstop reclaims any PROVABLY-DEAD ghost lease in the pool (item resolved on main, or PR merged/closed) so a finished-but-unreleased lane never blocks a fresh dispatch — the pool ACTS on the ghost the board only flags; --no-reap opts out. #2413: --purpose=workflow-lane MARKS the lease (workflowLane:true) → the guard requires a sibling to assert its minted slug before a destructive op. #2560: --scope=<repo:path,...> declares this lane's ADVISORY predicted file-scope — persisted into the marker (the live scope-lease collector reads it) + warns on overlap, but NEVER gates the acquire (the whole-clone lease is the real lock). #2616: --item=NNN records this lane's item → lane in the lane-ports registry (same as `map`) so conveyor-state's health-stall scan can flag a genuinely stalled lane — the self-serve population a conveyor delivery agent needs (nothing else calls `map` for it). #2350: --reserve (requires --lane=N) mints a PERMANENT reserved lane — no TTL, never stale, off-limits to acquire/refresh/provision (even --force); dropped only by `release --release-reserved`. #2997: EVERY acquire now mints a per-holder `holder` slug into the lease and prints it (stderr + --json `holder`) — the one signal that separates this holder from a SIBLING agent of the same session, which `ownerSession` cannot; assert it as `--session=<slug>` (release) or `LANE_SESSION=<slug>` (a destructive git op) whenever a sibling of your session also holds a live lane. #2997 r2: --adopt also stamps YOU as the lane's OCCUPANT (`workerSession`) — pass it when the process running this acquire is the one that will work in the lane, omit it when you are leasing on someone else's behalf (they run `adopt` instead).
  *   node scripts/lane-pool.mjs adopt   --lane=N [--force] [--json]   # #2997 r2 the dispatcher → worker OCCUPANCY hand-off: declare the CALLING session the agent working in lane-N (stamps `workerSession`), which is what arms guard-lane.mjs's Edit/Write refusal against every OTHER session. `ownerSession` cannot do this job — it records whoever RAN `acquire`, which for a dispatched lane is the dispatcher, not the worker. Idempotent; a lane already declared-occupied by a different LIVE session needs --force (a deliberate takeover, which names who is displaced).
  *   node scripts/lane-pool.mjs release (--lane=N | --all | --all-pools (--session=<slug> | --item=<num>)) [--session=<slug>] [--pool=<name>] [--force] [--release-reserved]   # #2275 hand a leased lane back to the pool (own lease, or --force); #2350 --release-reserved is the deliberate un-reserve for a PERMANENT reserved lane (--force alone never drops one); #2667 --all-pools --session sweeps EVERY pool under POOL_ROOT and releases that session's leases (cross-locus couple cleanup in one call), and --pool=<name> selects a pool by dir-name (no checkout path needed); #2748 --all-pools --item=<num> is the by-ITEM sweep the drain's release-on-land uses (matches every lease whose session encodes that item number — needs no exact slug); #2997 a CONTESTED lease (another live lease — in ANY pool under POOL_ROOT, per r2 — shares its ownerSession, i.e. a sibling agent of yours holds a lane) is never released on the ownerSession match alone — pass `--session=<the holder slug acquire printed>` or `--force`. A STALE lease is never contested (r2): a dead holder has nothing to prove, so an expired lease releases without --force exactly as on main.
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s); #2350 REFUSES a reserved lane (even --all/--force) — deliberate teardown is `remove --lane=N --release-reserved`
@@ -95,6 +95,9 @@ import {
   isContestedLease,
   isTransientRefLockError,
 } from './lib/lane-lease.mjs';
+// #4122 — the free-lane list `acquire`'s auto-pick reads as a fast pre-filter before paying for its own scan
+// (see that module's own header for the full incident/design writeup).
+import { readFreeLaneList, isFreeLaneListFresh, freeLaneCandidates, resolveFreeLaneListPath, DEFAULT_FREE_LANE_LIST_MAX_AGE_MS, FREE_LANE_LIST_MAX_AGE_ENV } from './lib/free-lane-list.mjs';
 // #2560 — lane-pool may freely import readiness (confirmed no circular import): the advisory scope-lease check
 // at acquire. normScope normalizes the declared `--scope`; candidateLaunch is the pure overlap-at-launch query.
 import { normScope } from './readiness/scope-lease.mjs';
@@ -1814,6 +1817,25 @@ function cmdAcquire(repo) {
     const emitAcquirePollCount = () => {
       if (process.env.LANE_POOL_ACQUIRE_DEBUG === '1') process.stderr.write(`__ACQUIRE_POLLS__=${acquirePollCount}\n`);
     };
+    // #4122 — THE FREE-LANE LIST FAST PATH. `we:scripts/conveyor/lane-pool-health-watch.mjs` already walks the
+    // whole pool every tick and publishes its own `list --acquirable` answer (`we:scripts/lib/free-lane-list.mjs`);
+    // read it ONCE here, up front — never re-read per poll iteration, so a health-watch tick landing mid-`--wait-ms`
+    // can't change which source this call is committed to partway through. `--no-free-list` (tests; an operator
+    // who wants today's scan-only behavior back) or `--free-list-max-age-ms=0` skip it outright. A missing or
+    // STALE (older than `--free-list-max-age-ms` / `LANE_POOL_FREE_LIST_MAX_AGE_MS`, default 10 min) list is
+    // `null` here, which the loop below treats exactly like "already exhausted" — falls straight to the scan.
+    let freeList = null;
+    if (!flags['no-free-list'] && freeListMaxAgeMs() > 0) {
+      try {
+        const raw = readFreeLaneList(resolveFreeLaneListPath({ repoName: repo.name, poolDir: repo.poolDir }));
+        if (raw && isFreeLaneListFresh(raw, nowMs, freeListMaxAgeMs())) freeList = raw;
+      } catch { freeList = null; } // a corrupt/unreadable file is exactly "no list" — never a hard failure
+    }
+    // Once every candidate the list named has been tried (claimed-by-someone-else, or claimed-then-failed
+    // re-verify) this flips PERMANENTLY — never re-consulted even after `excluded.clear()` below rotates through
+    // the SAME static list again on a later poll tick, which would just re-try the identical dead ends until
+    // `--wait-ms` ran out instead of ever reaching the scan.
+    let freeListExhausted = !freeList;
     while (chosen === null) {
       // #3383 — the scan's own budget is now the FULL configured/default scan timeout (`--scan-timeout-ms` /
       // `LANE_POOL_LIST_SCAN_TIMEOUT_MS`), never shrunk to this caller's OWN remaining `--wait-ms`: the
@@ -1823,18 +1845,40 @@ function cmdAcquire(repo) {
       // in-flight scan it joined. `--wait-ms` still bounds only how long THIS acquire call may keep polling
       // for a lane to free up (the loop below), never the scan itself.
       let candidateDirs;
-      try {
-        candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: listScanTimeoutMs(), cacheTtlMs: listCacheTtlMs() });
-        sawScanTimeout = false;
-      } catch (e) {
-        // A scan that overran ITS OWN budget is not a hard failure here (unlike `list --acquirable` itself)
-        // — it just means "no proven candidate yet, and we don't know why"; fall through to the same
-        // wait/retry/fail-at-deadline handling as "found nothing free" below, so a slow tick self-heals on
-        // the next one. `sawScanTimeout` (above) is what lets the eventual message/growth-refusal tell this
-        // apart from a completed scan that genuinely found nothing.
-        if (!e || !e.scanTimeout) throw e;
-        candidateDirs = [];
-        sawScanTimeout = true;
+      let usingFreeList = false;
+      if (!freeListExhausted) {
+        const freeCands = freeLaneCandidates(freeList, { exclude: excluded });
+        if (freeCands.length) {
+          candidateDirs = freeCands.map((n) => laneDir(repo, n));
+          usingFreeList = true;
+        } else {
+          freeListExhausted = true; // this tick's list has nothing left to offer — fall through to the scan below
+        }
+      }
+      if (!usingFreeList) {
+        try {
+          // #4122 — once the free list is missing/stale/exhausted, this is EXACTLY today's pre-#4122 candidate
+          // source, unchanged: the shared, single-flight, cached full-pool scan (#xn432dz/#3383). An earlier
+          // draft tried to also make this fallback stop at the first provably free lane (`limit: 1`); reverted
+          // (pre-land, caught by `lane-pool-acquire-vanished-lane.test.mjs` / `lane-pool-acquire-refused-lease.
+          // test.mjs` going red) because `scanAcquirable`'s `limit` early-stop is not `excluded`-aware — a
+          // `limit: 1` result always names the SAME lowest-index candidate on every retry, so once that one
+          // candidate is excluded (claim lost, vanished, failed #2924 re-verify) the picking loop can never
+          // reach a second one from the SAME scan snapshot, exactly the fall-through those tests pin. Fixing
+          // that needs `scanAcquirable` itself to accept an exclusion set, left for a follow-up card rather than
+          // risking it in the fix this incident is actually blocked on.
+          candidateDirs = acquirableListCached(repo, { limit: null, scanTimeoutMs: listScanTimeoutMs(), cacheTtlMs: listCacheTtlMs() });
+          sawScanTimeout = false;
+        } catch (e) {
+          // A scan that overran ITS OWN budget is not a hard failure here (unlike `list --acquirable` itself)
+          // — it just means "no proven candidate yet, and we don't know why"; fall through to the same
+          // wait/retry/fail-at-deadline handling as "found nothing free" below, so a slow tick self-heals on
+          // the next one. `sawScanTimeout` (above) is what lets the eventual message/growth-refusal tell this
+          // apart from a completed scan that genuinely found nothing.
+          if (!e || !e.scanTimeout) throw e;
+          candidateDirs = [];
+          sawScanTimeout = true;
+        }
       }
       const pickable = candidateDirs
         .map((d) => Number(basename(d).slice(5)))
@@ -1845,6 +1889,18 @@ function cmdAcquire(repo) {
         const claimed = tryClaimLane(laneDir(repo, n), session, Date.now(), ttlMs);
         if (claimed) { pick = n; holderSlug = claimed; break; }
         excluded.add(n); // a concurrent acquire won this one — try the next candidate
+      }
+      // #4122 — a free-list round that claimed NOTHING (every listed candidate was already taken by someone
+      // else) gets exactly ONE pass: mark it exhausted now, before the sleep/retry branch below clears
+      // `excluded` — otherwise the next poll tick would recompute the SAME candidates from the SAME static
+      // list and retry the identical dead ends until `--wait-ms` ran out, never reaching the scan at all. Then
+      // go STRAIGHT to the scan in this same call (no sleep, no deadline gate, `excluded` kept) — with the
+      // default `--wait-ms=0` the deadline has already passed, so falling into the wait/grow/fail branch below
+      // would skip the scan entirely and either fail with a false "all held/dirty" or needlessly grow the pool
+      // while unlisted lanes sit free (PR #2679 review). Runs at most once: `freeListExhausted` is now sticky.
+      if (usingFreeList && pick === null) {
+        freeListExhausted = true;
+        continue;
       }
       if (pick !== null) {
         // #3407 fix item 2 — provision THIS candidate right here, inside the picking loop, so a failure falls
@@ -2313,6 +2369,9 @@ const numFlagOrEnv = (flag, env, dflt) => {
 };
 const listCacheTtlMs = () => numFlagOrEnv('cache-ttl-ms', 'LANE_POOL_LIST_CACHE_TTL_MS', DEFAULT_LIST_CACHE_TTL_MS);
 const listScanTimeoutMs = () => numFlagOrEnv('scan-timeout-ms', 'LANE_POOL_LIST_SCAN_TIMEOUT_MS', DEFAULT_LIST_SCAN_TIMEOUT_MS);
+// #4122 — how old the free-lane list may be and still be consulted (`--free-list-max-age-ms` / env); `--no-free-list`
+// disables the fast path outright (tests, or an operator who wants today's scan-only behavior back).
+const freeListMaxAgeMs = () => numFlagOrEnv('free-list-max-age-ms', FREE_LANE_LIST_MAX_AGE_ENV, DEFAULT_FREE_LANE_LIST_MAX_AGE_MS);
 
 function invalidateListCache(repo) {
   try { rmSync(LIST_CACHE_FILE(repo), { force: true }); } catch { /* best-effort — the fingerprint still guards */ }
@@ -3283,6 +3342,8 @@ const KNOWN_FLAGS = new Set([
   // #4139 — reclaim's operator override (explicit, logged, never automatic — see cmdReclaim's own docblock),
   // and keep's free-text reason.
   'override', 'reason',
+  // #4122 — acquire's free-lane-list fast-path knobs (see `we:scripts/lib/free-lane-list.mjs`'s own header).
+  'no-free-list', 'free-list-max-age-ms',
 ]);
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -3308,7 +3369,8 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|keep|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
-      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run] [--override] [--reason=<text>]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
+      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run] [--override] [--reason=<text>] ' +
+      '[--no-free-list] [--free-list-max-age-ms=N]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
       '  # acquire (auto-pick, no --lane): on a full pool, grows it by up to --growth-max-new=N new lanes (default 4, env ' +
       'LANE_POOL_ACQUIRE_GROWTH_MAX_NEW) up to a --hard-max=N ceiling (default 90 for web-everything/30 for siblings, env LANE_POOL_HARD_MAX) ' +
       'before failing — refuses to grow on a live remote-probe failure (#3383)\n' +
