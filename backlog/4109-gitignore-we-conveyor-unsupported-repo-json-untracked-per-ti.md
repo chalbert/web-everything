@@ -2,9 +2,10 @@
 bornAs: x4cteem
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:.gitignore"]
 dateOpened: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 
