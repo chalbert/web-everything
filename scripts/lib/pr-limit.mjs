@@ -459,4 +459,4 @@ export function runPrLimitCli(argv) {
 }
 
 const IS_CLI = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (IS_CLI) process.exit(runPrLimitCli(process.argv.slice(2)));
+if (IS_CLI) process.exitCode = runPrLimitCli(process.argv.slice(2));

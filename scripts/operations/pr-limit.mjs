@@ -9,4 +9,4 @@
  */
 import { runPrLimitCli } from '../lib/pr-limit.mjs';
 
-process.exit(runPrLimitCli(process.argv.slice(2)));
+process.exitCode = runPrLimitCli(process.argv.slice(2));
