@@ -133,6 +133,16 @@
  *   no item is ever double-reported under two note kinds. What is left — `overlaps lane-<n>`, `no free lane`,
  *   `cleared-but-not-ready`, and (defense-in-depth; unreachable via the production shell per dispatch-plan.mjs)
  *   `blocked` — had NO other surface at all before this.
+ *
+ * LOAD ADMISSION (#4076) — a SECOND admission axis, ORTHOGONAL to `config.maxConcurrentLanes` (#xupukxa, above):
+ *   that ceiling is a fixed, hardware-blind lane COUNT; this gate reads the host-sampler's actual `host.cpu.load1`
+ *   sample (via the IO shell's `loadAdmission` input, resolved by `../readiness/heavy-admission.mjs#resolveLoadAdmission`
+ *   — this pure core never touches fs itself) and withholds EVERY new dispatched-session launch this tick —
+ *   builds AND the free-lane pool prepare/fix/ci-heal spawns draw from — when the per-core ratio crosses a
+ *   threshold, beside whatever the fixed ceiling separately admits. Surfaced as `load-cap` notes (distinct from
+ *   `capacity-cap` — the fix differs: wait for load to drop vs. raise the cap / free a lane). Already-running
+ *   lanes/guards/watchers are untouched, mirroring `dispatchPaused`'s own posture. See `loadCapReading` and the
+ *   `loadHeld` branches in `planTick` for the mechanism.
  */
 
 import { mintSessionSlug } from './session-slug.mjs';
@@ -180,6 +190,15 @@ export const DEFAULT_STALL_TICKS = 3;
 function laneNumFromOverlapReason(reason) {
   const m = /^overlaps lane-(\d+)$/.exec(String(reason || ''));
   return m ? Number(m[1]) : null;
+}
+
+/** Human-readable load reading for a #4076 `load-cap` note's `text` — e.g. `"host load 8.50/12 cores (0.71 >
+ *  1.5)"`. Falls back to a bare threshold mention when the IO shell's `loadAdmission` carries no numeric
+ *  reading (e.g. a bypass reason, or a caller that only ever sets `held:true` directly in a test). Pure. */
+function loadCapReading(loadAdmission) {
+  const { load1, cores, perCore, maxPerCore } = loadAdmission || {};
+  if (load1 == null || cores == null || perCore == null) return `host load above threshold (max ${maxPerCore ?? '?'}/core)`;
+  return `host load ${Number(load1).toFixed(2)}/${cores} cores (${Number(perCore).toFixed(2)} > ${maxPerCore})`;
 }
 
 /**
@@ -1077,10 +1096,21 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *                                      // names, checked one by one against `TICK_SPAWN_KINDS` — e.g.
  *                                      // `['build','prepare','prepare-decision','investigate']` stops all NEW
  *                                      // item dispatch while `fix`/`ci-heal` keep working already-open PRs.
+ *   loadAdmission?: { held?:boolean, load1?:number|null, cores?:number|null, perCore?:number|null, maxPerCore?:number },
+ *                                      // #4076 — the load-admission gate's live verdict, resolved by the IO
+ *                                      // shell via `heavy-admission.mjs#resolveLoadAdmission` (this pure core
+ *                                      // has no fs of its own). ORTHOGONAL to `config.maxConcurrentLanes`
+ *                                      // above — never replaces it, a tick can be held by capacity-cap,
+ *                                      // load-cap, both, or neither. `held:true` withholds EVERY new
+ *                                      // dispatched-session launch this tick (builds AND the free-lane pool
+ *                                      // prepare/fix/ci-heal draw from), tagged `load-cap` distinctly from
+ *                                      // `capacity-cap` (the fix differs: wait for load to drop vs. raise the
+ *                                      // cap); already-running lanes/guards/watchers are untouched. Omitted /
+ *                                      // `held:false` (the default) changes nothing observable.
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedKinds = null, dispatchPausedReason = null } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedKinds = null, dispatchPausedReason = null, loadAdmission = {} } = {}) {
   // THE PAUSE, RESOLVED PER KIND (epic #3383). `pausedKinds` is the concrete list this tick holds: `[]` when
   // nothing is paused, all six when the marker declares no scope (an old-format `{paused:true}` file, or any
   // caller that still passes only the boolean — both keep holding everything, unchanged), or exactly the
@@ -1213,9 +1243,18 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // `by: 'capacity-cap'` in `suppressed` so it reads distinctly from a real guard suppression, and surfaced as
   // its own note below rather than silently dropped.
   const buildBudget = capToConcurrency(guardFiltered.spawn, { activeCount: lanes.length, cap: cfg.maxConcurrentLanes });
+  // #4076 — THE LOAD-ADMISSION GATE, applied AFTER the fixed lane-count ceiling just above (orthogonal, never
+  // replacing it — see `loadAdmission`'s own doc comment on the function signature). When held, every build the
+  // ceiling still admitted is ALSO withheld this tick, tagged `by: 'load-cap'` — distinct from `capacity-cap`
+  // (the fix differs: wait for load to drop vs. raise the cap / free a lane) — so the note names the real reason.
+  const loadHeld = loadAdmission && loadAdmission.held === true;
   const launched = {
-    spawn: buildBudget.admitted,
-    suppressed: [...guardFiltered.suppressed, ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' }))],
+    spawn: loadHeld ? [] : buildBudget.admitted,
+    suppressed: [
+      ...guardFiltered.suppressed,
+      ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' })),
+      ...(loadHeld ? buildBudget.admitted.map((l) => ({ num: l.num, lane: l.lane, by: 'load-cap' })) : []),
+    ],
   };
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, ...spawnStamp(tick, now) }));
   const liveBuildGuards = [...buildLive, ...newBuildGuards];
@@ -1255,11 +1294,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     activeCount: lanes.length + launched.spawn.length,
     cap: cfg.maxConcurrentLanes,
   });
-  availableLanes = capacityBudget.admitted;
+  // #4076 — the SAME load-admission gate applied to builds above, now applied to the prepare/fix/ci-heal pool:
+  // when held, every lane the fixed ceiling still admitted is withheld too, so the four spawn kinds combined
+  // draw from an EMPTY pool this tick rather than each independently racing whatever the ceiling left them.
+  availableLanes = loadHeld ? [] : capacityBudget.admitted;
   // `notes` is declared further down (step 9) — stash these here and splice them in there, rather than reorder
   // the whole function around one early-arriving note kind.
   const capacityCapNotes = capacityBudget.overflow.map((l) =>
     ({ kind: 'capacity-cap', lane: l, text: `⏸ lane-${l} available but withheld — concurrent-lane cap (${cfg.maxConcurrentLanes}) reached` }));
+  const loadCapNotes = (loadHeld ? capacityBudget.admitted : []).map((l) =>
+    ({ kind: 'load-cap', lane: l, text: `⏸ lane-${l} available but withheld — ${loadCapReading(loadAdmission)}` }));
 
   // 4. PREPARE spawns (scope + decision + investigation) — union re-dispatch gate, lane exclusion; consume
   //    lanes. #3609 — a manual dispatch-pause holds these too, not just `plan.launch` (which dispatch-plan.mjs
@@ -1325,7 +1369,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
 
   // 9. Surface notes — the deterministic, no-agent surfaces (§3d epics, §3e prepared decisions) + guard TTL
   //    re-dispatch warnings, gathered so the skill posts them without re-deriving.
-  const notes = [...capacityCapNotes];
+  const notes = [...capacityCapNotes, ...loadCapNotes];
   // #3609 — ONE aggregate note for the manual dispatch-pause (rather than per-spawn-kind notes each spawn
   // planner would otherwise emit): the individual `plan.held` items already carry their own per-num
   // `dispatch-paused` note below, so this note covers only what those DON'T — the tick's own prepare/fix/
@@ -1352,6 +1396,7 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // silently vanish rather than being told why.
   for (const s of launched.suppressed) {
     if (s.by === 'capacity-cap') notes.push({ kind: 'capacity-cap', num: s.num, text: `⏸ #${s.num} — capacity-cap (concurrent-lane cap ${cfg.maxConcurrentLanes} reached)` });
+    if (s.by === 'load-cap') notes.push({ kind: 'load-cap', num: s.num, text: `⏸ #${s.num} — load-cap (${loadCapReading(loadAdmission)})` });
   }
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
@@ -1714,6 +1759,17 @@ async function main(argv) {
     admission = JSON.parse(raw);
   } catch { /* best-effort — see comment above */ }
 
+  // #4076 — the load-admission gate's live verdict: a DIFFERENT `heavy-admission.mjs` mode (`load-status`,
+  // never the heavy-command semaphore's own `status` just above) reads the host-sampler's latest load1/cores
+  // and decides whether NEW dispatched-session launches should be held this tick. Best-effort, same posture as
+  // every other marker read in this shell: a missing/unreadable sample or a `heavy-admission.mjs` failure
+  // FAILS OPEN (`{held:false}`) rather than ever wedging dispatch on a sampler outage.
+  let loadAdmission = { held: false };
+  try {
+    const raw = time('loadAdmissionMs', () => execFileSync('node', [ADMISSION_CLI, 'load-status', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
+    loadAdmission = JSON.parse(raw);
+  } catch { /* fail open — see comment above */ }
+
   // #3609 — the manual/emergency dispatch-pause marker (best-effort direct import, matching the durable-floor
   // reads above). FAILS OPEN: a missing module or unreadable/corrupt marker leaves `dispatchPaused` false —
   // dispatch-plan.mjs's own IO shell already reads the SAME marker independently for `plan.launch`, so a
@@ -1747,7 +1803,7 @@ async function main(argv) {
 
   // epic #3383 — dispatchPausedKinds carries the manual-pause marker's KIND SCOPE through verbatim (`null` =
   // blanket pause); dropping it here would silently re-widen a scoped pause back to holding all six kinds.
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason });
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason, loadAdmission });
   // Verbose-mode timing breakdown (#3521 decision-trace v1 follow-up) — an IO-shell-observed fact, not something
   // the pure core computes; attached only here, after the tick already ran, so a timing read can never affect
   // the decision itself.
