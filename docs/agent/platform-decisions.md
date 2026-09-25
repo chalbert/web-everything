@@ -3857,6 +3857,9 @@ isolated-clone rule ([#pool-siblings-real-built-clones](#pool-siblings-real-buil
    (amended 2026-09-23 by [#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 1: the
    "same clean handler" premise is wrong mid-tick — a tick inside a synchronous child call cannot run the handler,
    so the lease is never released. Never `kickstart -k` a daemon mid-tick.)
+   (amended 2026-09-25 by [#daemon-jobs](#daemon-jobs): the clean-shutdown path still stops the in-flight
+   pass, but no longer kills a detached drain follow-up job, which holds the numbering mutex itself, so no
+   double drain follows.)
 
 3. **Self-source review — the SAME size/complexity-graduated committee as any change, with the ONE retained
    invariant that the review is INDEPENDENT (Fork C, OPERATOR-MODIFIED).** A PR that changes the daemon's own
@@ -5532,7 +5535,9 @@ clauses:
    compared after resolving symlinks, and a check that the checkout is the designated daemon clone; the
    designated-root setting ships in the plists before the check does; (ii) a **cross-daemon mutex** — a
    per-clone reader/writer lock: each tick holds a shared hold, the one process that moves the clone holds an
-   exclusive one, so the tree never moves under a running tick and never has two movers; (iii) **pinned state
+   exclusive one, so the tree never moves under a running tick and never has two movers (narrowed 2026-09-25
+   by [#daemon-jobs](#daemon-jobs): the shared hold covers a tick and a tree-changing job, not a read-only job,
+   which runs from a pinned code snapshot); (iii) **pinned state
    paths** — state found by script location (the `.conveyor/` queue, the tracked scorecard file, the overlay
    list) lives at a root given by env or flag, per
    [#state-lives-where-its-nature-dictates](#state-lives-where-its-nature-dictates); (iv) the restart floor.
@@ -5648,6 +5653,40 @@ notification contract accepted explicitly. Grounding: `we:reports/2026-09-24-hea
 fresh-context screen; ratify-time `judgePanel` skeptic `ratify-4065` found no refutation). Build slices 4077,
 4078, 4068, 4066, 4079, 4081 under epic 4075. Composes with #4045 (outside heartbeat check reads the
 last-tick stamp) and #4052 (state root).
+
+---
+
+### Slow daemon actions run as detached jobs with durable records; the daemon loop never waits on one {#daemon-jobs}
+
+**Ratified 2026-09-25** (`4120`, bornAs `x6sslco`, operator, in session: *"I ratify"*). Fork 1 (a) — a job is a
+run-store record kind, with a `host:pid:procStart` handle and a dead-handle relaunch rule; Fork 2 (c) — code
+version per kind (`readonly-tree` runs from a pinned snapshot, `mutates-tree` runs in its own working tree).
+Three ratify lines settled by precedent. Grounding: `we:reports/2026-09-24-daemon-blocking-antipatterns.md`.
+
+A daemon action that can outlast a small part of its tick runs as a **job**: a detached child process
+with a run-store record under the daemon's pinned state root, identified by `host:pid:procStart`. The tick
+only starts jobs and reads records. A job's code never changes under it: a job that only reads runs from a
+pinned code snapshot; a job that changes a git tree runs in its own working tree and holds the clone's
+shared hold only while it runs. On boot and every tick the daemon reattaches: a live job is left alone, a
+stalled one is killed and relaunched, a dead one resumes from its last applied step up to a capped number
+of attempts, then fails visibly; every step is idempotent. Writers to `main` are serial under the
+numbering mutex with no unlocked fallback. The health daemon reads job records; it is never told about
+them.
+
+This amends [#drain-daemon-self-hosting-boundary](#drain-daemon-self-hosting-boundary) clause 2: the drain
+daemon's shutdown still stops its pass, but no longer kills a drain follow-up job, which holds the
+numbering mutex itself, so no double drain follows. It narrows
+[#resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle) clause 3 (ii): the shared hold
+covers a tick and a tree-changing job, not a read-only job. Timeouts stay as clause 6 of that anchor
+states.
+
+**Lineage:** #4120 (ratified 2026-09-25; prepared 2026-09-24 with one Opus skeptic round that flipped Fork 2
+from "every job pinned" to per-kind; ratify-time `judgePanel` skeptic `ratify-4120` refuted no fork and raised
+three amendments, all taken into the build slices: the adoption order became `blockedBy` edges, and the
+sleep-detection rule and snapshot-store eviction went into 4125's acceptance). Build slices 4125, 4131, 4135,
+4126, 4124, 4132 under epic 4075. Composes with
+[#conveyor-session-lifecycle-policy](#conveyor-session-lifecycle-policy) (bot-session jobs are relaunched,
+never resumed) and [#automated-health-daemon](#automated-health-daemon) clauses 1–2.
 
 ---
 
