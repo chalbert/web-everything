@@ -1494,10 +1494,10 @@ describe('writeChatSpawnLink / tryReadChatSpawnLink — the link store', () => {
     expect(tryReadChatSpawnLink('never-written', dir)).toBeNull();
   });
 
-  it('{ok:false} for a corrupt file — AMBIGUOUS, never the same as "no link"', () => {
+  it('{ok:false} for a corrupt file — AMBIGUOUS, never the same as "no link" — but STILL carries an age (the file\'s own mtime), so the ceiling can still apply to it (round-2 security fix, PR #2678)', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'child-2.json'), '{not json');
-    expect(tryReadChatSpawnLink('child-2', dir)).toEqual({ ok: false });
+    expect(tryReadChatSpawnLink('child-2', dir)).toEqual({ ok: false, recordedAtMs: expect.any(Number) });
   });
 
   it('refuses an unsafe id as a filename, on both write and read — never a guess', () => {
@@ -1589,6 +1589,30 @@ describe('classifyChatSpawnGuard — PURE, the three-way rule', () => {
       const linkNoAge = { ok: true, spawnedByChatSessionId: 'chat-1' };
       expect(classifyChatSpawnGuard({ link: linkNoAge, ended: false, nowMs: T0 + 999_999, ceilingMs: 10_000 }))
         .toEqual({ blocked: true, reason: 'chat-not-ended' });
+    });
+
+    // Independent-review security finding, PR #2678 ROUND 2 (2026-09-25) — FIXED: the round-1 ceiling only
+    // ever applied to an HONEST link (`ok:true`); an `{ok:false}` (ambiguous/corrupt) one returned blocked
+    // BEFORE the ceiling check ever ran, reintroducing permanent immunity through that path instead.
+    it('an ambiguous/corrupt link ALSO expires at the ceiling — the round-2 fix', () => {
+      const corrupt = { ok: false, recordedAtMs: T0 };
+      expect(classifyChatSpawnGuard({ link: corrupt, ended: false, nowMs: T0 + 5000, ceilingMs: 10_000 }))
+        .toEqual({ blocked: true, reason: 'ambiguous-chat-link' }); // still blocked before the ceiling
+      expect(classifyChatSpawnGuard({ link: corrupt, ended: false, nowMs: T0 + 10_000, ceilingMs: 10_000 }))
+        .toEqual({ blocked: false, reason: 'chat-spawn-guard-ceiling' }); // unblocked once it elapses
+    });
+
+    it('every blocked reason this function can return is reachable to unblocked within the ceiling (invariant, per the reviewer\'s own prevention ask)', () => {
+      const cases = [
+        { ok: true, spawnedByChatSessionId: 'chat-1', recordedAtMs: T0 }, // -> chat-not-ended
+        { ok: false, recordedAtMs: T0 }, // -> ambiguous-chat-link
+      ];
+      for (const link of cases) {
+        const before = classifyChatSpawnGuard({ link, ended: false, nowMs: T0 + 1, ceilingMs: 10_000 });
+        expect(before.blocked).toBe(true);
+        const after = classifyChatSpawnGuard({ link, ended: false, nowMs: T0 + 10_000, ceilingMs: 10_000 });
+        expect(after).toEqual({ blocked: false, reason: 'chat-spawn-guard-ceiling' });
+      }
     });
   });
 });

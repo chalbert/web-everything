@@ -960,7 +960,7 @@ export function writeChatSpawnLink({ spawnedSessionId, spawnedByChatSessionId, n
  * feeds {@link classifyChatSpawnGuard}'s own ceiling clamp, the security-finding fix (see file header).
  * @returns {null|{ok:false}|{ok:true, spawnedByChatSessionId:string, recordedAtMs:number|null}}
  */
-export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDir(), { readFileSyncFn = readFileSync } = {}) {
+export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDir(), { readFileSyncFn = readFileSync, statFn = statSync } = {}) {
   if (!isSafeSessionId(spawnedSessionId)) return null;
   const path = join(dir, `${spawnedSessionId}.json`);
   let text;
@@ -969,13 +969,24 @@ export function tryReadChatSpawnLink(spawnedSessionId, dir = resolveChatSpawnsDi
   } catch {
     return null; // no file — no link on record, never an error
   }
+  // Independent-review finding, PR #2678 round 2 (2026-09-25), FIXED: an `{ok:false}` (ambiguous) answer must
+  // still carry SOME age signal for {@link classifyChatSpawnGuard}'s own ceiling clamp to apply to it — the
+  // file's own mtime, obtainable even when its CONTENT fails to parse (corrupt JSON, a bad `spawnedByChatSessionId`,
+  // or a real link whose own `recordedAt` field itself failed to parse). Without this, the exact vulnerability
+  // this PR fixes for an HONEST link (permanent reap immunity) came back for a MALFORMED one — the ceiling
+  // check only ever ran on `recordedAtMs`, which was `null` for every one of these three cases.
+  const mtimeFallbackMs = () => { try { return statFn(path).mtimeMs; } catch { return null; } };
   try {
     const parsed = JSON.parse(text);
-    if (!isSafeSessionId(parsed?.spawnedByChatSessionId)) return { ok: false };
+    if (!isSafeSessionId(parsed?.spawnedByChatSessionId)) return { ok: false, recordedAtMs: mtimeFallbackMs() };
     const recordedAtMs = Date.parse(parsed?.recordedAt ?? '');
-    return { ok: true, spawnedByChatSessionId: parsed.spawnedByChatSessionId, recordedAtMs: Number.isFinite(recordedAtMs) ? recordedAtMs : null };
+    return {
+      ok: true,
+      spawnedByChatSessionId: parsed.spawnedByChatSessionId,
+      recordedAtMs: Number.isFinite(recordedAtMs) ? recordedAtMs : mtimeFallbackMs(),
+    };
   } catch {
-    return { ok: false }; // a file exists but is unreadable — ambiguous, never "no link"
+    return { ok: false, recordedAtMs: mtimeFallbackMs() }; // a file exists but is unreadable — ambiguous, never "no link"
   }
 }
 
@@ -1010,29 +1021,41 @@ export function isChatEnded(chatSessionId, dir = resolveChatEndedDir(), { readFi
 
 /**
  * we:scripts/conveyor/session-reaper.mjs#classifyChatSpawnGuard — PURE. The statute's own three-way rule, PLUS
- * the security-finding ceiling fix (see file header):
+ * the security-finding ceiling fix (see file header) — NOW APPLIED UNIFORMLY (round 2 fix, PR #2678):
  *   - `link === null` (no stamp at all — daemon-dispatched, or this feature simply hasn't stamped it, e.g. a
  *     session started before this axis shipped) → NOT blocked. This is the "unchanged from today" default.
- *   - `link.ok === false` (a stamp exists but is unreadable/malformed) → BLOCKED, `ambiguous-chat-link` — never
- *     the same as "no link" (statute: "an unknown or ambiguous link is never reaped").
  *   - `link.ok === true` and `ended === true` → NOT blocked, `chat-ended`.
- *   - `link.ok === true`, not ended, but `nowMs - linkAgeMs >= ceilingMs` → NOT blocked, `chat-spawn-guard-
- *     ceiling` — a forged or simply never-ended link cannot grant reap immunity FOREVER, mirroring
- *     {@link classifyNoOutcomeStall}'s own ceiling-always-wins precedent. `ceilingMs`/`linkAgeMs` of `null`
- *     (an unparseable `recordedAt`, or a caller that omits the clock) disables the clamp for THAT check only —
- *     the surrounding `ended` check still applies — never silently widening the block instead.
- *   - Otherwise → BLOCKED, `chat-not-ended`.
- * @param {{link:null|{ok:false}|{ok:true, spawnedByChatSessionId:string, recordedAtMs?:number|null}, ended?:boolean, nowMs?:number, ceilingMs?:number|null}} o
+ *   - Otherwise (an `{ok:false}` ambiguous/corrupt link, OR a real link that is not yet ended) → BLOCKED, UNLESS
+ *     `nowMs - link.recordedAtMs >= ceilingMs`, in which case → NOT blocked, `chat-spawn-guard-ceiling` — a
+ *     forged, corrupted, or simply never-ended link cannot grant reap immunity FOREVER, mirroring
+ *     {@link classifyNoOutcomeStall}'s own ceiling-always-wins precedent. Applying this check to BOTH blocked
+ *     branches (not only the honest-link one) is the round-2 fix itself: the first cut let the ceiling apply
+ *     only to a real link, so a MALFORMED one reintroduced the identical permanent-immunity bug through the
+ *     `ambiguous-chat-link` path instead — {@link tryReadChatSpawnLink}'s own mtime fallback is what makes
+ *     `link.recordedAtMs` available for that case too. `ceilingMs`/`recordedAtMs` of `null` (a caller that
+ *     omits the clock, or a link whose age is somehow still unknowable even via mtime) disables the clamp for
+ *     THAT check only — the surrounding block still applies — never silently widening it into a permanent one.
+ *     When blocked and NOT saved by the ceiling: `chat-not-ended` for a real link, `ambiguous-chat-link` for a
+ *     corrupt one — the reason always reflects which case it actually was.
+ * @param {{link:null|{ok:false, recordedAtMs?:number|null}|{ok:true, spawnedByChatSessionId:string, recordedAtMs?:number|null}, ended?:boolean, nowMs?:number, ceilingMs?:number|null}} o
  * @returns {{blocked:boolean, reason:('no-link'|'ambiguous-chat-link'|'chat-ended'|'chat-not-ended'|'chat-spawn-guard-ceiling')}}
  */
 export function classifyChatSpawnGuard({ link, ended = false, nowMs = Date.now(), ceilingMs = null } = {}) {
   if (link === null || link === undefined) return { blocked: false, reason: 'no-link' };
-  if (link.ok !== true) return { blocked: true, reason: 'ambiguous-chat-link' };
-  if (ended) return { blocked: false, reason: 'chat-ended' };
+  if (link.ok === true && ended) return { blocked: false, reason: 'chat-ended' };
+  // Independent-review finding, PR #2678 round 2 (2026-09-25), FIXED: the ceiling clamp used to sit ONLY on
+  // this branch (a real, honest, not-yet-ended link) — the `link.ok !== true` (ambiguous/corrupt) case
+  // returned BLOCKED immediately above, before ever reaching it, so a malformed link file granted the exact
+  // PERMANENT reap immunity this whole ceiling exists to rule out, via a different code path. The clamp now
+  // applies uniformly to BOTH "ambiguous" and "real but not ended" — `link.recordedAtMs` carries an age for
+  // either case now (a real link's own `recordedAt`, or — for a corrupt one — the file's own mtime; see
+  // {@link tryReadChatSpawnLink}'s own fix). `ceilingMs`/`recordedAtMs` of `null` (a caller that omits the
+  // clock, or a link whose age is somehow still unknowable even via mtime) disables the clamp for THAT check
+  // only — the surrounding block still applies — never silently widening a block into a permanent one.
   if (typeof ceilingMs === 'number' && ceilingMs > 0 && typeof link.recordedAtMs === 'number' && Number.isFinite(link.recordedAtMs)) {
     if (nowMs - link.recordedAtMs >= ceilingMs) return { blocked: false, reason: 'chat-spawn-guard-ceiling' };
   }
-  return { blocked: true, reason: 'chat-not-ended' };
+  return link.ok === true ? { blocked: true, reason: 'chat-not-ended' } : { blocked: true, reason: 'ambiguous-chat-link' };
 }
 
 /**
