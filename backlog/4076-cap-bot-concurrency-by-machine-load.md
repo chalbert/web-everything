@@ -3,9 +3,10 @@ bornAs: xsed2mb
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/readiness/heavy-admission.mjs", "we:scripts/conveyor/tick-core.mjs"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 ---
 

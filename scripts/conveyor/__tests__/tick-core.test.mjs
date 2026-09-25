@@ -1647,6 +1647,108 @@ describe('planTick — maxConcurrentLanes (#xupukxa, live incident 2026-09-07: 1
   });
 });
 
+describe('planTick — loadAdmission (#4076): a SECOND, ORTHOGONAL gate beside the fixed lane ceiling', () => {
+  it('omitted / held:false — changes nothing observable (the default, byte-for-byte pre-#4076 behavior)', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      // no loadAdmission input at all
+    });
+    expect(out.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(out.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
+    expect(out.decisions.notes.some((n) => n.kind === 'load-cap')).toBe(false);
+
+    const outExplicitFalse = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], unshaped: [{ num: 20 }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      loadAdmission: { held: false, load1: 3, cores: 12, perCore: 0.25, maxPerCore: 1.5 },
+    });
+    expect(outExplicitFalse.decisions.spawnBuilds).toEqual([{ num: 10, lane: 4 }]);
+    expect(outExplicitFalse.decisions.spawnPrepareScope).toEqual([{ num: 20, lane: 5 }]);
+    expect(outExplicitFalse.decisions.notes.some((n) => n.kind === 'load-cap')).toBe(false);
+  });
+
+  it('held:true withholds a build the fixed lane ceiling alone would have admitted, tagged distinctly from capacity-cap', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 50 }, // plenty of room under the fixed ceiling
+      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.suppressedBuilds).toEqual(expect.arrayContaining([{ num: 10, lane: 4, by: 'load-cap' }]));
+    expect(out.decisions.notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'load-cap', num: 10, text: expect.stringContaining('20.00/12 cores (1.67 > 1.5)') }),
+    ]));
+    // never mislabeled as the fixed-ceiling reason — the two gates are distinct, the fix differs
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap')).toBe(false);
+  });
+
+  it('held:true ALSO withholds prepare/fix/ci-heal spawns — the free-lane pool they draw from goes to zero', () => {
+    const out = planTick({
+      state: { queue: [], unshaped: [{ num: 20 }, { num: 21 }], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      loadAdmission: { held: true, load1: 30, cores: 12, perCore: 2.5, maxPerCore: 1.5 },
+    });
+    expect(out.decisions.spawnPrepareScope).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'load-cap' && n.lane != null)).toBe(true);
+    // both withheld free lanes are named, each with the real reading embedded
+    const laneNotes = out.decisions.notes.filter((n) => n.kind === 'load-cap' && n.lane != null);
+    expect(laneNotes.map((n) => n.lane).sort()).toEqual([4, 5]);
+    expect(laneNotes[0].text).toContain('30.00/12 cores (2.50 > 1.5)');
+  });
+
+  it('is ORTHOGONAL to the fixed lane ceiling: both gates can fire in the SAME tick, on DIFFERENT survivors', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }, { num: 11, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }, { num: 11, lane: 5 }] },
+      freeLanes: [4, 5],
+      bookkeeping: { tick: 0 },
+      config: { maxConcurrentLanes: 1 }, // capacity-cap trims #11 first
+      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 }, // load-cap then trims the survivor, #10
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.suppressedBuilds).toEqual(expect.arrayContaining([
+      { num: 11, lane: 5, by: 'capacity-cap' },
+      { num: 10, lane: 4, by: 'load-cap' },
+    ]));
+    expect(out.decisions.notes.some((n) => n.kind === 'capacity-cap' && n.num === 11)).toBe(true);
+    expect(out.decisions.notes.some((n) => n.kind === 'load-cap' && n.num === 10)).toBe(true);
+  });
+
+  it('holds nothing when there is nothing to hold — a quiet tick with load held produces no spurious notes', () => {
+    const out = planTick({
+      state: { queue: [], lanes: [], prs: [] },
+      plan: { launch: [] },
+      freeLanes: [],
+      bookkeeping: { tick: 0 },
+      loadAdmission: { held: true, load1: 20, cores: 12, perCore: 1.6667, maxPerCore: 1.5 },
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'load-cap')).toBe(false);
+  });
+
+  it('a missing numeric reading (e.g. a bypass) still holds correctly and falls back to a generic note', () => {
+    const out = planTick({
+      state: { queue: [{ num: 10, buildQueued: true }], lanes: [], prs: [] },
+      plan: { launch: [{ num: 10, lane: 4 }] },
+      freeLanes: [4],
+      bookkeeping: { tick: 0 },
+      loadAdmission: { held: true }, // no load1/cores/perCore/maxPerCore at all
+    });
+    expect(out.decisions.spawnBuilds).toEqual([]);
+    expect(out.decisions.notes.some((n) => n.kind === 'load-cap' && n.num === 10)).toBe(true);
+  });
+});
+
 describe('planTick — manual dispatch-pause (#3609): holds ALL new prepare/fix/ci-heal spawns, never touches in-flight work', () => {
   const changesPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', labels: ['review:changes'] });
   const redPr = (pr, num) => ({ num, prNumber: pr, state: 'OPEN', ci: 'fail', labels: ['ready-to-merge'] });
