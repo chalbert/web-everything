@@ -18,5 +18,9 @@
   {
     "file": "scripts/lib/forge-land-provider.mjs",
     "reason": "The `pr-land` argv builders run gh with `cwd` bound to the checkout being landed from, so gh infers the repo from that checkout's git remote (any repo, not a hard-coded one); adding `--repo` would break the byte-identical argv `pr-land.mjs` executed before this port."
+  },
+  {
+    "file": "scripts/operations/land-advance-io.mjs",
+    "reason": "The three flagged `gh`/reconcile-pass reads (a fix plan's PR-diff fallback scope, its itemless-PR diff-path resolution, and the cached reconcile-pass read) are all reached only for a `we` PR: `planFixesFromReconcile` is called only after `p.repo !== 'we'` is refused upstream as `unsupported-repo`, and `readReconcile`'s own docblock (`reconcile-pass owns what a PR is owed`) already states it is read once for `we`, the only repo it plans today."
   }
 ]

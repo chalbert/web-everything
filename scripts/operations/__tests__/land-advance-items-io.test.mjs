@@ -5,11 +5,9 @@ import { withBareOrigin, withNarrowClone } from './helpers/real-repo.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createItemReader, queueItemInto, TRACKER_REF, TRACKER_PATH } from '../land-advance-items-io.mjs';
+import { createLandAdvanceApplier } from '../land-advance-io.mjs';
 import { readQueueFile, queuePath } from '../../conveyor/queue-store.mjs';
 import { pauseStorePath } from '../../readiness/dispatch-pause.mjs';
-// NOTE (#3865): the branch's full io test also covered `createLandAdvanceApplier` from `land-advance-io.mjs`
-// (#3856's own module, not yet on main) — that case is deferred to #3856, which owns that file. Every case
-// below exercises ONLY this item's own module, land-advance-items-io.mjs.
 let root;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'la-items-')); });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -38,6 +36,17 @@ it('already-queued items in the canonical sidecar count as in flight', () => {
   queueItemInto(root, '3653', () => 0);
   const run = (program, args) => args[0] === 'show' ? TRACKER : args[0].endsWith('conveyor-state.mjs') ? '{}' : JSON.stringify({ launch: [], held: [] });
   expect(createItemReader({ run, root })().skipped).toEqual([{ num: '3653', rank: 1, reason: 'in-flight' }]);
+});
+// #3720: the run-record guard half of "two calls, one dispatch" — queueing is idempotent, so a second apply of the
+// same plan adds nothing; and item queueing happens only when the item opt-in allows it.
+it('applies items by queueing them into the canonical conveyor sidecar, idempotently, only when opted in', async () => {
+  const plan = { errors: [], rows: [], proposed: [], escalations: [], capacity: { budget: 2 }, items: { proposed: [{ num: '3653', lane: 30 }] } };
+  const apply = createLandAdvanceApplier({ canonicalRoot: root, now: () => Date.parse('2026-09-21T00:00:00Z') });
+  expect((await apply(plan, { prs: true, items: false })).queued).toEqual([]);
+  expect(readQueueFile(queuePath(root))).toEqual([]);
+  expect((await apply(plan, { prs: false, items: true })).queued).toEqual(['3653']);
+  await apply(plan, { prs: false, items: true });
+  expect(readQueueFile(queuePath(root)).map((e) => e.num)).toEqual(['3653']);
 });
 // THE REAL MECHANISM (#2949 fidelity): the tracker is read with a real `git show <ref>:<path>` in a real clone, and the
 // in-flight read and the queue sink use a real sidecar file. Only the two node children are answered by the wrapper.

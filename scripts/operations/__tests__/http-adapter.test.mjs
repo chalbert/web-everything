@@ -60,6 +60,7 @@ import { RECORD_VERDICT_OP } from '../record-verdict.mjs';
 import { VERIFY_OP } from '../verify.mjs';
 import { MUTATION_CHECK_OP } from '../mutation-check.mjs';
 import { PR_STATUS_OP } from '../pr-status.mjs';
+import { LAND_ADVANCE_OP } from '../land-advance.mjs';
 import { PR_RECONCILE_OP } from '../pr-reconcile.mjs';
 import { RUNNER_ACTIVITY_OP } from '../runner-activity.mjs';
 import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
@@ -343,6 +344,11 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // `registry.mjs` and `step-kinds.mjs`, and every `gh` call lives in `pr-status-io.mjs` behind the
     // injected reader. It reads PRs; it can act on none of them.
     [PR_STATUS_OP]: 'pr-status.mjs',
+    // #3720/#3856 — `land-advance` is READ-ONLY (plan only, no sinks): its declaration reaches nothing that
+    // can act — every effect the plan can call for (dispatching a delivery agent, a CI-heal repair, a review,
+    // queueing an item) lives behind `land-advance-io.mjs`'s sinks, which `../run.mjs` never wires into this
+    // registration (`sinks: {}`).
+    [LAND_ADVANCE_OP]: 'land-advance.mjs',
     // #3694 — READ-ONLY and genuinely so: both steps are `compute`, imports are `registry.mjs`/`step-kinds.mjs` and pure `pr-status.mjs` helpers, and every `gh` call lives in `pr-status-io.mjs` behind the injected reader.
     [PR_RECONCILE_OP]: 'pr-reconcile.mjs',
     [RUNNER_ACTIVITY_OP]: 'runner-activity.mjs',
@@ -413,7 +419,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, TELEMETRY_SUMMARY_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, LAND_ADVANCE_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, TELEMETRY_SUMMARY_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
