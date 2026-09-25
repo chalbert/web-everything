@@ -234,9 +234,10 @@ describe('countTerminalStandDowns — excludes ONLY a SUPERSEDED, SELF-AUTHORED 
   });
 
   it('review finding 3 — a TRUSTED-author comment merely not provably watcher-self-authored still stays terminal', () => {
-    // Trusted (a real `author.login`) but not provably THE WATCHER'S OWN identity (`viewerDidAuthor: false`) —
-    // narrow-self-authored-false for supersede purposes, but still an ordinary trusted terminal stand-down.
-    const trustedNotWatcherSelf = { body: watcherStandDown.body, viewerDidAuthor: false, author: AUTOMATION };
+    // Trusted (the OPERATOR'S login — my broader isTrustedMarkerAuthor accepts it) but NOT self-authored under
+    // this file's own narrower isSelfAuthored (matches AUTOMATION_LOGINS, never the operator) — so neither
+    // supersede path applies and it stays an ordinary trusted terminal stand-down.
+    const trustedNotWatcherSelf = { body: watcherStandDown.body, viewerDidAuthor: false, author: { login: 'chalbert' } };
     expect(countTerminalStandDowns([trustedNotWatcherSelf, supersede])).toBe(1);
   });
 
