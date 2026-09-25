@@ -32,7 +32,30 @@
  *       the epic card's own hand-written "Critical path: 3897 → 3902 → 3903 → 3906 → 3908 → 3487" and its Wave
  *       lettering (3902 is Wave B, 3905 is Wave C, 3908 is Wave D — D lands after B and C).
  *     - an IMPL file cannot be moved (its OWN card owns it) — the fix is to add the later owner(s) as
- *       `blockedBy`, which is exactly what the `blocker` classification then makes safe on the next run.
+ *       `blockedBy`, which is exactly what the `blocker` classification then makes safe on the next run — UNLESS
+ *       that edge would itself cycle (the later owner is already, transitively, `blockedBy` THIS card): then the
+ *       one dependency FILE moves into this card's own scope instead (safe by construction — see `buildFindings`).
+ *
+ * NON-IMPORT DEPENDENCIES (#3906 drop, epic #3443's second graduation failure past the plain-import one above).
+ *   A slice's tests can also fail on a sibling's file that a plain `import` scan can never see:
+ *     - a STRING-LITERAL path — `join(ROOT, 'a', 'b', 'c.mjs')`, `new URL('./x.md', import.meta.url)`, a bare
+ *       `readFileSync('scripts/x.mjs')`/`spawn(node, [path])` argv element — see `extractPathLiteralSpecifiers`.
+ *       Only a candidate that resolves to a REAL blob at the snapshot counts (existence is the noise filter for
+ *       a guess this much less certain than a real `import`); classified exactly like an import once resolved.
+ *     - CONTENT DRIFT — a file `origin/main` already has is normally an unconditional `on-main` (no hazard, by
+ *       the header comment above). But if it is ALSO in an OPEN SIBLING's own `scope:` (the slice that will
+ *       change it), main's CURRENT content is not what lands — only the sibling's ported version is. A snapshot
+ *       vs. `origin/main` content diff on exactly that bounded set (referenced AND sibling-scoped) reclassifies
+ *       it `later:#N` instead. Real cases: `we:scripts/operations/completion-record.mjs` (#3903 — main lacks
+ *       `'task'` in `COMPLETION_KINDS`), `we:skills-src/conveyor/fix-agent-brief.md` (#3904),
+ *       `we:docs/agent/dispatcher-runbook.md` (#3910), a fake-CLI test helper (#3907).
+ *   KNOWN GAP, stated rather than hidden: a path assembled ACROSS module boundaries — a re-exported constant
+ *   (`RUNBOOK` from `we:scripts/gen-dispatch-routing-table.mjs`, read with `readFileSync(RUNBOOK, …)` in a
+ *   DIFFERENT file) or a runtime-variable lookup (`briefPath(root, kind)` picking a brief filename out of a
+ *   `kind`-keyed table, joined elsewhere) — is not resolvable from one file's text alone; this tool intentionally
+ *   stays single-file, matched to `extractImportSpecifiers`'s own "not a real parser" scope, rather than growing
+ *   a cross-module resolver for it. See the epic-#3443 PR notes for exactly which live #3906 findings this
+ *   extension explains and which remain that gap.
  *
  *   PURE CORE below (no fs/child_process/Date) is unit-tested on synthetic fixtures
  *   (`we:scripts/__tests__/graduation-import-check.test.mjs`). The IO shell (git/fs) and the CLI sit at the
@@ -102,39 +125,84 @@ export function idCompare(a, b) {
 
 /**
  * The file's leading run of `import` statements — everything from the top up to the first line that is
- * neither blank nor part of an import statement. PURE. House ESM style (confirmed across every module read
- * while building this tool) always clusters real imports in one contiguous block at the top of the file, so
- * this is a cheap, reliable boundary — and a NECESSARY one: some modules embed literal `import … from '…'`
- * text inside a template-literal STRING (a source string handed to a spawned subprocess for a test, e.g.
+ * neither blank, nor part of an import statement, nor one of two narrow, explicitly-recognized PREAMBLE
+ * shapes that this repo's tests routinely interleave BETWEEN two import blocks (found live, #3906's
+ * `dispatch-lane-prepare-wiring.test.mjs`: a `vi.mock('node:child_process', …)` / `vi.mock('node:fs', …)` pair
+ * sits between the file's `vitest` import and its real (mocked-module) imports, so the OLD single-contiguous-
+ * block rule silently dropped everything after the mock calls — including the very import
+ * (`../prepare-scope-run.mjs`) a later slice needed flagged):
+ *   - a `vi.mock(<literal>, <factory>);` call — vitest's own hoisting idiom for "mock this module, then import
+ *     the real (mocked) bindings below it"; skipped whole (balanced-paren, string-aware, so a `)`/`;` inside
+ *     the factory's body or a mocked literal never mis-terminates it).
+ *   - a trivial recorder declaration the SAME tests set up right beside those mocks, e.g. `const spawned = [];`
+ *     — deliberately narrow (`[]`/`{}`/`new Map()`/`new Set()` only, never an arbitrary expression) so it can
+ *     never itself swallow real code.
+ * Every OTHER non-blank, non-import line still ends the header exactly as before — this is a widening of what
+ * counts as "still preamble", not a loosening of the boundary itself. This remains a NECESSARY restriction, not
+ * merely a convenience one: some modules embed literal `import … from '…'` text inside a template-literal
+ * STRING (a source string handed to a spawned subprocess for a test, e.g.
  * `we:scripts/conveyor/validate-and-promote.mjs`'s `DISPATCH_PROBE_SRC` and
  * `we:scripts/operations/__tests__/coordination-cross-clone.test.mjs`'s spawned `-e` probe) — text that
- * matches the static-import regex but is not an import of the current module at all. Restricting the static
- * regex to this header keeps those false positives out without needing a real parser. (Dynamic `import()` is
- * scanned over the WHOLE file, not just the header — a lazy `await import(...)` deep in a function, as in
- * `we:scripts/operations/review-loop-cli.mjs`, is a real import there.) Assumes the house style of terminating
- * every import statement with a semicolon (true of every file this tool has read) — a file that relied on ASI
- * would fail open (header would swallow the rest of the file), which only widens what gets scanned, never
- * narrows it.
+ * matches the static-import regex but is not an import of the current module at all. Both of those cases sit
+ * well past any run of imports/mocks/trivial recorders (inside a real function body), so they still correctly
+ * fall outside the widened header. (Dynamic `import()` is scanned over the WHOLE file, not just the header — a
+ * lazy `await import(...)` deep in a function, as in `we:scripts/operations/review-loop-cli.mjs`, is a real
+ * import there.) Assumes the house style of terminating every import statement with a semicolon (true of every
+ * file this tool has read) — a file that relied on ASI would fail open (header would swallow the rest of the
+ * file), which only widens what gets scanned, never narrows it.
  */
 function importHeader(source) {
-  const lines = source.split('\n');
-  const header = [];
-  let inImport = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!inImport) {
-      if (trimmed === '') { header.push(line); continue; }
-      if (/^import\b/.test(trimmed)) {
-        header.push(line);
-        inImport = !trimmed.includes(';');
-        continue;
-      }
-      break; // first non-blank, non-import top-level line — header ends here
+  const n = source.length;
+  let i = 0;
+  let headerEnd = 0;
+  const isWs = (ch) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+  const skipString = (quote) => {
+    i++; // past the opening quote
+    while (i < n) {
+      if (source[i] === '\\') { i += 2; continue; }
+      if (source[i] === quote) { i++; return; }
+      i++;
     }
-    header.push(line);
-    if (trimmed.includes(';')) inImport = false;
+  };
+  /** Consume a `(`-opened, string-aware balanced span starting at `source[i] === '('`; leaves `i` just past
+   *  the matching `)`. Only tracks parens (not braces/brackets) — sufficient because valid JS always nests one
+   *  bracket TYPE correctly regardless of other types mixed in, as long as strings are skipped (handled here). */
+  const skipParens = () => {
+    let depth = 0;
+    while (i < n) {
+      const ch = source[i];
+      if (ch === '"' || ch === "'" || ch === '`') { skipString(ch); continue; }
+      if (ch === '(') { depth++; i++; continue; }
+      if (ch === ')') { depth--; i++; if (depth === 0) return; continue; }
+      i++;
+    }
+  };
+  const skipToTopLevelSemicolon = () => {
+    while (i < n && source[i] !== ';') {
+      if (source[i] === '"' || source[i] === "'" || source[i] === '`') { skipString(source[i]); continue; }
+      i++;
+    }
+    if (i < n) i++; // consume the ';'
+  };
+  const RECORDER_RE = /^(?:export\s+)?(?:const|let)\s+[A-Za-z_$][\w$]*\s*=\s*(?:\[\s*\]|\{\s*\}|new\s+(?:Map|Set)\(\s*\))\s*;/;
+  while (i < n) {
+    while (i < n && isWs(source[i])) i++;
+    if (i >= n) break;
+    const rest = source.slice(i, i + 400); // cheap bound for the anchored checks below
+    if (/^import\b/.test(rest)) { skipToTopLevelSemicolon(); headerEnd = i; continue; }
+    if (/^vi\.mock\(/.test(rest)) {
+      i += 'vi.mock'.length; // i now at '('
+      skipParens();
+      while (i < n && isWs(source[i])) i++;
+      if (source[i] === ';') i++;
+      headerEnd = i;
+      continue;
+    }
+    const recorderMatch = RECORDER_RE.exec(rest);
+    if (recorderMatch) { i += recorderMatch[0].length; headerEnd = i; continue; }
+    break; // first non-blank, non-import, non-preamble top-level line — header ends here
   }
-  return header.join('\n');
+  return source.slice(0, headerEnd);
 }
 
 /**
@@ -177,6 +245,102 @@ export function resolveRelativeImport(fromRepoPath, specifier) {
   if (!specifier.startsWith('./') && !specifier.startsWith('../')) return null;
   const dir = pathPosix.dirname(fromRepoPath);
   return pathPosix.normalize(pathPosix.join(dir, specifier));
+}
+
+/** Extensions this tool ever treats a non-import path reference as pointing to — matches the kinds of files a
+ *  `scope:` entry can itself be (`.mjs`/`.js` code, `.md` briefs/docs, `.json` data). PURE constant. */
+const PATH_LITERAL_EXT_RE = /\.(?:mjs|js|md|json)$/;
+
+/**
+ * Extract candidate NON-import file-path references from one module's source text: the shapes #3906's live
+ * failures actually used to reach a file this tool's `import`-only scan could never see (a mechanical build
+ * provider that SPAWNS a script by path, a test that reads a doc/brief off disk, a helper joined in by
+ * `__dirname`) — never a real parser, matched to house style exactly like {@link extractImportSpecifiers}:
+ *   - `join(<base>, 'a', 'b', …, 'z.ext')` / `resolve(<base>, …)` — a `node:path` join whose FIRST argument is
+ *     an arbitrary single identifier/member expression (`REPO_ROOT`, `ROOT`, `__dirname`, `import.meta.dirname`
+ *     — never a nested call, see the limitation note below) and every argument after it is a plain literal;
+ *     the literal segments are joined with `/` to form the candidate. Real case: #3906's
+ *     `we:scripts/operations/dispatch-providers/build.mjs` — `join(REPO_ROOT, 'scripts', 'operations',
+ *     'deliver-item-run.mjs')` (#3903's file — no single literal segment has a `/` in it, so nothing shorter
+ *     than joining the whole call would find this).
+ *   - `new URL('./x.ext', import.meta.url)` — the other house idiom for "a path next to this file".
+ *   - a bare multi-segment literal that already reads like a repo path (`'./helpers/fake-claude.mjs'`,
+ *     `'scripts/x.mjs'`) wherever it appears — a `readFileSync(...)` argument, a `spawn`/`execFileSync` argv
+ *     array element, a plain constant. Scanned over the WHOLE file (comments stripped first), not just the
+ *     header — unlike a static `import`, these calls are house-style at any depth.
+ *
+ * NOISE CONTROL: every candidate here is a GUESS, far more likely than a real `import` specifier to collide
+ * with a string that merely looks path-shaped (a label, a fixture value). The caller is REQUIRED to keep only
+ * a candidate that actually resolves to a real blob at the snapshot (`git cat-file -e`) before treating it as a
+ * dependency — see the module doc / IO shell below. That existence gate, not this function, is what keeps a
+ * coincidental match from becoming a finding.
+ *
+ * KNOWN LIMITATIONS (found live, #3906): a `join()`/`resolve()` call whose first argument is itself a nested
+ * call (`join(dirname(fileURLToPath(import.meta.url)), …)` rather than a bound `__dirname`/`ROOT` identifier)
+ * is not matched — the regex below deliberately stays single-identifier-only rather than hand-rolling a
+ * balanced-expression scanner for one more argument position. A path assembled from a RUNTIME variable (e.g.
+ * `we:scripts/operations/dispatch-lane-io.mjs#briefPath(root, kind)` picking a brief filename out of a
+ * `kind`-keyed lookup table, then joining it elsewhere) is never resolvable from one file's text alone — this
+ * is a real, accepted gap, not an oversight; see the epic-#3443 PR notes for which live #3906 findings it
+ * explains and which it cannot.
+ * @param {string} source
+ * @returns {Array<{path:string, base:'dirname'|'root'}>} `path` is the candidate (repo-relative when
+ *   `base==='root'`; relative-from-the-containing-file, `./`-normalized, when `base==='dirname'`) — NOT yet
+ *   checked for existence.
+ */
+export function extractPathLiteralSpecifiers(source) {
+  const stripped = String(source ?? '')
+    .replace(/^#!.*\n/, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+  const out = [];
+  const isDirnameBase = (baseArg) => baseArg === '__dirname' || baseArg === 'import.meta.dirname' || /\bdirname\b/.test(baseArg);
+
+  // join(base, 'lit', 'lit', …, 'lit.ext') / resolve(base, 'lit', …) — base is one identifier/member
+  // expression (no nested call); every following argument must be a plain single-quoted literal.
+  const joinRe = /\b(?:join|resolve)\(\s*([\w.$]+)((?:\s*,\s*'[^'\n]*')+)\s*\)/g;
+  for (const m of stripped.matchAll(joinRe)) {
+    const segs = [...m[2].matchAll(/'([^']*)'/g)].map((s) => s[1]);
+    if (!segs.length) continue;
+    const joined = segs.join('/');
+    if (!PATH_LITERAL_EXT_RE.test(joined)) continue;
+    out.push({ path: joined, base: isDirnameBase(m[1]) ? 'dirname' : 'root' });
+  }
+
+  // new URL('./x.ext', import.meta.url)
+  const urlRe = /\bnew\s+URL\(\s*'([^'\n]+)'\s*,\s*import\.meta\.url\s*\)/g;
+  for (const m of stripped.matchAll(urlRe)) {
+    if (PATH_LITERAL_EXT_RE.test(m[1])) out.push({ path: m[1], base: 'dirname' });
+  }
+
+  // a bare multi-segment literal anywhere (readFileSync arg, spawn/execFileSync argv element, plain constant).
+  // Requires 2+ real `/`-separated segments — directory segments deliberately exclude `.` (`[\w-]+`, never
+  // `[\w.-]+`) so a single-segment literal like `'./x.md'` cannot be absorbed by treating its OWN leading `.`
+  // as a (degenerate, zero-width-prefix) directory segment; only the FINAL segment (the filename) allows dots,
+  // via the explicit extension tail. A hidden directory component (`.github/x.md`) is the one real path shape
+  // this excludes — accepted, since nothing this epic scans uses one.
+  const bareRe = /'((?:\.\.?\/)?[\w-]+(?:\/[\w-]+)*\/[\w.-]+\.(?:mjs|js|md|json))'/g;
+  for (const m of stripped.matchAll(bareRe)) {
+    const lit = m[1];
+    out.push({ path: lit, base: lit.startsWith('./') || lit.startsWith('../') ? 'dirname' : 'root' });
+  }
+  return out;
+}
+
+/**
+ * Resolve one {@link extractPathLiteralSpecifiers} candidate against the repo path of the file that contains
+ * it, to a repo-relative path — the non-`import` counterpart of {@link resolveRelativeImport}. PURE.
+ * @param {string} fromRepoPath
+ * @param {{path:string, base:'dirname'|'root'}} candidate
+ * @returns {string}
+ */
+export function resolvePathLiteralSpecifier(fromRepoPath, candidate) {
+  if (candidate.base === 'dirname') {
+    const dir = pathPosix.dirname(fromRepoPath);
+    const rel = candidate.path.startsWith('./') || candidate.path.startsWith('../') ? candidate.path : `./${candidate.path}`;
+    return pathPosix.normalize(pathPosix.join(dir, rel));
+  }
+  return pathPosix.normalize(candidate.path.replace(/^\.\//, ''));
 }
 
 /** Every id reachable from `id`'s `blockedBy` edges, transitively (cycle-safe). PURE. */
@@ -245,33 +409,57 @@ export function landingDepth(id, cardsById, seen = new Set()) {
 
 /**
  * Classify one resolved import path for the card that owns the IMPORTING file.
- * @param {{repoPath:string, ownerId:string, cardsById:Map<string,object>, mainPaths:Set<string>}} a
+ *
+ * `driftedPaths` (default empty — every existing caller/test that omits it keeps the ORIGINAL "on-main always
+ * wins" behaviour byte-for-byte) names paths that exist on `origin/main` but whose SNAPSHOT content differs
+ * from it — e.g. #3906's live case, `we:scripts/operations/completion-record.mjs`: main already has the file
+ * (so it would otherwise be silently `on-main`), but the branch's `COMPLETION_KINDS` adds `'task'`, which main
+ * lacks — a real graduation-ordering hazard wearing an `on-main` costume. A drifted path still resolves
+ * `on-main` UNLESS a sibling-slice `later` candidate exists for it (the SAME search `later` always ran) — a
+ * drift nobody's open scope claims, or one only the importer's OWN card or an already-guaranteed blocker
+ * claims, is main's ordinary evolution, not this epic's hazard, so it is left exactly as before.
+ * @param {{repoPath:string, ownerId:string, cardsById:Map<string,object>, mainPaths:Set<string>, driftedPaths?:Set<string>}} a
  * @returns {{kind:'on-main'|'own'|'blocker'|'later'|'unowned', ownerId?:string}}
  */
-export function classifyImportPath({ repoPath, ownerId, cardsById, mainPaths }) {
+export function classifyImportPath({ repoPath, ownerId, cardsById, mainPaths, driftedPaths = new Set() }) {
   const we = withWe(repoPath);
-  if (mainPaths.has(repoPath) || mainPaths.has(we)) return { kind: 'on-main' };
   const owner = cardsById.get(ownerId);
-  if (owner && owner.scope.includes(we)) return { kind: 'own' };
   const blockers = transitiveBlockedBy(ownerId, cardsById);
-  for (const bId of blockers) {
-    if (cardsById.get(bId)?.scope.includes(we)) return { kind: 'blocker', ownerId: bId };
-  }
   // `later` is deliberately scoped to SIBLING slices of the SAME epic (`owner.parent`), never the whole
   // backlog. The same repo path can legitimately appear in an unrelated card's `scope:` too — e.g. a bug card
   // filed against the not-yet-landed branch file under a completely different epic (measured: one graduation
   // module here has FOUR open owners across three different epics, only one of which is this porting epic) —
   // and that card has nothing to do with this epic's landing order. Reaching outside the epic would propose
-  // moving/blocking against a card the drain's Slice-procedure ordering never touches.
-  const candidates = [];
-  for (const [id, c] of cardsById) {
-    if (id === ownerId || blockers.has(id)) continue;
-    if (c.status === 'open' && c.parent === owner?.parent && c.scope.includes(we)) candidates.push(id);
+  // moving/blocking against a card the drain's Slice-procedure ordering never touches. Shared between the
+  // plain "missing on main" path below and the on-main-but-DRIFTED path above it.
+  const laterCandidates = () => {
+    const candidates = [];
+    for (const [id, c] of cardsById) {
+      if (id === ownerId || blockers.has(id)) continue;
+      if (c.status === 'open' && c.parent === owner?.parent && c.scope.includes(we)) candidates.push(id);
+    }
+    return candidates.sort(idCompare);
+  };
+  if (mainPaths.has(repoPath) || mainPaths.has(we)) {
+    // A drift the ASKING card itself co-owns (the multi-owner "shared, append-only" files — e.g.
+    // `we:scripts/operations/run.mjs`, owned by #3898/#3906/#3909 at once) is never promoted: the asking card
+    // is by definition one of the file's own authors, exactly the `own` precedence the non-drifted path below
+    // already gives it — a drifted file its OWN scope also claims is this card's job to land correctly, not a
+    // hazard pointing somewhere else. Checked before the later-candidate search, not after, so a shared file's
+    // simultaneous co-owners are never treated as "some OTHER card" for each other.
+    const isOwn = owner && owner.scope.includes(we);
+    if (!isOwn && (driftedPaths.has(repoPath) || driftedPaths.has(we))) {
+      const candidates = laterCandidates();
+      if (candidates.length) return { kind: 'later', ownerId: candidates[0] };
+    }
+    return { kind: 'on-main' };
   }
-  if (candidates.length) {
-    candidates.sort(idCompare);
-    return { kind: 'later', ownerId: candidates[0] };
+  if (owner && owner.scope.includes(we)) return { kind: 'own' };
+  for (const bId of blockers) {
+    if (cardsById.get(bId)?.scope.includes(we)) return { kind: 'blocker', ownerId: bId };
   }
+  const candidates = laterCandidates();
+  if (candidates.length) return { kind: 'later', ownerId: candidates[0] };
   return { kind: 'unowned' };
 }
 
@@ -331,13 +519,20 @@ function wouldCycle(target, blockerId, cardsById) {
  * just the original candidate owners) — a move can turn some other import (safely `own`/`blocker` under the
  * old owner) into a fresh hazard under the new one, exactly the mechanism the #3895→#3908 case needed
  * (residual `blockedBy #3905`). PURE.
- * @param {{currentOwnerId:string, classifications:Array, cardsById:Map<string,object>, mainPaths:Set<string>}} a
+ * @param {{currentOwnerId:string, classifications:Array, cardsById:Map<string,object>, mainPaths:Set<string>, driftedPaths?:Set<string>}} a
  * @returns {{target:string, addBlockedBy:string[], cycleWarnings:Array<{path:string, ownerId:string}>}|null}
  *   `null` when the file has no `later` import (nothing to place for). `target === currentOwnerId` means
  *   "stays put" — the caller must not treat that as a scope move.
  */
-export function planTestFileFix({ currentOwnerId, classifications, cardsById, mainPaths }) {
-  const laterOwnerIds = classifications.filter((c) => c.kind === 'later').map((c) => c.ownerId);
+export function planTestFileFix({ currentOwnerId, classifications, cardsById, mainPaths, driftedPaths = new Set(), sharedPaths = new Set() }) {
+  // A SHARED (multi-owner, append-only) file — `we:scripts/operations/run.mjs` is the named case, co-owned by
+  // several open siblings at once by house convention ("each slice appends only its own lines") — is never a
+  // placement factor and never earns a `blockedBy` edge: any card can freely become one more co-owner of it.
+  // Filtered out here, at both call sites below, so it can only ever resolve through `addToScope` (the SAME
+  // path `unowned` already takes) — never through a `move`/`blockedBy` decision built for a genuinely
+  // single-owner file.
+  const isShared = (c) => sharedPaths.has(withWe(c.repoPath));
+  const laterOwnerIds = classifications.filter((c) => c.kind === 'later' && !isShared(c)).map((c) => c.ownerId);
   if (!laterOwnerIds.length) return null;
   const candidates = [...new Set([currentOwnerId, ...laterOwnerIds])];
   const ranked = rankOwnerCandidates(candidates, cardsById);
@@ -347,8 +542,13 @@ export function planTestFileFix({ currentOwnerId, classifications, cardsById, ma
   const addBlockedBy = new Set();
   const cycleWarnings = [];
   for (const c of classifications) {
-    if (c.kind === 'on-main') continue; // owner-independent; reclassifying is a no-op
-    const under = classifyImportPath({ repoPath: c.repoPath, ownerId: target, cardsById, mainPaths });
+    if (isShared(c)) continue; // becomes a co-owner via addToScope under whichever card ends up owning the file
+    // Every import is RE-classified under `target`, including one that read `on-main` under the OLD owner —
+    // with `driftedPaths` in play that is no longer owner-independent (the sibling-candidate search a drift
+    // check runs excludes the ASKING owner and ITS blockers, which differ at `target`) — a plain on-main entry
+    // (not drifted, or drifted but unclaimed) reclassifies right back to `on-main` here regardless, so this
+    // costs an extra call, never a different answer, when there is no drift to reconsider.
+    const under = classifyImportPath({ repoPath: c.repoPath, ownerId: target, cardsById, mainPaths, driftedPaths });
     if (under.kind !== 'later') continue; // own/blocker/on-main under the chosen home — no edge needed
     if (under.ownerId === target) continue; // defensive; classifyImportPath never returns this
     if (wouldCycle(target, under.ownerId, cardsById)) cycleWarnings.push({ path: c.repoPath, ownerId: under.ownerId });
@@ -360,55 +560,77 @@ export function planTestFileFix({ currentOwnerId, classifications, cardsById, ma
 /**
  * Group per-import classifications into per-file findings with a proposed fix. Only files carrying a `later`
  * or `unowned` classification produce a finding — `on-main`/`own`/`blocker` are silently fine.
- * @param {{cardsById:Map<string,object>, mainPaths:Set<string>, results:Array<{ownerId:string, file:string, classifications:Array}>}} a
+ * @param {{cardsById:Map<string,object>, mainPaths:Set<string>, driftedPaths?:Set<string>, sharedPaths?:Set<string>, results:Array<{ownerId:string, file:string, classifications:Array}>}} a
  *   `results[i].classifications` items are `{specifier, repoPath, ...classifyImportPath() result}`.
  * @returns {Array<object>} one entry per (card, file) with a finding.
  */
-export function buildFindings({ cardsById, mainPaths, results }) {
+export function buildFindings({ cardsById, mainPaths, driftedPaths = new Set(), sharedPaths = new Set(), results }) {
   const findings = [];
   for (const r of results) {
-    const later = r.classifications.filter((c) => c.kind === 'later');
+    const isShared = (c) => sharedPaths.has(withWe(c.repoPath));
+    // A `later`-classified path that is ALREADY a multi-owner SHARED file (see planTestFileFix's doc) is split
+    // off here too — it resolves through `addToScope` exactly like `unowned`, never through `move`/`blockedBy`.
+    const laterAll = r.classifications.filter((c) => c.kind === 'later');
+    const later = laterAll.filter((c) => !isShared(c));
+    const laterShared = laterAll.filter(isShared);
     const unowned = r.classifications.filter((c) => c.kind === 'unowned');
-    if (!later.length && !unowned.length) continue;
+    if (!later.length && !laterShared.length && !unowned.length) continue;
     const test = isTestFile(r.file);
     let fix;
     if (later.length) {
       if (test) {
-        fix = { kind: 'move', ...planTestFileFix({ currentOwnerId: r.ownerId, classifications: r.classifications, cardsById, mainPaths }) };
+        fix = { kind: 'move', ...planTestFileFix({ currentOwnerId: r.ownerId, classifications: r.classifications, cardsById, mainPaths, driftedPaths, sharedPaths }) };
       } else {
         // An impl file cannot move (the card's own scope IS the code) — but a proposed blockedBy edge can
-        // still cycle (the later owner already depends, transitively, on THIS card). Guard it the same way
-        // planTestFileFix does, rather than blindly wiring a self-defeating edge.
-        const targets = [], cycleWarnings = [];
-        for (const t of new Set(later.map((c) => c.ownerId))) {
-          if (wouldCycle(r.ownerId, t, cardsById)) cycleWarnings.push({ path: null, ownerId: t });
+        // still cycle (the later owner already depends, transitively, on THIS card). Real case, #3906: its own
+        // `dispatch-providers/build.mjs` needs #3903's `deliver-item-run.mjs`, but #3903 is ALREADY `blockedBy`
+        // #3906 — so `wouldCycle(3906, 3903)` is true. That very fact is what makes a DIFFERENT fix safe: since
+        // #3903 already lands after #3906 no matter what, relocating the one dependency FILE itself out of
+        // #3903's scope and into #3906's own scope needs no new edge at all — #3906 already has it, by
+        // definition, once it owns it. (Anything inside #3903 that also needs the file keeps seeing it land in
+        // time: it now reaches #3906 as a `blocker`, the exact edge that caused this cycle in the first place.)
+        // Only fall back to a plain cycle warning — never silently do nothing — for a `later` owner NEITHER a
+        // safe blockedBy edge NOR this move can resolve, which cannot happen here: `wouldCycle` false takes the
+        // blockedBy branch, `wouldCycle` true takes the move branch, covering both outcomes.
+        const targets = [], moveIn = [], byTarget = new Map();
+        for (const c of later) {
+          if (!byTarget.has(c.ownerId)) byTarget.set(c.ownerId, []);
+          byTarget.get(c.ownerId).push(c.repoPath);
+        }
+        for (const [t, paths] of byTarget) {
+          if (wouldCycle(r.ownerId, t, cardsById)) for (const p of paths) moveIn.push({ path: p, fromOwnerId: t });
           else targets.push(t);
         }
-        fix = { kind: 'blockedBy', targets: targets.sort(idCompare), cycleWarnings };
+        fix = { kind: 'blockedBy', targets: targets.sort(idCompare), moveIn, cycleWarnings: [] };
       }
     } else {
-      // Every remaining import is `unowned`: the branch has the file, but no OPEN card in the epic claims it —
-      // it has to be ported together with the code that needs it, so the fix is to add it to the IMPORTING
-      // card's own scope (never invented as a new card, never guessed onto some other card).
+      // Every remaining import is `unowned` and/or a SHARED co-ownership add: `unowned` — the branch has the
+      // file, but no OPEN card in the epic claims it, so it has to be ported together with the code that needs
+      // it (never invented as a new card, never guessed onto some other card); `laterShared` — the referencing
+      // card simply becomes one more append-only co-owner of an already-multi-owned file. Both resolve the
+      // SAME way: add to the IMPORTING card's own scope, nothing else.
       fix = { kind: 'add-to-scope', owner: r.ownerId, paths: [] };
     }
-    // A file can carry BOTH `later` and `unowned` imports at once. Whichever card ends up owning the FILE
-    // (the move target, or this card unchanged) is also the one whose scope should gain the unowned path(s) —
-    // same reasoning as the unowned-only case above, just attached to whatever the primary fix already is.
-    if (unowned.length) {
+    // A file can carry `later`/`unowned`/shared-`later` imports at once. Whichever card ends up owning the
+    // FILE (the move target, or this card unchanged) is also the one whose scope should gain the unowned AND
+    // shared-co-ownership path(s) — same reasoning as the unowned-only case above, just attached to whatever
+    // the primary fix already is.
+    const scopeAdds = [...unowned, ...laterShared];
+    if (scopeAdds.length) {
       const owner = fix.kind === 'move' ? fix.target : r.ownerId;
-      fix.addToScope = { owner, paths: unowned.map((c) => withWe(c.repoPath)) };
-      if (fix.kind === 'add-to-scope') fix.paths = fix.addToScope.paths; // unowned-only: same list, top-level too
+      fix.addToScope = { owner, paths: scopeAdds.map((c) => withWe(c.repoPath)) };
+      if (fix.kind === 'add-to-scope') fix.paths = fix.addToScope.paths; // unowned/shared-only: same list, top-level too
     }
-    findings.push({ ownerId: r.ownerId, file: r.file, isTest: test, later, unowned, fix });
+    findings.push({ ownerId: r.ownerId, file: r.file, isTest: test, later, laterShared, unowned, fix });
   }
   return findings.sort((a, b) => idCompare(a.ownerId, b.ownerId) || a.file.localeCompare(b.file));
 }
 
 /** One-line, human-readable rendering of a finding's proposed fix. PURE. */
 export function describeFix(finding) {
+  const sharedWe = new Set((finding.laterShared ?? []).map((c) => withWe(c.repoPath)));
   const scopeSuffix = finding.fix.addToScope?.paths.length
-    ? `; add ${finding.fix.addToScope.paths.map((p) => `\`${p}\``).join(', ')} to #${finding.fix.addToScope.owner}'s scope (unowned)`
+    ? `; add ${finding.fix.addToScope.paths.map((p) => `\`${p}\` (${sharedWe.has(p) ? 'shared file — new co-owner' : 'unowned'})`).join(', ')} to #${finding.fix.addToScope.owner}'s scope`
     : '';
   if (finding.fix.kind === 'move') {
     const cyc = finding.fix.cycleWarnings?.length
@@ -425,10 +647,52 @@ export function describeFix(finding) {
     const cyc = finding.fix.cycleWarnings?.length
       ? ` — MANUAL: #${finding.fix.cycleWarnings.map((w) => w.ownerId).join(', #')} would cycle`
       : '';
-    return `add blockedBy ${finding.fix.targets.map((t) => `#${t}`).join(', ')}${cyc}${scopeSuffix}`;
+    const bb = finding.fix.targets.length ? `add blockedBy ${finding.fix.targets.map((t) => `#${t}`).join(', ')}` : '';
+    const mv = finding.fix.moveIn?.length
+      ? finding.fix.moveIn.map((m) => `move \`${withWe(m.path)}\` here from #${m.fromOwnerId} (blockedBy the other way would cycle)`).join('; ')
+      : '';
+    return [bb, mv].filter(Boolean).join('; ') + cyc + scopeSuffix;
   }
-  if (finding.fix.kind === 'add-to-scope') return `add ${finding.fix.paths.map((p) => `\`${p}\``).join(', ')} to #${finding.fix.owner}'s own scope (unowned; ports with the code that needs it)`;
+  if (finding.fix.kind === 'add-to-scope') {
+    return `add ${finding.fix.paths.map((p) => `\`${p}\` (${sharedWe.has(p) ? 'shared file — new co-owner' : 'unowned; ports with the code that needs it'})`).join(', ')} to #${finding.fix.owner}'s own scope`;
+  }
   return finding.fix.reason;
+}
+
+/**
+ * A batch-level cycle backstop. Every PER-FINDING cycle guard in this file (`wouldCycle`, `planTestFileFix`'s
+ * `isFullyAcyclic`) checks ONE proposed edge against the graph as it stood BEFORE this run's edits — necessary
+ * but not sufficient, because a single run can propose MANY edges from MANY independent findings, and two of
+ * them can each look safe alone yet jointly close a cycle. Real case, epic #3443's live run: one finding added
+ * #3906 `blockedBy` #3907 (a moved-in test's residual import); a SEPARATE, independently-computed finding in
+ * the SAME run added #3907 `blockedBy` #3906 (an impl file's own import) — neither `wouldCycle` call could see
+ * the other, since each checked only the pre-run graph, but the batch's UNION is a direct 2-cycle.
+ *
+ * `createCycleGuard(cardsById)` returns a `tryAddEdge(from, to)` closure over a MUTABLE clone of the graph:
+ * each accepted edge is folded in immediately, so the NEXT call in the same batch sees it — turning the
+ * "compute every finding against one static snapshot" pipeline into a de-facto sequential one for cycle
+ * purposes, without restructuring `buildFindings` itself. Rejects (returns `false` for) any edge that would
+ * make `from` and `to` mutually dependent, INCLUDING one closed only by edges THIS SAME BATCH already added —
+ * the rejected edge is simply not applied this run; the next run reconsiders it against the graph as it then
+ * stands (typically resolving differently once other edges/moves from this run have landed). PURE.
+ * @param {Map<string,{id:string, blockedBy:string[]}>} cardsById
+ * @returns {(from:string, to:string) => boolean}
+ */
+export function createCycleGuard(cardsById) {
+  const adj = new Map([...cardsById].map(([id, c]) => [id, new Set(c.blockedBy)]));
+  const reaches = (from, to, seen = new Set()) => {
+    if (from === to) return true;
+    if (seen.has(from)) return false;
+    seen.add(from);
+    for (const b of adj.get(from) ?? []) if (reaches(b, to, seen)) return true;
+    return false;
+  };
+  return (from, to) => {
+    if (from === to || reaches(to, from)) return false; // `to` already (transitively) needs `from` first
+    if (!adj.has(from)) adj.set(from, new Set());
+    adj.get(from).add(to);
+    return true;
+  };
 }
 
 /**
@@ -436,12 +700,22 @@ export function describeFix(finding) {
  * one-line note for BOTH sides of every move/blockedBy edge — exactly what `--apply` writes, nothing else.
  * PURE (caller supplies `today`). Only `move` and `blockedBy` fixes produce edits; `unresolved` has no card to
  * point a fix at, so it is left for a human and never auto-applied.
+ *
+ * `cardsById`, when supplied, arms the {@link createCycleGuard} batch backstop over every `addBlockedBy` edge
+ * this call proposes — omitted (the default), every edge is taken as each finding proposed it, matching every
+ * existing caller/test's behaviour byte-for-byte. A dropped edge is recorded on the returned Map as a non-
+ * enumerable-looking but perfectly ordinary extra property, `.droppedEdges` (`{from, to}[]`), always `[]` when
+ * `cardsById` is omitted — read it, never assume every proposed edge landed.
  * @param {Array<object>} findings  from {@link buildFindings}
  * @param {string} today  `YYYY-MM-DD`
- * @returns {Map<string, {removeScope:string[], addScope:string[], addBlockedBy:string[], notes:string[]}>}
+ * @param {{cardsById?:Map<string,object>}} [opts]
+ * @returns {Map<string, {removeScope:string[], addScope:string[], addBlockedBy:string[], notes:string[]}> & {droppedEdges: Array<{from:string,to:string}>}}
  */
-export function planEdits(findings, today) {
+export function planEdits(findings, today, { cardsById } = {}) {
   const edits = new Map();
+  const droppedEdges = [];
+  edits.droppedEdges = droppedEdges;
+  const tryAddEdge = cardsById ? createCycleGuard(cardsById) : () => true;
   const get = (id) => {
     if (!edits.has(id)) edits.set(id, { removeScope: [], addScope: [], addBlockedBy: [], notes: [] });
     return edits.get(id);
@@ -459,15 +733,28 @@ export function planEdits(findings, today) {
       // planTestFileFix's doc for the #3901/#3856 and #3895/#3908 shapes this covers. Fix with blockedBy on
       // `target` rather than moving again (which could ping-pong between two unrelated owners forever).
       for (const t of f.fix.addBlockedBy ?? []) {
+        if (!tryAddEdge(target, t)) { droppedEdges.push({ from: target, to: t }); continue; }
         get(target).addBlockedBy.push(t);
         get(target).notes.push(`- ${today}: graduation-import-check added blockedBy #${t} — the moved-in \`${f.file}\` also imports a module #${t} owns.`);
         get(t).notes.push(`- ${today}: graduation-import-check made this a blocker of #${target} — its moved-in \`${f.file}\` imports a module this card owns.`);
       }
     } else if (f.fix.kind === 'blockedBy') {
       for (const t of f.fix.targets) {
+        if (!tryAddEdge(f.ownerId, t)) { droppedEdges.push({ from: f.ownerId, to: t }); continue; }
         get(f.ownerId).addBlockedBy.push(t);
         get(f.ownerId).notes.push(`- ${today}: graduation-import-check added blockedBy #${t} — \`${f.file}\` imports a module #${t} owns.`);
         get(t).notes.push(`- ${today}: graduation-import-check made this a blocker of #${f.ownerId} — its \`${f.file}\` imports a module this card owns.`);
+      }
+      // The later owner is ALREADY (transitively) blockedBy `f.ownerId` — a blockedBy edge the other way would
+      // cycle, so the specific dependency FILE moves here instead. Safe by construction: `f.ownerId` already
+      // lands before `fromOwnerId` no matter what, so anything inside `fromOwnerId` that still needs this file
+      // reaches it as a `blocker` on its next scan (the very edge that made a `blockedBy` fix cycle here).
+      for (const mv of f.fix.moveIn ?? []) {
+        const p = withWe(mv.path);
+        get(mv.fromOwnerId).removeScope.push(p);
+        get(f.ownerId).addScope.push(p);
+        get(mv.fromOwnerId).notes.push(`- ${today}: graduation-import-check moved \`${p}\` to #${f.ownerId} — #${f.ownerId}'s \`${f.file}\` needs it directly, and this card already (transitively) depends on #${f.ownerId}, so a blockedBy edge the other way would cycle.`);
+        get(f.ownerId).notes.push(`- ${today}: graduation-import-check moved \`${p}\` here from #${mv.fromOwnerId} — this card's \`${f.file}\` needs it directly, and a blockedBy edge to #${mv.fromOwnerId} would cycle (it already depends on this card).`);
       }
     }
     if (f.fix.addToScope?.paths.length) {
@@ -599,11 +886,15 @@ function run() {
   const results = [];
   const warnings = [];
   const toCheckOnMain = new Set();
-  const perFileImports = []; // { ownerId, file, resolved: [{specifier, repoPath}] }
+  const perFileImports = []; // { ownerId, file, resolved: [{specifier, repoPath, via}] }
 
+  // `.mjs`/`.js` only — the SOURCE side of a scan (what gets read and parsed for references). `.md`/`.json`
+  // are still valid TARGET extensions (a brief, a data file) — see PATH_LITERAL_EXT_RE — just never scanned
+  // themselves; nothing this epic's slices scope reads a doc/data file's OWN prose for further references.
+  const SOURCE_EXT_RE = /\.(?:mjs|js)$/;
   for (const card of targets) {
     for (const file of card.scope) {
-      if (!file.endsWith('.mjs')) continue;
+      if (!SOURCE_EXT_RE.test(file)) continue;
       if (sharedFiles.has(file)) continue; // reported once below, not once per owning card
       const repoPath = stripWe(file);
       const src = gitShow(args.snapshot, repoPath);
@@ -611,13 +902,20 @@ function run() {
         warnings.push(`could not read ${file} at ${args.snapshot} (git show failed) — skipped`);
         continue;
       }
-      const specifiers = extractImportSpecifiers(src);
       const resolved = [];
-      for (const spec of specifiers) {
-        const rp = resolveRelativeImport(repoPath, spec);
-        if (!rp) continue;
-        resolved.push({ specifier: spec, repoPath: rp });
+      const seen = new Set(); // dedupe: an import specifier's own text can also match the path-literal scan
+      const addResolved = (specifier, rp, via) => {
+        if (!rp || rp === repoPath || seen.has(rp)) return;
+        seen.add(rp);
+        resolved.push({ specifier, repoPath: rp, via });
         toCheckOnMain.add(rp);
+      };
+      for (const spec of extractImportSpecifiers(src)) addResolved(spec, resolveRelativeImport(repoPath, spec), 'import');
+      for (const cand of extractPathLiteralSpecifiers(src)) {
+        const rp = resolvePathLiteralSpecifier(repoPath, cand);
+        // A path-LITERAL candidate is a guess (unlike a real `import`, which is unambiguous by construction) —
+        // only count one that actually resolves to a real blob at the snapshot, per the card's own instructions.
+        if (rp && rp !== repoPath && !seen.has(rp) && existsAtRef(args.snapshot, rp)) addResolved(cand.path, rp, 'path');
       }
       perFileImports.push({ ownerId: card.id, file, resolved });
     }
@@ -628,17 +926,52 @@ function run() {
   const mainPaths = new Set();
   for (const p of toCheckOnMain) if (existsAtRef('origin/main', p)) mainPaths.add(p);
 
+  // CONTENT-DRIFT: a path that already exists on `origin/main` is normally unconditionally safe (`on-main`) —
+  // but if it is ALSO in some open sibling slice's own `scope:` (the slice that will actually change it), its
+  // CURRENT main content is not what this epic promises to land; only its post-port content is. Bounded to
+  // paths that are BOTH referenced (already in `mainPaths`) AND scope-claimed — never the whole epic's scope,
+  // and never a full-repo sweep — so the extra `git show` pair this costs stays proportional to what a run
+  // already does. Real cases: `we:scripts/operations/completion-record.mjs` (#3903 — main lacks `'task'` in
+  // `COMPLETION_KINDS`), `we:docs/agent/dispatcher-runbook.md` (#3910),
+  // `we:scripts/operations/__tests__/helpers/fake-claude.mjs` (#3907).
+  //
+  // EXCLUDES `.json` — measured live: without this, `we:scripts/conveyor/run-scorecards.json` (a LIVE scorecard
+  // file that keeps changing on `main` for reasons that have nothing to do with this epic) surfaced as a false
+  // graduation hazard — and #3443's OWN tail-sweep card (#3910) already rules explicitly that this exact file
+  // "is runtime data, not code… never ported/edited". Generalized past that one named file, on the same
+  // reasoning: a `.json` sibling in this epic's scope is a DATA artifact a slice's tests fixture against, not a
+  // behavioral file whose drift is a landing-order hazard the way a `.mjs`/`.md` file's drift can be.
+  const scopedOnMain = new Set();
+  for (const t of targets) for (const s of t.scope) {
+    const rp = stripWe(s);
+    if (rp.endsWith('.json')) continue;
+    if (mainPaths.has(rp)) scopedOnMain.add(rp);
+  }
+  const driftedPaths = new Set();
+  for (const rp of scopedOnMain) {
+    const snapText = gitShow(args.snapshot, rp);
+    const mainText = gitShow('origin/main', rp);
+    if (snapText != null && mainText != null && snapText !== mainText) driftedPaths.add(rp);
+  }
+  for (const rp of [...driftedPaths].sort()) {
+    warnings.push(`${withWe(rp)} exists on origin/main but its content at ${args.snapshot} differs — treated as a graduation dependency, not "on-main"`);
+  }
+
   for (const { ownerId, file, resolved } of perFileImports) {
-    const classifications = resolved.map(({ specifier, repoPath }) => ({
-      specifier, repoPath, ...classifyImportPath({ repoPath, ownerId, cardsById, mainPaths }),
+    const classifications = resolved.map(({ specifier, repoPath, via }) => ({
+      specifier, repoPath, via, ...classifyImportPath({ repoPath, ownerId, cardsById, mainPaths, driftedPaths }),
     }));
     results.push({ ownerId, file, classifications });
   }
 
-  const findings = buildFindings({ cardsById, mainPaths, results });
+  const sharedWePaths = new Set(sharedFiles.keys());
+  const findings = buildFindings({ cardsById, mainPaths, driftedPaths, sharedPaths: sharedWePaths, results });
 
   if (args.apply) {
-    const edits = planEdits(findings, localToday());
+    const edits = planEdits(findings, localToday(), { cardsById });
+    for (const { from, to } of edits.droppedEdges) {
+      warnings.push(`--apply: dropped blockedBy #${to} on #${from} — would cycle once combined with another edge THIS SAME RUN also added; re-run to reconsider it against the updated graph`);
+    }
     for (const [id, edit] of edits) {
       const f = files.get(id);
       if (!f) { warnings.push(`--apply: no card file found for #${id} (referenced by an edit) — skipped`); continue; }
@@ -660,8 +993,9 @@ function report({ args, targets, findings, warnings }) {
       cardsChecked: targets.length,
       findings: findings.map((f) => ({
         card: f.ownerId, file: f.file, isTest: f.isTest,
-        laterImports: f.later.map((c) => ({ path: withWe(c.repoPath), owner: c.ownerId })),
-        unownedImports: f.unowned.map((c) => withWe(c.repoPath)),
+        laterImports: f.later.map((c) => ({ path: withWe(c.repoPath), owner: c.ownerId, via: c.via })),
+        sharedLaterImports: f.laterShared.map((c) => ({ path: withWe(c.repoPath), via: c.via })),
+        unownedImports: f.unowned.map((c) => ({ path: withWe(c.repoPath), via: c.via })),
         fix: f.fix,
       })),
       warnings,
@@ -678,8 +1012,9 @@ function report({ args, targets, findings, warnings }) {
   process.stdout.write(`  ${findings.length} finding(s):\n\n`);
   for (const f of findings) {
     process.stdout.write(`  #${f.ownerId}  ${f.file}${f.isTest ? '  [test]' : '  [impl]'}\n`);
-    for (const c of f.later) process.stdout.write(`        later:  ${withWe(c.repoPath)}  → owned by #${c.ownerId}\n`);
-    for (const c of f.unowned) process.stdout.write(`        unowned: ${withWe(c.repoPath)}\n`);
+    for (const c of f.later) process.stdout.write(`        later:  ${withWe(c.repoPath)}  → owned by #${c.ownerId}${c.via === 'path' ? '  (found via non-import path reference)' : ''}\n`);
+    for (const c of f.laterShared) process.stdout.write(`        shared: ${withWe(c.repoPath)}  → becomes a new co-owner${c.via === 'path' ? '  (found via non-import path reference)' : ''}\n`);
+    for (const c of f.unowned) process.stdout.write(`        unowned: ${withWe(c.repoPath)}${c.via === 'path' ? '  (found via non-import path reference)' : ''}\n`);
     process.stdout.write(`        fix → ${describeFix(f)}\n`);
   }
 }

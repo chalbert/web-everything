@@ -4,8 +4,8 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3901", "3893", "3897", "3902"]
-scope: ["we:scripts/lib/__tests__/antigravity-judge-spawn.integration.test.mjs", "we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs", "we:scripts/lib/__tests__/codex-judge-spawn.test.mjs", "we:scripts/lib/__tests__/judge-panel.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs", "we:scripts/lib/__tests__/review-core.test.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs", "we:scripts/lib/antigravity-judge-spawn.mjs", "we:scripts/lib/codex-judge-spawn.mjs", "we:scripts/lib/judge-panel.mjs", "we:scripts/lib/judge-spawn.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/review-core.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/lib/review-render.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/operations/__tests__/review-loop-cli.test.mjs", "we:scripts/operations/__tests__/review-pr-io.test.mjs", "we:scripts/operations/__tests__/review-pr.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/record-verdict-io.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/operations/review-pr-io.mjs", "we:scripts/operations/review-pr.mjs", "we:skills-src/review/review-agent-brief.md", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/juror-flags.test.mjs", "we:scripts/operations/__tests__/record-verdict-cli.test.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt", "we:scripts/lib/__tests__/codex-model-routing.test.mjs"]
+blockedBy: ["3901", "3893", "3897", "3902", "3915"]
+scope: ["we:scripts/lib/__tests__/antigravity-judge-spawn.integration.test.mjs", "we:scripts/lib/__tests__/antigravity-judge-spawn.test.mjs", "we:scripts/lib/__tests__/codex-judge-spawn.test.mjs", "we:scripts/lib/__tests__/judge-panel.test.mjs", "we:scripts/lib/__tests__/judge-spawn.test.mjs", "we:scripts/lib/__tests__/review-core.test.mjs", "we:scripts/lib/antigravity-judge-spawn.mjs", "we:scripts/lib/codex-judge-spawn.mjs", "we:scripts/lib/judge-panel.mjs", "we:scripts/lib/judge-spawn.mjs", "we:scripts/lib/review-render.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/operations/__tests__/review-pr-io.test.mjs", "we:scripts/operations/cli-adapter.mjs", "we:scripts/operations/record-verdict-io.mjs", "we:scripts/operations/review-loop-cli.mjs", "we:scripts/operations/review-pr-io.mjs", "we:scripts/operations/review-pr.mjs", "we:skills-src/review/review-agent-brief.md", "we:scripts/operations/__tests__/judge-provider-port.test.mjs", "we:scripts/operations/__tests__/judge-provider-selection.test.mjs", "we:scripts/operations/__tests__/helpers/fake-claude.mjs", "we:scripts/lib/__tests__/fixtures/panel-mandate.correctness.pre-3094.txt", "we:scripts/lib/__tests__/codex-model-routing.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/conveyor/advisory-round-count.mjs"]
 dateOpened: "2026-09-22"
 tags: []
 ---
@@ -159,3 +159,35 @@ card's dependency, #3906's scope) can now inject `--model` for the model-tier ta
 the existing resolution.
 
 No worker-step changes — the existing note's steps 1–9 still apply as written for these three files.
+
+## Graduation import check
+
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/run-record.mjs` to #3915 — #3915's `we:scripts/operations/run-store.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/effect-executor.mjs` to #3915 — #3915's `we:scripts/operations/dispatch-providers/build.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/run-store.mjs` to #3915 — #3915's `we:scripts/operations/dispatch-lane-io.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/jury-core.mjs` to #3915 — #3915's `we:scripts/lib/review-core.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/review-core.mjs` to #3915 — #3915's `we:scripts/pr-land.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/review-escalation.mjs` to #3915 — #3915's `we:scripts/pr-land.mjs` needs it directly, and this card already (transitively) depends on #3915, so a blockedBy edge the other way would cycle.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/effect-executor.mjs` here from #3906 — this card's `we:scripts/operations/review-pr.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/run-record.mjs` here from #3906 — this card's `we:scripts/operations/review-pr-io.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/effect-executor.mjs` here from #3906 — this card's `we:scripts/operations/review-pr-io.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/run-store.mjs` here from #3906 — this card's `we:scripts/operations/review-loop-cli.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/run-record.mjs` here from #3906 — this card's `we:scripts/operations/cli-adapter.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/effect-executor.mjs` here from #3906 — this card's `we:scripts/operations/cli-adapter.mjs` needs it directly, and a blockedBy edge to #3906 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check moved `we:scripts/conveyor/advisory-round-count.mjs` here from #3908 — this card's `we:scripts/operations/review-pr.mjs` needs it directly, and a blockedBy edge to #3908 would cycle (it already depends on this card).
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/review-loop-cli.mjs`, which this card ports.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/review-pr.test.mjs` to #3910 — it imports a module #3910 owns.
+- 2026-09-25: graduation-import-check added we:scripts/operations/run.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/review-pr-io.test.mjs`, which this card ports.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/review-loop-cli.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/review-loop-cli.test.mjs` to #3906 — it imports a module #3906 owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/record-verdict-cli.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/record-verdict-cli.test.mjs` to #3906 — it imports a module #3906 owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/juror-flags.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/operations/__tests__/juror-flags.test.mjs` to #3906 — it imports a module #3906 owns.
+- 2026-09-25: graduation-import-check added blockedBy #3915 — `we:scripts/lib/review-escalation.mjs` imports a module #3915 owns.
+- 2026-09-25: graduation-import-check moved `we:scripts/lib/__tests__/review-escalation.test.mjs` to #3910 — it imports a module #3910 owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/explore.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3903 — its moved-in `we:scripts/operations/__tests__/dispatch-task.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/dispatch-spawn-live.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3906 — its moved-in `we:scripts/operations/__tests__/dispatch-lane-fixture-harness.test.mjs` imports a module this card owns.
+- 2026-09-25: graduation-import-check made this a blocker of #3903 — its `we:scripts/operations/deliver-item-wrapper.mjs` imports a module this card owns.

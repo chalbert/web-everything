@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3898", "3892", "3891"]
+blockedBy: ["3898", "3892", "3891", "3906", "3908"]
 scope: ["we:scripts/__tests__/fixtures/prototype-tracker-full.golden.html", "we:scripts/lib/prototype-tracker-compact-io.mjs", "we:scripts/operations/__tests__/tracker-refresh-real.test.mjs", "we:scripts/operations/__tests__/tracker-refresh.test.mjs", "we:scripts/operations/__tests__/turn-digest.test.mjs", "we:scripts/operations/tracker-refresh-io.mjs", "we:scripts/operations/tracker-refresh-state.mjs", "we:scripts/operations/tracker-refresh.mjs", "we:scripts/operations/turn-digest-io.mjs", "we:scripts/operations/turn-digest.mjs", "we:scripts/prototype-tracker.mjs", "we:skills-src/prototype-tracker/SKILL.md", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -19,3 +19,8 @@ Ports 8 files (we:scripts/lib/prototype-tracker-compact-io.mjs, we:scripts/opera
 1. **Executable** — `npx vitest run we:scripts/operations/__tests__/tracker-refresh-real.test.mjs we:scripts/operations/__tests__/tracker-refresh.test.mjs we:scripts/operations/__tests__/turn-digest.test.mjs we:scripts/operations/__tests__/http-adapter.test.mjs` passes on main's tree (all of this slice's tests; each fails before the port because its module is missing or differs).
 2. **Executable** — `npm run check:standards` reports 0 errors, and the PR's required `test` and `smoke` checks are green.
 3. **Faithful port** — for each ported file, `git diff 600acc14f -- <file>` (prototype snapshot vs main after the port) shows only main's own later changes kept by the merge notes, never a behaviour change of the branch code; runtime data files (e.g. `we:scripts/conveyor/run-scorecards.json`) are never edited.
+
+## Graduation import check
+
+- 2026-09-25: graduation-import-check added blockedBy #3908 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3908 owns.
+- 2026-09-25: graduation-import-check added blockedBy #3906 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3906 owns.
