@@ -166,9 +166,20 @@ export default {
   id: 'lane-acquire-under-load',
   title: 'lane acquire --wait-ms is no bound under concurrent load (live: 6-minute acquires; main today: last of 5 waiters at 3.4x its wait)',
   card: 'we:backlog/xj2k2pp (first fix b6c6dee34 / #4069 was partial; epic #4075)',
-  fixedBy: { sha: '(unfixed — b6c6dee34 partial)', where: 'not fixed yet', paths: ['scripts/lane-pool.mjs'] },
-  // The NEXT fix (xj2k2pp) has no marker yet: expected-fail until it lands. `firstFixPresent` keeps the old probe.
-  fixPresent() { return false; },
+  fixedBy: { sha: '(this worker\'s PR)', where: 'cmdAcquire / acquirableListCached', paths: ['scripts/lane-pool.mjs'] },
+  // xj2k2pp fix: `acquirableListCached`'s "wait for a DIFFERENT caller's in-flight shared-scan lock" branch now
+  // takes a `callerDeadlineMs` (this acquire call's own --wait-ms deadline) and gives up with a distinguishable
+  // `{ lockContention: true }` once it elapses, instead of sitting out the lock/scan's own (far larger, and
+  // rightly still shared/unbounded-per-caller) budget regardless of how small THIS caller's own wait was. That
+  // is exactly the "serialized staircase" this break measures: a caller stuck behind someone else's turn at the
+  // single-flight lock, over and over, never getting to check its OWN deadline until each such wait finished.
+  // `lockContention` is a marker string unique to this fix (absent from the pre-fix tree, including the earlier
+  // partial b6c6dee34/#4069 fix `firstFixPresent` below still probes for).
+  fixPresent(root) {
+    try {
+      return readFileSync(join(root, 'scripts/lane-pool.mjs'), 'utf8').includes('lockContention');
+    } catch { return false; }
+  },
   firstFixPresent(root) {
     try {
       const src = readFileSync(join(root, 'scripts/lane-pool.mjs'), 'utf8');

@@ -12,9 +12,15 @@
  *   `LANE_POOL_LIST_SCAN_TIMEOUT_MS`, independent of any one caller's `--wait-ms` — `--wait-ms` bounds only
  *   how long an acquire call may keep POLLING for a lane to free up once a scan has answered, never the scan
  *   itself. Two consequences proven here:
- *   1. A small `--wait-ms` no longer truncates a slower SHARED scan into a false "all held/dirty" — the
- *      call now simply takes as long as the scan needs (bounded by the scan's own, larger budget) and
- *      returns a REAL answer instead of a premature wrong one.
+ *   1. A small `--wait-ms` never gets the OLD misleading false "all held/dirty" (this file's original
+ *      complaint) — but per the LATER xj2k2pp fix (soak break `lane-acquire-under-load`, epic #3383/#4075:
+ *      "acquire honours its --wait-ms as a real deadline"), it also no longer silently blocks past its OWN
+ *      wait-ms waiting for a DIFFERENT, longer-lived caller's shared scan to finish — 5-concurrent-caller soak
+ *      evidence showed that wait, unbounded, compounding across repeated scan rounds into a 3.4x-of-wait-ms
+ *      "serialized staircase". It now fails FAST, at its own wait-ms (`acquirableListCached`'s
+ *      `callerDeadlineMs`), with its own clearly labeled reason — "lock contention" — which still, like
+ *      before, is explicitly NEVER the misleading "all held/dirty" this file exists to rule out; it is simply
+ *      an honest "don't know yet, gave up waiting on someone else" instead of either extreme.
  *   2. When a scan genuinely never finishes within its own (now-independent) budget, the failure message
  *      says so explicitly ("the acquirability scan itself did not finish"), never the misleading "N all
  *      held/dirty" — and the SEPARATE growth-on-empty fix (#3383 bug 1) refuses to fire on that signal,
@@ -46,13 +52,16 @@ function runPool(args, extraEnv = {}) {
   return { code: r.status ?? 1, out: String(r.stdout || ''), err: String(r.stderr || '') };
 }
 function runPoolAsync(args, extraEnv = {}) {
+  const startedAt = Date.now();
   return new Promise((res) => {
     const c = spawn('node', [SCRIPT, ...args], { env: env(extraEnv) });
     let out = '';
     let err = '';
     c.stdout.on('data', (d) => (out += d));
     c.stderr.on('data', (d) => (err += d));
-    c.on('close', (code) => res({ code, out, err }));
+    // #xj2k2pp — `ms` (wall-clock duration) lets the lock-contention case below assert boundedness, not just
+    // the message text.
+    c.on('close', (code) => res({ code, out, err, ms: Date.now() - startedAt }));
   });
 }
 function provision(count) {
@@ -92,7 +101,7 @@ afterEach(() => {
 });
 
 describe('lane-pool acquire (#3383 coordinator follow-up) — the scan budget is independent of --wait-ms', () => {
-  it('a small --wait-ms no longer truncates a slower SHARED scan into a false "all held/dirty"', async () => {
+  it('a small --wait-ms no longer waits out a slower SHARED scan it lost the lock race for — never the false "all held/dirty", now a fast, honest "lock contention" instead', async () => {
     provision(2);
     // Dirty lane-1's tracked file so evaluating it costs a REAL git call (status --porcelain), which the
     // slow shim delays — a genuinely slow scan, not an instant one. lane-2 stays clean: the one real
@@ -102,12 +111,8 @@ describe('lane-pool acquire (#3383 coordinator follow-up) — the scan budget is
     // Each git call sleeps 0.5s (empirically ~7s wall-clock for this 2-lane pool's full scan — real git
     // spawn overhead adds up beyond the raw sleep total). Both callers ask for only 1s of --wait-ms (far
     // smaller than the scan itself needs), but a generous --scan-timeout-ms (15s) so the scan can actually
-    // finish. Pre-fix, each caller's own scan budget would have been clamped to ~1s (its own remaining
-    // wait-ms) and every one would report "no free lane" wrongly, well before the scan ever answered.
-    // Post-fix, both share the one real (slow but successful) scan and the lane-2 winner actually gets it.
-    // `--hard-max=2` pins the SEPARATE growth-on-empty fix's ceiling at this pool's real size: the losing
-    // caller's own wait-ms elapses too (it never wins lane-2), and without this it would go on to grow the
-    // pool — real, slow-shimmed clones — correct behaviour, but not THIS test's subject.
+    // finish (for whichever caller wins the lock and runs it). `--hard-max=2` pins the SEPARATE
+    // growth-on-empty fix's ceiling at this pool's real size — not this test's subject.
     const rs = await Promise.all(
       [1, 2].map((i) => runPoolAsync(
         ['acquire', ...REPO(), `--session=caller-${i}`, '--wait-ms=1000', '--scan-timeout-ms=15000', '--hard-max=2'],
@@ -116,13 +121,23 @@ describe('lane-pool acquire (#3383 coordinator follow-up) — the scan budget is
     );
     const succeeded = rs.filter((r) => r.code === 0);
     const failed = rs.filter((r) => r.code !== 0);
-    // Exactly one caller wins the one real acquirable lane; the other correctly reports genuine
-    // "all held/dirty" (not a scan-timeout artifact) — never BOTH failing on a false "all held/dirty".
+    // The lock WINNER still runs the real (slow but successful, unbounded-by-its-own-wait-ms) scan and gets
+    // the one real acquirable lane, exactly as before.
     expect(succeeded).toHaveLength(1);
     expect(succeeded[0].out.trim()).toBe(join(poolRoot, 'scanwait', 'lane-2'));
     expect(failed).toHaveLength(1);
-    expect(failed[0].err).toMatch(/no free lane in pool "scanwait" \(2 all held\/dirty\)/);
+    // The lock LOSER (xj2k2pp): no longer sits out the winner's ~7s scan just because its own wait-ms was
+    // small — it gives up at its OWN --wait-ms (1000ms) with an honest "lock contention" reason, still never
+    // the misleading "all held/dirty" this file's ORIGINAL fix exists to rule out (the truth is simply not
+    // known yet when this caller gives up — a different fact from "a completed scan found nothing").
+    expect(failed[0].err).toMatch(/no lane within 1000ms in pool "scanwait"/);
+    expect(failed[0].err).toMatch(/lock contention/i);
+    expect(failed[0].err).not.toMatch(/all held\/dirty/);
     expect(failed[0].err).not.toMatch(/scan itself did not finish/);
+    // Bounded: the loser's total wall time reflects ITS OWN wait-ms (1000ms), not the ~7s the winner's real
+    // scan took — generous margin (4s) for process/git spawn overhead, never the scan's own cost.
+    const loserIdx = rs[0].code === 0 ? 1 : 0;
+    expect(rs[loserIdx].ms).toBeLessThan(4000);
   }, 30_000);
 
   it('when a scan genuinely never finishes in time, the message says so — never the misleading "all held/dirty" — and growth does not fire', () => {
