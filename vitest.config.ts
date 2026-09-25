@@ -219,6 +219,16 @@ export default defineConfig({
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
       // #x5n4zn3 — same tier: a real spawned node driver + a real hanging `gh` shim on `PATH`.
       'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
+      // #3383 — the stateful fake-GitHub's own proof: real bare origin/clone + real `execFileSync('gh', …)`,
+      // same tier as the two files immediately above it.
+      'scripts/conveyor/__tests__/fake-gh-state.test.mjs',
+      // #3383 (xitk240) — the rest of the daemon scenario simulator: real spawned sleepers/daemon hosts, real
+      // bare origins and lane pools. They belong to the integration tier only (vitest.integration.config.ts);
+      // running them in the unit suite too is what put fake-claude-sessions on CI shard 4 for PR #2623.
+      'scripts/conveyor/__tests__/sim-clock.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenarios-smoke.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenario-*.test.mjs',
+      'scripts/operations/__tests__/fake-claude-sessions.test.mjs',
     ],
   },
   resolve: {

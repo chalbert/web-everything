@@ -36,9 +36,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import {
+  SHIM_PATH, readStoreSnapshot, withStoreLock, readCalls, findSessionIn, killSleeper,
+} from './fake-claude-shim.mjs';
 
 /** The shim, as a node script. Kept in one string so the fixture is a single file with nothing to resolve. */
 const SHIM = `#!/usr/bin/env node
@@ -230,4 +234,124 @@ export function withFakeClaude() {
     },
     cleanup: () => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } },
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+// PART 3 of the daemon scenario simulator (epic #3383, `reports/2026-09-24-daemon-scenario-simulator.md`):
+// `createFakeClaude` — a SECOND, separate fake `claude`, alongside `withFakeClaude` above (untouched — every
+// existing caller, `dispatch-lane-integration`/`dispatch-spawn-live`/`parked-pr-conflict-dispatch-integration`,
+// keeps using it exactly as before). This one backs a whole SCENARIO: sessions carry real pids, real
+// transcripts, and a scriptable per-session behaviour queue a scenario's runner steps one action per tick
+// (`we:scripts/conveyor/__tests__/sim/agent-actions.mjs#stepSessions`). The state machine itself lives in
+// `./fake-claude-shim.mjs` — see that file's own header for the listing contract derived from the real
+// consumers and the transcript-path derivation measured against `pr-status.mjs`/`conveyor-state.mjs`.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * A glob with `*` wildcards only (no `?`, no character classes — every pattern this simulator writes,
+ * `review-*`/`fix-*`/an exact name, needs nothing richer). `*` matches greedily across the WHOLE remaining
+ * string, same as shell globbing over a single path segment.
+ * @param {string} pattern
+ * @param {string} value
+ * @returns {boolean}
+ */
+function matchGlob(pattern, value) {
+  const escaped = String(pattern).split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+  return new RegExp(`^${escaped}$`).test(String(value ?? ''));
+}
+
+/**
+ * Stand up the scenario-grade fake `claude` — a real executable on `PATH`, backed by a locked JSON session
+ * store (`./fake-claude-shim.mjs#withStoreLock`) and an NDJSON call log, plus an in-process behaviour-script
+ * registry (`script()`) that `agent-actions.mjs#stepSessions` drains one action per live session per call.
+ *
+ * `root`/`home`/`storeFile` are all optional so a scenario's `world.mjs` (part 1) can nest this inside its own
+ * scenario-root temp dir; omitted, each mints its own throwaway temp dir — good enough for a standalone test
+ * of this file.
+ *
+ * @param {{root?: string, home?: string, storeFile?: string}} [o]
+ * @returns {{
+ *   env: Record<string,string>,
+ *   sessions: () => object[],
+ *   session: (nameOrId: string) => object|null,
+ *   setState: (id: string, state: string, extra?: object) => void,
+ *   killPid: (id: string) => void,
+ *   fault: (name: string, value?: boolean) => void,
+ *   script: (pattern: string, actions: Array<{kind:string, run:Function}>) => void,
+ *   takeNextAction: (name: string) => {kind:string, run:Function}|null,
+ *   calls: () => object[],
+ *   cleanup: () => void,
+ * }}
+ */
+export function createFakeClaude({ root, home, storeFile } = {}) {
+  const dir = root ?? mkdtempSync(join(tmpdir(), 'fake-claude-sessions-'));
+  mkdirSync(dir, { recursive: true });
+  const homeDir = home ?? join(dir, 'home');
+  mkdirSync(homeDir, { recursive: true });
+  const store = storeFile ?? join(dir, 'store.json');
+  const calls = join(dir, 'calls.ndjson');
+  const bin = join(dir, 'claude');
+
+  writeFileSync(store, JSON.stringify({ sessions: [], pids: [], faults: {} }), 'utf8');
+  writeFileSync(calls, '', 'utf8');
+  // `#!/bin/sh exec node <shim> "$@"` — same wrapper shape as `git-replay.mjs`'s own precedent, so the state
+  // machine is a real, separately-runnable/importable `.mjs` file rather than a string template.
+  writeFileSync(bin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(SHIM_PATH)} "$@"\n`, 'utf8');
+  chmodSync(bin, 0o755);
+
+  /** In-process only — a behaviour script is a queue of ALREADY-CONSTRUCTED action objects (the caller built
+   *  them via `w.act.postVerdict({...})` etc before handing them to `script()`), so there is nothing here to
+   *  serialize to the on-disk store; only the session LISTING crosses the process boundary. */
+  const scripts = []; // [{ pattern, queue: [...actions] }]
+
+  return {
+    env: {
+      PATH: `${dir}:${process.env.PATH}`,
+      FAKE_CLAUDE_STORE: store,
+      FAKE_CLAUDE_CALLS: calls,
+      FAKE_CLAUDE_HOME: homeDir,
+    },
+    sessions: () => readStoreSnapshot(store).sessions,
+    session: (nameOrId) => findSessionIn(readStoreSnapshot(store), nameOrId),
+    setState: (id, state, extra = {}) => withStoreLock(store, (s) => {
+      const session = findSessionIn(s, id);
+      if (!session) throw new Error(`fake-claude: setState — no session matching ${JSON.stringify(id)}`);
+      session.state = state;
+      Object.assign(session, extra);
+    }),
+    killPid: (id) => withStoreLock(store, (s) => {
+      const session = findSessionIn(s, id);
+      if (session?.pid) killSleeper(session.pid);
+    }),
+    fault: (name, value = true) => withStoreLock(store, (s) => { s.faults[name] = value; }),
+    /** Attach a behaviour script: every LIVE session whose `name` matches `pattern` (glob, `*` wildcards) pops
+     *  one action off this queue per `stepSessions` call, in order, until exhausted. First-registered pattern
+     *  wins when more than one would match a given name. */
+    script: (pattern, actions) => { scripts.push({ pattern, queue: [...actions] }); },
+    /** `agent-actions.mjs#stepSessions`'s own seam: the next queued action for a session NAME, or `null` when
+     *  nothing is scripted for it (a session with no script simply never advances on its own). */
+    takeNextAction: (name) => {
+      for (const entry of scripts) {
+        if (matchGlob(entry.pattern, name) && entry.queue.length) return entry.queue.shift();
+      }
+      return null;
+    },
+    calls: () => readCalls(calls),
+    /** Kill ONLY the sleeper pids this instance itself recorded (`store.pids` — appended on every session
+     *  register, never pruned by `stop`/`setState`, so a session mutated after the fact is still found), then
+     *  remove the scratch dir. Never a blanket process kill — see the file header's hard rules. */
+    cleanup: () => {
+      const snapshot = readStoreSnapshot(store);
+      for (const pid of snapshot.pids || []) killSleeper(pid);
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+  };
+}
+
+/** The `GH_TOKEN` a dispatched session's spawn env carried, recorded verbatim by the shim (`fake-claude-shim.mjs`
+ *  reads `env.GH_TOKEN` at `--bg` time) — `null` when the spawner stripped it (`sanitizeSpawnEnv`,
+ *  `we:scripts/lib/gh-app-shim.mjs`). The one assert helper `agent-actions.mjs#inheritStaleToken`'s own docblock
+ *  promises: "assert helpers `sessionEnvToken(session)`". */
+export function sessionEnvToken(session) {
+  return session?.env?.GH_TOKEN ?? null;
 }

@@ -87,12 +87,35 @@ export default defineConfig({
       // #xu2krte — real git-conflict fixture + real (fake, cost-nothing) `claude` CLI round trip.
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
       'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
+      // #3383 — daemon scenario simulator: the sim clock (real spawned `node` children) and the fake-session
+      // shim (real spawned processes + real pid liveness), both real-process-cost tests, not pure-logic units.
+      'scripts/conveyor/__tests__/sim-clock.test.mjs',
+      'scripts/operations/__tests__/fake-claude-sessions.test.mjs',
+      // #3383 — the stateful fake-GitHub's own proof: real bare origin/clone + real `execFileSync('gh', …)`.
+      'scripts/conveyor/__tests__/fake-gh-state.test.mjs',
+      // #3383 — the tracer scenario: a forked daemon host dynamically importing the sim clone's own module
+      // graph, many real `node`/`git` child spawns per tick. Pinned to `forks` below for the same reason as
+      // this config's other many-child-process members.
+      'scripts/conveyor/__tests__/sim-scenarios-smoke.test.mjs',
+      // #3383 — the first three built scenarios (report "First three scenarios" A/B/C, I-15/I-18, I-07, I-09):
+      // same many-real-child-process cost tier as their tracer sibling above, pinned to `forks` below for the
+      // identical contention reason.
+      'scripts/conveyor/__tests__/sim-scenario-self-sync-sibling.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenario-approved-conflict-grace.test.mjs',
+      'scripts/conveyor/__tests__/sim-scenario-lane-starvation.test.mjs',
     ],
     poolMatchGlobs: [
       ['scripts/__tests__/stdout-flush.test.mjs', 'forks'],
       ['scripts/__tests__/gate-entrypoint-integration.test.mjs', 'forks'],
       ['scripts/operations/__tests__/wake-cli.test.mjs', 'forks'],
       ['scripts/operations/__tests__/dispatch-spawn-live.test.mjs', 'forks'],
+      // #3383 — the daemon-scenario tracer forks a long-lived daemon host child (itself dynamically importing
+      // and running the sim clone's whole module graph) plus many short-lived `node`/`git` children per tick —
+      // isolated here for the identical contention reason as this array's other members.
+      ['scripts/conveyor/__tests__/sim-scenarios-smoke.test.mjs', 'forks'],
+      ['scripts/conveyor/__tests__/sim-scenario-self-sync-sibling.test.mjs', 'forks'],
+      ['scripts/conveyor/__tests__/sim-scenario-approved-conflict-grace.test.mjs', 'forks'],
+      ['scripts/conveyor/__tests__/sim-scenario-lane-starvation.test.mjs', 'forks'],
       // #x01b2gj — a fifth join, for the identical CORRECTNESS reason as the four above: its TTL-backdating
       // cases (the item-resolved AND pr-merged terminal axes) flaked red twice on 2026-08-30 under real
       // concurrent host load, passing clean in isolation. It spawns real `lane-pool.mjs` children (each
