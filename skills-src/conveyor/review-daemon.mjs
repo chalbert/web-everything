@@ -76,7 +76,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
 import { runReconcilePass } from '../../scripts/conveyor/reconcile-pass.mjs';
-import { dispatchReview } from '../../scripts/operations/review-dispatch.mjs';
+// x26lw6u — the review is dispatched as a deterministic JOB (`review-job.mjs`: acquire → review-loop-cli →
+// report → release, no Claude wrapper session); `WE_REVIEW_DISPATCH_MODE=session` keeps the old `claude --bg`
+// path reachable. The jurors review-loop-cli spawns are the fresh, independent reviewers either way.
+import { dispatchReviewByMode } from '../../scripts/operations/review-job.mjs';
 import { tagReviewRound } from '../../scripts/conveyor/review-round-tag.mjs';
 import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 // #x01u7az — the review-hold reconcile sweep (a stray review:pending beside a live review:human; a stray
@@ -156,7 +159,7 @@ export async function runDaemonLoop({
  */
 export function runReviewTick({
   reconcile = runReconcilePass,
-  dispatch = dispatchReview,
+  dispatch = dispatchReviewByMode,
   tagRound = tagReviewRound,
   tagStatus = tagReviewStatus,
   statusCandidates = selectStatusCandidates,
@@ -220,10 +223,17 @@ export function runReviewTick({
   const deferredForLanes = reviews.length - dispatchable.length;
   const dispatched = [];
   const failed = [];
+  const skipped = [];
   for (const d of dispatchable) {
     try {
       const result = dispatch({ pr: d.prNumber, repo });
-      dispatched.push({ prNumber: d.prNumber, agentId: result.agentId ?? null });
+      // x26lw6u — a job dispatch that declined to start (a live job already on this PR, or the lane cool-off)
+      // did not advance the round, so it gets no round tag — same rule as a failed dispatch.
+      if (result?.skipped) { skipped.push({ prNumber: d.prNumber, reason: result.skipped }); continue; }
+      dispatched.push({
+        prNumber: d.prNumber, agentId: result?.agentId ?? null,
+        ...(result?.mode ? { mode: result.mode } : {}), ...(Number.isInteger(result?.jobPid) ? { jobPid: result.jobPid } : {}),
+      });
     } catch (e) {
       failed.push({ prNumber: d.prNumber, error: String((e && e.message) || e).split('\n')[0] });
       continue; // no round tag on a failed dispatch — the round did not actually advance
@@ -236,7 +246,7 @@ export function runReviewTick({
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {
-    reviewsOwed: reviews.length, dispatched, failed, refusals: (plan.refusals ?? []).length,
+    reviewsOwed: reviews.length, dispatched, failed, skipped, refusals: (plan.refusals ?? []).length,
     reconcileError: null, deferredForLanes,
     holdReconcile: holdReconcileResults, holdReconcileError,
   };
@@ -267,6 +277,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const failed = [];
+  const skipped = [];
   // #xvzwiew — a RECONCILE-PHASE failure (`runReviewTick` now catches it and returns `reconcileError` instead
   // of throwing) reports through this SEPARATE bucket, never folded into `failed` as a bogus `prNumber: null`
   // dispatch failure — no PR was ever identified for a repo whose reconcile crashed, so reporting it as if a
@@ -299,10 +310,11 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
     refusals += result.refusals;
     deferredForLanes += result.deferredForLanes ?? 0;
     for (const d of result.dispatched) dispatched.push({ ...d, repo });
+    for (const k of (result.skipped ?? [])) skipped.push({ ...k, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
   }
   return {
-    repos: perRepo, reviewsOwed, dispatched, failed, refusals, reconcileFailed, deferredForLanes,
+    repos: perRepo, reviewsOwed, dispatched, failed, skipped, refusals, reconcileFailed, deferredForLanes,
     holdReconcile: holdReconcileRemoved, holdReconcileFailed,
   };
 }
@@ -397,6 +409,8 @@ export function buildCliDaemonEffects({
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
       log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}${result.deferredForLanes ? `, deferred ${result.deferredForLanes} (no acquirable lane this tick, #3383)` : ''}`);
+      for (const k of (result.skipped ?? [])) log.error(`review-daemon: ${k.repo}#${k.prNumber} not dispatched — ${k.reason}`);
+      for (const d of result.dispatched) log.error(`review-daemon: ${d.repo}#${d.prNumber} dispatched as ${d.mode ?? 'session'}${d.jobPid ? ` (job pid ${d.jobPid})` : ''}${d.agentId ? ` (agent ${d.agentId})` : ''}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
       // #xvzwiew — a reconcile-phase failure (discovery itself, e.g. a transient `claude agents --json`
       // ENOENT) reports here ONLY, never also folded into the `failed` (dispatch) line above — see

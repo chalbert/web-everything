@@ -29,7 +29,7 @@ import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
@@ -91,7 +91,10 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
-export function tagReviewStatus({ pr, repo, listAgents = defaultListAgents, provider = createGhProvider() } = {}) {
+// x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
+// longer runs as a `claude --bg` session, so without them every job-run review would read as "nothing live" and
+// never carry `review-status:reviewing`.
+export function tagReviewStatus({ pr, repo, listAgents = () => listAgentsWithReviewJobs(), provider = createGhProvider() } = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = listAgents();

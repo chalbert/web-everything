@@ -54,6 +54,7 @@ import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
 import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
@@ -122,14 +123,20 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * planReconcile}/`assessLiveness` — the mechanical backstop for exactly the case a crashed review agent's
  * unreported infra failure leaves behind (`review-agent-brief.md`'s "report done on exit" is prose, and prose
  * is not guaranteed to run).
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, now?:number, hungThresholdMs?:number}} [o]
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, now?:number, hungThresholdMs?:number, listJobs?:Function}} [o]
+ *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
 export function defaultReadAgents({
   exec = execFileSync, env = process.env, completionFor = tryReadCompletion,
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
+  listJobs = undefined,
 } = {}) {
-  const listed = defaultListAgents({ exec, env });
+  // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
+  // so it has no listing row of its own. Its live job record is merged in as a row of the same shape (name
+  // `review-<pr>`, `state: 'working'`, `pid`) — `bindAgents` then binds it by name and `assessLiveness` reads its
+  // pid, so a PR with a review job in flight is refused `live-process` exactly as a live review session was.
+  const listed = listAgentsWithReviewJobs({ listAgents: () => defaultListAgents({ exec, env }), listJobs });
   // xpb0zyq — a session that already wrote its own completion record is finished, whatever the listing says.
   const selfReported = markSelfReportedDone(Array.isArray(listed) ? listed : [], completionFor, now);
   // #3383 continuation — a session whose OWN transcript has gone stale is finished too, self-report or not.
