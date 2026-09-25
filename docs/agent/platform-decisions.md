@@ -5658,7 +5658,7 @@ last-tick stamp) and #4052 (state root).
 
 ### Slow daemon actions run as detached jobs with durable records; the daemon loop never waits on one {#daemon-jobs}
 
-**Ratified 2026-09-25** (`4120`, bornAs `x6sslco`, operator, in session: *"I ratify"*). Fork 1 (a) — a job is a
+**Ratified 2026-09-25** (`4120`, bornAs `4120`, operator, in session: *"I ratify"*). Fork 1 (a) — a job is a
 run-store record kind, with a `host:pid:procStart` handle and a dead-handle relaunch rule; Fork 2 (c) — code
 version per kind (`readonly-tree` runs from a pinned snapshot, `mutates-tree` runs in its own working tree).
 Three ratify lines settled by precedent. Grounding: `we:reports/2026-09-24-daemon-blocking-antipatterns.md`.
