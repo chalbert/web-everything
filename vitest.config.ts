@@ -207,6 +207,9 @@ export default defineConfig({
       'scripts/conveyor/__tests__/parked-pr-conflict-dispatch-integration.test.mjs',
       // #x5n4zn3 — same tier: a real spawned node driver + a real hanging `gh` shim on `PATH`.
       'scripts/conveyor/__tests__/parked-pr-conflict-hung-gh-bounded.test.mjs',
+      // #3383 — the stateful fake-GitHub's own proof: real bare origin/clone + real `execFileSync('gh', …)`,
+      // same tier as the two files immediately above it.
+      'scripts/conveyor/__tests__/fake-gh-state.test.mjs',
     ],
   },
   resolve: {
