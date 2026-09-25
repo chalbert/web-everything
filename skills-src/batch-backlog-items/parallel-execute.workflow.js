@@ -349,25 +349,53 @@ log(`Provisioned lane pools — ${poolSummary}. ready-to-merge label ${labelRead
 // ── Phase 3 — Work each item in its coupled clone → open a ready-to-merge PR ────
 phase('Lanes');
 
-function laneDirsForItem(it) {
-  const dirs = {}; // repo -> dir
-  for (const repo of affectedReposOf(it)) {
-    const idx = laneIndexOf(lanePlan, it, repo);
-    const pool = lanePools[repo] || [];
-    // #2426 — couple item→lane by position into the ACQUIRABLE pool. If the pool ran short (more items than
-    // acquirable lanes — sibling sessions hold too many), the overflow item gets NO lane ('') and is cleanly
-    // carried with a log below. NEVER wrap with `idx % pool.length`: that silently coupled two items onto ONE
-    // lane, so the second clobbered the first's work. Contention must carry-and-log, never double up.
-    dirs[repo] = pool[idx] || '';
-  }
-  return dirs;
-}
-
 // The lane NUMBER (`lane-N` → N) an item is coupled to in a repo, parsed from its clone dir. Needed for the
 // #2413 `acquire --lane=N` / `release --lane=N` the lane runs from the primary (a dir alone can't name a lane).
 function laneNumFromDir(dir) {
   const m = String(dir || '').match(/lane-(\d+)\/?$/);
   return m ? m[1] : '';
+}
+
+// #3892/#3916/#3917 — QUEUE OVER FREE LANES instead of dropping the overflow (the live wf_0c2ca672-4f0 failure:
+// 4 items, provisioning returned only 1 acquirable WE lane because sibling sessions held the rest — the OLD
+// `pool[idx] || ''` coupling gave the other 3 items NO lane at all and they were "cleanly carried" as
+// drop:'no-result', never running). Each lane is a PERSISTENT clone the item's OWN agent() acquires, works, and
+// RELEASES (laneItemPrompt steps 1/9) — so reusing one for a second item is safe once the first has fully
+// finished and released it. So an item with no lane free RIGHT NOW should WAIT for one, not be dropped.
+//
+// Items are assigned to lanes round-robin (`idx % pool.length`, `idx` = the item's position among items
+// touching that repo — see repoLanePlan/laneIndexOf above) and gated on a promise-chain per (repo, lane index):
+// each item's start awaits whichever item is ahead of it in that lane's queue finishing AND releasing. Lanes
+// run CONCURRENTLY with each other; items sharing one lane run SEQUENTIALLY — never two on one lane at once.
+// A cross-repo item is gated on EVERY repo-lane it needs, together (Promise.all): its single agent() call spans
+// all its repos atomically, so it can never be split across rounds (started on repo A while still queued on B).
+//
+// The ONLY items dropped outright are ones a needed repo provisioned ZERO acquirable lanes for (not "busy" —
+// genuinely none), because no amount of waiting produces a lane that doesn't exist. Those get drop:'no-lane'
+// (distinct from 'no-result', which stays reserved for an agent that genuinely died) — see the Finalize ledger.
+function buildLaneSchedule(workItems) {
+  const occupancy = {}; // repo -> [nextFreePromise, …] index-aligned to lanePools[repo]
+  for (const repo of Object.keys(lanePools)) occupancy[repo] = (lanePools[repo] || []).map(() => Promise.resolve());
+  const schedule = new Map(); // item -> null (no lane exists at all) | { perRepo: {repo: {dir, waitFor, release}}, queuedBehind }
+  for (const it of workItems) {
+    const repos = affectedReposOf(it);
+    const noLaneAtAll = repos.some((r) => !(lanePools[r] || []).length);
+    if (noLaneAtAll) { schedule.set(it, null); continue; }
+    const perRepo = {};
+    const queuedBehind = []; // e.g. "we lane-5" — only populated when this item is NOT first in that lane's queue
+    for (const repo of repos) {
+      const pool = lanePools[repo] || [];
+      const idx = laneIndexOf(lanePlan, it, repo);
+      const laneIdx = idx % pool.length;
+      const waitFor = occupancy[repo][laneIdx]; // resolves once whoever is ahead of us on this lane releases it
+      if (idx >= pool.length) queuedBehind.push(`${repo} lane-${laneNumFromDir(pool[laneIdx])}`);
+      let release;
+      occupancy[repo][laneIdx] = new Promise((res) => { release = res; }); // the NEXT item on this lane waits on us
+      perRepo[repo] = { dir: pool[laneIdx], waitFor, release: () => release() };
+    }
+    schedule.set(it, { perRepo, queuedBehind });
+  }
+  return schedule;
 }
 
 function laneItemPrompt(it, laneDirs) {
@@ -551,7 +579,10 @@ function laneItemPrompt(it, laneDirs) {
   return lines.join('\n');
 }
 
-log(`Working ${workItems.length} item(s) concurrently — each opens its own ready-to-merge PR the instant it lands…`);
+const laneSchedule = buildLaneSchedule(workItems);
+const queuedCount = Array.from(laneSchedule.values()).filter((a) => a && a.queuedBehind.length).length;
+const noLaneCount = Array.from(laneSchedule.values()).filter((a) => a === null).length;
+log(`Working ${workItems.length} item(s) over their lane pools — each opens its own ready-to-merge PR the instant it lands${queuedCount ? `; ${queuedCount} item(s) queue behind a busy lane and start once it frees` : ''}${noLaneCount ? `; ${noLaneCount} item(s) have NO lane provisioned at all and cannot run this batch` : ''}…`);
 {
   const esc = workItems.filter((it) => it.complex).map((it) => `#${it.num}`);
   log(`  lane execution: Sonnet default${laneModelOverride ? ` (override '${laneModelOverride}')` : ''}, Opus for ${esc.length ? esc.length + ' complex item(s): ' + esc.join(', ') : 'none flagged complex'}; NEVER Fable. The PR's required \`test\` check is the quality floor — the drain never merges a red PR.`);
@@ -559,24 +590,31 @@ log(`Working ${workItems.length} item(s) concurrently — each opens its own rea
 
 let itemsDone = 0;
 const results = await parallel(workItems.map((it) => () => {
-  const laneDirs = laneDirsForItem(it);
   // A seeded new item has no NNN until it scaffolds in-lane (#2215) — display by its lane key (`new-<slug>`).
   const disp = it.seed ? laneKeyOf(it) : `#${it.num}`;
-  if (!laneDirs.we) {
+  const assign = laneSchedule.get(it);
+  if (!assign) {
     itemsDone++;
-    // #2426 — no acquirable WE lane left for this item (more items than free lanes: sibling sessions hold too
-    // many). Carry it explicitly rather than double up onto a lane already coupled to another item.
-    log(`  ✗ ${disp} (${itemsDone}/${workItems.length}): no acquirable WE lane (pool exhausted by lease contention) → carried [${it.slug}]`);
-    return Promise.resolve(null);
+    const starved = affectedReposOf(it).filter((r) => !(lanePools[r] || []).length);
+    // A needed repo provisioned ZERO acquirable lanes — no amount of queueing produces one this batch.
+    log(`  ✗ ${disp} (${itemsDone}/${workItems.length}): NO acquirable lane provisioned for ${starved.join('/')} (zero, not busy) → dropped [${it.slug}]`);
+    return Promise.resolve({ num: it.seed ? undefined : String(it.num), drop: 'no-lane' });
   }
-  return agent(laneItemPrompt(it, laneDirs), { label: `lane:${disp}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) })
+  if (assign.queuedBehind.length) {
+    log(`  ⏳ ${disp}: queued behind ${assign.queuedBehind.join(', ')} — will start once free [${it.slug}]`);
+  }
+  const laneDirs = Object.fromEntries(Object.entries(assign.perRepo).map(([r, p]) => [r, p.dir]));
+  const releaseAll = () => { for (const p of Object.values(assign.perRepo)) p.release(); };
+  return Promise.all(Object.values(assign.perRepo).map((p) => p.waitFor))
+    .then(() => agent(laneItemPrompt(it, laneDirs), { label: `lane:${disp}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) }))
     .then((r) => {
       itemsDone++;
+      releaseAll();
       const prN = r && Array.isArray(r.prs) ? r.prs.filter((p) => p && p.pr).length : 0;
       log(`  ${r && r.status === 'pr-open' && prN > 0 ? '✓' : '~'} ${r && r.num ? '#' + r.num : disp} (${itemsDone}/${workItems.length}): ${r ? r.status + ', gate ' + r.gate + (prN ? `, ${prN} PR(s) opened` : ', no PR') : 'no result'} [${it.slug}]`);
       return r ? { ...r, num: r.num || (it.seed ? undefined : String(it.num)), _item: it } : null;
     })
-    .catch(() => { itemsDone++; log(`  ✗ ${disp} (${itemsDone}/${workItems.length}) died → carried [${it.slug}]`); return null; });
+    .catch(() => { itemsDone++; releaseAll(); log(`  ✗ ${disp} (${itemsDone}/${workItems.length}) died → carried [${it.slug}]`); return null; });
 }));
 
 // ── Phase 4 — Finalize: build the ledger + write the local don't-re-offer signal (NO integrate, NO drain) ──
