@@ -471,6 +471,20 @@ describe('runHungCiRecoveryAllRepos — one sweepHungCiRecovery call per watched
     ]);
   });
 
+  // xd1sfms follow-up (live 2026-09-25, #2636 hung twice on the same shard) — an applied row's OWN `kind` (the
+  // plan's real classification, e.g. `repeat-hang`) must survive this mapping verbatim, never overwritten by
+  // the ok/action heuristic — the heuristic is a fallback for an older fixture that supplies no `kind` at all.
+  it('preserves an applied row\'s OWN kind (e.g. repeat-hang) rather than re-deriving it from ok/action', () => {
+    const tick = vi.fn(() => ({
+      dispatch: [], refusals: [],
+      applied: [{
+        prNumber: 2636, runId: 36187480460, ok: true, action: 'cancelled-no-rerun', kind: 'repeat-hang', why: 'job hung twice',
+      }],
+    }));
+    const out = runHungCiRecoveryAllRepos({ repos: ['chalbert/web-everything'], tick });
+    expect(out.dispatched).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'repeat-hang', action: 'cancelled-no-rerun' })]);
+  });
+
   it('drops the ordinary not-hung refusal (the expected case for almost every PR on almost every tick) but keeps a real one', () => {
     const tick = vi.fn(() => ({
       dispatch: [], applied: [],

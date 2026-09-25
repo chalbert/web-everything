@@ -264,9 +264,12 @@ export function runHungCiRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, t
       continue;
     }
     const { repo, result } = entry;
-    // a hung candidate this tick actually acted on (cancel+rerun attempted, whether or not it succeeded) —
-    // `applied` rows carry their own `ok`, so a failed cancel/rerun still shows up (never silently dropped).
-    for (const a of (result.applied ?? [])) dispatched.push({ ...a, repo, kind: a.ok ? 'hung-cancel-rerun' : `hung-${a.action}` });
+    // a hung candidate this tick actually acted on (cancel+rerun OR cancel-only attempted, whether or not it
+    // succeeded) — `applied` rows carry their own `ok`, so a failed attempt still shows up (never silently
+    // dropped). Prefers the row's OWN `kind` (the plan's real classification — `hung-cancel-rerun` or
+    // `repeat-hang`, xd1sfms follow-up) over the old ok/action heuristic, which a fixture supplying no `kind`
+    // (an older test double) still falls back to.
+    for (const a of (result.applied ?? [])) dispatched.push({ ...a, repo, kind: a.kind ?? (a.ok ? 'hung-cancel-rerun' : `hung-${a.action}`) });
     for (const r of (result.refusals ?? [])) if (r.kind !== 'not-hung') refusals.push({ ...r, repo });
   }
   return { repos: perRepo, dispatched, refusals };

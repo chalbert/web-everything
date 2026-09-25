@@ -240,7 +240,7 @@ describe('main-red-recovery — buildHungCandidates', () => {
     const candidates = buildHungCandidates([PR_2636_HUNG]);
     expect(candidates).toEqual([{
       prNumber: 2636, headRefName: 'lane/batch-...-3915', headSha: 'deadbeef2636',
-      runId: 36161558017, startedAt: '2026-09-25T16:34:28.000Z',
+      runId: 36161558017, startedAt: '2026-09-25T16:34:28.000Z', jobName: 'test-shard (1)',
     }]);
   });
 
@@ -294,5 +294,42 @@ describe('main-red-recovery — planHungCiRecoveries', () => {
 
   it('DEFAULT_HUNG_THRESHOLD_MS is well above every real p95 measured 2026-09-25 (test-shard 249s, test 380s, smoke 146s)', () => {
     expect(DEFAULT_HUNG_THRESHOLD_MS).toBeGreaterThan(380 * 1000 * 3);
+  });
+
+  // LIVE 2026-09-25, orchestrator-flagged: #2636's `test-shard (1)` hung on run 36161558017, then hung AGAIN
+  // on run 36187480460 after the PR's head was refreshed onto a NEW sha. A repeat hang on the SAME job across
+  // different shas is evidence of a real hang in that shard's own tests, not one-off infra — this dispatches
+  // `repeat-hang` (cancel only, never rerun) instead of burning another blind retry.
+  it('dispatches repeat-hang (cancel only, never rerun) when the SAME job has hung before on a DIFFERENT sha', () => {
+    const candidates = [{
+      prNumber: 2636, headRefName: 'lane/x', headSha: 'a-new-sha-after-refresh', runId: 36187480460,
+      startedAt: '2026-09-25T20:43:42Z', jobName: 'test-shard (1)', hungAttemptsForSha: 0, hungAttemptsForJob: 1,
+    }];
+    const plan = planHungCiRecoveries({ candidates, now: Date.parse('2026-09-25T21:40:00Z') });
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      prNumber: 2636, runId: 36187480460, jobName: 'test-shard (1)', kind: 'repeat-hang',
+    })]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('repeat-hang takes priority over the per-sha cap check — checked first, even on a fresh sha with 0 sha-attempts', () => {
+    const candidates = [{
+      prNumber: 2636, headSha: 'brand-new-sha', runId: 1, startedAt: '2026-09-25T19:00:00Z',
+      jobName: 'test-shard (1)', hungAttemptsForSha: 0, hungAttemptsForJob: 3,
+    }];
+    const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'repeat-hang' })]);
+  });
+
+  it('a job that has never hung before (hungAttemptsForJob 0/omitted) takes the ordinary hung-cancel-rerun path, not repeat-hang', () => {
+    const candidates = buildHungCandidates([PR_2636_HUNG]); // hungAttemptsForJob omitted — first time this job is seen hung
+    const plan = planHungCiRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'hung-cancel-rerun' })]);
+  });
+
+  it('no jobName resolved (defensive) never crashes into repeat-hang — falls through to the ordinary path', () => {
+    const candidates = [{ prNumber: 5, headSha: 'x', runId: 1, startedAt: '2026-09-25T16:00:00Z', jobName: null, hungAttemptsForJob: 5 }];
+    const plan = planHungCiRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'hung-cancel-rerun' })]);
   });
 });

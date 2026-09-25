@@ -10,8 +10,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildCandidates, sweepCiRedRecovery, refreshOntoMain, formatReport,
-  HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments,
-  cancelAndRerunHungRun, sweepHungCiRecovery, formatHungReport,
+  HUNG_CI_COMMENT_MARKER, buildHungCiComment, countHungCiComments, countHungCiCommentsByJob,
+  cancelAndRerunHungRun, cancelHungRun, describeExecError, sweepHungCiRecovery, formatHungReport,
 } from '../ci-red-recovery-watch.mjs';
 
 const failingCheck = (completedAt) => ({ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', completedAt });
@@ -239,17 +239,40 @@ describe('ci-red-recovery-watch — sweepHungCiRecovery', () => {
     });
     expect(cancelAndRerun).toHaveBeenCalledTimes(1);
     expect(cancelAndRerun).toHaveBeenCalledWith(36161558017, { repo: null });
-    expect(postComment).toHaveBeenCalledWith(2636, { repo: null, runId: 36161558017, headSha: 'deadbeef2636' });
+    expect(postComment).toHaveBeenCalledWith(2636, {
+      repo: null, runId: 36161558017, headSha: 'deadbeef2636', jobName: 'test-shard (1)',
+      kind: 'hung-cancel-rerun', ok: true, action: 'cancelled-and-rerun', error: null,
+    });
     expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2636, runId: 36161558017, ok: true, action: 'cancelled-and-rerun' })]);
   });
 
-  it('never posts the marker comment when the cancel+rerun itself failed — a failed attempt must not inflate the cap', () => {
+  // LIVE 2026-09-25, orchestrator-flagged: the ORIGINAL version of this pass only posted (and therefore only
+  // COUNTED) a SUCCESSFUL cancel+rerun. Live against #2636, the GitHub App token lacked `actions:write`, so
+  // `gh run cancel` failed on EVERY tick, the marker was never posted, the durable per-sha count stayed 0
+  // forever, and this pass would have retried the identical doomed call every 2 minutes indefinitely. Fixed:
+  // the marker (and therefore the count) is posted on EVERY attempt, success or failure.
+  it('POSTS the marker comment even when the cancel+rerun itself FAILED — a failed attempt still counts toward the cap', () => {
     const cancelAndRerun = vi.fn(() => ({ ok: false, action: 'cancel-failed', error: 'boom' }));
     const postComment = vi.fn();
-    sweepHungCiRecovery({
+    const result = sweepHungCiRecovery({
       readOpenPrs: () => [PR_2636_HUNG], readComments: () => [], cancelAndRerun, postComment, now: NOW, apply: true,
     });
-    expect(postComment).not.toHaveBeenCalled();
+    expect(postComment).toHaveBeenCalledWith(2636, expect.objectContaining({ ok: false, action: 'cancel-failed', error: 'boom' }));
+    expect(result.applied).toEqual([expect.objectContaining({ prNumber: 2636, ok: false, action: 'cancel-failed', error: 'boom' })]);
+  });
+
+  it('a run whose cancel+rerun keeps FAILING still trips hung-cap-exhausted after maxRetriesPerSha attempts — never hammers gh forever', () => {
+    // Simulates tick N+1 reading back the durable failure markers ticks 1..maxRetriesPerSha posted.
+    const readComments = () => [
+      { body: buildHungCiComment({ headSha: 'deadbeef2636', jobName: 'test-shard (1)', ok: false, action: 'cancel-failed', error: 'permission denied' }), author: { login: 'web-everything' } },
+      { body: buildHungCiComment({ headSha: 'deadbeef2636', jobName: 'test-shard (1)', ok: false, action: 'cancel-failed', error: 'permission denied' }), author: { login: 'web-everything' } },
+    ];
+    const cancelAndRerun = vi.fn();
+    const result = sweepHungCiRecovery({
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, now: NOW, apply: true, maxRetriesPerSha: 2,
+    });
+    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
+    expect(cancelAndRerun).not.toHaveBeenCalled();
   });
 
   it('refuses hung-cap-exhausted once the durable per-sha comment count already hit the cap, and never calls cancelAndRerun', () => {
@@ -265,29 +288,121 @@ describe('ci-red-recovery-watch — sweepHungCiRecovery', () => {
     expect(cancelAndRerun).not.toHaveBeenCalled();
   });
 
-  it('a NEW push (different head sha) starts the cap fresh — the old sha\'s exhausted count never carries over', () => {
+  it('a NEW push (different head sha) starts the SHA cap fresh — the old sha\'s exhausted count never carries over', () => {
     const readComments = () => [
-      { body: buildHungCiComment({ headSha: 'an-old-sha' }), author: { login: 'web-everything' } },
-      { body: buildHungCiComment({ headSha: 'an-old-sha' }), author: { login: 'web-everything' } },
+      { body: buildHungCiComment({ headSha: 'an-old-sha', jobName: 'some-other-job' }), author: { login: 'web-everything' } },
+      { body: buildHungCiComment({ headSha: 'an-old-sha', jobName: 'some-other-job' }), author: { login: 'web-everything' } },
     ];
     const cancelAndRerun = vi.fn(() => ({ ok: true, action: 'cancelled-and-rerun' }));
     const result = sweepHungCiRecovery({
       readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, postComment: vi.fn(), now: NOW, apply: true, maxRetriesPerSha: 2,
     });
-    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, attempts: 0 })]);
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, attempts: 0, kind: 'hung-cancel-rerun' })]);
     expect(cancelAndRerun).toHaveBeenCalledTimes(1);
+  });
+
+  // LIVE 2026-09-25, orchestrator-flagged: #2636's `test-shard (1)` hung twice across two different shas.
+  it('routes a repeat-hang dispatch to cancelOnly, never cancelAndRerun, and posts the escalation marker', () => {
+    const readComments = () => [
+      // a PRIOR attempt on this SAME job, against a DIFFERENT (now-superseded) sha — the repeat-hang signal.
+      { body: buildHungCiComment({ headSha: 'an-old-sha', jobName: 'test-shard (1)' }), author: { login: 'web-everything' } },
+    ];
+    const cancelAndRerun = vi.fn();
+    const cancelOnly = vi.fn(() => ({ ok: true, action: 'cancelled-no-rerun' }));
+    const postComment = vi.fn();
+    const result = sweepHungCiRecovery({
+      readOpenPrs: () => [PR_2636_HUNG], readComments, cancelAndRerun, cancelOnly, postComment, now: NOW, apply: true,
+    });
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'repeat-hang' })]);
+    expect(cancelOnly).toHaveBeenCalledWith(36161558017, { repo: null });
+    expect(cancelAndRerun).not.toHaveBeenCalled();
+    expect(postComment).toHaveBeenCalledWith(2636, expect.objectContaining({ kind: 'repeat-hang', ok: true, action: 'cancelled-no-rerun' }));
+    expect(result.applied).toEqual([expect.objectContaining({ kind: 'repeat-hang', ok: true, action: 'cancelled-no-rerun' })]);
+  });
+});
+
+describe('ci-red-recovery-watch — countHungCiCommentsByJob', () => {
+  it('counts a trusted marker naming this job, ACROSS different shas — a rebase must never reset this count', () => {
+    const comments = [
+      { body: buildHungCiComment({ headSha: 'sha-1', jobName: 'test-shard (1)' }), author: { login: 'web-everything' } },
+      { body: buildHungCiComment({ headSha: 'sha-2', jobName: 'test-shard (1)' }), author: { login: 'web-everything' } }, // different sha, SAME job — still counts
+      { body: buildHungCiComment({ headSha: 'sha-2', jobName: 'test-shard (2)' }), author: { login: 'web-everything' } }, // a different job — must not count
+      { body: buildHungCiComment({ headSha: 'sha-2', jobName: 'test-shard (1)' }), author: { login: 'some-random-user' } }, // untrusted author
+    ];
+    expect(countHungCiCommentsByJob(comments, 'test-shard (1)')).toBe(2);
+  });
+
+  it('a non-array/empty input counts zero', () => {
+    expect(countHungCiCommentsByJob(null)).toBe(0);
+    expect(countHungCiCommentsByJob([])).toBe(0);
+  });
+});
+
+describe('ci-red-recovery-watch — cancelHungRun', () => {
+  it('cancels and NEVER reruns', () => {
+    const calls = [];
+    const exec = vi.fn((file, args) => { calls.push(args); return ''; });
+    const result = cancelHungRun(36187480460, { repo: 'chalbert/web-everything', exec });
+    expect(result).toEqual({ ok: true, action: 'cancelled-no-rerun' });
+    expect(calls).toEqual([['run', 'cancel', '36187480460', '--repo', 'chalbert/web-everything']]);
+  });
+
+  it('reports a failed cancel with the REAL error text', () => {
+    const exec = vi.fn(() => { const e = new Error('Command failed: gh run cancel 1'); e.stderr = 'HttpError: Resource not accessible by integration'; throw e; });
+    const result = cancelHungRun(1, { exec });
+    expect(result).toEqual({ ok: false, action: 'cancel-failed', error: 'HttpError: Resource not accessible by integration' });
+  });
+});
+
+describe('ci-red-recovery-watch — describeExecError', () => {
+  // LIVE 2026-09-25, orchestrator-flagged: the ORIGINAL error handling here took only
+  // `e.message.split('\n')[0]`, which for a Node execFileSync failure is just "Command failed: gh run cancel
+  // 123" — the actual `gh` stderr (a permission error, a "run already completed" race, etc.) was silently
+  // dropped. Confirmed live against #2636's own daemon log.
+  it('prefers the REAL stderr over the generic "Command failed" exec message', () => {
+    const e = new Error('Command failed: gh run cancel 36187480460 --repo chalbert/web-everything');
+    e.stderr = 'HttpError: Resource not accessible by integration (actions:write required)\n';
+    expect(describeExecError(e)).toBe('HttpError: Resource not accessible by integration (actions:write required)');
+  });
+
+  it('accepts a Buffer stderr (execFileSync default encoding shape) exactly like a string one', () => {
+    const e = new Error('Command failed');
+    e.stderr = Buffer.from('run is already completing');
+    expect(describeExecError(e)).toBe('run is already completing');
+  });
+
+  it('falls back to the full message (not just its first line) when stderr is empty/missing', () => {
+    const e = new Error('Command failed: gh run cancel 1\nsome extra detail on a second line');
+    expect(describeExecError(e)).toBe('Command failed: gh run cancel 1\nsome extra detail on a second line');
+  });
+
+  it('caps an excessively long error at 500 chars so a runaway stderr never bloats a PR comment', () => {
+    const e = new Error('x');
+    e.stderr = 'y'.repeat(1000);
+    const described = describeExecError(e);
+    expect(described.length).toBe(501); // 500 chars + the trailing ellipsis
+    expect(described.endsWith('…')).toBe(true);
   });
 });
 
 describe('ci-red-recovery-watch — formatHungReport', () => {
   it('prints one line per dispatch/refusal/applied, WITH the reason on both dispatch and applied lines', () => {
     const report = formatHungReport({
-      dispatch: [{ prNumber: 2636, runId: 36161558017, why: 'stuck 3h' }],
+      dispatch: [{ prNumber: 2636, runId: 36161558017, kind: 'hung-cancel-rerun', why: 'stuck 3h' }],
       refusals: [{ prNumber: 9001, kind: 'hung-cap-exhausted', why: 'cap hit' }],
       applied: [{ prNumber: 2636, runId: 36161558017, ok: true, action: 'cancelled-and-rerun', why: 'stuck 3h' }],
     });
     expect(report).toContain('hung-cancel-rerun PR #2636 run 36161558017 — stuck 3h');
     expect(report).toContain('hung-cap-exhausted PR #9001 — cap hit');
     expect(report).toContain('applied: cancelled-and-rerun run 36161558017 (PR #2636) — stuck 3h');
+  });
+
+  it('prints a repeat-hang dispatch under its OWN kind, never mislabelled as hung-cancel-rerun', () => {
+    const report = formatHungReport({
+      dispatch: [{ prNumber: 2636, runId: 36187480460, kind: 'repeat-hang', why: 'job hung twice' }],
+      refusals: [], applied: [],
+    });
+    expect(report).toContain('repeat-hang PR #2636 run 36187480460 — job hung twice');
+    expect(report).not.toContain('hung-cancel-rerun');
   });
 });

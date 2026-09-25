@@ -363,10 +363,16 @@ export function isRunHung({ startedAt, now = Date.now(), thresholdMs = DEFAULT_H
  * the PR as still-open whenever the required check either has no entry yet or has not completed, AND at least
  * one of the run's own checks is itself not yet `COMPLETED`. `startedAt` on the returned row is the EARLIEST
  * `startedAt` among the run's still-open checks — the run's own age, not any one job's.
+ * `jobName` on the returned row is the name of the check WHOSE `startedAt` is that earliest timestamp — the
+ * actual hung job (e.g. `"test-shard (1)"`), never the PR-level required check name. LIVE 2026-09-25: #2636
+ * hung on `test-shard (1)` TWICE, on two DIFFERENT head shas (36161558017, then 36187480460 after a refresh) —
+ * a repeat hang on the SAME job name across different shas is the signal {@link planHungCiRecoveries} uses to
+ * tell "bad luck, this infra attempt hung" from "this shard's own tests are the problem" (see that function's
+ * own docblock).
  * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup` returns.
  * @param {{requiredCheck?:string, workflowName?:string}} [o]
  * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null), runId:(number|null),
- *   startedAt:(string|null)}>}
+ *   startedAt:(string|null), jobName:(string|null)}>}
  */
 export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHECK, workflowName = DEFAULT_MAIN_WORKFLOW_NAME } = {}) {
   const out = [];
@@ -383,13 +389,17 @@ export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHEC
 
     let runId = null;
     let earliestStart = null;
+    let jobName = null;
     let stillOpen = false;
     for (const c of ciChecks) {
       if (runId == null) runId = runIdFromDetailsUrl(c?.detailsUrl);
       if (String(c?.status).toUpperCase() === 'COMPLETED') continue;
       stillOpen = true;
       const started = Date.parse(c?.startedAt);
-      if (Number.isFinite(started) && (earliestStart == null || started < earliestStart)) earliestStart = started;
+      if (Number.isFinite(started) && (earliestStart == null || started < earliestStart)) {
+        earliestStart = started;
+        jobName = c?.name ?? null;
+      }
     }
     if (!stillOpen) continue; // every check the rollup knows about already finished; required just hasn't been created yet (e.g. queued behind `needs`) with nothing itself running — nothing to cancel.
 
@@ -399,6 +409,7 @@ export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHEC
       headSha: pr?.headRefOid ?? null,
       runId,
       startedAt: earliestStart != null ? new Date(earliestStart).toISOString() : null,
+      jobName,
     });
   }
   return out;
@@ -412,17 +423,33 @@ export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHEC
  * ORDER OF THE CHECKS:
  *   1. Not actually hung yet ({@link isRunHung} false) → `not-hung` (the ordinary, expected case for almost
  *      every open PR on almost every tick).
- *   2. Hung, but this exact head sha already used up its cap → `hung-cap-exhausted` (see the section header
- *      above for why this needs no separate escalation step — bounded job `timeout-minutes` does the rest).
- *   3. Otherwise → `hung-cancel-rerun` dispatch.
+ *   2. REPEAT HANG ON THE SAME JOB, across a DIFFERENT head sha (`hungAttemptsForJob >= 1`) → `repeat-hang`
+ *      dispatch: cancel the run but do NOT rerun it. LIVE 2026-09-25, orchestrator-flagged: #2636's
+ *      `test-shard (1)` hung on run 36161558017, then hung AGAIN on run 36187480460 after the PR's head was
+ *      refreshed onto a new sha — the SAME job name hanging twice across two different trees is evidence the
+ *      hang lives in that shard's own tests (a real bug or infinite loop the PR introduced), not one-off infra
+ *      flakiness a blind retry would fix. Checked BEFORE the per-sha cap below (and takes priority over it)
+ *      because it is a STRONGER, faster signal than "this exact sha has been retried N times" — a fresh sha
+ *      that immediately re-hangs on the identical job doesn't need to burn its own retry budget to prove the
+ *      point. Cancelling (never rerunning) is what lets the EXISTING `ci-red` → `ci-heal` path
+ *      (`we:scripts/conveyor/reconcile-core.mjs`) take over: `we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed`
+ *      already treats a CANCELLED required check as failed, so ci-heal is dispatched with a real diagnosis
+ *      target instead of this pass endlessly re-running a shard that will only hang again.
+ *   3. Hung, no repeat-hang signal, but this exact head sha already used up its ATTEMPT cap (counted on every
+ *      attempt, succeeded or not — see `ci-red-recovery-watch.mjs#sweepHungCiRecovery`'s own docblock for why
+ *      a FAILED cancel must still count) → `hung-cap-exhausted` (bounded job `timeout-minutes`, landed in the
+ *      same card, does the rest — see the section header above).
+ *   4. Otherwise → `hung-cancel-rerun` dispatch.
  * @param {object} o
  * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null), runId?:(number|null),
- *   startedAt?:(string|null), hungAttemptsForSha?:number}>} [o.candidates] - `hungAttemptsForSha` is the
- *   CALLER's durable count (see `ci-red-recovery-watch.mjs#countHungCiComments`) for THIS candidate's
- *   `headSha`; omitted/non-finite is treated as 0 (a candidate the caller never bothered counting is one this
- *   pass has not yet tried, the same safe default {@link planMainRedRebases} uses for an unresolved `aheadBy`
- *   in the OPPOSITE direction it needs here — 0 is the correct floor, not the correct ceiling, for a brand-new
- *   candidate).
+ *   startedAt?:(string|null), jobName?:(string|null), hungAttemptsForSha?:number,
+ *   hungAttemptsForJob?:number}>} [o.candidates] - `hungAttemptsForSha` is the CALLER's durable count (see
+ *   `ci-red-recovery-watch.mjs#countHungCiComments`) for THIS candidate's `headSha`; `hungAttemptsForJob` is
+ *   the durable count for THIS candidate's `jobName`, ACROSS every sha this PR has ever had (see
+ *   `ci-red-recovery-watch.mjs#countHungCiCommentsByJob`). Both omitted/non-finite default to 0 — a candidate
+ *   the caller never bothered counting is one this pass has not yet tried, the same safe default
+ *   {@link planMainRedRebases} uses for an unresolved `aheadBy` in the OPPOSITE direction it needs here — 0 is
+ *   the correct floor, not the correct ceiling, for a brand-new candidate.
  * @param {number} [o.now]
  * @param {number} [o.thresholdMs]
  * @param {number} [o.maxRetriesPerSha]
@@ -437,18 +464,27 @@ export function planHungCiRecoveries({
     const prNumber = Number(c?.prNumber);
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
     const base = {
-      prNumber, headRefName: c?.headRefName ?? null, headSha: c?.headSha ?? null, runId: c?.runId ?? null,
+      prNumber, headRefName: c?.headRefName ?? null, headSha: c?.headSha ?? null, runId: c?.runId ?? null, jobName: c?.jobName ?? null,
     };
     const minutes = Math.round(thresholdMs / 60000);
     if (!isRunHung({ startedAt: c?.startedAt, now, thresholdMs })) {
       refusals.push({ ...base, kind: 'not-hung', why: `PR #${prNumber}'s CI run (${base.runId ?? '?'}) has not been open past the ${minutes}min hung threshold` });
       continue;
     }
+    const jobAttempts = Number.isFinite(c?.hungAttemptsForJob) ? c.hungAttemptsForJob : 0;
+    if (base.jobName && jobAttempts >= 1) {
+      dispatch.push({
+        ...base,
+        kind: 'repeat-hang',
+        why: `PR #${prNumber}'s job "${base.jobName}" has hung ${jobAttempts} time(s) before on a DIFFERENT head sha (run ${base.runId ?? '?'} is hung again now) — this looks like a real hang in this shard's own tests, not infra; cancelling only (never re-running) so the existing ci-red -> ci-heal path diagnoses it`,
+      });
+      continue;
+    }
     const attempts = Number.isFinite(c?.hungAttemptsForSha) ? c.hungAttemptsForSha : 0;
     if (attempts >= maxRetriesPerSha) {
       refusals.push({
         ...base, kind: 'hung-cap-exhausted',
-        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} was already cancelled+re-run ${attempts} time(s) (cap ${maxRetriesPerSha}) — leaving it for GitHub's own job timeout-minutes to conclude it, at which point the ordinary ci-heal path takes over`,
+        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${attempts} hung-recovery attempt(s) (cap ${maxRetriesPerSha}) — leaving it for GitHub's own job timeout-minutes to conclude it, at which point the ordinary ci-heal path takes over`,
       });
       continue;
     }
