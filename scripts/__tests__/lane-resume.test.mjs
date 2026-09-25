@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet, deriveItemFromRef, classifyPrMissingRef, planOpenPrMissingRef } from '../lane-resume.mjs';
+import { classifyLane, orderByBlockedBy, landDecision, land, testConclusionOf, remoteManifestApiArgs, markStackDescendantsBlocked, planStackRebuild, rebuildDescendant, deriveLandedFromMain, resolvedOnMain, resolvedItemSet, deriveItemFromRef, classifyPrMissingRef, planOpenPrMissingRef, submitPrMissingOpen, prMissingOpenArgs } from '../lane-resume.mjs';
 // The drain's own selector — asserted alongside so the enqueue side is PROVEN to read the same entry (#xkfv491).
 import { latestRequiredCheck } from '../merge-ai-prs.mjs';
 
@@ -867,5 +867,64 @@ describe('lane-resume — planOpenPrMissingRef (#xcf4556, the `open <laneRef>` r
 
   it('proceeds even with an item, as long as that item is not resolved-on-main-by-another-commit', () => {
     expect(planOpenPrMissingRef(base({ item: 3915, resolvedOnMainByOtherCommit: false })).ok).toBe(true);
+  });
+});
+
+describe('lane-resume — submitPrMissingOpen (#xcf4556 review: the spawn + report-reading IO glue)', () => {
+  const o = { ref: 'lane/x', tipSha: 'abc123', bodyFile: '/b/body.md', dir: '/repo', prLandScript: '/we/scripts/pr-land.mjs' };
+  // Replays execFileSync's own shape: a zero exit returns stdout; a non-zero exit THROWS with status/stdout.
+  const exitWith = (status, report, calls = []) => (cmd, args) => {
+    calls.push([cmd, ...args]);
+    const stdout = JSON.stringify(report) + '\n';
+    if (status === 0) return stdout;
+    throw Object.assign(new Error(`Command failed: exit ${status}`), { status, signal: null, stdout, stderr: '' });
+  };
+
+  it('spawns pr-land.mjs --label-on-green (never a raw `gh pr create`), with --no-require-verified only alongside it', () => {
+    const calls = [];
+    submitPrMissingOpen({ ...o, exec: exitWith(0, { merged: false, reason: 'labelled-on-green', pr: 7 }, calls) });
+    expect(calls).toHaveLength(1);
+    const [cmd, ...args] = calls[0];
+    expect(cmd).toBe('node');
+    expect(args[0]).toMatch(/pr-land\.mjs$/);
+    expect(args).toContain('--label-on-green');
+    expect(args).toContain('--no-require-verified');
+    expect(args).toEqual(expect.arrayContaining(['--ref=lane/x', '--sha=abc123', '--body-file=/b/body.md', '--repo=/repo', '--json']));
+    expect(calls.flat()).not.toContain('gh');
+    expect(prMissingOpenArgs(o)).toEqual(args);
+  });
+
+  it('a clean label-on-green open is ok, naming the PR', () => {
+    const v = submitPrMissingOpen({ ...o, exec: exitWith(0, { merged: false, reason: 'labelled-on-green', pr: 7 }) });
+    expect(v).toMatchObject({ ok: true, prOpened: true, outcome: 'opened', pr: 7 });
+  });
+
+  // pr-land's POST-OPEN stops: the PR exists, then pr-land exits non-zero. The live proof run hit check-timeout
+  // on PR #2636 — the pre-fix glue reported that as ok:false / "refused".
+  for (const reason of ['check-timeout', 'check-red', 'behind', 'conflict']) {
+    it(`a post-open ${reason} (exit 3, pr named) reports the PR as OPENED, not refused`, () => {
+      const v = submitPrMissingOpen({ ...o, exec: exitWith(3, { merged: false, reason, pr: 2636, detail: 'leaving for a later drain pass' }) });
+      expect(v.ok).toBe(true);
+      expect(v.prOpened).toBe(true);
+      expect(v.pr).toBe(2636);
+      expect(v.reason).toBe(reason);
+      expect(v.outcome).not.toBe('opened'); // pr-land's own stop is still surfaced, not hidden
+    });
+  }
+
+  it('a pre-open guard refusal (no pr) is NOT ok', () => {
+    const v = submitPrMissingOpen({ ...o, exec: exitWith(3, { merged: false, reason: 'bad-ref', detail: 'no such ref' }) });
+    expect(v).toMatchObject({ ok: false, prOpened: false, outcome: 'refused', pr: null, reason: 'bad-ref' });
+  });
+
+  it('a crash with no parseable report is NOT ok and is unrun (never claimed as an answer)', () => {
+    const exec = () => { throw Object.assign(new Error('boom'), { status: 1, signal: null, stdout: 'TypeError: x\n', stderr: '' }); };
+    const v = submitPrMissingOpen({ ...o, exec });
+    expect(v).toMatchObject({ ok: false, prOpened: false, outcome: 'unrun' });
+  });
+
+  it('a spawn failure (no status/stdout at all) is unrun, not refused', () => {
+    const exec = () => { throw new Error('spawn node ENOENT'); };
+    expect(submitPrMissingOpen({ ...o, exec })).toMatchObject({ ok: false, outcome: 'unrun' });
   });
 });

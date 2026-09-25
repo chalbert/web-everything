@@ -94,6 +94,8 @@ export { remoteManifestApiArgs };
 // only the first `---`…`---` block — the same splice-scoped reader the backlog status verbs use.
 import { readField } from './backlog/frontmatter.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+// #xcf4556 review: pr-land's report is read through open-pr's ONE classifier, never re-parsed here.
+import { classifySubmit } from './operations/open-pr.mjs';
 
 /**
  * The ONE frontmatter-strict "is this backlog doc `status: resolved` on main?" predicate (#2455). BOTH
@@ -775,7 +777,8 @@ function collectPrMissingLanes({ repos = null, singleRepo = false, self = null, 
  * #3321); the PR's own required `test` check still gates the eventual land.
  * @param {string} ref
  * @param {{repo?:string|null, json?:boolean}} [o]
- * @returns {{ok:boolean, ref:string, reason?:string, raw?:object}}
+ * @returns {{ok:boolean, ref:string, reason?:string, prOpened?:boolean, outcome?:string, pr?:number|null, url?:string|null, detail?:string}}
+ *   a pre-spawn refusal carries only `{ok:false, ref, reason}`; a spawn returns {@link submitPrMissingOpen}'s shape.
  */
 function openPrMissingLane(ref, { repo = null } = {}) {
   const self = localSlug();
@@ -824,18 +827,45 @@ function openPrMissingLane(ref, { repo = null } = {}) {
   const bodyFile = joinPath(bodyDir, 'body.md');
   writeFileSync(bodyFile, body, 'utf8');
 
-  const prLandScript = fileURLToPath(new URL('./pr-land.mjs', import.meta.url));
-  const args = [prLandScript, `--ref=${ref}`, `--sha=${tipSha}`, '--label-on-green', '--no-require-verified', `--body-file=${bodyFile}`, `--repo=${dir}`, '--json'];
+  return submitPrMissingOpen({ ref, tipSha, bodyFile, dir });
+}
+
+/**
+ * The pr-land argv `open <laneRef>` spawns. PURE — exported so the transport guarantee (`pr-land.mjs
+ * --label-on-green`, never a raw `gh pr create`) is pinned by a test, not only by a docstring (#xcf4556
+ * review). `--no-require-verified` is safe ONLY because `--label-on-green` still waits on the PR's required
+ * checks before any ready-to-merge label; the two travel together.
+ * @param {{prLandScript:string, ref:string, tipSha:string, bodyFile:string, dir:string}} o
+ * @returns {string[]}
+ */
+export function prMissingOpenArgs({ prLandScript, ref, tipSha, bodyFile, dir }) {
+  return [prLandScript, `--ref=${ref}`, `--sha=${tipSha}`, '--label-on-green', '--no-require-verified', `--body-file=${bodyFile}`, `--repo=${dir}`, '--json'];
+}
+
+/**
+ * Spawn pr-land for a recovered ref and read its report through open-pr's SHARED `classifySubmit` /
+ * `HOME_REASONS` table — never a local re-parse (#xcf4556 review). In `--label-on-green` mode pr-land opens
+ * the PR FIRST, then waits on checks, so `check-timeout`/`check-red`/`behind`/`conflict` exit non-zero while
+ * naming a PR that EXISTS. Recovery's job is to make that PR exist, so `ok` is true whenever one does
+ * (`prOpened`); pr-land's own `outcome`/`reason` ride along so the caller still sees what happened after the
+ * open. `exec` is injectable so the test pins the argv and replays pr-land's real post-open payloads.
+ * @returns {{ok:boolean, ref:string, prOpened:boolean, outcome:string, pr:number|null, url:string|null, reason?:string, detail?:string}}
+ */
+export function submitPrMissingOpen({ ref, tipSha, bodyFile, dir, exec = execFileSync, prLandScript = fileURLToPath(new URL('./pr-land.mjs', import.meta.url)) }) {
+  const args = prMissingOpenArgs({ prLandScript, ref, tipSha, bodyFile, dir });
+  let report;
   try {
-    const out = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    const raw = JSON.parse(out.trim().split('\n').pop());
-    return { ok: !!raw.merged || raw.reason === 'labelled-on-green' || raw.reason === 'opened', ref, raw };
+    report = { status: 0, stdout: String(exec('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })) };
   } catch (e) {
-    const stdout = String(e.stdout || '').trim();
-    let raw = null;
-    try { raw = JSON.parse(stdout.split('\n').pop()); } catch { /* pr-land didn't emit JSON (crashed before its own emit) */ }
-    return { ok: false, ref, reason: raw ? (raw.detail || raw.reason) : String(e.message || e).split('\n')[0], raw };
+    // execFileSync throws on a non-zero exit WITH status/stdout attached; a spawn failure carries neither.
+    report = e && (e.status != null || e.signal)
+      ? { status: e.status, signal: e.signal, stdout: String(e.stdout || ''), stderr: String(e.stderr || '') }
+      : { error: e instanceof Error ? e : new Error(String(e)) };
   }
+  const c = classifySubmit(report);
+  const pr = c.pr ?? null;
+  const prOpened = c.outcome === 'opened' || pr != null;
+  return { ok: prOpened, ref, prOpened, outcome: c.outcome, pr, url: c.url ?? null, ...(c.reason ? { reason: c.reason } : {}), ...(c.detail ? { detail: c.detail } : {}) };
 }
 
 function discover(asJson, { repos = null, singleRepo = false, windowDays = 7 } = {}) {
@@ -924,7 +954,15 @@ if (IS_CLI) {
     const repo = repoArg && repoArg !== self ? repoArg : null;
     const verdict = openPrMissingLane(ref, { repo });
     if (asJson) writeAllSync(1, JSON.stringify(verdict, null, 2) + '\n');
-    else process.stderr.write(`lane-resume open ${ref}${repo ? ` (${repo})` : ''}: ${verdict.ok ? '✓ opened' : '✗ refused'} — ${verdict.reason || (verdict.raw && (verdict.raw.detail || verdict.raw.reason)) || ''}\n`);
+    else {
+      // A post-open pr-land stop (check-timeout/check-red/…) still OPENED the PR — name it, so nobody reads
+      // "not landed yet" as "no PR" and opens a second one by hand.
+      const status = verdict.prOpened
+        ? `✓ opened PR #${verdict.pr ?? '?'}${verdict.outcome !== 'opened' ? ` — pr-land then stopped (${verdict.reason}); the PR exists, do NOT open another` : ''}`
+        : `✗ not opened (${verdict.outcome || 'refused'})`;
+      const why = verdict.detail || (!verdict.prOpened ? verdict.reason : '');
+      process.stderr.write(`lane-resume open ${ref}${repo ? ` (${repo})` : ''}: ${status}${why ? ` — ${why}` : ''}\n`);
+    }
     process.exit(verdict.ok ? 0 : 2);
   }
   else if (cmd === 'land') {

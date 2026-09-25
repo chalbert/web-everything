@@ -91,6 +91,12 @@ that says it was recovered by `/finish` and names the item. It REFUSES (opens no
 - the card it resolves is already `status: resolved` on main by a **different** commit — a human/finisher must
   reconcile which delivery is real before either lands.
 
+`pr-land` opens the PR *before* it waits on checks, so a `check-timeout`/`check-red`/`behind`/`conflict` stop
+still leaves a real PR. `open` reads pr-land's report through `open-pr.mjs`'s shared `classifySubmit` and prints
+`✓ opened PR #N — pr-land then stopped (<reason>)` (exit 0) in that case. The PR exists: **never** open a second
+one by hand. A `check-timeout` is picked up by the drain's ci-lifecycle reconcile; a `check-red`/`behind`/
+`conflict` PR then needs the ordinary `/finish` repair (fix or rebase) like any other stuck PR.
+
 **Do not open a PR for a `pr-missing` ref you are not confident is a genuinely finished delivery** — report it
 instead (e.g. in the pass summary) and let a human or a later pass decide. `pr-missing` is a discovery signal,
 not an unconditional auto-open list.
