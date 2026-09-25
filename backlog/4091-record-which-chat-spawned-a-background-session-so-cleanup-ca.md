@@ -3,10 +3,12 @@ bornAs: xltlavt
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:.claude/settings.json"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: main
 tags: []
 ---
 
