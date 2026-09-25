@@ -35,11 +35,17 @@ export default {
   title: 'a dispatched session starts in the daemon clone; its scratch file dirties the clone and freezes self-sync',
   card: 'we:backlog/xm5i1xm (epic #4075)',
   fixedBy: {
-    // #4174 lands as a single lane commit; the exact sha is filled in once it exists (see the PR that lands
-    // this file — `git log --oneline -1` on the lane branch below names it).
-    sha: 'xm5i1xm',
-    where: 'lane/4174-a-dispatched-session-starts-in-the-daemon-s-own-clone',
-    paths: ['scripts/operations/dispatch-lane-io.mjs', 'scripts/operations/dispatch-lane.mjs'],
+    sha: '70f0cd842',
+    where: 'lane/xm5i1xm-dispatched-session-scratch-cwd',
+    paths: [
+      'scripts/operations/dispatch-lane-io.mjs', 'scripts/operations/dispatch-lane.mjs',
+      'scripts/conveyor/reconcile-fix-dispatch.mjs', 'scripts/operations/review-dispatch.mjs',
+      'scripts/conveyor/stuck-pr-inspect-dispatch.mjs',
+      'skills-src/conveyor/delivery-agent-brief.md', 'skills-src/conveyor/fix-agent-brief.md',
+      'skills-src/conveyor/fix-agent-ci-brief.md', 'skills-src/conveyor/investigation-agent-brief.md',
+      'skills-src/conveyor/prepare-decision-agent-brief.md', 'skills-src/conveyor/prepare-scope-agent-brief.md',
+      'skills-src/review/review-agent-brief.md',
+    ],
   },
   fixPresent(root) {
     try {
