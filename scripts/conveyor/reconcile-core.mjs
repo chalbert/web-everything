@@ -130,6 +130,10 @@ import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 // which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
 // (see its own docblock for the full incident and the two facts it needs); this file only calls it.
 import { isPrCiFailureOwedRerun } from './main-red-recovery.mjs';
+// #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
+// second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
+// `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
+import { parseReviewedSha } from '../lib/review-escalation.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
@@ -184,11 +188,17 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          current tip and is STILL red, this refusal no longer fires and the PR falls through
  *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
+ *   `already-reviewed-head` — #2588/review-loops (epic #3383/#4075): the PR's CURRENT head already carries a
+ *                          `reviewed-sha` accept marker (`we:scripts/lib/review-escalation.mjs#parseReviewedSha`).
+ *                          A review already ran against this exact commit; dispatching another risks a second,
+ *                          contradicting verdict landing on a commit nobody has touched since (the live #2588
+ *                          incident this refusal closes: 3 review sessions in 16 minutes on one head, "changes"
+ *                          then "accepted" 5 minutes apart).
  */
 export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
-  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed',
+  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head',
 ]);
 
 /**
@@ -957,8 +967,50 @@ export function planReconcile({
       continue;
     }
 
+    // ── ONE REVIEW PER HEAD COMMIT (#2588/review-loops, epic #3383/#4075). Live-caught 2026-09-24: PR #2588 got
+    // a `review:changes` verdict at 23:55Z and a `review:accepted` verdict at 00:00Z, five minutes apart, from
+    // THREE separate review sessions dispatched within one 16-minute window — all reviewing the SAME head,
+    // because the liveness read this pass relies on (REFUSAL 4, see this file's own header) had a gap a session
+    // could fall through: a review session can finish and post its verdict to GitHub before `claude agents
+    // --json` and this pass's next tick agree it is gone, so a fresh review got dispatched for a commit that
+    // had, in fact, already been reviewed. This refusal is a SECOND, INDEPENDENT gate — it does not trust
+    // liveness at all, only the PR's own durable record of what has already happened to its CURRENT head.
+    //
+    // `parseReviewedSha` recovers the head sha the LATEST accept-shaped verdict (`accepted`/`clear-human`/
+    // `restamp` — never a bounce) covered, stamped by `we:scripts/review-set-label.mjs#buildVerdictComment`
+    // (`stampsAcceptance`). When it equals this PR's CURRENT `headRefOid`, this exact commit has already been
+    // reviewed and accepted — dispatching another review for it risks exactly the #2588 shape, a second verdict
+    // landing on a commit nobody has touched since the first one. This is silent (never refuses) for a PR that
+    // has only ever been BOUNCED, on purpose: a `review:changes` verdict stamps no `reviewed-sha` marker (it is
+    // not an acceptance), so a real, unaddressed finding still gets its round through the ordinary paths below,
+    // completely unaffected by this guard.
+    if (OWED[phase] === 'review') {
+      const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
+      const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
+      if (headSha && reviewedSha && reviewedSha === headSha) {
+        refuse('already-reviewed-head', {
+          ...withPhase, headSha, reviewedSha,
+          why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +
+            ' review — dispatching another review for a commit nobody has touched since risks a second,' +
+            ' contradicting verdict landing on it (#2588)',
+        });
+        continue;
+      }
+    }
+
+    // ── THE CAP, from the PR and ONLY from the PR — computed HERE, before REFUSAL 2, because the zero-findings
+    // review branch immediately below needs the REAL count too (#2588/review-loops, epic #3383/#4075). See the
+    // fuller note ahead of its other use, a few lines down.
+    const attempts = Math.max(
+      Number(counts[prNumber]) || 0,
+      countRearmComments(pr?.comments),
+      countAdvisoryComments(pr?.comments),
+    );
+
     // ── REFUSAL 2 — no findings, no fixer. A fix agent handed a PR with nothing to fix invents work. When a
-    // review is what the phase asks for, the review still goes out: "nothing to FIX" is not "nothing to do".
+    // review is what the phase asks for, the review still goes out: "nothing to FIX" is not "nothing to do" —
+    // UNLESS that review population has itself exhausted the round cap (#2588/review-loops, epic #3383/#4075;
+    // see the note on the `dispatch.push` below for the incident this closes).
     const findings = countFindings(pr?.comments);
     if (findings === 0) {
       refuse('no-findings', {
@@ -966,7 +1018,27 @@ export function planReconcile({
         why: 'no reviewer finding on this PR — a fix agent would invent work. A review, not a fix, is what an unreviewed PR is owed.',
       });
       if (OWED[phase] === 'review') {
-        dispatch.push({ ...base, ...withPhase, kind: 'review', findings: 0, attempts: 0, why: 'parked for an independent review and no finding has been raised yet — a review is owed (#3279 runs it)' });
+        // #2588/review-loops (epic #3383/#4075) — THE BUG: this branch used to dispatch with `attempts: 0`
+        // HARDCODED, no matter how many times it had already run, so a PR stuck re-reading `needs-review`/
+        // `needs-human` with zero findings every tick (a review session that crashes or never posts a verdict
+        // is exactly this shape) re-dispatched a fresh review agent FOREVER — the round cap never even saw a
+        // number to compare. It now reads the SAME durable `attempts` REFUSAL 3 binds on below, so this
+        // population hits `cap-exhausted` exactly like every other one once it is genuinely stuck, instead of
+        // looping forever.
+        if (attempts >= roundCap) {
+          refuse('cap-exhausted', {
+            ...withPhase, attempts, cap: roundCap, findings: 0,
+            why: `no reviewer finding has ever landed on this PR, but its own durable attempt count is ${attempts}` +
+              ` against a cap of ${roundCap} — a review keeps being dispatched with nothing to show for it, and a` +
+              ' person must take it',
+          });
+        } else {
+          dispatch.push({
+            ...base, ...withPhase, kind: 'review', findings: 0, attempts,
+            why: `parked for an independent review and no finding has been raised yet — a review is owed` +
+              ` (#3279 runs it); ${attempts} of ${roundCap} attempts are spent`,
+          });
+        }
       }
       continue;
     }
@@ -1022,11 +1094,9 @@ export function planReconcile({
     // (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) — counting THAT recovers the real round
     // count. Kept as a `Math.max` alongside the rearm count, never a replacement: a PR can carry BOTH kinds of
     // history, and the cap must bind on whichever count is higher, never reset by reading only one of the two.
-    const attempts = Math.max(
-      Number(counts[prNumber]) || 0,
-      countRearmComments(pr?.comments),
-      countAdvisoryComments(pr?.comments),
-    );
+    // `attempts` itself is computed ABOVE, ahead of REFUSAL 2 (#2588/review-loops, epic #3383/#4075) — the SAME
+    // value, not a second derivation, so the zero-findings review branch and this one can never disagree about
+    // how many attempts a PR has spent.
     if (attempts >= roundCap) {
       refuse('cap-exhausted', {
         ...withPhase, attempts, cap: roundCap,

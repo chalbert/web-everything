@@ -8,7 +8,7 @@
  *   plus the `kind !== 'background'` guard against ever touching an interactive session, AND the new proof
  *   that a `working`/`blocked` session is reaped once — and ONLY once — its own target is confirmed done.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   classifySessionReap,
   classifySessionReapWithGroundTruth,
@@ -29,6 +29,11 @@ import {
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
 } from '../session-reaper.mjs';
+import { INFRA_RETRY_COOLOFF_MS } from '../reconcile-core.mjs';
+import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const bg = (over = {}) => ({ id: 'abc12345', cwd: '/repo', kind: 'background', startedAt: 1, sessionId: 'abc12345-0000-0000-0000-000000000000', name: 'conveyor-1', ...over });
 const interactive = (over = {}) => ({ pid: 111, cwd: '/repo', kind: 'interactive', startedAt: 1, sessionId: 'def67890-0000-0000-0000-000000000000', name: 'my terminal', ...over });
@@ -786,5 +791,69 @@ describe('makeCompletionResolver — the IO helper over completion-store.mjs (#3
   it('returns null when no record exists on disk for an otherwise-valid slug', () => {
     const resolver = makeCompletionResolver({ dir: '/tmp/we-session-reaper-completion-resolver-test-nonexistent' });
     expect(resolver('review-999999')).toBeNull();
+  });
+
+  describe('#2588/review-loops (epic #3383/#4075) — `blocked-on-infra` cool-off', () => {
+    let dir;
+    beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'we-session-reaper-cooloff-')); });
+    afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+    it('does NOT report done while a `blocked-on-infra` outcome is still inside the cool-off — THE BUG: before this fix, `status: done` alone reaped the session immediately, erasing it from the listing before reconcile-core.mjs\'s own cool-off ever got a row to apply it to (PR re-dispatched ~2 min later)', () => {
+      const startedAt = () => '2026-09-24T23:00:00.000Z';
+      const updatedAt = '2026-09-24T23:05:00.000Z'; // 5 min after start — well inside the 15-min cool-off
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: startedAt }),
+        { status: 'done', outcome: 'blocked-on-infra' },
+        () => updatedAt,
+      );
+      writeCompletion(rec, dir);
+      const nowMs = Date.parse(updatedAt) + 5 * 60 * 1000; // 10 min after the report — still under the 15-min cap
+      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
+      expect(resolver('review-2588')).toEqual({ done: false });
+    });
+
+    it('reports done once the `blocked-on-infra` cool-off has elapsed', () => {
+      const startedAt = () => '2026-09-24T23:00:00.000Z';
+      const updatedAt = '2026-09-24T23:05:00.000Z';
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: startedAt }),
+        { status: 'done', outcome: 'blocked-on-infra' },
+        () => updatedAt,
+      );
+      writeCompletion(rec, dir);
+      const nowMs = Date.parse(updatedAt) + INFRA_RETRY_COOLOFF_MS + 1000; // just past the 15-min cap
+      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
+      expect(resolver('review-2588')).toEqual({ done: true });
+    });
+
+    it('a non-infra outcome (a real verdict) reports done immediately — the cool-off applies ONLY to `blocked-on-infra`', () => {
+      const startedAt = () => '2026-09-24T23:00:00.000Z';
+      const updatedAt = '2026-09-24T23:05:00.000Z';
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: startedAt }),
+        { status: 'done', outcome: 'accepted' },
+        () => updatedAt,
+      );
+      writeCompletion(rec, dir);
+      const nowMs = Date.parse(updatedAt) + 1000; // 1 second later
+      const resolver = makeCompletionResolver({ dir, now: () => nowMs });
+      expect(resolver('review-2588')).toEqual({ done: true });
+    });
+
+    it('classifySessionReapWithGroundTruth does not upgrade a `blocked`/`working` session to reap while its own completion resolver is still inside the cool-off', () => {
+      const startedAt = () => '2026-09-24T23:00:00.000Z';
+      const updatedAt = '2026-09-24T23:05:00.000Z';
+      const rec = applyCompletionUpdate(
+        newCompletionRecord({ session: 'review-2588', kind: 'review', pr: '2588', now: startedAt }),
+        { status: 'done', outcome: 'blocked-on-infra' },
+        () => updatedAt,
+      );
+      writeCompletion(rec, dir);
+      const nowMs = Date.parse(updatedAt) + 5 * 60 * 1000;
+      const completionFor = makeCompletionResolver({ dir, now: () => nowMs });
+      const session = { name: 'review-2588', kind: 'background', state: 'blocked', cwd: '/repo' };
+      const verdict = classifySessionReapWithGroundTruth(session, () => null, { completionFor });
+      expect(verdict.reap).toBe(false);
+    });
   });
 });

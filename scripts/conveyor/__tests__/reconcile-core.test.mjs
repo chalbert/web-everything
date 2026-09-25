@@ -47,6 +47,7 @@ import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
 import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT } from '../reconcile-pass.mjs';
 import { reviewSessionSlug } from '../review-session-slug.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
+import { buildReviewedShaMarker } from '../../lib/review-escalation.mjs';
 
 // ── fixtures — measured shapes, 2026-08-26 ───────────────────────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-26T17:34:00Z');
@@ -1418,5 +1419,93 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── #2588/review-loops (epic #3383/#4075) — THE REVIEW LOOPS: zero-findings reviews bypassing the round cap,
+// and no dedup against a head that already carries an accept verdict. Live incident: PR #2588 got `review:changes`
+// at 23:55Z and `review:accepted` at 00:00Z, five minutes apart, from THREE review sessions dispatched inside one
+// 16-minute window, all against the same head.
+describe('#2588/review-loops — the zero-findings review population now hits the round cap (epic #3383/#4075)', () => {
+  /** Shaped exactly like case 3's `pr1576` (`review:pending`, no real findings) but with a comment thread of
+   *  pure re-arm bookkeeping — zero findings by `countFindings`, but a real, non-zero durable attempt count. */
+  const zeroFindingsPr = (over = {}) => ({
+    number: 2588, state: 'OPEN',
+    headRefName: 'lane/review-loop-2588', headRefOid: '2588'.repeat(10),
+    labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pendingRollup, comments: [], ...over,
+  });
+
+  it('THE BUG, reproduced: before this fix, a zero-findings review dispatched with `attempts: 0` HARDCODED no matter how many rounds already ran — this pins the fix, the dispatched row now carries the REAL count', () => {
+    const twoRearms = [
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+    ];
+    const plan = planReconcile({ prs: [zeroFindingsPr({ comments: twoRearms })], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(1);
+    expect(plan.dispatch[0]).toMatchObject({ kind: 'review', prNumber: 2588, findings: 0, attempts: 2 });
+  });
+
+  it('once the REAL attempt count reaches the round cap, a zero-findings review population is refused `cap-exhausted`, not dispatched again — THE FIX for the "re-dispatch forever" loop', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const plan = planReconcile({ prs: [zeroFindingsPr({ comments: fiveRearms })], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['no-findings', 'cap-exhausted']);
+    expect(plan.refusals[1]).toMatchObject({ prNumber: 2588, attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('a `needs-human` PR (review:human) with zero findings is bound by the identical cap, via the SAME `attempts` value', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const pr = zeroFindingsPr({ labels: lbl('review:human'), comments: fiveRearms });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['no-findings', 'cap-exhausted']);
+  });
+
+  it('`already-reviewed-head` is on the frozen REFUSAL_KINDS list', () => {
+    expect(REFUSAL_KINDS).toContain('already-reviewed-head');
+  });
+});
+
+describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)', () => {
+  const HEAD = 'aa11bb22cc33dd44ee55ff6677889900aabbccdd';
+  const OLDER_HEAD = 'ffffffffffffffffffffffffffffffffffffffff';
+
+  it('a PR whose CURRENT head already carries a `reviewed-sha` accept marker is refused `already-reviewed-head`, never re-dispatched — the exact #2588 shape (a verdict already landed on this commit)', () => {
+    const pr = {
+      number: 2588, state: 'OPEN', headRefName: 'lane/review-loop-2588', headRefOid: HEAD,
+      labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}` }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-reviewed-head', prNumber: 2588, headSha: HEAD, reviewedSha: HEAD })]);
+  });
+
+  it('the SAME guard applies to a `needs-human` (review:human) PR — not just `needs-review`', () => {
+    const pr = {
+      number: 2589, state: 'OPEN', headRefName: 'lane/review-loop-2589', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(HEAD) }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('never fires on a PURE BOUNCE (review:changes, a real finding, no accept marker) — a `review:changes` verdict stamps no `reviewed-sha`, so an unaddressed finding still gets its fix round exactly as before', () => {
+    const pr = pr1563({ number: 2590, headRefOid: HEAD, comments: [finding()] }); // review:changes, real finding
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2590 })]);
+  });
+
+  it('does not refuse when the `reviewed-sha` marker covers an OLDER head — a fresh push after a stale accept is not "already reviewed" for its OWN new commit', () => {
+    const pr = {
+      number: 2591, state: 'OPEN', headRefName: 'lane/review-loop-2591', headRefOid: HEAD,
+      labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD) }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);
   });
 });

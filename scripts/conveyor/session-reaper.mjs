@@ -115,6 +115,11 @@ import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operatio
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import { applyCompletionUpdate, newCompletionRecord, tryReadCompletion, writeCompletion } from '../operations/completion-store.mjs';
 import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+// #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
+// binds `blocked-on-infra` on, imported (never re-declared) so the reaper and the reconciler can never disagree
+// about how long a `blocked-on-infra` outcome stays "not really done yet". No circular import: `reconcile-core.mjs`
+// only ever mentions this file in prose (its own header, re: `hung-session.mjs`'s shared detector), never imports it.
+import { INFRA_RETRY_COOLOFF_MS } from './reconcile-core.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -497,15 +502,36 @@ export function makeGroundTruthResolver({
  * is an exact match, never a prefix guess). `done: true` iff the record's `status` is `'done'`; a missing
  * record, an invalid slug (`completionPath` refuses one — e.g. an interactive session's free-text name), or
  * any read failure all answer `null` (unknown) — NEVER a guess, matching every other resolver in this file.
- * @param {{dir?:string}} [io]
+ *
+ * #2588/review-loops (epic #3383/#4075) — `outcome: 'blocked-on-infra'` is held to the SAME
+ * {@link INFRA_RETRY_COOLOFF_MS} cool-off `reconcile-core.mjs#markSelfReportedDone` already applies to that
+ * exact outcome, and for the exact reason stated there: a persistent outage must not be hammered by a fresh
+ * agent every tick, and a fresh dispatch must not be misread as the OLD one's completion. Before this fix, this
+ * resolver read `status: 'done'` alone and reaped (stopped) the session immediately regardless of `outcome` —
+ * live-caught: a review session that reported `blocked-on-infra` was reaped by THIS module within one tick,
+ * which erased it from `claude agents --json` entirely, so `reconcile-core.mjs`'s liveness read never even saw
+ * a row to apply its own cool-off to, and a fresh review agent was re-dispatched roughly 2 minutes later — the
+ * reaper's premature reap defeated the cool-off `markSelfReportedDone` exists to enforce, one layer up.
+ * `done: false` during the cool-off keeps the session un-reaped (still `not-terminal` in
+ * {@link classifySessionReapWithGroundTruth}'s axis 1) so a real still-blocked outage is not treated as a
+ * finished session before the SAME window the reconciler honours has elapsed.
+ * @param {{dir?:string, now?:() => number}} [io]
  * @returns {(name:string) => ({done:boolean}|null)}
  */
-export function makeCompletionResolver({ dir } = {}) {
+export function makeCompletionResolver({ dir, now = Date.now } = {}) {
   return function completionFor(name) {
     if (typeof name !== 'string' || !name) return null;
     try {
       const record = tryReadCompletion(name, dir);
-      return record ? { done: record.status === 'done' } : null;
+      if (!record) return null;
+      if (record.status !== 'done') return { done: false };
+      if (record.outcome === 'blocked-on-infra') {
+        const updatedMs = Date.parse(record.updatedAt ?? '');
+        if (Number.isFinite(updatedMs) && now() - updatedMs < INFRA_RETRY_COOLOFF_MS) {
+          return { done: false }; // still inside the infra-retry cool-off — not reapable yet
+        }
+      }
+      return { done: true };
     } catch {
       return null; // invalid slug / unreadable record — unknown, never reap on an unreadable signal
     }
