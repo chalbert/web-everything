@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 scope: ["we:scripts/lib/open-pr-items.mjs", "we:scripts/lib/__tests__/open-pr-items.test.mjs", "we:scripts/backlog-stranded-sweep.mjs", "we:scripts/__tests__/backlog-stranded-sweep.test.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
@@ -13,4 +15,6 @@ tags: []
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/open-pr-items.test.mjs we:scripts/__tests__/backlog-stranded-sweep.test.mjs` passes (both files gain #3916 regression cases that fail on the pre-fix code: the quoted-citation guard-8 false negative, and `commitSubjectDeliversItem`/`autoResolvableStrandings`, which did not exist before).
+2. **Live proof** — `node we:scripts/backlog-stranded-sweep.mjs --dry-run` on the real corpus reports `#3916` (and `#4025`, a second genuine miss of the same class) under "STRICT commit-subject proof", where before the fix `deliveredItemNumsFromPr(...)` on PR #2594's real ref/title/body returned `[]` instead of `['3916']`.
+3. **Executable** — `npm run check:standards` reports 0 errors.
