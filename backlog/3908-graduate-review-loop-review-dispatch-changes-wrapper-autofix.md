@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3906", "3904", "3907", "3905", "3915"]
+blockedBy: ["3906", "3904", "3907", "3905", "3915", "xvlu8t1", "x0n0eiz"]
 scope: ["we:scripts/conveyor/__tests__/advisory-round-count.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs", "we:scripts/operations/__tests__/review-dispatch.test.mjs", "we:scripts/conveyor/__tests__/reconcile-fix-routing.test.mjs", "we:scripts/operations/__tests__/telemetry-wiring.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -12,7 +12,7 @@ tags: []
 
 # Graduate review loop: review-dispatch changes, wrapper, autofix and reconcile-fix-dispatch from lane/mechanical-dispatcher to main
 
-Ports 8 files (we:scripts/operations/review-dispatch.mjs, we:scripts/operations/review-dispatch-wrapper.mjs, we:scripts/conveyor/autofix-review-findings.mjs, we:scripts/conveyor/fix-autofix-gate.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs, we:scripts/conveyor/reconcile-core.mjs, we:scripts/conveyor/reconcile-pass.mjs, we:scripts/conveyor/advisory-round-count.mjs) plus their tests. On the critical path. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-dispatch.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
+Ports 8 files (we:scripts/operations/review-dispatch.mjs, we:scripts/operations/review-dispatch-wrapper.mjs, we:scripts/conveyor/autofix-review-findings.mjs, we:scripts/conveyor/fix-autofix-gate.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs, we:scripts/conveyor/reconcile-core.mjs, we:scripts/conveyor/reconcile-pass.mjs, we:scripts/conveyor/advisory-round-count.mjs) plus their tests. On the critical path. Main also changed these files, so each gets a diff-merge: we:scripts/operations/review-dispatch.mjs, we:scripts/conveyor/reconcile-fix-dispatch.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 6a2c8c1ab of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
@@ -188,6 +188,13 @@ test fixtures may answer whether `supervision` is meant to reach `reviewSeatRout
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — the moved-in `we:scripts/operations/__tests__/review-dispatch-wrapper.test.mjs` also imports a module #x0n0eiz owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-pass.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` imports a module #x0n0eiz owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/reconcile-core.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/conveyor/__tests__/reconcile-core.test.mjs` also imports a module #xvlu8t1 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/conveyor/fix-autofix-gate.mjs` to #3906 — #3906's `we:scripts/conveyor/autofix-review-findings.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/conveyor/autofix-review-findings.mjs` to #3906 — #3906's `we:scripts/operations/review-dispatch.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/review-dispatch-wrapper.mjs` to #3906 — #3906's `we:scripts/operations/review-dispatch.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.

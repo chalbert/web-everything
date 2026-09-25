@@ -457,3 +457,39 @@ How each slice (a child of this item) graduates, per the statute
   membership this port must not invent unaided). This item (`#3892`) is left `status: open` for whichever PR
   (`#2628`) actually lands; this session does not resolve it, per #105 (claim/resolve tracks landed status,
   not which session did the work).
+
+- **2026-09-25: snapshot moved to `6a2c8c1ab`; two post-snapshot tail cards filed.** `origin/lane/mechanical-dispatcher`
+  advanced 13 commits past `600acc14f` (`git log 600acc14f..origin/lane/mechanical-dispatcher`). Three of them
+  (`b9b45b63f`, `ed443fa90`, `c51e09bfa` — heavy-admission ceiling, guard-bash raw-heavy-command deny, shared
+  free-lane scan cache) were confirmed already on `main` by CONTENT (not just by name) via PR #2563 and the
+  native single-flight+TTL cache already built into `we:scripts/lane-pool.mjs` (`#4018`, resolved); their
+  tracker-note-only commits (`d023b5d6c`, `c7e2046e7`, `346d625da`) are no-ops. Every remaining OPEN,
+  not-yet-started slice with no open PR — `#3487`, `#3862`, `#3898`, `#3899`, `#3900`, `#3903`, `#3904`,
+  `#3905`, `#3906`, `#3908`, `#3909`, `#3910` — now points its `Port from snapshot` text at `6a2c8c1ab`;
+  `#3487` and `#3862` (which never used that template phrase) instead got a short "snapshot moved" note
+  confirming — by diffing `600acc14f..6a2c8c1ab` against their own `scope:` — that none of their owned files
+  changed in the window, so their existing merge notes stand as written. `#3915` (open PR #2636, built from
+  `600acc14f`) is deliberately LEFT at its old snapshot with a note that its own post-snapshot delta (a
+  `we:scripts/operations/dispatch-lane-io.mjs` / `we:scripts/operations/dispatch-lane.mjs` diff from
+  `4f357472d`) goes to the new dispatch-contracts tail card instead, applied AFTER #2636 lands. `#3916`
+  (landed-but-stranded — PR #2594 merged the whole card's content but its `status` frontmatter was never
+  flipped, the `#3473` extractor-miscredit failure mode) is treated as landed and left untouched.
+
+  For the remaining changed files not covered by any moved card (owned only by resolved/landed slices, or by
+  no slice at all), filed two new post-snapshot tail cards (parent `#3443`, `--queue=false`), grouped by
+  coherence per the operator's own split:
+  - **`we:backlog/x0n0eiz-*`** — lane-pool/lane-lease/verify-lane/guard-bash/poc-land landing tooling
+    (`cdec41cd1`, `5db6d9484`, `6a2c8c1ab`'s own stranded-hash-grace commit). Explicitly diff-merges
+    `we:scripts/verify-lane.mjs` and `we:scripts/guard-bash.mjs` onto their `dd4beb5e5`-shaped bodies (main's
+    own diff-selected-test-gate + full-suite-deny work), never copies over them. `blockedBy`: none — every
+    base-file owner (`#3481`, `#3484`, `#3890`, `#3917`) is already resolved/landed.
+  - **`we:backlog/xvlu8t1-*`** — dispatch-contracts rule enforcement (`4f357472d`, `#3784` Rule 6), the
+    `we:scripts/conveyor/ci-heal-mark.mjs` land-seam hold half of prototype item `#4021` Fork 2, and telemetry
+    (`b92c91637`, `e14f27bef`). `blockedBy: ["3906", "3915"]` — its `we:scripts/conveyor/ci-heal-mark.mjs`
+    port is one coherent feature (`#4021` Fork 2) whose sibling files
+    (`we:scripts/operations/ci-heal-dispatch-wrapper.mjs`, `we:scripts/operations/fix-dispatch-wrapper.mjs`)
+    are covered by `#3906`, and its `we:scripts/operations/dispatch-lane-io.mjs` /
+    `we:scripts/operations/dispatch-lane.mjs` delta must land onto `main` only AFTER `#3915`'s PR #2636 lands.
+
+  `#3910` (the epic's own closing tail-sweep slice) got both new cards added to its `blockedBy`, so its own
+  final re-diff starts from a smaller residual instead of rediscovering this same delta.

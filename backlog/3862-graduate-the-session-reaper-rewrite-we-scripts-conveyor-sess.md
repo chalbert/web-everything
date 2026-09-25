@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3855", "3856", "3906", "3907", "3908", "3898"]
+blockedBy: ["3855", "3856", "3906", "3907", "3908", "3898", "xvlu8t1"]
 scope: ["we:scripts/conveyor/session-reap-plan.mjs", "we:scripts/conveyor/session-reap-stop.mjs", "we:scripts/conveyor/session-reap-evidence.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/__tests__/session-reap-plan.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop.test.mjs", "we:scripts/conveyor/__tests__/session-reap-stop-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence.test.mjs", "we:scripts/conveyor/__tests__/session-reap-evidence-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs", "we:scripts/conveyor/__tests__/session-reaper-finished-cli.test.mjs", "we:scripts/operations/clear-stuck-session.mjs", "we:scripts/operations/clear-stuck-session-io.mjs", "we:scripts/operations/__tests__/clear-stuck-session.test.mjs", "we:scripts/conveyor/__tests__/helpers/session-reaper-cli-harness.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/wip-agents.test.mjs", "we:scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json", "we:scripts/operations/__fixtures__/wip-agents/live-finished-dead.json"]
 dateOpened: "2026-09-21"
 tags: []
@@ -34,6 +34,10 @@ Added blockers 3906 and 3907: `we:scripts/conveyor/session-reap-stop.mjs` uses t
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/clear-stuck-session-io.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/session-reaper.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/session-reap-stop.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/conveyor/session-reap-evidence.mjs` imports a module #xvlu8t1 owns.
 - 2026-09-25: graduation-import-check added we:scripts/operations/__fixtures__/wip-agents/live-finished-dead.json to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/wip-agents.test.mjs`, which this card ports.
 - 2026-09-25: graduation-import-check added we:scripts/operations/__fixtures__/wip-agents/finished-not-reaped.json to this card's own scope — no open card owned it, and it is imported by `we:scripts/operations/__tests__/wip-agents.test.mjs`, which this card ports.
 - 2026-09-25: graduation-import-check added blockedBy #3898 — the moved-in `we:scripts/operations/__tests__/wip-agents.test.mjs` also imports a module #3898 owns.
@@ -45,3 +49,7 @@ Added blockers 3906 and 3907: `we:scripts/conveyor/session-reap-stop.mjs` uses t
 - 2026-09-24: graduation-import-check added we:scripts/conveyor/__tests__/helpers/session-reaper-cli-harness.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/conveyor/__tests__/session-reaper-cli.test.mjs`, which this card ports.
 - 2026-09-24: graduation-import-check added we:scripts/conveyor/__tests__/helpers/session-reaper-cli-harness.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/conveyor/__tests__/session-reap-stop-cli.test.mjs`, which this card ports.
 - 2026-09-24: graduation-import-check added we:scripts/conveyor/__tests__/helpers/session-reaper-cli-harness.mjs to this card's own scope — no open card owned it, and it is imported by `we:scripts/conveyor/__tests__/session-reap-evidence-cli.test.mjs`, which this card ports.
+
+## Snapshot moved to 6a2c8c1ab (2026-09-25)
+
+The epic's tracked prototype tip advanced from `600acc14f` to `6a2c8c1ab` (13 commits: `git log 600acc14f..origin/lane/mechanical-dispatcher`). Checked `git diff 600acc14f..6a2c8c1ab --stat` against every file in this card's scope (session-reap-plan/session-reap-stop/session-reap-evidence/session-reaper, clear-stuck-session[-io], wip-agents fixtures) — **no overlap**; none of this slice's files changed in that window. Port from `6a2c8c1ab` when dispatched (identical content to `600acc14f` for every file this card owns); the port notes and order/blockers above are unaffected.

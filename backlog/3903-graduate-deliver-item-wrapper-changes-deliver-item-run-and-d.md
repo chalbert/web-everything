@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3902", "3893", "3906", "3917", "3915", "3907"]
+blockedBy: ["3902", "3893", "3906", "3917", "3915", "3907", "xvlu8t1"]
 scope: ["we:scripts/operations/__tests__/completion-cli.test.mjs", "we:scripts/operations/__tests__/completion-record.test.mjs", "we:skills-src/conveyor/delivery-agent-brief-v2.md", "we:skills-src/conveyor/delivery-agent-brief.md", "we:scripts/operations/__tests__/open-pr.test.mjs", "we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs", "we:scripts/operations/__tests__/dispatch-task.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -12,7 +12,7 @@ tags: []
 
 # Graduate deliver-item wrapper changes, deliver-item-run and delivery-agent-marker from lane/mechanical-dispatcher to main
 
-Ports 8 files (we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/operations/deliver-item-run.mjs, we:scripts/operations/delivery-agent-marker.mjs, we:scripts/operations/delivery-report-store.mjs, we:scripts/operations/completion-record.mjs, we:scripts/operations/completion-cli.mjs, we:skills-src/conveyor/delivery-agent-brief.md, we:skills-src/conveyor/delivery-agent-brief-v2.md) plus their tests. On the critical path. we:scripts/operations/deliver-item-wrapper.mjs is a 1.6k-line diff that main also changed. Main also changed these files, so each gets a diff-merge: we:scripts/operations/deliver-item-wrapper.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
+Ports 8 files (we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/operations/deliver-item-run.mjs, we:scripts/operations/delivery-agent-marker.mjs, we:scripts/operations/delivery-report-store.mjs, we:scripts/operations/completion-record.mjs, we:scripts/operations/completion-cli.mjs, we:skills-src/conveyor/delivery-agent-brief.md, we:skills-src/conveyor/delivery-agent-brief-v2.md) plus their tests. On the critical path. we:scripts/operations/deliver-item-wrapper.mjs is a 1.6k-line diff that main also changed. Main also changed these files, so each gets a diff-merge: we:scripts/operations/deliver-item-wrapper.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 6a2c8c1ab of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
@@ -60,6 +60,9 @@ Ports 8 files (we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/operat
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/dispatch-task.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-routing-record.test.mjs` also imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — the moved-in `we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs` also imports a module #xvlu8t1 owns.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/completion-cli.mjs` to #3906 — #3906's `we:scripts/operations/review-dispatch-wrapper.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/delivery-report-store.mjs` to #3906 — #3906's `we:scripts/operations/prepare-scope-wrapper.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.
 - 2026-09-25: graduation-import-check moved `we:scripts/operations/open-pr.mjs` to #3906 — #3906's `we:scripts/operations/prepare-scope-wrapper.mjs` needs it directly, and this card already (transitively) depends on #3906, so a blockedBy edge the other way would cycle.

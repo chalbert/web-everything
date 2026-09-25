@@ -4,7 +4,7 @@ kind: story
 size: 5
 parent: "3443"
 status: open
-blockedBy: ["3898", "3892", "3891", "3906", "3908"]
+blockedBy: ["3898", "3892", "3891", "3906", "3908", "x0n0eiz", "xvlu8t1"]
 scope: ["we:scripts/__tests__/fixtures/prototype-tracker-full.golden.html", "we:scripts/lib/prototype-tracker-compact-io.mjs", "we:scripts/operations/__tests__/tracker-refresh-real.test.mjs", "we:scripts/operations/__tests__/tracker-refresh.test.mjs", "we:scripts/operations/__tests__/turn-digest.test.mjs", "we:scripts/operations/tracker-refresh-io.mjs", "we:scripts/operations/tracker-refresh-state.mjs", "we:scripts/operations/tracker-refresh.mjs", "we:scripts/operations/turn-digest-io.mjs", "we:scripts/operations/turn-digest.mjs", "we:scripts/prototype-tracker.mjs", "we:skills-src/prototype-tracker/SKILL.md", "we:scripts/operations/run.mjs", "we:scripts/operations/__tests__/http-adapter.test.mjs"]
 dateOpened: "2026-09-22"
 tags: []
@@ -12,7 +12,7 @@ tags: []
 
 # Graduate tracker-refresh, turn-digest and prototype-tracker-compact-io from lane/mechanical-dispatcher to main
 
-Ports 8 files (we:scripts/lib/prototype-tracker-compact-io.mjs, we:scripts/operations/tracker-refresh.mjs, we:scripts/operations/tracker-refresh-io.mjs, we:scripts/operations/tracker-refresh-state.mjs, we:scripts/operations/turn-digest.mjs, we:scripts/operations/turn-digest-io.mjs, we:scripts/prototype-tracker.mjs, we:skills-src/prototype-tracker/SKILL.md) plus their tests. Adds its own registrations to we:scripts/operations/run.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 600acc14f of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
+Ports 8 files (we:scripts/lib/prototype-tracker-compact-io.mjs, we:scripts/operations/tracker-refresh.mjs, we:scripts/operations/tracker-refresh-io.mjs, we:scripts/operations/tracker-refresh-state.mjs, we:scripts/operations/turn-digest.mjs, we:scripts/operations/turn-digest-io.mjs, we:scripts/prototype-tracker.mjs, we:skills-src/prototype-tracker/SKILL.md) plus their tests. Adds its own registrations to we:scripts/operations/run.mjs. Graduation slice of epic #3443 (see its Slice procedure). FAITHFUL PORT: no behaviour change while porting; the branch code lands as-is (operator, 2026-09-22). Port from snapshot 6a2c8c1ab of origin/lane/mechanical-dispatcher. For every file main has changed since the merge base ca7e68b71 (check with git log ca7e68b71..origin/main -- <file>), apply the branch diff onto main's current file; never copy the branch file over it. Add only this slice's own lines to we:scripts/operations/run.mjs and the we:scripts/operations/__tests__/http-adapter.test.mjs pin (append-only, so parallel slices merge cleanly). Full gate on main's tree: check:standards, test, smoke. Hold lifted 2026-09-24: the #3857 model-tier table passed a live probe and the operator started wave A.
 
 ## Done when
 
@@ -22,5 +22,7 @@ Ports 8 files (we:scripts/lib/prototype-tracker-compact-io.mjs, we:scripts/opera
 
 ## Graduation import check
 
+- 2026-09-25: graduation-import-check added blockedBy #xvlu8t1 — `we:scripts/operations/turn-digest-io.mjs` imports a module #xvlu8t1 owns.
+- 2026-09-25: graduation-import-check added blockedBy #x0n0eiz — `we:scripts/operations/turn-digest-io.mjs` imports a module #x0n0eiz owns.
 - 2026-09-25: graduation-import-check added blockedBy #3908 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3908 owns.
 - 2026-09-25: graduation-import-check added blockedBy #3906 — `we:scripts/operations/turn-digest-io.mjs` imports a module #3906 owns.
