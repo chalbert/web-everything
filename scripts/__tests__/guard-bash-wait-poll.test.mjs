@@ -79,6 +79,7 @@ describe('CLI — live PreToolUse payloads', () => {
   const run = (command, extra = {}, env = {}) => {
     const e = { ...process.env, ...env };
     delete e.WE_DISPATCH_KIND;
+    delete e.WE_CONVEYOR_WORKER;
     Object.assign(e, env);
     const out = execFileSync(process.execPath, [GUARD], {
       input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/tmp', tool_input: { command }, ...extra }),
@@ -93,6 +94,22 @@ describe('CLI — live PreToolUse payloads', () => {
   it('denies a dispatched worker (WE_DISPATCH_KIND)', () => {
     const r = run(TASK_POLLS[0], {}, { WE_DISPATCH_KIND: 'fix' });
     expect(r.hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+  // xgqz204 — a `claude --bg` dispatch (review/fix/ci-heal/stuck-inspect/build) carries no WE_DISPATCH_KIND:
+  // `--bg` drops ambient env, and stamping the kind would arm the #3105 verification deny. It carries the
+  // worker marker in `--settings` env instead (dispatch-lane-io.mjs#buildAgentArgv), which is what the hook sees.
+  it('denies a --bg dispatched worker (WE_CONVEYOR_WORKER=1, no WE_DISPATCH_KIND)', () => {
+    for (const c of [TASK_POLLS[0], PR_POLLS[0]]) {
+      const r = run(c, {}, { WE_CONVEYOR_WORKER: '1' });
+      expect(r.hookSpecificOutput.permissionDecision).toBe('deny');
+    }
+  });
+  it('the worker marker alone does NOT arm the #3105 verification deny (fix/ci-heal briefs run verify-lane run)', () => {
+    expect(run('node /x/scripts/verify-lane.mjs run --repo=.', {}, { WE_CONVEYOR_WORKER: '1' })).toBeNull();
+  });
+  it('an unrecognised worker-marker value is not an agent session (warn only)', () => {
+    const r = run(PR_POLLS[0], {}, { WE_CONVEYOR_WORKER: '0' });
+    expect(r.hookSpecificOutput).toBeUndefined();
   });
   it('only warns the interactive session', () => {
     const r = run(PR_POLLS[0]);

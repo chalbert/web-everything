@@ -438,6 +438,8 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
       '-n', 'fix-1764',
+      // xgqz204 — the worker marker always rides `--settings` (a `--bg` session never sees ambient env).
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
       // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
       // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
@@ -472,10 +474,10 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     // checkout this dispatch actually starts in.
     expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
     expect(calls[0]).toContain('--settings');
-    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
   });
 
-  it('#x8mpubm — the REAL default resolveSettingsEnv (unconfigured host) emits no --settings at all', () => {
+  it('#x8mpubm — the REAL default resolveSettingsEnv (unconfigured host) adds nothing beyond the worker marker (xgqz204)', () => {
     const calls = [];
     dispatchFix(
       { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-wire-reconcile-pass', scope: ['we:x'], lane: 9 },
@@ -486,7 +488,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         // opt-in gated on WE_GITHUB_APP_* and must stay a safe no-op on this (unconfigured) test host.
       },
     );
-    expect(calls[0]).not.toContain('--settings');
+    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }));
   });
 
   it('attaches a carried-forward `resumeAttempt` (from a prior tryResumeFix call) to the reported result, without re-attempting anything itself', () => {

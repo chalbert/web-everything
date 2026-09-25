@@ -67,7 +67,7 @@ import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
-import { markWorkerEnv } from './session-role.mjs';
+import { markWorkerEnv, workerMarkerSettingsEnv } from './session-role.mjs';
 // #3902 — the blocking-spawn primitive `spawnAgentToCompletion` (below) is built on, for the same reason
 // `codex-delivery-provider.mjs#spawnCodexToCompletion` is (see that file's own header).
 import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
@@ -1259,6 +1259,10 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
   if (resumeSessionId) return ['--bg', '--resume', String(resumeSessionId), prompt];
   // NO `--session-id` — see this function's own header. `sessionId` is deliberately unreferenced here.
   void sessionId;
+  // xgqz204 — the worker marker ALWAYS rides in `--settings`' env: `claude --bg` drops the spawner's ambient
+  // env, so `markWorkerEnv` on the spawn call never reaches the session, and the #x36vidg wait-poll guard read
+  // every dispatched session as the operator's own. See `workerMarkerSettingsEnv`.
+  const sessionEnv = workerMarkerSettingsEnv(settingsEnv);
   return [
     '--bg',
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
@@ -1268,7 +1272,8 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     // DOES apply `--settings`'s `env` to the session's own Bash-tool subprocess environment (also
     // live-confirmed). Omitted entirely when `settingsEnv` is `null`/empty — a caller that never resolves one
     // (or a host with App auth unconfigured) gets a `--bg` argv byte-identical to before this existed.
-    ...(settingsEnv && Object.keys(settingsEnv).length ? ['--settings', JSON.stringify({ env: settingsEnv })] : []),
+    // xgqz204: never omitted any more — it always carries at least the worker marker (see above).
+    '--settings', JSON.stringify({ env: sessionEnv }),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...extraArgs.map(String),
     prompt,

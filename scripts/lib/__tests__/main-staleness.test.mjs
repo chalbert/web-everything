@@ -136,7 +136,7 @@ describe('checkMainStaleness — cleanOnly (#3474)', () => {
   }, calls);
   it('clean + on main → `merge --ff-only origin/main`, never `pull`', () => {
     const calls = [];
-    expect(checkMainStaleness({ cleanOnly: true, run: behind({}, calls) })).toEqual({ synced: true, behind: 2 });
+    expect(checkMainStaleness({ cleanOnly: true, run: behind({}, calls) })).toEqual({ synced: true, behind: 2, from: 'l', to: 'o' });
     expect(calls.find((a) => a[0] === 'merge')).toEqual(['merge', '--ff-only', 'origin/main']);
     expect(calls.some((a) => a[0] === 'pull')).toBe(false);
   });
