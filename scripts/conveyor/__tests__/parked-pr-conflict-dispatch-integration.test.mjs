@@ -246,8 +246,10 @@ describe('#xu2krte end-to-end — a REAL merge conflict, dispatched through the 
         // #3331 — no `--session-id` in the argv, and the ADDRESSABLE id is what the CLI printed back.
         // #3606's missed path (f41f3b32d) — fix dispatch now carries the same standing-identity system
         // prompt review-dispatch already had, so the argv gains `--append-system-prompt-file` too.
+        // xgqz204 — every dispatch also carries the worker marker via `--settings`.
         expect(fake.lastArgv()).toEqual([
           '--bg', '-n', 'fix-8802',
+          '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
           '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
           expect.stringContaining('fix brief for 8802'),
         ]);
