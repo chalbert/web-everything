@@ -128,11 +128,12 @@ import {
 } from './hung-session.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
-// #2588/review-loops (epic #3383/#4075) — the SAME infra-retry cool-off `reconcile-core.mjs#markSelfReportedDone`
-// binds `blocked-on-infra` on, imported (never re-declared) so the reaper and the reconciler can never disagree
-// about how long a `blocked-on-infra` outcome stays "not really done yet". No circular import: `reconcile-core.mjs`
-// only ever mentions this file in prose (its own header, re: `hung-session.mjs`'s shared detector), never imports it.
-import { INFRA_RETRY_COOLOFF_MS } from './reconcile-core.mjs';
+// #4149 (epic #3383/#4075) — this file no longer reads `INFRA_RETRY_COOLOFF_MS` itself: `makeCompletionResolver`
+// now stops a `blocked-on-infra` session's process as soon as its record says `done`, regardless of the cool-off
+// (see that function's own doc). `reconcile-core.mjs#markSelfReportedDone`/`#assessLiveness` still enforce the
+// SAME window — off the record, never off whether this reaper happened to leave a process alive — so no import
+// of that constant is needed here any more; the two files can no longer disagree, because only one of them
+// reads it at all.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -467,9 +468,22 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
     hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null,
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
-  if (base.reap || base.reason !== 'not-terminal') return base;
+  if (base.reap) return base;
+  if (base.reason !== 'not-terminal' && base.reason !== 'wrong-cwd') return base;
+  // #4149 (epic #3383/#4075) — `wrong-cwd` and `not-terminal` are the only two base reasons axes -1/0 below may
+  // still upgrade. LIVE, live-caught 2026-09-25: `fix-2003`/`fix-2115`/`fix-2267` were dispatched with `cwd`
+  // values (the primary `webeverything` checkout, a scratch-dispatcher clone) other than the review-daemon's own
+  // `allowedCwd`, and sat `state:'working'` for TEN DAYS — past the `fix` kind's own 120-minute no-outcome
+  // ceiling (`hung-session.mjs#NO_OUTCOME_DEFAULT_MINUTES`) — because `wrong-cwd` short-circuited every axis
+  // below it, including this one: "ghosts older than any window never swept" (#4075 audit). `review-2669`/
+  // `review-2678` were the identical shape one axis over (dispatched into a per-review scratch clone, not this
+  // checkout, idle 41/46 minutes — past the 30-minute hung-transcript default).
+  const cwdMismatch = base.reason === 'wrong-cwd';
 
   // Axis -1 — no-net-outcome stall. See doc above for why this runs BEFORE axis 0 and BEFORE `neverReapWorking`.
+  // #4149 — ALSO runs ahead of a `wrong-cwd` verdict, for the identical reason: a per-kind ceiling this far
+  // exceeded is independently-corroborated evidence that does not depend on which checkout dispatched the
+  // session (unlike axis 3's blind clock below, which has no such corroboration and stays cwd-gated).
   if (typeof noOutcomeFor === 'function') {
     let info = null;
     try { info = noOutcomeFor(session); } catch { info = null; }
@@ -478,11 +492,18 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
 
   // Axis 0 — hung-transcript detection. See doc above for why this runs BEFORE `neverReapWorking` below, and
   // why that override is safe: it is independently confirming the listing's `state` is wrong, not ignoring it.
+  // #4149 — same `wrong-cwd` override as axis -1, same reasoning.
   if (typeof hungFor === 'function') {
     let info = null;
     try { info = hungFor(session); } catch { info = null; }
     if (info && info.hung === true) return { reap: true, reason: `hung-transcript:${info.reason || 'stale'}` };
   }
+
+  // #4149 — neither corroborated axis fired: a `wrong-cwd` session falls through to `classifySessionReap`'s own
+  // verdict here, unchanged. `allowedCwd`'s whole purpose (never touch a session that merely shares a name
+  // pattern from an unrelated checkout) still holds for every axis below, which has no independent staleness
+  // evidence of its own to fall back on.
+  if (cwdMismatch) return base;
 
   if (neverReapWorking && session?.state === 'working') return base; // strictly-stricter mode — see doc above
 
@@ -610,8 +631,19 @@ export function groundTruthForPr(pr, { exec = execFileSync, env = process.env, r
       killSignal: 'SIGKILL',
     });
     const parsed = JSON.parse(String(out || '{}'));
-    const merged = Boolean(parsed?.mergedAt) || String(parsed?.state || '').toUpperCase() === 'MERGED';
-    return merged ? { resolved: true, evidence: `pr#${pr}:merged` } : { resolved: false };
+    const state = String(parsed?.state || '').toUpperCase();
+    const merged = Boolean(parsed?.mergedAt) || state === 'MERGED';
+    // #4149 (epic #3383/#4075) — RATIFIED WIDENING: this axis used to answer `resolved` for a MERGED PR only,
+    // "on purpose", so a still-`working` session was never stopped prematurely by a rebase-only close. Live audit
+    // 2026-09-25 found the opposite failure costing more: a ghost session bound to a PR that was CLOSED WITHOUT
+    // merging (abandoned, superseded, duplicate) had no path to ever being confirmed done by this axis — nothing
+    // to fix, nothing to merge, and yet it sat forever. A closed PR is exactly as terminal as a merged one for
+    // "is there still real work coming out of this session" — see `retentionGroundTruthForPr` below, which
+    // already used this wider "merged or closed" test for the RETENTION sweep; this axis now matches it.
+    const closed = state === 'CLOSED';
+    return (merged || closed)
+      ? { resolved: true, evidence: `pr#${pr}:${merged ? 'merged' : 'closed'}` }
+      : { resolved: false };
   } catch {
     return null; // `gh` unavailable / PR not found / timeout — unknown, never reap on an unreadable signal
   }
@@ -666,35 +698,38 @@ export function makeGroundTruthResolver({
  * record, an invalid slug (`completionPath` refuses one — e.g. an interactive session's free-text name), or
  * any read failure all answer `null` (unknown) — NEVER a guess, matching every other resolver in this file.
  *
- * #2588/review-loops (epic #3383/#4075) — `outcome: 'blocked-on-infra'` is held to the SAME
- * {@link INFRA_RETRY_COOLOFF_MS} cool-off `reconcile-core.mjs#markSelfReportedDone` already applies to that
- * exact outcome, and for the exact reason stated there: a persistent outage must not be hammered by a fresh
- * agent every tick, and a fresh dispatch must not be misread as the OLD one's completion. Before this fix, this
- * resolver read `status: 'done'` alone and reaped (stopped) the session immediately regardless of `outcome` —
- * live-caught: a review session that reported `blocked-on-infra` was reaped by THIS module within one tick,
- * which erased it from `claude agents --json` entirely, so `reconcile-core.mjs`'s liveness read never even saw
- * a row to apply its own cool-off to, and a fresh review agent was re-dispatched roughly 2 minutes later — the
- * reaper's premature reap defeated the cool-off `markSelfReportedDone` exists to enforce, one layer up.
- * `done: false` during the cool-off keeps the session un-reaped (still `not-terminal` in
- * {@link classifySessionReapWithGroundTruth}'s axis 1) so a real still-blocked outage is not treated as a
- * finished session before the SAME window the reconciler honours has elapsed.
- * @param {{dir?:string, now?:() => number}} [io]
+ * #4149 (epic #3383/#4075) — ROOT-CAUSE CORRECTION, reversing #2588/review-loops' own prior fix. That change
+ * (see git history, PR #2647-era) held `outcome: 'blocked-on-infra'` to the SAME {@link INFRA_RETRY_COOLOFF_MS}
+ * cool-off `reconcile-core.mjs#markSelfReportedDone` applies, reasoning that reaping (stopping) the session mid
+ * cool-off would erase its row from `claude agents --json` before the reconciler's own liveness read ever saw
+ * it, defeating the cool-off one layer up. LIVE, 2026-09-25: that fix traded one bug for another. `review-2669`
+ * sat `state: 'blocked'`, idle 41+ minutes, its OWN completion record already `status: 'done'`, `outcome:
+ * 'blocked-on-infra'` — genuinely finished, no more work coming from that OS process — yet this resolver kept
+ * answering `done: false` for the ENTIRE cool-off window (15 minutes) and beyond (nothing here ever re-checks
+ * once the window is understood to have passed; the session-reaper's own next tick does, but the point is nothing
+ * FORCED it to), so `claude stop` was never called and the process kept counting as a live holder against every
+ * `claude agents` reader — exactly backwards from "never a live holder". The record — not whether the OS process
+ * is still around — is what the retry pacing needs; keeping the PROCESS alive was never necessary to keep the
+ * record's own cool-off honoured.
+ *
+ * THE FIX: this resolver now answers `done: true` as soon as `status: 'done'`, REGARDLESS of `outcome` — the
+ * reaper stops the process immediately, every time, once the session says it is finished. The record itself is
+ * untouched by stopping the process (`claude stop` never deletes a completion record), so
+ * `reconcile-core.mjs#markSelfReportedDone` still reads the SAME record, still applies the SAME
+ * {@link INFRA_RETRY_COOLOFF_MS} window, and still refuses to treat the PR as available for redispatch until
+ * that window elapses — via `assessLiveness`'s own `awaitingInfraCooloff` flag (see that file), which now keys
+ * the cool-off off the RECORD, never off whether a process happens to still be listed. Cool-offs and retries key
+ * off the record; a live process is never required to enforce one.
+ * @param {{dir?:string}} [io]
  * @returns {(name:string) => ({done:boolean}|null)}
  */
-export function makeCompletionResolver({ dir, now = Date.now } = {}) {
+export function makeCompletionResolver({ dir } = {}) {
   return function completionFor(name) {
     if (typeof name !== 'string' || !name) return null;
     try {
       const record = tryReadCompletion(name, dir);
       if (!record) return null;
-      if (record.status !== 'done') return { done: false };
-      if (record.outcome === 'blocked-on-infra') {
-        const updatedMs = Date.parse(record.updatedAt ?? '');
-        if (Number.isFinite(updatedMs) && now() - updatedMs < INFRA_RETRY_COOLOFF_MS) {
-          return { done: false }; // still inside the infra-retry cool-off — not reapable yet
-        }
-      }
-      return { done: true };
+      return { done: record.status === 'done' };
     } catch {
       return null; // invalid slug / unreadable record — unknown, never reap on an unreadable signal
     }
@@ -1192,10 +1227,10 @@ export function retentionGroundTruthForItem(id, { backlogDir = DEFAULT_BACKLOG_D
 
 /**
  * PR-kind retention ground truth: `workDone` iff the PR is MERGED or CLOSED (the statute's own "merged or
- * closed" wording — wider than {@link groundTruthForPr}'s "merged only", which the STOP/reap axis keeps
- * unchanged on purpose: a closed-without-merge PR should not stop a still-working session prematurely, but its
- * records are still safe to eventually clean up). `terminalAt` is `mergedAt` (when merged) or `closedAt`
- * (when closed unmerged), parsed. Any failure (no `gh`, not found, timeout) answers unknown, never a guess.
+ * closed" wording — {@link groundTruthForPr}, the STOP/reap axis, was widened to the identical "merged or
+ * closed" test at #4149; both now agree a closed-without-merge PR is terminal). `terminalAt` is `mergedAt`
+ * (when merged) or `closedAt` (when closed unmerged), parsed. Any failure (no `gh`, not found, timeout) answers
+ * unknown, never a guess.
  * @param {string|number} pr
  * @param {{exec?:Function, env?:object, repo?:string}} [io]
  * @returns {{workDone:boolean, terminalAt:number|null}|null}

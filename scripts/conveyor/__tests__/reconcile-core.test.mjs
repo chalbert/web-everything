@@ -1503,6 +1503,52 @@ describe('assessLiveness — `state: stopped` is finished too (PR #2647/#2625, l
   });
 });
 
+// ── #4149 (epic #3383/#4075) — root-cause fix: session-reaper now `claude stop`s a `blocked-on-infra` session
+// AS SOON AS its record says done, regardless of the cool-off (see session-reaper.mjs#makeCompletionResolver's
+// own doc). That means `state` can already read `stopped` here WHILE the cool-off is still running — the exact
+// case `markSelfReportedDone`'s new `awaitingInfraCooloff` flag exists to keep `assessLiveness` from misreading.
+describe('markSelfReportedDone + assessLiveness — `awaitingInfraCooloff` outranks a `stopped` state (#4149)', () => {
+  const T0 = Date.parse('2026-09-25T20:00:00Z');
+  const listedStopped = { name: 'review-2669', state: 'stopped', startedAt: T0 };
+  const record = { status: 'done', outcome: 'blocked-on-infra', updatedAt: '2026-09-25T20:05:00Z' };
+  const recFor = (r) => (name) => (name === 'review-2669' ? r : null);
+
+  it('a `stopped` session still inside its own infra cool-off is flagged `awaitingInfraCooloff`, NOT `selfReportedDone`', () => {
+    const nowMs = Date.parse('2026-09-25T20:10:00Z'); // 5 min after the report — well inside the 15-min cool-off
+    const [a] = markSelfReportedDone([listedStopped], recFor(record), nowMs);
+    expect(a.awaitingInfraCooloff).toBe(true);
+    expect(a.selfReportedDone).toBeUndefined();
+  });
+
+  it('assessLiveness does NOT free the PR for a `stopped` row still awaiting its infra cool-off — the record, not the process, governs', () => {
+    const nowMs = Date.parse('2026-09-25T20:10:00Z');
+    const [a] = markSelfReportedDone([listedStopped], recFor(record), nowMs);
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).not.toBeNull();
+  });
+
+  it('once the cool-off elapses, the SAME `stopped` row is selfReportedDone and assessLiveness frees the PR', () => {
+    const nowMs = Date.parse('2026-09-25T20:25:00Z'); // past the 15-min cool-off
+    const [a] = markSelfReportedDone([listedStopped], recFor(record), nowMs);
+    expect(a.selfReportedDone).toBe(true);
+    expect(a.awaitingInfraCooloff).toBeUndefined();
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('end to end: a review:pending PR bound to a stopped-but-cooling-off reviewer is correctly refused, never redispatched early', () => {
+    const pr = pr1563({ number: 2669, labels: lbl('review:pending'), comments: [] });
+    const nowMs = Date.parse('2026-09-25T20:10:00Z');
+    const agents = markSelfReportedDone([listedStopped], recFor(record), nowMs);
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+  });
+
+  it('a plain `stopped` row with no infra cool-off in play is completely unaffected by this flag (never set)', () => {
+    const [a] = markSelfReportedDone([listedStopped], () => null, Date.parse('2026-09-25T20:10:00Z'));
+    expect(a).toBe(listedStopped); // untouched — no record at all
+    expect(assessLiveness([{ agent: listedStopped, cwd: '/c', sha: '' }])).toBeNull(); // plain `stopped` still frees the PR
+  });
+});
+
 // ── #2588/review-loops (epic #3383/#4075) — THE REVIEW LOOPS: zero-findings reviews bypassing the round cap,
 // and no dedup against a head that already carries an accept verdict. Live incident: PR #2588 got `review:changes`
 // at 23:55Z and `review:accepted` at 00:00Z, five minutes apart, from THREE review sessions dispatched inside one
