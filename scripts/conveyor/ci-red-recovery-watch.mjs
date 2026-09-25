@@ -61,8 +61,12 @@ import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { countTrustedLeadingMarker } from '../lib/marker-authorship.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
-import { computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
+import {
+  computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK,
+  buildHungCandidates, planHungCiRecoveries, DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
+} from './main-red-recovery.mjs';
 import { defaultReadMainRuns, defaultReadAheadBy } from './reconcile-pass.mjs';
 import { rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
@@ -165,6 +169,190 @@ export function sweepCiRedRecovery({
   return { ...plan, applied, mainRedWindows };
 }
 
+// ── HUNG-CI-RUN RECOVERY (we:backlog/xd1sfms-*.md, parent #4075/#3383) ─────────────────────────────────────────
+// See `we:scripts/conveyor/main-red-recovery.mjs`'s own "HUNG-CI-RUN RECOVERY" section header for the full
+// incident (#2636, run 36161558017) and why this reasons about the whole CI *run*, never just the named
+// required check. This half owns every real IO the hung-run pass needs: reading a PR's comment thread (to
+// recover the durable per-sha attempt count), the one real write (`gh run cancel` then `gh run rerun`), and
+// posting the durable marker comment that write leaves behind.
+
+/** we:scripts/conveyor/ci-red-recovery-watch.mjs#HUNG_CI_COMMENT_MARKER — the stable FIRST LINE of the durable
+ *  hung-recovery comment, mirroring `we:scripts/conveyor/ci-heal-mark.mjs#CI_HEAL_COMMENT_MARKER`'s own shape.
+ *  Distinct marker text (and, unlike that file, scoped to one head sha per {@link countHungCiComments}) so the
+ *  two attempt caps never cross-count. */
+export const HUNG_CI_COMMENT_MARKER = '⏱️ conveyor CI-hung-recovery — cancelled & re-run';
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#buildHungCiComment — the durable comment body posted after a
+ * completed cancel+rerun. Its first line MUST be {@link HUNG_CI_COMMENT_MARKER}; its body embeds `sha: <headSha>`
+ * so {@link countHungCiComments} can scope its count to the CURRENT head sha only (a new push must start the
+ * cap fresh — see `main-red-recovery.mjs`'s own docblock for why). PURE.
+ * @param {{actor?:string, runId?:(number|string|null), headSha?:(string|null)}} o
+ * @returns {string}
+ */
+export function buildHungCiComment({ actor = 'conveyor CI-hung-recovery', runId = null, headSha = null } = {}) {
+  return [
+    HUNG_CI_COMMENT_MARKER,
+    '',
+    `sha: ${headSha ?? '(unknown)'}`,
+    `${actor} found required-check run ${runId ?? '?'} stuck in_progress/queued past the hung threshold; cancelled it and asked GitHub to re-run it.`,
+  ].join('\n');
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#countHungCiComments — the DURABLE, restart-surviving hung-run
+ * attempt count for ONE head sha, mirroring `we:scripts/conveyor/ci-heal-mark.mjs#countCiHealComments`'s own
+ * "the count IS PR state" discipline, narrowed to `headSha` (see {@link buildHungCiComment}'s own docblock for
+ * why a new push must not inherit a previous sha's count). Delegates the leading-line-+-trusted-author match
+ * itself to `we:scripts/lib/marker-authorship.mjs#countTrustedLeadingMarker` — the ONE shared answer every
+ * durable marker counter in this repo now runs through (#3383 adversarial-review finding: a forged marker from
+ * an untrusted login must never inflate a real cap) — never re-derived here; this function's only own logic is
+ * the per-sha pre-filter that function doesn't know about. PURE.
+ * @param {Array<{body?:string}|string>|null|undefined} comments - as `gh pr view <pr> --json comments` returns.
+ * @param {string|null} [headSha] - when given, only a marker whose body names THIS sha counts; omitted counts
+ *   every trusted hung-recovery marker on the PR regardless of sha (used only when the caller has no sha yet).
+ * @returns {number}
+ */
+export function countHungCiComments(comments, headSha = null) {
+  if (!Array.isArray(comments)) return 0;
+  const scoped = headSha
+    ? comments.filter((c) => {
+      const body = typeof c === 'string' ? c : c?.body;
+      return typeof body === 'string' && body.includes(`sha: ${headSha}`);
+    })
+    : comments;
+  return countTrustedLeadingMarker(scoped, HUNG_CI_COMMENT_MARKER);
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadPrComments — read one PR's comment thread, the
+ * narrow shape {@link countHungCiComments} needs. Called ONLY for a candidate this tick has already found
+ * hung (see `sweepHungCiRecovery`'s own "pay for it only when needed" comment) — never for every open PR.
+ * @param {number} prNumber
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {Array<object>}
+ */
+export function defaultReadPrComments(prNumber, { exec = execFileSyncThrottled, repo = null } = {}) {
+  const argv = ['pr', 'view', String(prNumber), '--json', 'comments'];
+  if (repo) argv.push('--repo', repo);
+  const out = exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(String(out || '{}'));
+  return Array.isArray(parsed?.comments) ? parsed.comments : [];
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultPostHungCiComment — post the durable marker comment
+ * ({@link buildHungCiComment}) after a completed cancel+rerun. Never called for a run that was NOT actually
+ * cancelled+rerun (see `sweepHungCiRecovery`) — an attempt that never happened must never inflate the cap.
+ * @param {number} prNumber
+ * @param {{exec?:Function, repo?:string|null, runId?:(number|null), headSha?:(string|null)}} [o]
+ */
+export function defaultPostHungCiComment(prNumber, { exec = execFileSyncThrottled, repo = null, runId = null, headSha = null } = {}) {
+  const argv = ['pr', 'comment', String(prNumber), '--body', buildHungCiComment({ runId, headSha })];
+  if (repo) argv.push('--repo', repo);
+  exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+}
+
+/** we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultSleepSync — a bounded, SYNCHRONOUS pause, used only to
+ *  give GitHub a moment to actually land a cancellation before the immediately-following rerun request (a
+ *  rerun asked for before the cancel lands is rejected by GitHub's own API). Kept synchronous — like every
+ *  other effect in this file — rather than turning this whole module async for one call site; injectable so
+ *  tests never actually sleep. */
+export function defaultSleepSync(ms) {
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sab, 0, 0, ms);
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#cancelAndRerunHungRun — the ONE real write the hung-run pass
+ * performs: `gh run cancel <runId>`, a short bounded pause, then `gh run rerun <runId>` (the WHOLE run — never
+ * `--failed`, which matches a `failure` conclusion, not the `cancelled` one this pass's own cancel just
+ * produced, and would silently rerun nothing). Never a raw retry of the still-hung attempt in place.
+ * @param {number|string} runId
+ * @param {{repo?:string|null, exec?:Function, sleepSync?:Function, waitMs?:number}} [o]
+ * @returns {{ok:boolean, action:string, error?:string}}
+ */
+export function cancelAndRerunHungRun(runId, { repo = null, exec = execFileSyncThrottled, sleepSync = defaultSleepSync, waitMs = 5000 } = {}) {
+  const repoArgs = repo ? ['--repo', repo] : [];
+  const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' };
+  try {
+    exec('gh', ['run', 'cancel', String(runId), ...repoArgs], opts);
+  } catch (e) {
+    return { ok: false, action: 'cancel-failed', error: String((e && e.message) || e).split('\n')[0] };
+  }
+  sleepSync(waitMs);
+  try {
+    exec('gh', ['run', 'rerun', String(runId), ...repoArgs], opts);
+  } catch (e) {
+    return { ok: false, action: 'rerun-failed', error: String((e && e.message) || e).split('\n')[0] };
+  }
+  return { ok: true, action: 'cancelled-and-rerun' };
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepHungCiRecovery — THE IO SHELL for the hung-run pass,
+ * mirroring {@link sweepCiRedRecovery}'s own read/plan/act shape exactly. Every reader/writer is injectable so
+ * the whole sweep is exercisable with no network and no credential.
+ * @param {{repo?:string|null, apply?:boolean, requiredCheck?:string, workflowName?:string, thresholdMs?:number,
+ *   maxRetriesPerSha?:number, readOpenPrs?:Function, readComments?:Function, cancelAndRerun?:Function,
+ *   postComment?:Function, now?:number}} [o]
+ * @returns {{dispatch:Array<object>, refusals:Array<object>, applied:Array<object>}}
+ */
+export function sweepHungCiRecovery({
+  repo = null, apply = false, requiredCheck = DEFAULT_REQUIRED_CHECK, workflowName = DEFAULT_MAIN_WORKFLOW_NAME,
+  thresholdMs = DEFAULT_HUNG_THRESHOLD_MS, maxRetriesPerSha = DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
+  readOpenPrs = defaultReadOpenPrs, readComments = defaultReadPrComments,
+  cancelAndRerun = cancelAndRerunHungRun, postComment = defaultPostHungCiComment, now = Date.now(),
+} = {}) {
+  const prs = readOpenPrs({ repo });
+  const rawCandidates = buildHungCandidates(prs, { requiredCheck, workflowName });
+  // The `gh pr view --json comments` read (to recover the durable per-sha attempt count) only matters for a
+  // candidate this tick has ALREADY found hung — mirrors `sweepCiRedRecovery`'s own "pay for it only when
+  // needed" discipline (there, gating the `gh run list --branch main` read on `candidates.length`).
+  const candidates = rawCandidates.map((c) => {
+    if (c.runId == null || !Number.isFinite(Date.parse(c.startedAt))) return c;
+    const hungNow = (now - Date.parse(c.startedAt)) >= thresholdMs;
+    if (!hungNow) return c;
+    const comments = readComments(c.prNumber, { repo });
+    return { ...c, hungAttemptsForSha: countHungCiComments(comments, c.headSha) };
+  });
+  const plan = planHungCiRecoveries({
+    candidates, now, thresholdMs, maxRetriesPerSha,
+  });
+
+  const applied = [];
+  if (apply) {
+    for (const d of plan.dispatch) {
+      const result = d.runId == null
+        ? { ok: false, action: 'no-run-id', error: `PR #${d.prNumber}'s hung check has no resolvable run id (detailsUrl missing/unparseable)` }
+        : cancelAndRerun(d.runId, { repo });
+      if (result.ok) postComment(d.prNumber, { repo, runId: d.runId, headSha: d.headSha });
+      // xd1sfms (#4075/#3383) — `why` carries forward from the PLAN (never re-derived here) so every applied
+      // action stays traceable to the reason it fired, whether or not the write itself succeeded — "log each
+      // hung-run action with its reason" (this card's own scope item 3).
+      applied.push({
+        prNumber: d.prNumber, headRefName: d.headRefName, runId: d.runId, why: d.why, ...result,
+      });
+    }
+  }
+  return { ...plan, applied };
+}
+
+/** we:scripts/conveyor/ci-red-recovery-watch.mjs#formatHungReport — one line per dispatch/refusal/applied
+ *  result for the hung-run pass, mirroring {@link formatReport}'s own shape/discipline. */
+export function formatHungReport({ dispatch = [], refusals = [], applied = [] } = {}) {
+  const lines = [`ci-red-recovery-watch (hung) — ${dispatch.length} owed a cancel+rerun, ${refusals.length} refusal(s), ${applied.length} applied`];
+  for (const d of dispatch) lines.push(`  → hung-cancel-rerun PR #${d.prNumber} run ${d.runId ?? '?'} — ${d.why}`);
+  for (const r of refusals) if (r.kind !== 'not-hung') lines.push(`  ✗ ${r.kind} PR #${r.prNumber} — ${r.why}`);
+  for (const a of applied) lines.push(a.ok ? `  ✓ applied: ${a.action} run ${a.runId ?? '?'} (PR #${a.prNumber}) — ${a.why ?? '(no reason recorded)'}` : `  ✗ apply ${a.action} PR #${a.prNumber} run ${a.runId ?? '?'} — ${a.error} (reason it was attempted: ${a.why ?? '(none)'})`);
+  return lines.join('\n');
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -205,8 +393,17 @@ async function main(argv) {
     return;
   }
   const result = sweepCiRedRecovery({ repo: repoFlag, apply: !!flags.apply });
-  if (flags.json) writeAllSync(1, `${JSON.stringify(result)}\n`);
-  else writeLineSync(2, formatReport(result));
+  // xd1sfms (#4075/#3383) — the hung-run pass runs in the SAME `sweep` invocation, never a separate CLI verb:
+  // both watch the same open-PR listing for the same reason (a PR wrongly stuck on `checking`), and a daemon
+  // manifest entry that already schedules this script (see `we:skills-src/conveyor/daemon-manifest.mjs`'s own
+  // `ci-red-recovery-watch` entries) gets the hung-run fix for free rather than needing a second entry.
+  const hungResult = sweepHungCiRecovery({ repo: repoFlag, apply: !!flags.apply });
+  if (flags.json) {
+    writeAllSync(1, `${JSON.stringify({ mainRedRecovery: result, hungRecovery: hungResult })}\n`);
+  } else {
+    writeLineSync(2, formatReport(result));
+    writeLineSync(2, formatHungReport(hungResult));
+  }
   process.exitCode = 0;
 }
 
