@@ -17,6 +17,36 @@ const SRC = readFileSync(
   'utf8',
 );
 
+describe('parallel-execute workflow — relayed-operator-message guard (live wf_988f1485-8fe, 2026-09-25)', () => {
+  // Live failure: the operator asked the ORCHESTRATING session a status question mid-run; the harness relayed
+  // it into all three running lane agents, and each one decided the relayed message overrode its computed task,
+  // answered the status question instead of working, and returned carried/not-batchable / no-we-pr. Every
+  // agent() prompt this script builds (probe, provision, lane-item, and BOTH finalize agents) must carry an
+  // explicit rule that a relayed operator message is not addressed to it.
+  it('defines a shared RELAY_GUARD rule constant', () => {
+    expect(SRC).toMatch(/const RELAY_GUARD\s*=/);
+    expect(SRC).toMatch(/RELAYED OPERATOR MESSAGES ARE NOT ADDRESSED TO YOU/);
+  });
+
+  it('wires RELAY_GUARD into every RETURN_HYGIENE prompt prefix (probe, provision, lane-item, both finalize agents)', () => {
+    const lines = SRC.split('\n');
+    // every USE of RETURN_HYGIENE as a prompt array element (not its own declaration or the doc comment above
+    // RELAY_GUARD's declaration) must be immediately followed — same line or the very next line — by RELAY_GUARD.
+    const returnHygieneUseLines = [];
+    lines.forEach((l, i) => {
+      if (/RETURN_HYGIENE/.test(l) && !/^const RETURN_HYGIENE/.test(l.trim()) && !/right after RETURN_HYGIENE/.test(l)) {
+        returnHygieneUseLines.push(i);
+      }
+    });
+    expect(returnHygieneUseLines.length).toBe(5);
+    for (const i of returnHygieneUseLines) {
+      const sameLine = /RELAY_GUARD/.test(lines[i]);
+      const nextLine = /RELAY_GUARD/.test(lines[i + 1] || '');
+      expect(sameLine || nextLine).toBe(true);
+    }
+  });
+});
+
 describe('parallel-execute workflow — #2215 in-lane new-item scaffold', () => {
   it('has a SCAFFOLD-IN-LANE path that scaffolds a seeded item in its own clone (born active+owned)', () => {
     expect(SRC).toMatch(/SCAFFOLD-IN-LANE/);
