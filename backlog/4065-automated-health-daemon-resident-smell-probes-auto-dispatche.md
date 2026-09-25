@@ -2,8 +2,11 @@
 bornAs: xev8pnf
 kind: decision
 parent: "4075"
-status: open
+status: resolved
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
+codifiedIn: "docs/agent/platform-decisions.md#automated-health-daemon"
 preparedDate: "2026-09-24"
 preparedAgainstSha: "aad340b97cfbab097a92ff8fd875422ded4b76e3"
 relatedReport: reports/2026-09-24-health-daemon-design.md
@@ -33,6 +36,24 @@ watches); Fork 6 dissolved into "Supported by default" (already ruled by clause 
 `#resident-daemon-reload-lifecycle`); Forks 1–3 survived with amendments. Each fork's `Skeptic:` and
 `Screen:` lines record what changed.
 
+**Ratification review (2026-09-24, decision session).** Currency: `check:item` clean; no
+`we:docs/agent/platform-decisions.md` change since `preparedAgainstSha`; health flags only low prose-edges to #4045/#4052
+(stories that block slices 4077/4081, not this ruling); no G8. Cited statute clauses re-read verbatim and
+they hold. Independent skeptic (`judgePanel`, run `ratify-4065`, ok) raised three points, none refuting a
+default: (1) cite clauses verbatim — re-checked, they hold; (2) Fork 4 widens the notify contract — already
+explicit below, so it is the operator's call at ratification; (3) Fork 5 defers filing during lane
+starvation — accepted: the report and notification still fire, and the request waits in the ledger.
+Fork 1 was then amended by the operator: the health clone is dedicated and may run overlays of its own
+code only (not `main`-only) — see Fork 1's operator-amendment line.
+
+## Ruling (2026-09-24)
+
+**Ratified** by the operator (*"I ratify"*): all five forks at their defaults — Fork 1 as amended by the
+operator (dedicated clone running overlays of its own code only), Fork 4 with the notification widening
+explicitly accepted. Codified as
+[#automated-health-daemon](/docs/agent/platform-decisions/#automated-health-daemon). Build slices 4077, 4078,
+4068, 4066, 4079, 4081 are now unblocked by this card.
+
 ## Axes
 
 - **Isolation** — where the watch runs, relative to what it watches (Fork 1).
@@ -45,7 +66,7 @@ watches); Fork 6 dissolved into "Supported by default" (already ruled by clause 
 
 | Fork | Recommended default | Main alternative | Confidence |
 | --- | --- | --- | --- |
-| 1 — Where does it run? | **Its own resident process in its own failure domain: not inside any daemon it watches, from a `main`-only clone (no overlays), with a hard per-tick timeout and a last-tick-completed stamp** | Folded into an existing daemon | High |
+| 1 — Where does it run? | **Its own resident process in its own failure domain: not inside any daemon it watches, from its own dedicated clone (`main` plus overlays of its own code only, never shared), with a hard per-tick timeout and a last-tick-completed stamp** | Folded into an existing daemon | High |
 | 2 — Which smells get an agent? | **Deterministic diagnosis first; an agent only for a symptom with several plausible causes, whose evidence must be read, no other watch already dispatches for, and no inhibiting episode is open** | Dispatch on every smell no other watch covers | High |
 | 3 — What is one event? | **An episode per (smell, subject) with open/close hysteresis, a flap cap, a high-severity reminder, and tracked-silences that expire** | A cooldown keyed per (smell, subject) | High |
 | 4 — Where does the recommendation go? | **A scrubbed durable episode report + a HEALTH section in the operator queue + an OS notification for high severity, delivered by the health process itself** | A GitHub issue per episode | High |
@@ -55,20 +76,22 @@ watches); Fork 6 dissolved into "Supported by default" (already ruled by clause 
 
 Fork-existence: (b) is broken, not just worse — a watcher running inside a daemon it watches stalls and dies
 with that daemon, which is exactly 2026-09-24's failure mode ("alive but dispatching nothing"). (c) is broken
-on the day's own evidence: a clone that runs live overlays shares every daemon's failure domain (one bad
-overlay or a conflicted self-sync, both seen 2026-09-24, takes the watcher down with the watched).
+on the day's own evidence: a clone shared with other daemons' live overlays shares their failure domain (one
+bad overlay or a conflicted self-sync, both seen 2026-09-24, takes the watcher down with the watched).
 
 - **(a) Its own resident process, in its own failure domain.** One per host, singleton lease, under the
-  ruled reload lifecycle. It runs from a **`main`-only clone that never runs overlays** — the carve-out
-  model that clause 5(e) of
-  [#resident-daemon-reload-lifecycle](/docs/agent/platform-decisions/#resident-daemon-reload-lifecycle)
-  already applies to the drain. Every tick has a **hard wall-clock timeout on its child calls** (clause 6)
+  ruled reload lifecycle. It runs from its **own dedicated clone, shared with no other daemon**, tracking
+  `main` plus **overlays of its own code only** — so, per clause 5 of
+  [#resident-daemon-reload-lifecycle](/docs/agent/platform-decisions/#resident-daemon-reload-lifecycle),
+  a fix to the health watch can run live before it merges, while no other daemon's overlay can take it down.
+  A bad health overlay only breaks the health process, and the outside check of clause 6 (plus clause 5(d)'s
+  outside rollback) catches that. It is NOT a clause 5(e) carve-out: it does not merge to `main`. Every tick has a **hard wall-clock timeout on its child calls** (clause 6)
   and writes a **last-tick-completed stamp** from inside the tick, separate from the lease heartbeat —
   because the generic pass runner's heartbeat runs on an independent timer
   (`we:skills-src/conveyor/pass-daemon.mjs:194`) and keeps moving while a tick hangs
   (`spawnPassOnce`, line 159, has no child timeout).
 - (b) Folded into the dispatcher runner or the review daemon. Excluded (above).
-- (c) Its own process, but from a clone that runs overlays. Excluded (above).
+- (c) Its own process, but from a clone shared with other daemons' overlays. Excluded (above).
 
 Build note for slice 4077 (not ruled here): a `health-watch` entry in `DAEMON_MANIFEST`
 (`we:skills-src/conveyor/daemon-manifest.mjs:126`, shape `{script, args, intervalMs}`) run by the pass-daemon
@@ -85,6 +108,11 @@ timeout, the last-tick-completed stamp; option (c) added and excluded.
 Screen: flagged(impl+prio) → fixed (real fresh-context agent). The draft ruled "manifest entry vs bespoke
 daemon", which no consumer can observe and which differed only in build cost. Re-ruled as the observable
 policy (its own failure domain); the vehicle moved to a build note on slice 4077.
+
+Operator amendment (2026-09-24, decision session, "amend 1 as suggested"): the prepared default was a
+`main`-only clone with no overlays. That over-reached — the failure-domain argument only excludes a clone
+*shared* with other daemons' overlays, and the operator's clause 5(e) choice was that every daemon may run
+overlays unless it merges to `main`. Amended to a dedicated clone running overlays of its own code only.
 
 ## Fork 2 — Which smells get an agent, and which only alert?
 
@@ -196,6 +224,8 @@ conveyor never reads. (c) is broken for most smells: a daemon, a host or a lane 
 **Ratifying this fork widens the notification contract.** Today only "NEEDS YOU" PRs notify (the operator's
 "I only review human tag" rule, `we:scripts/operations/operator-notify.mjs` header). (a) adds exactly one
 more class: a *high-severity* health episode opening (and its one 4-hour reminder). Nothing else notifies.
+Operator approval (2026-09-24, decision session): "ok to add new kind for fork 4" — the widening is accepted
+as its own explicit call, answering the ratify-4065 skeptic's scope-bundling point.
 
 Supported by default (not a fork): the plateau /wip panel and the live status page (4067) render the same
 episode reports; they read (a), they do not compete with it. On a host with no desktop (a future VM), layer 3
@@ -300,8 +330,9 @@ person is a real authority question with a merit difference at zero cost; cap an
 A new anchor `#automated-health-daemon` in `we:docs/agent/platform-decisions.md`:
 
 > 1. A resident health process watches the conveyor from its own failure domain: never inside a daemon it
->    watches, from a `main`-only clone, with a per-tick timeout and a last-tick-completed stamp that the
->    outside check of `#resident-daemon-reload-lifecycle` clause 6 reads.
+>    watches, from its own dedicated clone that runs overlays of its own code only, with a per-tick
+>    timeout and a last-tick-completed stamp that the outside check of `#resident-daemon-reload-lifecycle`
+>    clause 6 reads.
 > 2. A smell is a cheap mechanical probe with a threshold. Deterministic diagnosis runs first; an agent is
 >    dispatched only for a multi-cause symptom whose evidence must be read, that no other watch dispatches
 >    for, while no inhibiting episode is open. The agent is diagnose-only, holds declared read operations
