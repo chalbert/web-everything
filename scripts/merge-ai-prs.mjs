@@ -129,6 +129,7 @@ import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTre
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime + (#3440) localRepoSlug keys that lease per-repo
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
+import { autoStrandedSweepPass } from './backlog-stranded-sweep.mjs'; // xvr2o8r — the strict #3916 auto-resolve backstop, run once per pass (see runStrandedSweepStep below); never a second resolver, shares resolveLandedItem via that module
 // xsbyo56 — the PARSE half of #2324's escalation-reason block, reused (not re-implemented) so the #2832
 // held-reconcile comment can name the SPECIFIC file(s) a park already scored, not just the hold label.
 import { parseEscalationReason } from './review-detail.mjs';
@@ -1116,6 +1117,70 @@ export function planResolveOnLand({ landedItems = [], assigned = [], carriers = 
  */
 export function resolveIdsForLandedPass(o = {}) {
   return planResolveOnLand(o).resolve;
+}
+
+/**
+ * xvr2o8r — THE DRAIN'S OWN CALL to the strict #3916 stranded-item backstop (`we:scripts/backlog-stranded-
+ * sweep.mjs#autoStrandedSweepPass`), run once per pass right after the resolve-on-land step above.
+ *
+ * WHY THIS IS SEPARATE FROM resolve-on-land. That step only ever flips a card whose OWN WE-carrier PR merged
+ * THIS pass (`landedThisPass`) — it has no way to catch a card stranded by an EARLIER heuristic miss (a
+ * `deliveredItemNumsFromPr` extractor bug, #3916's own root cause) or a couple that landed in a PRIOR pass but
+ * whose resolve got deferred (B5 above) and never re-attempted. `we:scripts/backlog-stranded-sweep.mjs --apply`
+ * (#2661) already closes that gap manually; nothing called it automatically until this wiring — the drain used
+ * to only print a hint pointing at it (see the `resolve-on-land DEFERRED` log line above).
+ *
+ * NEVER FAILS THE PASS. `sweepFn` (which touches fs/git) is called inside a try/catch here as a second layer of
+ * defense on top of `autoStrandedSweepPass`'s own internal never-throws contract — belt and suspenders, since
+ * this step running once **every pass** must never be the reason a drain pass that would otherwise have landed
+ * something exits non-zero. A thrown/errored sweep is logged (stderr, unless `asJson`) and the pass continues
+ * exactly as if the sweep found nothing.
+ *
+ * `dryRun:true` (the drain's own `--dry-run`) computes and logs exactly what would resolve, WITHOUT writing —
+ * this is what a drain dry-run's proof output shows: the strict candidates it would flip on a real pass.
+ *
+ * Injectable `sweepFn` (defaults to the real `autoStrandedSweepPass`) and `log`/`asJson` make this fully unit-
+ * testable without touching real fs/git or running the rest of this 5000+-line module.
+ *
+ * @param {{dryRun?:boolean, asJson?:boolean, sweepFn?:function, log?:function}} [o]
+ * @returns {{ok:boolean, ran:boolean, autoResolvable:Array, applied:Array, error:(string|null)}}
+ */
+export function runStrandedSweepStep({ dryRun = false, asJson = false, sweepFn = autoStrandedSweepPass, log = (msg) => process.stderr.write(msg) } = {}) {
+  let report;
+  try {
+    report = sweepFn({ apply: !dryRun });
+  } catch (e) {
+    const error = String((e && e.message) || e).split('\n')[0];
+    if (!asJson) log(`  ⚠ stranded-sweep errored — skipped this pass, logging and continuing (xvr2o8r): ${error}\n`);
+    return { ok: false, ran: false, autoResolvable: [], applied: [], error };
+  }
+  if (!report || typeof report !== 'object') {
+    // A misbehaving injected sweepFn (or a future refactor that changes its shape) degrades the same way a
+    // thrown error does — never a crash, never a silent pretend-success.
+    if (!asJson) log('  ⚠ stranded-sweep returned no report — skipped this pass, logging and continuing (xvr2o8r)\n');
+    return { ok: false, ran: false, autoResolvable: [], applied: [], error: 'sweepFn returned a non-object report' };
+  }
+  if (!report.ok) {
+    if (!asJson) log(`  ⚠ stranded-sweep ✗ ${report.error || 'unknown error'} — skipped this pass, logging and continuing (xvr2o8r)\n`);
+    return { ok: false, ran: !!report.ran, autoResolvable: report.autoResolvable || [], applied: report.applied || [], error: report.error || null };
+  }
+  if (!asJson) {
+    if (report.mainLogUnavailable) {
+      log('  · stranded-sweep: could not read origin/main\'s commit log this pass — skipped, will retry next pass (xvr2o8r)\n');
+    } else if (report.autoResolvable && report.autoResolvable.length) {
+      if (dryRun) {
+        log(`  · stranded-sweep DRY-RUN would resolve ${report.autoResolvable.map((h) => `#${h.id}`).join(', ')} (strict commit-subject proof, #3916/xvr2o8r) — nothing written\n`);
+      } else {
+        const flipped = (report.applied || []).filter((a) => a.flipped).map((a) => `#${a.id}`);
+        const already = (report.applied || []).filter((a) => a.alreadyResolved).map((a) => `#${a.id}`);
+        const failed = (report.applied || []).filter((a) => !a.flipped && !a.alreadyResolved);
+        if (flipped.length) log(`  ✓ stranded-sweep resolved ${flipped.join(', ')} (strict commit-subject proof, #3916/xvr2o8r)\n`);
+        if (already.length) log(`  · stranded-sweep: ${already.join(', ')} already resolved\n`);
+        if (failed.length) log(`  ⚠ stranded-sweep FAILED to resolve ${failed.map((f) => `#${f.id} (${f.reason || 'unknown'})`).join(', ')} — resolve by hand (#3916/xvr2o8r)\n`);
+      }
+    }
+  }
+  return { ok: true, ran: !!report.ran, autoResolvable: report.autoResolvable || [], applied: report.applied || [], error: null };
 }
 
 /**
@@ -4988,6 +5053,16 @@ async function runCli() {
     if (numLock.contended && !AS_JSON) process.stderr.write(`  ⚠ numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
   }
 
+  // xvr2o8r — the strict #3916 stranded-item auto-resolve backstop, ONCE PER PASS, unconditionally (never
+  // gated on `landedLocal`): unlike the resolve-on-land block just above, which can only ever flip a card whose
+  // OWN carrier merged THIS pass, this sweep is the recovery path for a card stranded by an EARLIER heuristic
+  // miss or a couple whose resolve was deferred in a prior pass — it has to keep checking even on a pass that
+  // itself lands nothing local. Runs under `DRY_RUN` too (apply:false there), so a dry-run's proof output shows
+  // exactly what a real pass would resolve, without writing anything. `runStrandedSweepStep` never throws —
+  // any failure (an unreadable `backlog/`, `git log` unavailable, a thrown resolve) is logged and this pass
+  // continues exactly as if the sweep found nothing.
+  const strandedSweep = runStrandedSweepStep({ dryRun: DRY_RUN, asJson: AS_JSON });
+
   // #2318 — POST-LAND DUPLICATE-NNN TRIPWIRE (LOUD-ONLY, #xsyia6k). JIT numbering (#2288) makes two lanes racing
   // to one birth-NNN structurally rare, but a bug on ANY land path could still put two files at one numeric id on
   // main — exactly the #2316 double-land, where two individually-green PRs both passed `ids must be unique` against
@@ -5048,7 +5123,7 @@ async function runCli() {
   // goes to the formatter — it computes+appends the trailing `total=` itself; passing `timings` here would
   // print `total=` twice (once as an ordinary step, once as the formatter's own).
   process.stderr.write(`merge-ai-prs · pass timings: ${formatTimingsSummary(timingSteps, { total: passTotalMs, order: PASS_STEP_ORDER })} (considered ${verdicts.length}, merged ${merged.length})\n`);
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, ...(revalidationAborted.length ? { revalidationAborted } : {}), rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, ...(revalidationAborted.length ? { revalidationAborted } : {}), rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...((strandedSweep.autoResolvable.length || strandedSweep.applied.length || !strandedSweep.ok) ? { strandedSweep } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
