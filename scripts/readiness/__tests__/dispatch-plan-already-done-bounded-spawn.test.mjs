@@ -18,7 +18,8 @@
  *
  *   Runs the REAL `dispatch-plan.mjs` CLI in FIXTURE MODE (`--backlog-dir`, #x7xv2xt) so the real lane pool /
  *   `scope-lease-collect.mjs` are never touched (fixtureMode short-circuits both), with `--no-drift-check
- *   --no-pause-check` dropping the two other best-effort child spawns, and a fake `gh` on `PATH`
+ *   --no-pause-check --no-pr-limit-check` dropping the OTHER best-effort child spawns (we:xniq7xs added the
+ *   third), and a fake `gh` on `PATH`
  *   ({@link withFakeGh}, the SAME shim `dispatcher-fixture-harness.test.mjs` uses) standing in for GitHub so the
  *   test costs nothing and needs no auth/network. Every `gh pr list …` call it receives is logged, so the
  *   assertions are on SPAWN COUNT, never wall time — this can't flake under load.
@@ -97,7 +98,7 @@ describe('dispatch-plan.mjs already-done ground truth — spawn count is LINEAR 
       const freeLanes = Array.from({ length: 80 }, (_, i) => 9000 + i).join(',');
       const out = execFileSync(
         'node',
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, `--free-lanes=${freeLanes}`, '--no-drift-check', '--no-pause-check'],
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, `--free-lanes=${freeLanes}`, '--no-drift-check', '--no-pause-check', '--no-pr-limit-check'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       );
       const plan = JSON.parse(out);
@@ -125,7 +126,7 @@ describe('dispatch-plan.mjs already-done ground truth — spawn count is LINEAR 
       const env = { ...process.env, ...fakeGh.env, CONVEYOR_QUEUE_FILE: queueFile };
       execFileSync(
         'node',
-        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-ground-truth'],
+        [PLAN_CLI, '--json', `--backlog-dir=${backlogDir}`, '--free-lanes=1', '--no-drift-check', '--no-pause-check', '--no-ground-truth', '--no-pr-limit-check'],
         { encoding: 'utf8', env, maxBuffer: 32 * 1024 * 1024 },
       );
       expect(prListCalls(fakeGh).length).toBe(0);
