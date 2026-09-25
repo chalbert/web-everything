@@ -17,6 +17,9 @@ export default defineConfig({
     // #3383 bugfix: default delivery-telemetry OFF for the whole run (`WE_TELEMETRY=0`) so wrapper tests
     // that invoke the real dispatch wrappers don't append fixture spans to the shared
     // `.operations/telemetry/*.jsonl` log — see `vitest.setup.ts`'s own header for the full story.
+    // The same setup file also hands every test its own throwaway `WE_COORDINATION_ROOT` (#3901), which
+    // `action-cli.test.mjs`/`action-records.test.mjs` rely on: their `createActionStore()` calls take no
+    // explicit root, so without it they would write real attempts to `~/workspace/.operations/coordination`.
     setupFiles: ['./vitest.setup.ts'],
     // #x1jcikc: cap this invocation's own worker count (see vitest.shared.ts#maxTestWorkers for the sizing
     // rationale) — otherwise the ~2000-file suite defaults to one thread per CPU core, which is how two
