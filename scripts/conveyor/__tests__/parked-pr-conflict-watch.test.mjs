@@ -961,12 +961,13 @@ describe('defaultListMainStatutePatchesSinceMergeBase — argv shape + failure m
 describe('findWatcherStandDownComment', () => {
   it('finds a stand-down comment posted by the watch itself', () => {
     const body = buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' });
-    expect(findWatcherStandDownComment([{ body }])).toEqual({ body, createdAt: null });
+    // #3383 — the watch posts under the automation's own login; a trusted author is now required to count.
+    expect(findWatcherStandDownComment([{ body, author: { login: 'web-everything' } }])).toEqual({ body, createdAt: null });
   });
 
   it('null: a fix agent\'s own judgment stand-down does not match', () => {
     const body = buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' });
-    expect(findWatcherStandDownComment([{ body }])).toBeNull();
+    expect(findWatcherStandDownComment([{ body, author: { login: 'web-everything' } }])).toBeNull();
   });
 
   it('null: no comments at all', () => {
@@ -1058,8 +1059,9 @@ describe('watchParkedPrConflicts — #xu2krte Fork 2 review-human statute amendm
 });
 
 describe('watchParkedPrConflicts — #xu2krte Fork 2 recheck of an ALREADY stood-down parked PR (live PR #2549 shape)', () => {
-  const watcherMarkerComment = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }) };
-  const humanJudgmentComment = { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }) };
+  // #3383 — every marker (this one included) now requires a trusted author; both are posted by the automation.
+  const watcherMarkerComment = { body: buildStandDownComment({ actor: WATCHER_STAND_DOWN_ACTOR, reason: 'conflict' }), author: { login: 'web-everything' } };
+  const humanJudgmentComment = { body: buildStandDownComment({ actor: 'conveyor fix agent', reason: 'needs-judgment' }), author: { login: 'web-everything' } };
   const alreadyLabelledPr = (over = {}) => ({
     number: 2549, mergeable: 'CONFLICTING', headRefName: 'lane/3681-ratify-daemon-lifecycle',
     labels: [{ name: 'review:human' }, { name: CONFLICT_LABEL }], ...over,
@@ -1428,7 +1430,8 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
       repo: 'o/n', listPrs: () => [{ number: 2505, mergeable: 'CONFLICTING', labels: L('review:accepted', CONFLICT_LABEL) }],
       provider: fakeProvider(), postFinding: () => routed.push('finding'), postStandDown: () => routed.push('sd'),
       labelAgeMs: () => QUEUED_CONFLICT_GRACE_MS * 2, listPrFiles: () => statuteFiles,
-      listPrComments: () => [{ body: STAND_DOWN_MARKER }],
+      // #3383 — a trusted author is now required for the marker read-back to count.
+      listPrComments: () => [{ body: STAND_DOWN_MARKER, author: { login: 'web-everything' } }],
     });
     expect(later).toEqual([]);
     expect(routed).toEqual(['sd']);

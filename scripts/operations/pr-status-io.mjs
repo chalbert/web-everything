@@ -121,7 +121,16 @@ export function createPrReader({ run = execFileSync, reconcile = false } = {}) {
         if (!Array.isArray(parsed.comments)) throw new Error('pr-reconcile: unreadable comments');
         const comments = parsed.comments.map((c) => {
           if (typeof c?.body !== 'string') throw new Error('pr-reconcile: unreadable comment body');
-          return { body: c.body, createdAt: String(c.createdAt ?? ''), url: String(c.url ?? '') };
+          // #3383 — `author`/`viewerDidAuthor` MUST survive this normalization: `countStandDownComments` (and
+          // every other durable marker counter) now requires a trusted author
+          // (`we:scripts/lib/marker-authorship.mjs`) before a marker counts at all. Dropping these fields here
+          // would silently blind `standDownEvidence` to every REAL stand-down (a false negative — the escalation
+          // gets lost, not merely spoofed), never just close the forgery this item actually targets.
+          return {
+            body: c.body, createdAt: String(c.createdAt ?? ''), url: String(c.url ?? ''),
+            ...(c.author && typeof c.author === 'object' ? { author: { login: String(c.author.login ?? '') } } : {}),
+            ...(typeof c.viewerDidAuthor === 'boolean' ? { viewerDidAuthor: c.viewerDidAuthor } : {}),
+          };
         });
         detail = {
           state: String(r.state ?? '').toLowerCase(),
