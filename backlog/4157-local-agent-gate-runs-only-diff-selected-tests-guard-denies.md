@@ -3,9 +3,10 @@ bornAs: xpnhz4o
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/test-selection.mjs", "we:scripts/lib/verify-lane-gate.mjs", "we:scripts/verify-lane.mjs", "we:scripts/lib/repo-profile.mjs", "we:scripts/guard-bash.mjs", "we:skills-src/conveyor/fix-agent-brief.md", "we:skills-src/conveyor/fix-agent-ci-brief.md"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
