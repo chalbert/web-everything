@@ -3,10 +3,11 @@ bornAs: x3zr5tu
 kind: story
 size: 2
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/parked-pr-conflict-watch.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
