@@ -3,10 +3,11 @@ bornAs: xgkl5ha
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/hung-session.mjs", "we:scripts/conveyor/session-reaper.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
