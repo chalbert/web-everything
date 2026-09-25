@@ -78,7 +78,7 @@ import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences }
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { withNumberingLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo)
+import { withNumberingLock, lockResultOr, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 dual-lock: numbering mutex + whole-process drain lease (#3440 localRepoSlug keys it per-repo); lockResultOr (#xuqk1vp) safely reads a lock outcome that may have refused to run
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -845,6 +845,54 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
 }
 
 /**
+ * xb94mt5 — cheap, git-only pre-check: does `CWD`'s tree carry ANY tracked provisional (hash-keyed) backlog
+ * file right now? Mirrors the pre-check `scripts/lib/number-pending-hashes-before-push.mjs` already runs
+ * before every push (same regex, same `git ls-files backlog/*.md` call) — kept as an independent, in-scope
+ * copy here rather than importing that file, so this module never depends on a caller-side script. Lets a
+ * caller that runs UNCONDITIONALLY once per pass (not gated on "did a WE PR merge THIS pass") skip the mutex
+ * + the full `numberPendingHashes` corpus read entirely on the overwhelmingly common "nothing pending" tick.
+ * @param {string} CWD
+ * @returns {boolean}
+ */
+export function hasPendingHashFiles(CWD) {
+  const tracked = quietGit(CWD, ['ls-files', 'backlog/*.md']);
+  return tracked != null && /backlog\/x[0-9a-z]{6}-/.test(tracked);
+}
+
+/**
+ * xb94mt5 — number (+ publish) whenever the refreshed tree carries a pending hash file, REGARDLESS of whether
+ * THIS pass itself landed a WE PR. Audit finding A4 (we:reports/2026-09-24-daemon-blocking-antipatterns.md):
+ * the JIT numbering in `scripts/merge-ai-prs.mjs` fires only when `landedLocal` is true (a WE PR merged this
+ * pass), so a killed pass, a failed push, or a couple that landed via a non-WE-carrier path leaves a hash file
+ * on main un-numbered until the next WE PR HAPPENS to land — and the resident drain daemon's own clone-refresh
+ * `reset --hard` (against `#resident-daemon-reload-lifecycle` clause 4) discards any unpushed numbering commit
+ * in between, so the miss can persist indefinitely rather than merely until the next merge.
+ *
+ * This is the SAME `numberPendingHashes` + numbering-mutex machinery `finalizeLand` uses (single source, never
+ * a fork), wired to run on its own "is there anything to do" signal instead of a caller's landed-this-pass
+ * flag — a caller (a drain pass's own top-of-loop, `push-if-green.mjs`'s pre-push hook, a cron sweep) can call
+ * this UNCONDITIONALLY, every pass, and it is a true no-op (no git spawn beyond the one cheap `ls-files`, no
+ * mutex acquisition) whenever {@link hasPendingHashFiles} finds nothing. xuqk1vp: never runs the write
+ * unlocked — a live holder's pass simply finds nothing-to-do-yet and the NEXT pass's cheap check retries.
+ * `lockOpts` passes through to {@link withNumberingLock} (e.g. `lockRoot`/`now`/`sleep`/`waitMs` for a test's
+ * throwaway lock dir + fake clock) — never the mutex's OWN choice to run unlocked, which stays hard-`false`.
+ * @param {string} CWD
+ * @param {object} [lockOpts]
+ * @returns {{ attempted: boolean, numbered?: {assigned: Array<{hash:string,nnn:string}>, committed: boolean}, pushed?: boolean, deferred?: boolean, heldBy?: string|null }}
+ */
+export function numberPendingHashesIfAny(CWD, lockOpts = {}) {
+  if (!hasPendingHashFiles(CWD)) return { attempted: false };
+  const numLock = withNumberingLock((heartbeat) => {
+    const numbered = numberPendingHashes(CWD);
+    heartbeat();
+    const pushed = numbered.committed ? publishMain(CWD) : false;
+    return { numbered, pushed };
+  }, { ...lockOpts, runUnlockedOnContention: false });
+  if (!numLock.ran) return { attempted: true, deferred: true, heldBy: numLock.heldBy ?? null };
+  return { attempted: true, numbered: numLock.result.numbered, pushed: numLock.result.pushed };
+}
+
+/**
  * Resolve a birth-hash to the NNN it LANDED as, by reading the sole cross-clone proof-of-land: the
  * `bornAs:<hash>` line `numberPendingHashes` stamped into a numbered item's frontmatter on origin/main
  * (#2392). Returns the landed NNN string, or null when the hash has no bornAs record on main (it has not
@@ -905,16 +953,26 @@ function finalizeLand(CWD, num) {
   // single publish below pushes the unqueue commit and the numbering commit to main together.
   //
   // #2391 — number+publish is the NUMBERING CRITICAL SECTION (sole-serial-writer, #2288/#2290). Wrap it in the
-  // TTL-bounded numbering mutex so two concurrent lands never both mint an NNN off the same base. A crashed
-  // holder expires by the lease; a pathological live-contention falls through un-locked (reported), never hangs.
-  const numLock = withNumberingLock(() => {
+  // TTL-bounded numbering mutex so two concurrent lands never both mint an NNN off the same base.
+  //
+  // xuqk1vp — `runUnlockedOnContention: false`: a live holder blocked past the budget means this section NEVER
+  // runs unlocked (the old fallback let two writers race main; the #2318 tripwire only ever caught it AFTER the
+  // damage). A refusal defers this pass entirely (`numLock.ran === false` → no numbering, no push here) — safe
+  // because it's a pure no-op vs. today's tree, and #xb94mt5 (drain: number pending hashes on ANY pass that
+  // finds them) is what sweeps up a hash file this pass deferred, on the very next pass, so nothing strands.
+  // `heartbeat` is threaded through so a genuinely-long section (before #xn6n5gp's linear fix lands, or a slow
+  // push) keeps its own lease fresh instead of racing the 5-minute TTL out from under itself.
+  const numLock = withNumberingLock((heartbeat) => {
     const numbered = numberPendingHashes(CWD);
+    heartbeat(); // refresh — numbering is the long pole; the push below should never find its own lease stale
     const pushed = (unqueueCommitted || numbered.committed) ? publishMain(CWD) : false;
     return { numbered, pushed };
-  });
-  const numbered = numLock.result.numbered;
-  pushed = numLock.result.pushed;
-  if (numLock.contended) process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex not acquired (held by ${numLock.heldBy || '?'}) — numbered+published without it (#2391); the #2318 duplicate-NNN tripwire is the backstop\n`);
+  }, { runUnlockedOnContention: false });
+  const fallback = { numbered: { assigned: [], committed: false }, pushed: false };
+  const outcome = lockResultOr(numLock, fallback);
+  const numbered = outcome.numbered;
+  pushed = outcome.pushed;
+  if (!numLock.ran) process.stderr.write(`lane-drain ⚠ #${num}: numbering mutex held by ${numLock.heldBy || '?'} — DEFERRED this pass (#2391/#xuqk1vp), never run unlocked; a later pass (or #xb94mt5's any-pending-hash sweep) numbers+publishes it\n`);
   return { unqueued, manifestDeleted, pushed, numbered };
 }
 

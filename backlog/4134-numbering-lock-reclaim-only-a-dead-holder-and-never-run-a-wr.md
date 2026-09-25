@@ -3,8 +3,9 @@ bornAs: xuqk1vp
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
 tags: []
 scope: ["we:scripts/lane-drain.mjs", "we:scripts/readiness/drain-lock.mjs", "we:scripts/backlog/id.mjs"]
 ---

@@ -84,6 +84,30 @@ export function makeOwner(kind) { return `${hostname()}:${process.pid}:${kind}`;
 /** The whole-process drain lease owner for this process. */
 export function drainOwner() { return makeOwner('drain'); }
 
+// ── xuqk1vp — reclaim only a genuinely DEAD holder, never the TTL alone ────────────
+/**
+ * Same-machine PID-liveness probe for a held numbering/land-write lock entry, mirroring
+ * `heavy-admission.mjs`'s `probeSlotHolderLiveness` (kept separate rather than imported: that helper takes a
+ * bare `(pid, selfPid)` pair keyed to the admission lock's own reservation shape, while this reads straight off
+ * a `file-locks.mjs` entry and additionally requires the entry's `owner` to name THIS host — the lock root
+ * (`DRAIN_LOCK_ROOT`) is machine-global but this repo's contenders (a lane clone, the primary, `/pr`) are all
+ * same-host by construction (see file header); a foreign-host owner (a stale entry copied in some other way, or
+ * a future cross-host contender) must never be probed with a LOCAL `process.kill` — a reused pid on THIS host
+ * could then be misread as the (different-host) holder. Returns `'dead'` only when a same-host pid is provably
+ * gone (`ESRCH`); `'alive'`/`'unknown'` otherwise — the TTL floor in {@link reclaimDecision} is always the
+ * fallback for everything that isn't a proven-dead same-host pid.
+ * @param {{owner:string, pid:number|null}|null} entry
+ * @returns {'dead'|'alive'|'unknown'}
+ */
+export function probeNumberingHolderLiveness(entry) {
+  if (!entry || !Number.isInteger(entry.pid) || entry.pid <= 0) return 'unknown';
+  const entryHost = String(entry.owner || '').split(':')[0];
+  if (!entryHost || entryHost !== hostname()) return 'unknown'; // not provably this host — never guess
+  if (entry.pid === process.pid) return 'alive'; // the probing process can't be its own dead holder
+  try { process.kill(entry.pid, 0); return 'alive'; }
+  catch (e) { return e && e.code === 'ESRCH' ? 'dead' : 'unknown'; }
+}
+
 // ── #3440 — per-repo lease key ────────────────────────────────────────────────────
 /** The invoking checkout's own repo identity — an `org/repo` slug parsed from `git remote get-url origin` run
  *  in `cwd`. Used to key the whole-process drain lease PER REPO ({@link drainLeasePathFor}) so a drain launched
@@ -120,11 +144,17 @@ export function sleepSyncMs(ms) {
 
 /**
  * Try to acquire the numbering mutex ONCE for `owner`. Thin over file-locks `reserve` (which atomically wins
- * the dir, or reclaims a stale/dead holder via the TTL). Returns `{ ok, reason, heldBy }`.
+ * the dir, or reclaims a stale/dead holder). xuqk1vp: probes the CURRENT holder's same-host pid liveness
+ * ({@link probeNumberingHolderLiveness}) before calling `reserve`, so a provably-dead holder is reclaimed on
+ * the `pid-dead` fast path immediately — not only after the TTL — while a live-but-slow holder is NEVER
+ * reclaimed by the TTL alone while its own heartbeat stays fresh (see {@link withNumberingLock}'s in-section
+ * heartbeat). Returns `{ ok, reason, heldBy }`.
  */
 export function tryAcquireNumberingLock(lockRoot, owner, { pid = process.pid, leaseMinutes = NUMBERING_LEASE_MINUTES, nowMs = Date.now(), lockPath = NUMBERING_LOCK_PATH } = {}) {
   ensureRoot(lockRoot);
-  return reserve(lockRoot, lockPath, owner, nowMs, nowIsoFrom(nowMs), pid, 'unknown', leaseMinutes);
+  const current = readLockEntry(lockRoot, lockPath);
+  const pidLiveness = current ? probeNumberingHolderLiveness(current) : 'unknown';
+  return reserve(lockRoot, lockPath, owner, nowMs, nowIsoFrom(nowMs), pid, pidLiveness, leaseMinutes);
 }
 
 /** Release the numbering mutex, but ONLY if `owner` still holds it (never stomp a reclaimer who seized it
@@ -139,16 +169,32 @@ export function releaseNumberingLockIfOwned(lockRoot, owner, lockPath = NUMBERIN
 
 /**
  * Run `fn` inside the NUMBERING CRITICAL SECTION — the mutex that makes the number+publish step
- * sole-serial-writer (#2288/#2290). Spin-acquires (reclaim-aware) up to `waitMs`, runs `fn`, then releases
- * (only if still owned). The default `waitMs` is a full lease, so a CRASHED holder is always reclaimed within
- * the budget and only a genuinely-live, actively-numbering holder can block — and that finishes in seconds.
+ * sole-serial-writer (#2288/#2290). Spin-acquires (reclaim-aware, pid-dead-fast-path per xuqk1vp) up to
+ * `waitMs`, runs `fn`, then releases (only if still owned). The default `waitMs` is a full lease, so a
+ * CRASHED holder is always reclaimed within the budget (immediately if its pid is provably dead) and only a
+ * genuinely-live holder can block.
  *
- * FALLBACK (never hang a land): if a live holder blocks PAST the budget (pathological — numbering is
- * seconds), `fn` runs WITHOUT the lock and the result carries `contended: true` so the caller can warn. This
- * degrades to today's (lock-free) behaviour rather than wedging the land; the #2318 duplicate-NNN tripwire +
- * `number-stranded` remain the backstop. Injectable clock/sleep keep it unit-testable.
+ * `fn` is called as `fn(heartbeat)` — xuqk1vp: a multi-step section (JIT-number, then resolve-on-land, then
+ * push; or a merge-cascade's per-PR loop) can call `heartbeat()` between its own steps to refresh the lock's
+ * `heartbeatAt` mid-section, WITHOUT any timer/thread (Node's single-threaded, so a heartbeat can only ever
+ * happen at a synchronous call boundary `fn` itself controls). This is what makes "the section can legitimately
+ * outlive `leaseMinutes`" safe: a genuinely-live holder that heartbeats stays un-reclaimable (the TTL floor in
+ * `reclaimDecision` only fires once the heartbeat itself goes stale), while a holder that crashed mid-section
+ * stops heartbeating and is reclaimed by the TTL (or sooner, via the pid-dead fast path) exactly as before. A
+ * caller that ignores the arg (every pre-existing `() => {...}` `fn`) is unaffected — extra call args are a
+ * no-op in JS. `heartbeat` itself is a no-op once the lock is no longer held (reclaimed away, or never held).
  *
- * @returns {{ result: any, held: boolean, contended: boolean, heldBy: string|null, reason: string }}
+ * `runUnlockedOnContention` DEFAULTS `true` (UNCHANGED — #2288/#2683 backward compat): several existing
+ * call sites (`merge-ai-prs.mjs`, `pr-land.mjs`, `number-pending-hashes-before-push.mjs`) are OUTSIDE this
+ * item's declared scope and still read `.result` assuming `fn` always ran; flipping the shared default out
+ * from under them would hand each an `undefined` result on contention with no matching guard — a worse bug
+ * than the one this item fixes. xuqk1vp's "never run a write-to-main section unlocked" instead ships as an
+ * OPT-IN (`runUnlockedOnContention: false`, mirroring the #3637 POC-land contract exactly): the ONE in-scope
+ * write-to-main section this item owns (`lane-drain.mjs`'s numbering+push) passes it explicitly and handles
+ * `ran:false` via {@link lockResultOr}. A future item can migrate the other call sites the same way, each
+ * auditing its own `.result` consumption — tracked as a natural follow-up, not silently forced here.
+ *
+ * @returns {{ result: any, ran: boolean, held: boolean, contended: boolean, heldBy: string|null, reason: string }}
  */
 export function withNumberingLock(fn, {
   lockRoot = DRAIN_LOCK_ROOT,
@@ -170,15 +216,14 @@ export function withNumberingLock(fn, {
     acq = tryAcquireNumberingLock(lockRoot, owner, { pid, leaseMinutes, nowMs: now(), lockPath });
   }
   const held = acq.ok;
-  // #3637 — a caller whose critical section must NEVER run unserialized (the POC fast-lander's push) opts out
-  // of the never-hang fallback: it gets `ran:false` and decides for itself, rather than silently doing the
-  // write the lock exists to serialize. The numbering/land callers keep the original degrade-to-lock-free
-  // behaviour (`runUnlockedOnContention: true`), so nothing about #2288/#2683 changes.
+  // #3637/xuqk1vp — a caller whose critical section must NEVER run unserialized opts IN via
+  // `runUnlockedOnContention: false`; the default stays permissive (see the doc comment above).
   if (!held && !runUnlockedOnContention) {
     return { result: undefined, ran: false, held: false, contended: true, heldBy: acq.heldBy ?? null, reason: acq.reason };
   }
+  const doHeartbeat = () => held && heartbeat(lockRoot, lockPath, owner, nowIsoFrom(now()), pid);
   try {
-    return { result: fn(), ran: true, held, contended: !held, heldBy: acq.heldBy ?? null, reason: acq.reason };
+    return { result: fn(doHeartbeat), ran: true, held, contended: !held, heldBy: acq.heldBy ?? null, reason: acq.reason };
   } finally {
     if (held) releaseNumberingLockIfOwned(lockRoot, owner, lockPath);
   }
@@ -197,6 +242,20 @@ export function withNumberingLock(fn, {
  */
 export function withLandWriteLock(fn, opts = {}) {
   return withNumberingLock(fn, { owner: makeOwner('land'), ...opts });
+}
+
+/**
+ * xuqk1vp — safe accessor for a {@link withNumberingLock}/{@link withLandWriteLock} outcome that may have
+ * REFUSED to run (`ran:false`, a live holder + the new default `runUnlockedOnContention:false`): returns
+ * `fallback` when `lock.ran` is false, else `lock.result`. Every write-to-main call site should read a lock's
+ * outcome through this rather than `lock.result` directly — a raw `.result` is `undefined` on refusal, and
+ * treating `undefined` as "the numbering/merge outcome" (e.g. `.result.assigned`) throws, or worse, silently
+ * mis-reads "didn't run" as "ran with nothing to do".
+ * @param {{ran:boolean, result:any}} lock
+ * @param {any} fallback
+ */
+export function lockResultOr(lock, fallback) {
+  return lock.ran ? lock.result : fallback;
 }
 
 // ── (1b) #3637 — the PER-POC-BRANCH land lock ────────────────────────────────────
