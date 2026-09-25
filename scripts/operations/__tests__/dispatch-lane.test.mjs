@@ -88,6 +88,8 @@ import {
   resolveDeliveryBase,
   // #x8mpubm follow-up — the spawn-env credential hygiene.
   defaultSpawnAgent,
+  // #x36vidg — the Bash timeouts every dispatch carries.
+  DISPATCH_BASH_TIMEOUT_ENV, resolveDispatchSettingsEnv,
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
@@ -807,6 +809,11 @@ describe('what the sink actually runs', () => {
       '--append-system-prompt-file', '/path/to/identity.md',
       '--model', 'sonnet', '# build #3037',
     ]);
+  });
+
+  it('#x36vidg — resolveDispatchSettingsEnv always carries the 10-min Bash timeouts, gh-shim env or not', () => {
+    const env = resolveDispatchSettingsEnv('/nonexistent-root-for-test');
+    expect(env).toMatchObject({ BASH_DEFAULT_TIMEOUT_MS: '600000', BASH_MAX_TIMEOUT_MS: '600000' });
   });
 
   it('#x8mpubm — an empty settingsEnv object emits no --settings at all, same as null/omitted', () => {
@@ -1830,7 +1837,10 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // item's OWN `scope:` frontmatter, not the one-file prepare scope. `--append-system-prompt-file` (#xqyyoje)
     // is the sink's own standing-identity flag, always present on a real dispatch — see
     // `DISPATCHED_AGENT_SYSTEM_PROMPT_FILE`.
-    expect(spawned[0].argv).toEqual([
+    // #x36vidg — `--settings` always carries the Bash timeouts (plus the gh-shim PATH on an opted-in host).
+    const settingsAt = spawned[0].argv.indexOf('--settings');
+    expect(JSON.parse(spawned[0].argv[settingsAt + 1]).env).toMatchObject(DISPATCH_BASH_TIMEOUT_ENV);
+    expect(spawned[0].argv.filter((_, i) => i !== settingsAt && i !== settingsAt + 1)).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
       expectedPrompt('build', {

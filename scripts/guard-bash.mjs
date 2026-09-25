@@ -18,6 +18,11 @@
  *     `run_in_background` param OR a shell `&`/nohup. Backgrounding the suite run then yielding is the exact
  *     #2833 subagent stall (the lane sits mid-flight, produces nothing, never errors). Run it synchronously in
  *     the foreground; no override.
+ *   • #x36vidg — in an AGENT session only (subagent `agent_id` on the payload, or `WE_DISPATCH_KIND`), a
+ *     WAIT-POLL: a sleep loop over PR merge/label or CI-check state (or a blocking `gh pr checks --watch` /
+ *     `gh run watch`) — the drain/pr-watch own merge+CI, report and exit — or a sleep loop over a background
+ *     task's `tasks/<id>.output` / a `subagents/*.jsonl` transcript — re-run the gate in the foreground with an
+ *     explicit timeout instead. The interactive main session gets a WARN (`systemMessage`), never a deny.
  *   • a BACKGROUNDED codex-direct-task.mjs / gemini-direct-task.mjs invocation — both scripts are
  *     synchronous by contract (see their FOREGROUND ONLY banners). No override (#3383).
  *   • a backlog item-mutation (claim/scaffold/…) run in a lane clone whose HEAD is BEHIND origin/main —
@@ -1767,6 +1772,91 @@ export function mainSessionDelegateNudge(command, { primaryCwd = false } = {}) {
   return "you're running mechanical verification work (test:unit/check:standards/verify-lane) from the PRIMARY checkout — the conveyor's main session should delegate mechanical work to a lane subagent (#2677). This is a WARN, not a denial (there's no reliable way to tell a delegated subagent's own primary-reporting verify apart from the main session's own laziness, #2335) — if this really is a delegated subagent's verify, ignore it.";
 }
 
+// ── #x36vidg — AGENT WAIT-POLLING ──────────────────────────────────────────────────────────────────────────
+// Measured over ~600 transcripts (2026-09-24 10:23 ET → 09-25): two wait shapes cost ~17h of pure idle.
+//   1. PR/CI poll — a sleep loop around `gh pr view … state|labels|mergedAt`, `gh pr checks`, `statusCheckRollup`,
+//      `gh api …/check-runs`, `gh run list/watch` (or a blocking `gh pr checks --watch` / `gh run watch`). The
+//      drain daemon is the SOLE merger and pr-watch / the conveyor observe merge+CI; a worker reports and exits.
+//   2. Background-output poll — a sleep loop over the agent's OWN `tasks/<id>.output` (or a `subagents/*.jsonl`
+//      transcript), almost always because a >2-min gating command was auto-backgrounded at the Bash default.
+// SCOPE: DENY only in an AGENT session — a subagent (`agent_id` on the hook payload, the documented subagent
+// marker `guard-monitor-subagent.mjs` already keys on) or a dispatched session (`WE_DISPATCH_KIND`). The
+// operator's interactive main session only gets a WARN: the pinned CLAUDE.md rule explicitly lets it "actively
+// poll" PR/merge state itself, so a hard deny there would contradict a standing rule.
+// DETECTION: the loop keyword and `sleep` must sit at COMMAND position in the quote-MASKED text (so a commit
+// message / jq / python string never reads as a loop), while the probe is matched on the raw text (a probe is
+// routinely inside `"$(gh pr view …)"` or a quoted `out="…/tasks/x.output"` assignment). A loop polling
+// anything else (a port coming up, a `verify-lane.mjs check` marker, a lock file) passes; so does a one-shot
+// `gh pr view` / `gh pr checks` with no loop.
+const CMD_POS = String.raw`(?:^|[;&|(){}\n]|\b(?:do|then|else)\b)\s*`;
+const POLL_LOOP_KEYWORD = new RegExp(`${CMD_POS}(?:until|while|for)\\b`);
+const POLL_SLEEP = new RegExp(`${CMD_POS}(?:\\S*/)?sleep\\s+\\S`);
+const PR_CI_PROBE = [
+  /\bgh\s+pr\s+(?:view|checks|status)\b/,
+  /\bgh\s+run\s+(?:list|view|watch)\b/,
+  /\bgh\s+api\b[^\n;|&]*(?:check-runs|check-suites|\/commits\/[^\s/]+\/status\b|\/pulls\/\d+)/,
+  /\b(?:statusCheckRollup|mergedAt|mergeStateStatus)\b/,
+];
+/** A BLOCKING CI watch needs no loop at all — the CLI itself polls until the checks settle. */
+const PR_CI_BLOCKING_WATCH = /\bgh\s+pr\s+checks\b[^\n;|&]*--watch\b|\bgh\s+run\s+watch\b/;
+const BACKGROUND_OUTPUT_PROBE = /\btasks\/[^\s'"/]+\.output\b|\bsubagents\/[^\s'"]*\.jsonl\b/;
+
+/** Which wait-poll shape (if any) does `command` run? Pure. Returns `'pr-ci'`, `'task-output'`, or null. */
+export function waitPollKind(command) {
+  const raw = heredocScan(String(command || '')).text;
+  // The whole text, plus every script bash RE-EXECUTES (`bash -c '…'`, `timeout 580 sh -c "…"`, `$( … )`) —
+  // a loop wrapped in a quoted `-c` script is fully masked in the outer view but is still the same poll.
+  let nested = [];
+  // `timeout <dur>` is not a wrapper `canonicalCommand` peels, and `timeout 580 bash -c '<poll>'` is a real
+  // observed shape — peel it here so the `-c` script is reached.
+  const peelTimeout = (seg) => seg.replace(/^\s*timeout\s+(?:-\S+\s+)*\S+\s+/, '');
+  try { nested = parseSegments(raw).segments.flatMap((seg) => nestedCommandStrings(peelTimeout(seg))); } catch { nested = []; }
+  for (const text of [raw, ...nested]) {
+    const masked = maskQuoted(text);
+    if (PR_CI_BLOCKING_WATCH.test(masked)) return 'pr-ci';
+    if (!POLL_LOOP_KEYWORD.test(masked) || !POLL_SLEEP.test(masked)) continue;
+    // The probe is matched on the WHOLE raw command: the output path is routinely assigned before the loop.
+    if (PR_CI_PROBE.some((re) => re.test(raw))) return 'pr-ci';
+    if (BACKGROUND_OUTPUT_PROBE.test(raw)) return 'task-output';
+  }
+  return null;
+}
+
+const WAIT_POLL_REASON = {
+  'pr-ci': 'an agent session (subagent or dispatched worker) may not WAIT-POLL PR merge/label state or CI checks '
+    + '(a sleep loop around `gh pr view … state|labels|mergedAt`, `gh pr checks`, `statusCheckRollup`, '
+    + '`gh api …/check-runs`, `gh run list`, or a blocking `gh pr checks --watch` / `gh run watch`). The resident '
+    + 'drain daemon is the SOLE merger and pr-watch / the conveyor own merge + CI observation — the drain/pr-watch '
+    + 'owns merge+CI; report and exit (delivery-agent-brief.md step 10 "EXIT — do not merge, do not release, do not '
+    + 'wait"; docs/agent/delivery-loop.md). Read the PR ONCE if you need its number/state for your report (a single '
+    + '`gh pr view <n> --json state,labels` with no loop is allowed), return it, and END. Measured cost of this '
+    + 'pattern: ~9.3h of idle across 26 worker sessions in one day (#x36vidg).',
+  'task-output': 'an agent session (subagent or dispatched worker) may not SLEEP-POLL a background task\'s output file '
+    + '(`tasks/<id>.output`) or a subagent transcript (`subagents/*.jsonl`) — you will be notified on completion. '
+    + 'For a long gating command (test:unit, check:standards, verify-lane, pr-land, review-loop-cli) that the Bash '
+    + 'tool auto-backgrounded at its 2-minute default, re-run it in the FOREGROUND with an explicit timeout '
+    + '(e.g. timeout: 600000, the 10-minute max) instead of polling its output; if you still have other work, do it '
+    + 'and read the output once the completion notification arrives — but never end your turn relying on that '
+    + '(pinned CLAUDE.md rule). Measured cost of this pattern: ~7h of idle in one day (#x36vidg).',
+};
+
+/** The DENY reason for a wait-poll in an AGENT session (`agentSession` truthy), else null. Pure. */
+export function agentWaitPollReason(command, { agentSession = false } = {}) {
+  if (!agentSession) return null;
+  const kind = waitPollKind(command);
+  return kind ? WAIT_POLL_REASON[kind] : null;
+}
+
+/** The WARN-only twin for the operator's interactive main session (no deny — the pinned CLAUDE.md rule lets the
+ *  main session poll PR/merge state itself). Pure; emitted on the CLI's `systemMessage` nudge channel. */
+export function interactiveWaitPollNudge(command, { agentSession = false } = {}) {
+  if (agentSession) return null;
+  const kind = waitPollKind(command);
+  if (kind === 'pr-ci') return 'this is a sleep-poll on PR/CI state (#x36vidg). Allowed in the interactive session, but the drain lands ready-to-merge PRs and pr-watch reports merges — prefer a one-shot read over a wait loop. (An agent session would be DENIED here.)';
+  if (kind === 'task-output') return 'this sleep-polls a background task\'s output file (#x36vidg). You are notified when a background task finishes; for a long gating command prefer a FOREGROUND run with an explicit timeout (e.g. timeout: 600000). (An agent session would be DENIED here.)';
+  return null;
+}
+
 /**
  * Is `cwd` a constellation PRIMARY checkout (not a lane clone)? Pure. A lane clone lives under `/.lanes/` so
  * it is always allowed; otherwise cwd must sit at/under one of the `primaries` roots. `primaries` is injected
@@ -3208,6 +3298,10 @@ export function decide(command, ctx = {}) {
   // does its own pipeline-scoped segmentation (#1961 review r3) rather than reading the string as one blob.
   const trunc = truncatedOperationJsonReason(command);
   if (trunc) return trunc;
+  // #x36vidg — a wait-poll is a property of the WHOLE command (the loop keyword, the `sleep`, and the probe
+  // sit in different segments), so it is checked here, never per segment. Agent sessions only.
+  const waitPoll = agentWaitPollReason(command, { agentSession: ctx.agentSession });
+  if (waitPoll) return waitPoll;
   // #2968 — the pipe/xargs, while-read, and `-exec` enumerate-then-`git add` sink shapes all need more than
   // one segment to see (the enumeration source is a DIFFERENT segment, or the `git add` sits inside a
   // compound whose head word is `while`/`find`). Whole-command, same shape as the two checks above it.
@@ -3344,6 +3438,7 @@ if (IS_CLI) {
   let contestedHolderSlug = null;
   let runInBackground = false;
   let dispatchKind = null;
+  let agentSession = false;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -3355,6 +3450,10 @@ if (IS_CLI) {
     // `claude --bg` process env (inherited by every hook it runs, same channel `CLAUDE_CODE_SESSION_ID`
     // already relies on below); unset for an interactive operator session, which is unaffected.
     dispatchKind = process.env.WE_DISPATCH_KIND || null;
+    // #x36vidg — an AGENT session: a subagent (the documented `agent_id` field Claude Code puts on a hook
+    // payload only when the tool call originates inside a subagent) or a dispatched worker. Gates the
+    // wait-poll deny; the interactive main session (neither) gets the WARN twin instead.
+    agentSession = (typeof ev.agent_id === 'string' && ev.agent_id !== '') || !!dispatchKind;
     // #2367 — the DURABLE session identity. Key on `CLAUDE_CODE_SESSION_ID` (env) FIRST — the SAME source
     // `lane-pool.mjs acquire` stamps into the lease's `ownerSession`, so my own lease can never read as foreign
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
@@ -3378,7 +3477,7 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind };
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed
@@ -3403,7 +3502,8 @@ if (IS_CLI) {
   // of the deny channel above (fires even when `r` is null — this command wrote no tree); stderr only, never
   // blocks. try/catch: a guard bug here must never wedge the agent.
   try {
-    const nudge = mainSessionDelegateNudge(cmd, { primaryCwd });
+    const nudge = [mainSessionDelegateNudge(cmd, { primaryCwd }), interactiveWaitPollNudge(cmd, { agentSession })]
+      .filter(Boolean).join(' | ') || null;
     // #2788 review — stderr on an exit-0 PreToolUse hook is NOT surfaced to the user or fed back to the
     // model, so the WARN half shipped as a no-op. Emit it on the structured stdout channel instead
     // (`systemMessage`, the documented field for a non-blocking hook message) and keep writing stderr as a

@@ -17,7 +17,7 @@ export function decide(event) {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: "Monitor is denied for subagents: its 'started' acknowledgment does not ensure a completion notification will reach you. Per the pinned rule in root CLAUDE.md, run the gating check as a synchronous foreground command within this turn (for example, until <condition>; do sleep N; done). Do not end the turn assuming a background watch will wake you.",
+      permissionDecisionReason: "Monitor is denied for subagents: its 'started' acknowledgment does not ensure a completion notification will reach you. Per the pinned rule in root CLAUDE.md, run the gating check as a synchronous foreground command within this turn (for example, until <condition>; do sleep N; done — but never over PR merge/CI state or a background task's output file: guard-bash denies those, the drain owns merge+CI and a long gate belongs in the foreground with an explicit timeout). Do not end the turn assuming a background watch will wake you.",
     },
   };
 }

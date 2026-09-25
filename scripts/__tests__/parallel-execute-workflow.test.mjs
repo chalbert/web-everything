@@ -104,11 +104,17 @@ describe('parallel-execute workflow — #2215 in-lane new-item scaffold', () => 
 });
 
 describe('parallel-execute workflow — #2429 self-excluding pr-land wait', () => {
-  it('prescribes waiting on pr-land via the background-completion notification, not a hand-rolled poll', () => {
+  it('prescribes a FOREGROUND pr-land bounded under the Bash ceiling, never a background run + poll (#x36vidg)', () => {
     expect(SRC).toMatch(/#2429/);
-    // DoD option 1: the wait is the harness resuming the lane on the background task's completion.
-    expect(SRC).toMatch(/run_in_background/);
-    expect(SRC).toMatch(/completion notification/i);
+    // #x36vidg superseded #2429's "background it and wait for the notification": that advice is what produced
+    // the measured tasks/<id>.output sleep-polls. The wait is now a foreground call with an explicit 10-min Bash
+    // timeout, and pr-land's own check wait is bounded inside it.
+    expect(SRC).toMatch(/FOREGROUND with an explicit Bash timeout of 600000/);
+    expect(SRC).toMatch(/NEVER run it with run_in_background/);
+    const prLandCalls = SRC.match(/node scripts\/pr-land\.mjs [^`]*--label-on-green --no-require-verified[^`]*`/g) || [];
+    const laneCalls = prLandCalls.filter((c) => !c.includes('<ref>'));
+    expect(laneCalls.length).toBeGreaterThan(0);
+    for (const c of laneCalls) expect(c).toMatch(/--timeout-min=9/);
   });
 
   it('bans a self-matching process-poll wait on pr-land (the #2429 hang)', () => {

@@ -95,6 +95,8 @@ for (let i = 0; i < argv.length; i += 1) {
   // #xqyyoje — the dispatched-agent standing-identity flag. Recorded, not read: this shim proves ARGV
   // acceptance (the real CLI's own --help lists this flag), not file contents.
   if (a === '--append-system-prompt-file') { systemPromptFile = argv[i += 1]; extraFlagCount += 1; continue; }
+  // #x8mpubm/#x36vidg — \`--settings '{"env":{...}}'\` (gh-App shim PATH, Bash timeouts); a real CLI flag.
+  if (a === '--settings') { i += 1; extraFlagCount += 1; continue; }
   // #3730 — the two flags dispatch-task adds. Both are real claude --help options. --permission-mode takes
   // a separate value; --allowedTools is VARIADIC in the real CLI, so the dispatcher passes it as ONE
   // --allowedTools=<list> token (a separate list would swallow the prompt), and only that spelling is accepted
