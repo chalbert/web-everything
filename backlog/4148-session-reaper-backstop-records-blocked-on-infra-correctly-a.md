@@ -3,9 +3,10 @@ bornAs: xb3q26f
 kind: story
 size: 2
 parent: "3383"
-status: active
+status: resolved
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
