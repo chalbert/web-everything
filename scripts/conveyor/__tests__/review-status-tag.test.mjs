@@ -131,6 +131,40 @@ describe('tagReviewStatus — IO shell over injected fakes (no claude/gh process
     expect(result).toEqual({ changed: false, label: 'review-status:fixing', removed: [] });
     expect(provider.calls).toEqual([['readLabels', 'chalbert/web-everything', 42]]);
   });
+
+  // #4133 (epic #3383/#4075) — a caller with the tick's own already-fetched `claude agents --json` listing and
+  // PR labels (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`) skips BOTH re-fetches entirely.
+  describe('agents / currentLabels — skip listAgents()/provider.readLabels() entirely when supplied', () => {
+    it('never calls listAgents or provider.readLabels when both are supplied', () => {
+      let listAgentsCalls = 0;
+      const listAgents = () => { listAgentsCalls++; return []; };
+      const provider = fakeProvider([{ name: 'should-never-be-read' }]);
+      const result = tagReviewStatus({
+        pr: 42, repo: 'chalbert/web-everything', listAgents, provider,
+        agents: [{ name: 'review-42', state: 'working' }], currentLabels: [],
+      });
+      expect(result).toEqual({ changed: true, label: 'review-status:reviewing', removed: [] });
+      expect(listAgentsCalls).toBe(0);
+      expect(provider.calls.map((c) => c[0])).toEqual(['ensureLabel', 'setLabels']); // no 'readLabels' call
+    });
+
+    it('is idempotent off the supplied data too — no write when it already matches', () => {
+      const provider = fakeProvider([{ name: 'should-never-be-read' }]);
+      const result = tagReviewStatus({
+        pr: 42, repo: 'chalbert/web-everything', provider,
+        agents: [{ name: 'review-42', state: 'working' }], currentLabels: [{ name: 'review-status:reviewing' }],
+      });
+      expect(result).toEqual({ changed: false, label: 'review-status:reviewing', removed: [] });
+      expect(provider.calls).toEqual([]);
+    });
+
+    it('omitting both reads fresh — byte-identical to before these options existed', () => {
+      const provider = fakeProvider([]);
+      const listAgents = () => [{ name: 'review-42', state: 'working' }];
+      tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
+      expect(provider.calls[0]).toEqual(['readLabels', 'chalbert/web-everything', 42]);
+    });
+  });
 });
 
 it('tags only the matching repo session', () => {

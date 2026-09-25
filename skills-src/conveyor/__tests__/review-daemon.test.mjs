@@ -325,7 +325,86 @@ describe('runReviewTick — repo reaches reconcile too (regression, #xvyuwtg liv
   it('reconcile is called with the SAME repo this tick was given, not unconditionally omitted', () => {
     const reconcile = vi.fn(() => ({ dispatch: [], refusals: [] }));
     runReviewTick({ reconcile, dispatch: () => ({}), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [], repo: 'chalbert/plateau-app' });
-    expect(reconcile).toHaveBeenCalledWith({ repo: 'chalbert/plateau-app' });
+    // #4133 — also receives `readPrs`/`readAgents` closures now (the tick's own single reads, reused inside
+    // reconcile rather than re-fetched); `objectContaining` keeps this assertion about `repo` specifically.
+    expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ repo: 'chalbert/plateau-app' }));
+  });
+});
+
+// #4133 (epic #3383/#4075) — audit `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2: one
+// `gh pr list` / `claude agents --json` per tick, reused by reconcile AND the tag helpers, never re-fetched
+// once per PR.
+describe('runReviewTick — #4133 shared reads (opt-in via readPrs/readAgents)', () => {
+  it('omitting readPrs/readAgents (the default) is byte-identical to before — reconcile gets no extra keys, tags get no currentLabels/agents', () => {
+    const reconcile = vi.fn(() => ({ dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }], refusals: [] }));
+    const tagRound = vi.fn();
+    const tagStatus = vi.fn();
+    runReviewTick({
+      reconcile, dispatch: () => ({ agentId: 'a' }), tagRound, tagStatus,
+      statusCandidates: () => [{ prNumber: 10 }],
+    });
+    expect(reconcile).toHaveBeenCalledWith({ repo: expect.any(String) });
+    expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ currentLabels: undefined }));
+    expect(tagStatus).toHaveBeenCalledWith(expect.objectContaining({ agents: undefined, currentLabels: undefined }));
+  });
+
+  it('when opted in, readPrs/readAgents are each called ONCE per tick, never once per PR', () => {
+    const prs = [{ number: 10, labels: [{ name: 'review:pending' }] }, { number: 20, labels: [{ name: 'review:pending' }] }];
+    const agents = [{ name: 'review-10', state: 'working' }];
+    const readPrs = vi.fn(() => prs);
+    const readAgents = vi.fn(() => agents);
+    const reconcile = vi.fn(() => ({
+      dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }, { kind: 'review', prNumber: 20, attempts: 0 }],
+      refusals: [],
+    }));
+    const tagRound = vi.fn();
+    const tagStatus = vi.fn();
+    runReviewTick({
+      reconcile, readPrs, readAgents, dispatch: ({ pr }) => ({ agentId: `a${pr}` }), tagRound, tagStatus,
+      statusCandidates: () => [{ prNumber: 10 }, { prNumber: 20 }],
+    });
+    expect(readPrs).toHaveBeenCalledTimes(1); // NOT once per PR, even though two PRs got tagged
+    expect(readAgents).toHaveBeenCalledTimes(1);
+  });
+
+  it('reconcile receives readPrs/readAgents closures returning the SAME tick data (no second fetch inside reconcile)', () => {
+    const prs = [{ number: 10, labels: [] }];
+    const agents = [{ name: 'review-10', state: 'working' }];
+    const readPrs = vi.fn(() => prs);
+    const readAgents = vi.fn(() => agents);
+    let reconcileSawPrs = null;
+    let reconcileSawAgents = null;
+    const reconcile = vi.fn(({ readPrs: innerReadPrs, readAgents: innerReadAgents }) => {
+      reconcileSawPrs = innerReadPrs();
+      reconcileSawAgents = innerReadAgents();
+      return { dispatch: [], refusals: [] };
+    });
+    runReviewTick({ reconcile, readPrs, readAgents, dispatch: () => ({}), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(reconcileSawPrs).toBe(prs); // the identical array, not a re-fetched copy
+    expect(reconcileSawAgents).toBe(agents);
+    expect(readPrs).toHaveBeenCalledTimes(1); // reconcile's own closure call did NOT trigger a second real fetch
+    expect(readAgents).toHaveBeenCalledTimes(1);
+  });
+
+  it('tagRound/tagStatus receive the dispatched PR\'s own already-fetched labels, and tagStatus receives the tick\'s own agents', () => {
+    const prs = [{ number: 10, labels: [{ name: 'review-round:1' }] }];
+    const agents = [{ name: 'review-10', state: 'blocked' }];
+    const reconcile = vi.fn(() => ({ dispatch: [{ kind: 'review', prNumber: 10, attempts: 0 }], refusals: [] }));
+    const tagRound = vi.fn();
+    const tagStatus = vi.fn();
+    runReviewTick({
+      reconcile, readPrs: () => prs, readAgents: () => agents, dispatch: () => ({ agentId: 'a' }), tagRound, tagStatus,
+      statusCandidates: () => [{ prNumber: 10 }],
+    });
+    expect(tagRound).toHaveBeenCalledWith(expect.objectContaining({ pr: 10, currentLabels: prs[0].labels }));
+    expect(tagStatus).toHaveBeenCalledWith(expect.objectContaining({ pr: 10, agents, currentLabels: prs[0].labels }));
+  });
+
+  it('a readPrs/readAgents failure is isolated exactly like a reconcile failure — reconcileError, not a throw', () => {
+    const readPrs = () => { throw new Error('gh: rate limited'); };
+    const out = runReviewTick({ reconcile: () => ({ dispatch: [], refusals: [] }), readPrs, readAgents: () => [], dispatch: () => ({}), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(out.reconcileError).toBe('gh: rate limited');
+    expect(out.dispatched).toEqual([]);
   });
 });
 
