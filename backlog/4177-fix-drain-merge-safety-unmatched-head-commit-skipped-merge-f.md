@@ -3,10 +3,11 @@ bornAs: xvzc4v4
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/pr-merge-gate.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/lane-drain.mjs"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
