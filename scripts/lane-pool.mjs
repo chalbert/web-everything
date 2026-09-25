@@ -1746,6 +1746,18 @@ function cmdAcquire(repo) {
     // growth-on-empty design, unreviewed here). Sticky for the rest of THIS call once any provisioning failure
     // occurs, mirroring `sawScanTimeout`'s own fail-SAFE-STOP-never-fail-safe-GROW rationale just above.
     let sawProvisionFailure = false;
+    // #xj4tewd — a wall-clock-only proof of "no poll happened" is flaky on a busy runner: plain process/git
+    // overhead alone (no polling at all) can exceed one `ACQUIRE_POLL_MS` interval under load (live-caught:
+    // 1030/1011/1003ms observed against a 1000ms ceiling, PRs #2596/#2634/#2643). Count actual poll
+    // iterations instead — an exact, load-independent fact a test can assert on — and print it to stderr
+    // ONLY when opted in (`LANE_POOL_ACQUIRE_DEBUG=1`), so this never changes stdout/stderr for any real
+    // caller. `acquirePollCount === 0` is a stronger, deterministic proof that the omitted-`--wait-ms` path
+    // never sleeps at all, which is what that behavior actually guarantees — wall time can only ever be
+    // evidence of it, never the fact itself.
+    let acquirePollCount = 0;
+    const emitAcquirePollCount = () => {
+      if (process.env.LANE_POOL_ACQUIRE_DEBUG === '1') process.stderr.write(`__ACQUIRE_POLLS__=${acquirePollCount}\n`);
+    };
     while (chosen === null) {
       // #3383 — the scan's own budget is now the FULL configured/default scan timeout (`--scan-timeout-ms` /
       // `LANE_POOL_LIST_SCAN_TIMEOUT_MS`), never shrunk to this caller's OWN remaining `--wait-ms`: the
@@ -1801,6 +1813,7 @@ function cmdAcquire(repo) {
       }
       if (Date.now() < deadline) {
         sleepSyncMs(ACQUIRE_POLL_MS);
+        acquirePollCount++;
         excluded.clear(); // a lane held/dirty a moment ago may have freed (or gone TTL-stale) since
         continue;
       }
@@ -1830,6 +1843,7 @@ function cmdAcquire(repo) {
       }
       // #3383 bug 3b — say WHICH happened: a scan that never finished (never proven "all held/dirty" at
       // all) gets its own message, distinct from a completed scan that genuinely found nothing acquirable.
+      emitAcquirePollCount(); // #xj4tewd — before fail() exits the process, so a debug-mode caller still sees it
       fail(
         sawScanTimeout
           ? `no free lane in pool "${repo.name}" — the acquirability scan itself did not finish within the ` +
@@ -1843,6 +1857,7 @@ function cmdAcquire(repo) {
             : `no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`,
       );
     }
+    emitAcquirePollCount(); // #xj4tewd — success path (the loop exited via `break`, not `fail`)
   }
 
   // #2560 (§3i-A4 Fork 1) — ADVISORY, STRICTLY NON-BLOCKING scope-overlap check. Runs AFTER the atomic O_EXCL
