@@ -3,9 +3,12 @@ bornAs: xcf4556
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 scope: ["we:scripts/lane-resume.mjs", "we:scripts/__tests__/lane-resume.test.mjs", "we:.claude/skills/finish/SKILL.md", "we:skills-src/finish/SKILL.md"]
 dateOpened: "2026-09-24"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
+graduatedTo: one-off
 tags: []
 ---
 
