@@ -312,13 +312,28 @@ describe('main-red-recovery — planHungCiRecoveries', () => {
     expect(plan.refusals).toEqual([]);
   });
 
-  it('repeat-hang takes priority over the per-sha cap check — checked first, even on a fresh sha with 0 sha-attempts', () => {
+  it('repeat-hang fires on a fresh sha (0 sha-attempts) with budget left, even with a large prior job-hang count', () => {
     const candidates = [{
       prNumber: 2636, headSha: 'brand-new-sha', runId: 1, startedAt: '2026-09-25T19:00:00Z',
       jobName: 'test-shard (1)', hungAttemptsForSha: 0, hungAttemptsForJob: 3,
     }];
     const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'repeat-hang' })]);
+  });
+
+  // LIVE 2026-09-25, second finding (confirmed against #2636's own run 36187480460): the SAME permission gap
+  // that makes an ordinary cancel fail also makes a repeat-hang cancel fail, and a repeat-hang attempt posts
+  // its OWN marker against the current sha — so without capping repeat-hang by the SAME per-sha budget, a
+  // permanently-failing repeat-hang candidate would re-dispatch `repeat-hang` every tick forever. The per-sha
+  // cap is now checked BEFORE the repeat-hang classification, so it closes this for both kinds at once.
+  it('the per-sha cap takes priority over repeat-hang once THIS sha has already burned its attempts — never dispatches repeat-hang forever', () => {
+    const candidates = [{
+      prNumber: 2636, headSha: 'a-sha-that-keeps-failing-to-cancel', runId: 36187480460, startedAt: '2026-09-25T19:00:00Z',
+      jobName: 'test-shard (1)', hungAttemptsForSha: 2, hungAttemptsForJob: 1,
+    }];
+    const plan = planHungCiRecoveries({ candidates, now: NOW, maxRetriesPerSha: 2 });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2636, kind: 'hung-cap-exhausted' })]);
+    expect(plan.dispatch).toEqual([]);
   });
 
   it('a job that has never hung before (hungAttemptsForJob 0/omitted) takes the ordinary hung-cancel-rerun path, not repeat-hang', () => {

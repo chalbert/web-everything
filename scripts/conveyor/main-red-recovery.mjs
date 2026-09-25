@@ -423,22 +423,31 @@ export function buildHungCandidates(prs, { requiredCheck = DEFAULT_REQUIRED_CHEC
  * ORDER OF THE CHECKS:
  *   1. Not actually hung yet ({@link isRunHung} false) → `not-hung` (the ordinary, expected case for almost
  *      every open PR on almost every tick).
- *   2. REPEAT HANG ON THE SAME JOB, across a DIFFERENT head sha (`hungAttemptsForJob >= 1`) → `repeat-hang`
- *      dispatch: cancel the run but do NOT rerun it. LIVE 2026-09-25, orchestrator-flagged: #2636's
- *      `test-shard (1)` hung on run 36161558017, then hung AGAIN on run 36187480460 after the PR's head was
- *      refreshed onto a new sha — the SAME job name hanging twice across two different trees is evidence the
- *      hang lives in that shard's own tests (a real bug or infinite loop the PR introduced), not one-off infra
- *      flakiness a blind retry would fix. Checked BEFORE the per-sha cap below (and takes priority over it)
- *      because it is a STRONGER, faster signal than "this exact sha has been retried N times" — a fresh sha
- *      that immediately re-hangs on the identical job doesn't need to burn its own retry budget to prove the
- *      point. Cancelling (never rerunning) is what lets the EXISTING `ci-red` → `ci-heal` path
+ *   2. This exact head sha already used up its ATTEMPT cap (counted on every attempt AGAINST THIS SHA,
+ *      succeeded or not — see `ci-red-recovery-watch.mjs#sweepHungCiRecovery`'s own docblock for why a FAILED
+ *      cancel must still count, and REGARDLESS of whether those attempts were `repeat-hang` or ordinary — see
+ *      the LIVE, twice-corrected note below) → `hung-cap-exhausted` (bounded job `timeout-minutes`, landed in
+ *      the same card, does the rest — see the section header above). Checked BEFORE the repeat-hang
+ *      classification, not after: LIVE 2026-09-25, second finding, confirmed against #2636's own run
+ *      36187480460 — the SAME `actions:write` permission gap that makes an ordinary cancel fail also makes a
+ *      `repeat-hang` cancel fail, and a `repeat-hang` dispatch posts its own marker against the CURRENT sha
+ *      exactly like an ordinary one does; without this ordering, a permanently-failing `repeat-hang` candidate
+ *      would re-dispatch `repeat-hang` every single tick forever (repeat-hang's own retries were never capped
+ *      independently) — the exact unbounded-retry defect this same card's FIRST live finding already fixed for
+ *      the ordinary path, recurring one level up. Checking the sha cap first closes it for both kinds at once.
+ *   3. REPEAT HANG ON THE SAME JOB, across a DIFFERENT head sha (`hungAttemptsForJob >= 1`, and this sha still
+ *      has budget left per check 2) → `repeat-hang` dispatch: cancel the run but do NOT rerun it. LIVE
+ *      2026-09-25, orchestrator-flagged: #2636's `test-shard (1)` hung on run 36161558017, then hung AGAIN on
+ *      run 36187480460 after the PR's head was refreshed onto a new sha — the SAME job name hanging twice
+ *      across two different trees is evidence the hang lives in that shard's own tests (a real bug or infinite
+ *      loop the PR introduced), not one-off infra flakiness a blind retry would fix. This is a STRONGER, faster
+ *      signal than "this exact sha has been retried N times" — a fresh sha that immediately re-hangs on the
+ *      identical job doesn't need to burn its own retry budget to prove the point, so it is offered BEFORE the
+ *      ordinary `hung-cancel-rerun` path (check 4) even though it is checked AFTER the sha-cap gate (check 2).
+ *      Cancelling (never rerunning) is what lets the EXISTING `ci-red` → `ci-heal` path
  *      (`we:scripts/conveyor/reconcile-core.mjs`) take over: `we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed`
  *      already treats a CANCELLED required check as failed, so ci-heal is dispatched with a real diagnosis
  *      target instead of this pass endlessly re-running a shard that will only hang again.
- *   3. Hung, no repeat-hang signal, but this exact head sha already used up its ATTEMPT cap (counted on every
- *      attempt, succeeded or not — see `ci-red-recovery-watch.mjs#sweepHungCiRecovery`'s own docblock for why
- *      a FAILED cancel must still count) → `hung-cap-exhausted` (bounded job `timeout-minutes`, landed in the
- *      same card, does the rest — see the section header above).
  *   4. Otherwise → `hung-cancel-rerun` dispatch.
  * @param {object} o
  * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null), runId?:(number|null),
@@ -471,20 +480,29 @@ export function planHungCiRecoveries({
       refusals.push({ ...base, kind: 'not-hung', why: `PR #${prNumber}'s CI run (${base.runId ?? '?'}) has not been open past the ${minutes}min hung threshold` });
       continue;
     }
-    const jobAttempts = Number.isFinite(c?.hungAttemptsForJob) ? c.hungAttemptsForJob : 0;
-    if (base.jobName && jobAttempts >= 1) {
-      dispatch.push({
-        ...base,
-        kind: 'repeat-hang',
-        why: `PR #${prNumber}'s job "${base.jobName}" has hung ${jobAttempts} time(s) before on a DIFFERENT head sha (run ${base.runId ?? '?'} is hung again now) — this looks like a real hang in this shard's own tests, not infra; cancelling only (never re-running) so the existing ci-red -> ci-heal path diagnoses it`,
-      });
-      continue;
-    }
+    // xd1sfms follow-up (LIVE 2026-09-25, second finding): the per-sha attempt cap is checked BEFORE the
+    // repeat-hang classification, not after — a `repeat-hang` dispatch still counts against `hungAttemptsForSha`
+    // (its own marker embeds the CURRENT sha, so `countHungCiComments` sees it on the next tick), so without
+    // this ordering a permanently-failing cancel on a repeat-hang candidate (confirmed live: the same GitHub
+    // App `actions:write` gap that blocks an ordinary cancel also blocks a repeat-hang one) would dispatch
+    // `repeat-hang` again, EVERY tick, forever — repeat-hang's whole point is to stop retrying, not to retry
+    // under a different name. Checking the cap first closes that: once THIS sha has burned its attempts
+    // (whichever kind they were), it falls to `hung-cap-exhausted` and GitHub's own `timeout-minutes` takes
+    // over, exactly as an ordinary exhausted retry already does.
     const attempts = Number.isFinite(c?.hungAttemptsForSha) ? c.hungAttemptsForSha : 0;
     if (attempts >= maxRetriesPerSha) {
       refusals.push({
         ...base, kind: 'hung-cap-exhausted',
         why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${attempts} hung-recovery attempt(s) (cap ${maxRetriesPerSha}) — leaving it for GitHub's own job timeout-minutes to conclude it, at which point the ordinary ci-heal path takes over`,
+      });
+      continue;
+    }
+    const jobAttempts = Number.isFinite(c?.hungAttemptsForJob) ? c.hungAttemptsForJob : 0;
+    if (base.jobName && jobAttempts >= 1) {
+      dispatch.push({
+        ...base, attempts,
+        kind: 'repeat-hang',
+        why: `PR #${prNumber}'s job "${base.jobName}" has hung ${jobAttempts} time(s) before on a DIFFERENT head sha (run ${base.runId ?? '?'} is hung again now) — this looks like a real hang in this shard's own tests, not infra; cancelling only (never re-running) so the existing ci-red -> ci-heal path diagnoses it`,
       });
       continue;
     }
