@@ -958,8 +958,29 @@ describe('runReconcileFixDispatch — read reconcile-pass, plan, assign a lane, 
         reconcile: () => ({ dispatch: [], refusals: [] }),
         checkStaleness: FRESH,
       });
-      expect(result).toEqual({ dispatched: [], refusals: [], reconcileRefusals: 0 });
+      expect(result).toEqual({
+        dispatched: [], refusals: [], reconcileRefusals: 0, reconcileRefusalDetails: [],
+      });
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  // #x0mn6x0 (epic #4075/#3383) — see the identical proof + rationale in
+  // `we:scripts/operations/__tests__/ci-heal-pr-dispatch.test.mjs`: `reconcileRefusalDetails` hands up the
+  // SAME `reconciled.refusals` array the pre-existing `reconcileRefusals` count was always derived from,
+  // additively (the count itself is untouched).
+  it('reconcileRefusalDetails carries the real reconcile-layer refusal objects, additively alongside the existing count', () => {
+    const result = runReconcileFixDispatch({
+      root: '/repo',
+      repo: 'chalbert/web-everything',
+      reconcile: () => ({
+        dispatch: [],
+        refusals: [{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }],
+      }),
+      pickFreeLanes: () => [], // never shell the real lane pool — this test's `dispatch` list is empty anyway
+      checkStaleness: FRESH,
+    });
+    expect(result.reconcileRefusals).toBe(1);
+    expect(result.reconcileRefusalDetails).toEqual([{ prNumber: 2635, kind: 'owed-ci-rerun', why: "main's own CI was red" }]);
   });
 });
 

@@ -113,12 +113,17 @@ export const FIX_DISPATCH_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map(
  *   `runReconcileFixDispatch`); every other option is forwarded to it for EVERY repo except `repo` itself,
  *   which this loop supplies per-iteration.
  * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
- *   refusals:Array<object>}}
+ *   refusals:Array<object>, reconcileRefusals:Array<object>}} `reconcileRefusals` here (unlike the
+ *   SAME-NAMED, differently-shaped field on a single {@link runReconcileFixDispatch} result, which is a bare
+ *   count) is the per-repo-tagged ARRAY of `we:scripts/conveyor/reconcile-core.mjs#planReconcile`'s own
+ *   outright refusals — a PR reconcile never even offered as a `fix`/`ci-heal` dispatch entry (#x0mn6x0, epic
+ *   #4075/#3383; see `runReconcileFixDispatch`'s own `reconcileRefusalDetails` docblock for the full why).
  */
 export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = runReconcileFixDispatch, ...tickOpts } = {}) {
   const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
   const dispatched = [];
   const refusals = [];
+  const reconcileRefusals = [];
   for (const entry of perRepo) {
     if (entry.error) {
       refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
@@ -127,8 +132,11 @@ export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_RE
     const { repo, result } = entry;
     for (const d of (result.dispatched ?? [])) dispatched.push({ ...d, repo });
     for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+    for (const r of (result.reconcileRefusalDetails ?? [])) reconcileRefusals.push({ ...r, repo });
   }
-  return { repos: perRepo, dispatched, refusals };
+  return {
+    repos: perRepo, dispatched, refusals, reconcileRefusals,
+  };
 }
 
 /**
@@ -150,7 +158,9 @@ export function runReconcileFixDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_RE
  * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
  *   `runReconcileCiHealDispatch`); every other option is forwarded to it for EVERY repo except `repo` itself.
  * @returns {Promise<{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
- *   refusals:Array<object>}>}
+ *   refusals:Array<object>, reconcileRefusals:Array<object>}>} `reconcileRefusals` — see
+ *   {@link runReconcileFixDispatchAllRepos}'s own identical field for the shape and the why (#x0mn6x0, epic
+ *   #4075/#3383).
  */
 export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = runReconcileCiHealDispatch, ...tickOpts } = {}) {
   const perRepo = [];
@@ -167,6 +177,7 @@ export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_
   }
   const dispatched = [];
   const refusals = [];
+  const reconcileRefusals = [];
   for (const entry of perRepo) {
     if (entry.error) {
       refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
@@ -175,8 +186,11 @@ export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_
     const { repo, result } = entry;
     for (const d of (result.dispatched ?? [])) dispatched.push({ ...d, repo });
     for (const r of (result.refusals ?? [])) refusals.push({ ...r, repo });
+    for (const r of (result.reconcileRefusalDetails ?? [])) reconcileRefusals.push({ ...r, repo });
   }
-  return { repos: perRepo, dispatched, refusals };
+  return {
+    repos: perRepo, dispatched, refusals, reconcileRefusals,
+  };
 }
 
 /**
@@ -216,7 +230,12 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
  * for reporting.
  * @param {{repos?:string[], fixTick?:Function, ciHealTick?:Function}} [o] - both ticks default to the real
  *   dispatch functions; injecting either is for tests only.
- * @returns {Promise<{repos:Array<object>, dispatched:Array<object>, refusals:Array<object>, ciHeal:object}>}
+ * @returns {Promise<{repos:Array<object>, dispatched:Array<object>, refusals:Array<object>,
+ *   reconcileRefusals:Array<object>, ciHeal:object}>} `reconcileRefusals` (#x0mn6x0, epic #4075/#3383) merges
+ *   both halves' own reconcile-layer refusal arrays — see {@link runReconcileFixDispatchAllRepos}'s own field
+ *   for the shape/why. `onTick` (below) logs these SEPARATELY from `refusals`: they are a different
+ *   population (a PR reconcile refused outright, never even offered to `fix`/`ci-heal`), not a duplicate
+ *   count of the same thing.
  */
 export async function runTickAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick } = {}) {
   const fix = runReconcileFixDispatchAllRepos({ repos, ...(fixTick ? { tick: fixTick } : {}) });
@@ -225,8 +244,31 @@ export async function runTickAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, fixTi
     repos: fix.repos, // same repo list both halves ticked — the shape onTick's log already reads from
     dispatched: [...fix.dispatched, ...ciHeal.dispatched],
     refusals: [...fix.refusals, ...ciHeal.refusals],
+    reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? [])],
     ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
   };
+}
+
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatRefusalLine — #x0mn6x0 (epic #4075/#3383,
+ * "daemons must log every refusal and skip with its reason"): ONE printable line per refusal object, whatever
+ * layer produced it. `prNumber`/`pr` is read tolerantly — the fix-side refusals (`reconcile-fix-dispatch.mjs`)
+ * key on `pr`, the ci-heal-side and reconcile-core ones key on `prNumber` (the SAME inconsistency the existing
+ * CLI printer already papers over — `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s own IS_CLI block reads
+ * `r.prNumber ?? r.pr`) — never re-derived, matched here. `label` distinguishes the two populations a tick can
+ * now report: an ordinary dispatch-layer refusal (`no-lane`/`held`/`dispatch-failed`/`unsupported-repo`/
+ * `no-scope`, for a PR the plan DID offer to `fix`/`ci-heal`) from a reconcile-layer one (`owed-ci-rerun`/
+ * `no-findings`/`live-process`/`cap-exhausted`/`stood-down`/`owed-elsewhere`/`nothing-owed`/..., for a PR
+ * `reconcile-core.mjs#planReconcile` refused OUTRIGHT and never even offered) — the exact distinction PRs
+ * #2635/#2636/#2653 made invisible on 2026-09-25 (see this file's own imports' docblocks for the incident).
+ * @param {string} label - `'refused'` or `'reconcile-refused'`.
+ * @param {{repo?:string, kind?:string, prNumber?:(number|null), pr?:(number|null), why?:string}} r
+ * @returns {string}
+ */
+export function formatRefusalLine(label, r) {
+  const prNum = r?.prNumber ?? r?.pr ?? null;
+  const prLabel = prNum == null ? '(no PR)' : `PR #${prNum}`;
+  return `reconcile-fix-dispatch-daemon: ${label} ${r?.kind ?? 'unknown'} ${r?.repo ?? '?'} ${prLabel} — ${r?.why ?? '(no reason given)'}`;
 }
 
 /** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runTickAllRepos} (`fix` +
@@ -239,9 +281,21 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
-      const { repos = [], dispatched = [], refusals = [] } = result || {};
+      const {
+        repos = [], dispatched = [], refusals = [], reconcileRefusals = [],
+      } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
       for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
+      // #x0mn6x0 — ONE LINE PER REFUSAL, never just the count above. `refusals` = a PR the plan offered to
+      // `fix`/`ci-heal` but the dispatch itself refused (no-lane, held, dispatch-failed, unsupported-repo,
+      // no-scope). A `tick-failed` entry is already printed via the per-repo loop above — skip it here so it
+      // is never printed twice.
+      for (const r of refusals) if (r?.kind !== 'tick-failed') log.error(formatRefusalLine('refused', r));
+      // `reconcileRefusals` = a PR `reconcile-core.mjs#planReconcile` refused OUTRIGHT, never even offered to
+      // `fix`/`ci-heal` (owed-ci-rerun, no-findings, live-process, cap-exhausted, stood-down, owed-elsewhere,
+      // nothing-owed, ...) — previously invisible everywhere (collapsed to a bare count and dropped before it
+      // ever reached this daemon's own tick result at all).
+      for (const r of reconcileRefusals) log.error(formatRefusalLine('reconcile-refused', r));
     },
     onTickError: (error) => {
       log.error(`reconcile-fix-dispatch-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);
