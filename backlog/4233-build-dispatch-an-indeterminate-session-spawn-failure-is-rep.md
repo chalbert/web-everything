@@ -16,7 +16,7 @@ dispatch-lane-io: an INDETERMINATE claude --bg spawn failure writes a durable re
 
 ## Slice
 
-**Deferred:** do not start until open PR #2741 (card xrv69j6) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
+**Deferred:** do not start until open PR #2741 (card 4238) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
 
 Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
