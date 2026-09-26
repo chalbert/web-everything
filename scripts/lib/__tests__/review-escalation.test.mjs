@@ -45,6 +45,12 @@ import {
   findContradictoryReviewVerdicts,
   decideContradictoryVerdictHeal,
   buildContradictoryVerdictHealComment,
+  findAcceptVerdictComment,
+  findSupersedingEscalation,
+  planConvertSupersededVerdict,
+  targetedCheckQuestion,
+  renderConvertedAdvisoryNote,
+  CONVERTED_ADVISORY_NOTE_MARKER,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
@@ -950,6 +956,146 @@ describe('#2409 — reviewed-SHA marker helpers', () => {
     expect(parseReviewedSha(undefined)).toBe(null);
     expect(parseReviewedSha([])).toBe(null);
     expect(parseReviewedSha([{ body: 'no marker here' }, {}, null])).toBe(null);
+  });
+});
+
+describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a superseded verdict instead of re-reviewing', () => {
+  const HEAD = 'abbe08beacae462f98d6caf654d3ce7867c92801';
+  const bot = { login: 'web-everything' };
+  const acceptBody = `✅ review — accepted\n\n## Human review verdict — chalbert/web-everything#2766\n\n`
+    + `**Verdict:** ✅ pass\n\n${buildReviewedShaMarker(HEAD)}`;
+  const testGamingParkBody = '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\ntest-gaming '
+    + 'suspected — CI-green may be manufactured by tampering with tests: tests-removed: foo.test.mjs (net 2 '
+    + 'test case(s) removed)';
+  const heldRestateBody = '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review '
+    + 'hold (review:human) stands, so the "ready-to-merge" go-ahead is withheld even though the required check '
+    + 'is green (#2832). Clear the review to release it.';
+  const healBody = '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**\n\nThis PR carried both '
+    + '`review:accepted` and `review:human` at once.';
+
+  describe('findAcceptVerdictComment', () => {
+    it('finds the comment carrying the marker for the given head', () => {
+      const found = findAcceptVerdictComment([{ body: acceptBody, author: bot, createdAt: '2026-09-26T21:47:00Z' }], HEAD);
+      expect(found).toEqual({ body: acceptBody, createdAt: '2026-09-26T21:47:00Z' });
+    });
+    it('null when no comment carries a marker for that head', () => {
+      expect(findAcceptVerdictComment([{ body: 'plain', author: bot }], HEAD)).toBe(null);
+      expect(findAcceptVerdictComment([], HEAD)).toBe(null);
+    });
+    it('#4140 — an untrusted author\'s marker is never found', () => {
+      expect(findAcceptVerdictComment([{ body: acceptBody, author: { login: 'mallory' } }], HEAD)).toBe(null);
+    });
+  });
+
+  describe('findSupersedingEscalation', () => {
+    it('finds a test-gaming park comment (the substantive reason)', () => {
+      const found = findSupersedingEscalation(
+        [{ body: testGamingParkBody, author: bot, createdAt: '2026-09-26T21:51:01Z' }],
+        { afterCreatedAt: '2026-09-26T21:47:43Z' },
+      );
+      expect(found).toEqual({ kind: 'test-gaming', reasonText: expect.stringMatching(/^test-gaming suspected/), createdAt: '2026-09-26T21:51:01Z' });
+    });
+    it('finds a manifest-tamper park comment', () => {
+      const body = '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nmanifest baseline '
+        + 'mismatch — post-review tamper suspected: dismissedFindings 0→2';
+      const found = findSupersedingEscalation([{ body, author: bot, createdAt: '2026-09-26T21:51:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found.kind).toBe('manifest-tamper');
+    });
+    it('an ORDINARY "held —" re-statement of an existing hold is NOT an escalation', () => {
+      const found = findSupersedingEscalation([{ body: heldRestateBody, author: bot, createdAt: '2026-09-26T21:51:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found).toBe(null);
+    });
+    it('falls back to the mutual-exclusivity heal when no substantive reason is posted', () => {
+      const found = findSupersedingEscalation([{ body: healBody, author: bot, createdAt: '2026-09-26T21:51:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found).toEqual({ kind: 'heal-mutual-exclusivity', reasonText: healBody, createdAt: '2026-09-26T21:51:00Z' });
+    });
+    it('prefers a substantive reason over a heal comment when BOTH are present, regardless of order', () => {
+      const found = findSupersedingEscalation(
+        [
+          { body: testGamingParkBody, author: bot, createdAt: '2026-09-26T21:51:00Z' },
+          { body: healBody, author: bot, createdAt: '2026-09-26T23:15:00Z' },
+        ],
+        { afterCreatedAt: '2026-09-26T21:47:00Z' },
+      );
+      expect(found.kind).toBe('test-gaming');
+    });
+    it('ignores a comment at or before `afterCreatedAt` — not a supersession of an accept it predates', () => {
+      const found = findSupersedingEscalation([{ body: testGamingParkBody, author: bot, createdAt: '2026-09-26T21:47:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found).toBe(null);
+    });
+    it('#4140 — an untrusted author\'s park/heal comment is never counted as an escalation', () => {
+      const found = findSupersedingEscalation(
+        [{ body: testGamingParkBody, author: { login: 'mallory' }, createdAt: '2026-09-26T21:51:00Z' }],
+        { afterCreatedAt: '2026-09-26T21:47:00Z' },
+      );
+      expect(found).toBe(null);
+    });
+  });
+
+  describe('planConvertSupersededVerdict', () => {
+    it('THE LIVE #2766/#2767 SHAPE converts', () => {
+      const comments = [
+        { body: acceptBody, author: bot, createdAt: '2026-09-26T21:47:43Z' },
+        { body: testGamingParkBody, author: bot, createdAt: '2026-09-26T21:51:01Z' },
+        { body: healBody, author: bot, createdAt: '2026-09-26T23:15:40Z' },
+      ];
+      const plan = planConvertSupersededVerdict({ headSha: HEAD, reviewedSha: HEAD, comments });
+      expect(plan.convert).toBe(true);
+      expect(plan.escalation.kind).toBe('test-gaming');
+      expect(plan.acceptComment.body).toBe(acceptBody);
+    });
+    it('does not convert when reviewedSha !== headSha (a fresh push — the ordinary path, unaffected)', () => {
+      const plan = planConvertSupersededVerdict({ headSha: HEAD, reviewedSha: 'deadbeef', comments: [] });
+      expect(plan).toEqual({ convert: false });
+    });
+    it('does not convert with no accept comment in hand, even if reviewedSha somehow matches', () => {
+      const plan = planConvertSupersededVerdict({ headSha: HEAD, reviewedSha: HEAD, comments: [] });
+      expect(plan).toEqual({ convert: false });
+    });
+    it('does not convert with no superseding escalation posted', () => {
+      const comments = [{ body: acceptBody, author: bot, createdAt: '2026-09-26T21:47:00Z' }];
+      const plan = planConvertSupersededVerdict({ headSha: HEAD, reviewedSha: HEAD, comments });
+      expect(plan).toEqual({ convert: false });
+    });
+  });
+
+  describe('targetedCheckQuestion', () => {
+    it('asks about the removed tests for test-gaming', () => {
+      expect(targetedCheckQuestion({ kind: 'test-gaming' })).toMatch(/test case/i);
+    });
+    it('asks about the manifest fields for manifest-tamper', () => {
+      expect(targetedCheckQuestion({ kind: 'manifest-tamper' })).toMatch(/dismissedFindings/);
+    });
+    it('asks about a missed clearance for the heal shape', () => {
+      expect(targetedCheckQuestion({ kind: 'heal-mutual-exclusivity' })).toMatch(/clear-human/);
+    });
+  });
+
+  describe('renderConvertedAdvisoryNote', () => {
+    it('quotes the prior verdict verbatim as a blockquote, states the escalation reason, and never emits a Decision line', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766,
+        acceptComment: { body: acceptBody, createdAt: '2026-09-26T21:47:00Z' },
+        escalation: { kind: 'test-gaming', reasonText: 'test-gaming suspected — …' },
+        targetedCheckAnswer: { verdict: 'accept', note: 'legitimate removal' },
+      });
+      expect(note).toContain(CONVERTED_ADVISORY_NOTE_MARKER);
+      expect(note).toContain('> ✅ review — accepted');
+      expect(note).toContain('test-gaming suspected — …');
+      expect(note).not.toMatch(/\*\*Decision:\*\*/);
+      expect(note).toContain('**Advisory outcome:** `accept`');
+      expect(note).toContain('still needs the human ceremony');
+    });
+    it('a `changes` targeted-check answer renders a `changes` advisory outcome', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766,
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: { verdict: 'changes', note: 'tests were weakened' },
+      });
+      expect(note).toContain('**Advisory outcome:** `changes`');
+      expect(note).toContain('tests were weakened');
+    });
   });
 });
 
