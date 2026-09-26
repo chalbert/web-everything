@@ -35,6 +35,32 @@
  * (`daemon-clone-lock.mjs`, Module A), read/write the overlay list (`daemon-overlays.mjs`, Module B), and run
  * the live smoke (`daemon-live-smoke.mjs`, Module D).
  *
+ * xa4qo7n (epic #4075/#3383) — THE SMOKE NEVER RUNS AGAINST `root`, AND NEVER HOLDS THE WRITE LOCK. Live
+ * 2026-09-26 09:32 ET: the two checks #2691 added (`reconcile-dry-run`, `dispatch-dry-run`) pushed a routine
+ * smoke to ~65s; since the OLD `rebuildClone` ran `git reset --hard <candidate>` (Step 5) and THEN the whole
+ * live smoke (Step 6) inside ONE `withWriteLock` hold, every daemon sharing the clone was refused its read lock
+ * (`writer-active`) and ticked 0 dispatches for that whole ~65s, every time main moved — the same class of bug
+ * #2625 fixed for the smoke's OWN duration, but #2625 never moved the smoke OFF the lock. `rebuildClone` now
+ * splits into three steps, only the first and third of which ever touch `root`'s working tree or take its
+ * write lock:
+ *   1. {@link prepareRebuild} (locked, fast — recovery/safety/fetch/`planRebuild`, all object-DB-only or plain
+ *      reads until the very last instant): computes `plan.finalSha` and returns EITHER a terminal result (same
+ *      short-circuit reasons as before: dirty, up-to-date, still-rejected, a pinned-overlay refusal, …) or a
+ *      `{terminal:false, plan, prevHead}` signal to proceed.
+ *   2. UNLOCKED: {@link materializeCandidate} checks `plan.finalSha` out into a disposable `git worktree` (see
+ *      {@link candidateWorktreePath}) — sharing `root`'s object DB, so this fetches/copies nothing — and the
+ *      FULL live smoke runs against THAT worktree, never against `root`. Every daemon sharing `root` keeps
+ *      reading/dispatching off root's CURRENT, already-verified tree for the smoke's entire duration.
+ *   3. {@link finalizeRebuild} (locked, fast — only reached after a PASSING smoke): re-verifies nothing else
+ *      moved `root` while step 2 ran (a sibling process's own rebuild, or one that already landed this exact
+ *      build), then does the ONE `git reset --hard <finalSha>` this module ever performs, and writes
+ *      `state.adopted`. A FAILING smoke (step 2) never reaches this step at all — `root` was never touched, so
+ *      there is nothing to roll back, and no lock is ever taken for a rejection.
+ * This also collapses the old `state.unverified`/`smokeOnly` re-smoke-on-crash-recovery path: since a reset now
+ * NEVER runs before its smoke has already passed, a crash between step 3's reset and its state write can only
+ * ever be a crash on an ALREADY-VERIFIED build — recovery ({@link prepareRebuild}'s Step 0) promotes it straight
+ * to `adopted` from the `inProgress` record's own echoed plan fields, with no re-smoke.
+ *
  * DRY RUN IS STRICTLY READ-ONLY ON THE REAL CLONE. {@link dryRunRebuild} never calls `git reset`, `git fetch`
  * (against the clone itself — it fetches into a disposable scratch bare repo instead), or anything else that
  * writes an object or moves a ref in `root`. It borrows `root`'s objects via `objects/info/alternates` (so the
@@ -63,7 +89,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, rmSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, statSync, unlinkSync,
-  existsSync,
+  existsSync, symlinkSync,
 } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname, resolve as resolvePath, isAbsolute } from 'node:path';
@@ -653,7 +679,9 @@ export function isExternalOnlyFailure(failed) {
 export const REBUILD_LOCK_WAIT_ENV = 'WE_DAEMON_REBUILD_LOCK_WAIT_MS';
 export const DEFAULT_REBUILD_LOCK_WAIT_MS = 60_000;
 
-/** A live smoke at least this long (it holds the clone's write lock throughout) raises a `smoke-slow` alert. */
+/** A live smoke at least this long raises a `smoke-slow` alert — informational only (xa4qo7n): the smoke runs
+ *  against a disposable candidate worktree and holds NO lock, so a slow one no longer starves any daemon's
+ *  ticks the way it did before this fix; it is still worth knowing about (it delays adopting new code). */
 export const SLOW_SMOKE_ALERT_MS = 60_000;
 
 /** Backoff before an external-only rejection is re-smoked: base * 2^(attempts-1), capped. Env-tunable. */
@@ -668,13 +696,446 @@ function redactDetail(detail) {
   return String(detail ?? '').replace(/\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '$1<redacted>').slice(0, 500);
 }
 
-// ── rebuildClone — the IO shell ──────────────────────────────────────────────────────────────────────────────
+// ── candidate worktree (xa4qo7n) — where the live smoke actually runs, never `root` ─────────────────────────
 
 /**
- * Rebuild `root` fresh from `origin/main` + its registered overlay list, under the clone's exclusive WRITE lock
- * (`daemon-clone-lock.mjs`, Module A) — a refused lock is reported, never treated as an error. See the file
- * header for the object-DB/determinism contract and the per-step description in the design spec this
- * implements (docs/agent/platform-decisions.md#resident-daemon-reload-lifecycle clauses 2-5).
+ * Fixed per-clone staging path for the candidate worktree the live smoke runs against — OUTSIDE any git tree,
+ * same `stateDir`/`cloneKey` convention as every other per-clone sidecar this module owns. FIXED (not a fresh
+ * `mkdtemp` per attempt) so a crashed attempt's leftover worktree is found and torn down by the very next
+ * attempt ({@link materializeCandidate}) instead of accumulating orphan directories on disk.
+ * @param {string} root
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function candidateWorktreePath(root, env = process.env) {
+  return join(stateDir(env), `${cloneKey(root)}.candidate`);
+}
+
+/**
+ * Check `sha` out into a disposable `git worktree` at {@link candidateWorktreePath} — a SECOND working copy of
+ * the SAME `root` repository (`git worktree add` shares the object database; this never fetches or copies a
+ * single object, unlike {@link dryRunRebuild}'s separate scratch-bare-repo trick, which exists only because a
+ * dry run must never write anything into `root`'s own refs — this module already owns `root` outright once it
+ * holds the write lock, so a plain worktree is enough). A stale worktree already at the fixed path (a crashed
+ * prior attempt) is force-torn-down first so orphans never accumulate. `node_modules` is symlinked in from
+ * `root` on a best-effort basis — a fresh worktree checkout carries only git-tracked files, and the live
+ * smoke's checks spawn real `node`/`gh` child processes from it that need real dependencies; a repo with no
+ * `node_modules` (or one whose checks then fail on a missing module) surfaces that as an ordinary check
+ * failure, never a silent skip.
+ * @param {{root:string, sha:string, run:typeof gitRun, env?:NodeJS.ProcessEnv}} o
+ * @returns {{ok:true, path:string}|{ok:false, reason:string}}
+ */
+export function materializeCandidate({ root, sha, run, env }) {
+  const path = candidateWorktreePath(root, env);
+  const git = makeGit({ run, cwd: root, env, timeoutMs: 120_000 });
+  git(['worktree', 'remove', '--force', path]);
+  try { rmSync(path, { recursive: true, force: true }); } catch { /* best-effort teardown of a stale attempt */ }
+  git(['worktree', 'prune']);
+  mkdirSync(dirname(path), { recursive: true });
+  const add = git(['worktree', 'add', '--detach', '--quiet', path, sha]);
+  if (add.status !== 0) {
+    return { ok: false, reason: `worktree-add-failed: ${String(add.stderr || add.stdout || '').trim().split('\n')[0]}` };
+  }
+  try {
+    const nodeModules = join(root, 'node_modules');
+    if (existsSync(nodeModules) && !existsSync(join(path, 'node_modules'))) {
+      symlinkSync(nodeModules, join(path, 'node_modules'), 'dir');
+    }
+  } catch { /* best-effort — see docblock above */ }
+  return { ok: true, path };
+}
+
+/** Best-effort teardown of a candidate worktree — never throws. A failure here just leaves the fixed path for
+ *  the NEXT {@link materializeCandidate} call to clear before it reuses it. */
+export function removeCandidate({ root, path, run, env }) {
+  const git = makeGit({ run, cwd: root, env, timeoutMs: 60_000 });
+  try { git(['worktree', 'remove', '--force', path]); } catch { /* best-effort */ }
+  try { rmSync(path, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try { git(['worktree', 'prune']); } catch { /* best-effort */ }
+}
+
+/**
+ * PURE-ish (one alert side-effect): is `root` still safe to move, migrating known daemon-state-file dirt out of
+ * the way first (see {@link migrateDaemonStateFiles}) exactly as the old single-phase `doRebuild` did at its own
+ * Step 1 — shared by {@link prepareRebuild} (before the candidate is even built) and {@link finalizeRebuild}
+ * (re-checked right before the one `reset --hard`, since real time — an unlocked smoke — passed in between).
+ * @returns {{safe:boolean, reason?:string, detail?:*, untracked:Array<string>}}
+ */
+function ensureSafeToMove({
+  git, root, env, stEnv, alert, knownInputs,
+}) {
+  let unsafe = findUnsafeLocalState({ git, knownInputs });
+  if (!unsafe.safe && unsafe.reason === 'dirty') {
+    const mig = migrateDaemonStateFiles({
+      git, root, dirty: unsafe.detail, env: stEnv,
+    });
+    for (const m of mig.migrated) alert('state-file-migrated', m);
+    if (mig.ok) unsafe = findUnsafeLocalState({ git, knownInputs });
+    else if (mig.reason !== 'not-state-files') alert('state-file-migrate-failed', { reason: mig.reason });
+  }
+  return unsafe;
+}
+
+/** The one "this clone is being held off origin/main" alert both {@link prepareRebuild} and
+ *  {@link finalizeRebuild} raise on a non-moving, non-adopting, plan-ok, behind-main result — factored out so
+ *  both phases (which each read their OWN fresh `state`, see file header) compute it identically. */
+function staleAlertDetail(result, state) {
+  if (result.moved || result.adopted || !result.plan?.ok || result.plan.upToDate) return null;
+  return {
+    reason: result.reason,
+    mainSha: result.plan.mainSha,
+    target: result.plan.finalSha,
+    retryAt: state.rejected?.inputsKey === result.plan.inputsKey ? (state.rejected.retryAt ?? null) : null,
+    message: 'the rebuild is holding this clone off origin/main — dispatches from it refuse as stale until this clears',
+  };
+}
+
+// ── rebuildClone — the IO shell ──────────────────────────────────────────────────────────────────────────────
+
+/** Shas a clone was previously built from — see {@link findUnsafeLocalState}'s `knownInputs`. */
+function knownInputsOf(state) {
+  return [
+    state?.adopted?.head, state?.adopted?.mainSha, ...((state?.adopted?.applied) || []).map((a) => a?.sha),
+    state?.quarantine?.prevHead,
+  ].filter(Boolean);
+}
+
+/**
+ * Phase 1 (LOCKED, fast — no smoke, no `reset --hard`): recovery, safety, fetch, `planRebuild`, overlay-list
+ * edits, and the up-to-date/still-rejected/untracked-collision short-circuits — everything the old single-phase
+ * `doRebuild` did in its Steps 0-4.5. Returns EITHER `{terminal:true, result, alerts}` (a final `rebuildClone`
+ * result — the caller returns it as-is) or `{terminal:false, plan, prevHead, alerts}` (proceed to build +
+ * smoke a candidate — see {@link rebuildClone}).
+ */
+async function prepareRebuild({
+  root, env, log, run, prState, stateOpts, mainOnly, now,
+}) {
+  const stEnv = { ...env, ...(stateOpts?.env || {}) };
+  const git = makeGit({ run, cwd: root, env });
+  const alertsList = [];
+  const nowMs = () => now();
+  const nowIso = () => new Date(nowMs()).toISOString();
+
+  const alert = (kind, detail) => {
+    alertsList.push({ kind, detail });
+    log?.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
+    try {
+      const file = alertsFilePath(root, stEnv);
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
+    } catch { /* best-effort audit trail only */ }
+  };
+  const terminal = (result) => {
+    // A clone the rebuild will NOT advance while origin/main (or an overlay) has moved is STALE — every dispatch
+    // from it refuses as stale-main. Say so loudly, every tick it stays that way, instead of leaving the daemons
+    // silently refusing everything (live 2026-09-25 08:14 ET: held by a still-rejected smoke, refused 6/tick).
+    const stale = staleAlertDetail(result, state);
+    if (stale) alert('clone-held-stale', stale);
+    return { terminal: true, result, alerts: alertsList };
+  };
+
+  const state = readRebuildState(root, stEnv);
+  const writeState = () => writeRebuildState(root, state, stEnv);
+
+  // ── Step 0: recovery ──────────────────────────────────────────────────────────────────────────────────
+  const indexLockPath = join(root, '.git', 'index.lock');
+  try {
+    const st = statSync(indexLockPath);
+    const staleMs = Number(env?.WE_DAEMON_INDEX_LOCK_STALE_MS) || 120_000;
+    if (nowMs() - st.mtimeMs > staleMs) {
+      unlinkSync(indexLockPath);
+      alert('index-lock-recovered', { ageMs: nowMs() - st.mtimeMs });
+    } else {
+      return terminal({ moved: false, reason: 'index-locked' });
+    }
+  } catch { /* no index.lock present — nothing to recover */ }
+
+  if (state.inProgress) {
+    const staleMs = Number(env?.WE_DAEMON_REBUILD_STALE_MS) || 30 * 60_000;
+    const sameHost = state.inProgress.host === hostname();
+    const pidDead = sameHost && (() => {
+      try { process.kill(state.inProgress.pid, 0); return false; } catch (e) { return e && e.code === 'ESRCH'; }
+    })();
+    const startedMs = Date.parse(state.inProgress.startedAt || '');
+    const aged = Number.isFinite(startedMs) && nowMs() - startedMs > staleMs;
+    if (pidDead || aged) {
+      const headNow = verifyRev(git, 'HEAD');
+      const clean = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) }).safe;
+      const ip = state.inProgress;
+      if (headNow === ip.target || (headNow === ip.prevHead && clean)) {
+        state.inProgress = null;
+        // xa4qo7n — under THIS design a `reset --hard` NEVER runs before its candidate's live smoke has already
+        // passed (see file header), so `headNow === target` here can only mean: the reset landed, the process
+        // died before the state write right after it, and the smoke for this EXACT build already passed. Promote
+        // it straight to `adopted` from the inProgress record's own echoed plan fields — no re-smoke needed (a
+        // real change from the pre-fix design, where the smoke ran AFTER the reset and a crash here really could
+        // mean an unverified build on disk — see `agent-memory`/PR #2625's own advisory for that history).
+        const promote = headNow === ip.target && ip.target !== ip.prevHead;
+        if (promote) {
+          state.adopted = {
+            head: ip.target, inputsKey: ip.inputsKey ?? null, mainSha: ip.mainSha ?? null, applied: ip.applied ?? [], at: nowIso(),
+          };
+          state.rejected = null;
+          writeState();
+          alert('rebuild-interrupted-recovered', { target: ip.target, headNow, promoted: true });
+          // Short-circuit here (unlike the non-promoted branch below, which falls through to a fresh plan this
+          // same tick): this build is now FULLY adopted, so there is nothing else for this tick to decide.
+          return terminal({
+            moved: false, adopted: true, reason: 'recovered-adopted', head: ip.target,
+          });
+        }
+        writeState();
+        alert('rebuild-interrupted-recovered', { target: ip.target, headNow, promoted: false });
+      } else {
+        alert('rebuild-interrupted-unrecoverable', { inProgress: state.inProgress, headNow });
+        return terminal({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
+      }
+    }
+  }
+
+  if (state.quarantine) {
+    // Same definition of "clean" as findUnsafeLocalState: tracked changes only (an untracked sidecar must never
+    // freeze recovery), plus the same untracked-collision guard Step 4.5 runs — refuse if prevHead has content
+    // at an untracked path, since this `reset --hard` would silently overwrite it.
+    const { prevHead: qHead } = state.quarantine;
+    const status = git(['status', '--porcelain', '--untracked-files=no']);
+    const untracked = collectUntrackedPaths(git);
+    const clean = status.status === 0 && !String(status.stdout ?? '').trim() && untracked !== null
+      && !untracked.some((p) => git(['cat-file', '-e', `${qHead}:${p}`]).status === 0);
+    const reset = clean ? git(['reset', '--hard', state.quarantine.prevHead]) : { status: 1 };
+    if (clean && reset.status === 0) {
+      state.quarantine = null;
+      writeState();
+    } else {
+      return terminal({ moved: false, reason: 'quarantined' });
+    }
+  }
+
+  // ── Step 1: must be on main, and the local tree must be safe to move ────────────────────────────────────
+  const headRef = git(['symbolic-ref', '--short', 'HEAD']);
+  const onMain = headRef.status === 0 ? String(headRef.stdout ?? '').trim() === 'main' : null;
+  if (!onMain) {
+    alert('not-on-main', { onMain });
+    return terminal({ moved: false, reason: 'not-on-main' });
+  }
+
+  const unsafe = ensureSafeToMove({
+    git, root, env, stEnv, alert, knownInputs: knownInputsOf(state),
+  });
+  if (!unsafe.safe) {
+    alert(unsafe.reason, unsafe.detail);
+    return terminal({ moved: false, reason: unsafe.reason });
+  }
+  // Report kept untracked paths on EVERY tick that gets this far — including no-op (`up-to-date`,
+  // `still-rejected`) ticks — not only when the tree moves. `reset --hard` never removes them, so an
+  // unexpected file (nothing daemon-written should be here: `.conveyor/` and host-local settings are
+  // gitignored, and ignored paths are not listed) keeps showing up in the alert log for as long as it stays.
+  if (unsafe.untracked.length > 0) alert('untracked-kept', { paths: unsafe.untracked });
+
+  const prevHead = verifyRev(git, 'HEAD');
+  if (!prevHead) {
+    alert('head-unresolved');
+    return terminal({ moved: false, reason: 'head-unresolved' });
+  }
+
+  // ── Step 2: fetch ────────────────────────────────────────────────────────────────────────────────────
+  // A corrupt overlay file reads as an empty list. Building on that would quietly rebuild onto main alone and
+  // drop every registered fix, so refuse and alert instead (mainOnly ignores overlays anyway, so it proceeds).
+  const overlayState = readOverlayState(root, { env });
+  if (overlayState.corrupt) {
+    alert('overlay-state-corrupt', { file: overlayFilePath(root, env) });
+    if (!mainOnly) return terminal({ moved: false, reason: 'overlay-state-corrupt' });
+  }
+  const overlaysBefore = overlayState.overlays;
+  const fetchResult = fetchMainAndOverlays({ git, overlays: overlaysBefore });
+  if (!fetchResult.ok) {
+    alert('fetch-failed');
+    return terminal({ moved: false, reason: 'fetch-failed' });
+  }
+  for (const ref of fetchResult.goneRefs) alert('overlay-ref-gone-on-fetch', { ref });
+
+  // ── Step 3: plan + apply list edits ─────────────────────────────────────────────────────────────────
+  const plan = await planRebuild({
+    git, headSha: prevHead, mainRef: 'origin/main', overlays: overlaysBefore, prState, mainOnly,
+  });
+  if (!plan.ok) {
+    // A pinned refusal keeps the current tree AND the overlay list untouched (no decisions were applied).
+    alert(plan.reason, plan.detail);
+    return terminal({ moved: false, reason: plan.reason, ...(plan.detail ? { detail: plan.detail } : {}) });
+  }
+  for (const d of plan.decisions) {
+    if (d.action === 'remove') {
+      removeOverlay(root, d.ref, { env, why: d.reason });
+      appendOverlayEvent(root, { kind: 'auto-dropped', ref: d.ref, pr: d.pr, reason: d.reason }, { env });
+      alert('overlay-auto-dropped', { ref: d.ref, reason: d.reason });
+    } else if (d.action === 'drop') {
+      alert('overlay-conflict-dropped', { ref: d.ref, reason: d.reason });
+    }
+  }
+  for (const kind of plan.alerts) alert(kind.kind, kind.detail);
+
+  // ── Step 4: up-to-date / still-rejected short-circuits ──────────────────────────────────────────────
+  if (plan.upToDate) {
+    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
+      state.adopted = {
+        head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
+      };
+      writeState();
+    }
+    return terminal({ moved: false, reason: 'up-to-date', plan });
+  }
+  if (state.rejected?.inputsKey === plan.inputsKey) {
+    // An external-only rejection (only gh/network checks failed) is never permanent: once its backoff expires
+    // the same inputs are smoked again, instead of sticking until main or an overlay moves.
+    const retryAtMs = Date.parse(state.rejected.retryAt || '');
+    if (!(Number.isFinite(retryAtMs) && nowMs() >= retryAtMs)) {
+      return terminal({ moved: false, reason: 'still-rejected', plan });
+    }
+    alert('rejected-retry-due', { inputsKey: plan.inputsKey, attempts: state.rejected.attempts ?? 1 });
+  }
+
+  // ── Step 4.5: untracked-collision guard — a `reset --hard` keeps untracked files, but SILENTLY OVERWRITES
+  //    one if the incoming tree has real content at that same path. Check every untracked path from Step 1's
+  //    `unsafe.untracked` against the target tree; anything not present there is harmless (already reported as
+  //    `untracked-kept` after Step 1). Re-checked again in {@link finalizeRebuild} right before the actual
+  //    `reset --hard`, since real (unlocked) time passes for the smoke in between.
+  if (unsafe.untracked.length > 0) {
+    const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
+    if (colliding.length > 0) {
+      alert('untracked-collision', { paths: colliding });
+      return terminal({ moved: false, reason: 'untracked-collision', untracked: colliding, plan });
+    }
+  }
+
+  // Nothing left that can be decided without smoking a candidate first — hand off to rebuildClone's unlocked
+  // build+smoke step, then {@link finalizeRebuild}.
+  return {
+    terminal: false, plan, prevHead, alerts: alertsList,
+  };
+}
+
+/**
+ * Phase 3 (LOCKED, fast — reached ONLY after phase 2's unlocked smoke, run by {@link rebuildClone}, already
+ * PASSED): re-verifies nothing else moved `root` while the smoke ran, then performs the ONE `git reset --hard`
+ * this module ever does, and writes `state.adopted`. On a FAILING smoke this is never called at all — `root`
+ * was never touched, so {@link rebuildClone} handles that case itself, with no lock and nothing to roll back.
+ */
+async function finalizeRebuild({
+  root, env, log, run, stateOpts, now, plan, prevHead,
+}) {
+  const stEnv = { ...env, ...(stateOpts?.env || {}) };
+  const git = makeGit({ run, cwd: root, env });
+  const alertsList = [];
+  const nowMs = () => now();
+  const nowIso = () => new Date(nowMs()).toISOString();
+
+  const alert = (kind, detail) => {
+    alertsList.push({ kind, detail });
+    log?.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
+    try {
+      const file = alertsFilePath(root, stEnv);
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
+    } catch { /* best-effort audit trail only */ }
+  };
+  const state = readRebuildState(root, stEnv);
+  const writeState = () => writeRebuildState(root, state, stEnv);
+  const terminal = (result) => {
+    const stale = staleAlertDetail(result, state);
+    if (stale) alert('clone-held-stale', stale);
+    return { ...result, alerts: alertsList };
+  };
+
+  // Defensive re-check: real (unlocked) time passed for the smoke since `prepareRebuild` read `prevHead`. Either
+  // a SIBLING process's own rebuild already landed this EXACT build (align state and stop, no error), or
+  // something else moved `root` entirely (abandon this attempt cleanly; the next tick recomputes a fresh plan).
+  const headNow = verifyRev(git, 'HEAD');
+  if (headNow === plan.finalSha) {
+    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
+      state.adopted = {
+        head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
+      };
+      state.rejected = null;
+      writeState();
+    }
+    return terminal({
+      moved: false, adopted: true, reason: 'already-adopted', head: plan.finalSha, plan,
+    });
+  }
+  if (headNow !== prevHead) {
+    alert('root-changed-during-smoke', { expectedPrevHead: prevHead, headNow });
+    return terminal({ moved: false, reason: 'root-changed-during-smoke', plan });
+  }
+
+  // Re-run the same safety gate `prepareRebuild` already passed — the tree could, in principle, have picked up
+  // new dirt during the unlocked smoke window (see {@link ensureSafeToMove}'s docblock).
+  const unsafe = ensureSafeToMove({
+    git, root, env, stEnv, alert, knownInputs: knownInputsOf(state),
+  });
+  if (!unsafe.safe) {
+    alert(unsafe.reason, unsafe.detail);
+    return terminal({ moved: false, reason: unsafe.reason, plan });
+  }
+  if (unsafe.untracked.length > 0) {
+    const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
+    if (colliding.length > 0) {
+      alert('untracked-collision', { paths: colliding });
+      return terminal({ moved: false, reason: 'untracked-collision', untracked: colliding, plan });
+    }
+  }
+
+  // ── The ONE `reset --hard` this module performs — always AFTER a passing smoke, never before. ──────────
+  state.inProgress = {
+    pid: process.pid, host: hostname(), prevHead, target: plan.finalSha, startedAt: nowIso(),
+    inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied,
+  };
+  writeState();
+  try {
+    const reset = git(['reset', '--hard', plan.finalSha]);
+    if (reset.status !== 0) {
+      const rollback = git(['reset', '--hard', prevHead]);
+      const rolledBack = rollback.status === 0;
+      // A failed reset may have half-moved the tree; if the rollback also failed, its state is unknown —
+      // quarantine so no later tick builds or runs on it.
+      if (!rolledBack) state.quarantine = { prevHead, reason: 'reset-rollback-failed' };
+      state.inProgress = null;
+      writeState();
+      alert('reset-failed', { target: plan.finalSha, rolledBack });
+      return terminal({
+        moved: false, reason: 'reset-failed', rolledBack, ...(rolledBack ? {} : { quarantine: true }), plan,
+      });
+    }
+    state.adopted = {
+      head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
+    };
+    state.rejected = null;
+    state.inProgress = null;
+    writeState();
+    return terminal({
+      moved: true, adopted: true, head: plan.finalSha, prevHead, plan,
+    });
+  } catch (e) {
+    const rollback = git(['reset', '--hard', prevHead]);
+    if (rollback.status !== 0) {
+      state.quarantine = { prevHead, reason: 'rebuild-threw' };
+      state.inProgress = null;
+      writeState();
+      alert('rollback-failed', { prevHead, error: String(e?.message || e) });
+      return terminal({ moved: false, reason: 'rollback-failed', quarantine: true, plan });
+    }
+    state.inProgress = null;
+    writeState();
+    alert('rebuild-threw', { error: String(e?.message || e) });
+    return terminal({ moved: false, reason: 'rebuild-error', plan });
+  }
+}
+
+/**
+ * Rebuild `root` fresh from `origin/main` + its registered overlay list. See the file header (xa4qo7n) for the
+ * full three-step design — {@link prepareRebuild} (locked, fast) → build + smoke a disposable candidate
+ * (UNLOCKED — the live smoke never runs against `root` and never holds its write lock) →
+ * {@link finalizeRebuild} (locked, fast, reached only after a passing smoke). A lock refusal at either locked
+ * step is reported, never treated as an error.
  * @param {{root:string, env?:NodeJS.ProcessEnv, log?:Console, run?:typeof gitRun, runSmoke?:typeof runLiveSmokeWithRetry,
  *   prState?:(pr:number)=>(Promise<string|null>|string|null), lockOpts?:object, stateOpts?:{env?:NodeJS.ProcessEnv},
  *   mainOnly?:boolean, now?:()=>number, sleep?:(ms:number)=>Promise<void>}} o
@@ -701,338 +1162,149 @@ export async function rebuildClone({
     ...(sleep ? { sleep } : {}),
     ...lockOpts,
   };
+  const stEnv = { ...env, ...(stateOpts?.env || {}) };
 
+  // ── Phase 1 (locked, fast) ───────────────────────────────────────────────────────────────────────────────
   const startedMs = now();
-  const lockResult = await withWriteLock(root, () => doRebuild({
-    root, env, log, run, runSmoke, prState, stateOpts, mainOnly, now,
+  const prep = await withWriteLock(root, () => prepareRebuild({
+    root, env, log, run, prState, stateOpts, mainOnly, now,
   }), finalLockOpts);
 
-  if (!lockResult.ok) {
-    if (lockResult.reason === 'tick-in-progress') {
-      log.error?.(`daemon-rebuild: gave up after ${Math.round((now() - startedMs) / 1000)}s — reader ${lockResult.heldBy ?? '?'} still ticking; this tick runs on the current tree and the next one retries (#4044)`);
+  if (!prep.ok) {
+    if (prep.reason === 'tick-in-progress') {
+      log.error?.(`daemon-rebuild: gave up after ${Math.round((now() - startedMs) / 1000)}s — reader ${prep.heldBy ?? '?'} still ticking; this tick runs on the current tree and the next one retries (#4044)`);
     }
-    return { moved: false, reason: lockResult.reason, ...(lockResult.heldBy ? { heldBy: lockResult.heldBy } : {}) };
+    return { moved: false, reason: prep.reason, ...(prep.heldBy ? { heldBy: prep.heldBy } : {}) };
   }
-  return lockResult.value;
-}
-
-/** Shas a clone was previously built from — see {@link findUnsafeLocalState}'s `knownInputs`. */
-function knownInputsOf(state) {
-  return [
-    state?.adopted?.head, state?.adopted?.mainSha, ...((state?.adopted?.applied) || []).map((a) => a?.sha),
-    state?.quarantine?.prevHead,
-  ].filter(Boolean);
-}
-
-async function doRebuild({ root, env, log, run, runSmoke, prState, stateOpts, mainOnly, now }) {
-  const stEnv = { ...env, ...(stateOpts?.env || {}) };
-  const git = makeGit({ run, cwd: root, env });
-  const alertsList = [];
-  const nowMs = () => now();
-  const nowIso = () => new Date(nowMs()).toISOString();
-
-  const alert = (kind, detail) => {
-    alertsList.push({ kind, detail });
-    log?.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
-    try {
-      const file = alertsFilePath(root, stEnv);
-      mkdirSync(dirname(file), { recursive: true });
-      appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
-    } catch { /* best-effort audit trail only */ }
-  };
-  const finish = (result) => {
-    // A clone the rebuild will NOT advance while origin/main (or an overlay) has moved is STALE — every dispatch
-    // from it refuses as stale-main. Say so loudly, every tick it stays that way, instead of leaving the daemons
-    // silently refusing everything (live 2026-09-25 08:14 ET: held by a still-rejected smoke, refused 6/tick).
-    if (!result.moved && !result.adopted && result.plan?.ok && !result.plan.upToDate) {
-      alert('clone-held-stale', {
-        reason: result.reason, mainSha: result.plan.mainSha, target: result.plan.finalSha,
-        retryAt: state.rejected?.inputsKey === result.plan.inputsKey ? (state.rejected.retryAt ?? null) : null,
-        message: 'the rebuild is holding this clone off origin/main — dispatches from it refuse as stale until this clears',
-      });
-    }
-    return { ...result, alerts: alertsList };
-  };
-
-  const state = readRebuildState(root, stEnv);
-  const writeState = () => writeRebuildState(root, state, stEnv);
-
-  // ── Step 0: recovery ──────────────────────────────────────────────────────────────────────────────────
-  const indexLockPath = join(root, '.git', 'index.lock');
-  try {
-    const st = statSync(indexLockPath);
-    const staleMs = Number(env?.WE_DAEMON_INDEX_LOCK_STALE_MS) || 120_000;
-    if (nowMs() - st.mtimeMs > staleMs) {
-      unlinkSync(indexLockPath);
-      alert('index-lock-recovered', { ageMs: nowMs() - st.mtimeMs });
-    } else {
-      return finish({ moved: false, reason: 'index-locked' });
-    }
-  } catch { /* no index.lock present — nothing to recover */ }
-
-  if (state.inProgress) {
-    const staleMs = Number(env?.WE_DAEMON_REBUILD_STALE_MS) || 30 * 60_000;
-    const sameHost = state.inProgress.host === hostname();
-    const pidDead = sameHost && (() => {
-      try { process.kill(state.inProgress.pid, 0); return false; } catch (e) { return e && e.code === 'ESRCH'; }
-    })();
-    const startedMs = Date.parse(state.inProgress.startedAt || '');
-    const aged = Number.isFinite(startedMs) && nowMs() - startedMs > staleMs;
-    if (pidDead || aged) {
-      const headNow = verifyRev(git, 'HEAD');
-      const clean = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) }).safe;
-      if (headNow === state.inProgress.target || (headNow === state.inProgress.prevHead && clean)) {
-        const { target, prevHead: interruptedPrev } = state.inProgress;
-        // HEAD == target means the reset landed but the live smoke never finished (PR #2625 advisory): the tree
-        // is UNVERIFIED. Remember it, so Step 4 below smokes it instead of calling it `up-to-date` and adopting it.
-        if (headNow === target && headNow !== interruptedPrev) state.unverified = { head: target, prevHead: interruptedPrev };
-        state.inProgress = null;
-        writeState();
-        alert('rebuild-interrupted-recovered', { target, headNow, unverified: !!state.unverified });
-      } else {
-        alert('rebuild-interrupted-unrecoverable', { inProgress: state.inProgress, headNow });
-        return finish({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
-      }
-    }
+  if (prep.value.terminal) {
+    return { ...prep.value.result, alerts: prep.value.alerts };
   }
+  const { plan, prevHead, alerts: prepAlerts } = prep.value;
 
-  if (state.quarantine) {
-    // Same definition of "clean" as findUnsafeLocalState: tracked changes only (an untracked sidecar must never
-    // freeze recovery), plus the same untracked-collision guard Step 4.5 runs — refuse if prevHead has content
-    // at an untracked path, since this `reset --hard` would silently overwrite it.
-    const { prevHead: qHead } = state.quarantine;
-    const status = git(['status', '--porcelain', '--untracked-files=no']);
-    const untracked = collectUntrackedPaths(git);
-    const clean = status.status === 0 && !String(status.stdout ?? '').trim() && untracked !== null
-      && !untracked.some((p) => git(['cat-file', '-e', `${qHead}:${p}`]).status === 0);
-    const reset = clean ? git(['reset', '--hard', state.quarantine.prevHead]) : { status: 1 };
-    if (clean && reset.status === 0) {
-      state.quarantine = null;
-      writeState();
-    } else {
-      return finish({ moved: false, reason: 'quarantined' });
-    }
-  }
-
-  // ── Step 1: must be on main, and the local tree must be safe to move ────────────────────────────────────
-  const headRef = git(['symbolic-ref', '--short', 'HEAD']);
-  const onMain = headRef.status === 0 ? String(headRef.stdout ?? '').trim() === 'main' : null;
-  if (!onMain) {
-    alert('not-on-main', { onMain });
-    return finish({ moved: false, reason: 'not-on-main' });
-  }
-
-  let unsafe = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) });
-  // The only dirt the rebuild clears itself: daemon runtime state in a known tracked file. Its rows go to the
-  // pinned state root first, so nothing is lost; any other dirt still refuses (see DAEMON_STATE_FILES).
-  if (!unsafe.safe && unsafe.reason === 'dirty') {
-    const mig = migrateDaemonStateFiles({ git, root, dirty: unsafe.detail, env: stEnv });
-    for (const m of mig.migrated) alert('state-file-migrated', m);
-    if (mig.ok) unsafe = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) });
-    else if (mig.reason !== 'not-state-files') alert('state-file-migrate-failed', { reason: mig.reason });
-  }
-  if (!unsafe.safe) {
-    alert(unsafe.reason, unsafe.detail);
-    return finish({ moved: false, reason: unsafe.reason });
-  }
-  // Report kept untracked paths on EVERY tick that gets this far — including no-op (`up-to-date`,
-  // `still-rejected`) ticks — not only when the tree moves. `reset --hard` never removes them, so an
-  // unexpected file (nothing daemon-written should be here: `.conveyor/` and host-local settings are
-  // gitignored, and ignored paths are not listed) keeps showing up in the alert log for as long as it stays.
-  if (unsafe.untracked.length > 0) alert('untracked-kept', { paths: unsafe.untracked });
-
-  const prevHead = verifyRev(git, 'HEAD');
-  if (!prevHead) {
-    alert('head-unresolved');
-    return finish({ moved: false, reason: 'head-unresolved' });
-  }
-
-  // ── Step 2: fetch ────────────────────────────────────────────────────────────────────────────────────
-  // A corrupt overlay file reads as an empty list. Building on that would quietly rebuild onto main alone and
-  // drop every registered fix, so refuse and alert instead (mainOnly ignores overlays anyway, so it proceeds).
-  const overlayState = readOverlayState(root, { env });
-  if (overlayState.corrupt) {
-    alert('overlay-state-corrupt', { file: overlayFilePath(root, env) });
-    if (!mainOnly) return finish({ moved: false, reason: 'overlay-state-corrupt' });
-  }
-  const overlaysBefore = overlayState.overlays;
-  const fetchResult = fetchMainAndOverlays({ git, overlays: overlaysBefore });
-  if (!fetchResult.ok) {
-    alert('fetch-failed');
-    return finish({ moved: false, reason: 'fetch-failed' });
-  }
-  for (const ref of fetchResult.goneRefs) alert('overlay-ref-gone-on-fetch', { ref });
-
-  // ── Step 3: plan + apply list edits ─────────────────────────────────────────────────────────────────
-  const plan = await planRebuild({
-    git, headSha: prevHead, mainRef: 'origin/main', overlays: overlaysBefore, prState, mainOnly,
+  // ── Phase 2 (UNLOCKED — the whole point of xa4qo7n): build + smoke a disposable candidate ───────────────
+  const candidate = materializeCandidate({
+    root, sha: plan.finalSha, run, env,
   });
-  if (!plan.ok) {
-    // A pinned refusal keeps the current tree AND the overlay list untouched (no decisions were applied).
-    alert(plan.reason, plan.detail);
-    return finish({ moved: false, reason: plan.reason, ...(plan.detail ? { detail: plan.detail } : {}) });
-  }
-  for (const d of plan.decisions) {
-    if (d.action === 'remove') {
-      removeOverlay(root, d.ref, { env, why: d.reason });
-      appendOverlayEvent(root, { kind: 'auto-dropped', ref: d.ref, pr: d.pr, reason: d.reason }, { env });
-      alert('overlay-auto-dropped', { ref: d.ref, reason: d.reason });
-    } else if (d.action === 'drop') {
-      alert('overlay-conflict-dropped', { ref: d.ref, reason: d.reason });
-    }
-  }
-  for (const kind of plan.alerts) alert(kind.kind, kind.detail);
-
-  // ── Step 4: up-to-date / still-rejected short-circuits ──────────────────────────────────────────────
-  // `smokeOnly`: HEAD already sits at the planned build, but that build was never smoked (a rebuild died between
-  // its reset and its smoke — see Step 0). Never adopt it on the `up-to-date` path; smoke it in place instead, and
-  // roll back to the pre-interrupt head if it fails.
-  const smokeOnly = !!(plan.upToDate && state.unverified && state.unverified.head === plan.finalSha);
-  if (state.unverified && !smokeOnly) {
-    state.unverified = null; // the tree has moved on (or the plan changed) — the old marker no longer applies
-    writeState();
-  }
-  if (plan.upToDate && !smokeOnly) {
-    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
-      state.adopted = {
-        head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
-      };
-      writeState();
-    }
-    return finish({ moved: false, reason: 'up-to-date', plan });
-  }
-  if (!smokeOnly && state.rejected?.inputsKey === plan.inputsKey) {
-    // An external-only rejection (only gh/network checks failed) is never permanent: once its backoff expires
-    // the same inputs are smoked again, instead of sticking until main or an overlay moves.
-    const retryAtMs = Date.parse(state.rejected.retryAt || '');
-    if (!(Number.isFinite(retryAtMs) && nowMs() >= retryAtMs)) {
-      return finish({ moved: false, reason: 'still-rejected', plan });
-    }
-    alert('rejected-retry-due', { inputsKey: plan.inputsKey, attempts: state.rejected.attempts ?? 1 });
+  if (!candidate.ok) {
+    log.error?.(`daemon-rebuild: candidate-worktree-failed (${candidate.reason}) — not adopting ${plan.finalSha}, retrying next tick`);
+    return {
+      moved: false, reason: 'candidate-worktree-failed', detail: candidate.reason, plan, alerts: prepAlerts,
+    };
   }
 
-  // ── Step 4.5: untracked-collision guard — a `reset --hard` keeps untracked files, but SILENTLY OVERWRITES
-  //    one if the incoming tree has real content at that same path. Check every untracked path from Step 1's
-  //    `unsafe.untracked` against the target tree; anything not present there is harmless (already reported as
-  //    `untracked-kept` after Step 1).
-  if (!smokeOnly && unsafe.untracked.length > 0) {
-    const colliding = unsafe.untracked.filter((p) => git(['cat-file', '-e', `${plan.finalSha}:${p}`]).status === 0);
-    if (colliding.length > 0) {
-      alert('untracked-collision', { paths: colliding });
-      return finish({
-        moved: false, reason: 'untracked-collision', untracked: colliding, plan,
-      });
-    }
+  // #4044: the files changed since the LAST LIVE-VERIFIED build (HEAD before this move, when it is the adopted
+  // one) — lets the smoke skip a tree-code check whose code none of them touch (see daemon-live-smoke.mjs
+  // SMOKE_CHECKS). Unknown (not the adopted head, a failed diff) ⇒ null ⇒ full smoke.
+  let changedFiles = null;
+  const readState = readRebuildState(root, stEnv);
+  if (readState.adopted?.head && readState.adopted.head === prevHead) {
+    const d = makeGit({ run, cwd: root, env })(['diff', '--name-only', prevHead, plan.finalSha]);
+    if (d.status === 0) changedFiles = String(d.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
   }
 
-  // ── Step 5: move the tree (the ONLY `reset --hard` in this module) ──────────────────────────────────
-  // In smokeOnly mode the tree is already at the target; a failed smoke rolls back to the pre-interrupt head.
-  const rollbackTo = smokeOnly ? state.unverified.prevHead : prevHead;
-  state.inProgress = { pid: process.pid, host: hostname(), prevHead: rollbackTo, target: plan.finalSha, startedAt: nowIso() };
-  state.unverified = null;
-  writeState();
-
-  let resetOk = false;
+  let smokeResult;
+  let smokeThrew = null;
+  const smokeStartedMs = now();
   try {
-    const reset = smokeOnly ? { status: 0 } : git(['reset', '--hard', plan.finalSha]);
-    resetOk = reset.status === 0;
-    if (!resetOk) {
-      const rollback = git(['reset', '--hard', prevHead]);
-      const rolledBack = rollback.status === 0;
-      // A failed reset may have half-moved the tree; if the rollback also failed, its state is unknown —
-      // quarantine exactly like a failed post-smoke rollback, so no later tick builds or runs on it.
-      if (!rolledBack) state.quarantine = { prevHead, reason: 'reset-rollback-failed' };
-      state.inProgress = null;
-      writeState();
-      alert('reset-failed', { target: plan.finalSha, rolledBack });
-      return finish({
-        moved: false, reason: 'reset-failed', rolledBack, ...(rolledBack ? {} : { quarantine: true }), plan,
-      });
-    }
+    smokeResult = await runSmoke({ root: candidate.path, env, changedFiles });
+  } catch (e) {
+    smokeThrew = e;
+  }
+  const smokeMs = now() - smokeStartedMs;
+  removeCandidate({
+    root, path: candidate.path, run, env,
+  });
 
-    // ── Step 6: live smoke ─────────────────────────────────────────────────────────────────────────────
-    // #4044: the files changed since the LAST LIVE-VERIFIED build (HEAD before this move, when it is the adopted
-    // one) — lets the smoke skip a tree-code check whose code none of them touch (see daemon-live-smoke.mjs
-    // SMOKE_CHECKS). Unknown (not the adopted head, a smokeOnly re-verify, a failed diff) ⇒ null ⇒ full smoke.
-    let changedFiles = null;
-    if (!smokeOnly && state.adopted?.head && state.adopted.head === prevHead) {
-      const d = git(['diff', '--name-only', prevHead, plan.finalSha]);
-      if (d.status === 0) changedFiles = String(d.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
-    }
-    const smokeStartedMs = nowMs();
-    const smokeResult = await runSmoke({ root, env, changedFiles });
-    const smokeMs = nowMs() - smokeStartedMs;
-    // The smoke runs under the WRITE lock, so every daemon on this clone skips its ticks for its whole duration —
-    // a slow one is the answer to "why was the lock held so long", so it is always on the record.
+  if (smokeThrew) {
+    // `daemon-live-smoke.mjs` documents itself as never throwing — this is defense-in-depth only. Root was
+    // never touched (the smoke ran against the now-discarded candidate), so there is nothing to roll back and
+    // no lock to take; just report it like any other rejection and let the next tick retry fresh.
+    log.error?.(`daemon-rebuild: smoke-threw ${String(smokeThrew?.message || smokeThrew)}`);
+    return {
+      moved: false,
+      reason: 'smoke-threw',
+      plan,
+      alerts: [...prepAlerts, { kind: 'smoke-threw', detail: String(smokeThrew?.message || smokeThrew) }],
+    };
+  }
+
+  if (smokeResult.verdict !== 'pass') {
+    // Root was NEVER touched — no rollback, no lock, nothing to quarantine. Record the rejection (a genuine
+    // `'code'` verdict only — `'transient'` never poisons the reject-cache, see the file header / Module D).
+    const alertsList = [];
+    const nowIso = () => new Date(now()).toISOString();
+    const alert = (kind, detail) => {
+      alertsList.push({ kind, detail });
+      log.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
+      try {
+        const file = alertsFilePath(root, stEnv);
+        mkdirSync(dirname(file), { recursive: true });
+        appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
+      } catch { /* best-effort audit trail only */ }
+    };
     if (smokeMs >= SLOW_SMOKE_ALERT_MS) {
       alert('smoke-slow', {
         ms: smokeMs, checks: (smokeResult.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
       });
     }
-    if (smokeResult.verdict === 'pass') {
-      state.adopted = {
-        head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
-      };
-      state.rejected = null;
-      state.inProgress = null;
-      writeState();
-      // smokeOnly: the tree did not move THIS call (it was already there), so no restart is owed for it.
-      if (smokeOnly) return finish({ moved: false, adopted: true, reason: 'verified-after-interrupt', head: plan.finalSha, plan });
-      return finish({ moved: true, adopted: true, head: plan.finalSha, prevHead, plan });
-    }
-
-    const rollback = git(['reset', '--hard', rollbackTo]);
-    if (rollback.status !== 0) {
-      state.quarantine = { prevHead: rollbackTo, reason: smokeResult.verdict === 'code' ? 'smoke-code-rollback-failed' : 'smoke-transient-rollback-failed' };
-      state.inProgress = null;
-      writeState();
-      alert('rollback-failed', { prevHead: rollbackTo });
-      return finish({ moved: false, reason: 'rollback-failed', quarantine: true, plan });
-    }
-
     if (smokeResult.verdict === 'code') {
+      const state = readRebuildState(root, stEnv);
       const failed = (smokeResult.smoke?.results || []).filter((r) => !r.ok);
       const failedNames = failed.map((r) => r.name).join(',');
       const prev = state.rejected?.inputsKey === plan.inputsKey ? state.rejected : null;
       state.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
       if (isExternalOnlyFailure(failed)) {
-        // Only checks that run EXTERNAL tools (gh) failed — nothing that runs the tree under test. That is far
-        // more likely GitHub/network than the build, so reject with a growing backoff, never until main moves.
         const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
         const delay = rejectRetryDelayMs(env, attempts);
-        Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(nowMs() + delay).toISOString() });
+        Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(now() + delay).toISOString() });
       }
-      state.inProgress = null;
-      writeState();
+      writeRebuildState(root, state, stEnv);
       alert('smoke-rejected', {
         failed: failedNames,
         details: failed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
         ...(state.rejected.retryAt ? { retryAt: state.rejected.retryAt, attempts: state.rejected.attempts } : {}),
       });
-      return finish({ moved: false, reason: 'smoke-rejected', rolledBack: true, plan });
+      const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-rejected', plan }, state);
+      if (staleDetail) alert('clone-held-stale', staleDetail);
+      return { moved: false, reason: 'smoke-rejected', plan, alerts: [...prepAlerts, ...alertsList] };
     }
-
-    // 'transient' — never poison the reject-cache (see file header / Module D rationale).
-    state.inProgress = null;
-    writeState();
+    // 'transient' — never poison the reject-cache.
     alert('smoke-transient');
-    return finish({ moved: false, reason: 'smoke-transient', rolledBack: true, plan });
-  } catch (e) {
-    if (resetOk) {
-      const rollback = git(['reset', '--hard', rollbackTo]);
-      if (rollback.status !== 0) {
-        state.quarantine = { prevHead: rollbackTo, reason: 'rebuild-threw' };
-        state.inProgress = null;
-        writeState();
-        alert('rollback-failed', { prevHead: rollbackTo, error: String(e?.message || e) });
-        return finish({ moved: false, reason: 'rollback-failed', quarantine: true, plan });
-      }
-    }
-    state.inProgress = null;
-    writeState();
-    alert('rebuild-threw', { error: String(e?.message || e) });
-    return finish({ moved: false, reason: 'rebuild-error', plan });
+    const state = readRebuildState(root, stEnv);
+    const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-transient', plan }, state);
+    if (staleDetail) alert('clone-held-stale', staleDetail);
+    return { moved: false, reason: 'smoke-transient', plan, alerts: [...prepAlerts, ...alertsList] };
   }
+
+  // ── Phase 3 (locked, fast) — reached only after a PASSING smoke ─────────────────────────────────────────
+  const fin = await withWriteLock(root, () => finalizeRebuild({
+    root, env, log, run, stateOpts, now, plan, prevHead,
+  }), finalLockOpts);
+
+  if (!fin.ok) {
+    if (fin.reason === 'tick-in-progress') {
+      log.error?.(`daemon-rebuild: could not take the write lock to finalize ${plan.finalSha} after a passing smoke (reader ${fin.heldBy ?? '?'} still ticking) — retrying next tick`);
+    }
+    return {
+      moved: false, reason: fin.reason, ...(fin.heldBy ? { heldBy: fin.heldBy } : {}), plan, alerts: prepAlerts,
+    };
+  }
+
+  const result = fin.value;
+  const combinedAlerts = [...prepAlerts, ...result.alerts];
+  if (smokeMs >= SLOW_SMOKE_ALERT_MS) {
+    const slowDetail = {
+      ms: smokeMs, checks: (smokeResult.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
+    };
+    combinedAlerts.push({ kind: 'smoke-slow', detail: slowDetail });
+    log.error?.(`daemon-rebuild: smoke-slow ${JSON.stringify(slowDetail)}`);
+    try {
+      const file = alertsFilePath(root, stEnv);
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, `${JSON.stringify({ at: new Date(now()).toISOString(), kind: 'smoke-slow', detail: slowDetail })}\n`, 'utf8');
+    } catch { /* best-effort */ }
+  }
+  return { ...result, alerts: combinedAlerts };
 }
 
 // ── dryRunRebuild — STRICTLY read-only on `root` ────────────────────────────────────────────────────────────

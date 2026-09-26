@@ -519,7 +519,7 @@ async function checkTreeStaysClean({ root, budgets, runChild, env, beforePorcela
 // text says. THE RULE: any check that runs code FROM THE TREE UNDER TEST (`cwd: root` — `reconcile-pass.mjs`,
 // `lane-pool.mjs`) is `mayBeTransient:false`. Anything that code prints flows into `detail`; if its text could buy
 // a `'transient'` verdict, a broken (or hostile) overlay could print one of {@link TRANSIENT_FAILURE_PATTERNS}
-// ("no free lane", "ETIMEDOUT") and dodge the reject record every tick, re-smoking forever under the WRITE lock
+// ("no free lane", "ETIMEDOUT") and dodge the reject record every tick, re-smoking forever every tick
 // (PR #2625 advisory, security/reject-cache-bypass). Only checks that run external tools (`gh`) stay eligible.
 // A test in daemon-live-smoke.test.mjs enforces the rule by running every row and watching its `cwd`.
 // Cost, accepted: a genuinely exhausted pool (after `--wait-ms` gave it 180s to free up) or a gh/network blip
@@ -534,6 +534,15 @@ async function checkTreeStaysClean({ root, budgets, runChild, env, beforePorcela
 // none of them touch ran this exact code live already and passed — it is reported `skipped` (ok), not re-run.
 // Unknown diff, an incomplete closure, or any touched file ⇒ the check runs, exactly as before. The gh checks
 // (external, ~1s) always run.
+//
+// xa4qo7n (epic #4075/#3383) follow-up: skip-unchanged above only shortens a smoke that STILL runs; it does not
+// stop main moving on every drain PR from touching these checks' own import closure most of the time (both
+// `reconcile-dry-run` and `dispatch-dry-run` pull in the dispatch/reconcile machinery, which changes often), so
+// the 44s+17s live 2026-09-26 09:32 ET (`reconcile-dry-run`+`dispatch-dry-run`) kept dominating the smoke anyway.
+// `daemon-rebuild.mjs` fixes the OTHER half of the 2026-09-25 209s incident this section describes: `runLiveSmoke`
+// now always runs against a DISPOSABLE candidate worktree (`root` here is never the daemon's real clone), and
+// `rebuildClone` never holds the clone's write lock for any part of it — see that file's own header. A slow
+// smoke here no longer means a single daemon tick gets skipped, whatever its duration.
 export const SMOKE_CHECKS = Object.freeze([
   { name: 'lane-pool-list', run: checkLanePoolList, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },
   { name: 'lane-acquire-release', run: checkLaneAcquireRelease, mayBeTransient: false, codeEntries: ['scripts/lane-pool.mjs'] },

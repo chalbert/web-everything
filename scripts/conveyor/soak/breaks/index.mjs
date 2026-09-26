@@ -31,6 +31,7 @@ import sessionJunkInDaemonClone from './session-junk-in-daemon-clone.mjs';
 import shortJobBehindFullSuite from './short-job-behind-full-suite.mjs';
 import claudeAuthExpired from './claude-auth-expired.mjs';
 import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
+import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -45,6 +46,7 @@ export const BREAKS = Object.freeze([
   shortJobBehindFullSuite,
   claudeAuthExpired,
   claudeAuthFalsePositive,
+  rebuildSmokeOffLock,
 ]);
 
 export function breakById(id) {

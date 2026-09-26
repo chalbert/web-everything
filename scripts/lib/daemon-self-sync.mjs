@@ -81,8 +81,10 @@
  *      quarantined ⇒ release the lock and skip the tick (never run children off a rejected tree, never
  *      restart onto it). Else if `HEAD` has moved since this process's own boot (#3383 bug 2's drift check,
  *      unchanged in spirit) ⇒ release the lock FIRST, then `onRestart({reason:'head-moved'})` — safe because
- *      any HEAD change visible under the read lock is always an ADOPTED build (a rebuild's writer holds the
- *      lock through its own live smoke, and a rejected build is restored before the writer ever releases).
+ *      any HEAD change visible under the read lock is always an ADOPTED build — xa4qo7n: the writer only ever
+ *      moves `root`'s HEAD (`git reset --hard`) AFTER the candidate's live smoke has already passed (run
+ *      unlocked, against a disposable worktree, never against `root` itself — see `daemon-rebuild.mjs`'s file
+ *      header), so a rejected build never reaches `root` at all and there is nothing to restore.
  *   4. Run the real tick under the read lock (try/finally — the lock is released whether the tick returns or
  *      throws), and release it before doing anything else.
  *   5. `hasStaleRefusal(result)` (#3383 bug 1, unchanged in spirit) ⇒ AFTER the read lock is released, call
@@ -573,8 +575,9 @@ export function withSelfSync(effects, {
 
         // #3383 bug 2 (unchanged in spirit) — HEAD moved since THIS process's own boot even though it never
         // did the rebuilding itself (a sibling process sharing this clone did). Safe to restart unconditionally
-        // here: any HEAD change visible under the read lock is always an ADOPTED build — a rebuild's writer
-        // holds the write lock through its own live smoke, and a rejected build is restored before release.
+        // here: any HEAD change visible under the read lock is always an ADOPTED build — xa4qo7n: the writer
+        // only moves `root`'s HEAD after its candidate's live smoke has already passed elsewhere (unlocked), so
+        // a rejected build never lands on `root` in the first place.
         const headNow = readHead(syncOpts());
         if (bootSha != null && headNow != null && headNow !== bootSha && restartGate(headNow).restart) {
           releaseOnce();
