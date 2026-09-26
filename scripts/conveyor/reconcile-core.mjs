@@ -1205,21 +1205,20 @@ export function planReconcile({
  * `review-status:*` refresh (`we:scripts/conveyor/review-status-tag.mjs`) this tick, given this pass's own
  * `dispatch`/`refusals` output.
  *
- * EVERY PR THIS PASS HAS AN OPINION ABOUT, EXCEPT `nothing-owed`. `nothing-owed` is the ONLY refusal kind that
- * genuinely means "reviewed and queued, already landed, or a signal-free PR unrelated to this loop" — see
- * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for a `needs-human`/`conflicted` phase
- * alike (`ci-red` moved OFF this table at multi-repo slice 7 — it is a real `dispatch` entry, `kind:'ci-heal'`,
- * now, not a refusal), which are real conveyor-dispatched PRs stuck on something this pass does not run (a
- * human clear, a rebase) — NOT unrelated PRs. Before this function existed,
- * `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded `owed-elsewhere` wholesale on the mistaken
- * premise that it "covers every unrelated human PR" — confirmed live 2026-09-05 on PR #1920: its `needs-human`
- * refusal (kind `owed-elsewhere`) was excluded from every tick's refresh sweep, so its stale
- * `review-status:reviewing` label — left over from a session that no longer exists in `claude agents --json`
- * at all — was NEVER re-derived and cleared. `review-status-tag.mjs` is idempotent and name-keyed (matches
- * `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a PR with nothing live simply clears any
- * stale label — safe to call on every candidate this returns, including a genuinely-foreign PR that happens to
- * reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst, never a wrong label).
- * SAME BUG CLASS, THIRD TIME (live-caught 2026-09-22, PR #2472): a PR that moves to being owed a FIX
+ * EVERY PR THIS PASS HAS AN OPINION ABOUT — including `nothing-owed`. `owed-elsewhere` never meant "unrelated
+ * PR": it fires for a `needs-human`/`conflicted` phase alike (`ci-red` moved OFF this table at multi-repo
+ * slice 7 — it is a real `dispatch` entry, `kind:'ci-heal'`, now, not a refusal), which are real
+ * conveyor-dispatched PRs stuck on something this pass does not run (a human clear, a rebase) — NOT unrelated
+ * PRs. Before this function existed, `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded
+ * `owed-elsewhere` wholesale on the mistaken premise that it "covers every unrelated human PR" — confirmed
+ * live 2026-09-05 on PR #1920: its `needs-human` refusal (kind `owed-elsewhere`) was excluded from every
+ * tick's refresh sweep, so its stale `review-status:reviewing` label — left over from a session that no
+ * longer exists in `claude agents --json` at all — was NEVER re-derived and cleared. `review-status-tag.mjs`
+ * is idempotent and name-keyed (matches `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a
+ * PR with nothing live simply clears any stale label — safe to call on every candidate this returns, including
+ * a genuinely-foreign PR that happens to reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst,
+ * never a wrong label).
+ * SAME BUG CLASS, SECOND TIME (live-caught 2026-09-22, PR #2472): a PR that moves to being owed a FIX
  * (`plan.dispatch`'s `kind:'fix'` entries — e.g. a `review:changes` bounce) used to be in NEITHER
  * `reviewsOwed` NOR `refusals`, so its status label never got re-derived once it left the review-owed
  * state. PR #2472's own `review-2472` session finished and posted its real `review:changes` verdict, but
@@ -1227,18 +1226,29 @@ export function planReconcile({
  * for it again to notice the session was `done` and clear the label. Exactly the same root shape as the
  * `owed-elsewhere` miss documented above (a real, currently-relevant PR silently excluded from the refresh
  * sweep), just a different exclusion. Fixed by adding `fixesOwed` as a THIRD candidate source, included the
- * same unconditional way `reviewsOwed` already is — `review-status-tag.mjs` stays idempotent and
- * name-keyed, so including a fix-owed PR here costs one wasted read at worst on a genuinely quiet PR, never
- * a wrong label.
+ * same unconditional way `reviewsOwed` already is.
+ * SAME BUG CLASS, THIRD TIME (live-caught 2026-09-26, PR #2711, card x8who76): `nothing-owed` used to be
+ * excluded outright on the premise that it "genuinely means reviewed and queued, already landed, or a
+ * signal-free PR unrelated to this loop" — true of its STEADY STATE, but false at the exact instant a PR
+ * TRANSITIONS into it. `classifyPr` resolves `review:accepted`/`ready-to-merge` to phase `queued`, which is
+ * neither in `OWED` nor `OWED_ELSEWHERE`, so it refuses as `nothing-owed` — and that exclusion meant a PR
+ * whose review had JUST been accepted (carrying a `review-status:reviewing` label from the round that just
+ * finished) never got `review-status-tag.mjs` called again to notice the review session/job was gone and
+ * clear it. Confirmed live: PR #2711 got `review:accepted` at 13:07Z and `ready-to-merge` at 13:08Z but still
+ * carried `review-status:reviewing` (added 12:59Z) at 13:12Z — the operator read "accepted AND reviewing",
+ * a live contradiction. Fixed the same way as the other two: stop excluding it. `review-status-tag.mjs`'s own
+ * idempotency argument above applies identically to `nothing-owed` — a PR that was NEVER live costs one
+ * wasted read (or nothing at all when reads are shared, #4133) and no label ever gets written; a PR that just
+ * WENT quiet finally gets its stale label cleared within one tick instead of never.
  * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
  * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
  * @param {Array<{prNumber:number}>} [fixesOwed] - the `kind:'fix'` subset of this pass's own `dispatch`
- * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed, plus every refusal except `nothing-owed`
+ * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed + every refusal, `nothing-owed` included
  */
 export function selectStatusCandidates(reviewsOwed, refusals, fixesOwed) {
   return [
     ...(Array.isArray(reviewsOwed) ? reviewsOwed : []),
     ...(Array.isArray(fixesOwed) ? fixesOwed : []),
-    ...(Array.isArray(refusals) ? refusals : []).filter((r) => r && r.kind !== 'nothing-owed'),
+    ...(Array.isArray(refusals) ? refusals : []),
   ];
 }

@@ -1368,7 +1368,7 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
   });
 });
 
-describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
+describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920/#2472/#2711 staleness, x5v8yy9/x8who76)', () => {
   it('includes an owed-elsewhere refusal (e.g. ci-red) — it is a real conveyor PR, not an unrelated one', () => {
     // `needs-human` no longer produces `owed-elsewhere` (xpprcdz dispatches `review` for it instead) — `ci-red`
     // is the current real example of a phase this pass refuses as someone else's job.
@@ -1376,13 +1376,25 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
-  it('excludes ONLY nothing-owed', () => {
+  it('no longer excludes nothing-owed (x8who76 — see the dedicated test below for why)', () => {
     const refusals = [
       { prNumber: 1, kind: 'nothing-owed', phase: 'queued' },
       { prNumber: 2, kind: 'owed-elsewhere', phase: 'ci-red' },
       { prNumber: 3, kind: 'cap-exhausted' },
     ];
-    expect(selectStatusCandidates([], refusals).map((r) => r.prNumber)).toEqual([2, 3]);
+    expect(selectStatusCandidates([], refusals).map((r) => r.prNumber)).toEqual([1, 2, 3]);
+  });
+
+  // Live-caught 2026-09-26, PR #2711, card x8who76: SAME BUG CLASS as #1920/#2472 above, a third exclusion.
+  // `nothing-owed` used to be dropped outright on the premise it never carries anything live — true in
+  // steady state, false at the exact tick a PR TRANSITIONS into it. #2711 got `review:accepted` (phase
+  // `queued` → refusal kind `nothing-owed`) while still carrying `review-status:reviewing` from the round
+  // that had just finished; excluding `nothing-owed` meant `review-status-tag.mjs` was never called again to
+  // notice the review session/job was gone and clear it — the label sat stale, "accepted AND reviewing" at
+  // once, a live contradiction the operator caught.
+  it('includes a nothing-owed refusal — a PR that just went quiet still deserves one more status refresh to clear a stale label', () => {
+    const refusals = [{ prNumber: 2711, kind: 'nothing-owed', phase: 'queued' }];
+    expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
   it('includes every reviewsOwed entry regardless of refusals', () => {
@@ -1403,14 +1415,14 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates([], [], fixesOwed)).toEqual(fixesOwed);
   });
 
-  it('combines reviewsOwed + fixesOwed + non-nothing-owed refusals, all three sources at once', () => {
+  it('combines reviewsOwed + fixesOwed + every refusal (including nothing-owed), all three sources at once', () => {
     const reviewsOwed = [{ prNumber: 1, kind: 'review' }];
     const fixesOwed = [{ prNumber: 2, kind: 'fix' }];
     const refusals = [{ prNumber: 3, kind: 'owed-elsewhere' }, { prNumber: 4, kind: 'nothing-owed' }];
-    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed).map((c) => c.prNumber)).toEqual([1, 2, 3]);
+    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed).map((c) => c.prNumber)).toEqual([1, 2, 3, 4]);
   });
 
-  it('a 2-arg call (fixesOwed omitted) is byte-identical to before this fix — every existing caller unaffected', () => {
+  it('a 2-arg call (fixesOwed omitted) still passes every refusal through unfiltered', () => {
     const reviewsOwed = [{ prNumber: 1 }];
     const refusals = [{ prNumber: 2, kind: 'owed-elsewhere' }];
     expect(selectStatusCandidates(reviewsOwed, refusals)).toEqual([{ prNumber: 1 }, { prNumber: 2, kind: 'owed-elsewhere' }]);
