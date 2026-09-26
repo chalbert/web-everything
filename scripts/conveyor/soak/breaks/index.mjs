@@ -37,6 +37,12 @@ import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
 import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
 import claudeAuthDispatchPause from './claude-auth-dispatch-pause.mjs';
 import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
+import smokeExpiredGhToken from './smoke-expired-gh-token.mjs';
+import shallowCloneUnrelatedHistories from './shallow-clone-unrelated-histories.mjs';
+import reaperRestopsFinishedSessions from './reaper-restops-finished-sessions.mjs';
+import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
+import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
+import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -57,6 +63,12 @@ export const BREAKS = Object.freeze([
   brokenSmokeHarnessHoldsLastGood,
   claudeAuthDispatchPause,
   rebuildConcurrentCandidates,
+  smokeExpiredGhToken,
+  shallowCloneUnrelatedHistories,
+  reaperRestopsFinishedSessions,
+  coupleSplitByUnrelatedMerge,
+  ciHealLoopStaleLabelReviewGate,
+  alreadyLandedPrGetsFixer,
 ]);
 
 export function breakById(id) {
