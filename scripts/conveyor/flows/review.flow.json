@@ -3,7 +3,7 @@
   "title": "Review (job model)",
   "summary": "The review daemon ticks every 120s, discovers PRs owed an independent review (or re-armed after a fix), and dispatches each as a detached, deterministic job (not a Claude wrapper session): claim a job slot, acquire a lane, run one review-loop-cli.mjs round under a hard 45-minute timeout, classify the outcome, swap the PR's review:* label, release the lane, and — only after that arc fully finishes — run advisory non-Claude extra seats. Round-cap exhaustion, a review:human park, an infra timeout, and a hard-killed job are real states with weak or missing ownership; see the notes on round-cap-exhausted, human-hold, blocked-on-infra and job-died-silently.",
   "derivedFrom": {
-    "commit": "91cc453e4",
+    "commit": "00413a56c",
     "date": "2026-09-26"
   },
   "sources": [
@@ -37,7 +37,13 @@
     "scripts/conveyor/health-smells/daemon-owed-no-dispatch.mjs",
     "scripts/conveyor/health-smells/red-pr-unattended.mjs",
     "scripts/progress-board.mjs",
-    "scripts/lib/daemon-self-sync.mjs"
+    "scripts/lib/daemon-self-sync.mjs",
+    "scripts/operations/review-extra-seats.mjs",
+    "scripts/lib/provider-routing.mjs",
+    "scripts/conveyor/run-scorecard-store.mjs",
+    "scripts/conveyor/log-delegation-trial.mjs",
+    "scripts/lib/marker-authorship.mjs",
+    "scripts/lib/delegation-marker.mjs"
   ],
   "entry": {
     "state": "review-owed",
@@ -203,7 +209,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116) — NO post-accept red-team runs on this path (grepped: redTeamRequired/foldRedTeamVerdict, scripts/lib/jury-core.mjs:1116-1136, are only called from skills-src/jury/subject-jury.workflow.js and scripts/lib/converge-core.mjs:503-508 — i.e. the /jury and /converge skills — never from scripts/operations/review-pr.mjs, which has zero references to either). The only extra scrutiny an accepted PR gets is the advisory, non-blocking extra-seats-advisory branch, AFTER this label is already live."
+      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the x00g3tt post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
     },
     {
       "id": "changes-requested",
@@ -321,6 +327,23 @@
       "retries": null,
       "escalation": null,
       "notes": "Deliberately decoupled: this step runs strictly AFTER the arc's outcome is already reported `done` and the label already swapped (scripts/operations/review-job.mjs:296-297,307-321) — a crash, a thrown kill switch, or a timeout here is captured only as a `status` field in the logged summary (scripts/operations/review-job.mjs:311-321) and can never change the verdict, never retries, and is never surfaced to an operator. This is intentional per the file's own header, not an oversight, but it is still a no-owner/no-escalation terminus for whatever the added seats found."
+    },
+    {
+      "id": "red-team-advisory",
+      "label": "x00g3tt post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "review-job",
+      "ownerCite": "scripts/operations/review-job.mjs:362-374",
+      "wait": {
+        "for": "review-extra-seats.mjs's `red-team` subcommand to finish (one non-Claude attack call, then a Claude re-check of anything it reports)",
+        "timeout": "resolveSeatTimeoutMs(env) + 20*60*1000ms wall clock on the child process itself (SIGKILL on expiry, same spawnSync mechanism as the review loop and the added seats)",
+        "onTimeout": "red-team-advisory",
+        "cite": "scripts/operations/review-job.mjs:265-273,201-207; scripts/operations/review-extra-seats.mjs:80,108-111,643-653"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Gated on redTeamRequired(verdict) (scripts/lib/jury-core.mjs:1116-1118) — only an ACCEPT verdict ever reaches this state; a bounced or parked review never does. Deliberately decoupled exactly like extra-seats-advisory: this runs strictly AFTER the review's own outcome is already reported and labelled (scripts/operations/review-job.mjs:362-364), so a crash, a thrown kill switch (WE_REVIEW_RED_TEAM=0, or WE_REVIEW_EXTRA_SEATS=0 which disables this too), or a timeout here is captured only as a `status` field on the logged summary (scripts/operations/review-job.mjs:365-373) — never retried, never escalated, never able to change the verdict or the review:* label. `foldedVerdict` (accept/changes/needs-human, jury-core.mjs#foldRedTeamVerdict) is RECORDED as evidence only — the module's own header states it is 'recorded, not enforced' in v1 (scripts/operations/review-extra-seats.mjs:37-40,682-684). A confirmed break DOES leave a durable trace beyond the log line: a `red-team-miss` evidence row for the accepting Claude seat and for the builder's model/provider (buildMissRows, scripts/operations/review-extra-seats.mjs:879-903), a 'reworked' delegation-trial row when the PR carries a delegation marker (finishRedTeamEffects, scripts/operations/review-extra-seats.mjs:945-967), and ONE advisory PR comment deduped by a trusted-author-checked marker (scripts/operations/review-extra-seats.mjs:726-733,906-924,969-983). The model never runs twice for the same (pr, head): a prior clean seat row makes a later run a `resumeRedTeam` replay that only finishes whichever effect (row / delegation trial / comment) failed last time, spending no new call (scripts/operations/review-extra-seats.mjs:735-747,989-1014,1038-1039). It shares its daily call cap and reservation ledger with the ordinary added seats (DAILY_CAP_ENV, default 40/day, scripts/operations/review-extra-seats.mjs:76-77) — if extra-seats-advisory's own calls already spent the day's budget, the red team is simply skipped for cap reasons (scripts/operations/review-extra-seats.mjs:1050-1057), which this file records as a real, not-owned/not-escalated shared-resource coupling rather than a distinct failure. This is intentional per the module's own header, not an oversight — the same shape as extra-seats-advisory's own no-owner/no-escalation terminus, so it carries no new card."
     },
     {
       "id": "shadow-observation",
@@ -510,6 +533,13 @@
       "on": "the loop's stdout parsed and did not time out",
       "kind": "normal",
       "cite": "scripts/operations/review-job.mjs:404"
+    },
+    {
+      "from": "accepted",
+      "to": "red-team-advisory",
+      "on": "the loop's stdout parsed and did not time out, and the loop's own verdict was exactly `accept` (redTeamRequired)",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:362-364,457; scripts/lib/jury-core.mjs:1116-1118"
     }
   ],
   "steps": [
@@ -752,6 +782,39 @@
           "cite": "scripts/operations/review-job.mjs:248-249"
         }
       ],
+      "provides": []
+    },
+    {
+      "id": "run-red-team-seat",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "spawn `review-extra-seats.mjs red-team` as its own process; inside, redTeamEnabled() checks both kill switches first, then a prior clean seat row for this exact (pr, head commit) short-circuits into a `resumeRedTeam` replay (no new call spent) — otherwise selectReviewSeatProvider picks Codex or Gemini for the `red-team` lens (skipping a provider whose CLI is missing or sitting out a quota hold), reserves ONE call against the shared daily cap under the reservation-ledger lock, builds a throwaway scratch clone fetching ONLY the PINNED head commit (refuses an unpinned rev — the lane is already released by this point), and runs the attack call at the higher 'high' effort each provider offers",
+      "cite": "scripts/operations/review-job.mjs:265-273; scripts/operations/review-extra-seats.mjs:716-719,1025-1096",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
+      "provides": []
+    },
+    {
+      "id": "claude-recheck-confirmed-breaks",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "for every break the seat call reported, spawn a fresh tool-free Claude juror (sonnet, high effort, $1 budget, 10-minute timeout) that judges ONLY the diff to decide whether the claimed break is real; a claim it does not confirm, and a re-check that itself errors or times out, is marked `confirmedByRecheck:false` — a miss is only ever inferred from a positive confirmation, never from silence",
+      "cite": "scripts/operations/review-extra-seats.mjs:700-703,1100-1114,1174-1181",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
+      "provides": []
+    },
+    {
+      "id": "record-red-team-outcome",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "write the red-team's own scorecard evidence row, plus one `red-team-miss` row for the accepting Claude seat and one for the builder's model per confirmed break; log a 'reworked' delegation-trial row when the PR carries a delegation marker; and post ONE deduped advisory PR comment (a trusted-author-checked marker stops a repeat post) — none of this ever swaps the review:* label, changes the merge outcome, or re-opens the round loop",
+      "cite": "scripts/operations/review-extra-seats.mjs:879-903,932-987,1130-1146",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
       "provides": []
     }
   ]
