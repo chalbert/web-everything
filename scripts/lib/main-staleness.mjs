@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { realpathSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { lastGoodForClone } from './daemon-last-good.mjs';
 
 /** Default git runner — spawnSync (returns non-zero without throwing). */
 export function gitRun(args, opts = {}) {
@@ -185,6 +186,9 @@ export function assertMainNotStale(root, checkStaleness, {
   // xgqz204 — the self-fast-forward seams (see `selfFastForwardAction`). All default to the real process.
   codeRoot = THIS_CODE_ROOT, armed = selfSyncState.armed, reexeced = selfSyncState.reexeced,
   reexec = reexecSelf, changedFiles = (r, from, to) => changedFilesBetween(r, from, to),
+  // x5wbsbc — the last-known-good read (see `daemon-last-good.mjs`); injectable for tests.
+  lastGood = (r, dirty) => lastGoodForClone({ root: r, headSha: readHeadSha(r), dirty }),
+  write = (s) => process.stderr.write(s),
 } = {}) {
   // #4044 Module E — a MANAGED clone (`process.env.WE_DAEMON_MANAGED_CLONE === '1'`, set by
   // `daemon-self-sync.mjs#withSelfSync` at wrapper construction) is rebuilt fresh from `origin/main` (+ its
@@ -207,6 +211,29 @@ export function assertMainNotStale(root, checkStaleness, {
     if (Array.isArray(files) && files.length > 0 && !files.some(isCodePath)) {
       process.stderr.write(`${label}: the managed clone is ${st.behind} commit(s) behind origin/${base} in non-code files only (${files.length} file(s)) — not stale for dispatch (#4044).\n`);
       st = { fresh: true, behind: st.behind, behindNonCodeOnly: true, files: files.length };
+    }
+  }
+  // x5wbsbc (epic #4075) — FALLBACK TO THE LAST WORKING BUILD, NEVER BLOCK DELIVERY (operator ruling 2026-09-26).
+  // A managed clone that is still behind here is being HELD by its gated rebuild (a rejected smoke, a smoke in
+  // flight, a broken smoke harness). When its HEAD is exactly the last build a live smoke passed
+  // (`state.adopted.head`) and its tree is clean, that build is known to work: dispatch from it instead of
+  // refusing. Past the max age (default 24 h, `WE_DAEMON_LAST_GOOD_MAX_AGE_MS`) it ALERTS on every dispatch but
+  // still dispatches; the health watch's `daemon-held-on-last-good` sign notifies the operator after 15 min.
+  if (st && st.action === 'warn' && managedClone) {
+    let lg = null;
+    try { lg = lastGood(root, !!st.dirty); } catch { lg = null; }
+    if (lg && lg.onLastGood) {
+      const heldWhy = lg.held ? ` held since ${lg.heldSince} (${lg.held.reason ?? '?'}${lg.held.failed ? `: ${lg.held.failed}` : ''})` : '';
+      write(`${label}: the managed clone is ${st.behind} commit(s) behind origin/${base} but runs its LAST-KNOWN-GOOD `
+        + `build ${String(lg.lastGood).slice(0, 12)}${heldWhy} — dispatching from it, not refusing (x5wbsbc).\n`);
+      if (lg.overAge) {
+        write(`${label}: ALERT — the clone has been held on its last-good build for ${Math.round(lg.ageMs / 3_600_000)}h, `
+          + `past the max age — still dispatching; fix what the rebuild's alerts name (x5wbsbc).\n`);
+      }
+      st = {
+        fresh: true, behind: st.behind, onLastGood: true, lastGood: lg.lastGood, heldSince: lg.heldSince,
+        heldReason: lg.held?.reason ?? null, overAge: lg.overAge,
+      };
     }
   }
   if (st && st.synced) {
@@ -306,6 +333,13 @@ export function isSameCheckout(a, b) {
 export function selfFastForwardAction({ sameCheckout, codeChanged, armed, reexeced }) {
   if (!sameCheckout || codeChanged === false) return 'proceed';
   return armed && !reexeced ? 'reexec' : 'refuse';
+}
+
+/** `git rev-parse HEAD` in `root`, or `null` (never throws). */
+export function readHeadSha(root, run = gitRun) {
+  const r = run(['rev-parse', 'HEAD'], { cwd: root, timeout: 30_000, killSignal: 'SIGKILL' });
+  const out = String(r.stdout ?? '').trim();
+  return r.status === 0 && out ? out : null;
 }
 
 /** Files that differ between two commits, or `null` when unknown (a missing SHA, or git failed). */

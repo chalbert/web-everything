@@ -2,7 +2,11 @@
  * (c) / #4077 (design smell 4, pulled into slice 1) — a daemon clone stuck behind `main`, or its gated rebuild
  * rejecting the new tree. Reads ~/.claude/daemon-self-sync-state/<cloneKey>.alerts.jsonl (`smoke-rejected`,
  * `clone-held-stale`, `smoke-slow`) and <cloneKey>.rebuild.json. 2026-09-25 08:15 ET: the rebuild's smoke gate
- * rejected `gh` calls, the clone was held stale, and every daemon on it refused dispatch as stale.
+ * rejected `gh` calls, the clone was held stale, and every daemon on it refused dispatch as stale — the
+ * `daemonsRefusingStale`/`staleDaemons` reporting below still watches for exactly that. Since x5wbsbc
+ * (2026-09-26), a MANAGED clone with a known last-good build no longer refuses this way: it falls back to
+ * dispatching from that last-good build instead of blocking (`main-staleness.mjs#assertMainNotStale`) — the
+ * `daemon-held-on-last-good` sign is what now watches how long it stays on that fallback.
  */
 import { MINUTE, fmtAge } from '../health-watch-core.mjs';
 
