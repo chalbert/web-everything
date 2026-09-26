@@ -33,6 +33,7 @@ import claudeAuthExpired from './claude-auth-expired.mjs';
 import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
 import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
 import daemonOverlayLockWait from './daemon-overlay-lock-wait.mjs';
+import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -49,6 +50,7 @@ export const BREAKS = Object.freeze([
   claudeAuthFalsePositive,
   rebuildSmokeOffLock,
   daemonOverlayLockWait,
+  rebuildConcurrentCandidates,
 ]);
 
 export function breakById(id) {

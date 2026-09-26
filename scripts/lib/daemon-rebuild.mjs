@@ -94,7 +94,7 @@ import {
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname, resolve as resolvePath, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { withWriteLock } from './daemon-clone-lock.mjs';
 import {
@@ -599,7 +599,7 @@ function alertsFilePath(root, env = process.env) {
 }
 
 const EMPTY_STATE = Object.freeze({
-  adopted: null, rejected: null, inProgress: null, quarantine: null, unverified: null,
+  adopted: null, rejected: null, inProgress: null, quarantine: null, unverified: null, building: null,
 });
 
 /**
@@ -608,7 +608,7 @@ const EMPTY_STATE = Object.freeze({
  * @param {string} root
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {{adopted:object|null, rejected:object|null, inProgress:object|null, quarantine:object|null,
- *   unverified:{head:string, prevHead:string}|null}}
+ *   unverified:{head:string, prevHead:string}|null, building:object|null}}
  */
 export function readRebuildState(root, env = process.env) {
   try {
@@ -619,6 +619,7 @@ export function readRebuildState(root, env = process.env) {
       inProgress: parsed?.inProgress ?? null,
       quarantine: parsed?.quarantine ?? null,
       unverified: parsed?.unverified ?? null,
+      building: parsed?.building ?? null,
     };
   } catch {
     return { ...EMPTY_STATE };
@@ -699,25 +700,91 @@ function redactDetail(detail) {
 // ── candidate worktree (xa4qo7n) — where the live smoke actually runs, never `root` ─────────────────────────
 
 /**
- * Fixed per-clone staging path for the candidate worktree the live smoke runs against — OUTSIDE any git tree,
- * same `stateDir`/`cloneKey` convention as every other per-clone sidecar this module owns. FIXED (not a fresh
- * `mkdtemp` per attempt) so a crashed attempt's leftover worktree is found and torn down by the very next
- * attempt ({@link materializeCandidate}) instead of accumulating orphan directories on disk.
+ * Per-ATTEMPT staging path for the candidate worktree the live smoke runs against — OUTSIDE any git tree, same
+ * `stateDir`/`cloneKey` convention as every other per-clone sidecar this module owns, suffixed with the build
+ * lease's own `token` (see {@link claimBuildLease}). PR #2731 review: this used to be ONE fixed path per clone,
+ * and two sibling daemons rebuilding the same clone at once force-removed each other's worktree mid-smoke. The
+ * single-flight lease already stops two builds overlapping; a unique path means an aged-lease takeover builds
+ * beside, never on top of, a tree a slow attempt may still be reading. A crashed attempt's leftover is found
+ * through the lease record it left behind (`state.building.path`) and torn down by whoever takes the lease over
+ * next — only once its owner is provably gone (see {@link leaseOwnerIsGone}).
  * @param {string} root
  * @param {NodeJS.ProcessEnv} [env]
+ * @param {string} [token] - the build lease's token (default: a fresh random one, never a shared fixed path).
  * @returns {string}
  */
-export function candidateWorktreePath(root, env = process.env) {
-  return join(stateDir(env), `${cloneKey(root)}.candidate`);
+export function candidateWorktreePath(root, env = process.env, token = `manual-${randomBytes(4).toString('hex')}`) {
+  return join(stateDir(env), `${cloneKey(root)}.candidate-${token}`);
+}
+
+// ── single-flight build lease (PR #2731 review) ──────────────────────────────────────────────────────────────
+
+/** Tokens of the builds THIS process is running right now — lets a process tell its own finished-but-unreleased
+ *  lease (a release that could not take the write lock) from one still in flight. */
+const ACTIVE_BUILD_TOKENS = new Set();
+
+/** How long a lease from a live pid (or another host) is honoured before it is treated as abandoned. Well past
+ *  the slowest live smoke seen (~6 min) so a real build is never taken over mid-smoke. */
+export const REBUILD_LEASE_STALE_ENV = 'WE_DAEMON_REBUILD_LEASE_STALE_MS';
+export const DEFAULT_REBUILD_LEASE_STALE_MS = 20 * 60_000;
+
+/**
+ * Is `building` (a `state.building` lease record) held by a build that is still running? Same host + this pid:
+ * only while its token is in {@link ACTIVE_BUILD_TOKENS}. Same host, other pid: while that pid is alive and the
+ * lease is not aged. Other host: until it ages out. A record that cannot be read fails OPEN (not live) — the
+ * lease is a courtesy against wasted, colliding smokes, and the unique candidate path is what keeps a takeover
+ * from ever touching another attempt's tree.
+ */
+export function buildLeaseIsLive(building, { env = process.env, nowMs = Date.now() } = {}) {
+  if (!building || typeof building !== 'object') return false;
+  const staleMs = Number(env?.[REBUILD_LEASE_STALE_ENV]) > 0 ? Number(env[REBUILD_LEASE_STALE_ENV]) : DEFAULT_REBUILD_LEASE_STALE_MS;
+  const startedMs = Date.parse(building.startedAt || '');
+  if (!Number.isFinite(startedMs) || nowMs - startedMs > staleMs) return false;
+  if (building.host !== hostname()) return true;
+  if (building.pid === process.pid) return ACTIVE_BUILD_TOKENS.has(building.token);
+  try { process.kill(building.pid, 0); return true; } catch (e) { return !(e && e.code === 'ESRCH'); }
 }
 
 /**
- * Check `sha` out into a disposable `git worktree` at {@link candidateWorktreePath} — a SECOND working copy of
+ * Must be called UNDER the write lock with a freshly read `state`: take the single-flight build lease for
+ * `plan`, tearing down an abandoned lease's leftover candidate first. Returns the lease, or `null` when a live
+ * sibling build already holds it. Mutates `state.building`; the caller writes the state.
+ */
+function claimBuildLease({ state, plan, root, run, env, nowMs }) {
+  if (buildLeaseIsLive(state.building, { env, nowMs })) return null;
+  if (state.building?.path && leaseOwnerIsGone(state.building)) removeCandidate({ root, path: state.building.path, run, env });
+  const token = `${process.pid}-${randomBytes(4).toString('hex')}`;
+  const lease = {
+    token, pid: process.pid, host: hostname(), startedAt: new Date(nowMs).toISOString(),
+    target: plan.finalSha, inputsKey: plan.inputsKey, path: candidateWorktreePath(root, env, token),
+  };
+  state.building = lease;
+  ACTIVE_BUILD_TOKENS.add(token);
+  return lease;
+}
+
+/** May an abandoned lease's candidate be deleted? Only when its owner provably is not still reading it: this
+ *  process (none of our builds is running — see {@link buildLeaseIsLive}), or a dead pid on this host. An AGED
+ *  lease from a still-live pid (a smoke slower than the stale limit) or another host is taken over, but its tree
+ *  is left alone — the new attempt uses its own unique path, so the two never collide. */
+function leaseOwnerIsGone(building) {
+  if (building.host !== hostname()) return false;
+  if (building.pid === process.pid) return !ACTIVE_BUILD_TOKENS.has(building.token);
+  try { process.kill(building.pid, 0); return false; } catch (e) { return !!(e && e.code === 'ESRCH'); }
+}
+
+/** Under the write lock: drop `state.building` if it is still OUR lease (a takeover's newer lease is left alone). */
+function releaseBuildLease(state, lease) {
+  if (state.building?.token === lease.token) state.building = null;
+}
+
+/**
+ * Check `sha` out into a disposable `git worktree` at `path` (default {@link candidateWorktreePath}) — a SECOND working copy of
  * the SAME `root` repository (`git worktree add` shares the object database; this never fetches or copies a
  * single object, unlike {@link dryRunRebuild}'s separate scratch-bare-repo trick, which exists only because a
  * dry run must never write anything into `root`'s own refs — this module already owns `root` outright once it
- * holds the write lock, so a plain worktree is enough). A stale worktree already at the fixed path (a crashed
- * prior attempt) is force-torn-down first so orphans never accumulate. `node_modules` is symlinked in from
+ * holds the write lock, so a plain worktree is enough). Anything already at `path` is force-torn-down first —
+ * `path` is unique to this attempt's lease, so that is only ever this attempt's own leftover. `node_modules` is symlinked in from
  * `root` on a best-effort basis — a fresh worktree checkout carries only git-tracked files, and the live
  * smoke's checks spawn real `node`/`gh` child processes from it that need real dependencies; a repo with no
  * `node_modules` (or one whose checks then fail on a missing module) surfaces that as an ordinary check
@@ -734,11 +801,12 @@ export function candidateWorktreePath(root, env = process.env) {
  * per-worktree; git resolves it from `--git-common-dir`, confirmed empirically — a PRIVATE per-worktree
  * `info/exclude` file is never even read), so every worktree's status reads the symlink as ignored, exactly
  * like the tracked `.gitignore` already treats the real directory.
- * @param {{root:string, sha:string, run:typeof gitRun, env?:NodeJS.ProcessEnv}} o
+ * @param {{root:string, sha:string, run:typeof gitRun, env?:NodeJS.ProcessEnv, path?:string}} o
  * @returns {{ok:true, path:string}|{ok:false, reason:string}}
  */
-export function materializeCandidate({ root, sha, run, env }) {
-  const path = candidateWorktreePath(root, env);
+export function materializeCandidate({
+  root, sha, run, env, path = candidateWorktreePath(root, env),
+}) {
   const git = makeGit({ run, cwd: root, env, timeoutMs: 120_000 });
   git(['worktree', 'remove', '--force', path]);
   try { rmSync(path, { recursive: true, force: true }); } catch { /* best-effort teardown of a stale attempt */ }
@@ -815,6 +883,7 @@ function ensureSafeToMove({
  *  both phases (which each read their OWN fresh `state`, see file header) compute it identically. */
 function staleAlertDetail(result, state) {
   if (result.moved || result.adopted || !result.plan?.ok || result.plan.upToDate) return null;
+  if (result.reason === 'rebuild-in-progress') return null; // a sibling is already moving it — not held
   return {
     reason: result.reason,
     mainSha: result.plan.mainSha,
@@ -832,6 +901,21 @@ function knownInputsOf(state) {
     state?.adopted?.head, state?.adopted?.mainSha, ...((state?.adopted?.applied) || []).map((a) => a?.sha),
     state?.quarantine?.prevHead,
   ].filter(Boolean);
+}
+
+/**
+ * Under the write lock: move `root` off a never-smoked build back onto `prevHead` (its last verified head), with
+ * the same "clean" test the quarantine recovery uses — no tracked change, and no untracked file prevHead has
+ * content at (the reset would silently overwrite it). Returns whether HEAD is now `prevHead`.
+ */
+function rollbackUnverified({ git, prevHead }) {
+  if (!prevHead || !verifyRev(git, `${prevHead}^{commit}`)) return false;
+  const status = git(['status', '--porcelain', '--untracked-files=no']);
+  const untracked = collectUntrackedPaths(git);
+  const clean = status.status === 0 && !String(status.stdout ?? '').trim() && untracked !== null
+    && !untracked.some((p) => git(['cat-file', '-e', `${prevHead}:${p}`]).status === 0);
+  if (!clean) return false;
+  return git(['reset', '--hard', prevHead]).status === 0;
 }
 
 /**
@@ -896,14 +980,26 @@ async function prepareRebuild({
       const headNow = verifyRev(git, 'HEAD');
       const clean = findUnsafeLocalState({ git, knownInputs: knownInputsOf(state) }).safe;
       const ip = state.inProgress;
-      if (headNow === ip.target || (headNow === ip.prevHead && clean)) {
+      // PR #2731 review: only a record THIS design wrote (`verified: true` — its smoke passed before its reset)
+      // may be promoted unsmoked. A record without the marker was written by the pre-fix code, which reset BEFORE
+      // smoking, so HEAD == target there means a build that was never smoked is on disk: roll it back to the
+      // last verified head and let this tick rebuild + smoke it off-lock like any other candidate.
+      const atUnverifiedTarget = headNow === ip.target && ip.target !== ip.prevHead && ip.verified !== true;
+      if (atUnverifiedTarget) {
+        const rolled = rollbackUnverified({ git, prevHead: ip.prevHead });
+        if (!rolled) {
+          alert('rebuild-interrupted-unrecoverable', { inProgress: ip, headNow, unverified: true });
+          return terminal({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
+        }
+        state.inProgress = null;
+        writeState();
+        alert('rebuild-interrupted-recovered', { target: ip.target, headNow, promoted: false, rolledBackUnverified: true });
+      } else if (headNow === ip.target || (headNow === ip.prevHead && clean)) {
         state.inProgress = null;
         // xa4qo7n — under THIS design a `reset --hard` NEVER runs before its candidate's live smoke has already
-        // passed (see file header), so `headNow === target` here can only mean: the reset landed, the process
-        // died before the state write right after it, and the smoke for this EXACT build already passed. Promote
-        // it straight to `adopted` from the inProgress record's own echoed plan fields — no re-smoke needed (a
-        // real change from the pre-fix design, where the smoke ran AFTER the reset and a crash here really could
-        // mean an unverified build on disk — see `agent-memory`/PR #2625's own advisory for that history).
+        // passed (see file header), so `headNow === target` on a `verified` record can only mean: the reset
+        // landed, the process died before the state write right after it, and the smoke for this EXACT build
+        // already passed. Promote it straight to `adopted` from the inProgress record's own echoed plan fields.
         const promote = headNow === ip.target && ip.target !== ip.prevHead;
         if (promote) {
           state.adopted = {
@@ -925,6 +1021,22 @@ async function prepareRebuild({
         return terminal({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
       }
     }
+  }
+
+  // PR #2731 review: the pre-fix recovery could leave `state.unverified` — a build reset onto but never smoked.
+  // This design never writes it, so treat it exactly like an unmarked inProgress record at its target: roll back
+  // to its verified prevHead so this tick re-smokes it off-lock, instead of reading HEAD as up-to-date.
+  if (state.unverified) {
+    const uv = state.unverified;
+    if (verifyRev(git, 'HEAD') === uv.head && uv.head !== uv.prevHead) {
+      if (!rollbackUnverified({ git, prevHead: uv.prevHead })) {
+        alert('rebuild-interrupted-unrecoverable', { unverified: uv });
+        return terminal({ moved: false, reason: 'rebuild-interrupted-unrecoverable' });
+      }
+      alert('unverified-build-rolled-back', { head: uv.head, prevHead: uv.prevHead });
+    }
+    state.unverified = null;
+    writeState();
   }
 
   if (state.quarantine) {
@@ -1041,10 +1153,25 @@ async function prepareRebuild({
     }
   }
 
+  // PR #2731 review — single flight: phase 2 runs unlocked, so without this a sibling daemon sharing the clone
+  // could build + smoke the same candidate at the same time. Claimed HERE, under the write lock, so exactly one
+  // caller wins; the loser returns at once and its next tick finds the winner's result.
+  const lease = claimBuildLease({
+    state, plan, root, run, env: stEnv, nowMs: nowMs(),
+  });
+  if (!lease) {
+    const b = state.building;
+    log?.error?.(`daemon-rebuild: rebuild-in-progress — pid ${b?.pid ?? '?'}@${b?.host ?? '?'} is already smoking ${String(b?.target ?? '?').slice(0, 9)} for this clone; this tick runs on the current tree`);
+    return terminal({
+      moved: false, reason: 'rebuild-in-progress', heldBy: `${b?.pid ?? '?'}@${b?.host ?? '?'}`, plan,
+    });
+  }
+  writeState();
+
   // Nothing left that can be decided without smoking a candidate first — hand off to rebuildClone's unlocked
   // build+smoke step, then {@link finalizeRebuild}.
   return {
-    terminal: false, plan, prevHead, alerts: alertsList,
+    terminal: false, plan, prevHead, lease, alerts: alertsList,
   };
 }
 
@@ -1055,7 +1182,7 @@ async function prepareRebuild({
  * was never touched, so {@link rebuildClone} handles that case itself, with no lock and nothing to roll back.
  */
 async function finalizeRebuild({
-  root, env, log, run, stateOpts, now, plan, prevHead,
+  root, env, log, run, stateOpts, now, plan, prevHead, lease,
 }) {
   const stEnv = { ...env, ...(stateOpts?.env || {}) };
   const git = makeGit({ run, cwd: root, env });
@@ -1074,7 +1201,10 @@ async function finalizeRebuild({
   };
   const state = readRebuildState(root, stEnv);
   const writeState = () => writeRebuildState(root, state, stEnv);
+  // Every exit from this (locked) phase ends the build, so every exit releases its lease and persists that.
+  releaseBuildLease(state, lease);
   const terminal = (result) => {
+    writeState();
     const stale = staleAlertDetail(result, state);
     if (stale) alert('clone-held-stale', stale);
     return { ...result, alerts: alertsList };
@@ -1119,9 +1249,11 @@ async function finalizeRebuild({
   }
 
   // ── The ONE `reset --hard` this module performs — always AFTER a passing smoke, never before. ──────────
+  // `verified: true` is what lets crash recovery promote this record unsmoked — a record without it came from
+  // the pre-fix code, which reset BEFORE smoking (PR #2731 review; see prepareRebuild's Step 0).
   state.inProgress = {
     pid: process.pid, host: hostname(), prevHead, target: plan.finalSha, startedAt: nowIso(),
-    inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied,
+    inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, verified: true,
   };
   writeState();
   try {
@@ -1213,13 +1345,56 @@ export async function rebuildClone({
   if (prep.value.terminal) {
     return { ...prep.value.result, alerts: prep.value.alerts };
   }
-  const { plan, prevHead, alerts: prepAlerts } = prep.value;
+  const {
+    plan, prevHead, lease, alerts: prepAlerts,
+  } = prep.value;
+  try {
+    return await buildSmokeAndFinalize({
+      root, env, log, run, runSmoke, stateOpts, now, plan, prevHead, lease, prepAlerts, stEnv, finalLockOpts,
+    });
+  } catch (e) {
+    // Best-effort: never leave a thrown build's lease on disk to hold a sibling off until it ages out.
+    try {
+      await withWriteLock(root, () => {
+        const st = readRebuildState(root, stEnv);
+        releaseBuildLease(st, lease);
+        writeRebuildState(root, st, stEnv);
+      }, finalLockOpts);
+    } catch { /* the owner's next call takes an unreleased lease back anyway */ }
+    throw e;
+  } finally {
+    ACTIVE_BUILD_TOKENS.delete(lease.token);
+  }
+}
+
+/**
+ * Phases 2 + 3 of {@link rebuildClone}, run while this process holds the single-flight build `lease`. Every
+ * outcome that does NOT reach {@link finalizeRebuild} records itself (the lease release, and a rejection) under
+ * the write lock too — PR #2731 review: an unlocked `state.json` write could clobber a sibling's locked one.
+ */
+async function buildSmokeAndFinalize({
+  root, env, log, run, runSmoke, stateOpts, now, plan, prevHead, lease, prepAlerts, stEnv, finalLockOpts,
+}) {
+  /** Under the write lock: release our lease, apply `mutate` to the fresh state, persist. Returns that state, or
+   *  null when the lock could not be taken (the lease then lapses: this process's next call takes it over). */
+  const settle = async (mutate) => {
+    const r = await withWriteLock(root, () => {
+      const st = readRebuildState(root, stEnv);
+      releaseBuildLease(st, lease);
+      mutate?.(st);
+      writeRebuildState(root, st, stEnv);
+      return st;
+    }, finalLockOpts);
+    if (!r.ok) log.error?.(`daemon-rebuild: could not take the write lock to record this build's outcome (${r.reason}) — nothing recorded; the next tick retries`);
+    return r.ok ? r.value : null;
+  };
 
   // ── Phase 2 (UNLOCKED — the whole point of xa4qo7n): build + smoke a disposable candidate ───────────────
   const candidate = materializeCandidate({
-    root, sha: plan.finalSha, run, env,
+    root, sha: plan.finalSha, run, env, path: lease.path,
   });
   if (!candidate.ok) {
+    await settle();
     log.error?.(`daemon-rebuild: candidate-worktree-failed (${candidate.reason}) — not adopting ${plan.finalSha}, retrying next tick`);
     return {
       moved: false, reason: 'candidate-worktree-failed', detail: candidate.reason, plan, alerts: prepAlerts,
@@ -1251,8 +1426,9 @@ export async function rebuildClone({
 
   if (smokeThrew) {
     // `daemon-live-smoke.mjs` documents itself as never throwing — this is defense-in-depth only. Root was
-    // never touched (the smoke ran against the now-discarded candidate), so there is nothing to roll back and
-    // no lock to take; just report it like any other rejection and let the next tick retry fresh.
+    // never touched (the smoke ran against the now-discarded candidate), so there is nothing to roll back; just
+    // release the lease, report it like any other rejection, and let the next tick retry fresh.
+    await settle();
     log.error?.(`daemon-rebuild: smoke-threw ${String(smokeThrew?.message || smokeThrew)}`);
     return {
       moved: false,
@@ -1263,8 +1439,9 @@ export async function rebuildClone({
   }
 
   if (smokeResult.verdict !== 'pass') {
-    // Root was NEVER touched — no rollback, no lock, nothing to quarantine. Record the rejection (a genuine
-    // `'code'` verdict only — `'transient'` never poisons the reject-cache, see the file header / Module D).
+    // Root was NEVER touched — no rollback, nothing to quarantine. Record the rejection (a genuine `'code'`
+    // verdict only — `'transient'` never poisons the reject-cache, see the file header / Module D), under the
+    // write lock like every other state write.
     const alertsList = [];
     const nowIso = () => new Date(now()).toISOString();
     const alert = (kind, detail) => {
@@ -1282,21 +1459,24 @@ export async function rebuildClone({
       });
     }
     if (smokeResult.verdict === 'code') {
-      const state = readRebuildState(root, stEnv);
       const failed = (smokeResult.smoke?.results || []).filter((r) => !r.ok);
       const failedNames = failed.map((r) => r.name).join(',');
-      const prev = state.rejected?.inputsKey === plan.inputsKey ? state.rejected : null;
-      state.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
-      if (isExternalOnlyFailure(failed)) {
-        const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
-        const delay = rejectRetryDelayMs(env, attempts);
-        Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(now() + delay).toISOString() });
-      }
-      writeRebuildState(root, state, stEnv);
+      let rejected = null;
+      const state = await settle((st) => {
+        const prev = st.rejected?.inputsKey === plan.inputsKey ? st.rejected : null;
+        st.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
+        if (isExternalOnlyFailure(failed)) {
+          const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
+          const delay = rejectRetryDelayMs(env, attempts);
+          Object.assign(st.rejected, { externalOnly: true, attempts, retryAt: new Date(now() + delay).toISOString() });
+        }
+        rejected = st.rejected;
+      }) ?? readRebuildState(root, stEnv);
       alert('smoke-rejected', {
         failed: failedNames,
         details: failed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
-        ...(state.rejected.retryAt ? { retryAt: state.rejected.retryAt, attempts: state.rejected.attempts } : {}),
+        ...(rejected?.retryAt ? { retryAt: rejected.retryAt, attempts: rejected.attempts } : {}),
+        ...(rejected ? {} : { recorded: false }),
       });
       const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-rejected', plan }, state);
       if (staleDetail) alert('clone-held-stale', staleDetail);
@@ -1304,7 +1484,7 @@ export async function rebuildClone({
     }
     // 'transient' — never poison the reject-cache.
     alert('smoke-transient');
-    const state = readRebuildState(root, stEnv);
+    const state = (await settle()) ?? readRebuildState(root, stEnv);
     const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-transient', plan }, state);
     if (staleDetail) alert('clone-held-stale', staleDetail);
     return { moved: false, reason: 'smoke-transient', plan, alerts: [...prepAlerts, ...alertsList] };
@@ -1312,7 +1492,7 @@ export async function rebuildClone({
 
   // ── Phase 3 (locked, fast) — reached only after a PASSING smoke ─────────────────────────────────────────
   const fin = await withWriteLock(root, () => finalizeRebuild({
-    root, env, log, run, stateOpts, now, plan, prevHead,
+    root, env, log, run, stateOpts, now, plan, prevHead, lease,
   }), finalLockOpts);
 
   if (!fin.ok) {

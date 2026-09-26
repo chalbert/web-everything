@@ -625,7 +625,7 @@ describe('rebuildClone', () => {
     const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
     seedInProgress(cloneDir, env, {
       pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: head, startedAt: new Date().toISOString(),
-      inputsKey: 'seeded-inputs-key', mainSha: head, applied: [],
+      inputsKey: 'seeded-inputs-key', mainSha: head, applied: [], verified: true,
     });
 
     const runSmoke = passSmoke();
@@ -654,7 +654,7 @@ describe('rebuildClone', () => {
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD~1']).trim();
     seedInProgress(cloneDir, env, {
       pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString(),
-      inputsKey: 'ik-crash-1', mainSha: target, applied: [],
+      inputsKey: 'ik-crash-1', mainSha: target, applied: [], verified: true,
     });
     return { target, prevHead };
   }
@@ -669,6 +669,50 @@ describe('rebuildClone', () => {
     expect(result.reason).toBe('recovered-adopted');
     expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
     expect(readRebuildState(cloneDir, env).adopted.inputsKey).toBe('ik-crash-1');
+  });
+
+  // PR #2731 review: a record written by the PRE-fix code (reset BEFORE smoke) carries no `verified` marker, and
+  // the pre-fix recovery could leave `state.unverified` behind. Either one at HEAD means a build that was NEVER
+  // smoked is on disk — it must be rolled back and re-smoked off-lock, never promoted straight to adopted.
+  function crashAfterLegacyReset(cloneDir, env, { asUnverified = false } = {}) {
+    const { target, prevHead } = crashAfterReset(cloneDir, env);
+    const file = rebuildStatePath(cloneDir, env);
+    const legacy = asUnverified
+      ? { unverified: { head: target, prevHead } }
+      : { inProgress: { pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString() } };
+    writeFileSync(file, JSON.stringify(legacy));
+    return { target, prevHead };
+  }
+
+  it.each([
+    ['a legacy inProgress record (no verified marker)', false],
+    ['a legacy state.unverified record', true],
+  ])('%s at HEAD is never promoted unsmoked — a failing smoke leaves the clone back on prevHead', async (_label, asUnverified) => {
+    const { cloneDir, env } = makeFixture();
+    const { target, prevHead } = crashAfterLegacyReset(cloneDir, env, { asUnverified });
+    const runSmoke = vi.fn(async () => ({ verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'broken' }] } }));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.adopted).toBeFalsy();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.adopted?.head).not.toBe(target);
+    expect(state.inProgress).toBeNull();
+    expect(state.unverified).toBeNull();
+  });
+
+  it.each([
+    ['a legacy inProgress record (no verified marker)', false],
+    ['a legacy state.unverified record', true],
+  ])('%s at HEAD is re-smoked, then adopted once the smoke passes', async (_label, asUnverified) => {
+    const { cloneDir, env } = makeFixture();
+    const { target } = crashAfterLegacyReset(cloneDir, env, { asUnverified });
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(result.adopted).toBe(true);
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(target);
+    expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
   });
 
   it('recovers an aged interrupted rebuild from another host when HEAD is back at a clean prevHead', async () => {
@@ -738,6 +782,73 @@ describe('rebuildClone', () => {
     expect(interruptedAlerts(result)).toEqual([]);
     expect(result.reason).toBe('up-to-date');
     expect(readRebuildState(cloneDir, env).inProgress).toMatchObject({ pid: process.pid });
+  });
+
+  // ── single-flight build lease (PR #2731 review) ────────────────────────────────────────────────────────────
+
+  function seedBuilding(cloneDir, env, building) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ building }));
+  }
+
+  it('a live sibling build lease makes a second rebuild yield rebuild-in-progress — no candidate, no smoke', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const sibling = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 60000)'], { stdio: 'ignore' });
+    try {
+      const building = {
+        token: 'sib', pid: sibling.pid, host: hostname(), startedAt: new Date().toISOString(), path: join(env.WE_DAEMON_STATE_DIR, 'sib-candidate'),
+      };
+      seedBuilding(cloneDir, env, building);
+      const runSmoke = passSmoke();
+      const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+      const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+      expect(result.reason).toBe('rebuild-in-progress');
+      expect(runSmoke).not.toHaveBeenCalled();
+      expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+      expect(result.alerts.map((a) => a.kind)).not.toContain('clone-held-stale');
+      expect(readRebuildState(cloneDir, env).building).toEqual(building); // the sibling's lease is left alone
+    } finally {
+      sibling.kill('SIGKILL');
+    }
+  });
+
+  it.each([
+    ['a dead pid', () => ({ pid: deadPid(), startedAt: new Date().toISOString() }), true],
+    ['this process, but no build of ours is running (an unreleased lease)', () => ({ pid: process.pid, startedAt: new Date().toISOString() }), true],
+    // Aged but its owner may still be reading it: taken over, but its tree is left alone (unique paths never collide).
+    ['an aged lease from another host', () => ({ pid: 1, host: 'some-other-host', startedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }), false],
+  ])('an abandoned lease (%s) is taken over and the rebuild adopts; its leftover is torn down only if its owner is gone', async (_label, make, removed) => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const leftover = join(env.WE_DAEMON_STATE_DIR, 'abandoned-candidate');
+    mkdirSync(leftover, { recursive: true });
+    seedBuilding(cloneDir, env, {
+      token: 'old', host: hostname(), path: leftover, ...make(),
+    });
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(result.adopted).toBe(true);
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(existsSync(leftover)).toBe(!removed);
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
+  });
+
+  it('each attempt smokes its own unique candidate path, and a rejected build releases its lease', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const roots = [];
+    const runSmoke = vi.fn(async ({ root }) => {
+      roots.push(root);
+      return { verdict: 'transient', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'flake' }] } };
+    });
+    await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
+    await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(roots).toHaveLength(2);
+    expect(roots[0]).not.toBe(roots[1]);
+    for (const r of roots) expect(existsSync(r)).toBe(false);
   });
 
   // ── Step 5/6: rollback failures on the live rebuildClone path (injected failing `run`) ──────────────────────
