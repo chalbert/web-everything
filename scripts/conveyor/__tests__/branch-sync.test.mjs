@@ -238,6 +238,64 @@ describe('runSyncOnce — the retry/escalate state machine (fake git, real fs)',
     expect(r.status).toBe('offline');
     expect(existsSync(join(dir, 't5-state.json'))).toBe(false);
   });
+
+  // #x8pcbf3 — LIVE INCIDENT, PR #2752 (`lane/4034-critical-work-gate`). Read-only, reproduced against the real
+  // branch in `wev-review-daemon`: a checkout that is a shallow clone inherits its shallow boundary onto any
+  // brand-new ref it fetches (the `origin/<refName>` tracking ref this loop's own step 1 just wrote), which
+  // grafts that ref as a rootless commit and makes `git merge-tree` fail `fatal: refusing to merge unrelated
+  // histories` — a checkout defect, not a real conflict. See `we:scripts/lib/git-run.mjs#ensureFullHistory`'s
+  // own header for the full incident and the live before/after evidence gathered against the real branch.
+  it('the FIRST probe failing "unrelated histories" is fixed and RETRIED — never a bare conflict on a checkout defect', () => {
+    const calls = [];
+    let mergeTreeCalls = 0;
+    const shallowGit = (args) => {
+      calls.push(args[0]);
+      if (args[0] === 'rev-parse') return { ok: true, stdout: 'true\n', stderr: '' }; // shallow
+      if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' }; // covers step 1's own fetch AND the unshallow fetch
+      if (args[0] === 'rev-list') return fakeRevListCount(args, { behind: 3, ahead: 0 });
+      if (args[0] === 'merge-tree') {
+        mergeTreeCalls += 1;
+        // FIRST probe: the checkout-defect failure this fix targets. RETRY (after unshallowing): a real,
+        // ordinary conflict — proving the loop falls through to its normal conflict handling afterwards,
+        // not a special "shallow" status of its own.
+        return mergeTreeCalls === 1
+          ? { ok: false, stdout: '', stderr: 'fatal: refusing to merge unrelated histories' }
+          : { ok: false, stdout: '', stderr: 'CONFLICT (content): Merge conflict in shared.txt' };
+      }
+      throw new Error(`unexpected git call in the shallow fake: ${args.join(' ')}`);
+    };
+    const r = runSyncOnce({
+      cwd: dir, git: shallowGit, now: 1000, statePath: join(dir, 't6-state.json'), alertPath: join(dir, 't6-alert.json'),
+      logPath: join(dir, 't6.log'), notify: () => {}, appendLog: () => {}, maxAttempts: 3,
+      backoff: { baseMs: 10, factor: 2, capMs: 100 },
+    });
+    // An ORDINARY conflict, attempt 1 — the checkout defect was transparently fixed, never surfaced as its own
+    // status or burning extra attempts.
+    expect(r).toMatchObject({ status: 'conflict', attempt: 1 });
+    expect(mergeTreeCalls).toBe(2); // the probe really was retried, not just logged
+    // is-shallow was probed, and an unshallow fetch happened, only AFTER the first probe failed.
+    expect(calls.indexOf('merge-tree')).toBeLessThan(calls.indexOf('rev-parse'));
+    expect(calls.filter((c) => c === 'fetch').length).toBeGreaterThanOrEqual(2); // step 1's fetch + the unshallow fetch
+  });
+
+  it('an ORDINARY conflict (not "unrelated histories") never triggers the shallow-checkout recovery at all', () => {
+    const calls = [];
+    const ordinaryGit = (args) => {
+      calls.push(args[0]);
+      if (args[0] === 'fetch') return { ok: true, stdout: '', stderr: '' };
+      if (args[0] === 'rev-list') return fakeRevListCount(args, { behind: 3, ahead: 0 });
+      if (args[0] === 'merge-tree') return { ok: false, stdout: '', stderr: 'CONFLICT (content): Merge conflict in shared.txt' };
+      throw new Error(`unexpected git call in the ordinary fake: ${args.join(' ')}`); // rev-parse must NOT be called
+    };
+    const r = runSyncOnce({
+      cwd: dir, git: ordinaryGit, now: 1000, statePath: join(dir, 't7-state.json'), alertPath: join(dir, 't7-alert.json'),
+      logPath: join(dir, 't7.log'), notify: () => {}, appendLog: () => {}, maxAttempts: 3,
+      backoff: { baseMs: 10, factor: 2, capMs: 100 },
+    });
+    expect(r).toMatchObject({ status: 'conflict', attempt: 1 });
+    expect(calls.filter((c) => c === 'merge-tree')).toHaveLength(1); // no retry
+    expect(calls).not.toContain('rev-parse'); // no shallow probe at all on an ordinary conflict
+  });
 });
 
 // ── 3. the CLI — a REAL throwaway git conflict fixture, no network ─────────────────────────────────────────────

@@ -48,6 +48,7 @@ import { resolve } from 'node:path';
 
 import { driftDefaults } from '../lib/poc-branches.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { ensureFullHistory } from '../lib/git-run.mjs';
 
 /** Default long-lived branch this cadence watches (#3464's own subject) and its integration target. Both
  *  overridable (`--branch=` / `--target=`, or `WE_BRANCH_DRIFT_BRANCH` / `WE_BRANCH_DRIFT_TARGET`) so this stays
@@ -184,6 +185,18 @@ function computeDrift({ branch, target, cwd, fetch = true }) {
   } catch {
     return null; // one side doesn't exist / isn't fetched — nothing to report
   }
+  // #x8pcbf3 (live incident, PR #2752) — see `we:scripts/lib/git-run.mjs#ensureFullHistory`'s own header: a
+  // checkout that is already a shallow clone inherits that shallow boundary onto any brand-new ref it fetches
+  // (like `branch`, just fetched above), which can make the merge-tree probe below fail `fatal: refusing to
+  // merge unrelated histories` for a CHECKOUT-DEFECT reason, never a real conflict — and this function already
+  // reads ANY merge-tree failure as `conflict:true`, so an unfixed shallow checkout would wrongly `blocked` this
+  // scope's dispatch forever. Best-effort: adapts `sh`'s throw-on-nonzero contract to the shared helper's
+  // `{status, stdout, stderr}` one, rather than a second copy of the shallow-detection logic.
+  const historyRun = (cmd, cmdArgs, opts) => {
+    try { return { status: 0, stdout: sh(cmd, cmdArgs, opts), stderr: '' }; }
+    catch (e) { return { status: e.status ?? 1, stdout: '', stderr: String(e.stderr || e.message || e) }; }
+  };
+  if (fetch) ensureFullHistory(historyRun, { cwd, remote: 'origin' });
   let conflict = false;
   try {
     sh('git', ['merge-tree', '--write-tree', `origin/${target}`, `origin/${branch}`], { cwd });

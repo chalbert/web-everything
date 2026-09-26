@@ -34,7 +34,7 @@
  * resolver, never a best-effort guess on a giant/binary/non-UTF-8 blob.
  */
 
-import { gitRun as gitRunner, hashObjectVerified, verifyTreeBlob } from './git-run.mjs';
+import { gitRun as gitRunner, hashObjectVerified, verifyTreeBlob, ensureFullHistory } from './git-run.mjs';
 import { LANE_MANIFEST, parseMergeTree } from './rebase-drop-manifest.mjs';
 
 export { LANE_MANIFEST };
@@ -309,8 +309,35 @@ export function rebaseDropContent({
   }
 
   const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
-  const parsed = parseMergeTree(mt.stdout, mt.status);
-  if (!parsed.tree) return { action: 'error', reason: `merge-tree produced no tree (${firstLine(mt.stderr)})` };
+  let parsed = parseMergeTree(mt.stdout, mt.status);
+  if (!parsed.tree) {
+    const firstErr = firstLine(mt.stderr);
+    // #x8pcbf3 (live incident, PR #2752) — FIX AND RETRY, not a bare error: see `we:scripts/lib/rebase-drop-
+    // manifest.mjs#rebaseDropManifest`'s own copy of this comment (the SAME live incident, the SAME plumbing
+    // shape) and `we:scripts/lib/git-run.mjs#ensureFullHistory`'s own header for the full story and evidence.
+    if (/unrelated histories/i.test(firstErr)) {
+      const history = ensureFullHistory(run, { cwd, remote });
+      if (history.ok && history.unshallowed) {
+        const retryMt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
+        const retryParsed = parseMergeTree(retryMt.stdout, retryMt.status);
+        if (retryParsed.tree) {
+          parsed = retryParsed;
+        } else {
+          const retryErr = firstLine(retryMt.stderr);
+          return {
+            action: 'error',
+            reason: `merge-tree produced no tree (${retryErr}) — checkout was shallow, was unshallowed, and the merge STILL failed; `
+              + 'this looks like a genuinely unrelated-history pair, not a checkout defect',
+          };
+        }
+      } else {
+        const why = history.ok ? 'checkout is not shallow' : `checkout is shallow and could not be unshallowed (${history.reason})`;
+        return { action: 'error', reason: `merge-tree produced no tree (${firstErr}) — ${why}` };
+      }
+    } else {
+      return { action: 'error', reason: `merge-tree produced no tree (${firstErr})` };
+    }
+  }
   if (parsed.clean || parsed.conflictPaths.length === 0) {
     return { action: 'skip', reason: 'no conflict — not a content-rebase-drop candidate', conflictPaths: [] };
   }

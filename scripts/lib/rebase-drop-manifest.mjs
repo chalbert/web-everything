@@ -30,7 +30,7 @@
  * unit-testable without a real repo (see `scripts/lib/__tests__/rebase-drop-manifest.test.mjs`).
  */
 
-import { gitRun as gitRunner } from './git-run.mjs';
+import { gitRun as gitRunner, ensureFullHistory } from './git-run.mjs';
 import { applyCollisionHealToIndex } from './nnn-collision-heal.mjs';
 
 export const LANE_MANIFEST = '.lane-manifest.json';
@@ -139,8 +139,40 @@ export function rebaseDropManifest({
   }
 
   const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
-  const parsed = parseMergeTree(mt.stdout, mt.status);
-  if (!parsed.tree) return { action: 'error', reason: `merge-tree produced no tree (${(mt.stderr || '').split('\n')[0]})` };
+  let parsed = parseMergeTree(mt.stdout, mt.status);
+  if (!parsed.tree) {
+    const firstErr = (mt.stderr || '').split('\n')[0];
+    // #x8pcbf3 (live incident, PR #2752) — FIX AND RETRY, not a bare error: a checkout that is ALREADY a
+    // shallow clone inherits that shallow boundary onto any BRAND-NEW ref it fetches (like `laneRef`, just
+    // fetched above), unless deepened first. The freshly-fetched ref then lands as its own grafted root commit
+    // with no recorded parents, so `merge-tree` finds no common ancestor with `base` and fails `fatal: refusing
+    // to merge unrelated histories` — a checkout DEFECT, not a real conflict, but indistinguishable from one by
+    // that message alone. Only paid for on this (rare) failure path — the ordinary happy path never runs an
+    // extra probe. See `we:scripts/lib/git-run.mjs#ensureFullHistory`'s own header for the full incident and
+    // the live before/after evidence gathered against the real branch.
+    if (/unrelated histories/i.test(firstErr)) {
+      const history = ensureFullHistory(run, { cwd, remote });
+      if (history.ok && history.unshallowed) {
+        const retryMt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
+        const retryParsed = parseMergeTree(retryMt.stdout, retryMt.status);
+        if (retryParsed.tree) {
+          parsed = retryParsed; // the checkout defect is fixed — fall through to ordinary processing below
+        } else {
+          const retryErr = (retryMt.stderr || '').split('\n')[0];
+          return {
+            action: 'error',
+            reason: `merge-tree produced no tree (${retryErr}) — checkout was shallow, was unshallowed, and the merge STILL failed; `
+              + 'this looks like a genuinely unrelated-history pair, not a checkout defect',
+          };
+        }
+      } else {
+        const why = history.ok ? 'checkout is not shallow' : `checkout is shallow and could not be unshallowed (${history.reason})`;
+        return { action: 'error', reason: `merge-tree produced no tree (${firstErr}) — ${why}` };
+      }
+    } else {
+      return { action: 'error', reason: `merge-tree produced no tree (${firstErr})` };
+    }
+  }
 
   const disp = manifestConflictDisposition(parsed, manifest);
   if (disp === 'real') return { action: 'skip', reason: `real conflict beyond ${manifest}`, conflictPaths: parsed.conflictPaths };
