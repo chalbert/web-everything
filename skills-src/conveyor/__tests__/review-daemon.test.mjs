@@ -33,6 +33,7 @@ import {
   REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
+import { tagReviewStatus } from '../../../scripts/conveyor/review-status-tag.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../../scripts/conveyor/session-reaper.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -196,6 +197,47 @@ describe('runReviewTick — the per-tick sequence', () => {
     const out = runReviewTick({ reconcile, dispatch: () => { throw new Error('should not be called'); }, tagRound: () => {}, tagStatus, statusCandidates: (r, ref) => ref });
     expect(out).toMatchObject({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 1 });
     expect(tagStatus).toHaveBeenCalledTimes(1);
+  });
+
+  // Live-caught 2026-09-26, PR chalbert/web-everything#2711, card x8who76 — END-TO-END with #2711's REAL label
+  // sequence and the REAL `selectStatusCandidates`/`tagReviewStatus` (only the `gh` provider is faked): #2711
+  // got `review:accepted` + `ready-to-merge` (phase `queued` → `classifyPr`), which `reconcile-pass.mjs`'s real
+  // `runReconcilePass` refuses as `nothing-owed` — NOT a review/fix dispatch entry, and (before this fix)
+  // silently dropped by `selectStatusCandidates`'s own `nothing-owed` exclusion. No `review-<pr>`/`fix-<pr>`
+  // session or job was live (the review job had already finished; `review-2711.log` was the only thing left in
+  // `.operations/review-jobs/`), yet `review-status:reviewing` (added while the review round was still live)
+  // sat on the PR uncleared — "accepted AND reviewing" at once. This proves the daemon's real per-tick wiring,
+  // not just the pure `selectStatusCandidates`/`tagReviewStatus` units in isolation.
+  it('#2711: a PR that just went from review-owed to accepted+ready-to-merge gets review-status:reviewing cleared within one tick', () => {
+    const pr2711Labels = [
+      { name: 'review:accepted' }, { name: 'ready-to-merge' },
+      { name: 'review-round:2' }, { name: 'review-status:reviewing' }, { name: 'checking' },
+    ];
+    const reconcile = vi.fn(() => ({
+      dispatch: [],
+      refusals: [{ kind: 'nothing-owed', prNumber: 2711, phase: 'queued' }],
+    }));
+    const readPrs = () => [{ number: 2711, labels: pr2711Labels }];
+    // No `review-2711`/`fix-2711` row at all — the job already finished and its record was already removed
+    // (`listAgentsWithReviewJobs`'s own "a dead/absent job must not keep a PR looking busy forever" contract).
+    const readAgents = () => [];
+    const setLabelsCalls = [];
+    const fakeProvider = {
+      readLabels: () => { throw new Error('must use the shared currentLabels, never re-read'); },
+      ensureLabel: () => {},
+      setLabels: (repo, pr, spec) => setLabelsCalls.push({ repo, pr, spec }),
+    };
+    const tagStatus = (opts) => tagReviewStatus({ ...opts, provider: fakeProvider });
+    const out = runReviewTick({
+      reconcile, readPrs, readAgents, tagStatus,
+      dispatch: () => { throw new Error('nothing should be dispatched — #2711 owes nothing'); },
+      tagRound: () => { throw new Error('no round tag on a non-dispatched PR'); },
+    });
+    expect(out.reviewsOwed).toBe(0);
+    expect(out.dispatched).toEqual([]);
+    expect(setLabelsCalls).toEqual([
+      { repo: 'chalbert/web-everything', pr: 2711, spec: { add: undefined, remove: ['review-status:reviewing'] } },
+    ]);
   });
 });
 
