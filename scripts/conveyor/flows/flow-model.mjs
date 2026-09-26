@@ -86,7 +86,7 @@ export function resolveBornAsCite(relPath, { exists, listBacklogFiles, readBackl
     let content;
     try { content = readBacklogFile(f); } catch { continue; }
     // Frontmatter only: a body line quoting `bornAs:` (an example, a pasted card) is not a birth record.
-    const fm = typeof content === 'string' ? content.match(/^﻿?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/) : null;
+    const fm = typeof content === 'string' ? content.match(/^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/) : null;
     if (fm && bornAsRe.test(fm[1])) return `backlog/${f}`;
   }
   return relPath; // no bornAs record anywhere — genuinely dangling
