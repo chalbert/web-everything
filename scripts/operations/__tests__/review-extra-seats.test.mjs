@@ -2,7 +2,11 @@
  * #4194 — ADDED NON-CLAUDE REVIEW SEATS: advisory lenses + one extra juror routed to Codex/Gemini through the
  * direct-task scripts, BESIDE Claude's mandatory seats. No real codex/agy/git/GitHub process: every effect is a fake.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   reviewSeatRoutes, ROUTED_ADVISORY_LENSES, EXTRA_JUROR_MANDATE, REVIEW_SEAT_MODELS,
@@ -10,7 +14,8 @@ import {
 import {
   runExtraSeats, extraSeatsEnabled, resolveDailyCap, callsUsedToday, quotaHold, claudeFindingsFromLoop,
   buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay, renderSeatSummary,
-  EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, toIsoInstant,
+  EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, toIsoInstant, extractAnswerJson, reserveSeatCalls,
+  createExtraSeatsIo,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeExtraSeats } from '../review-job.mjs';
 import { ADVISORY_JUDGE_LENS, JUDGE_SEATS } from '../review-pr.mjs';
@@ -41,7 +46,7 @@ const LOOP_PAYLOAD = {
 const answer = (lenses) => `I reviewed it.\n\n\`\`\`json\n${JSON.stringify({ lenses })}\n\`\`\``;
 
 /** A fake seat io recording every effect. */
-function fakeSeatIo(over = {}) {
+function fakeSeatIo(over = {}, ledgerBox = { value: null }) {
   const calls = [];
   const rows = [];
   const io = {
@@ -49,6 +54,13 @@ function fakeSeatIo(over = {}) {
     newId: (() => { let n = 0; return () => `call-${++n}`; })(),
     log: (l) => calls.push(['log', l]),
     readRecords: () => [],
+    // The shared reservation ledger; pass one `ledgerBox` to several fakes to model concurrent review jobs.
+    reserveCalls: ({ want, dailyCap, now }) => {
+      const r = reserveSeatCalls({ ledger: ledgerBox.value, records: io.readRecords(), want, dailyCap, now, newId: io.newId });
+      ledgerBox.value = r.ledger;
+      calls.push(['reserve', want, r.callIds.length]);
+      return r;
+    },
     append: (row) => { const v = validateScorecard({ v: 1, scoredAt: new Date(NOW).toISOString(), ...row }); if (!v.ok) throw new Error(v.errors.join('; ')); rows.push(row); },
     cliAvailable: () => true,
     makeScratch: (o) => { calls.push(['scratch', o]); return '/tmp/seat-scratch'; },
@@ -209,6 +221,15 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
     expect(parsed['standards-conformance'].ok).toBe(false);
   });
 
+  it('finds an unfenced answer however its JSON is spaced or indented', () => {
+    const lenses = { 'claim-accuracy': { verdict: 'accept', findings: [] } };
+    expect(extractAnswerJson(`Done.\n${JSON.stringify({ lenses })}`)).toEqual({ lenses });
+    expect(extractAnswerJson(`Done.\n{ "lenses": { "claim-accuracy": { "verdict": "accept", "findings": [] } } }`)).toEqual({ lenses });
+    expect(extractAnswerJson(`Done.\n${JSON.stringify({ lenses }, null, 2)}\n`)).toEqual({ lenses });
+    expect(extractAnswerJson('Done.\n{\n\t"lenses"  :  {}\n}')).toEqual({ lenses: {} });
+    expect(extractAnswerJson('no answer at all')).toBeNull();
+  });
+
   it('classifies timeouts, quota hits, garbage and success', () => {
     expect(classifySeatCall('codex', { timedOut: true, report: null }).status).toBe('timeout');
     expect(classifySeatCall('gemini', { report: { events: { finalResponse: '', errorMessage: 'RESOURCE_EXHAUSTED: quota' } } }).status).toBe('quota-exhausted');
@@ -304,6 +325,51 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     expect(calls.some((c) => c[0] === 'seat')).toBe(false);
   });
 
+  it('concurrent reviews cannot reserve more than the remaining daily budget', async () => {
+    // Both jobs read the same store snapshot (0 used) before either has written a row — the race the cap must
+    // survive. Each wants 2 calls (codex + gemini); the cap is 2, so together they may launch 2, not 4.
+    const ledgerBox = { value: null };
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let launched = 0;
+    const runSeat = async (o) => { launched += 1; await gate; return fakeSeatIo().io.runSeat(o); };
+    const a = fakeSeatIo({ runSeat }, ledgerBox);
+    const b = fakeSeatIo({ runSeat, newId: (() => { let n = 0; return () => `b-call-${++n}`; })() }, ledgerBox);
+    const env = { [DAILY_CAP_ENV]: '2' };
+    const pa = runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, a.io);
+    const pb = runExtraSeats({ pr: 6, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, b.io);
+    release();
+    const [ra, rb] = await Promise.all([pa, pb]);
+    expect(launched).toBe(2);
+    expect(ra.status).toBe('ran');
+    expect(rb.status).toBe('skipped');
+    expect(rb.reason).toMatch(/daily-cap/);
+    expect(ledgerBox.value.reservations).toHaveLength(2);
+  });
+
+  it('a short grant (a concurrent review took one) re-plans every seat onto the one granted call', async () => {
+    // The snapshot says 2 left; the ledger already holds a reservation the store has not seen, so 1 is granted.
+    const ledgerBox = { value: { version: 1, reservations: [{ callId: 'other', at: new Date(NOW).toISOString() }] } };
+    const { io, calls, rows } = fakeSeatIo({}, ledgerBox);
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [DAILY_CAP_ENV]: '2' } }, io);
+    expect(r.status).toBe('ran');
+    expect(calls.find((c) => c[0] === 'reserve')).toEqual(['reserve', 2, 1]);
+    expect(calls.filter((c) => c[0] === 'seat')).toHaveLength(1);
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((x) => x.provider)).size).toBe(1);
+    expect(r.callsUsedToday).toBe(2);
+    // the row carries the RESERVED call id, so the store and the ledger count it once
+    expect(ledgerBox.value.reservations.map((x) => x.callId)).toContain(rows[0].callId);
+  });
+
+  it('a reservation that cannot be made fails closed — nothing spawned', async () => {
+    const { io, calls } = fakeSeatIo({ reserveCalls: () => { throw new Error('EACCES ledger'); } });
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    expect(r.status).toBe('skipped');
+    expect(r.reason).toMatch(/EACCES ledger/);
+    expect(calls.some((c) => c[0] === 'seat' || c[0] === 'scratch')).toBe(false);
+  });
+
   it('a loop that never read the PR → skipped; a crashing store append is survived', async () => {
     const { io } = fakeSeatIo({ append: () => { throw new Error('disk full'); } });
     expect((await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: { stopped: 'refused' }, env: {} }, io)).status).toBe('skipped');
@@ -357,9 +423,120 @@ describe('#4194 review-job — the seats run AFTER the arc, and can never change
     expect(out.extraSeats).toBeUndefined();
   });
 
+  it('no seats when the loop timed out even though it had already flushed a parseable payload', () => {
+    // The child can print its whole JSON and then be SIGKILLed past the wall during cleanup: `parsed` is
+    // non-null, so only the `timedOut` half of the guard keeps the seats from firing on an unfinished review.
+    const { io, calls } = fakeJobIo({ runLoop: () => ({ status: null, signal: 'SIGKILL', stdout: JSON.stringify(LOOP_PAYLOAD), stderr: '', timedOut: true }) });
+    const out = runReviewJob({ pr: 10, repo: REPO, pid: 99 }, io);
+    expect(calls.some((c) => c[0] === 'seats')).toBe(false);
+    expect(out.extraSeats).toBeUndefined();
+  });
+
+  it('no seats when the loop finished in time but printed nothing parseable', () => {
+    const { io, calls } = fakeJobIo({ runLoop: () => ({ status: 1, signal: null, stdout: 'not json', stderr: '', timedOut: false }) });
+    const out = runReviewJob({ pr: 10, repo: REPO, pid: 99 }, io);
+    expect(calls.some((c) => c[0] === 'seats')).toBe(false);
+    expect(out.extraSeats).toBeUndefined();
+  });
+
   it('summarizeExtraSeats keeps findings and confirmation, drops the bulk', () => {
     const s = summarizeExtraSeats({ status: 'ran', seats: [{ seat: 'extra-juror', lens: 'correctness', provider: 'codex', model: 'm', status: 'ok', seatVerdict: 'changes', findings: [{ summary: 's', file: 'f', line: 1, impactIfUnfixed: 'broken', confirmedByClaude: true }] }], rowsWritten: 1, callsUsedToday: 2, dailyCap: 40 });
     expect(s.seats[0].findings[0]).toEqual({ summary: 's', file: 'f', line: 1, impact: 'broken', confirmedByClaude: true });
     expect(s).toMatchObject({ rowsWritten: 1, callsUsedToday: 2, dailyCap: 40 });
+  });
+});
+
+describe('#4194 reserveSeatCalls — the daily budget is reserved BEFORE a call launches', () => {
+  const at = (iso) => ({ callId: iso, at: iso });
+  const ids = () => { let n = 0; return () => `r${++n}`; };
+
+  it('grants up to what is left, counting both stored rows and outstanding reservations', () => {
+    const records = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, callId: 'done-1', scoredAt: '2026-09-26T14:00:00Z' }];
+    const ledger = { version: 1, reservations: [at('2026-09-26T14:30:00Z')] };
+    const r = reserveSeatCalls({ ledger, records, want: 3, dailyCap: 4, now: NOW, newId: ids() });
+    expect(r.callIds).toEqual(['r1', 'r2']);
+    expect(r.used).toBe(2);
+    expect(r.ledger.reservations).toHaveLength(3);
+  });
+
+  it('a reservation whose row has since landed is counted once, not twice', () => {
+    const records = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, callId: 'x', scoredAt: '2026-09-26T14:00:00Z' }];
+    const ledger = { version: 1, reservations: [{ callId: 'x', at: '2026-09-26T13:59:00Z' }] };
+    expect(reserveSeatCalls({ ledger, records, want: 5, dailyCap: 3, now: NOW, newId: ids() }).callIds).toHaveLength(2);
+  });
+
+  it('yesterday\'s reservations are dropped and do not count; nothing is granted at or over the cap', () => {
+    const ledger = { version: 1, reservations: [at('2026-09-25T12:00:00Z'), at('2026-09-26T12:00:00Z')] };
+    const r = reserveSeatCalls({ ledger, records: [], want: 5, dailyCap: 2, now: NOW, newId: ids() });
+    expect(r.callIds).toEqual(['r1']);
+    expect(r.ledger.reservations.map((x) => x.at.slice(0, 10))).toEqual(['2026-09-26', '2026-09-26']);
+    expect(reserveSeatCalls({ ledger: r.ledger, records: [], want: 1, dailyCap: 2, now: NOW, newId: ids() }).callIds).toEqual([]);
+    expect(reserveSeatCalls({ ledger: null, records: [], want: 0, dailyCap: 2, now: NOW, newId: ids() }).callIds).toEqual([]);
+  });
+});
+
+describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and store', () => {
+  let root;
+  const git = (cwd, ...args) => {
+    const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'we-seat-io-')); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('makeScratch is a SELF-CONTAINED copy of the pinned commit: no alternates, and it survives the lane being gc\'d or deleted', () => {
+    const lane = join(root, 'lane');
+    mkdirSync(lane);
+    git(lane, 'init', '--quiet');
+    writeFileSync(join(lane, 'a.txt'), 'one\n');
+    git(lane, 'add', 'a.txt');
+    git(lane, 'commit', '--quiet', '-m', 'one');
+    const pinned = git(lane, 'rev-parse', 'HEAD');
+    writeFileSync(join(lane, 'a.txt'), 'two\n');
+    git(lane, 'commit', '--quiet', '-am', 'two');
+    const io = createExtraSeatsIo({ env: process.env });
+    const dir = io.makeScratch({ lanePath: lane, rev: pinned });
+    try {
+      expect(git(dir, 'rev-parse', 'HEAD')).toBe(pinned);
+      expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('one\n');
+      expect(existsSync(join(dir, '.git', 'objects', 'info', 'alternates'))).toBe(false);
+      // The lane is re-acquired and reset (its objects pruned) — or gone entirely. The scratch must not care.
+      rmSync(lane, { recursive: true, force: true });
+      expect(git(dir, 'cat-file', '-p', `${pinned}:a.txt`)).toBe('one');
+      expect(git(dir, 'fsck', '--no-progress', '--connectivity-only')).toBe('');
+    } finally { io.removeScratch(dir); }
+  });
+
+  it('makeScratch with no pinned rev checks out the lane HEAD', () => {
+    const lane = join(root, 'lane');
+    mkdirSync(lane);
+    git(lane, 'init', '--quiet');
+    writeFileSync(join(lane, 'a.txt'), 'x\n');
+    git(lane, 'add', 'a.txt');
+    git(lane, 'commit', '--quiet', '-m', 'x');
+    const io = createExtraSeatsIo({ env: process.env });
+    const dir = io.makeScratch({ lanePath: lane, rev: null });
+    try { expect(git(dir, 'rev-parse', 'HEAD')).toBe(git(lane, 'rev-parse', 'HEAD')); } finally { io.removeScratch(dir); }
+  });
+
+  it('reserveCalls persists the ledger beside the store, so a second job sees the first one\'s reservation', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const now = Date.now();
+    const first = createExtraSeatsIo({ env: process.env, storePath }).reserveCalls({ want: 2, dailyCap: 3, now });
+    const second = createExtraSeatsIo({ env: process.env, storePath }).reserveCalls({ want: 2, dailyCap: 3, now });
+    expect(first.callIds).toHaveLength(2);
+    expect(second.callIds).toHaveLength(1);
+    expect(second.used).toBe(2);
+    expect(existsSync(`${join(root, 'state', 'review-seat-reservations.json')}.lock`)).toBe(false);
+  });
+
+  it('a corrupt ledger fails closed: reserveCalls throws and leaves the file for a human, never overwrites it', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const ledger = join(root, 'state', 'review-seat-reservations.json');
+    mkdirSync(join(root, 'state'), { recursive: true });
+    writeFileSync(ledger, '{ not json');
+    expect(() => createExtraSeatsIo({ env: process.env, storePath }).reserveCalls({ want: 1, dailyCap: 3, now: Date.now() })).toThrow();
+    expect(readFileSync(ledger, 'utf8')).toBe('{ not json');
   });
 });

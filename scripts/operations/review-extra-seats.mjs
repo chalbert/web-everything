@@ -26,7 +26,9 @@
  *
  * COST. {@link EXTRA_SEATS_ENV}`=0` is the kill switch (checked before anything else is read or spawned). A
  * per-day cap on non-Claude seat CALLS ({@link DAILY_CAP_ENV}, default {@link DEFAULT_DAILY_CAP}) is counted off
- * the store's own rows (distinct `callId`s dated today, America/New_York). A provider whose CLI is not on PATH, or
+ * the store's own rows (distinct `callId`s dated today, America/New_York) plus outstanding reservations: each call
+ * is RESERVED under a lock before it launches ({@link reserveSeatCalls}), so concurrent reviews cannot together
+ * overspend it. A provider whose CLI is not on PATH, or
  * whose last seat row hit its quota (until its reset, or {@link QUOTA_COOLOFF_MS} when none was reported), is
  * skipped with the reason logged.
  *
@@ -36,7 +38,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,7 +49,8 @@ import {
 } from '../lib/provider-routing.mjs';
 import { findingCorroboratedBy, IMPACT_LEVELS, normalizeFinding } from '../lib/jury-core.mjs';
 import { expectationForLens, huntBriefForLens } from '../lib/review-core.mjs';
-import { appendScorecard, readStore } from '../conveyor/run-scorecard-store.mjs';
+import { appendScorecard, readStore, resolveScorecardStorePath } from '../conveyor/run-scorecard-store.mjs';
+import { withInfraLock } from '../conveyor/infra-blocked.mjs';
 import { scrubPublish } from '../lib/secret-scrub.mjs';
 
 const THIS_FILE = fileURLToPath(import.meta.url);
@@ -102,12 +105,36 @@ export function capDay(when) {
 
 const seatRows = (records) => (Array.isArray(records) ? records : []).filter((r) => r && r.dispatchKind === REVIEW_SEAT_DISPATCH_KIND);
 
-/** Distinct seat calls recorded on `now`'s day. PURE. */
-export function callsUsedToday(records, now) {
-  const day = capDay(now);
+const callIdsToday = (records, day) => {
   const ids = new Set();
   for (const r of seatRows(records)) if (capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
-  return ids.size;
+  return ids;
+};
+
+/** Distinct seat calls recorded on `now`'s day. PURE. */
+export function callsUsedToday(records, now) {
+  return callIdsToday(records, capDay(now)).size;
+}
+
+/**
+ * RESERVE up to `want` seat calls against the day's cap, BEFORE any provider launches. The store only learns of a
+ * call once its row is written — minutes later — so two reviews that both read "N left" would each spend it. The
+ * ledger closes that gap: today's calls are the union of stored rows' `callId`s and outstanding reservations (a
+ * reservation whose row has landed shares its id, so it counts once). The caller holds a cross-process lock around
+ * read → this → write. A reservation whose call never writes a row still counts: the budget errs toward spending
+ * less. Earlier days' reservations are dropped. PURE.
+ * @param {{ledger:(object|null), records:Array<object>, want:number, dailyCap:number, now:number, newId:Function}} o
+ * @returns {{callIds:string[], used:number, ledger:{version:number, reservations:Array<{callId:string, at:string}>}}}
+ */
+export function reserveSeatCalls({ ledger, records, want, dailyCap, now, newId }) {
+  const day = capDay(now);
+  const kept = (Array.isArray(ledger?.reservations) ? ledger.reservations : []).filter((r) => r && capDay(r.at) === day);
+  const ids = callIdsToday(records, day);
+  for (const r of kept) ids.add(r.callId);
+  const grant = Math.max(0, Math.min(Number(want) || 0, dailyCap - ids.size));
+  const callIds = Array.from({ length: grant }, () => newId());
+  const at = new Date(now).toISOString();
+  return { callIds, used: ids.size, ledger: { version: 1, reservations: [...kept, ...callIds.map((callId) => ({ callId, at }))] } };
 }
 
 /**
@@ -186,8 +213,9 @@ export function extractAnswerJson(text) {
   const s = String(text ?? '');
   const fenced = [...s.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
   const candidates = [...fenced.reverse()];
-  const lastBrace = s.lastIndexOf('{"lenses"');
-  if (lastBrace !== -1) candidates.push(s.slice(lastBrace));
+  // Unfenced: the object may be spaced or pretty-printed, so match `{ "lenses"` with any whitespace, last first.
+  const starts = [...s.matchAll(/\{\s*"lenses"\s*:/g)].map((m) => m.index).reverse();
+  for (const i of starts) candidates.push(s.slice(i));
   for (const c of candidates) {
     try {
       const obj = JSON.parse(c.trim());
@@ -340,12 +368,27 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
       available.push(p);
     }
     for (const u of unavailable) io.log(`added seats: skipping ${u.provider} — ${u.reason}`);
-    const plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: dailyCap - used });
+    let plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: dailyCap - used });
+    // The snapshot above is advisory: RESERVE the calls under the ledger's lock before launching any, so
+    // concurrent reviews can never together spend past the cap. A short grant re-plans onto that many providers.
+    const wanted = [...new Set(plan.routes.map((r) => r.provider))];
+    let reservation = { callIds: [], used };
+    if (wanted.length) {
+      try {
+        reservation = io.reserveCalls({ want: wanted.length, dailyCap, now });
+      } catch (e) {
+        return { status: 'skipped', reason: `could not reserve the daily seat budget (${String(e?.message ?? e).slice(0, 200)}) — no call launched`, skipped: [], callsUsedToday: used, dailyCap };
+      }
+      if (reservation.callIds.length < wanted.length) {
+        plan = reviewSeatRoutes({ available, scorecards: records, callsRemaining: reservation.callIds.length });
+      }
+    }
+    const callIdOf = new Map([...new Set(plan.routes.map((r) => r.provider))].map((p, i) => [p, reservation.callIds[i]]));
     const skipped = plan.skipped.map((s) => ({
       seat: s.seat, lens: s.lens,
       reason: available.length ? s.reason : `${s.reason} (${unavailable.map((u) => `${u.provider}: ${u.reason}`).join('; ')})`,
     }));
-    if (!plan.routes.length) return { status: 'skipped', reason: skipped[0]?.reason ?? 'nothing routed', skipped, callsUsedToday: used, dailyCap };
+    if (!plan.routes.length) return { status: 'skipped', reason: skipped[0]?.reason ?? 'nothing routed', skipped, callsUsedToday: reservation.used, dailyCap };
 
     const claudeFindings = claudeFindingsFromLoop(loopPayload);
     const claudeVerdict = loopPayload?.verdict?.verdict ?? null;
@@ -363,7 +406,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
       const byProvider = new Map();
       for (const r of plan.routes) byProvider.set(r.provider, [...(byProvider.get(r.provider) ?? []), r]);
       const calls = [...byProvider.entries()].map(async ([provider, group]) => {
-        const callId = io.newId();
+        const callId = callIdOf.get(provider);
         const taskFile = join(inputDir, `task-${provider}.md`);
         io.writeFile(taskFile, buildSeatTask({
           pr, repo, title: read.title, dir: scratch, diffFile, bodyFile, changedFiles: read.netChangedFiles ?? [], seats: group,
@@ -391,7 +434,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
     } finally {
       if (scratch) { try { io.removeScratch(scratch); } catch { /* a stray temp dir is harmless */ } }
     }
-    return { status: 'ran', seats, skipped, callsUsedToday: used + new Set(seats.map((s) => s.callId)).size, dailyCap, rowsWritten };
+    return { status: 'ran', seats, skipped, callsUsedToday: reservation.used + callIdOf.size, dailyCap, rowsWritten };
   } catch (e) {
     return { status: 'error', reason: String(e?.message ?? e).slice(0, MAX_TEXT) };
   }
@@ -428,25 +471,49 @@ export function seatCallArgv({ provider, taskFile, dir, model, effort, timeoutMs
 
 const CLI_BIN = Object.freeze({ codex: 'codex', gemini: 'agy' });
 
-export function createExtraSeatsIo({ env = process.env, root = REPO_ROOT } = {}) {
+/** The reservation ledger's file, beside the scorecard store it budgets against. */
+export const RESERVATION_LEDGER_FILE = 'review-seat-reservations.json';
+
+/** @param {{env?:object, root?:string, storePath?:string}} [o] — `storePath` pins the store (tests); default is the shared one. */
+export function createExtraSeatsIo({ env = process.env, root = REPO_ROOT, storePath } = {}) {
+  const storeIo = storePath ? { path: storePath } : {};
+  const ledgerPath = join(dirname(storePath ?? resolveScorecardStorePath()), RESERVATION_LEDGER_FILE);
+  const newId = () => randomUUID();
   return {
     now: () => Date.now(),
-    newId: () => randomUUID(),
+    newId,
     log: (line) => process.stderr.write(`[${new Date().toISOString()}] ${line}\n`),
-    readRecords: () => readStore().records,
-    append: (row) => appendScorecard(row),
+    readRecords: () => readStore(storeIo).records,
+    append: (row) => appendScorecard(row, storeIo),
+    // Read → reserve → write under the same exclusive-create lock the store's own appends use (best-effort like
+    // every user of that lock: after 5s of contention it proceeds unlocked). An unreadable ledger THROWS — the run
+    // then launches nothing — rather than being overwritten, which would forget today's outstanding reservations.
+    reserveCalls: ({ want, dailyCap, now }) => withInfraLock(ledgerPath, () => {
+      const ledger = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, 'utf8')) : null;
+      const r = reserveSeatCalls({ ledger, records: readStore(storeIo).records, want, dailyCap, now, newId });
+      const tmp = `${ledgerPath}.${process.pid}.tmp`;
+      writeFileSync(tmp, `${JSON.stringify(r.ledger, null, 2)}\n`);
+      renameSync(tmp, ledgerPath);
+      return r;
+    }),
     cliAvailable: (provider) => {
       const r = spawnSync(CLI_BIN[provider], ['--version'], { env, encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'pipe'] });
       return r.status === 0;
     },
+    // A SELF-CONTAINED copy of the one pinned commit: a fresh repo that FETCHES it from the lane, so its objects
+    // arrive as its own pack — no `--shared` alternates, no hardlinks into the lane's object store. The lane is
+    // already released when this runs and may be reset/gc'd by its next holder; and the Gemini seat reading this
+    // dir has write tools, so nothing it does here may reach the lane's objects either. Shallow on purpose: the
+    // seats get the net diff as a file, so one commit's tree is all they read.
     makeScratch: ({ lanePath, rev }) => {
       const dir = mkdtempSync(join(tmpdir(), 'we-review-seat-'));
       const git = (args) => {
         const r = spawnSync('git', args, { encoding: 'utf8', timeout: 5 * 60 * 1000 });
         if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${String(r.stderr).trim().slice(0, 300)}`);
       };
-      git(['clone', '--quiet', '--shared', '--no-checkout', lanePath, dir]);
-      git(['-C', dir, 'checkout', '--quiet', '--detach', rev || 'HEAD']);
+      git(['init', '--quiet', dir]);
+      git(['-C', dir, 'fetch', '--quiet', '--no-tags', '--depth=1', lanePath, rev || 'HEAD']);
+      git(['-C', dir, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']);
       return dir;
     },
     removeScratch: (dir) => rmSync(dir, { recursive: true, force: true }),
