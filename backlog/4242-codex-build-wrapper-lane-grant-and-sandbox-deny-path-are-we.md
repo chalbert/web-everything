@@ -2,9 +2,10 @@
 bornAs: xftsbsg
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/codex-delivery-provider.mjs", "we:scripts/lib/repo-profile.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
