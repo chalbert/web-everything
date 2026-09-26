@@ -3,10 +3,11 @@ bornAs: xt1ljei
 kind: story
 size: 2
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/run-scorecard-store.mjs", "we:skills-src/conveyor/launchd/", "we:scripts/lib/daemon-rebuild.mjs", "we:scripts/review-set-label.mjs", "we:scripts/gen-dispatch-routing-table.mjs", "we:.gitignore"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
