@@ -76,6 +76,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
+import { createQueueBudget } from '../readiness/heavy-queue-projection.mjs'; // card xkyw1x4 — queue-time admission
 
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultLoadItems, defaultListAgents,
@@ -920,6 +921,12 @@ export function runReconcileFixDispatch({
   resolveProfile = repoProfile,
   checkStaleness,
   prsFile, unsupportedPath,
+  // Card xkyw1x4 — the heavy-test queue baseline (or a function returning it, called once per pass). Each new fix
+  // is costed at its expected heavy-slot demand and dispatched only while the projected queue wait stays ≤ the
+  // max (30 min default); the rest are refused `queue-cap` and retried next pass. `null` (the default, and what
+  // every test gets unless it opts in) = no gate; the CLI and the fix-dispatch daemon pass the live
+  // `heavy-admission.mjs#resolveLiveQueueBaseline`.
+  queueAdmission = null,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
@@ -969,8 +976,15 @@ export function runReconcileFixDispatch({
   // Lanes: THIS repo's own pool (`profile.lanePoolRepo` — `.` for WE, an absolute checkout path for a sibling
   // repo), never the WE pool for a non-WE repo (#x33jgwt).
   const lanes = [...(typeof pickFreeLanes === 'function' ? pickFreeLanes() : freeLaneNumbers({ root, lanePoolRepo: profile.lanePoolRepo }))];
+  const queueBudget = queueBudgetFrom(queueAdmission, { root, repo: repoKey });
   const dispatched = [];
   for (const entry of planned) {
+    // Card xkyw1x4 — queue-cap BEFORE a resume or a lane pop: either way a fix session runs its checks next.
+    const q = queueBudget.tryAdmit('fix', { id: entry.pr });
+    if (!q.admit) {
+      refusals.push({ pr: entry.pr, kind: 'queue-cap', why: queueCapWhy(q) });
+      continue;
+    }
     // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
     // is even eligible (tryResumeFix itself returns `resumed: false, resumeAttempt: null` immediately for any
     // other kind, at no lane cost either way).
@@ -1024,6 +1038,24 @@ export function runReconcileFixDispatch({
   }
 
   return { dispatched, refusals, reconcileRefusals: reconciled.refusals.length, reconcileRefusalDetails: reconciled.refusals };
+}
+
+/** Card xkyw1x4 — a `queueAdmission` option may be a queue BUDGET already (`createQueueBudget`'s object — the
+ *  daemon shares ONE per pass across repos and across fix + CI-heal, so every dispatch in the pass sees the ones
+ *  before it), the baseline itself, or a function returning the baseline. A function that throws fails open (no
+ *  gate), the same posture the tick's load / queue reads take. Shared with `we:scripts/operations/ci-heal-pr-dispatch.mjs`. */
+export function queueBudgetFrom(queueAdmission, ctx = {}) {
+  if (queueAdmission && typeof queueAdmission.tryAdmit === 'function') return queueAdmission;
+  let baseline = queueAdmission ?? null;
+  if (typeof queueAdmission === 'function') {
+    try { baseline = queueAdmission(ctx) ?? null; } catch { baseline = null; }
+  }
+  return createQueueBudget(baseline);
+}
+
+/** The human reason for a `queue-cap` refusal. */
+export function queueCapWhy(d) {
+  return `projected heavy-test queue wait ${d.projectedMinutes}m would exceed ${d.maxWaitMinutes}m with this dispatch (+${d.demandMinutes}m) — retried next pass`;
 }
 
 /**
@@ -1109,7 +1141,11 @@ if (IS_CLI) {
   } else {
     let result;
     try {
-      result = runReconcileFixDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] });
+      const { resolveLiveQueueBaseline } = await import('../readiness/heavy-admission.mjs');
+      result = runReconcileFixDispatch({
+        repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'],
+        queueAdmission: ({ root }) => resolveLiveQueueBaseline({ checkoutRoot: root }),
+      });
     } catch (e) {
       process.stderr.write(`✗ reconcile-fix-dispatch failed: ${String((e && e.message) || e).split('\n')[0]}\n`);
       process.exit(1);

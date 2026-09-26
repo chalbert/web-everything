@@ -82,13 +82,21 @@ describe('assessHeavyQueueRow — minutes + who assembly, pure', () => {
 });
 
 describe('projectedWaitMinutesForNewJob — a rough estimate, 0 whenever a slot is already free', () => {
+  // The list-scheduling ALGORITHM is what these cases pin, so they run against a fixed table (the pre-xkyw1x4
+  // constants) passed explicitly — independent of the seeds / rolling standard times card xkyw1x4 introduced.
+  const STD = { selected: 15, FULL: 35, standards: 8, files: 5, other: 20 };
+
+  it('with no table passed, uses the xkyw1x4 seeds (STANDARD_MINUTES_BY_KIND)', () => {
+    expect(STANDARD_MINUTES_BY_KIND.FULL).toBe(18);
+    expect(projectedWaitMinutesForNewJob({ rows: [{ state: 'RUN', kind: 'FULL', minutes: 3 }], freeCount: 0 })).toBe(15);
+  });
   it('is 0 the moment a slot is free', () => {
     expect(projectedWaitMinutesForNewJob({ rows: [], freeCount: 1 })).toBe(0);
   });
 
   it('with the cap full and no waiters, projects the soonest holder finishing its kind\'s standard time', () => {
     const rows = [{ state: 'RUN', kind: 'standards', minutes: 3 }]; // standard 8m, 3m elapsed → 5m left
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(STANDARD_MINUTES_BY_KIND.standards - 3);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(STD.standards - 3);
   });
 
   it('a new job queues BEHIND every already-waiting job (mirrors the FCFS fix this same card ships)', () => {
@@ -99,7 +107,7 @@ describe('projectedWaitMinutesForNewJob — a rough estimate, 0 whenever a slot 
     ];
     // The one waiter is assigned to whichever machine frees soonest (the 8m one), pushing it to 8+20=28; the
     // new arrival gets the OTHER machine, still free at 15m — never the raw 8m holder alone.
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(15);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(15);
   });
 
   it('a crashed/stale waiter (live: false) is shown but never adds a wave to the projection', () => {
@@ -109,12 +117,12 @@ describe('projectedWaitMinutesForNewJob — a rough estimate, 0 whenever a slot 
       { state: 'WAIT', kind: 'other', minutes: 3, live: false },
       { state: 'WAIT', kind: 'standards', minutes: 1 },
     ];
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(1 + STANDARD_MINUTES_BY_KIND.standards);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(1 + STD.standards);
   });
 
   it('never goes negative — a holder already past its kind\'s standard time floors at 0', () => {
     const rows = [{ state: 'RUN', kind: 'files', minutes: 999 }];
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(0);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(0);
   });
 
   it('#2692 independent-review finding: waiting jobs at/past capacity ALL contribute their own duration, not just the current holder\'s remaining time', () => {
@@ -123,23 +131,23 @@ describe('projectedWaitMinutesForNewJob — a rough estimate, 0 whenever a slot 
     // reported ~1m (the holder's own remaining time alone); the real queue this new arrival joins is
     // 1 + 8 + 8 + 8 = 25m.
     const rows = [
-      { state: 'RUN', kind: 'other', minutes: STANDARD_MINUTES_BY_KIND.other - 1 }, // 1m left
+      { state: 'RUN', kind: 'other', minutes: STD.other - 1 }, // 1m left
       { state: 'WAIT', kind: 'standards', minutes: 3, since: '2026-01-01T00:00:00.000Z' },
       { state: 'WAIT', kind: 'standards', minutes: 2, since: '2026-01-01T00:01:00.000Z' },
       { state: 'WAIT', kind: 'standards', minutes: 1, since: '2026-01-01T00:02:00.000Z' },
     ];
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(1 + STANDARD_MINUTES_BY_KIND.standards * 3);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(1 + STD.standards * 3);
   });
 
   it('with cap > 1, waiting jobs load-balance across whichever machine frees soonest', () => {
     const rows = [
-      { state: 'RUN', kind: 'other', minutes: STANDARD_MINUTES_BY_KIND.other - 1 }, // machine A: 1m left
-      { state: 'RUN', kind: 'other', minutes: STANDARD_MINUTES_BY_KIND.other - 2 }, // machine B: 2m left
+      { state: 'RUN', kind: 'other', minutes: STD.other - 1 }, // machine A: 1m left
+      { state: 'RUN', kind: 'other', minutes: STD.other - 2 }, // machine B: 2m left
       { state: 'WAIT', kind: 'standards', minutes: 1, since: '2026-01-01T00:00:00.000Z' }, // → A (1 < 2): A=1+8=9
       { state: 'WAIT', kind: 'standards', minutes: 1, since: '2026-01-01T00:01:00.000Z' }, // → B (2 < 9): B=2+8=10
     ];
     // Soonest-free machine after both waiters are placed is A at 9m.
-    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0 })).toBe(9);
+    expect(projectedWaitMinutesForNewJob({ rows, freeCount: 0, standardMinutes: STD })).toBe(9);
   });
 });
 

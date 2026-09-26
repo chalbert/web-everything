@@ -31,6 +31,12 @@ Then the headline: `verdict.heldCount` of `verdict.cap` held, `verdict.waitingCo
 `verdict.projectedWaitMinutesForNewJob` (the rough estimate for a NEW job arriving now — `0` whenever
 `verdict.freeCount > 0`).
 
+Then **projected wait if you start now** (card xkyw1x4): `verdict.queueAdmission.projectedWaitMinutes` against
+`maxWaitMinutes` (30 by default), and for each kind in `verdict.queueAdmission.byKind` (review, fix, ci-heal,
+build) whether one more session started now would be admitted or held `queue-cap` — the same rule the conveyor
+tick and the fix-dispatch daemon apply. `standardSource` says whether each kind's standard time is the rolling
+median of real holds or still the seed.
+
 ## Read only
 
 This is a READ: it never acquires, releases, or reaps a slot, and never runs a gate. A row's `kind: FULL` on

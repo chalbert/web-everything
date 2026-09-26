@@ -31,6 +31,7 @@
  */
 import { op } from './registry.mjs';
 import { compute } from './step-kinds.mjs';
+import { DEFAULT_STANDARD_MINUTES, createQueueBudget, DEFAULT_BUILD_SIZE } from '../readiness/heavy-queue-projection.mjs';
 
 export const HEAVY_QUEUE_OP = 'heavy-queue';
 
@@ -38,17 +39,11 @@ export const HEAVY_QUEUE_OP = 'heavy-queue';
  *  header calls #3372. A repo whose HEAD descends from this commit runs the NEW default gate. */
 export const SELECTED_GATE_MERGE_SHA = '14a3d0dff';
 
-/** Conservative, constant "standard time" per KIND (minutes) a new job of that kind is expected to occupy a
- *  slot — used only to project a rough wait for a NEW job, never to classify a running one. Deliberately crude
- *  ("constants for now" per the card): the admission card (a further slice) is expected to refine these from
- *  real measured durations rather than this operation growing its own second estimator. */
-export const STANDARD_MINUTES_BY_KIND = Object.freeze({
-  selected: 15, // `npx vitest related <files> --run && npm run check:standards -- --local --files=…`
-  FULL: 35, // `npm run test:unit && npm run check:standards` (unconditional, the pre-#2680 shape)
-  standards: 8, // `npm run check:standards` alone
-  files: 5, // `npx vitest related <files> --run` alone (no check:standards half)
-  other: 20, // anything else routed through the pool (build, npm ci, …) — a neutral middle guess
-});
+/** The SEED "standard time" per KIND (minutes) — card xkyw1x4 replaced this operation's old crude constants
+ *  with the admission module's own seeds (`heavy-queue-projection.mjs#DEFAULT_STANDARD_MINUTES`, measured under
+ *  load 2026-09-25). The live report uses the ROLLING typical value per kind the admission root records on every
+ *  slot release (`verdict.queue.standardMinutes`); these seeds apply only when no snapshot carries one. */
+export const STANDARD_MINUTES_BY_KIND = DEFAULT_STANDARD_MINUTES;
 
 /**
  * Classify a heavy-admission holder/waiter's KIND from the LIVE command line of the pid it acquired under.
@@ -57,7 +52,10 @@ export const STANDARD_MINUTES_BY_KIND = Object.freeze({
  * @param {{command:string|null, isSelectedBase?:boolean|null}} o
  * @returns {'selected'|'FULL'|'standards'|'files'|'other'}
  */
-export function classifyHeavyJobKind({ command, isSelectedBase = null } = {}) {
+export function classifyHeavyJobKind({ command, isSelectedBase = null, kind = null } = {}) {
+  // Card xkyw1x4 — a holder / waiter written by the new admission code RECORDS its kind (slot `meta.kind`, the
+  // waiting marker's `kind`); that recorded kind wins over re-deriving it from the command line.
+  if (['selected', 'FULL', 'standards', 'files', 'other'].includes(kind)) return kind;
   const cmd = String(command || '').trim();
   if (!cmd) return 'other';
   if (/verify-lane\.mjs/.test(cmd)) return isSelectedBase ? 'selected' : 'FULL';
@@ -83,7 +81,7 @@ function minutesBetween(fromIso, nowMs) {
  */
 export function assessHeavyQueueRow(raw, { state, observedAt }) {
   const nowMs = Date.parse(observedAt);
-  const kind = classifyHeavyJobKind({ command: raw.command, isSelectedBase: raw.isSelectedBase });
+  const kind = classifyHeavyJobKind({ command: raw.command, isSelectedBase: raw.isSelectedBase, kind: raw.kind ?? null });
   const who = (raw.lease && (raw.lease.purpose || raw.lease.session)) || null;
   const since = state === 'RUN' ? raw.heartbeatAt : raw.requestedAt;
   return {
@@ -119,19 +117,20 @@ export function assessHeavyQueueRow(raw, { state, observedAt }) {
  * otherwise add a phantom 20-minute wave each (PR #2692 fix-round self-review).
  * @param {{rows:Array<object>, freeCount:number}} o
  */
-export function projectedWaitMinutesForNewJob({ rows, freeCount }) {
+export function projectedWaitMinutesForNewJob({ rows, freeCount, standardMinutes = STANDARD_MINUTES_BY_KIND }) {
   if (freeCount > 0) return 0;
   const holders = rows.filter((r) => r.state === 'RUN');
   if (holders.length === 0) return 0;
+  const std = { ...STANDARD_MINUTES_BY_KIND, ...(standardMinutes || {}) };
   const machineFreeAt = holders
-    .map((h) => Math.max((STANDARD_MINUTES_BY_KIND[h.kind] ?? STANDARD_MINUTES_BY_KIND.other) - (h.minutes ?? 0), 0));
+    .map((h) => Math.max((std[h.kind] ?? std.other) - (h.minutes ?? 0), 0));
   const waiting = rows
     .filter((r) => r.state === 'WAIT' && r.live !== false)
     .sort((a, b) => (Date.parse(a.since) || 0) - (Date.parse(b.since) || 0)); // FCFS arrival order
   for (const w of waiting) {
     let soonest = 0;
     for (let i = 1; i < machineFreeAt.length; i++) if (machineFreeAt[i] < machineFreeAt[soonest]) soonest = i;
-    machineFreeAt[soonest] += STANDARD_MINUTES_BY_KIND[w.kind] ?? STANDARD_MINUTES_BY_KIND.other;
+    machineFreeAt[soonest] += std[w.kind] ?? std.other;
   }
   return Math.round(Math.min(...machineFreeAt) * 10) / 10;
 }
@@ -150,13 +149,48 @@ export function assessHeavyQueue(read) {
     ...read.held.map((r) => assessHeavyQueueRow(r, { state: 'RUN', observedAt })),
     ...read.waiting.map((r) => assessHeavyQueueRow(r, { state: 'WAIT', observedAt })),
   ];
-  const projected = projectedWaitMinutesForNewJob({ rows, freeCount: read.freeCount });
+  const queue = read.queue && typeof read.queue === 'object' ? read.queue : null;
+  const projected = projectedWaitMinutesForNewJob({ rows, freeCount: read.freeCount, standardMinutes: queue?.standardMinutes });
+  const admission = assessQueueAdmission(queue);
   const headline = `${read.heldCount} of ${read.cap} held, ${rows.filter((r) => r.state === 'WAIT').length} waiting`
-    + (read.freeCount > 0 ? ` — ${read.freeCount} free` : ` — projected wait for a new job: ~${projected}m`);
+    + (read.freeCount > 0 ? ` — ${read.freeCount} free` : ` — projected wait for a new job: ~${projected}m`)
+    + (admission ? ` — ${admission.headline}` : '');
   return {
     observedAt, cap: read.cap, heldCount: read.heldCount, freeCount: read.freeCount,
     waitingCount: rows.filter((r) => r.state === 'WAIT').length,
     projectedWaitMinutesForNewJob: projected, rows, headline,
+    queueAdmission: admission,
+  };
+}
+
+/**
+ * Card xkyw1x4 — "PROJECTED WAIT IF YOU START NOW": the dispatch-admission view of the queue baseline
+ * (`heavy-admission.mjs#resolveQueueBaseline`). For each dispatch kind, what the projected queue wait would be
+ * if one more session of that kind started right now, and whether the `queue-cap` gate would admit or hold it —
+ * the SAME `createQueueBudget` the tick and the fix / CI-heal daemons admit with, never a second estimator.
+ * `null` when no baseline was read; `{bypassed}` when the gate is switched off.
+ * @param {object|null} queue
+ */
+export function assessQueueAdmission(queue) {
+  if (!queue) return null;
+  if (queue.bypassed) return { bypassed: queue.bypassed, headline: `queue admission bypassed (${queue.bypassed})` };
+  const byKind = {};
+  for (const [label, kind, size] of [['review', 'review', null], ['fix', 'fix', null], ['ci-heal', 'ci-heal', null], [`build (size ${DEFAULT_BUILD_SIZE})`, 'build', DEFAULT_BUILD_SIZE], ['build (size 8)', 'build', 8]]) {
+    const d = createQueueBudget(queue).tryAdmit(kind, { size });
+    byKind[label] = { demandMinutes: d.demandMinutes, projectedMinutes: d.projectedMinutes, admit: d.admit, exempt: d.exempt };
+  }
+  const fix = byKind.fix;
+  return {
+    projectedWaitMinutes: queue.projectedWaitMinutes,
+    maxWaitMinutes: queue.maxWaitMinutes,
+    slots: queue.slots, fastSlots: queue.fastSlots,
+    backlogMinutes: queue.backlogMinutes,
+    heldRemainingMinutes: queue.heldRemainingMinutes, waitingMinutes: queue.waitingMinutes, pendingMinutes: queue.pendingMinutes,
+    pending: queue.pending ?? [],
+    standardMinutes: queue.standardMinutes, standardSource: queue.standardSource,
+    byKind,
+    headline: `projected wait if you start now: ~${queue.projectedWaitMinutes}m of ${queue.maxWaitMinutes}m max`
+      + ` (a fix → ~${fix.projectedMinutes}m, ${fix.admit ? 'admitted' : 'HELD queue-cap'})`,
   };
 }
 

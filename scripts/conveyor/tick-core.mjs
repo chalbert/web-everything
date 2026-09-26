@@ -152,6 +152,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // The kind-scoped pause's PURE half (epic #3383) — the same predicate `dispatch-plan.mjs` uses for its own
 // `build` gate, so the two cores can never disagree about what a given marker holds. No fs comes in with it.
 import { resolvePausedKinds, isScopedPause } from '../readiness/dispatch-pause.mjs';
+import { createQueueBudget, dispatchDemandMinutes, DEFAULT_ARRIVAL_WINDOW_MINUTES } from '../readiness/heavy-queue-projection.mjs'; // card xkyw1x4 — the pure queue-time admission (the IO half lives in heavy-admission.mjs)
 
 /** Held reasons (from {@link ../readiness/dispatch-plan.mjs HELD_REASONS}) that already have their OWN dedicated
  *  note elsewhere in {@link planTick} — `needs-slice` from `state.needsSlice`, `needs-decision` from
@@ -1107,10 +1108,19 @@ export function buildStatusLine({ queue = [], lanes = [], prs = [], health = {},
  *                                      // `capacity-cap` (the fix differs: wait for load to drop vs. raise the
  *                                      // cap); already-running lanes/guards/watchers are untouched. Omitted /
  *                                      // `held:false` (the default) changes nothing observable.
+ *   queueAdmission?: object|null,       // card xkyw1x4 — the heavy-test QUEUE BASELINE (`heavy-admission.mjs
+ *                                      // queue-status --json`: backlog slot-minutes, slots, max wait, standard
+ *                                      // times). Each new build / fix / ci-heal spawn is costed at its expected
+ *                                      // heavy-slot demand and ADMITTED only while the projected wait stays ≤ the
+ *                                      // max (30 min default); the rest are held as `queue-cap`, beside `load-cap`.
+ *                                      // Several spawns in one tick each see the ones admitted before them. Omitted
+ *                                      // / bypassed / malformed = no gate (fails open, like `load-cap`).
+ *   itemSizes?: Record<string, number>, // card xkyw1x4 — a launch candidate's card `size`, which scales a build's
+ *                                      // expected demand. Missing = the default size.
  * }} input
  * @returns {{ decisions:object, nextState:object }}
  */
-export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedKinds = null, dispatchPausedReason = null, loadAdmission = {} } = {}) {
+export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = {}, signals = {}, prRearmCounts = {}, prCiHealCounts = {}, admission = {}, liveAgentSessions = [], config = {}, now = null, lastOperatorTurn = null, dispatchPaused = false, dispatchPausedKinds = null, dispatchPausedReason = null, loadAdmission = {}, queueAdmission = null, itemSizes = {} } = {}) {
   // THE PAUSE, RESOLVED PER KIND (epic #3383). `pausedKinds` is the concrete list this tick holds: `[]` when
   // nothing is paused, all six when the marker declares no scope (an old-format `{paused:true}` file, or any
   // caller that still passes only the boolean — both keep holding everything, unchanged), or exactly the
@@ -1248,12 +1258,26 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // ceiling still admitted is ALSO withheld this tick, tagged `by: 'load-cap'` — distinct from `capacity-cap`
   // (the fix differs: wait for load to drop vs. raise the cap / free a lane) — so the note names the real reason.
   const loadHeld = loadAdmission && loadAdmission.held === true;
+  // Card xkyw1x4 — THE QUEUE-TIME GATE (`queue-cap`), applied after load-cap. One budget per tick, seeded with the
+  // baseline (held + waiting + dispatched-not-yet-queued) plus this conveyor's OWN fresh spawns whose lane is not
+  // leased yet (the baseline reads leases, so a session spawned moments ago would otherwise be invisible), then
+  // charged spawn by spawn — builds first, then fixes, then CI-heals — so the Nth quick dispatch is the one held.
+  const queueBudget = createQueueBudget(queueAdmission, {
+    extraMinutes: freshSpawnDemandMinutes({ build: build.live, fix: fix.live, ciHeal: ciHeal.live }, { lanes, now, queueAdmission, itemSizes }),
+  });
+  const queueHeldBuilds = [];
+  const queueAdmittedBuilds = [];
+  for (const l of loadHeld ? [] : buildBudget.admitted) {
+    const d = queueBudget.tryAdmit('build', { size: itemSizes?.[normNum(l.num)] ?? itemSizes?.[l.num] ?? null, id: l.num });
+    if (d.admit) queueAdmittedBuilds.push(l); else queueHeldBuilds.push({ ...l, projectedMinutes: d.projectedMinutes, demandMinutes: d.demandMinutes });
+  }
   const launched = {
-    spawn: loadHeld ? [] : buildBudget.admitted,
+    spawn: queueAdmittedBuilds,
     suppressed: [
       ...guardFiltered.suppressed,
       ...buildBudget.overflow.map((l) => ({ num: l.num, lane: l.lane, by: 'capacity-cap' })),
       ...(loadHeld ? buildBudget.admitted.map((l) => ({ num: l.num, lane: l.lane, by: 'load-cap' })) : []),
+      ...queueHeldBuilds.map((l) => ({ num: l.num, lane: l.lane, by: 'queue-cap', projectedMinutes: l.projectedMinutes, demandMinutes: l.demandMinutes })),
     ],
   };
   const newBuildGuards = launched.spawn.map((l) => ({ num: l.num, lane: l.lane, ...spawnStamp(tick, now) }));
@@ -1343,9 +1367,12 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   // 6. FIX spawns — conveyor-launched `review:changes` PRs, gated by in-flight test + retry cap; consume lanes.
   //    #3609 — held by the same manual dispatch-pause as step 4; `fixAttempts` passes through UNCHANGED (no new
   //    attempt is spawned to count) rather than being recomputed by `planFixSpawns`.
-  const fixPlan = kindPaused('fix')
+  const fixPlanRaw = kindPaused('fix')
     ? { spawns: [], newGuards: [], fixAttempts, consumedLanes: [], notes: [] }
     : planFixSpawns({ prs, launchedNums, liveFixGuards: fix.live, fixAttempts, prRearmCounts, retryCap: cfg.fixRetryCap, availableLanes, tick, now });
+  // Card xkyw1x4 — queue-cap on fix spawns: a held fix gives its lane back and records no guard.
+  const fixQueue = applyQueueCapToSpawns(fixPlanRaw, 'fix', queueBudget);
+  const fixPlan = fixQueue.plan;
   const liveFixGuards = [...fix.live, ...fixPlan.newGuards];
   const fixConsumed = new Set(fixPlan.consumedLanes.map(String));
   availableLanes = availableLanes.filter((l) => !fixConsumed.has(String(l)));
@@ -1354,9 +1381,16 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   //     fix loop: same entry + counter + cap shape, CI-regression trigger, and the heal repairs ONLY CI — never the
   //     review label. Uses the lanes the builds/prepares/fixes did not take, gated by in-flight test + retry cap.
   //    #3609 — held by the same manual dispatch-pause as steps 4/6; `ciHealAttempts` passes through UNCHANGED.
-  const ciHealPlan = kindPaused('ci-heal')
+  const ciHealPlanRaw = kindPaused('ci-heal')
     ? { spawns: [], newGuards: [], ciHealAttempts, consumedLanes: [], notes: [] }
     : planCiHealSpawns({ prs, launchedNums, liveCiHealGuards: ciHeal.live, ciHealAttempts, prCiHealCounts, retryCap: cfg.ciHealRetryCap, availableLanes, tick, now });
+  // Card xkyw1x4 — queue-cap on CI-heal spawns. planCiHealSpawns bumps the attempt count at plan time, so a held
+  // heal also gets its PR's prior count back (a held heal is not an attempt).
+  const ciHealQueue = applyQueueCapToSpawns(ciHealPlanRaw, 'ci-heal', queueBudget);
+  const ciHealPlan = ciHealQueue.held.length === 0 ? ciHealQueue.plan : {
+    ...ciHealQueue.plan,
+    ciHealAttempts: restoreAttempts(ciHealQueue.plan.ciHealAttempts, ciHealAttempts, ciHealQueue.held.map((h) => h.pr)),
+  };
   const liveCiHealGuards = [...ciHeal.live, ...ciHealPlan.newGuards];
 
   // 7. WATCHERS — one per open conveyor-launched PR; prune to currently-open conveyor PRs. Each armed entry
@@ -1397,6 +1431,11 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
   for (const s of launched.suppressed) {
     if (s.by === 'capacity-cap') notes.push({ kind: 'capacity-cap', num: s.num, text: `⏸ #${s.num} — capacity-cap (concurrent-lane cap ${cfg.maxConcurrentLanes} reached)` });
     if (s.by === 'load-cap') notes.push({ kind: 'load-cap', num: s.num, text: `⏸ #${s.num} — load-cap (${loadCapReading(loadAdmission)})` });
+    if (s.by === 'queue-cap') notes.push({ kind: 'queue-cap', num: s.num, text: `⏸ #${s.num} — queue-cap (${queueCapReading(s, queueBudget)})` });
+  }
+  // Card xkyw1x4 — held fix / CI-heal spawns get the same `queue-cap` note, naming the PR.
+  for (const [what, q] of [['fix', fixQueue], ['CI-heal', ciHealQueue]]) {
+    for (const h of q.held) notes.push({ kind: 'queue-cap', num: h.num, pr: h.pr, text: `⏸ ${what} PR #${h.pr} (#${h.num}) — queue-cap (${queueCapReading(h, queueBudget)})` });
   }
   for (const r of build.retired) if (r.note) notes.push({ kind: 'build-ttl', num: r.num, text: `⚠ #${r.num} never claimed after ${cfg.buildTtlTicks} ticks — re-dispatching` });
   for (const r of prepare.retired) if (r.note) notes.push({ kind: 'prepare-ttl', num: r.num, text: `⚠ prepare #${r.num} produced no PR in ${cfg.prepareTtlTicks} ticks — re-dispatching` });
@@ -1517,6 +1556,14 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
     spawnInvestigations: prep.investigationSpawns,
     spawnFixes: fixPlan.spawns,
     spawnCiHeals: ciHealPlan.spawns,
+    // Card xkyw1x4 — the queue-time gate's verdict for this tick (null when no baseline was supplied).
+    queueAdmission: queueBudget.active ? {
+      maxWaitMinutes: queueBudget.maxWaitMinutes,
+      backlogMinutes: queueAdmission.backlogMinutes,
+      slots: queueAdmission.slots,
+      projectedWaitMinutes: queueBudget.projectFor(0),
+      decisions: queueBudget.decisions(),
+    } : null,
     armWatchers: watch.arm,
     retireGuards: { build: build.retired, prepare: prepare.retired, fix: fix.retired, ciHeal: ciHeal.retired },
     idleStop: idle.stop,
@@ -1556,6 +1603,71 @@ export function planTick({ state = {}, plan = {}, freeLanes = [], bookkeeping = 
       heldStall: heldStall.nextHeldStall,
     },
   };
+}
+
+// ── card xkyw1x4 — queue-time admission helpers (pure) ──────────────────────────────────────────────────
+
+/**
+ * Expected heavy-slot demand of THIS conveyor's own recent spawns that the queue baseline cannot see yet: a live
+ * build / fix / CI-heal guard spawned within the arrival window whose lane is not leased (not in `state.lanes`) —
+ * the session exists but has not acquired its lane, so no lease, holder or waiter reflects it. Once the lane is
+ * leased, the baseline's lease scan counts it instead, so nothing is counted twice. Pure.
+ */
+export function freshSpawnDemandMinutes(guards, { lanes = [], now = null, queueAdmission = null, itemSizes = {} } = {}) {
+  if (!Number.isFinite(now) || !queueAdmission) return 0;
+  const windowMs = (Number.isFinite(queueAdmission.arrivalWindowMinutes) ? queueAdmission.arrivalWindowMinutes : DEFAULT_ARRIVAL_WINDOW_MINUTES) * 60_000;
+  const leased = new Set((Array.isArray(lanes) ? lanes : []).map((l) => String(l?.lane ?? l)));
+  let total = 0;
+  for (const [kind, list] of [['build', guards.build], ['fix', guards.fix], ['ci-heal', guards.ciHeal]]) {
+    for (const g of Array.isArray(list) ? list : []) {
+      if (!g || g.lane == null || !Number.isFinite(g.spawnedAt)) continue;
+      if (now - g.spawnedAt > windowMs || leased.has(String(g.lane))) continue;
+      total += dispatchDemandMinutes(kind, { size: kind === 'build' ? (itemSizes?.[normNum(g.num)] ?? null) : null, standardMinutes: queueAdmission.standardMinutes });
+    }
+  }
+  return total;
+}
+
+/**
+ * Run each planned spawn of `kind` through the tick's queue budget. Held spawns are dropped from `spawns`,
+ * `newGuards` and `consumedLanes` (their lane goes back to the pool for the next spawn kind). Pure.
+ * @returns {{plan:object, held:Array<{pr:number, num:*, lane:*, projectedMinutes:number, demandMinutes:number}>}}
+ */
+export function applyQueueCapToSpawns(plan, kind, budget) {
+  if (!budget || !budget.active || !Array.isArray(plan?.spawns) || plan.spawns.length === 0) return { plan, held: [] };
+  const held = [];
+  const keep = [];
+  for (const sp of plan.spawns) {
+    const d = budget.tryAdmit(kind, { id: sp.pr });
+    if (d.admit) keep.push(sp); else held.push({ ...sp, projectedMinutes: d.projectedMinutes, demandMinutes: d.demandMinutes });
+  }
+  if (held.length === 0) return { plan, held };
+  const heldPrs = new Set(held.map((h) => Number(h.pr)));
+  const heldLanes = new Set(held.map((h) => String(h.lane)));
+  return {
+    plan: {
+      ...plan,
+      spawns: keep,
+      newGuards: plan.newGuards.filter((g) => !heldPrs.has(Number(g.pr))),
+      consumedLanes: plan.consumedLanes.filter((l) => !heldLanes.has(String(l))),
+    },
+    held,
+  };
+}
+
+/** Put back the prior attempt count for PRs whose planned spawn was held (a held spawn is not an attempt). */
+function restoreAttempts(next, prior, prs) {
+  const out = { ...(next || {}) };
+  for (const pr of prs) {
+    if (prior && Object.prototype.hasOwnProperty.call(prior, pr)) out[pr] = prior[pr]; else delete out[pr];
+  }
+  return out;
+}
+
+/** Human-readable reading for a `queue-cap` note, e.g. `projected heavy-test wait 34.5m > 30m (this spawn +6.5m)`. */
+function queueCapReading(held, budget) {
+  const max = budget?.maxWaitMinutes ?? '?';
+  return `projected heavy-test wait ${held?.projectedMinutes ?? '?'}m > ${max}m (this spawn +${held?.demandMinutes ?? '?'}m)`;
 }
 
 /**
@@ -1770,6 +1882,40 @@ async function main(argv) {
     loadAdmission = JSON.parse(raw);
   } catch { /* fail open — see comment above */ }
 
+  // Card xkyw1x4 — the heavy-test QUEUE BASELINE for the `queue-cap` gate (`heavy-admission.mjs queue-status`).
+  // Best-effort and fail-open like load-status: a read failure leaves `queueAdmission` null (no gate).
+  // `--queue-status-file=<json>` replays a saved baseline instead — the dry-run seam for "what would this tick do
+  // under a busy queue", never used by the live runner.
+  let queueAdmission = null;
+  try {
+    if (typeof flags['queue-status-file'] === 'string') {
+      const { readFileSync } = await import('node:fs');
+      queueAdmission = JSON.parse(readFileSync(flags['queue-status-file'], 'utf8'));
+    } else {
+      const qArgs = ['queue-status', '--json'];
+      if (typeof flags.repo === 'string') qArgs.push(`--repo=${flags.repo}`);
+      const raw = time('queueAdmissionMs', () => execFileSync('node', [ADMISSION_CLI, ...qArgs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' }));
+      queueAdmission = JSON.parse(raw);
+    }
+  } catch { queueAdmission = null; }
+  // A build's expected demand scales with its card `size` — read straight off each launch candidate's card
+  // frontmatter (cheap: one small file per candidate, only when there is something to launch).
+  const itemSizes = {};
+  if (queueAdmission && Array.isArray(plan?.launch) && plan.launch.length) {
+    try {
+      const { readdirSync, readFileSync } = await import('node:fs');
+      const backlogDir = typeof flags['backlog-dir'] === 'string' ? flags['backlog-dir'] : join(HERE, '..', '..', 'backlog');
+      const files = readdirSync(backlogDir);
+      for (const l of plan.launch) {
+        const key = normNum(l.num);
+        const f = files.find((n) => n.endsWith('.md') && normNum(n.split('-')[0]) === key);
+        if (!f) continue;
+        const m = /^size:\s*(\d+(?:\.\d+)?)\s*$/m.exec(readFileSync(join(backlogDir, f), 'utf8').split(/\n---\s*\n/)[0]);
+        if (m) itemSizes[key] = Number(m[1]);
+      }
+    } catch { /* sizes are optional — a build without one is costed at the default size */ }
+  }
+
   // #3609 — the manual/emergency dispatch-pause marker (best-effort direct import, matching the durable-floor
   // reads above). FAILS OPEN: a missing module or unreadable/corrupt marker leaves `dispatchPaused` false —
   // dispatch-plan.mjs's own IO shell already reads the SAME marker independently for `plan.launch`, so a
@@ -1803,7 +1949,7 @@ async function main(argv) {
 
   // epic #3383 — dispatchPausedKinds carries the manual-pause marker's KIND SCOPE through verbatim (`null` =
   // blanket pause); dropping it here would silently re-widen a scoped pause back to holding all six kinds.
-  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason, loadAdmission });
+  const out = planTick({ state, plan, freeLanes, bookkeeping, signals, prRearmCounts, prCiHealCounts, admission, liveAgentSessions, config, now: Date.now(), lastOperatorTurn, dispatchPaused, dispatchPausedKinds, dispatchPausedReason, loadAdmission, queueAdmission, itemSizes });
   // Verbose-mode timing breakdown (#3521 decision-trace v1 follow-up) — an IO-shell-observed fact, not something
   // the pure core computes; attached only here, after the tick already ran, so a timing read can never affect
   // the decision itself.

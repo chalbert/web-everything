@@ -1,0 +1,186 @@
+/**
+ * @file scripts/readiness/__tests__/heavy-admission-fast-lane.test.mjs
+ * @description Card xkyw1x4 — the heavy-admission IO half against a REAL (temp) lock root: the FAST LANE (a short
+ *   job never waits behind a full-suite waiter; one slot reserved for short jobs; first-come-first-served still
+ *   holds inside each lane), hold durations recorded by kind on release, and the queue baseline (held + waiting +
+ *   dispatched-not-yet-queued). Never touches the real lane pool: every lock root is a `mkdtemp` dir and lane
+ *   leases are injected.
+ */
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  acquireSlotBlocking, tryAcquireSlot, markWaiting, releaseOwnedSlot, heldSlots, listWaiting, clearWaiting,
+  readHoldDurations, readStandardMinutes, resolveQueueBaseline, resolveLiveQueueBaseline,
+} from '../heavy-admission.mjs';
+
+const roots = [];
+function tempRoot() {
+  const r = mkdtempSync(join(tmpdir(), 'heavy-fast-lane-'));
+  roots.push(r);
+  return r;
+}
+afterEach(() => { while (roots.length) rmSync(roots.pop(), { recursive: true, force: true }); });
+
+const T0 = Date.parse('2026-09-25T20:00:00.000Z');
+const iso = (ms) => new Date(ms).toISOString();
+
+/** A deterministic clock + sleep: each sleep advances the clock by `pollMs` and runs `onSleep(n)`. */
+function fakeTime({ start = T0, onSleep = () => {} } = {}) {
+  let t = start;
+  let n = 0;
+  return {
+    now: () => t,
+    sleep: async (ms) => { n += 1; t += ms; onSleep(n); },
+    polls: () => n,
+  };
+}
+
+/** A slot held by a "full suite" that is still running (own pid → liveness unknown → the lease protects it). */
+function holdSlot(lockRoot, cap, owner, kind = 'FULL') {
+  const r = tryAcquireSlot({ lockRoot, cap, owner, pid: process.pid, nowMs: T0, nowIso: iso(T0), meta: { kind, acquiredAt: iso(T0) }, slots: [0] });
+  expect(r.ok).toBe(true);
+}
+
+describe('fast lane — a short job never waits behind a full-suite waiter', () => {
+  it('cap 2: with a full suite running and another full suite WAITING, a newer short job takes the reserved slot at once', async () => {
+    const lockRoot = tempRoot();
+    holdSlot(lockRoot, 2, 'lane-full-running');
+    // An OLDER full-suite waiter (a real, live marker — same pid → never reaped as dead).
+    markWaiting({ lockRoot, owner: 'lane-full-waiting', lane: '5', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
+    const clock = fakeTime();
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 2, owner: 'lane-fixer-check', kind: 'selected', env: {}, ceilingMs: 60_000, log: () => {}, ...clock,
+    });
+    expect(r).toMatchObject({ ok: true, slot: 1, waitedMs: 0 });
+    expect(heldSlots({ lockRoot, cap: 2 }).map((h) => h.meta?.kind)).toEqual(['FULL', 'selected']);
+  });
+
+  it('cap 2: a full suite may NOT take the reserved fast slot, even when it is the only free slot', async () => {
+    const lockRoot = tempRoot();
+    holdSlot(lockRoot, 2, 'lane-full-running');
+    const clock = fakeTime();
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 2, owner: 'lane-second-full', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
+    });
+    expect(r).toMatchObject({ ok: false, ceilingHit: true });
+  });
+
+  it('cap 1 (no reserved slot): when the slot frees, the short job takes it ahead of an OLDER full-suite waiter', async () => {
+    const lockRoot = tempRoot();
+    holdSlot(lockRoot, 1, 'lane-full-running');
+    markWaiting({ lockRoot, owner: 'lane-full-waiting', lane: '5', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
+    // The running full suite finishes during the short job's first poll.
+    const clock = fakeTime({ onSleep: (n) => { if (n === 1) releaseOwnedSlot({ lockRoot, cap: 1, owner: 'lane-full-running' }); } });
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'lane-fixer-check', kind: 'standards', env: {}, ceilingMs: 60_000, log: () => {}, ...clock,
+    });
+    expect(r).toMatchObject({ ok: true, slot: 0 });
+    expect(clock.polls()).toBe(1);
+  });
+
+  it('first-come-first-served still holds INSIDE the fast lane: an older short waiter goes first', async () => {
+    const lockRoot = tempRoot();
+    markWaiting({ lockRoot, owner: 'lane-older-short', lane: '7', pid: process.pid, kind: 'selected', nowIso: iso(T0 - 60_000) });
+    const clock = fakeTime();
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 1, owner: 'lane-newer-short', kind: 'files', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
+    });
+    expect(r).toMatchObject({ ok: false, ceilingHit: true });
+  });
+
+  it('a full-suite waiter still ranks first-come-first-served among full suites', async () => {
+    const lockRoot = tempRoot();
+    markWaiting({ lockRoot, owner: 'lane-older-full', lane: '7', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
+    const clock = fakeTime();
+    const r = await acquireSlotBlocking({
+      lockRoot, cap: 2, owner: 'lane-newer-full', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
+    });
+    expect(r).toMatchObject({ ok: false, ceilingHit: true });
+  });
+});
+
+describe('waiting markers — two long owners never share one marker file', () => {
+  it('owners that differ only after 128 characters (lanes under a deep pool root) keep separate markers', () => {
+    const lockRoot = tempRoot();
+    const deep = `/tmp/${'x'.repeat(140)}/web-everything`;
+    markWaiting({ lockRoot, owner: `${deep}/lane-2#1`, pid: process.pid, kind: 'FULL', nowIso: iso(T0) });
+    markWaiting({ lockRoot, owner: `${deep}/lane-3#2`, pid: process.pid, kind: 'FULL', nowIso: iso(T0) });
+    expect(listWaiting(lockRoot).map((m) => m.owner).sort()).toEqual([`${deep}/lane-2#1`, `${deep}/lane-3#2`]);
+    clearWaiting({ lockRoot, owner: `${deep}/lane-2#1` });
+    expect(listWaiting(lockRoot).map((m) => m.owner)).toEqual([`${deep}/lane-3#2`]);
+  });
+});
+
+describe('hold durations — recorded by kind on release, rolled into the standard time', () => {
+  it('each release appends {kind, ms}; three FULL holds of ~20m make FULL\'s standard ~20m', async () => {
+    const lockRoot = tempRoot();
+    for (let i = 0; i < 3; i++) {
+      const owner = `lane-${i}`;
+      // Acquired "20 minutes ago" on the fake clock; released now on the real one.
+      const r = await acquireSlotBlocking({ lockRoot, cap: 1, owner, kind: 'FULL', env: {}, log: () => {}, now: () => Date.now() - 20 * 60_000, sleep: async () => {} });
+      expect(r.ok).toBe(true);
+      releaseOwnedSlot({ lockRoot, cap: 1, owner });
+    }
+    const recs = readHoldDurations(lockRoot);
+    expect(recs).toHaveLength(3);
+    expect(recs.every((r) => r.kind === 'FULL' && r.ms >= 20 * 60_000 - 1000)).toBe(true);
+    const { minutes, source } = readStandardMinutes(lockRoot);
+    expect(Math.round(minutes.FULL)).toBe(20);
+    expect(source.FULL.from).toBe('rolling');
+    expect(source.selected.from).toBe('seed');
+  });
+
+  it('a slot acquired by older code (no kind recorded) is released without writing a guessed duration', () => {
+    const lockRoot = tempRoot();
+    tryAcquireSlot({ lockRoot, cap: 1, owner: 'legacy', pid: process.pid, nowMs: T0, nowIso: iso(T0) });
+    releaseOwnedSlot({ lockRoot, cap: 1, owner: 'legacy' });
+    expect(readHoldDurations(lockRoot)).toEqual([]);
+  });
+});
+
+describe('resolveQueueBaseline — held + waiting + dispatched-not-yet-queued', () => {
+  it('counts remaining held time, live waiters, and fresh dispatched sessions that have not reached the slots', () => {
+    const lockRoot = tempRoot();
+    const NOW = T0 + 6 * 60_000;
+    tryAcquireSlot({ lockRoot, cap: 2, owner: '/p/we/lane-1#11', pid: process.pid, nowMs: T0, nowIso: iso(T0), meta: { kind: 'FULL', acquiredAt: iso(T0) } });
+    markWaiting({ lockRoot, owner: '/p/we/lane-2', repo: '/p/we/lane-2', lane: '2', pid: process.pid, kind: 'selected', nowIso: iso(NOW - 60_000) });
+    const leases = [
+      { repo: '/p/we/lane-3', lease: { purpose: 'conveyor-fix', session: 'fix-10', acquiredAt: iso(NOW - 2 * 60_000), ttlMinutes: 240 } }, // pending fix
+      { repo: '/p/we/lane-4', lease: { purpose: 'conveyor-delivery', session: 'conveyor-99', acquiredAt: iso(NOW - 3 * 60_000), ttlMinutes: 240 } }, // pending build
+      { repo: '/p/we/lane-5', lease: { purpose: 'conveyor-fix', session: 'fix-11', acquiredAt: iso(NOW - 40 * 60_000), ttlMinutes: 240 } }, // past the arrival window
+      { repo: '/p/we/lane-1', lease: { purpose: 'conveyor-fix', session: 'fix-12', acquiredAt: iso(NOW - 60_000), ttlMinutes: 240 } }, // already holding
+      { repo: '/p/we/lane-6', lease: { purpose: 'review-juror', session: 'review-5', acquiredAt: iso(NOW - 60_000), ttlMinutes: 240 } }, // review: 0
+      { repo: '/p/we/lane-7', lease: { purpose: 'hermetic-host-tests', session: 'Mac:1', acquiredAt: iso(NOW - 60_000), ttlMinutes: 240 } }, // not a dispatch
+    ];
+    const b = resolveQueueBaseline({ lockRoot, cap: 2, nowMs: NOW, env: {}, readLeases: () => leases, isLiveWaiter: () => true });
+    expect(b.pending.map((p) => [p.lane, p.dispatchKind, p.demandMinutes])).toEqual([['3', 'fix', 3.25], ['4', 'build', 6.5]]);
+    // FULL held 6m of 18 → 12 left; one selected waiter 3; pending 3.25 + 6.5 → 24.75 slot-min over 2 slots.
+    expect(b).toMatchObject({ heldRemainingMinutes: 12, waitingMinutes: 3, pendingMinutes: 9.75, backlogMinutes: 24.75, projectedWaitMinutes: 12.38, maxWaitMinutes: 30, fastSlots: 1 });
+  });
+
+  it('a dispatched session that already finished a heavy run since its lease began is not pending any more', () => {
+    const lockRoot = tempRoot();
+    const now = Date.now();
+    const leases = [{ repo: '/p/we/lane-3', lease: { purpose: 'conveyor-fix', session: 'fix-10', acquiredAt: iso(now - 5 * 60_000), ttlMinutes: 240 } }];
+    // Before its first heavy run: pending.
+    expect(resolveQueueBaseline({ lockRoot, cap: 1, nowMs: now, env: {}, readLeases: () => leases }).pending).toHaveLength(1);
+    // It runs (and finishes) a selected check → a duration is recorded for its repo → it has arrived.
+    tryAcquireSlot({ lockRoot, cap: 1, owner: '/p/we/lane-3#5', pid: process.pid, nowMs: now, nowIso: iso(now), meta: { kind: 'selected', acquiredAt: iso(now - 60_000) } });
+    releaseOwnedSlot({ lockRoot, cap: 1, owner: '/p/we/lane-3#5' });
+    expect(resolveQueueBaseline({ lockRoot, cap: 1, nowMs: Date.now() + 1000, env: {}, readLeases: () => leases }).pending).toEqual([]);
+  });
+
+  it('WE_QUEUE_ADMISSION=off and CI bypass the gate; the max wait is configurable', () => {
+    const lockRoot = tempRoot();
+    expect(resolveQueueBaseline({ lockRoot, cap: 2, env: { WE_QUEUE_ADMISSION: 'off' }, readLeases: () => [] }).bypassed).toBe('off');
+    expect(resolveQueueBaseline({ lockRoot, cap: 2, env: { CI: 'true' }, readLeases: () => [] }).bypassed).toBe('ci');
+    expect(resolveQueueBaseline({ lockRoot, cap: 2, env: { WE_QUEUE_ADMISSION_MAX_WAIT_MINUTES: '45' }, readLeases: () => [] }).maxWaitMinutes).toBe(45);
+  });
+
+  it('the live resolver never reads the real host pool from a test worker (fails open instead)', () => {
+    const b = resolveLiveQueueBaseline({ checkoutRoot: '/nonexistent/checkout', env: { VITEST: 'true', HOME: '/nonexistent-home' } });
+    expect(b.bypassed).toBe('error');
+  });
+});
