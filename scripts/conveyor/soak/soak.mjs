@@ -216,6 +216,12 @@ export async function runSoak({
     violations.push({ round: null, daemon: null, tick: null, invariant, detail: fatal });
     say(`FATAL [${invariant}] ${fatal}`);
   }
+  // A hook finding with no later tick to ride on (a daemon-less scenario that drives the code directly, or one
+  // raised in the last round) is still a finding — never let it vanish into a false GREEN (PR #2731 review).
+  for (const x of pendingHookViolations.splice(0)) {
+    violations.push({ round: null, daemon: null, tick: null, ...x });
+    say(`hook [${x.invariant}] ${x.detail}`);
+  }
   const ms = Date.now() - startedAt;
   const byInv = {};
   for (const v of violations) byInv[v.invariant] = (byInv[v.invariant] ?? 0) + 1;
