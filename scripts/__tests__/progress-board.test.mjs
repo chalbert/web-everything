@@ -192,6 +192,40 @@ describe('classifyPr', () => {
     expect(classifyPr(pr({ labels: ['ci:failed'], mergeStateStatus: 'BLOCKED', statusCheckRollup: pr2636Rollup }))).toBe('ci-red');
   });
 
+  // xx6kg3f (epic #3383/#4075) — LIVE INCIDENT 2026-09-26 13:52 ET, PR #2739 (chalbert/web-everything):
+  // `review:accepted` + the durable `ci:failed` label, but the reconcile tick that logged
+  // `reconcile-refused nothing-owed … phase queued` for it had fetched a rollup that did not (yet, or due to
+  // a `gh` hiccup) show the failing `test` check — `ciFailed([])` reads `false`, and with no OTHER signal
+  // `classifyPr` fell through to `queued`. The durable `ci:failed` label is exactly the fact this rollup read
+  // missed; trusting it as a fallback is what closes the gap. Fixture: PR #2739's REAL labels
+  // (`gh pr view 2739 --repo chalbert/web-everything --json labels`), with the rollup this ONE degraded read
+  // would have returned (empty — the shape a rate-limited/partial `gh` response takes, per this file's own
+  // "degradation is a feature" header).
+  it('trusts the durable ci:failed label when this read\'s own rollup came back empty — PR #2739, 2026-09-26 (xx6kg3f)', () => {
+    const pr2739Labels = ['review:accepted', 'ci:failed', 'review-round:2', 'review-status:reviewing'];
+    expect(classifyPr(pr({ labels: pr2739Labels, mergeStateStatus: 'BLOCKED', statusCheckRollup: [] }))).toBe('ci-red');
+  });
+
+  // The full real rollup (`gh pr view 2739 --repo chalbert/web-everything --json statusCheckRollup`, at the
+  // moment its `test` check had already concluded) already classified correctly BEFORE the fix above — pinned
+  // here so a future change to `ciFailed`/`FAILING_CONCLUSIONS` cannot quietly regress the non-degraded path.
+  it('reads PR #2739\'s real, undegraded rollup as ci-red too (xx6kg3f)', () => {
+    const pr2739Labels = ['review:accepted', 'ci:failed', 'review-round:2', 'review-status:reviewing'];
+    const pr2739Rollup = [
+      { name: 'test-shard (1)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'test-shard (2)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'test-shard (3)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'test-shard (4)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'daemon-soak', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'test-selection-measure', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { name: 'visual', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ];
+    expect(classifyPr(pr({ labels: pr2739Labels, mergeStateStatus: 'BLOCKED', statusCheckRollup: pr2739Rollup }))).toBe('ci-red');
+  });
+
   it('ranks the operator\'s status above every other', () => {
     const ranks = Object.entries(PR_STATUS).map(([k, v]) => [k, v.rank]);
     expect(Math.min(...ranks.map(([, r]) => r))).toBe(PR_STATUS['needs-human'].rank);

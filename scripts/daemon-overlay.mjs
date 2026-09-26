@@ -24,6 +24,17 @@
  * actually present). Exit codes: 2 on bad usage (unknown command, missing `--clone`, `add`/`remove` missing
  * `--ref`, non-integer `--pr`); 1 when the write lock is refused (add/remove only); 0 otherwise — including a
  * `remove` of a ref that was never present, which is not a usage error.
+ *
+ * xa4qo7n follow-up (live 2026-09-26, epic #4075): this CLI's add/remove used to call `withWriteLock(root, fn,
+ * {})` with NO wait bound at all — it inherited `acquireWrite`'s raw 600s (10 MINUTE) default. A live operator
+ * run of `add` reserved the writer key, then sat silently (0% CPU, no log line) for 8+ minutes waiting for a
+ * busy clone's readers to drain, during which EVERY daemon sharing the clone was refused `writer-active` on
+ * every tick — the exact class of freeze card 4044/#2625 fixed for `daemon-rebuild.mjs#rebuildClone` (which
+ * bounds its OWN write-lock wait to {@link DEFAULT_OVERLAY_LOCK_WAIT_MS}-scale via `WE_DAEMON_REBUILD_LOCK_WAIT_MS`,
+ * logging both the wait start and the give-up) — this CLI just never got that same fix. It now bounds its wait
+ * the same way (env `WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default {@link DEFAULT_OVERLAY_LOCK_WAIT_MS}), logs when
+ * it starts waiting and who is blocking it, and on timeout reports `tick-in-progress` (retryable — the caller
+ * already treats any `!ok` as "write lock refused" and exits 1) instead of silently hanging.
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +55,12 @@ function fail(msg) {
   process.stderr.write(`daemon-overlay: ${msg}\n`);
   process.exitCode = 2;
 }
+
+/** Env var bounding how long add/remove waits for live readers to drain before giving up — see the file header
+ *  (xa4qo7n follow-up). Kept short: this CLI's own mutation is a tiny metadata write, not a rebuild, so it only
+ *  ever needs to outlast whatever tick(s) are CURRENTLY in flight, never a long one. */
+export const OVERLAY_LOCK_WAIT_ENV = 'WE_DAEMON_OVERLAY_LOCK_WAIT_MS';
+export const DEFAULT_OVERLAY_LOCK_WAIT_MS = 30_000;
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -77,11 +94,18 @@ async function main() {
   const env = process.env;
 
   // Run `fn` (the actual mutation) either bare (`--no-lock`) or under Module A's write lock, imported lazily —
-  // see the file header for why this import cannot be a top-of-file `import`.
+  // see the file header for why this import cannot be a top-of-file `import`. BOUNDED (xa4qo7n follow-up):
+  // never the raw 600s `acquireWrite` default — see OVERLAY_LOCK_WAIT_ENV.
+  const waitMs = Number(env[OVERLAY_LOCK_WAIT_ENV]) > 0 ? Number(env[OVERLAY_LOCK_WAIT_ENV]) : DEFAULT_OVERLAY_LOCK_WAIT_MS;
   const withLockIfNeeded = async (fn) => {
     if (noLock) return { ok: true, value: fn() };
     const { withWriteLock } = await import('./lib/daemon-clone-lock.mjs');
-    return withWriteLock(root, () => fn(), {});
+    return withWriteLock(root, () => fn(), {
+      waitMs,
+      onBlocked: ({ blockers, waitMs: w }) => process.stderr.write(
+        `daemon-overlay: waiting up to ${Math.round(w / 1000)}s for live reader(s) ${blockers.join(', ')} to finish their tick (xa4qo7n)\n`,
+      ),
+    });
   };
 
   let output;
@@ -104,7 +128,7 @@ async function main() {
       return list;
     });
     if (!locked.ok) {
-      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason})\n`);
+      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason}${locked.heldBy ? ` — held by ${locked.heldBy}` : ''})\n`);
       process.exitCode = 1;
       return;
     }
@@ -116,7 +140,7 @@ async function main() {
       return { removed, list };
     });
     if (!locked.ok) {
-      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason})\n`);
+      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason}${locked.heldBy ? ` — held by ${locked.heldBy}` : ''})\n`);
       process.exitCode = 1;
       return;
     }

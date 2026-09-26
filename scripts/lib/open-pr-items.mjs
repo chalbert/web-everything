@@ -308,17 +308,203 @@ function isNonDeliveryPr(ref, title, { body = '', changedFiles = null } = {}) {
  * credited. When the changed-file list is known it must include the card itself (`backlog/<hash>-…`), i.e. the
  * PR filed it; the caller's hash→NNN re-key (`planResolveOnLand`) then only flips a card numbered THIS land.
  * Same whole-PR guards as `deliveredItemNumsFromPr`. Pure.
- * @returns {string|null} the provisional hash, or null
+ *
+ * #xqpqyr2 — the scaffold-refile check above is necessary when the hash has NO OTHER proof, but wrongly
+ * requires a re-file when the card was ALREADY numbered on `main` — by a JIT-numbering pass that ran BEFORE
+ * this PR's own diff was computed — since the merged PR's diff then never touches the renamed file at all
+ * (real, live: PR #2668's ref led `xn6n5gp`, but its merge diff touched `backlog/4127-…md`, never
+ * `backlog/xn6n5gp-…md`, because a numbering commit had already renamed it). `landedNumberFor` (injected;
+ * defaults to a no-op so every pre-existing call site/test is unaffected) reads the SAME durable
+ * `bornAs:<hash>` frontmatter record on `origin/main` already used for the identical stackParent/blockedBy
+ * proof — strictly STRONGER evidence than the changed-file heuristic, since it is the actual birth record,
+ * not a guess from file paths. Tried FIRST; when it resolves, the caller (`landedIdsForCandidate`) treats the
+ * returned NNN exactly like a hash literal (both pass through `asItemId`), so this never needs a second code
+ * path downstream.
+ * @param {{body?:string, changedFiles?:(Array|null), landedNumberFor?:function}} [o] `landedNumberFor(hash)` →
+ *   the item's current NNN (as a string) if a `bornAs: <hash>` record already exists on `origin/main`, else
+ *   `null`/falsy. Defaults to `() => null` (inert — identical to pre-#xqpqyr2 behaviour).
+ * @returns {string|null} the provisional hash, the already-landed NNN, or null
  */
-export function deliveredHashFromPr(headRefName = '', title = '', { body = '', changedFiles = null } = {}) {
+export function deliveredHashFromPr(headRefName = '', title = '', { body = '', changedFiles = null, landedNumberFor = () => null } = {}) {
   const ref = String(headRefName || '');
   const lane = ref.match(/(?:^|\/)lane\/(.+)$/);
   const lead = lane ? lane[1].split(/[-_]/).filter(Boolean)[0] : '';
   if (!/^x[0-9a-z]{6}$/.test(lead || '')) return null;
   if (isNonDeliveryPr(ref, title, { body, changedFiles })) return null;
+  const landed = typeof landedNumberFor === 'function' ? landedNumberFor(lead) : null;
+  if (landed != null) return String(landed);
   if (Array.isArray(changedFiles) && changedFiles.length > 0
     && !changedFiles.some((f) => String(f?.path ?? f).startsWith(`backlog/${lead}-`))) return null;
   return lead;
+}
+
+/**
+ * #xqpqyr2 — ride-along cards a PR declares (and, for signal 3, PROVES) it resolves BESIDES its own single
+ * ref-led id. `deliveredItemNumsFromPr`/`deliveredHashFromPr` structurally credit AT MOST one id per PR (the
+ * one its ref/title names as the PR's OWN lane); a coordinated multi-card PR — several small cards landed
+ * together because they touch the same files or are explicitly sequenced — declares its OTHER cards only in
+ * its own text or diff, never in its ref, so those cards' `active` status survives the land forever. Real,
+ * live cases this closes: PR #2668 (ref-led `xn6n5gp` → #4127) also delivered `xuqk1vp` → #4134 and `xb94mt5`
+ * → #4121, named only in its title/body; PR #2689 (ref-led `x0zg44l` → #4169) also delivered `xg6m4i5` → #4172,
+ * named only in a body heading and a bold `**Rule (xg6m4i5):**` line.
+ *
+ * THREE conservative signals, each independently gated so a bare mention in prose never counts — the exact
+ * "looks delivered" false-positive class this must avoid (per this module's own docstring above):
+ *   1. An explicit "resolves #N" / "Resolves: #N, #M" LINE marker in the body — anchored to the START of a
+ *      line (optional leading list marker / bold decoration), never a mid-sentence citation — AND corroborated
+ *      by the PR's own diff moving that card's frontmatter status to `active`/`resolved` (the text alone never
+ *      resolves a card; a touched-but-unclaimed or deferred `open` card never counts). This is the
+ *      `Resolves #N` / `Refs #N` backstop `docs/agent/platform-decisions.md`'s
+ *      `#drain-multi-slice-card-interim-hold` note already anticipated as "a later, additive backstop."
+ *   2. A structured bornAs-HASH card marker: a `x[0-9a-z]{6}` token that appears either (a) in a parenthesized
+ *      group of the PR's own TITLE holding only hashes (`(xuqk1vp)`, `(xuqk1vp, xb94mt5)`), or (b) INSIDE a
+ *      body line's leading markdown BOLD span, or on a HEADING line — never a bare hash mention in ordinary
+ *      prose elsewhere, including the prose that follows a leading bold span on the same line. Corroborated
+ *      exactly like signal 1 (under the card's hash or its number). A hash with a REAL `bornAs` record on
+ *      `origin/main` (`landedNumberFor`) credits its NNN; one not numbered yet credits the bare hash only when
+ *      the PR filed/claimed that hash-named card itself.
+ *   3. A backlog file the PR's OWN diff flips TO `status: resolved` (`resolvedStatusIdsFromDiff` below) —
+ *      ground truth from the merge itself, independent of any text heuristic.
+ * All three sit behind the same whole-PR `isNonDeliveryPr` guards (no-code-changes / all-.md / annotation) a
+ * housekeeping-only or scope-authoring PR never ride-along-credits either. Pure.
+ * @param {{body?:string, changedFiles?:(Array|null), diff?:string, landedNumberFor?:function}} [o]
+ * @returns {string[]} zero-padded item ids, deduplicated (order not significant — caller unions into a Set)
+ */
+export function declaredResolvedIdsFromPr(headRefName = '', title = '', { body = '', changedFiles = null, diff = '', landedNumberFor = () => null } = {}) {
+  const ref = String(headRefName || '');
+  if (isNonDeliveryPr(ref, title, { body, changedFiles })) return [];
+  const ids = new Set();
+  // Signals 1/2 name a card; that is only a CLAIM (PR #2724 review, two rounds). The evidence is the PR's own
+  // diff moving that card's FRONTMATTER status to `active` (the PR claimed it — the delivery-agent convention,
+  // as real ride-along PRs #2668/#2689 did) or `resolved`, never from `resolved` (a re-open). A card merely
+  // touched (a typo, a scope edit), filed `open` (a deferred follow-up) or absent from the diff credits
+  // nothing; an unknown diff fails closed.
+  const transitions = backlogStatusTransitionsFromDiff(diff);
+  const delivered = (key) => {
+    const t = transitions.get(key);
+    return !!t && (t.to === 'active' || t.to === 'resolved') && t.from !== 'resolved';
+  };
+  // Signal 1 — explicit resolves/Resolves marker LINES (never mid-sentence): "Resolves #4121", "resolves:
+  // #4121, #4134", "Resolves #4121 and #4134." — optional leading `-`/`*` bullet, bold decoration and one
+  // trailing `.`/`;`.
+  for (const rawLine of String(body || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const m = /^(?:[-*]\s+)?\*{0,2}resolve[sd]?:?\*{0,2}\s+((?:#\d{2,5}\b[\s,&]*(?:and\s+)?)+)[.;]?$/i.exec(line);
+    if (!m) continue;
+    for (const n of m[1].matchAll(/#(\d{2,5})/g)) {
+      const id = n[1].padStart(3, '0');
+      if (delivered(id)) ids.add(id);
+    }
+  }
+  // Signal 2 — structured bornAs-hash card markers (title parens holding only hashes; body leading bold span /
+  // heading line). On a bold-led line only the text INSIDE the leading bold span counts — prose after it
+  // (`**Note:** unlike xg6m4i5, …`) is a citation.
+  const hashCandidates = new Set();
+  for (const g of String(title || '').matchAll(/\(([^()]*)\)/g)) {
+    if (!/^\s*x[0-9a-z]{6}(?:\s*(?:,|\+|&|\band\b)\s*x[0-9a-z]{6})*\s*$/i.test(g[1])) continue;
+    for (const m of g[1].matchAll(/x[0-9a-z]{6}/gi)) hashCandidates.add(m[0].toLowerCase());
+  }
+  for (const rawLine of String(body || '').split(/\r?\n/)) {
+    const bold = /^\s*(?:[-*+]\s+)?\*\*([^*\n]*)\*\*/.exec(rawLine);
+    const markerText = bold ? bold[1] : (/^\s{0,3}#{1,6}\s/.test(rawLine) ? rawLine : null);
+    if (markerText == null) continue;
+    for (const m of markerText.matchAll(/\b(x[0-9a-z]{6})\b/gi)) hashCandidates.add(m[1].toLowerCase());
+  }
+  // A hash already numbered on `origin/main` (a REAL bornAs record) credits its NNN; one the PR filed under its
+  // hash and is not numbered yet (numbering runs in this same land) credits the bare hash, which
+  // `planResolveOnLand` re-keys to the NNN minted this land. Either way the diff must show the delivery move.
+  for (const hash of hashCandidates) {
+    const landed = typeof landedNumberFor === 'function' ? landedNumberFor(hash) : null;
+    if (landed != null) {
+      const id = String(landed).padStart(3, '0');
+      if (delivered(id) || delivered(hash)) ids.add(id);
+    } else if (delivered(hash)) {
+      ids.add(hash);
+    }
+  }
+  // Signal 3 — a backlog file the PR's OWN diff flips TO status: resolved (ground truth, not a heuristic).
+  for (const n of resolvedStatusIdsFromDiff(diff)) ids.add(n);
+  return [...ids];
+}
+
+/**
+ * #xqpqyr2 — each backlog card's frontmatter `status:` transition in a unified diff (PR #2724 review round 2).
+ * Only a FRONTMATTER status line counts: a status line on a side stops counting once that side shows the
+ * closing `---` delimiter, a blank line or any non-YAML line before it (a fenced example, body prose). A
+ * modified card must REMOVE its prior status for a transition to exist (an added status line alone is not
+ * one); a new file (`--- /dev/null`) transitions from `null`. Pure.
+ * @param {string} diffText
+ * @returns {Map<string, {from:(string|null), to:(string|null)}>} keyed by zero-padded NNN or lowercase hash —
+ *   both the old and new name of a renamed card
+ */
+const FRONTMATTER_MAX_LINE = 30;
+
+export function backlogStatusTransitionsFromDiff(diffText = '') {
+  const out = new Map();
+  const text = String(diffText || '');
+  if (!text) return out;
+  const cardKey = (p) => {
+    const k = /(?:^|\/)backlog\/(\d{2,5}|x[0-9a-z]{6})-[^/]+\.md$/i.exec(p || '')?.[1];
+    return !k ? null : /^\d/.test(k) ? k.padStart(3, '0') : k.toLowerCase();
+  };
+  const yamlish = (c) => /^[A-Za-z_][\w-]*:(?:\s|$)/.test(c) || /^\s+\S/.test(c) || /^-\s/.test(c);
+  for (const block of text.split(/^diff --git /m).slice(1)) {
+    const lines = block.split(/\r?\n/);
+    const header = /a\/(\S+)\s+b\/(\S+)/.exec(lines[0] || '');
+    const keys = header ? [...new Set([cardKey(header[1]), cardKey(header[2])].filter(Boolean))] : [];
+    if (!keys.length) continue;
+    const firstHunk = lines.findIndex((l) => l.startsWith('@@'));
+    const isNew = lines.slice(0, firstHunk < 0 ? lines.length : firstHunk).includes('--- /dev/null');
+    // Per side: `ln` the next line number, `body` true once that side is provably past the frontmatter,
+    // `opened` true once the opening `---` at line 1 was seen. A hunk that never shows line 1 cannot see where
+    // the frontmatter ends, so there a status line counts only within the first FRONTMATTER_MAX_LINE lines
+    // (real cards put `status:` by line 19) — a body `status:` line deep in the file is prose.
+    const side = { old: { ln: 0, body: false, opened: false }, new: { ln: 0, body: false, opened: false } };
+    let inHunk = false;
+    let from = null;
+    let to = null;
+    const visit = (s, c) => {
+      const n = s.ln++;
+      if (s.body) return false;
+      if (n === 1) { if (c === '---') s.opened = true; else s.body = true; return false; }
+      if (c === '---' || !yamlish(c)) { s.body = true; return false; }
+      return s.opened || n <= FRONTMATTER_MAX_LINE; // a frontmatter line
+    };
+    for (const line of lines.slice(1)) {
+      const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (h) { inHunk = true; side.old.ln = Number(h[1]); side.new.ln = Number(h[2]); continue; }
+      if (!inHunk || line.startsWith('\\')) continue;
+      const mark = line[0];
+      const content = line.slice(1);
+      // Unquote (`status: "active"`) and drop a trailing `# comment`, so a quoted `'resolved'` still reads as a
+      // re-open rather than slipping past the `from !== 'resolved'` guard.
+      const status = /^status:\s*(["']?)([\w-]+)\1\s*(?:#.*)?$/.exec(content.trimEnd())?.[2] ?? null;
+      if (mark === ' ') { visit(side.old, content); visit(side.new, content); }
+      else if (mark === '-') { if (visit(side.old, content) && status) from = status; }
+      else if (mark === '+') { if (visit(side.new, content) && status) to = status; }
+    }
+    if (to == null || to === from || (from == null && !isNew)) continue;
+    for (const k of keys) out.set(k, { from, to });
+  }
+  return out;
+}
+
+/**
+ * #xqpqyr2 — the ground-truth half of `declaredResolvedIdsFromPr` (signal 3): which numbered backlog files
+ * does a unified diff itself flip FROM some other status TO `status: resolved`? A file already `resolved`
+ * before this PR (a `-status: resolved` line paired with the `+status: resolved` addition — i.e. no real
+ * transition) is excluded; this only credits a PR that PERFORMED the flip — in the card's FRONTMATTER, per
+ * `backlogStatusTransitionsFromDiff` (a body example is not a flip). Pure — takes a diff string (`git
+ * diff` / `gh pr diff` output), never fetches one itself.
+ * @param {string} diffText
+ * @returns {string[]} zero-padded item ids
+ */
+export function resolvedStatusIdsFromDiff(diffText = '') {
+  const ids = [];
+  for (const [key, t] of backlogStatusTransitionsFromDiff(diffText)) {
+    if (/^\d/.test(key) && t.to === 'resolved') ids.push(key);
+  }
+  return ids;
 }
 
 export function extractItemNums(prs) {

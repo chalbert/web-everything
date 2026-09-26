@@ -29,8 +29,12 @@ export const COMPLETION_STATUSES = Object.freeze(['started', 'done']);
 
 /** The dispatched-agent kinds this record shape serves (`we:backlog/3436-*.md`'s own two briefs, plus
  *  `inspect` — the diagnosis-only stuck-PR inspection agent, epic #3383 — added the same way this file's own
- *  header already anticipated a third kind: no shape change, just one more name in the enum). */
-export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'inspect']);
+ *  header already anticipated a third kind: no shape change, just one more name in the enum; plus `ci-heal` —
+ *  the CI-heal fix agent (`fix-agent-ci-brief.md`) — added #4075/xg7m2wq after a LIVE incident (PR #2724,
+ *  2026-09-26) proved a `ci-heal` session that had genuinely finished still counted as a live holder of its PR
+ *  forever, because this enum had no entry for it at all and the brief itself never reported completion. No
+ *  shape change here either — one more name in the same closed enum). */
+export const COMPLETION_KINDS = Object.freeze(['review', 'fix', 'inspect', 'ci-heal']);
 
 /** Session slugs are used as filenames, so the character set is closed — no separators, no traversal. */
 const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

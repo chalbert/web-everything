@@ -1,9 +1,10 @@
 ---
+bornAs: xxwkomm
 kind: story
 size: 3
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,11 +12,11 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Session reaper: a session that will not stop escalates, and the dispatch-scratch sweep actually runs (flow gaps, session-reaper)
 
-session-reaper: after the 3rd failed stop, record a per-session failure count across passes and escalate at a cap; wire --dispatch-scratch-sweep into the review daemon reap pass so orphaned scratch is cleaned on a schedule. Clears build-dispatch session-reaped-no-outcome silent-failure and session-cleanup dispatch-scratch-orphaned (xwuof33).
+session-reaper: after the 3rd failed stop, record a per-session failure count across passes and escalate at a cap; wire --dispatch-scratch-sweep into the review daemon reap pass so orphaned scratch is cleaned on a schedule. Clears build-dispatch session-reaped-no-outcome silent-failure and session-cleanup dispatch-scratch-orphaned (4235).
 
 ## Slice
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - build-dispatch session-reaped-no-outcome (silent-failure)

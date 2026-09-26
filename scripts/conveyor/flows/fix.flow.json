@@ -229,7 +229,7 @@
       "label": "blocked-on-infra streak capped — escalated, cool-off lengthened",
       "terminal": false,
       "owner": "scripts/conveyor/reconcile-core.mjs#planReconcile",
-      "ownerCite": "scripts/conveyor/reconcile-core.mjs:944-951",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:989-996",
       "wait": {
         "for": "the LENGTHENED 60-minute capped infra cool-off (INFRA_RETRY_CAPPED_COOLOFF_MS) before retrying again",
         "timeout": "60m",
@@ -240,7 +240,7 @@
       "escalation": {
         "to": "operator",
         "how": "infra-retry-exhausted note → PR comment + operator-queue",
-        "cite": "scripts/conveyor/reconcile-core.mjs:944-951; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
+        "cite": "scripts/conveyor/reconcile-core.mjs:989-996; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
       "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },
@@ -283,9 +283,9 @@
       "escalation": {
         "to": "operator",
         "how": "round-cap-exhausted note → PR comment + operator-queue",
-        "cite": "scripts/conveyor/reconcile-core.mjs:895-903,1126-1131,1222-1227,1334-1339,1377-1381"
+        "cite": "scripts/conveyor/reconcile-core.mjs:940-948,1171-1176,1267-1272,1379-1384,1422-1426"
       },
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1377-1381, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1126-1131, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1334-1339, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1222-1227, same cap, capKind `stacked-rebase`). Every ONE of these now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903) — the SAME 'refuse AND surface' shape the sibling ci-heal-exhausted path (reconcile-core.mjs:938-957) already used, now shared by every non-ci-heal cap population, each carrying `capKind` so the note names which population is exhausted (`fix`/`review`/`advisory-fix`/`conflict-fix`/`stacked-rebase`). Formerly a refusal-only entry (logged by the daemon's own formatRefusalLine, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538, to its own stderr/log file) — now also a durable PR comment via reconcile-note-comment.mjs and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes`."
+      "notes": "xilx617 (epic #4075/#3383) — FIXED. refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1422-1426, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1171-1176, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1379-1384, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1267-1272, same cap, capKind `stacked-rebase`). Every ONE of these now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903) — the SAME 'refuse AND surface' shape the sibling ci-heal-exhausted path (reconcile-core.mjs:1103-1122) already used, now shared by every non-ci-heal cap population, each carrying `capKind` so the note names which population is exhausted (`fix`/`review`/`advisory-fix`/`conflict-fix`/`stacked-rebase`). Formerly a refusal-only entry (logged by the daemon's own formatRefusalLine, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538, to its own stderr/log file) — now also a durable PR comment via reconcile-note-comment.mjs and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes`."
     }
   ],
   "transitions": [

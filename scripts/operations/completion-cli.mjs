@@ -31,7 +31,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The SAME two grammars `dispatch-lane.mjs#sessionSlugFor` (fix) and `review-dispatch.mjs` (review) mint. */
 export function sessionSlugForCompletion({ kind, pr, repo = 'we' }) {
-  if (kind !== 'review' && kind !== 'fix') throw new TypeError(`operations: completion --kind must be review or fix, got ${JSON.stringify(kind)}`);
+  if (kind !== 'review' && kind !== 'fix' && kind !== 'ci-heal') throw new TypeError(`operations: completion --kind must be review, fix, or ci-heal, got ${JSON.stringify(kind)}`);
   if (pr === undefined || pr === null || String(pr).trim() === '') throw new TypeError('operations: completion --pr is required when --session is not given');
   return mintSessionSlug({ kind, id: pr, repo: repoKeyForSlug(repo) });
 }

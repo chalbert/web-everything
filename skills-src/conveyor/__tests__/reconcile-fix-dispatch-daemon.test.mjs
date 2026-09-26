@@ -14,6 +14,7 @@ import {
   runReconcileCiHealDispatchAllRepos, runTickAllRepos, formatRefusalLine,
   runHungCiRecoveryAllRepos, formatHungActionLine,
   runMainRedRebaseAllRepos, formatMainRedRebaseActionLine,
+  runMissingRunRecoveryAllRepos, formatMissingRunActionLine,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -347,6 +348,10 @@ describe('runReconcileCiHealDispatchAllRepos — one runReconcileCiHealDispatch 
 // is the shared "nothing hung, nothing to do" stand-in for tests that aren't exercising this half at all.
 const noopHungCiTick = () => ({ dispatch: [], refusals: [], applied: [] });
 const noopMainRedRebaseTick = () => ({ dispatch: [], refusals: [], applied: [] });
+// xi4od2p (#4075/#3383) — the daemon's SIXTH half (missing-run recovery). Same reason as the two `noop*Tick`
+// stand-ins just above: every pre-existing `runTickAllRepos` call in this suite must supply a fake for this
+// half too, or it falls through to the real (network-calling) `sweepMissingRunRecovery` — forbidden in tests.
+const noopMissingRunTick = () => ({ dispatch: [], refusals: [], applied: [] });
 // #4191 (epic #4075/#3383) — the daemon's fifth half (notes). Every pre-existing `runTickAllRepos` call in this
 // describe block predates it and injects only the first four ticks; without also injecting this one, the REAL
 // default (`defaultReadNotesForRepo`, a genuine `runReconcilePass` call) runs against these fixtures' fake repo
@@ -359,7 +364,7 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
     const fixTick = vi.fn(({ repo }) => ({ dispatched: repo === 'repo-a' ? [{ pr: 1 }] : [], refusals: [] }));
     const ciHealTick = vi.fn(async ({ repo }) => ({ dispatched: repo === 'repo-b' ? [{ pr: 2 }] : [], refusals: [] }));
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(fixTick).toHaveBeenCalledTimes(2);
     expect(ciHealTick).toHaveBeenCalledTimes(2);
@@ -376,7 +381,7 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
       return { dispatched: [{ pr: 9, repo }], refusals: [] };
     });
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' }); // ci-heal still ran for repo-a despite fix's own failure there
     expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-b' }); // fix still ran for repo-b despite ci-heal's own failure there
@@ -400,7 +405,7 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
       reconcileRefusalDetails: repo === 'repo-b' ? [{ prNumber: 2, kind: 'nothing-owed', why: 'ci-heal-side' }] : [],
     }));
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(out.reconcileRefusals).toEqual([
       { repo: 'repo-a', prNumber: 1, kind: 'owed-ci-rerun', why: 'fix-side' },
@@ -417,7 +422,7 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
     // calls that same guard near its own top, exactly as `runReconcileFixDispatch` already does.
     const ciHealTick = vi.fn(async () => { throw new Error(message); });
     const out = await runTickAllRepos({
-      repos: ['chalbert/web-everything'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['chalbert/web-everything'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     // Proves the WIRING: hasStaleMainRefusal reads whatever `runTickAllRepos` puts in `.refusals`, regardless
     // of which half (fix or ci-heal) produced it — a ci-heal-side entry is never dropped or siloed from the
@@ -436,7 +441,7 @@ describe('runTickAllRepos — the Claude-auth-broken gate skips fix/ci-heal disp
     const ciHealTick = vi.fn(async () => ({ dispatched: [{ pr: 998 }], refusals: [] }));
     const out = await runTickAllRepos({
       repos: ['repo-a', 'repo-b'], fixTick, ciHealTick,
-      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
       authGateOverride: () => ({ paused: true, reason: 'paused: Claude login expired — run /login' }),
     });
     expect(fixTick).not.toHaveBeenCalled();
@@ -454,7 +459,7 @@ describe('runTickAllRepos — the Claude-auth-broken gate skips fix/ci-heal disp
     const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
     const out = await runTickAllRepos({
       repos: ['repo-a', 'repo-b'], fixTick, ciHealTick,
-      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
       authGateOverride: () => ({ paused: false, reason: null }),
     });
     expect(fixTick).toHaveBeenCalledTimes(2);
@@ -472,7 +477,7 @@ describe('runTickAllRepos — the Claude-auth-broken gate skips fix/ci-heal disp
     const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
     const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
     const out = await runTickAllRepos({
-      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(out.authPaused).toBe(false);
     expect(fixTick).toHaveBeenCalledTimes(1);
@@ -603,7 +608,7 @@ describe('runTickAllRepos — now runs THREE halves: fix, ci-heal, and hung-ci-r
       applied: repo === 'repo-a' ? [{ prNumber: 5, runId: 50, ok: true, action: 'cancelled-and-rerun', why: 'stuck' }] : [],
     }));
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(out.dispatched).toEqual(expect.arrayContaining([
       expect.objectContaining({ prNumber: 5, runId: 50, repo: 'repo-a', kind: 'hung-cancel-rerun' }),
@@ -618,7 +623,7 @@ describe('runTickAllRepos — now runs THREE halves: fix, ci-heal, and hung-ci-r
     const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
     const hungCiTick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('hung-ci broke'); return { dispatch: [], refusals: [], applied: [] }; });
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-a' });
     expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' });
@@ -712,7 +717,8 @@ describe('runTickAllRepos — now runs FOUR halves: fix, ci-heal, hung-ci-recove
       applied: repo === 'repo-a' ? [{ prNumber: 2685, headRefName: 'lane/xgqz204', ok: true, action: 'rebased' }] : [],
     }));
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick,
+      missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(out.dispatched).toEqual(expect.arrayContaining([
       expect.objectContaining({ prNumber: 2685, repo: 'repo-a', kind: 'rebase-onto-main' }),
@@ -727,7 +733,8 @@ describe('runTickAllRepos — now runs FOUR halves: fix, ci-heal, hung-ci-recove
     const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
     const mainRedRebaseTick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('rebase broke'); return { dispatch: [], refusals: [], applied: [] }; });
     const out = await runTickAllRepos({
-      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick, notesTick: noopNotesTick,
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick,
+      missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
     });
     expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-a' });
     expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' });
@@ -767,5 +774,124 @@ describe('runTickAllRepos — source contract: really calls runMainRedRebaseAllR
 
   it('onTick logs one line per rebase action via formatMainRedRebaseActionLine', () => {
     expect(src).toMatch(/for \(const a of \(mainRedRebase\?\.dispatched \?\? \[\]\)\) log\.error\(formatMainRedRebaseActionLine\(a\)\);/);
+  });
+});
+
+// xi4od2p (#4075/#3383) — the daemon's SIXTH half: missing-run recovery (PR chalbert/web-everything#2729's LIVE
+// incident — a required check that never even started). Mirrors {@link runMainRedRebaseAllRepos}'s own suite
+// shape exactly: per-repo isolation via injected `tick`, then a `runTickAllRepos` merge proof, then a
+// source-contract proof — same reason this half rides THIS daemon (no launchd job installs `pass-daemon.mjs`
+// for its own `daemon-manifest.mjs` entry).
+describe('runMissingRunRecoveryAllRepos — one sweepMissingRunRecovery call per watched repo, apply always true (xi4od2p)', () => {
+  it('calls tick once per repo, ALWAYS with apply:true — nothing else ever performs this trigger', () => {
+    const tick = vi.fn(() => ({ dispatch: [], refusals: [], applied: [] }));
+    runMissingRunRecoveryAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(tick).toHaveBeenCalledTimes(2);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-a', apply: true });
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-b', apply: true });
+  });
+
+  it('maps each applied trigger to a repo-tagged dispatched row', () => {
+    const tick = vi.fn(({ repo }) => ({
+      dispatch: [], refusals: [],
+      applied: repo === 'repo-a' ? [{ prNumber: 2729, headRefName: 'lane/4166-x', ok: true, action: 'update-branch', labelCleared: true }] : [],
+    }));
+    const out = runMissingRunRecoveryAllRepos({ repos: ['repo-a', 'repo-b'], tick });
+    expect(out.dispatched).toEqual([
+      { prNumber: 2729, headRefName: 'lane/4166-x', ok: true, action: 'update-branch', labelCleared: true, repo: 'repo-a', kind: 'trigger-ci' },
+    ]);
+  });
+
+  it('one repo\'s sweep failure never blocks another repo\'s — reported as tick-failed', () => {
+    const tick = vi.fn(({ repo }) => { if (repo === 'repo-bad') throw new Error('gh outage'); return { dispatch: [], refusals: [], applied: [] }; });
+    const out = runMissingRunRecoveryAllRepos({ repos: ['repo-bad', 'repo-good'], tick });
+    expect(out.refusals).toEqual([{ repo: 'repo-bad', prNumber: null, kind: 'tick-failed', why: 'gh outage' }]);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-good', apply: true });
+  });
+
+  it('drops a not-overdue refusal from its own refusals (the ordinary case for almost every open PR on almost every tick)', () => {
+    const tick = vi.fn(() => ({ dispatch: [], refusals: [{ prNumber: 1, kind: 'not-overdue', why: 'too soon' }], applied: [] }));
+    const out = runMissingRunRecoveryAllRepos({ repos: ['repo-a'], tick });
+    expect(out.refusals).toEqual([]);
+  });
+
+  it('defaults repos to FIX_DISPATCH_DAEMON_REPOS — every watched repo', () => {
+    const tick = vi.fn(() => ({ dispatch: [], refusals: [], applied: [] }));
+    runMissingRunRecoveryAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(FIX_DISPATCH_DAEMON_REPOS.length);
+  });
+});
+
+describe('runTickAllRepos — now runs SIX halves, missing-run-recovery included (xi4od2p)', () => {
+  it('merges the missing-run half\'s dispatched/refusals into the tick\'s own top-level arrays, and keeps its own detail at .missingRun', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const missingRunTick = vi.fn(({ repo }) => ({
+      dispatch: [], refusals: [],
+      applied: repo === 'repo-a' ? [{ prNumber: 2729, headRefName: 'lane/4166-x', ok: true, action: 'update-branch', labelCleared: true }] : [],
+    }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+      mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick, notesTick: noopNotesTick,
+    });
+    expect(out.dispatched).toEqual(expect.arrayContaining([
+      expect.objectContaining({ prNumber: 2729, repo: 'repo-a', kind: 'trigger-ci' }),
+    ]));
+    expect(out.missingRun.dispatched).toEqual([
+      expect.objectContaining({ prNumber: 2729, repo: 'repo-a' }),
+    ]);
+  });
+
+  it('a missing-run-side failure for one repo does not skip that SAME repo\'s other halves, and vice versa', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const missingRunTick = vi.fn(({ repo }) => { if (repo === 'repo-a') throw new Error('trigger broke'); return { dispatch: [], refusals: [], applied: [] }; });
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick,
+      mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick, notesTick: noopNotesTick,
+    });
+    expect(fixTick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(ciHealTick).toHaveBeenCalledWith({ repo: 'repo-a' });
+    expect(out.refusals).toEqual(expect.arrayContaining([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'trigger broke' }]));
+  });
+});
+
+describe('formatMissingRunActionLine — one printable line per missing-run-trigger action, including the label-clear note (xi4od2p)', () => {
+  it('prints a successful action with the label-cleared note', () => {
+    const line = formatMissingRunActionLine({
+      repo: 'chalbert/web-everything', prNumber: 2729, headRefName: 'lane/4166-x', ok: true, action: 'update-branch',
+      labelCleared: true, why: 'no run at all',
+    });
+    expect(line).toContain('PR #2729');
+    expect(line).toContain('lane/4166-x');
+    expect(line).toContain('applied update-branch');
+    expect(line).toContain('cleared stale checking label');
+    expect(line).toContain('no run at all');
+  });
+
+  it('prints a FAILED action with its error, and no label-cleared note when nothing was cleared', () => {
+    const line = formatMissingRunActionLine({
+      repo: 'chalbert/web-everything', prNumber: 2729, headRefName: 'lane/4166-x', ok: false, action: 'workflow-dispatch',
+      labelCleared: false, error: 'workflow not found',
+    });
+    expect(line).toContain('FAILED workflow-dispatch');
+    expect(line).toContain('workflow not found');
+    expect(line).not.toContain('cleared stale checking label');
+  });
+});
+
+// SOURCE-CONTRACT proof, mirroring the main-red-rebase suite above.
+describe('runTickAllRepos — source contract: really calls runMissingRunRecoveryAllRepos (xi4od2p)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
+
+  it('runTickAllRepos itself calls runMissingRunRecoveryAllRepos', () => {
+    const start = src.indexOf('export async function runTickAllRepos(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toMatch(/runMissingRunRecoveryAllRepos\(/);
+  });
+
+  it('onTick logs one line per missing-run action via formatMissingRunActionLine', () => {
+    expect(src).toMatch(/for \(const a of \(missingRun\?\.dispatched \?\? \[\]\)\) log\.error\(formatMissingRunActionLine\(a\)\);/);
   });
 });

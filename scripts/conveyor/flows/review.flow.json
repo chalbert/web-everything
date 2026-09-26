@@ -252,20 +252,20 @@
       "terminal": true,
       "outcome": "failure",
       "owner": "none",
-      "ownerCite": "scripts/conveyor/reconcile-core.mjs:1377-1381",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:1422-1426",
       "wait": null,
       "retries": {
         "what": "rearm/advisory-comment-counted negotiation rounds (countRearmComments + countAdvisoryComments, whichever is higher)",
         "cap": 5,
         "onCap": "round-cap-exhausted",
-        "cite": "scripts/lib/jury-core.mjs:1034; scripts/conveyor/reconcile-core.mjs:1161-1165,1377-1381"
+        "cite": "scripts/lib/jury-core.mjs:1034; scripts/conveyor/reconcile-core.mjs:1206-1210,1422-1426"
       },
       "escalation": {
         "to": "operator",
         "how": "round-cap-exhausted note → PR comment + operator-queue",
-        "cite": "scripts/conveyor/reconcile-core.mjs:895-903,1377-1381"
+        "cite": "scripts/conveyor/reconcile-core.mjs:940-948,1422-1426"
       },
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:938-957): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1377-1381) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
+      "notes": "xilx617 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:1103-1122): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1422-1426) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
       "ack": {}
     },
     {
@@ -295,7 +295,7 @@
       "label": "blocked-on-infra streak capped — escalated, cool-off lengthened",
       "terminal": false,
       "owner": "scripts/conveyor/reconcile-core.mjs#planReconcile",
-      "ownerCite": "scripts/conveyor/reconcile-core.mjs:944-951",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:989-996",
       "wait": {
         "for": "the LENGTHENED 60-minute capped infra cool-off (INFRA_RETRY_CAPPED_COOLOFF_MS) before retrying again",
         "timeout": "60m",
@@ -306,7 +306,7 @@
       "escalation": {
         "to": "operator",
         "how": "infra-retry-exhausted note → PR comment + operator-queue",
-        "cite": "scripts/conveyor/reconcile-core.mjs:944-951; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
+        "cite": "scripts/conveyor/reconcile-core.mjs:989-996; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
       "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },

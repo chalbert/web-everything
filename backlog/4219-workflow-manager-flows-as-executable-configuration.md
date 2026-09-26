@@ -1,11 +1,12 @@
 ---
+bornAs: x3vjug7
 kind: decision
 parent: "4075"
 status: open
 scope: ["we:scripts/conveyor/flows/README.md", "we:scripts/conveyor/flows/flow-model.mjs", "we:scripts/conveyor/flows/check.mjs", "we:scripts/conveyor/flows/graph.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, workflow, flows, decision]
-relatedTo: ["4120", "3931", "xr05jjl"]
+relatedTo: ["4120", "3931", "4220"]
 ---
 
 # Workflow manager: flows as executable configuration
@@ -28,7 +29,7 @@ an unowned state, an unbounded wait or an unprovided assumption **before** it sh
 
 Slice 1 is live: `we:scripts/conveyor/flows/` describes nine flows as data (states with owner / waits /
 retries / escalation; steps with assumptions / provisions, cited `file:line`), generates Mermaid, and
-`we:scripts/conveyor/flows/check.mjs` gates CI on unacknowledged gaps (xr05jjl).
+`we:scripts/conveyor/flows/check.mjs` gates CI on unacknowledged gaps (4220).
 
 ## Open forks (not ruled — `/prepare` next)
 
@@ -65,14 +66,14 @@ expression language; (iii) code-first flows with a derived description (reverses
 
 - The engine as a new single point of failure: every migrated flow must keep a **fallback** (the current code
   path) behind a switch, and the engine itself must fall back to last-known-good like the daemon rebuild
-  (x5wbsbc).
+  (4217).
 - Shadow mode first: the engine computes "what I would do" next to the real daemon, and diffs; it acts only after
   N days of zero diffs.
 - Migration risk per flow is proportional to its blast radius (drain merges to main; review only labels).
 
 ## Proposed staged path (to confirm at /prepare)
 
-1. **Describe** (done, xr05jjl): flows as data + graphs + CI gap gate. Keep the descriptions honest: a daemon PR
+1. **Describe** (done, 4220): flows as data + graphs + CI gap gate. Keep the descriptions honest: a daemon PR
    that changes a flow updates its flow file (the step-2 "what else does this touch" review lens reads the diff
    of the flow file).
 2. **Plateau view**: render the flows and their live state on Plateau `/wip` (epic #3931) — which state each PR /

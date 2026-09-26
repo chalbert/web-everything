@@ -226,6 +226,10 @@ export function probeSelfSync(dir) {
       rejected: rb.rejected ?? null,
       quarantine: rb.quarantine ?? null,
       inProgress: rb.inProgress ? { ...rb.inProgress, startedAt: Date.parse(rb.inProgress.startedAt || '') || null } : null,
+      // x5wbsbc: a failed live smoke keeps the clone on its last-good build instead of blocking delivery —
+      // `daemon-rebuild.mjs`'s `hold`/`smokeAndAdopt` write this; `since` parsed the same way `adopted.at`/
+      // `inProgress.startedAt` are (`Date.parse`, `null` when invalid — an epoch-0 string included, same style).
+      held: rb.held ? { ...rb.held, since: Date.parse(rb.held.since || '') || null } : null,
     } : null;
     return { cloneKey, alerts, rebuild };
   });
@@ -285,7 +289,14 @@ export function probeAgents({ exec = run } = {}) {
   const arr = JSON.parse(exec('claude', ['agents', '--json'], { cwd: homedir() }));
   // `cwd`/`sessionId` carried through (additive — no existing smell reads `probes.agents` at all yet) so the
   // claude-auth-expired sign below can resolve each background session's own transcript.
-  return arr.map((a) => ({ name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId }));
+  // #xrv69j6 — `status`/`waitingFor` ALSO carried through (additive, same reasoning): a background session
+  // blocked on Claude Code's own unanswerable permission prompt reports `state: "blocked"`,
+  // `status: "waiting"`, `waitingFor: "permission prompt"` (measured live, `claude agents --json`, session
+  // `fix-2735`) — the `dispatch-permission-stall` smell below is the first reader.
+  return arr.map((a) => ({
+    name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId,
+    status: a.status ?? null, waitingFor: a.waitingFor ?? null,
+  }));
 }
 
 /**
@@ -456,8 +467,8 @@ export async function tick(flags = {}) {
   // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
   // here: every pre-existing smell stays exactly as silent as before in shadow mode (nothing here changes for
   // them), and the ONLY smell that can produce a non-suppressed entry while `mode: 'shadow'` is one that opts
-  // in via `notifyEvenInShadow` (today: `claude-auth-expired` alone — see that smell's own doc for why an
-  // expired operator login is urgent enough to break the "shadow mode notifies nothing" rule). Best-effort:
+  // in via `notifyEvenInShadow` (today: `claude-auth-expired` and `daemon-held-on-last-good` — see each
+  // smell's own doc for why it is urgent enough to break the "shadow mode notifies nothing" rule). Best-effort:
   // `notifyDesktopChecked` already reports its own failure rather than throwing; a delivery failure here must
   // never fail the tick.
   const notifications = [];
