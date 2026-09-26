@@ -77,6 +77,10 @@ import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname, sep } from 'node:path';
 import { resolveReal } from './guard-lane.mjs';
 import { guardedPoolRoot, referenceArgs } from './lib/lane-pool-paths.mjs';
+// #4196 — the constellation's known GitHub slugs, the second signal `isOriginCanonical` cross-checks a
+// lane's `origin` against (see that function's own header for why this is an OR with `repo.originUrl`, never
+// the sole source of truth).
+import { CONSTELLATION_REPOS, repoKeyForDir } from './lib/constellation-repos.mjs';
 import {
   LEASE_FILENAME,
   DEFAULT_LEASE_TTL_MINUTES,
@@ -303,6 +307,57 @@ function resolveRepo() {
 }
 
 const laneDir = (repo, n) => join(repo.poolDir, `lane-${n}`);
+
+// ── origin canonicality (#4196) ──────────────────────────────────────────────────────────────────────
+// A lane's `origin` remote is the ONE source of truth every dirty/ahead/preservation check in this file
+// (`laneDirtyOrAhead`, `aheadIsProvablyPushed`, `liveRemoteShas`, …) trusts unconditionally. If `origin` itself
+// has drifted to something other than the real remote — live-caught 2026-09-25: lane-11's `origin` was a
+// LOCAL FOLDER PATH (the operator's own primary checkout, `/Users/…/webeverything`) instead of
+// `git@github.com:chalbert/web-everything.git`, while all 88 other lanes were fine — every one of those
+// checks silently answers against the WRONG target: a preservation check reads a commit as "already on
+// origin" when it only exists on the primary checkout's disk (never pushed to GitHub), and a `fetch origin`
+// never talks to GitHub at all.
+//
+// The canonical value to compare a lane against is TWO signals, either being enough (an OR, never an AND):
+//  1. `repo.originUrl` — what THIS invocation itself resolved (`resolveRepo()`): either an explicit
+//     `--origin=` override, or the reference/primary checkout's own `origin` remote. A lane cloned by this
+//     file always got exactly this URL (`cloneLane` clones from `repo.originUrl`, never anything else), so
+//     under normal operation (no `--origin=` override, invoked from the real primary checkout) this already
+//     IS the real GitHub remote — and it is what lets a throwaway test/dev pool (`--origin=<temp bare repo>`,
+//     `--name=web-everything`, see `lane-pool-siblings.test.mjs`) compare CORRECTLY against its own fake
+//     origin instead of being false-flagged against a hardcoded GitHub URL it was never meant to match.
+//  2. The CONSTELLATION-canonical URL for a recognized pool name (`CONSTELLATION_REPOS`) — a second,
+//     independent signal so a lane is still judged correctly even when THIS invocation's own `repo.originUrl`
+//     is itself unreliable (e.g. run with cwd inside an already-drifted lane).
+// A lane matching EITHER signal is canonical; matching neither is drift. An unrecognized pool name with no
+// `repo.originUrl` at all (only possible for a `--pool=`-selecting read/release op) has no signal to compare
+// against at all — fail OPEN (never flagged), matching this file's existing "no proof ⇒ don't act" posture.
+function constellationCanonicalOriginUrl(repoName) {
+  const key = repoKeyForDir(repoName);
+  return key ? `git@github.com:${CONSTELLATION_REPOS[key].slug}.git` : null;
+}
+
+function isOriginCanonical(originUrl, repo) {
+  const constellationUrl = constellationCanonicalOriginUrl(repo.name);
+  if (!originUrl) return !repo.originUrl && !constellationUrl; // no origin at all ⇒ drift iff we have a signal
+  const trimmed = originUrl.trim();
+  if (repo.originUrl && trimmed === repo.originUrl.trim()) return true;
+  if (constellationUrl && trimmed === constellationUrl) return true;
+  return !repo.originUrl && !constellationUrl; // no signal to judge against ⇒ never flag
+}
+
+/**
+ * The full drift verdict for one lane directory: its raw `origin`, the canonical value(s) it was checked
+ * against, and whether it drifted. Read-only (one `remote get-url`) — never fetches/mutates anything.
+ * @param {object} repo
+ * @param {string} dir
+ * @returns {{originUrl: string|null, canonicalUrl: string|null, drifted: boolean}}
+ */
+function laneOriginDrift(repo, dir) {
+  const originUrl = tryGit(['remote', 'get-url', 'origin'], dir, { timeout: LOCAL_GIT_TIMEOUT_MS });
+  const canonicalUrl = repo.originUrl || constellationCanonicalOriginUrl(repo.name) || null;
+  return { originUrl, canonicalUrl, drifted: !isOriginCanonical(originUrl, repo) };
+}
 
 /**
  * Is this checkout a shallow clone? Returns `null` when the probe itself fails, which `referenceArgs` reads as
@@ -777,6 +832,22 @@ function cloneLane(repo, n) {
   if (!repo.originUrl) {
     fail(`could not determine an origin URL for pool "${repo.name}" — --pool selects an existing pool for read/release only; to clone/acquire a lane pass --repo=<checkout> or --origin=<url>`);
   }
+  // #4196 — a NEW lane's origin is about to be exactly `repo.originUrl` (the clone source right below), so this
+  // is a defense-in-depth sanity check, not the primary detection path (that lives in `laneOriginDrift`, run on
+  // every EXISTING lane by `status`/`refresh`/`acquire`): if this invocation itself resolved an origin that
+  // doesn't match the known constellation remote for a RECOGNIZED pool name, warn loudly now rather than
+  // silently baking the drift into a brand-new lane and only discovering it later. A best-effort WARN, never a
+  // fail — an explicit `--origin=` override for a recognized pool name is a legitimate, deliberate thing to do
+  // (every throwaway test/dev pool in this file's own test suite does exactly this, e.g.
+  // `lane-pool-siblings.test.mjs`'s `--name=web-everything --origin=<temp bare repo>`).
+  const constellationUrl = constellationCanonicalOriginUrl(repo.name);
+  if (constellationUrl && repo.originUrl.trim() !== constellationUrl) {
+    log(
+      `  ⚠ #4196 lane-${n}: cloning from ${repo.originUrl}, which is NOT the constellation-canonical remote for ` +
+        `"${repo.name}" (${constellationUrl}) — if this wasn't a deliberate --origin= override, this new lane will ` +
+        `carry the drift from birth; verify with \`status\` after this completes.`,
+    );
+  }
   const ref = cloneReferenceArgs(repo.referencePath);
   log(`  clone lane-${n} ← ${repo.originUrl} ${ref.length ? `(--reference ${repo.referencePath})` : '(no --reference: shallow)'} …`);
   gitQuiet(['clone', '--quiet', ...ref, repo.originUrl, dest]);
@@ -1033,6 +1104,21 @@ function localRemoteShas(dir) {
 // (safe to unmap its stale item mapping, #2139) from a skipped one (still serving its in-flight item).
 function refreshLane(repo, n, { force = false } = {}) {
   const dir = laneDir(repo, n);
+  // #4196 — checked BEFORE the fetch below: a lane whose `origin` has drifted must never be fetched/reset
+  // through it — that fetch would talk to the WRONG remote (or, worse, silently "succeed" against a local
+  // folder path that happens to be a valid git repo), and a reset would then measure "ahead" against that
+  // wrong target too. `--force` does NOT override this (unlike the plain dirty/ahead guard below): recycling a
+  // drifted-origin lane by force still resets it against the wrong remote. The escape hatch is
+  // `repair-origin`, never `--force`.
+  const drift = laneOriginDrift(repo, dir);
+  if (drift.drifted) {
+    log(
+      `  lane-${n}: SKIPPED — origin is NOT the canonical remote (${drift.originUrl || '(none)'}` +
+        `${drift.canonicalUrl ? ` vs expected ${drift.canonicalUrl}` : ''}) — refusing to fetch/reset against the ` +
+        `wrong target (#4196); run \`node scripts/lane-pool.mjs repair-origin --lane=${n}\` first`,
+    );
+    return { skipped: true, leased: false, dirty: false, uncommitted: 0, ahead: 0, originDrift: true };
+  }
   fetchOriginPruneWithRetry(dir);
   // #2337(b) — a LIVE lease is an ownership hold (a process is presumed alive within TTL), distinct from the
   // dirty/ahead STALENESS guard below. `--force` exists to recycle stale residue, not to stomp an active
@@ -1069,6 +1155,9 @@ function laneStatus(repo, n) {
   const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const behind = tryGit(['rev-list', '--count', `HEAD..origin/${repo.branch}`], dir);
+  // #4196 — status is the DETECT half: flag a lane whose origin isn't the canonical remote so a picker (human
+  // or `list --acquirable`/`acquire`) sees it before trusting anything else this file reports about the lane.
+  const drift = laneOriginDrift(repo, dir);
   let readError;
   const lease = readLease(dir, (error) => { readError = error.message; });
   return {
@@ -1080,6 +1169,8 @@ function laneStatus(repo, n) {
     clean: porcelain === '',
     behind: behind === null ? '?' : Number(behind),
     deps: depsReady(dir),
+    originUrl: drift.originUrl,
+    originCanonical: !drift.drifted,
     // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
     // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
     lease: lease || null,
@@ -1110,6 +1201,14 @@ function laneAcquirableInfo(repo, n, remoteShasBox = null, nowMs = Date.now(), t
   if (!existsSync(dir)) return { lane: n, exists: false };
   const lease = readLease(dir);
   if (leaseDisqualifiesAcquire(lease, nowMs, ttlMs)) return { lane: n, exists: true, lease, dirtyOrAhead: null };
+  // #4196 — a lane whose origin has drifted from the canonical remote is never auto-picked: handing it out
+  // would silently fetch/push against the wrong target. Reported as `dirtyOrAhead.dirty` (the SAME shape
+  // `isLaneAcquirable` already disqualifies on) plus an explicit `originDrift` flag so a caller can tell WHY,
+  // rather than inventing a second disqualification channel `isLaneAcquirable` would need to learn about too.
+  const drift = laneOriginDrift(repo, dir);
+  if (drift.drifted) {
+    return { lane: n, exists: true, lease, dirtyOrAhead: { dirty: true, uncommitted: 0, ahead: 0 }, originDrift: true };
+  }
   const getRemoteShas = () => {
     if (!remoteShasBox) return new Set();
     if (remoteShasBox.value === null) {
@@ -1685,6 +1784,20 @@ function cmdAcquire(repo) {
     const n = Number(flags.lane);
     const dir = laneDir(repo, n);
     if (!existsSync(dir)) fail(`lane-${n} does not exist (${dir})`);
+    // #4196 — refused BEFORE any lease is claimed (nothing to roll back): a lane whose origin has drifted from
+    // the canonical remote is off-limits to acquire altogether, `--force`/`--no-reset` included — leasing it
+    // out would let work happen against, fetch from, or (worst case) push to the WRONG remote. The escape
+    // hatch is `repair-origin`, never a flag on this command.
+    const originDrift = laneOriginDrift(repo, dir);
+    if (originDrift.drifted) {
+      fail(
+        `lane-${n}'s origin is NOT the canonical remote (${originDrift.originUrl || '(none)'}` +
+          `${originDrift.canonicalUrl ? ` vs expected ${originDrift.canonicalUrl}` : ''}) — refusing to acquire it ` +
+          `(#4196: fetches/pushes would silently target the wrong remote). Repair it first: ` +
+          `\`node scripts/lane-pool.mjs repair-origin --lane=${n}\` (safe only when unleased and every local ` +
+          `commit is already on the canonical remote or preserved), or investigate manually.`,
+      );
+    }
     // #2350 — a RESERVED lane is off-limits to an ordinary acquire, INCLUDING the OWNING session's own plain
     // re-acquire. Without this pre-claim guard, `tryClaimLane`'s `leaseOwnedBy` self-refresh would rewrite the
     // marker as an ordinary (non-reserved) lease and then the reset path below would `reset --hard` the lane —
@@ -2359,6 +2472,12 @@ function printStatus(repo) {
         ` · ${r.behind === 0 ? 'up-to-date' : `${r.behind} behind`} · deps ${r.deps}` +
         (r.leased ? ` · ${describeLease(r.lease)}` : ''),
     );
+    // #4196 — surfaced as its own loud line (never folded into the one-liner above) so it isn't missed at a
+    // glance: this is the ONE thing on this row that makes every OTHER fact this file reports about the lane
+    // (behind-count, dirty/ahead, preservation) untrustworthy, since they all trust `origin`.
+    if (r.originCanonical === false) {
+      log(`    ⚠ #4196 origin is NOT the canonical remote: ${r.originUrl || '(none)'} — run \`repair-origin --lane=${r.lane}\``);
+    }
   }
 }
 
@@ -3260,6 +3379,118 @@ function cmdReclaim(repo) {
   if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, override: overriding, ...reproof }, null, 2)}\n`);
 }
 
+// ── repair-origin (#4196) — the REPAIR half of a lane whose origin isn't the canonical remote ──────
+//
+// `status` (via `laneOriginDrift`, in `laneStatus`) and `refresh`/`acquire` (refuse to touch a drifted lane at
+// all) are the DETECT half. This is the one command that ever WRITES `origin` back to canonical — and it
+// does only that: `git remote set-url origin <canonical>` touches this lane's git CONFIG only, never a ref,
+// never the working tree, so — unlike every other mutating command in this file — it cannot itself lose a
+// single commit, however many the lane holds (the live motivating case, lane-11, carries a 324-commit
+// unmerged branch that must survive this untouched). The safety gate below exists anyway, because repairing
+// the URL and leaving real unpushed work behind would make every LATER command that trusts the now-canonical
+// `origin` (this file's own `laneDirtyOrAhead`/`aheadIsProvablyPushed`, `lane-whois.mjs`, …) suddenly see that
+// work as unpushed/abandoned — so "safe to repair" means "safe for everything that happens AFTER the repair
+// too", not merely "this one git-config write is harmless".
+/**
+ * Is lane-`n`'s origin drift safe to repair right now? See this section's own header for what "safe" means
+ * and why the `remote set-url`-only mutation still needs a real gate. Read-only (one `ls-remote` against the
+ * CANONICAL url, never `origin` — the remote name we don't trust here — plus local `for-each-ref`/`rev-list`);
+ * makes no git call that could mutate anything.
+ * @param {object} repo
+ * @param {number} n
+ * @returns {{safe:boolean, reason:string, originUrl:?string, canonicalUrl:?string, alreadyCanonical?:boolean, unpreserved?:string[]}}
+ */
+function laneOriginRepairSafety(repo, n) {
+  const dir = laneDir(repo, n);
+  const drift = laneOriginDrift(repo, dir);
+  if (!drift.drifted) {
+    return { safe: false, alreadyCanonical: true, reason: 'origin is already canonical — nothing to repair', originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl };
+  }
+  if (!drift.canonicalUrl) {
+    return { safe: false, reason: `no known canonical remote for pool "${repo.name}" to repair toward`, originUrl: drift.originUrl, canonicalUrl: null };
+  }
+  const lease = liveLease(dir, Date.now(), ttlMsFromFlags());
+  if (lease) {
+    return { safe: false, reason: `live lease held (${describeLease(lease)}) — never repair origin under a live holder`, originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl };
+  }
+  // Read-only network probe of the CANONICAL remote's live refs. Deliberately `ls-remote <url>` (a raw URL
+  // argument), never `ls-remote origin` — `origin` is exactly the remote name this whole command distrusts —
+  // and `ls-remote` never writes a local ref (unlike `fetch`), so this cannot touch the lane's own git state.
+  const lsOut = tryGit(['ls-remote', drift.canonicalUrl], dir, { timeout: NETWORK_GIT_TIMEOUT_MS });
+  if (lsOut === null) {
+    return { safe: false, reason: 'could not reach the canonical remote to verify preservation (ls-remote failed)', originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl };
+  }
+  const remoteShas = new Set(lsOut.split('\n').filter(Boolean).map((line) => line.split('\t')[0]).filter(Boolean));
+  if (remoteShas.size === 0) {
+    return { safe: false, reason: 'canonical remote returned no refs — refusing to risk it', originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl };
+  }
+  const tips = (tryGit(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads'], dir) || '')
+    .split('\n').filter(Boolean).map((line) => {
+      const sp = line.indexOf(' ');
+      return { sha: line.slice(0, sp), ref: line.slice(sp + 1) };
+    });
+  const unpreserved = tips.filter(({ sha }) => {
+    if (!sha || remoteShas.has(sha)) return false;
+    // The SAME bounded containment primitive `aheadIsProvablyPushed` uses for HEAD (#2920) — one `rev-list`
+    // call per branch tip, never one `merge-base` per remote head. Empty output ⇒ every ancestor of `sha` is
+    // already reachable from the union of `remoteShas`, i.e. provably already pushed to the canonical remote.
+    const out = tryGit(['rev-list', '--ignore-missing', '--max-count=1', sha, '--not', ...remoteShas], dir);
+    return out !== ''; // non-empty (or a read failure, `null !== ''`) ⇒ NOT provably contained — fail CLOSED
+  }).map(({ ref }) => ref);
+  if (unpreserved.length > 0) {
+    return {
+      safe: false,
+      reason: `local branch(es) not provably on the canonical remote yet: ${unpreserved.join(', ')} — repairing the origin URL now would make this lane's real work look unpushed to every later check`,
+      originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl, unpreserved,
+    };
+  }
+  return { safe: true, reason: 'unleased, canonical remote reachable, every local branch already on it', originUrl: drift.originUrl, canonicalUrl: drift.canonicalUrl };
+}
+
+/**
+ * `node scripts/lane-pool.mjs repair-origin [--lane=N] [--dry-run] [--json]` — sweeps every lane in the pool
+ * (or just `--lane=N`) and, for each one whose origin has drifted from the canonical remote
+ * ({@link laneOriginDrift}), either repairs it (`git remote set-url origin <canonical>` — config only, see
+ * this section's header for why that alone can never lose a commit) when {@link laneOriginRepairSafety} says
+ * it is safe, or reports why it was left alone. `--dry-run` runs the identical safety check and reports the
+ * verdict without ever calling `remote set-url`. A lane whose origin is already canonical is silently skipped
+ * (nothing to report — `status` already shows it clean).
+ */
+function cmdRepairOrigin(repo) {
+  const dryRun = !!flags['dry-run'];
+  let targetLane = null;
+  if (flags.lane !== undefined) {
+    targetLane = Number(flags.lane);
+    if (!Number.isInteger(targetLane) || targetLane < 1) fail('repair-origin needs --lane=<positive integer> (or omit --lane to sweep the whole pool)');
+  }
+  const lanes = targetLane !== null ? [targetLane] : existingLanes(repo);
+  const results = [];
+  for (const n of lanes) {
+    const dir = laneDir(repo, n);
+    if (!existsSync(dir)) {
+      if (targetLane !== null) fail(`lane-${n} does not exist under ${repo.poolDir}`);
+      continue;
+    }
+    const safety = laneOriginRepairSafety(repo, n);
+    if (safety.alreadyCanonical) continue; // nothing to report — status already shows this lane as canonical
+    if (safety.safe) {
+      if (dryRun) {
+        log(`  lane-${n}: WOULD repair origin ${safety.originUrl} → ${safety.canonicalUrl}`);
+        results.push({ lane: n, ...safety, dryRun: true, wouldRepair: true, repaired: false });
+      } else {
+        git(['remote', 'set-url', 'origin', safety.canonicalUrl], dir);
+        log(`  lane-${n}: origin repaired ${safety.originUrl} → ${safety.canonicalUrl}`);
+        results.push({ lane: n, ...safety, dryRun: false, repaired: true });
+      }
+    } else {
+      log(`  lane-${n}: origin drift detected but NOT repaired — ${safety.reason}`);
+      results.push({ lane: n, ...safety, dryRun, repaired: false });
+    }
+  }
+  if (flags.json) process.stdout.write(`${JSON.stringify({ repo: repo.name, dryRun, results }, null, 2)}\n`);
+  else if (results.length === 0) log(`no origin drift to report for "${repo.name}"${targetLane !== null ? ` (lane-${targetLane})` : ''}`);
+}
+
 // ── keep (#4139) — record "I looked at this queued lane, leave it" so it stops resurfacing ─────────
 //
 // The other half of the LANE RECLAIM one-click pair. `we:scripts/operations/operator-queue.mjs`'s
@@ -3412,6 +3643,7 @@ const COMMANDS = {
   remove: cmdRemove,
   trim: cmdTrim,
   reclaim: cmdReclaim,
+  'repair-origin': cmdRepairOrigin,
   keep: cmdKeep,
   map: cmdMap,
   unmap: cmdUnmap,
@@ -3420,7 +3652,7 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|keep|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|adopt|release|remove|trim|reclaim|repair-origin|keep|map|unmap> [--count=N] [--lane=N] [--all] [--all-pools] [--acquirable] [--max-new=N] ' +
       '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--adopt] [--base=<ref>] [--scope=<repo:path,...>] [--reserve] [--release-reserved] [--ttl-minutes=N] [--no-reset] [--no-reap] [--limit=N] [--no-cache] [--cache-ttl-ms=N] [--scan-timeout-ms=N] [--repo=<path>] [--pool=<name>] [--origin=<url>] ' +
       '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json] [--max=N] [--dry-run] [--override] [--reason=<text>] ' +
       '[--no-free-list] [--free-list-max-age-ms=N]  # trim: shrink a pool to --max lanes (default per-repo cap; env LANE_POOL_TRIM_MAX)\n' +
@@ -3433,7 +3665,11 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
       'half of lane-whois.mjs\'s finished-reclaimable verdict); --override (#4139) forces past that gate for a ' +
       'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic\n' +
       '  # keep --lane=N [--reason=<text>] [--json]: record "I looked at this lane, leave it" so operator-queue\'s ' +
-      'LANE RECLAIM section excludes it until its content changes (#4139)\n',
+      'LANE RECLAIM section excludes it until its content changes (#4139)\n' +
+      '  # repair-origin [--lane=N] [--dry-run] [--json]: detect a lane whose origin isn\'t the canonical remote ' +
+      '(status flags it too) and repair it (config-only, never touches refs/commits) ONLY when unleased + the ' +
+      'canonical remote is reachable + every local branch is already provably on it; otherwise reports why not ' +
+      'repaired (#4196)\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }

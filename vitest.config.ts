@@ -176,6 +176,9 @@ export default defineConfig({
       'scripts/__tests__/lane-pool-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-reap-on-list-acquirable.test.mjs',
       'scripts/__tests__/lane-pool-refresh-guard.test.mjs',
+      // #4196 — same tier: real throwaway origin/reference/pool, real spawned `lane-pool.mjs`
+      // status/refresh/acquire/repair-origin children proving the origin-drift detect+repair gate.
+      'scripts/__tests__/lane-pool-origin-drift.test.mjs',
       'scripts/__tests__/lane-pool-release-ownership.test.mjs',
       'scripts/__tests__/lane-pool-item-map.test.mjs',
       'scripts/__tests__/lane-pool-release-item-map.test.mjs',
