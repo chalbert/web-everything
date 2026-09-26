@@ -99,8 +99,9 @@ import {
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
 export const CODEX_CLI = 'codex';
 
-/** #4194 — the suffix a `--review` task carries in place of the edit instruction. Shared wording with
- *  `gemini-direct-task.mjs#REVIEW_MODE_SUFFIX` on purpose (same contract, two CLIs). */
+/** #4194 — the suffix a `--review` task carries in place of the edit instruction. Codex reads the checkout under its
+ *  own `read-only` sandbox; `gemini-direct-task.mjs#REVIEW_MODE_SUFFIX` differs on purpose (agy runs with its shell
+ *  and writes denied, so its task carries the PR text itself). */
 export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review. Do not edit, create or delete any file, do not run '
   + '`git commit`/`git push`/`git add`, do not install dependencies, and do not open a pull request. Read what you '
   + 'need, then put your whole answer in your final message.';

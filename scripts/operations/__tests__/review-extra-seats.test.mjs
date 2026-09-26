@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,7 +15,7 @@ import {
   runExtraSeats, extraSeatsEnabled, resolveDailyCap, callsUsedToday, quotaHold, claudeFindingsFromLoop,
   buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay, renderSeatSummary,
   EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, toIsoInstant, extractAnswerJson, reserveSeatCalls,
-  createExtraSeatsIo,
+  createExtraSeatsIo, withLedgerLock, isPinnedRev, repoRelativeFindings,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeExtraSeats } from '../review-job.mjs';
 import { ADVISORY_JUDGE_LENS, JUDGE_SEATS } from '../review-pr.mjs';
@@ -25,7 +25,10 @@ import {
 import { ADVISORY_LENSES, MANDATORY_LENSES, findingCorroboratedBy } from '../../lib/jury-core.mjs';
 import { validateScorecard, appendScorecard } from '../../conveyor/run-scorecard-store.mjs';
 import { buildCodexDirectTaskArgv, buildCodexPrompt } from '../../codex-direct-task.mjs';
-import { buildAgyPrompt, parseFlags as parseAgyFlags } from '../../gemini-direct-task.mjs';
+import {
+  buildAgyPrompt, buildAgyDirectTaskArgv, runAgyDirectExec, parseFlags as parseAgyFlags,
+} from '../../gemini-direct-task.mjs';
+import { EventEmitter } from 'node:events';
 
 const REPO = 'chalbert/web-everything';
 const NOW = Date.parse('2026-09-26T15:00:00Z');
@@ -193,6 +196,38 @@ describe('#4194 the direct-task scripts in --review mode', () => {
     expect(p).not.toMatch(/Make the change directly/);
   });
 
+  it('gemini in --review mode never gets --dangerously-skip-permissions, so agy denies its shell and writes', () => {
+    expect(buildAgyDirectTaskArgv({ review: true })).not.toContain('--dangerously-skip-permissions');
+    expect(buildAgyDirectTaskArgv({ review: true, resumeConversationId: 'c-1' })).not.toContain('--dangerously-skip-permissions');
+    expect(buildAgyDirectTaskArgv({})).toContain('--dangerously-skip-permissions');
+    // an extra dir would re-grant the reads outside --dir that review mode denies
+    expect(() => buildAgyDirectTaskArgv({ review: true, addDirs: ['/elsewhere'] })).toThrow(/add-dir/);
+    const p = buildAgyPrompt('Review it', '/abs/dir', { review: true });
+    expect(p).toMatch(/cannot run commands or write any file/);
+    expect(p).not.toMatch(/\brg\b|grep|via your shell/);
+  });
+
+  it('gemini --review drops the permission bypass through the real run (initial attempt and resume alike)', async () => {
+    const argvs = [];
+    const spawnFn = (_cli, argv) => {
+      argvs.push(argv);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = Object.assign(new EventEmitter(), { end: () => {} });
+      child.kill = () => {};
+      setImmediate(() => { child.stdout.emit('data', Buffer.from('{"type":"result","status":"success"}\n')); child.emit('close', 0); });
+      return child;
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'we-agy-review-'));
+    try {
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn });
+      await runAgyDirectExec({ dir, task: 'Review it', review: true, timeoutMs: 60_000, logFile: join(dir, 'log.jsonl'), stream: false, spawnFn, resumeConversationId: 'c-1' });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    expect(argvs).toHaveLength(2);
+    for (const a of argvs) expect(a).not.toContain('--dangerously-skip-permissions');
+  });
+
   it('seatCallArgv shells the existing scripts in review mode (gemini halves its per-attempt budget)', () => {
     const c = seatCallArgv({ provider: 'codex', taskFile: '/t', dir: '/d', model: 'm', effort: 'medium', timeoutMs: 600000, root: '/r' });
     expect(c[0]).toBe('/r/scripts/codex-direct-task.mjs');
@@ -211,6 +246,18 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
     for (const s of seats) expect(t).toContain(`"${s.key}"`);
     expect(t).toContain('/s/.git/d');
     expect(t).toMatch(/```json/);
+  });
+
+  it('an INLINE brief (the gemini seat) carries the diff and PR body in the message and points at no file', () => {
+    const t = buildSeatTask({ pr: 5, repo: REPO, title: 'T', inline: { diffText: 'diff --git a/q b/q\n+NEEDLE\n', body: 'BODY-TEXT' }, seats });
+    expect(t).toContain('+NEEDLE');
+    expect(t).toContain('BODY-TEXT');
+    expect(t).toMatch(/cannot run commands or write files/);
+    expect(t).toMatch(/UNTRUSTED/);
+    expect(t).not.toMatch(/checked out at|read what a seat needs/);
+    const big = buildSeatTask({ pr: 5, repo: REPO, title: 'T', inline: { diffText: 'x'.repeat(500_000), body: '' }, seats });
+    expect(big.length).toBeLessThan(260_000);
+    expect(big).toMatch(/truncated/);
   });
 
   it('parses the last fenced JSON; a seat missing from it is not ok', () => {
@@ -243,6 +290,27 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
     expect(findingCorroboratedBy({ summary: 'forged merge headline bypasses gate', file: './scripts/lib/ai-pr-authorship.mjs', line: 300 }, [CLAUDE_FINDING])).toBe(CLAUDE_FINDING);
     expect(findingCorroboratedBy({ summary: 'forged merge headline bypasses gate', file: 'other.mjs', line: 41 }, [CLAUDE_FINDING])).toBeNull();
     expect(findingCorroboratedBy({ summary: 'unrelated typo' }, [CLAUDE_FINDING])).toBeNull();
+  });
+
+  it('a seat citing the ABSOLUTE scratch path is cut back to the repo-relative path, so corroboration still matches', () => {
+    const scratch = '/var/folders/xy/T/we-review-seat-AbC123';
+    const parsed = { s: { ok: true, verdict: 'changes', findings: [
+      { summary: 'a', file: `${scratch}/scripts/lib/ai-pr-authorship.mjs` },
+      { summary: 'b', file: `/private${scratch}/x/y.mjs` },
+      { summary: 'c', file: 'already/relative.mjs' },
+      { summary: 'd', file: null },
+    ] } };
+    expect(repoRelativeFindings(parsed, scratch).s.findings.map((f) => f.file)).toEqual(['scripts/lib/ai-pr-authorship.mjs', 'x/y.mjs', 'already/relative.mjs', null]);
+    const f = repoRelativeFindings(parsed, scratch).s.findings[0];
+    expect(findingCorroboratedBy({ ...f, line: 41 }, [CLAUDE_FINDING])).toBe(CLAUDE_FINDING);
+  });
+
+  it('two DIFFERENT files that merely share a path tail never corroborate, even at a near line', () => {
+    const claude = { summary: 'config default is read before the env override', file: 'lib/config.mjs', line: 104 };
+    expect(findingCorroboratedBy({ summary: 'port parsing drops the scheme', file: 'apps/api/lib/config.mjs', line: 100 }, [claude])).toBeNull();
+    expect(findingCorroboratedBy({ summary: 'port parsing drops the scheme', file: 'scripts/other/lib/x.mjs', line: 5 }, [{ ...claude, file: 'scripts/lib/x.mjs', line: 5 }])).toBeNull();
+    // the same file, cited with or without a diff prefix / line suffix, still does
+    expect(findingCorroboratedBy({ summary: 'x', file: 'b/lib/config.mjs:101', line: 101 }, [claude])).toBe(claude);
   });
 
   it('rows are valid scorecard rows carrying provider, model, lens, findings and Claude confirmation', () => {
@@ -284,6 +352,27 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     expect(calls.find((c) => c[0] === 'scratch')[1]).toMatchObject({ lanePath: '/lane', rev: 'a'.repeat(40) });
     expect(calls.at(-1)).toEqual(['rm', '/tmp/seat-scratch']);
     expect(renderSeatSummary(r).join('\n')).toMatch(/also raised by Claude/);
+  });
+
+  it('the gemini seat gets an inline brief; the codex seat (OS read-only sandbox) reads the checkout', async () => {
+    const written = new Map();
+    const { io } = fakeSeatIo({ writeFile: (p, text) => written.set(p, text) });
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
+    expect(r.status).toBe('ran');
+    const gem = [...written].find(([p]) => p.endsWith('task-gemini.md'))[1];
+    const cod = [...written].find(([p]) => p.endsWith('task-codex.md'))[1];
+    expect(gem).toContain(LOOP_PAYLOAD.findings.read.diffText.trim());
+    expect(gem).not.toContain('/tmp/seat-scratch');
+    expect(cod).toContain('/tmp/seat-scratch');
+  });
+
+  it('no pinned rev on the loop payload → skipped before any reservation, scratch or spawn (never the released lane\'s HEAD)', async () => {
+    const { io, calls } = fakeSeatIo();
+    const payload = { ...LOOP_PAYLOAD, findings: { ...LOOP_PAYLOAD.findings, read: { ...LOOP_PAYLOAD.findings.read, netBasis: { base: 'b'.repeat(40) } } } };
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload, env: {} }, io);
+    expect(r.status).toBe('skipped');
+    expect(r.reason).toMatch(/pinned/);
+    expect(calls.some((c) => ['reserve', 'scratch', 'seat'].includes(c[0]))).toBe(false);
   });
 
   it('soak: a seat that fails, times out or throws never fails the run — it is only that seat\'s status', async () => {
@@ -508,7 +597,7 @@ describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and sto
     } finally { io.removeScratch(dir); }
   });
 
-  it('makeScratch with no pinned rev checks out the lane HEAD', () => {
+  it('makeScratch with no pinned rev REFUSES — the released lane\'s HEAD may already be another PR', () => {
     const lane = join(root, 'lane');
     mkdirSync(lane);
     git(lane, 'init', '--quiet');
@@ -516,8 +605,46 @@ describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and sto
     git(lane, 'add', 'a.txt');
     git(lane, 'commit', '--quiet', '-m', 'x');
     const io = createExtraSeatsIo({ env: process.env });
-    const dir = io.makeScratch({ lanePath: lane, rev: null });
-    try { expect(git(dir, 'rev-parse', 'HEAD')).toBe(git(lane, 'rev-parse', 'HEAD')); } finally { io.removeScratch(dir); }
+    for (const rev of [null, undefined, '', 'HEAD', 'main']) {
+      expect(() => io.makeScratch({ lanePath: lane, rev })).toThrow(/pinned/);
+    }
+  });
+
+  it('a held reservation lock FAILS CLOSED: past the wait, reserveCalls throws and writes no reservation', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const ledger = join(root, 'state', 'review-seat-reservations.json');
+    mkdirSync(join(root, 'state'), { recursive: true });
+    writeFileSync(`${ledger}.lock`, '99999'); // a live holder (fresh mtime) that never lets go
+    const io = createExtraSeatsIo({ env: process.env, storePath, lockTimeoutMs: 50 });
+    expect(() => io.reserveCalls({ want: 2, dailyCap: 3, now: Date.now() })).toThrow(/lock/);
+    expect(existsSync(ledger)).toBe(false);
+    expect(existsSync(`${ledger}.lock`)).toBe(true); // someone else's lock is never removed
+  });
+
+  it('a STALE reservation lock (a crashed holder) is taken over, not waited on forever', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const ledger = join(root, 'state', 'review-seat-reservations.json');
+    mkdirSync(join(root, 'state'), { recursive: true });
+    writeFileSync(`${ledger}.lock`, '99999');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${ledger}.lock`, old, old);
+    const r = createExtraSeatsIo({ env: process.env, storePath, lockTimeoutMs: 50 }).reserveCalls({ want: 1, dailyCap: 3, now: Date.now() });
+    expect(r.callIds).toHaveLength(1);
+    expect(existsSync(`${ledger}.lock`)).toBe(false);
+  });
+
+  it('a holder only ever removes ITS OWN lock — a lock taken over while it ran is left standing', () => {
+    const p = join(root, 'state', 'x.json');
+    withLedgerLock(p, () => {
+      writeFileSync(`${p}.lock`, 'someone-else'); // a waiter took our lock over while we held it
+    });
+    expect(readFileSync(`${p}.lock`, 'utf8')).toBe('someone-else');
+  });
+
+  it('isPinnedRev accepts only a full commit id — never a ref name or an abbreviation git would read as a ref', () => {
+    expect(isPinnedRev('a'.repeat(40))).toBe(true);
+    expect(isPinnedRev('b'.repeat(64))).toBe(true);
+    for (const r of ['deadbeef', 'a'.repeat(39), 'a'.repeat(41), 'A'.repeat(40), 'HEAD', 'main', '', null]) expect(isPinnedRev(r)).toBe(false);
   });
 
   it('reserveCalls persists the ledger beside the store, so a second job sees the first one\'s reservation', () => {

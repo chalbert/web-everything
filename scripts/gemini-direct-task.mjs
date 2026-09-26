@@ -29,7 +29,7 @@
  * fresh successful agy 1.2.2 stdin and file-write streams for this task. These are supplied observations,
  * not probes repeated by this implementation. #3632 tested a DIFFERENT, retired standalone Gemini CLI;
  * its verdict and flags do not apply. This implementation uses only agy's observed flag surface:
- * --input-format, --output-format, --disable-slash-commands, --dangerously-skip-permissions, --add-dir,
+ * --input-format, --output-format, --disable-slash-commands, --dangerously-skip-permissions (not with --review), --add-dir,
  * --model, --effort, --sandbox, --print-timeout, --print. Local `agy --help` also confirms --continue
  * (most recent conversation) and --conversation (resume by ID); retries use the latter unambiguously.
  * There is NO -C; Node spawn's cwd sets launch cwd.
@@ -51,7 +51,8 @@
  * stdin is then closed. No positional prompt, no argv-size exposure, no inherited stdin-trap pattern.
  * --disable-slash-commands is mandatory: leading '/' text otherwise gets intercepted before the model.
  * --dangerously-skip-permissions is mandatory for useful unattended editing: headless tool auto-denial
- * otherwise returns SUCCESS / exit 0 / empty response (#3633 probes 7 and 19).
+ * otherwise returns SUCCESS / exit 0 / empty response (#3633 probes 7 and 19). The one exception is --review
+ * (#4194), which omits it ON PURPOSE so shell, writes and reads outside --dir are denied (REVIEW_MODE_SUFFIX).
  *
  * Events carry `event`, not Codex's `type`. Completed step_update tools carry tool_name/tool_info;
  * only the last result carries terminal status, final response/error and inline token usage. No result
@@ -91,12 +92,17 @@ export const AGY_CLI = 'agy';
 export const AGY_RESUME_PROMPT = 'Continue the task from where you left off and finish it. Do not restart from scratch or repeat already-completed work.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
-/** #4194 — the suffix a `--review` task carries in place of the edit instruction (same contract as
- *  `codex-direct-task.mjs#REVIEW_MODE_SUFFIX`). agy has NO read-only mode (see the header: nothing confines its
- *  native file tools), so for a review this instruction plus a throwaway target directory is the whole guard. */
-export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review. Do not edit, create or delete any file, do not run '
-  + '`git commit`/`git push`/`git add`, do not install dependencies, and do not open a pull request. Read what you '
-  + 'need, then put your whole answer in your final message.';
+/** #4194 — the suffix a `--review` task carries in place of the edit instruction. agy has NO read-only mode (see
+ *  the header: `--sandbox` confines only its shell, never its native file tools), and a review task carries
+ *  UNTRUSTED PR text that may try to steer the agent. So a review run omits `--dangerously-skip-permissions`, and
+ *  agy's headless permission check then DENIES its shell (`run_command`), its file writes (`write_to_file`) and
+ *  any read outside its cwd — re-probed live on agy 1.2.11 (2026-09-26, PR #2714): each came back in the result's
+ *  `denied_actions` and left no trace on disk. A read INSIDE its cwd (`--dir`, which for a review must be a
+ *  throwaway checkout of public PR code) is still allowed. A denied call ends the turn with no answer, so the task
+ *  must carry everything the model needs in its own text; this suffix tells the model so. */
+export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review: you cannot run commands or write any file (those tool '
+  + 'calls are denied and end your turn). Judge from the material in this message, then put your whole answer in '
+  + 'your final message.';
 const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
 
 function requireText(value, name) {
@@ -112,12 +118,16 @@ function validateTimeout(value) {
 }
 
 /** Pure argv AFTER agy. No required cwd flag exists; scope is supplied via spawn and the prompt. */
-export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null } = {}) {
+export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null, review = false } = {}) {
   // Resume supplies a non-empty continuation instruction via text-mode --print and an explicit conversation.
   // stream-json input is for the initial task only: it runs one turn per stdin message.
   const argv = ['--input-format', resumeConversationId === null ? 'stream-json' : 'text', '--output-format', 'stream-json',
-    '--disable-slash-commands', '--dangerously-skip-permissions'];
+    '--disable-slash-commands'];
+  // #4194 — without this flag agy denies shell, writes and out-of-cwd reads (see REVIEW_MODE_SUFFIX).
+  if (!review) argv.push('--dangerously-skip-permissions');
   if (!Array.isArray(addDirs)) throw new TypeError('gemini-direct-task: addDirs must be an array');
+  // An extra dir would re-grant reads outside --dir that a review run exists to deny.
+  if (review && addDirs.length) throw new TypeError('gemini-direct-task: --add-dir is not allowed with --review');
   for (const dir of addDirs) {
     requireText(dir, 'addDirs entry');
     argv.push('--add-dir', dir); // bookkeeping only — neither read nor write confinement.
@@ -149,12 +159,7 @@ export function buildAgyPrompt(task, absoluteDir, { review = false } = {}) {
   requireText(task, 'task');
   requireText(absoluteDir, 'absoluteDir');
   if (!isAbsolute(absoluteDir)) throw new TypeError('gemini-direct-task: absoluteDir must be an absolute path');
-  if (review) {
-    return `${task.trim()}\n\n---\n\n`
-      + `The absolute directory to read is ${JSON.stringify(absoluteDir)}. Use only absolute paths; never trust your shell's own cwd. `
-      + 'Do not use the grep_search tool (it can silently report zero results); search with `rg` or `grep` via your shell.\n\n'
-      + REVIEW_MODE_SUFFIX;
-  }
+  if (review) return `${task.trim()}\n\n---\n\n${REVIEW_MODE_SUFFIX}`;
   return `${task.trim()}\n\n---\n\n`
     + `The absolute target directory is ${JSON.stringify(absoluteDir)}. Stay inside this directory. `
     + "Use only absolute paths and never trust your shell's own cwd: it may be agy's internal scratch directory, "
@@ -398,7 +403,7 @@ export async function runAgyDirectExec({
   let stdinLine;
   try {
     validateTimeout(timeoutMs);
-    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId });
+    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId, review });
     if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir, { review }));
     requireText(logFile, 'logFile');
     // A killed process can leave a partial final line. Separate attempts before appending new JSONL.
@@ -589,9 +594,10 @@ export const HELP = `usage: node scripts/gemini-direct-task.mjs --task=<text>|--
                              human can push straight from it. Default: origin stays at the local repoRoot
                              path (not push-capable); the real remote is only printed. No effect with --dir.
   --json                     Full report only on stdout (implies --no-stream).
-  --review                   #4194: a READ-ONLY review task — the prompt forbids edits and asks for the whole
-                             answer in the final message (events.finalResponse). Instruction only: agy has no
-                             read-only mode, so point --dir at a throwaway checkout.
+  --review                   #4194: a READ-ONLY review task — agy runs without --dangerously-skip-permissions,
+                             so shell, file writes and reads outside --dir are denied; the task text must carry
+                             everything to judge, and the answer comes back in the final message
+                             (events.finalResponse). Point --dir at a throwaway checkout.
 Timeout or nonzero/null exit without a terminal result: resume exactly once via --conversation <ID>,
 only with a captured init conversation ID. No ID means no retry. Each attempt gets a fresh timeout
 budget (up to twice --timeout-ms); the original prompt is not replayed. Both attempts stay in the log.

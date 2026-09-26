@@ -482,7 +482,8 @@ function wordOverlap(a, b) {
 /**
  * #4194 — DID ANOTHER SEAT RAISE THE SAME PROBLEM? PURE, deterministic. Used to stamp an ADDED (non-Claude)
  * review seat's finding with whether one of Claude's own seats confirmed it. Two findings corroborate when they
- * cite the same file (path suffix match) AND either sit within {@link CORROBORATION_LINE_WINDOW} lines of each
+ * cite the same file (the same path once a `./`/`a/`/`b/` prefix and a `:line` suffix are stripped — never a mere
+ * shared tail: `apps/api/lib/config.mjs` and `lib/config.mjs` are different files) AND either sit within {@link CORROBORATION_LINE_WINDOW} lines of each
  * other or share at least a quarter of their significant summary words; with no file on one side, the words alone
  * must overlap by at least half. A heuristic on purpose — it only LABELS an advisory finding, it never admits or
  * blocks anything — and it errs toward "not confirmed" (a missed match costs nothing but a weaker label).
@@ -500,8 +501,7 @@ export function findingCorroboratedBy(finding, others = []) {
     const op = corroborationPath(o.file);
     const words = wordOverlap(`${f.summary} ${f.failure_scenario ?? ''}`, `${o.summary} ${o.failure_scenario ?? ''}`);
     if (fp && op) {
-      const samePath = fp === op || fp.endsWith(`/${op}`) || op.endsWith(`/${fp}`);
-      if (!samePath) continue;
+      if (fp !== op) continue;
       const near = Number.isInteger(f.line) && Number.isInteger(o.line) && Math.abs(f.line - o.line) <= CORROBORATION_LINE_WINDOW;
       if (near || words >= 0.25) return raw;
     } else if (words >= 0.5) {
