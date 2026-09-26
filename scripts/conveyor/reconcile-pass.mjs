@@ -56,7 +56,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
@@ -65,7 +65,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // consumer in this repo already shares.
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
-import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -126,10 +126,12 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * THEN runs {@link markAuthExpiredSessions} (live incident, night of 2026-09-25/26 ET) after that, so a
  * session whose OWN transcript shows the Claude CLI's own auth-failure (see that function's own doc for the
  * full incident) ALSO stops reading as `live-process` — this one catches the failure the INSTANT it shows in
- * the transcript, rather than waiting out the generic hung-transcript threshold, and (unlike `hung`) also
- * covers `ci-heal` sessions, which carry no completion-record schema at all for `markSelfReportedDone` to ever
- * apply to.
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, now?:number, hungThresholdMs?:number, listJobs?:Function}} [o]
+ * the transcript, rather than waiting out the generic hung-transcript threshold.
+ * FINALLY runs {@link markIdleFinishedSessions} (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) — a
+ * backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last assistant
+ * turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is treated as
+ * finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md` did.
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
  *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
@@ -137,6 +139,7 @@ export function defaultReadAgents({
   exec = execFileSync, env = process.env, completionFor = tryReadCompletion,
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
   authExpiredInfoFor = readClaudeAuthExpiredInfo,
+  idleFinishedInfoFor = readIdleFinishedInfo, idleFinishedThresholdMs = resolveIdleFinishedThresholdMs(env),
   listJobs = undefined,
 } = {}) {
   // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
@@ -150,7 +153,11 @@ export function defaultReadAgents({
   const hungMarked = markHungSessions(selfReported, hungInfoFor, now, hungThresholdMs);
   // Live incident fix, night of 2026-09-25/26 ET — a session whose OWN transcript shows the Claude CLI's own
   // auth failure is finished too, whatever the listing's `state`/pid say.
-  return markAuthExpiredSessions(hungMarked, authExpiredInfoFor);
+  const authMarked = markAuthExpiredSessions(hungMarked, authExpiredInfoFor);
+  // #4075/xg7m2wq, live incident PR #2724, 2026-09-26 — the general backstop for EVERY kind: a session whose
+  // last assistant turn has fully ended (no pending tool call) and has sat idle past a short threshold is
+  // finished too, in case its own brief forgot to report completion the way `fix-agent-ci-brief.md` did.
+  return markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
 }
 
 /**

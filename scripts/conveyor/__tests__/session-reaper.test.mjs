@@ -27,6 +27,7 @@ import {
   runSessionReaperPass,
   makeHungResolver,
   makeAuthExpiredResolver,
+  makeIdleFinishedResolver,
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
   BLOCKED_ON_INFRA_OUTCOME,
@@ -689,6 +690,67 @@ describe('makeAuthExpiredResolver — the IO-shell resolver over hung-session.mj
   });
 });
 
+// #4075/xg7m2wq — live incident, PR #2724, 2026-09-26: ci-heal-2724 finished ("rebased onto main and pushed; no
+// code change was needed") but `fix-agent-ci-brief.md` never reported completion, so it kept counting as a live
+// holder of its own PR. This axis is the general backstop, for EVERY kind, not gated on any completion-record
+// schema — mirrors the auth-expired axis describe block above, one for one.
+describe('classifySessionReapWithGroundTruth — idle-turn-ended backstop (#4075/xg7m2wq, live incident PR #2724, 2026-09-26)', () => {
+  const alwaysIdleFinished = () => ({ finished: true, reason: 'turn-ended-idle' });
+  const neverIdleFinished = () => ({ finished: false, reason: 'fresh' });
+
+  it('a `working` session confirmed idle-finished is reaped — THE LIVE CASE (ci-heal-2724)', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), null, { idleFinishedFor: alwaysIdleFinished }))
+      .toEqual({ reap: true, reason: 'idle-finished:turn-ended-idle' });
+  });
+
+  it('applies to a kind with NO completion-record/no-outcome schema at all — the general-backstop premise', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'investigate-3451' }), null, { idleFinishedFor: alwaysIdleFinished }))
+      .toEqual({ reap: true, reason: 'idle-finished:turn-ended-idle' });
+  });
+
+  it('OVERRIDES `neverReapWorking:true` — same tier as the hung-transcript/auth-expired axes, same reasoning', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), null, { neverReapWorking: true, idleFinishedFor: alwaysIdleFinished }))
+      .toEqual({ reap: true, reason: 'idle-finished:turn-ended-idle' });
+  });
+
+  it('tried BEFORE ground-truth/completion — a resolver answering true short-circuits everything after it', () => {
+    let groundTruthCalled = false;
+    const groundTruthFor = () => { groundTruthCalled = true; return { resolved: false }; };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), groundTruthFor, { idleFinishedFor: alwaysIdleFinished }))
+      .toEqual({ reap: true, reason: 'idle-finished:turn-ended-idle' });
+    expect(groundTruthCalled).toBe(false);
+  });
+
+  it('a resolver answering not-finished falls through to every later axis unaffected', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), null, { neverReapWorking: true, idleFinishedFor: neverIdleFinished }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('a resolver that throws is treated as unknown, never a guess, and never crashes the pass', () => {
+    const throws = () => { throw new Error('unreadable transcript'); };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), null, { idleFinishedFor: throws }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('omitting idleFinishedFor entirely is byte-identical to before — additive only', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2724' }), null, { neverReapWorking: true }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('an already-terminal `done` session is unaffected — this axis only ever runs after the base `not-terminal` check', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'done', name: 'ci-heal-2724' }), null, { idleFinishedFor: alwaysIdleFinished }))
+      .toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('makeIdleFinishedResolver — the IO-shell resolver over hung-session.mjs (#4075/xg7m2wq)', () => {
+  it('delegates to readIdleFinishedInfo, never throwing on a bad row', () => {
+    const resolver = makeIdleFinishedResolver();
+    const { cwd, sessionId, ...noTranscript } = bg({ state: 'working' });
+    expect(resolver(noTranscript)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+  });
+});
+
 describe('classifySessionReapWithGroundTruth — the completion-record axis (epic #3383, #3436)', () => {
   it('a `blocked` session whose completion record reports done is reaped, tried BEFORE backlog/PR ground truth', () => {
     let groundTruthCalled = false;
@@ -853,8 +915,12 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(planBackstopCompletion({ name: 'prepare-3436' }, null)).toBeNull();
   });
 
-  it('never mints one for ci-heal-<pr> — a real PR-kind name, but no completion-record kind exists for it', () => {
-    expect(planBackstopCompletion({ name: 'ci-heal-2607' }, null)).toBeNull();
+  it('mints a fresh done/unreported-exit record for a ci-heal-<pr> session too (#4075/xg7m2wq, live incident PR #2724, 2026-09-26)', () => {
+    const rec = planBackstopCompletion({ name: 'ci-heal-2724' }, null, () => '2026-09-26T14:10:00.000Z');
+    expect(rec).toMatchObject({
+      session: 'ci-heal-2724', kind: 'ci-heal', pr: '2724', status: 'done', outcome: UNREPORTED_EXIT_OUTCOME,
+      startedAt: '2026-09-26T14:10:00.000Z', updatedAt: '2026-09-26T14:10:00.000Z',
+    });
   });
 
   it('never mints one for a name matching no known grammar — never a guess', () => {
@@ -900,8 +966,9 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     expect(rec.label).not.toBe(CLAUDE_AUTH_OUTCOME_LABEL);
   });
 
-  it('never mints one for ci-heal-<pr> even with `authExpired: true` — no completion-record kind exists for it', () => {
-    expect(planBackstopCompletion({ name: 'ci-heal-2711' }, null, undefined, false, false, true)).toBeNull();
+  it('mints BLOCKED_ON_INFRA_OUTCOME + the claude-auth label for a ci-heal-<pr> session too, now it has a schema', () => {
+    const rec = planBackstopCompletion({ name: 'ci-heal-2711' }, null, () => '2026-09-26T11:00:00.000Z', false, false, true);
+    expect(rec).toMatchObject({ session: 'ci-heal-2711', kind: 'ci-heal', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME, label: CLAUDE_AUTH_OUTCOME_LABEL });
   });
 
   it('omitting `authExpired` (or false) is byte-identical to before — no `label` field touched', () => {
