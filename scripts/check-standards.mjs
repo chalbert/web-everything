@@ -130,6 +130,56 @@ const JSON_MODE = process.argv.includes('--json');
 // is untouched: LOCAL_MODE is false, so every section still runs exactly as before (CI / close-out).
 const LOCAL_MODE = process.argv.includes('--local');
 
+// #4163 profiling — CHECK_STANDARDS_PROFILE=1 prints ms spent in each section below to stderr, so a
+// lane-gate shrink slice can target the sections that actually cost time instead of guessing. `mark()`
+// is called once per section boundary (the `── … ──` comments below) in BOTH modes — same call sequence
+// whether or not the flag is set — so profiling can never change what runs, only what prints. Zero cost
+// when unset (`mark` short-circuits before touching `process.hrtime`).
+const PROFILE = !!process.env.CHECK_STANDARDS_PROFILE;
+const profileEntries = [];
+let profileT = process.hrtime.bigint();
+const mark = (label) => {
+  if (!PROFILE) return;
+  const now = process.hrtime.bigint();
+  profileEntries.push([label, Number(now - profileT) / 1e6]);
+  profileT = now;
+};
+
+// #4168 — `--files=` parsed HERE, before any section runs, so the per-file content scanners below (6f,
+// 6f-i, 6f-i-b, 6f-ii, the 6f-ii-b anchor scan) can subset their own directory walk to just these files
+// instead of the whole corpus. This is the SAME parse the bottom-of-file `--files` consumer already did
+// (scripts/readiness/claimScope.mjs's `partitionLocal`) — hoisted, not duplicated: that block now reads
+// `LOCAL_FILES_LIST` instead of re-deriving it, so the two can never drift on what `--files=` means.
+//
+// `SCOPE_TO_FILES` (the gate every scanner below actually checks) requires BOTH `--local` AND `--files`:
+// `--files` alone (no `--local`) only narrows the BLOCKING set at the bottom while still classifying every
+// OTHER file's findings as external notes (`partitionLocal(..., {local:false})`) — that needs the full
+// scan to have run. `--local` alone (no `--files`) has no known file list to subset to. Only the combined
+// `--local --files=<lane files>` this epic's replay proof (#4164) targets is safe to skip work under: in
+// that mode EVERY finding on a file outside the list is demoted to a note regardless (`--local`'s own
+// semantics, #4167's docblock above), so never computing it changes zero blocking outcomes — only less
+// work to reach the same verdict. The default no-flag run, and CI's always-unscoped run, are untouched:
+// `SCOPE_TO_FILES` is false whenever `--local` is absent, exactly like `LOCAL_MODE` itself.
+const filesArgEarly = process.argv.find((a) => a.startsWith('--files='));
+const LOCAL_FILES_LIST = filesArgEarly
+  ? filesArgEarly.split('=').slice(1).join('=').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+  : null;
+const LOCAL_FILES = LOCAL_FILES_LIST ? new Set(LOCAL_FILES_LIST) : null;
+const SCOPE_TO_FILES = LOCAL_MODE && !!LOCAL_FILES;
+
+// Drop-in replacement for `readdirSync(join(ROOT, dirRel)).filter(...)` at every per-file-content-scanner
+// call site below: same result whenever `SCOPE_TO_FILES` is false (whole-repo/CI/default), but returns
+// only the names that are BOTH in `dirRel` and in the caller's `--files` list when scoped. `dirRel` must
+// carry its OWN trailing slash (`'backlog/'`, `'reports/'`, …) — the same convention every call site
+// already uses to build its `file:` label (`\`${dirRel}${name}\``), so a set membership test against
+// `LOCAL_FILES` (built from git-diff-style relative paths) never has to re-derive that convention.
+const scopedReaddir = (dirRel, exts) => {
+  const abs = join(ROOT, dirRel);
+  if (!existsSync(abs)) return [];
+  const names = readdirSync(abs).filter((n) => exts.some((e) => n.endsWith(e)));
+  return SCOPE_TO_FILES ? names.filter((n) => LOCAL_FILES.has(`${dirRel}${n}`)) : names;
+};
+
 // Each entry is { message, descriptor? }. The optional descriptor is the structured,
 // agent-targetable form of the failure — populated for every class a fixer (deterministic
 // or model) can act on. Calls with no descriptor are not yet agent-fixable.
@@ -142,6 +192,7 @@ const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
 const diffBranchCoverage = scanDiffBranchCoverage(ROOT);
 for (const e of diffBranchCoverage.errors) err(e.message, e.descriptor);
 
+mark("setup (imports + spec/backlog load)");
 // ── Failure descriptors (#095 → fed to the auto-fix agent #196) ────────────────
 // Every descriptor carries a `kind` (the failure class a fixer matches on) and `fix`: the routing
 // call this item (#197) records for each class —
@@ -183,6 +234,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // tests (#251). See docs/agent/backlog-workflow.md → "Agile sizing".
 const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Component', 'Module']);
 
+mark("Failure descriptors (#095 → fed to the auto-fix agent #196)");
 // ── Load specs ───────────────────────────────────────────────────────────────
 const blocks = arr(loadBlocks()); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const plugs = arr(loadDataRegistry('plugs')); // per-plug specs src/_data/plugs/<id>.json, assembled (#1157)
@@ -201,6 +253,7 @@ const capabilityMatrix = readJson('capabilityMatrix.json') || {};
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
 const backlog = arr(typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog);
 
+mark("Load specs");
 // ── 1. Spec ↔ description coverage ────────────────────────────────────────────
 const hasDesc = (folder, id) => existsSync(join(INC, folder, `${id}.njk`));
 for (const b of blocks)
@@ -228,6 +281,7 @@ for (const cat of adapters)
       err(`Adapter "${a.id}" has no src/_includes/adapter-descriptions/${a.id}.njk (src/adapter-pages.njk includes it by id; a missing partial crashes the Eleventy build, #1388)`,
         dMissingDescription('Adapter', a.id, `src/_includes/adapter-descriptions/${a.id}.njk`));
 
+mark("1. Spec ↔ description coverage");
 // ── 2. Spec ↔ implementation ──────────────────────────────────────────────────
 // Per #641 (block protocol/impl boundary, A/A/A): a WE block entry is a *protocol*,
 // not impl. The impl lives in the canonical `@frontierui/blocks` package, named by
@@ -243,6 +297,7 @@ for (const b of blocks) {
     warn(`Block "${b.id}" is status:active but has no implementedBy (@frontierui/blocks impl reference)`);
 }
 
+mark("2. Spec ↔ implementation");
 // ── 3. Status / type enums ────────────────────────────────────────────────────
 for (const b of blocks) {
   checkStatusInto('Block', b.id, b.status);
@@ -250,6 +305,7 @@ for (const b of blocks) {
 }
 for (const p of plugs) checkStatusInto('Plug', p.id, p.status);
 
+mark("3. Status / type enums");
 // ── 3a. Portfolio project tier — the importance axis (#2088, codified #portfolio-project-tiering) ──
 // Orthogonal to project `status` (which stays deliberately outside LIFECYCLE). Every project carries an
 // enum-validated `tier` (core | contextual | exploratory) by the named-consumer evidence bar; every
@@ -267,6 +323,7 @@ for (const p of projects)
   for (const w of advWarnings) warn(w.message, w.descriptor);
 }
 
+mark("3a. Portfolio project tier — the importance axis (#2088, codified #portfolio-project-tiering)");
 // ── 3b. composesBehaviors resolution (#936, Fork 2 of #933) ───────────────────
 // A block's `traits[]` records the named behaviors it PROVIDES (`withSortableHeader`, …); the new
 // `composesBehaviors[]` records the behaviors it CONSUMES. The de-facto behavior registry is the
@@ -338,6 +395,7 @@ for (const r of research)
   }
 }
 
+mark("3b. composesBehaviors resolution (#936, Fork 2 of #933)");
 // ── 4. Naming conventions (across all exports) ────────────────────────────────
 const allExports = blocks.flatMap((b) => (Array.isArray(b.exports) ? b.exports.map((e) => [b.id, e]) : []));
 for (const [id, name] of allExports) {
@@ -347,6 +405,7 @@ for (const [id, name] of allExports) {
     warn(`Export "${name}" (block "${id}") looks like a registry but isn't "Custom[Name]Registry"`);
 }
 
+mark("4. Naming conventions (across all exports)");
 // ── 5. Semantics glossary hygiene ─────────────────────────────────────────────
 const seenTerms = new Map();
 for (const t of semantics) {
@@ -356,6 +415,7 @@ for (const t of semantics) {
   seenTerms.set(key, true);
 }
 
+mark("5. Semantics glossary hygiene");
 // ── 5a. Semantics glossary COVERAGE (#1371 slice B of #1327; scope ratified #1343) ───────────────
 // The glossary is the project's ubiquitous vocabulary of CONCEPTS. The concept-bearing registries —
 // intents + protocols + capabilities — should each have a matching glossary term; a block/plug earns
@@ -395,6 +455,7 @@ for (const t of semantics) {
   }
 }
 
+mark("5a. Semantics glossary COVERAGE (#1371 slice B of #1327; scope ratified #1343)");
 // ── 6. Unique ids per registry ────────────────────────────────────────────────
 const dupCheck = (list, label) => {
   const seen = new Set();
@@ -409,6 +470,7 @@ dupCheck(plugs, 'plugs.json');
 dupCheck(research, 'researchTopics.json');
 dupCheck(protocols, 'protocols.json');
 
+mark("6. Unique ids per registry");
 // ── 6a-bis. Benchmark capability-presence join table (#352) ──────────────────
 // Each row of benchmarkCapabilityPresence.json must reference a known capability + corpus source; a
 // `verified` row should carry its deep doc URL. Pure rule, composed over the two sibling registries.
@@ -427,6 +489,7 @@ dupCheck(protocols, 'protocols.json');
   }
 }
 
+mark("6a-bis. Benchmark capability-presence join table (#352)");
 // ── 6a-ter. Reference-retirement convention (#584) ───────────────────────────
 // One uniform retirement field-set — the #546 death triplet + the #192 supersededBy pointer — checked
 // by a single shared helper across every structured reference home. The markers are opt-in
@@ -462,6 +525,7 @@ dupCheck(protocols, 'protocols.json');
       runShape(row, `capability-presence (${row.capabilityId}, ${row.sourceId})`, { resolveSupersededBy: inCorpus });
 }
 
+mark("6a-ter. Reference-retirement convention (#584)");
 // ── 6b. Protocols (first-class entity, owned by a Project) ───────────────────
 // Per-protocol field + reference rules (incl. the project-partial anchor probe) are the pure
 // `validateProtocol` (unit-tested in scripts/__tests__, #256); the script composes it over the live
@@ -479,6 +543,7 @@ for (const proto of protocols) {
   for (const w of pw) warn(w.message, w.descriptor);
 }
 
+mark("6b. Protocols (first-class entity, owned by a Project)");
 // ── 6b-bis. Assembler presets (#646/#667, registry-item recipes, surfaced via /presets/) ──
 // Per-preset field/status/reference rules + the non-empty files[] recipe guard are the pure
 // `validatePreset` (mirrors validateProtocol); the script composes it over the live registry.
@@ -491,6 +556,7 @@ for (const preset of presets) {
 }
 dupCheck(presets.map((p) => ({ id: p.name })), 'assemblerPresets.json');
 
+mark("6b-bis. Assembler presets (#646/#667, registry-item recipes, surfaced via /presets/)");
 // ── 6b-ter. Design systems (#747 Fork-3-A / #871, theme+intents bundles, surfaced via /design-systems/) ──
 // A thin `designSystems.json` rendering index pointing at manifests of shape
 // `{ extends, themeTokens (DTCG ref), intentDefaults?, traitDefaults? }`. The per-entry field/status/
@@ -515,10 +581,12 @@ dupCheck(designSystems, 'designSystems.json');
 
 dupCheck(intents, 'intents.json');
 
+mark("6b-ter. Design systems (#747 Fork-3-A / #871, theme+intents bundles, surfaced via /design-systems/)");
 // ── 6c. Intents (UX preference vocabulary, surfaced via /intents/ catalog) ───
 // Per-intent field/status/dimensions rules + the requiresCapabilities → capabilities.json resolution
 // are the pure `validateIntent` (#256). `capabilityIds` is built below (§6c-bis) before this runs.
 
+mark("6c. Intents (UX preference vocabulary, surfaced via /intents/ catalog)");
 // ── 6c-bis. Capability vocabulary + static build-matrix (#204, foundation of epic #203) ──
 // Capability ids borrow Baseline / `web-features` keys (D3′); the matrix (the default provider impl,
 // D4′) tiers each (impl × capability) at one of three states. Guard the vocabulary, the
@@ -630,6 +698,7 @@ const seenNums = new Set(backlog.map((i) => i.num).filter(Boolean));
 // so they're unit-tested with fixtures — #251.)
 const graduatedKinds = buildGraduatedKinds({ blocks, intents, protocols, projects, plugs, capabilityIds, adapters, demos });
 
+mark("6c-bis. Capability vocabulary + static build-matrix (#204, foundation of epic #203)");
 // ── 6d. Backlog (single source of truth for ideas/issues/reviews/decisions) ──
 // Feeds off backlog/*.md (frontmatter = fields, body = the per-item page). The per-item field +
 // outward-reference rules are the pure `validateBacklogItem` (unit-tested in scripts/__tests__);
@@ -745,6 +814,7 @@ const ctaless = backlog
 if (ctaless.length)
   err(`${ctaless.length} OPEN item(s) have NO call-to-action — they would render a bare tier badge with no next step (the #1004 dead-end class). Every not-ready item must resolve to a known next-action: build (Tier A) / ratify (decision) / slice (epic) / split (story>8) / unblock (blockedBy) / graduate the project (relatedProject) / clear a human gate. Fix each item's state so a pill renders. Items: ${ctaless.join(', ')}`);
 
+mark("6d. Backlog (single source of truth for ideas/issues/reviews/decisions)");
 // ── 6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis-flagged-batchable · #845 ──
 // bad-body-links) — the structural/rendering checks that operate on ONE item's body, consolidated into the
 // shared `lintBacklogItemRendering` (#845) so the whole-repo gate and the scoped `check:standards --item NNN`
@@ -763,6 +833,7 @@ for (const item of backlog) {
   for (const m of itemWarn) warn(m);
 }
 
+mark("6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis-flagged-batchable · #845");
 // ── 6d-quinquies. Unquoted-colon scalar in frontmatter (#453) ──
 // Scan the RAW backlog/*.md files, NOT the loader output — the loader (#430) already skips an item
 // whose frontmatter is malformed YAML and only warns, so the broken item is absent from `backlog`
@@ -780,6 +851,7 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
   }
 }
 
+mark("6d-quinquies. Unquoted-colon scalar in frontmatter (#453)");
 // ── 6d-sexies. Optional `scope:` predicted touch-set (#x53zzf9) ──
 // `scope: ["we:src/x/", "we:docs/y/"]` is the item's PREDICTED file-scope (REPO-QUALIFIED path prefixes) a
 // probe agent writes once so the deterministic conveyor dispatcher (scripts/readiness/dispatch-plan.mjs) can
@@ -876,6 +948,7 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
   }
 }
 
+mark("6d-sexies. Optional `scope:` predicted touch-set (#x53zzf9)");
 // ── 6d-ter. blockedBy dependency edges (#248) ──
 // `blockedBy: ["NNN", …]` is a directional prerequisite edge ("this can't start until NNN is
 // resolved"), making the backlog a real DAG that a deterministic readiness function (#249/#250)
@@ -1115,6 +1188,7 @@ for (const item of backlog) {
     warn(`Backlog item "${item.id}" shortTitle is ${item.shortTitle.length} chars (> ${SHORT_TITLE_MAX}) — tighten it to a glanceable 3–5 words, or drop it to fall back to the title.`);
 }
 
+mark("6d-ter. blockedBy dependency edges (#248)");
 // ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──
 // A renamed item lists prior URL segments in `formerSlugs:`; src/backlog-slug-redirects.njk turns
 // each into a redirect page at /backlog/<former>/ → /backlog/<id>/. Guard the field so a former slug
@@ -1143,6 +1217,7 @@ for (const item of backlog) {
   }
 }
 
+mark("6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases");
 // ── 6e. No hidden reports — every report must be exposed somewhere ────────────
 // "Three homes": research → a /research/ topic, spec → the website, everything else → a
 // backlog item. reports/ is NOT in the 11ty build, so a report is only reachable when it is
@@ -1151,6 +1226,11 @@ for (const item of backlog) {
 // The fs walk stays here; the de-date + visibility predicate is the pure `validateReportsNotHidden` (#256).
 const REPORTS = join(ROOT, 'reports');
 const reportFiles = existsSync(REPORTS) ? readdirSync(REPORTS).filter((f) => f.endsWith('.md')) : [];
+// #4168 — a SEPARATE scoped view for the per-file content scanners below (6f, 6f-i, 6f-i-b): 6e just
+// above needs the FULL `reportFiles` list regardless of scope (a hidden report is a hidden report whether
+// or not this lane touched it — that invariant is relational/global, out of #4168's scope by the epic's
+// own split), so it must never subset the shared variable those scanners also read.
+const scopedReportFiles = SCOPE_TO_FILES ? reportFiles.filter((f) => LOCAL_FILES.has(`reports/${f}`)) : reportFiles;
 const researchIds = new Set(research.map((r) => r.id).filter(Boolean));
 const backlogReportRefs = new Set(
   backlog.map((b) => b.relatedReport).filter(Boolean).map((p) => p.replace(/^reports\//, '')),
@@ -1160,6 +1240,7 @@ const backlogReportRefs = new Set(
   for (const e of re) err(e.message, e.descriptor);
 }
 
+mark("6e. No hidden reports — every report must be exposed somewhere");
 // ── 6e-ii. Untracked derived artifacts — local-vs-CI divergence guard (#2180) ──────────────────────
 // `check:standards` reads the working tree. On a dev machine, authored-but-never-committed files in
 // `reports/`, `src/_data/researchTopics/`, or `src/_includes/research-descriptions/` make existence and
@@ -1179,6 +1260,7 @@ try {
   // `git` unavailable or not a git repo — skip gracefully (not a gate failure).
 }
 
+mark("6e-ii. Untracked derived artifacts — local-vs-CI divergence guard (#2180)");
 // ── 6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B) ─
 // Every code-path reference in backlog/*.md + reports/*.md must carry a `<repo>:` locus marker so its
 // constellation repo is unambiguous in chat / raw markdown. The fs reads stay here; the carve-out scan
@@ -1191,10 +1273,14 @@ try {
 // the session's OWN breakage demoted to a note (false green — the #1389 masking). Per-file keying lets
 // `--scope` attribute each correctly — the session's files block, concurrent files demote.
 {
+  // #4168 — `scopedReaddir`/`scopedReportFiles` narrow this to the lane's own `--files` under
+  // `--local --files=…`; unchanged (full corpus) otherwise. This check judges each file's OWN content
+  // (a bare code-path reference in ITS body), so a file this lane never touched can't newly need a locus
+  // prefix it didn't already have — safe to skip entirely, not just demote after the fact.
   const docs = [];
-  for (const f of readdirSync(join(ROOT, 'backlog')).filter((n) => n.endsWith('.md')))
+  for (const f of scopedReaddir('backlog/', ['.md']))
     docs.push({ file: `backlog/${f}`, content: readFileSync(join(ROOT, 'backlog', f), 'utf8') });
-  for (const f of reportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
+  for (const f of scopedReportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
   for (const finding of scanRepoLocusPrefixes(docs)) {
     const msg =
       `${finding.count} code-path reference(s) in ${finding.file} lack a <repo>: locus prefix ` +
@@ -1205,6 +1291,7 @@ try {
   }
 }
 
+mark("6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B)");
 // ── 6f-i. PUBLISH-SEAM secret sweep on the committed corpus (#3015, under #2978 Fork 3) ───────────
 // The BACKSTOP of the hook + CLI + sweep trio (the shape #1574 established for locus prefixes). The two
 // write-time gates — `writeBacklogMd` for the CLI funnel, the `--pre` hooks for `Edit`/`Write` — deny
@@ -1226,18 +1313,20 @@ try {
   // Wrapped in try/catch (PR #1741 review finding 1) to match the stdout-flush call site above — a bare
   // top-level block here had no wrapping try, so any exception downstream of a malformed `findings` value
   // would have aborted the whole check-standards.mjs script rather than degrading this one section.
+  // #4168 — "Secret sweep stays in the lane, scoped": under `--local --files=…` this judges only the
+  // lane's own changed files (`scopedReaddir`), and `scoped: SCOPE_TO_FILES` tells the bridge to skip the
+  // (always whole-corpus) binary so its file-scoped JS fallback below actually runs instead of a full walk.
   const findings = runWeScan('secret-scrub', [`--root=${ROOT}`], {
     referenceFiles: [
       join(ROOT, 'scripts', 'check-standards-rules.mjs'),
       join(ROOT, 'scripts', 'lib', 'secret-scrub.mjs'),
     ],
+    scoped: SCOPE_TO_FILES,
   }) ?? (() => {
     const docs = [];
     for (const label of ['backlog', 'agent-memory-src']) {
-      const dir = join(ROOT, label);
-      if (!existsSync(dir)) continue;
-      for (const f of readdirSync(dir).filter((n) => n.endsWith('.md')))
-        docs.push({ file: `${label}/${f}`, content: readFileSync(join(dir, f), 'utf8') });
+      for (const f of scopedReaddir(`${label}/`, ['.md']))
+        docs.push({ file: `${label}/${f}`, content: readFileSync(join(ROOT, label, f), 'utf8') });
     }
     return scanPublishSecrets(docs);
   })();
@@ -1254,6 +1343,7 @@ try {
   err(`publish-secret sweep failed: ${e.message}`);
 }
 
+mark("6f-i. PUBLISH-SEAM secret sweep on the committed corpus (#3015, under #2978 Fork 3)");
 // ── 6f-i-b. HARNESS-SCAFFOLDING leak sweep on the committed corpus (#3448) ─────────────────────────
 // PR #1803 committed a literal <system-reminder> block into a backlog item — copy-pasted from the
 // authoring agent's own context, not an external attack, undetected until human review. This re-walks
@@ -1261,10 +1351,12 @@ try {
 // an agent accidentally pasting its own harness context into committed content. Pure detector lives in
 // scanHarnessScaffolding; the fs walk stays here, mirroring scanRepoLocusPrefixes / scanPublishSecrets.
 {
+  // #4168 — same scoping as 6f above: judges each file's own content, so a file outside the lane's
+  // `--files` list can be skipped entirely under `--local --files=…`.
   const docs = [];
-  for (const f of readdirSync(join(ROOT, 'backlog')).filter((n) => n.endsWith('.md')))
+  for (const f of scopedReaddir('backlog/', ['.md']))
     docs.push({ file: `backlog/${f}`, content: readFileSync(join(ROOT, 'backlog', f), 'utf8') });
-  for (const f of reportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
+  for (const f of scopedReportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
   for (const { file, hits } of scanHarnessScaffolding(docs)) {
     for (const hit of hits) {
       err(
@@ -1278,6 +1370,7 @@ try {
   }
 }
 
+mark("6f-i-b. HARNESS-SCAFFOLDING leak sweep on the committed corpus (#3448)");
 // ── 6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset) ───────────────────────────────
 // "A reference asserted without resolving it against the source it points at" (#2821, the #957 root
 // class). Four deterministic checks, each reproducing a real review-bounce instance the pure core
@@ -1344,11 +1437,14 @@ try {
 
   // #3417 — the optional Rust `we-scan citation-check` port, verified byte-identical to the four
   // JS gates combined; falls back to the JS scan whenever the binary is unbuilt/stale/wrongly-shaped/erroring.
+  // #4168 — `scoped: SCOPE_TO_FILES` also forces the fallback under `--local --files=…`, so `scanDir` below
+  // (itself scoped via `scopedReaddir`) actually runs instead of the binary's whole-corpus walk.
   const rustFindings = runWeScan('citation-check', [`--root=${ROOT}`], {
     referenceFiles: [
       join(ROOT, 'scripts', 'lib', 'citation-check.mjs'),
       join(ROOT, 'scripts', 'backlog', 'id.mjs'),
     ],
+    scoped: SCOPE_TO_FILES,
   });
 
   if (rustFindings) {
@@ -1385,10 +1481,13 @@ try {
     };
     // Same widened scope as gate 2/3 (#957 round 7) plus agent-memory-src/ (#3100): backlog + docs/agent +
     // agent-memory-src + reports + the two src/ research dirs (the latter render on the public /research/ page).
+    // #4168 — `scopedReaddir` narrows each dir to the lane's own `--files` under `--local --files=…`; every
+    // detector `scanFile` runs is per-file and stateless (see the comment above `scanFile`), so a file this
+    // lane never touched can't produce a NEW finding here — safe to skip reading it at all, not just demote
+    // its (identical, already-passing) finding afterward.
     const scanDir = (dir, exts) => {
       const abs = join(ROOT, dir);
-      if (!existsSync(abs)) return;
-      for (const f of readdirSync(abs)) if (exts.some((e) => f.endsWith(e)))
+      for (const f of scopedReaddir(dir, exts))
         scanFile(`${dir}${f}`, readFileSync(join(abs, f), 'utf8'));
     };
     scanDir('backlog/', ['.md']);
@@ -1402,6 +1501,7 @@ try {
   err(`citation-verification gate failed: ${e.message}`);
 }
 
+mark("6f-ii. CITATION-VERIFICATION gate family (#2821, proven subset)");
 // ── 6f-ii-b. REFERENCE-RESOLUTION gates (5b/5c/5d — 2026-09-06 staleness audit) ────────────────────
 // The gates above resolve a reference's CONTAINER; these resolve its CONTENT, and they resolve the two
 // SIBLING repos gate 5 skips by construction.
@@ -1438,11 +1538,13 @@ try {
       { kind: 'citation-graduated-target', file: 'backlog/' });
 
   // 5b — the `we:<path>#<symbol>` anchor form gate 5's own message recommends, now actually resolved.
+  // #4168 — per-file (a symbol anchor either resolves against the current tree or it doesn't, independent
+  // of any OTHER file), so `scopedReaddir` safely narrows this to the lane's own `--files` under
+  // `--local --files=…`. 5c above stays unscoped — it isn't file-attributable at all (see its descriptor's
+  // fixed `file: 'backlog/'`), so it's out of #4168's "judges one file's own content" mandate.
   const scanAnchors = (dir, exts) => {
     const abs = join(ROOT, dir);
-    if (!existsSync(abs)) return;
-    for (const name of readdirSync(abs)) {
-      if (!exts.some((e) => name.endsWith(e))) continue;
+    for (const name of scopedReaddir(dir, exts)) {
       const rel = `${dir}${name}`;
       for (const f of findDanglingSymbolAnchors(readFileSync(join(abs, name), 'utf8'), { readRepoFile }))
         emit2(`${rel}: symbol anchor \`${f.locus}\` does not resolve — ${f.reason === 'missing-file'
@@ -1466,6 +1568,7 @@ try {
   err(`reference-resolution gate failed: ${e.message}`);
 }
 
+mark("6f-ii-b. REFERENCE-RESOLUTION gates (5b/5c/5d — 2026-09-06 staleness audit)");
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
 // The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
 // an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency
@@ -1601,6 +1704,7 @@ try {
   }
 }
 
+mark("6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked");
 // ── 6g. Catalog-index completeness — every artifact type is reachable from a top-level index + nav ──
 // The recurring "expose everything" drift (#1803): a type ships detail pages (/<type>/{id}/) but never
 // gets a top-level index (/<type>/) or a nav entry, so it's only reachable by deep-linking. Derive the
@@ -1649,6 +1753,7 @@ try {
   }
 }
 
+mark("6g. Catalog-index completeness — every artifact type is reachable from a top-level index + nav");
 // ── 7. AGENTS.md inventory must be in sync (generated, not hand-edited) ────────
 // #4167 — `renderInventory()` reads the WHOLE repo's registries to re-derive AGENTS.md, and the one finding
 // it can produce is unconditionally `global: true` (see below): an isolated `--local` lane defers this to
@@ -1666,6 +1771,7 @@ if (!LOCAL_MODE) {
   }
 }
 
+mark("7. AGENTS.md inventory must be in sync (generated, not hand-edited)");
 // ── 8. No compiled artifacts shadowing TS sources ────────────────────────────
 // A stray `tsc <file>` (or an editor "compile on save") emits `.js`/`.d.ts` next to the `.ts`/
 // `.tsx` source, ignoring tsconfig `outDir`. Because Vite/vitest resolve extensionless imports
@@ -1690,6 +1796,7 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
   for (const e of se) err(e.message, e.descriptor);
 }
 
+mark("8. No compiled artifacts shadowing TS sources");
 // ── 8b. Plug runtime dual-mode conformance (#636, enforcing the #606 invariants) ─
 // Every plug domain must ship passing tests for BOTH the unplugged (non-invasive)
 // and plugged modes, and none may require plugged mode (the unplugged form is the
@@ -1730,6 +1837,7 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
   }
 }
 
+mark("8b. Plug runtime dual-mode conformance (#636, enforcing the #606 invariants)");
 // ── 8c. Block contract↔impl drift conformance (#659, the #606/#641 plugs analogue) ─
 // WE blocks are pure protocols; the impl lives in FUI (`implementedBy: @frontierui/blocks/…`).
 // When the sibling FUI repo is checked out, every `implementedBy` must resolve to a real impl
@@ -1848,6 +1956,7 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
   }
 }
 
+mark("8c. Block contract↔impl drift conformance (#659, the #606/#641 plugs analogue)");
 // ── 8f. Plug contract↔impl drift conformance (#1309, the §8c/#659 plugs analogue) ──
 // WE owns the plug platform layer; FUI ports each plug domain UP to the WE contract (#1250 reconcile
 // epic). Two arms, both detect-or-skip when ../frontierui is absent (mirrors 8c): (1) every we:plugs/
@@ -1880,6 +1989,7 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
   for (const w of pw) warn(w.message, w.descriptor);
 }
 
+mark("8f. Plug contract↔impl drift conformance (#1309, the §8c/#659 plugs analogue)");
 // ── 9. Vite dev-proxy allowlist must cover every 11ty catalog route ────────────
 // A new catalog page renders on the 11ty server (:8080) but 404s on the Vite dev server (:3000)
 // until its top-level URL segment is hand-added to the proxy allowlist in vite.config.mts. The 11ty
@@ -1911,6 +2021,7 @@ try {
   err(`Vite proxy allowlist check failed: ${e.message}`);
 }
 
+mark("9. Vite dev-proxy allowlist must cover every 11ty catalog route");
 // ── 9a-rules. Statute-layer integrity gate (#1828 resolution + #2083 duplicates/orphans/substance) ──
 // The statute layer (docs/agent/platform-decisions.md + 3 siblings) renders at /rules/, and ~229
 // `codifiedIn:` frontmatter values across backlog/*.md cite anchors in it. platform-decisions.md is
@@ -1928,6 +2039,7 @@ try {
   err(`Statute-layer integrity check failed: ${e.message}`);
 }
 
+mark("9a-rules. Statute-layer integrity gate (#1828 resolution + #2083 duplicates/orphans/substance)");
 // ── 9a′. Agent-memory freshness (#2087) ──
 // The hand-curated leaves under .claude/agent-memory/ carry no freshness guarantee: a leaf can cite a
 // decision the project has since ruled the other way, or a statute anchor renamed out from under it, and
@@ -1943,6 +2055,7 @@ try {
   warn(`Agent-memory freshness audit failed: ${e.message}`);
 }
 
+mark("9a′. Agent-memory freshness (#2087)");
 // ── 9a′-ii. Agent-memory citation integrity (#2921) ──
 // Different in kind from 9a′ above: these three signals reproduce the three factual errors the /review
 // of PR #1045 found in one 7-line memory paragraph — a wrong impl arm, a quoted guard section that exists
@@ -1958,6 +2071,7 @@ try {
   err(`Agent-memory citation-integrity check failed: ${e.message}`);
 }
 
+mark("9a′-ii. Agent-memory citation integrity (#2921)");
 // ── 9a″. Agent-memory index-tree shape (#2192) ──
 // The always-loaded MEMORY.md is injected into every session; the harness silently truncates it above
 // its budget, dropping load-bearing rules with no warning. This check enforces: (1) size ≤ budget,
@@ -1982,6 +2096,7 @@ try {
   warn(`Agent-memory index-tree check failed: ${e.message}`);
 }
 
+mark("9a″. Agent-memory index-tree shape (#2192)");
 // ── 9b. Module-resolution exports-lock (#274/#271) ──
 // Gather every `@frontierui/*` (locked-scope) entry from the project's SHIPPED native resolution
 // manifests — vite `resolve.alias` + every `<script type="importmap">` in the served catalog pages
@@ -2017,6 +2132,7 @@ try {
   err(`Module-resolution exports-lock check failed: ${e.message}`);
 }
 
+mark("9b. Module-resolution exports-lock (#274/#271)");
 // ── 9c. Codegen-placement invariants (#964 — hardening #956's ruling) ──
 // #956 settled: `serve()`'s form-generators stay WE-repo reference runtime (#791); `@webeverything`
 // ships only contract + vectors (#855). Its skeptic flagged both invariants as true-by-absence; this
@@ -2063,6 +2179,7 @@ try {
   err(`Codegen-placement invariants check failed: ${e.message}`);
 }
 
+mark("9c. Codegen-placement invariants (#964 — hardening #956's ruling)");
 // ── Demos: operational-wiring gate (routing/base-path/registry/dev-fallback) ────
 // Complements check:app-conformance (which validates standard USE). The static checks live in
 // check-demos.mjs and are composed here so the everyday gate catches the base-path reload bug class
@@ -2075,6 +2192,7 @@ try {
   err(`Demo operational-wiring check failed: ${e.message}`);
 }
 
+mark("Demos: operational-wiring gate (routing/base-path/registry/dev-fallback)");
 // ── Backlog badge single-source (anti-drift) ────────────────────────────────────
 // The /backlog/ tile + Prioritisation table (src/backlog.njk) and the /backlog/{id}/ detail page
 // (src/backlog-pages.njk) must render every badge/chip from the ONE shared macro file
@@ -2096,6 +2214,7 @@ try {
   }
 }
 
+mark("Backlog badge single-source (anti-drift)");
 // ── 10. Backlog kind-filter UI must cover every BACKLOG_KIND ───────────────────
 // The /backlog/ board hides any card whose `data-kind` is not an *active filter chip*
 // (src/assets/js/home-display.js → `failKind`). The chip set is built from hard-coded kind
@@ -2125,6 +2244,7 @@ try {
   err(`Backlog kind-filter coverage check failed: ${e.message}`);
 }
 
+mark("10. Backlog kind-filter UI must cover every BACKLOG_KIND");
 // ── 11. Static template a11y lint (#772, complements the #770/#771 rendered axe gate) ──
 // Structural a11y rules that live in the .njk source and a headless axe run cannot observe from the
 // computed page (it sees rendered DOM, not the authoring miss). Scoped to the site-chrome layouts —
@@ -2141,6 +2261,7 @@ try {
   err(`Static template a11y lint failed: ${e.message}`);
 }
 
+mark("11. Static template a11y lint (#772, complements the #770/#771 rendered axe gate)");
 // ── 12. Standard-vs-site surface classifier (#2052, interim per #2006 Fork 2(b)) ──
 // The WE repo intermingles WE-the-standard (zero-impl defs/gate/backlog) with the WE-website render (an
 // artifact-producing 11ty+Vite product, mis-homed — end-state extraction gated on #872). #2006 Fork 2(b)
@@ -2162,6 +2283,7 @@ try {
   err(`Standard-vs-site surface classifier failed: ${e.message}`);
 }
 
+mark("12. Standard-vs-site surface classifier (#2052, interim per #2006 Fork 2(b))");
 // ── 13. Playwright container-image pin lockstep (#2234) ────────────────────────
 // The visual-regression CI jobs (ci.yml's `visual` job + update-visual-baselines.yml) render inside a
 // version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container so rendered pixels stay
@@ -2182,6 +2304,7 @@ try {
   err(`Playwright container pin check failed: ${e.message}`);
 }
 
+mark("13. Playwright container-image pin lockstep (#2234)");
 // ── 14. Enum-totality gate — VERDICTS (#2823, item xiqj3w9) + IMPACT_LEVELS (#xdompzx) ────────
 // Every structure total over the `VERDICTS` enum (strictness/marker/label tables + the reducers that branch on a
 // verdict) must handle EVERY member — a member added without updating one is the script-decidable class PR #976 hit
@@ -2226,6 +2349,7 @@ try {
   for (const e of ite) err(e);
 }
 
+mark("14. Enum-totality gate — VERDICTS (#2823, item xiqj3w9) + IMPACT_LEVELS (#xdompzx)");
 // ── 15. Review-label swap must stay in its single home (#2882) ─────────────────
 // A doc under skills-src/ or docs/agent/ may not INSTRUCT a raw `gh pr edit … --add-label review:*`. That path
 // skips the `reviewed-sha` stamp the drain's staleness gate reads (#2409) and bypasses INVARIANT 2, which is
@@ -2257,6 +2381,7 @@ try {
   for (const e of rle) err(e);
 }
 
+mark("15. Review-label swap must stay in its single home (#2882)");
 // ── 15b. Review-label single home must hold for CODE too, not just docs (#2416) ──────────────
 // Rule 15 stops a MARKDOWN doc from INSTRUCTING the raw swap; nothing stopped a SCRIPT from minting the same
 // raw gh-exec label write, or an equivalent `setLabels` add of the accepted label, directly in code — the
@@ -2285,6 +2410,7 @@ try {
   for (const e of rlc) err(e);
 }
 
+mark("15b. Review-label single home must hold for CODE too, not just docs (#2416)");
 // ── 16. A DECLARED module contract must cover every specifier the module imports (PR #1064) ─────
 // A `scripts/lib/*.mjs` header that declares "from we:<module> — `a`, `b`" is a tripwire: it is what a
 // maintainer greps before changing a shared export, and what names the dependency a semantic change would
@@ -2305,6 +2431,7 @@ try {
   for (const e of validateDeclaredModuleContract(mods).errors) err(e.message, e.descriptor);
 }
 
+mark("16. A DECLARED module contract must cover every specifier the module imports (PR #1064)");
 // ── 17b. `--all` inside a git hook (#3196) ─────────────────────────────────────
 // `we:.githooks/post-merge` shipped a commands sync carrying `--all`, where the flag does not mean "deploy
 // everything" but "CREATE the machine-global tree" on a machine that never opted in. A hook runs unattended on
@@ -2323,6 +2450,7 @@ try {
   }
 }
 
+mark("17b. `--all` inside a git hook (#3196)");
 // ── 17c. Leash pin (#2892 — enforces #2840 trigger 3; guards #2838's flip-edit safeguard) ──────
 // No declarative-leash (`POLICY_SPEC`) file may be dropped from the human gate — checked against the roster AND
 // against the real `scoreEscalation`, so neither a reclassification nor a rubric edit can quietly hand the
@@ -2341,6 +2469,7 @@ if (!LOCAL_MODE) {
   for (const w of pin.warnings) warn(w.message, w.descriptor);
 }
 
+mark("17c. Leash pin (#2892 — enforces #2840 trigger 3; guards #2838's flip-edit safeguard)");
 // ── 17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782) ────────
 // #2678 Fork 1 ratified (b) — WARN (never error, never deny) on a file that is BOTH oversized and
 // scope-collision-heavy, keyed on a size+collision composite (never raw line count), with a
@@ -2386,6 +2515,7 @@ try {
   warn(`Small-file preference lock-point scan failed: ${e.message}`);
 }
 
+mark("17. Small-file preference: size+collision composite soft-warn (#2678 ruling, #2782)");
 // ── 18. Test-only exports: exported, tested, wired to nothing (#2967a) ─────────
 // `reduceLensJury` was exported from scripts/lib/converge-core.mjs, unit-tested and called by nothing, so
 // multi-juror lenses collapsed last-writer-wins. WARN-first (`TEST_ONLY_EXPORT_ENFORCED`). Pure rule in
@@ -2434,6 +2564,7 @@ try {
   warn(`Test-only-export scan failed: ${e.message}`);
 }
 
+mark("18. Test-only exports: exported, tested, wired to nothing (#2967a)");
 // ── 18b. A skill instructing a raw home a declared operation owns (#3224) ──────
 // THE THIRD CALLER. #3029/#3035 derive the CLI and the HTTP routes from one declaration, so those two cannot
 // drift. The skill prose telling an agent which command to run is derived from nothing — it is a hand edit
@@ -2549,6 +2680,7 @@ try {
   warn(`Skill/operation wiring scan failed: ${e.message}`);
 }
 
+mark("18b. A skill instructing a raw home a declared operation owns (#3224)");
 // ── 18c. Operation IO modules with no real-mechanism test (#2949 fidelity qualifier; #3264) ────
 // THE LADDER MEASURES DETERMINISM, NOT FIDELITY. #2949's acceptance-criteria ladder sorts criteria by who
 // checks them — tier 1 is "green or not, nobody judges". That says nothing about WHAT went green. #3264's work
@@ -2577,6 +2709,7 @@ try {
   for (const w of fidelity.warnings) warn(w.message, w.descriptor);
 }
 
+mark("18c. Operation IO modules with no real-mechanism test (#2949 fidelity qualifier; #3264)");
 // ── 19. Unfenced mandate params (#2967b) ───────────────────────────────────────
 // The WALK lives in `lib/mandate-fence-scan.mjs`, not here (PR #1235 review, finding 4): a walk copied into a
 // test pins the rule but never the registration, so `findUnfencedMandateParams([])` here used to leave the
@@ -2589,6 +2722,7 @@ try {
   for (const w of unfenced.warnings) warn(w.message, w.descriptor);
 }
 
+mark("19. Unfenced mandate params (#2967b)");
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────
 // `--scope=<session>` (alias `--mine=<session>`) partitions errors by ownership: an error on a file THIS
 // session dirtied (per its claim-time baseline, #949 Fork 2-A) BLOCKS; a concurrent/pre-existing red is
@@ -2616,6 +2750,7 @@ if (scopeSession) {
   }
 }
 
+mark("Scope attribution (#952, ratified #949 Fork 3-A)");
 // ── Local / per-lane gating (#1144, consumed by the parallel-batch orchestrator #1147) ─────────
 // `--files=<comma|space list>` scopes the BLOCKING set to findings attributable to those files — an
 // explicit-list sibling of `--scope` (which derives the set from a session's claim baseline). `--local`
@@ -2629,13 +2764,14 @@ if (scopeSession) {
 // `--scope` so the two compose (scope demotes concurrent sessions' files; --files/--local narrows further).
 // (`LOCAL_MODE` itself is read at the TOP of the file, #4167 — sections that produce only
 // always-demoted-under-`--local` findings check it there and skip their own work entirely.)
-const filesArg = process.argv.find((a) => a.startsWith('--files='));
+// #4168 — `filesArg`/`list` reuse the SAME parse `LOCAL_FILES_LIST` hoisted to the top of the file
+// (right after `mark`'s definition), rather than re-deriving it here, so the two can never drift on what
+// `--files=` means.
+const filesArg = filesArgEarly;
 let localNote = null;
 let list = null;
 if (filesArg || LOCAL_MODE) {
-  list = filesArg
-    ? filesArg.split('=').slice(1).join('=').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
-    : null;
+  list = LOCAL_FILES_LIST;
   const fileSet = list ? new Set(list) : null;
   const { blocking, demoted } = partitionLocal(errors, { fileSet, local: LOCAL_MODE });
   externalErrors = [...externalErrors, ...demoted]; // demoted globals/other-file reds print as notes
@@ -2644,6 +2780,7 @@ if (filesArg || LOCAL_MODE) {
   localNote = `${LOCAL_MODE ? '--local ' : ''}${filesArg ? `--files=${list.join(',')} ` : ''}— scoped to ${scopeDesc}; ${demoted.length} finding(s) demoted to notes.`;
 }
 
+mark("Local / per-lane gating (#1144, consumed by the parallel-batch orchestrator #1147)");
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
   diffBranchCoverage,
@@ -2704,4 +2841,13 @@ if (JSON_MODE) {
 // `execFileSync` (measured 2026-08-10) — the health gate's own machine feed, unreadable; the human mode is a
 // `console.log` loop whose many small async writes truncate RACILY (337 131 bytes to a file, 302 018 through a
 // slow pipe in the same measurement), which is why the drain remedy alone would not have been enough here.
+mark("Report");
+if (PROFILE) {
+  const rows = [...profileEntries].sort((a, b) => b[1] - a[1]);
+  const total = profileEntries.reduce((s, [, ms]) => s + ms, 0);
+  console.error('\ncheck-standards profile (ms per section, sorted desc):');
+  for (const [label, ms] of rows) console.error(`  ${ms.toFixed(1).padStart(8)}ms  ${label}`);
+  console.error(`  ${total.toFixed(1).padStart(8)}ms  TOTAL (${profileEntries.length} sections)`);
+}
+
 process.exitCode = errors.length ? 1 : 0;

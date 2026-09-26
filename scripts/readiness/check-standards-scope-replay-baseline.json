@@ -1,6 +1,6 @@
 {
-  "_doc": "check-standards scoped-mode replay proof (#4164, gates epic #4163). Regenerate: node scripts/readiness/check-standards-scope-replay.mjs --count=50 --out=scripts/readiness/check-standards-scope-replay-baseline.json. This run (#4167) additionally overlaid the #4167-patched scripts/check-standards.mjs onto each historical worktree checkout for the SCOPED invocation only (the FULL run is unaffected by #4167 — it never passes --local), since #4167's own commit does not yet exist in the replayed history — see agent-memory / the #4167 PR description for the exact method.",
-  "at": "2026-09-26T12:21:36.183Z",
+  "_doc": "check-standards scoped-mode replay proof (#4164, gates epic #4163). Regenerate: node scripts/readiness/check-standards-scope-replay.mjs --count=50 --out=scripts/readiness/check-standards-scope-replay-baseline.json",
+  "at": "2026-09-26T13:08:41.372Z",
   "base": "origin/main",
   "requestedCount": 50,
   "lockfileDrift": [],
@@ -10,15 +10,93 @@
     "erroredCount": 0,
     "totalMissed": 0,
     "diffsWithMisses": 0,
-    "fullRealAvg": 13.4974,
-    "scopedRealAvg": 13.377199999999998,
-    "fullCpuAvg": 14.061000000000002,
-    "scopedCpuAvg": 14.0054,
-    "realSavingsPct": 0.8905418821402833,
-    "cpuSavingsPct": 0.39541995590641754,
+    "fullRealAvg": 12.481199999999996,
+    "scopedRealAvg": 12.549599999999998,
+    "fullCpuAvg": 13.437800000000005,
+    "scopedCpuAvg": 13.574399999999995,
+    "realSavingsPct": -0.5480242284395809,
+    "cpuSavingsPct": -1.01653544478999,
     "pass": true
   },
   "rows": [
+    {
+      "sha": "87bb032cef51f17d3c483b63993482af3b40aeab",
+      "subject": "Merge pull request #2713 from chalbert/lane/xs81oxb-unowned-conflict-recovery",
+      "head": "93b2d603a4614ccf1646021cea03d6a800a47cad",
+      "changedCount": 3,
+      "linkedCount": 13,
+      "full": {
+        "realSec": 13.03,
+        "userSec": 10.98,
+        "sysSec": 3.35,
+        "maxRssBytes": 1063747584,
+        "errors": 0,
+        "warnings": 2359
+      },
+      "scoped": {
+        "realSec": 12.85,
+        "userSec": 11.04,
+        "sysSec": 3.14,
+        "maxRssBytes": 1052819456,
+        "errors": 0,
+        "warnings": 2359
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "b7661681250e01a1092609865979bdd37d14bb56",
+      "subject": "Merge pull request #2709 from chalbert/lane/4138-pr-closed-reason-comment",
+      "head": "1fcd210660527b545c358d8745a9e729a4996cd7",
+      "changedCount": 5,
+      "linkedCount": 18,
+      "full": {
+        "realSec": 12.87,
+        "userSec": 10.96,
+        "sysSec": 3.14,
+        "maxRssBytes": 1056718848,
+        "errors": 0,
+        "warnings": 2358
+      },
+      "scoped": {
+        "realSec": 13.91,
+        "userSec": 11.55,
+        "sysSec": 3.48,
+        "maxRssBytes": 1075183616,
+        "errors": 0,
+        "warnings": 2358
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "8001d1ccd0e3f9a571d8e0c061fd7a70a60b9aca",
+      "subject": "Merge pull request #2712 from chalbert/lane/x4axhga-stale-claim-health-smell",
+      "head": "a48de7ca5146957f6669d38bb6b2401b85110214",
+      "changedCount": 7,
+      "linkedCount": 15,
+      "full": {
+        "realSec": 14.14,
+        "userSec": 11.47,
+        "sysSec": 3.34,
+        "maxRssBytes": 1059389440,
+        "errors": 0,
+        "warnings": 2361
+      },
+      "scoped": {
+        "realSec": 13.66,
+        "userSec": 10.99,
+        "sysSec": 3.15,
+        "maxRssBytes": 1047412736,
+        "errors": 0,
+        "warnings": 2361
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
     {
       "sha": "b20b8ae88da842b48e71e9bb2cb072e3a4c22b12",
       "subject": "Merge pull request #2708 from chalbert/lane/3729-stale-ci-failed-mechanical-merge-commit",
@@ -26,20 +104,20 @@
       "changedCount": 4,
       "linkedCount": 8,
       "full": {
-        "realSec": 14.77,
-        "userSec": 11.09,
-        "sysSec": 2.88,
-        "maxRssBytes": 1058521088,
+        "realSec": 13.43,
+        "userSec": 10.84,
+        "sysSec": 3.16,
+        "maxRssBytes": 1046937600,
         "errors": 0,
         "warnings": 2353
       },
       "scoped": {
-        "realSec": 13.48,
-        "userSec": 11.05,
-        "sysSec": 3.24,
-        "maxRssBytes": 1058373632,
+        "realSec": 12.26,
+        "userSec": 10.67,
+        "sysSec": 2.87,
+        "maxRssBytes": 1040990208,
         "errors": 0,
-        "warnings": 2347
+        "warnings": 2353
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -52,20 +130,20 @@
       "changedCount": 20,
       "linkedCount": 10,
       "full": {
-        "realSec": 14.07,
-        "userSec": 11.14,
-        "sysSec": 3.09,
-        "maxRssBytes": 1058750464,
+        "realSec": 12.53,
+        "userSec": 10.78,
+        "sysSec": 2.76,
+        "maxRssBytes": 1045479424,
         "errors": 0,
         "warnings": 2355
       },
       "scoped": {
-        "realSec": 12.95,
-        "userSec": 11.08,
+        "realSec": 13.11,
+        "userSec": 10.91,
         "sysSec": 2.9,
-        "maxRssBytes": 1053278208,
+        "maxRssBytes": 1071628288,
         "errors": 0,
-        "warnings": 2349
+        "warnings": 2355
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -78,20 +156,20 @@
       "changedCount": 2,
       "linkedCount": 0,
       "full": {
-        "realSec": 13.31,
-        "userSec": 10.96,
-        "sysSec": 2.96,
-        "maxRssBytes": 1051967488,
+        "realSec": 11.69,
+        "userSec": 10.48,
+        "sysSec": 2.47,
+        "maxRssBytes": 1049362432,
         "errors": 0,
         "warnings": 2355
       },
       "scoped": {
-        "realSec": 12.58,
-        "userSec": 10.77,
-        "sysSec": 2.84,
-        "maxRssBytes": 1052835840,
+        "realSec": 11.56,
+        "userSec": 10.54,
+        "sysSec": 2.39,
+        "maxRssBytes": 1051590656,
         "errors": 0,
-        "warnings": 2349
+        "warnings": 2355
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -104,20 +182,20 @@
       "changedCount": 12,
       "linkedCount": 66,
       "full": {
-        "realSec": 13.98,
-        "userSec": 11.43,
-        "sysSec": 3.55,
-        "maxRssBytes": 1051033600,
+        "realSec": 11.67,
+        "userSec": 10.57,
+        "sysSec": 2.44,
+        "maxRssBytes": 1051607040,
         "errors": 0,
         "warnings": 2335
       },
       "scoped": {
-        "realSec": 13.1,
-        "userSec": 11.29,
-        "sysSec": 3.23,
-        "maxRssBytes": 1060225024,
+        "realSec": 11.97,
+        "userSec": 10.58,
+        "sysSec": 2.7,
+        "maxRssBytes": 1048395776,
         "errors": 0,
-        "warnings": 2329
+        "warnings": 2335
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -130,20 +208,20 @@
       "changedCount": 5,
       "linkedCount": 47,
       "full": {
-        "realSec": 12.77,
-        "userSec": 11.11,
-        "sysSec": 3.08,
-        "maxRssBytes": 1052426240,
+        "realSec": 12.35,
+        "userSec": 10.65,
+        "sysSec": 2.87,
+        "maxRssBytes": 1044938752,
         "errors": 0,
         "warnings": 2338
       },
       "scoped": {
-        "realSec": 12.15,
-        "userSec": 10.82,
-        "sysSec": 2.59,
-        "maxRssBytes": 1059471360,
+        "realSec": 12.37,
+        "userSec": 10.83,
+        "sysSec": 2.83,
+        "maxRssBytes": 1047347200,
         "errors": 0,
-        "warnings": 2332
+        "warnings": 2338
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -156,20 +234,20 @@
       "changedCount": 10,
       "linkedCount": 0,
       "full": {
-        "realSec": 13.18,
-        "userSec": 11.07,
-        "sysSec": 2.9,
-        "maxRssBytes": 1042857984,
+        "realSec": 12.69,
+        "userSec": 10.78,
+        "sysSec": 2.98,
+        "maxRssBytes": 1055604736,
         "errors": 0,
         "warnings": 2342
       },
       "scoped": {
-        "realSec": 14.82,
-        "userSec": 11.3,
-        "sysSec": 3.44,
-        "maxRssBytes": 1061076992,
+        "realSec": 12.95,
+        "userSec": 10.82,
+        "sysSec": 3.01,
+        "maxRssBytes": 1072644096,
         "errors": 0,
-        "warnings": 2336
+        "warnings": 2342
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -182,20 +260,20 @@
       "changedCount": 4,
       "linkedCount": 6,
       "full": {
-        "realSec": 15.24,
-        "userSec": 11.12,
-        "sysSec": 3.31,
-        "maxRssBytes": 1053343744,
+        "realSec": 12.39,
+        "userSec": 10.67,
+        "sysSec": 2.9,
+        "maxRssBytes": 1046167552,
         "errors": 0,
         "warnings": 2330
       },
       "scoped": {
-        "realSec": 12.56,
-        "userSec": 11.01,
-        "sysSec": 2.79,
-        "maxRssBytes": 1061502976,
+        "realSec": 12.32,
+        "userSec": 10.71,
+        "sysSec": 2.89,
+        "maxRssBytes": 1049919488,
         "errors": 0,
-        "warnings": 2324
+        "warnings": 2330
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -208,20 +286,20 @@
       "changedCount": 5,
       "linkedCount": 46,
       "full": {
-        "realSec": 14.03,
-        "userSec": 11.28,
-        "sysSec": 3.23,
-        "maxRssBytes": 1054982144,
+        "realSec": 12.97,
+        "userSec": 10.83,
+        "sysSec": 2.92,
+        "maxRssBytes": 1050918912,
         "errors": 0,
         "warnings": 2334
       },
       "scoped": {
-        "realSec": 14.13,
-        "userSec": 11.35,
-        "sysSec": 3.36,
-        "maxRssBytes": 1049296896,
+        "realSec": 13.16,
+        "userSec": 10.95,
+        "sysSec": 2.91,
+        "maxRssBytes": 1073840128,
         "errors": 0,
-        "warnings": 2328
+        "warnings": 2334
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -234,20 +312,20 @@
       "changedCount": 23,
       "linkedCount": 142,
       "full": {
-        "realSec": 15.51,
-        "userSec": 11.37,
-        "sysSec": 3.73,
-        "maxRssBytes": 1044234240,
+        "realSec": 11.89,
+        "userSec": 10.54,
+        "sysSec": 2.47,
+        "maxRssBytes": 1041678336,
         "errors": 0,
         "warnings": 2325
       },
       "scoped": {
-        "realSec": 13.94,
-        "userSec": 11.07,
-        "sysSec": 2.95,
-        "maxRssBytes": 1050902528,
+        "realSec": 12.02,
+        "userSec": 10.55,
+        "sysSec": 2.64,
+        "maxRssBytes": 1043054592,
         "errors": 0,
-        "warnings": 2319
+        "warnings": 2325
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -260,20 +338,20 @@
       "changedCount": 19,
       "linkedCount": 61,
       "full": {
-        "realSec": 12.51,
-        "userSec": 10.91,
-        "sysSec": 2.68,
-        "maxRssBytes": 1050443776,
+        "realSec": 12.2,
+        "userSec": 10.58,
+        "sysSec": 2.55,
+        "maxRssBytes": 1071431680,
         "errors": 0,
         "warnings": 2324
       },
       "scoped": {
-        "realSec": 12.55,
-        "userSec": 10.98,
-        "sysSec": 2.58,
-        "maxRssBytes": 1042251776,
+        "realSec": 12.81,
+        "userSec": 10.89,
+        "sysSec": 2.72,
+        "maxRssBytes": 1049001984,
         "errors": 0,
-        "warnings": 2318
+        "warnings": 2324
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -286,20 +364,20 @@
       "changedCount": 4,
       "linkedCount": 10,
       "full": {
-        "realSec": 14.5,
-        "userSec": 11.4,
-        "sysSec": 3.32,
-        "maxRssBytes": 1056309248,
+        "realSec": 11.64,
+        "userSec": 10.56,
+        "sysSec": 2.35,
+        "maxRssBytes": 1054048256,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 15.59,
-        "userSec": 11.32,
-        "sysSec": 3.45,
-        "maxRssBytes": 1043316736,
+        "realSec": 11.5,
+        "userSec": 10.46,
+        "sysSec": 2.41,
+        "maxRssBytes": 1055047680,
         "errors": 0,
-        "warnings": 2320
+        "warnings": 2326
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -312,20 +390,20 @@
       "changedCount": 1,
       "linkedCount": 0,
       "full": {
-        "realSec": 14.36,
-        "userSec": 11.34,
-        "sysSec": 3.44,
-        "maxRssBytes": 1049526272,
+        "realSec": 12.38,
+        "userSec": 10.67,
+        "sysSec": 2.72,
+        "maxRssBytes": 1050853376,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 13.59,
-        "userSec": 11.3,
-        "sysSec": 3.25,
-        "maxRssBytes": 1052491776,
+        "realSec": 13.25,
+        "userSec": 10.91,
+        "sysSec": 2.87,
+        "maxRssBytes": 1052573696,
         "errors": 0,
-        "warnings": 2320
+        "warnings": 2326
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -338,20 +416,20 @@
       "changedCount": 16,
       "linkedCount": 112,
       "full": {
-        "realSec": 12.98,
-        "userSec": 10.97,
-        "sysSec": 2.81,
-        "maxRssBytes": 1054998528,
+        "realSec": 14.52,
+        "userSec": 10.96,
+        "sysSec": 3.15,
+        "maxRssBytes": 1048625152,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 14.44,
-        "userSec": 11.29,
-        "sysSec": 3.37,
-        "maxRssBytes": 1049247744,
+        "realSec": 12.1,
+        "userSec": 10.74,
+        "sysSec": 2.55,
+        "maxRssBytes": 1047183360,
         "errors": 0,
-        "warnings": 2320
+        "warnings": 2326
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -364,20 +442,20 @@
       "changedCount": 6,
       "linkedCount": 32,
       "full": {
-        "realSec": 12.52,
-        "userSec": 10.88,
-        "sysSec": 2.71,
-        "maxRssBytes": 1044561920,
+        "realSec": 12.83,
+        "userSec": 10.92,
+        "sysSec": 2.73,
+        "maxRssBytes": 1047986176,
         "errors": 0,
         "warnings": 2322
       },
       "scoped": {
-        "realSec": 17.03,
-        "userSec": 11.08,
-        "sysSec": 2.91,
-        "maxRssBytes": 1032667136,
+        "realSec": 11.64,
+        "userSec": 10.54,
+        "sysSec": 2.37,
+        "maxRssBytes": 1036566528,
         "errors": 0,
-        "warnings": 2316
+        "warnings": 2322
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -390,20 +468,20 @@
       "changedCount": 4,
       "linkedCount": 4,
       "full": {
-        "realSec": 14.22,
-        "userSec": 11.51,
-        "sysSec": 3.41,
-        "maxRssBytes": 1050312704,
+        "realSec": 11.92,
+        "userSec": 10.67,
+        "sysSec": 2.6,
+        "maxRssBytes": 1052770304,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 13.65,
-        "userSec": 11.45,
-        "sysSec": 3.37,
-        "maxRssBytes": 1046282240,
+        "realSec": 12.1,
+        "userSec": 10.67,
+        "sysSec": 2.75,
+        "maxRssBytes": 1048772608,
         "errors": 0,
-        "warnings": 2320
+        "warnings": 2326
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -416,20 +494,20 @@
       "changedCount": 6,
       "linkedCount": 31,
       "full": {
-        "realSec": 13.9,
-        "userSec": 11.33,
-        "sysSec": 3.7,
-        "maxRssBytes": 1039515648,
+        "realSec": 12.01,
+        "userSec": 10.57,
+        "sysSec": 2.68,
+        "maxRssBytes": 1044480000,
         "errors": 0,
         "warnings": 2325
       },
       "scoped": {
-        "realSec": 13.83,
-        "userSec": 11.5,
-        "sysSec": 3.34,
-        "maxRssBytes": 1074331648,
+        "realSec": 12.27,
+        "userSec": 10.74,
+        "sysSec": 2.65,
+        "maxRssBytes": 1042382848,
         "errors": 0,
-        "warnings": 2319
+        "warnings": 2325
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -442,20 +520,20 @@
       "changedCount": 13,
       "linkedCount": 11,
       "full": {
-        "realSec": 12.18,
-        "userSec": 10.81,
+        "realSec": 12.86,
+        "userSec": 10.8,
         "sysSec": 2.73,
-        "maxRssBytes": 1043857408,
+        "maxRssBytes": 1044037632,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 12.24,
-        "userSec": 10.78,
-        "sysSec": 2.71,
-        "maxRssBytes": 1030340608,
+        "realSec": 12.88,
+        "userSec": 10.77,
+        "sysSec": 2.87,
+        "maxRssBytes": 1039941632,
         "errors": 0,
-        "warnings": 2300
+        "warnings": 2306
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -468,20 +546,20 @@
       "changedCount": 9,
       "linkedCount": 26,
       "full": {
-        "realSec": 13.09,
-        "userSec": 10.99,
-        "sysSec": 2.98,
-        "maxRssBytes": 1048608768,
+        "realSec": 12.98,
+        "userSec": 10.75,
+        "sysSec": 2.83,
+        "maxRssBytes": 1040367616,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 14.15,
-        "userSec": 11.34,
-        "sysSec": 3.33,
-        "maxRssBytes": 1044955136,
+        "realSec": 11.8,
+        "userSec": 10.88,
+        "sysSec": 2.52,
+        "maxRssBytes": 830390272,
         "errors": 0,
-        "warnings": 2320
+        "warnings": 2326
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -494,20 +572,20 @@
       "changedCount": 16,
       "linkedCount": 67,
       "full": {
-        "realSec": 17.02,
-        "userSec": 11.86,
-        "sysSec": 3.87,
-        "maxRssBytes": 1045757952,
+        "realSec": 11.39,
+        "userSec": 10.57,
+        "sysSec": 2.22,
+        "maxRssBytes": 1055260672,
         "errors": 0,
         "warnings": 2327
       },
       "scoped": {
-        "realSec": 15.45,
-        "userSec": 11.46,
-        "sysSec": 3.72,
-        "maxRssBytes": 1047330816,
+        "realSec": 11.6,
+        "userSec": 10.49,
+        "sysSec": 2.44,
+        "maxRssBytes": 1050968064,
         "errors": 0,
-        "warnings": 2321
+        "warnings": 2327
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -520,20 +598,20 @@
       "changedCount": 13,
       "linkedCount": 54,
       "full": {
-        "realSec": 15.41,
-        "userSec": 11.32,
-        "sysSec": 3.68,
-        "maxRssBytes": 1028489216,
+        "realSec": 11.34,
+        "userSec": 10.31,
+        "sysSec": 2.37,
+        "maxRssBytes": 1029259264,
         "errors": 0,
         "warnings": 2285
       },
       "scoped": {
-        "realSec": 13.83,
-        "userSec": 11.17,
-        "sysSec": 3.3,
-        "maxRssBytes": 1028227072,
+        "realSec": 11.24,
+        "userSec": 10.3,
+        "sysSec": 2.27,
+        "maxRssBytes": 1026310144,
         "errors": 0,
-        "warnings": 2279
+        "warnings": 2285
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -546,20 +624,20 @@
       "changedCount": 5,
       "linkedCount": 33,
       "full": {
-        "realSec": 13.72,
-        "userSec": 11.29,
-        "sysSec": 3.27,
-        "maxRssBytes": 1048838144,
+        "realSec": 11.5,
+        "userSec": 10.36,
+        "sysSec": 2.49,
+        "maxRssBytes": 1043578880,
         "errors": 0,
         "warnings": 2319
       },
       "scoped": {
-        "realSec": 15.09,
-        "userSec": 11.57,
-        "sysSec": 3.45,
-        "maxRssBytes": 1043595264,
+        "realSec": 11.53,
+        "userSec": 10.61,
+        "sysSec": 2.42,
+        "maxRssBytes": 835846144,
         "errors": 0,
-        "warnings": 2313
+        "warnings": 2319
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -572,20 +650,20 @@
       "changedCount": 6,
       "linkedCount": 12,
       "full": {
-        "realSec": 19.78,
-        "userSec": 11.84,
-        "sysSec": 3.97,
-        "maxRssBytes": 1042153472,
+        "realSec": 11.42,
+        "userSec": 10.44,
+        "sysSec": 2.36,
+        "maxRssBytes": 1049608192,
         "errors": 0,
         "warnings": 2321
       },
       "scoped": {
-        "realSec": 15.34,
-        "userSec": 11.65,
-        "sysSec": 3.86,
-        "maxRssBytes": 1043464192,
+        "realSec": 12.37,
+        "userSec": 10.66,
+        "sysSec": 2.66,
+        "maxRssBytes": 1040875520,
         "errors": 0,
-        "warnings": 2315
+        "warnings": 2321
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -598,20 +676,20 @@
       "changedCount": 10,
       "linkedCount": 27,
       "full": {
-        "realSec": 15.54,
-        "userSec": 11.64,
-        "sysSec": 3.84,
-        "maxRssBytes": 1027964928,
+        "realSec": 13.28,
+        "userSec": 10.74,
+        "sysSec": 2.74,
+        "maxRssBytes": 1025998848,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 14.29,
-        "userSec": 11.33,
-        "sysSec": 3.43,
-        "maxRssBytes": 1041973248,
+        "realSec": 13.2,
+        "userSec": 10.8,
+        "sysSec": 2.79,
+        "maxRssBytes": 1034502144,
         "errors": 0,
-        "warnings": 2274
+        "warnings": 2280
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -624,20 +702,20 @@
       "changedCount": 2,
       "linkedCount": 17,
       "full": {
-        "realSec": 13.42,
-        "userSec": 11.18,
-        "sysSec": 3.26,
-        "maxRssBytes": 1036288000,
+        "realSec": 12.38,
+        "userSec": 10.74,
+        "sysSec": 2.68,
+        "maxRssBytes": 1043496960,
         "errors": 0,
         "warnings": 2310
       },
       "scoped": {
-        "realSec": 12.56,
-        "userSec": 10.84,
-        "sysSec": 2.99,
-        "maxRssBytes": 1033469952,
+        "realSec": 12.69,
+        "userSec": 10.79,
+        "sysSec": 2.76,
+        "maxRssBytes": 1035534336,
         "errors": 0,
-        "warnings": 2304
+        "warnings": 2310
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -650,20 +728,20 @@
       "changedCount": 26,
       "linkedCount": 57,
       "full": {
-        "realSec": 13.02,
-        "userSec": 10.9,
-        "sysSec": 3,
-        "maxRssBytes": 1048051712,
+        "realSec": 12.49,
+        "userSec": 10.58,
+        "sysSec": 2.65,
+        "maxRssBytes": 1058930688,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 13.88,
-        "userSec": 11.38,
-        "sysSec": 3.21,
-        "maxRssBytes": 1031110656,
+        "realSec": 13.4,
+        "userSec": 10.8,
+        "sysSec": 3.05,
+        "maxRssBytes": 1036992512,
         "errors": 0,
-        "warnings": 2300
+        "warnings": 2306
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -676,20 +754,20 @@
       "changedCount": 2,
       "linkedCount": 10,
       "full": {
-        "realSec": 13.32,
-        "userSec": 10.95,
-        "sysSec": 2.98,
-        "maxRssBytes": 1039777792,
+        "realSec": 13.03,
+        "userSec": 10.85,
+        "sysSec": 2.72,
+        "maxRssBytes": 1038254080,
         "errors": 0,
         "warnings": 2319
       },
       "scoped": {
-        "realSec": 15.02,
-        "userSec": 11.04,
-        "sysSec": 3.23,
-        "maxRssBytes": 1044299776,
+        "realSec": 12.83,
+        "userSec": 10.82,
+        "sysSec": 2.61,
+        "maxRssBytes": 1045938176,
         "errors": 0,
-        "warnings": 2313
+        "warnings": 2319
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -702,20 +780,20 @@
       "changedCount": 45,
       "linkedCount": 68,
       "full": {
-        "realSec": 12.89,
-        "userSec": 10.58,
-        "sysSec": 2.76,
-        "maxRssBytes": 1041793024,
+        "realSec": 13.53,
+        "userSec": 10.8,
+        "sysSec": 2.86,
+        "maxRssBytes": 1054015488,
         "errors": 0,
         "warnings": 2314
       },
       "scoped": {
-        "realSec": 11.5,
-        "userSec": 10.4,
-        "sysSec": 2.33,
-        "maxRssBytes": 1039794176,
+        "realSec": 14.2,
+        "userSec": 11,
+        "sysSec": 3.2,
+        "maxRssBytes": 1040678912,
         "errors": 0,
-        "warnings": 2308
+        "warnings": 2314
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -728,20 +806,20 @@
       "changedCount": 8,
       "linkedCount": 10,
       "full": {
-        "realSec": 12.21,
-        "userSec": 10.65,
-        "sysSec": 2.6,
-        "maxRssBytes": 888979456,
+        "realSec": 13.32,
+        "userSec": 10.8,
+        "sysSec": 2.96,
+        "maxRssBytes": 1030832128,
         "errors": 0,
         "warnings": 2307
       },
       "scoped": {
-        "realSec": 11.42,
-        "userSec": 10.31,
-        "sysSec": 2.4,
-        "maxRssBytes": 1044594688,
+        "realSec": 13.56,
+        "userSec": 10.99,
+        "sysSec": 3.01,
+        "maxRssBytes": 1044447232,
         "errors": 0,
-        "warnings": 2301
+        "warnings": 2307
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -754,20 +832,20 @@
       "changedCount": 9,
       "linkedCount": 57,
       "full": {
-        "realSec": 11.83,
-        "userSec": 10.33,
-        "sysSec": 2.56,
-        "maxRssBytes": 1027506176,
+        "realSec": 13.36,
+        "userSec": 10.81,
+        "sysSec": 2.86,
+        "maxRssBytes": 1029799936,
         "errors": 0,
         "warnings": 2291
       },
       "scoped": {
-        "realSec": 11.25,
-        "userSec": 10.29,
-        "sysSec": 2.27,
-        "maxRssBytes": 1034338304,
+        "realSec": 12.67,
+        "userSec": 10.67,
+        "sysSec": 2.95,
+        "maxRssBytes": 1047298048,
         "errors": 0,
-        "warnings": 2285
+        "warnings": 2291
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -780,20 +858,20 @@
       "changedCount": 9,
       "linkedCount": 0,
       "full": {
-        "realSec": 12.81,
-        "userSec": 10.86,
-        "sysSec": 3.01,
-        "maxRssBytes": 1033322496,
+        "realSec": 11.8,
+        "userSec": 10.36,
+        "sysSec": 2.71,
+        "maxRssBytes": 1061912576,
         "errors": 0,
         "warnings": 2310
       },
       "scoped": {
-        "realSec": 12.47,
-        "userSec": 10.78,
-        "sysSec": 2.91,
-        "maxRssBytes": 1046478848,
+        "realSec": 12.53,
+        "userSec": 10.48,
+        "sysSec": 3.37,
+        "maxRssBytes": 1040826368,
         "errors": 0,
-        "warnings": 2304
+        "warnings": 2310
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -806,20 +884,20 @@
       "changedCount": 1,
       "linkedCount": 3,
       "full": {
-        "realSec": 13.83,
-        "userSec": 10.8,
-        "sysSec": 3.69,
-        "maxRssBytes": 1044824064,
+        "realSec": 11.66,
+        "userSec": 10.26,
+        "sysSec": 2.67,
+        "maxRssBytes": 1035698176,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 13.02,
-        "userSec": 11.02,
-        "sysSec": 3.18,
-        "maxRssBytes": 1039990784,
+        "realSec": 11.91,
+        "userSec": 10.33,
+        "sysSec": 2.89,
+        "maxRssBytes": 1035124736,
         "errors": 0,
-        "warnings": 2300
+        "warnings": 2306
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -832,20 +910,20 @@
       "changedCount": 11,
       "linkedCount": 44,
       "full": {
-        "realSec": 12.56,
-        "userSec": 10.8,
-        "sysSec": 3.03,
-        "maxRssBytes": 1049657344,
+        "realSec": 11.86,
+        "userSec": 10.38,
+        "sysSec": 2.82,
+        "maxRssBytes": 1030635520,
         "errors": 0,
         "warnings": 2303
       },
       "scoped": {
-        "realSec": 12.51,
-        "userSec": 10.73,
-        "sysSec": 3.1,
-        "maxRssBytes": 1045905408,
+        "realSec": 12.53,
+        "userSec": 10.58,
+        "sysSec": 3.25,
+        "maxRssBytes": 1043218432,
         "errors": 0,
-        "warnings": 2297
+        "warnings": 2303
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -858,20 +936,20 @@
       "changedCount": 15,
       "linkedCount": 57,
       "full": {
-        "realSec": 12.54,
-        "userSec": 10.84,
-        "sysSec": 3.07,
-        "maxRssBytes": 1042087936,
+        "realSec": 11.91,
+        "userSec": 10.25,
+        "sysSec": 2.92,
+        "maxRssBytes": 1022394368,
         "errors": 0,
         "warnings": 2290
       },
       "scoped": {
-        "realSec": 12.95,
-        "userSec": 10.89,
-        "sysSec": 3.36,
-        "maxRssBytes": 1040629760,
+        "realSec": 13.03,
+        "userSec": 10.78,
+        "sysSec": 3.03,
+        "maxRssBytes": 1037910016,
         "errors": 0,
-        "warnings": 2284
+        "warnings": 2290
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -884,20 +962,20 @@
       "changedCount": 1,
       "linkedCount": 1,
       "full": {
-        "realSec": 13,
-        "userSec": 10.96,
+        "realSec": 13.41,
+        "userSec": 10.76,
         "sysSec": 3.26,
-        "maxRssBytes": 1035878400,
+        "maxRssBytes": 1064665088,
         "errors": 0,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 13.89,
-        "userSec": 11.29,
-        "sysSec": 3.35,
-        "maxRssBytes": 1041203200,
+        "realSec": 14.2,
+        "userSec": 10.76,
+        "sysSec": 3.69,
+        "maxRssBytes": 1039417344,
         "errors": 0,
-        "warnings": 2289
+        "warnings": 2295
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -910,20 +988,20 @@
       "changedCount": 3,
       "linkedCount": 13,
       "full": {
-        "realSec": 13.93,
-        "userSec": 11.07,
-        "sysSec": 3.25,
-        "maxRssBytes": 1036681216,
+        "realSec": 12.74,
+        "userSec": 10.41,
+        "sysSec": 3.11,
+        "maxRssBytes": 1032470528,
         "errors": 0,
         "warnings": 2291
       },
       "scoped": {
-        "realSec": 14.55,
-        "userSec": 11.3,
-        "sysSec": 3.56,
-        "maxRssBytes": 1003651072,
+        "realSec": 12.5,
+        "userSec": 10.36,
+        "sysSec": 3.24,
+        "maxRssBytes": 1015005184,
         "errors": 0,
-        "warnings": 2285
+        "warnings": 2291
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -936,20 +1014,20 @@
       "changedCount": 1,
       "linkedCount": 0,
       "full": {
-        "realSec": 14.9,
-        "userSec": 11.21,
-        "sysSec": 3.4,
-        "maxRssBytes": 1040547840,
+        "realSec": 12.24,
+        "userSec": 10.45,
+        "sysSec": 2.93,
+        "maxRssBytes": 1041104896,
         "errors": 0,
         "warnings": 2299
       },
       "scoped": {
-        "realSec": 12.95,
-        "userSec": 10.82,
-        "sysSec": 3.08,
-        "maxRssBytes": 1039826944,
+        "realSec": 11.77,
+        "userSec": 10.23,
+        "sysSec": 2.82,
+        "maxRssBytes": 1031110656,
         "errors": 0,
-        "warnings": 2293
+        "warnings": 2299
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -962,20 +1040,20 @@
       "changedCount": 21,
       "linkedCount": 128,
       "full": {
-        "realSec": 12.23,
-        "userSec": 10.82,
-        "sysSec": 2.7,
-        "maxRssBytes": 1041825792,
+        "realSec": 11.89,
+        "userSec": 10.32,
+        "sysSec": 2.79,
+        "maxRssBytes": 1052049408,
         "errors": 0,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 11.27,
-        "userSec": 10.45,
-        "sysSec": 2.15,
-        "maxRssBytes": 1030242304,
+        "realSec": 12.05,
+        "userSec": 10.5,
+        "sysSec": 2.87,
+        "maxRssBytes": 1040580608,
         "errors": 0,
-        "warnings": 2289
+        "warnings": 2295
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -988,20 +1066,20 @@
       "changedCount": 31,
       "linkedCount": 91,
       "full": {
-        "realSec": 11.51,
-        "userSec": 10.5,
-        "sysSec": 2.19,
-        "maxRssBytes": 1031847936,
+        "realSec": 12.11,
+        "userSec": 10.4,
+        "sysSec": 2.98,
+        "maxRssBytes": 1031667712,
         "errors": 0,
         "warnings": 2297
       },
       "scoped": {
-        "realSec": 11.36,
-        "userSec": 10.56,
-        "sysSec": 2.07,
-        "maxRssBytes": 1017118720,
+        "realSec": 12.33,
+        "userSec": 10.52,
+        "sysSec": 3.12,
+        "maxRssBytes": 1035878400,
         "errors": 0,
-        "warnings": 2291
+        "warnings": 2297
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1014,20 +1092,20 @@
       "changedCount": 14,
       "linkedCount": 36,
       "full": {
-        "realSec": 11.87,
-        "userSec": 10.49,
-        "sysSec": 2.24,
-        "maxRssBytes": 1024344064,
+        "realSec": 12.36,
+        "userSec": 10.45,
+        "sysSec": 3.07,
+        "maxRssBytes": 1032224768,
         "errors": 0,
         "warnings": 2292
       },
       "scoped": {
-        "realSec": 11.72,
-        "userSec": 10.59,
-        "sysSec": 2.39,
-        "maxRssBytes": 1022263296,
+        "realSec": 12.51,
+        "userSec": 10.71,
+        "sysSec": 3.09,
+        "maxRssBytes": 971718656,
         "errors": 0,
-        "warnings": 2286
+        "warnings": 2292
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1040,20 +1118,20 @@
       "changedCount": 5,
       "linkedCount": 28,
       "full": {
-        "realSec": 11.04,
-        "userSec": 10.25,
-        "sysSec": 1.97,
-        "maxRssBytes": 1018871808,
+        "realSec": 12.53,
+        "userSec": 10.4,
+        "sysSec": 3.08,
+        "maxRssBytes": 1019658240,
         "errors": 0,
         "warnings": 2303
       },
       "scoped": {
-        "realSec": 10.68,
-        "userSec": 10.22,
-        "sysSec": 1.91,
-        "maxRssBytes": 851116032,
+        "realSec": 12.44,
+        "userSec": 10.47,
+        "sysSec": 3.17,
+        "maxRssBytes": 1034436608,
         "errors": 0,
-        "warnings": 2297
+        "warnings": 2303
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1066,20 +1144,20 @@
       "changedCount": 6,
       "linkedCount": 26,
       "full": {
-        "realSec": 11.7,
-        "userSec": 10.54,
-        "sysSec": 2.3,
-        "maxRssBytes": 1040039936,
+        "realSec": 13.7,
+        "userSec": 10.79,
+        "sysSec": 3.36,
+        "maxRssBytes": 1034190848,
         "errors": 0,
         "warnings": 2292
       },
       "scoped": {
-        "realSec": 13.39,
-        "userSec": 11.05,
-        "sysSec": 3.12,
-        "maxRssBytes": 1023508480,
+        "realSec": 13.65,
+        "userSec": 10.94,
+        "sysSec": 3.43,
+        "maxRssBytes": 1038893056,
         "errors": 0,
-        "warnings": 2286
+        "warnings": 2292
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1092,20 +1170,20 @@
       "changedCount": 14,
       "linkedCount": 67,
       "full": {
-        "realSec": 13.16,
-        "userSec": 10.71,
-        "sysSec": 3,
-        "maxRssBytes": 1029931008,
+        "realSec": 11.92,
+        "userSec": 10.31,
+        "sysSec": 2.77,
+        "maxRssBytes": 1021657088,
         "errors": 0,
         "warnings": 2293
       },
       "scoped": {
-        "realSec": 13.75,
-        "userSec": 11.01,
-        "sysSec": 3.43,
-        "maxRssBytes": 901218304,
+        "realSec": 11.81,
+        "userSec": 10.47,
+        "sysSec": 2.77,
+        "maxRssBytes": 943587328,
         "errors": 0,
-        "warnings": 2287
+        "warnings": 2293
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1118,20 +1196,20 @@
       "changedCount": 3,
       "linkedCount": 12,
       "full": {
-        "realSec": 12.46,
-        "userSec": 10.66,
-        "sysSec": 3.11,
-        "maxRssBytes": 1019953152,
+        "realSec": 11.68,
+        "userSec": 10.22,
+        "sysSec": 2.72,
+        "maxRssBytes": 1022672896,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 12.52,
-        "userSec": 10.78,
-        "sysSec": 2.93,
-        "maxRssBytes": 1035059200,
+        "realSec": 11.84,
+        "userSec": 10.26,
+        "sysSec": 2.85,
+        "maxRssBytes": 1021722624,
         "errors": 0,
-        "warnings": 2274
+        "warnings": 2280
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1144,20 +1222,20 @@
       "changedCount": 3,
       "linkedCount": 7,
       "full": {
-        "realSec": 13.34,
-        "userSec": 10.92,
-        "sysSec": 3.21,
-        "maxRssBytes": 1046953984,
+        "realSec": 11.85,
+        "userSec": 10.25,
+        "sysSec": 2.91,
+        "maxRssBytes": 1032077312,
         "errors": 0,
         "warnings": 2289
       },
       "scoped": {
-        "realSec": 14.21,
-        "userSec": 11.22,
-        "sysSec": 3.51,
-        "maxRssBytes": 1038991360,
+        "realSec": 12.13,
+        "userSec": 10.43,
+        "sysSec": 2.99,
+        "maxRssBytes": 1038041088,
         "errors": 0,
-        "warnings": 2283
+        "warnings": 2289
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1170,20 +1248,20 @@
       "changedCount": 1,
       "linkedCount": 34,
       "full": {
-        "realSec": 13.91,
-        "userSec": 11.08,
-        "sysSec": 3.41,
-        "maxRssBytes": 1023590400,
+        "realSec": 12.18,
+        "userSec": 10.41,
+        "sysSec": 2.95,
+        "maxRssBytes": 1028456448,
         "errors": 0,
         "warnings": 2290
       },
       "scoped": {
-        "realSec": 14.21,
-        "userSec": 11.09,
-        "sysSec": 3.46,
-        "maxRssBytes": 1022394368,
+        "realSec": 12.11,
+        "userSec": 10.55,
+        "sysSec": 2.76,
+        "maxRssBytes": 1031290880,
         "errors": 0,
-        "warnings": 2284
+        "warnings": 2290
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1196,20 +1274,20 @@
       "changedCount": 13,
       "linkedCount": 23,
       "full": {
-        "realSec": 13.85,
-        "userSec": 11.05,
-        "sysSec": 3.35,
-        "maxRssBytes": 1032929280,
+        "realSec": 12.93,
+        "userSec": 10.63,
+        "sysSec": 2.96,
+        "maxRssBytes": 1029652480,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 13.05,
-        "userSec": 11.04,
+        "realSec": 12.83,
+        "userSec": 10.58,
         "sysSec": 3.03,
-        "maxRssBytes": 1029177344,
+        "maxRssBytes": 1023475712,
         "errors": 0,
-        "warnings": 2274
+        "warnings": 2280
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1222,98 +1300,20 @@
       "changedCount": 9,
       "linkedCount": 39,
       "full": {
-        "realSec": 15.18,
-        "userSec": 11.12,
-        "sysSec": 3.64,
-        "maxRssBytes": 1023787008,
+        "realSec": 13.26,
+        "userSec": 10.57,
+        "sysSec": 3.18,
+        "maxRssBytes": 1042710528,
         "errors": 0,
         "warnings": 2289
       },
       "scoped": {
-        "realSec": 19.24,
-        "userSec": 11.15,
-        "sysSec": 3.48,
-        "maxRssBytes": 1037025280,
-        "errors": 0,
-        "warnings": 2283
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "7fb5c803977c7c3354159eb3a9116373022888e8",
-      "subject": "Merge pull request #2660 from chalbert/lane/batch-2026-09-25-waveC3-3907",
-      "head": "7b6cd72b801111539a74bf036ed1451ed76cbefb",
-      "changedCount": 35,
-      "linkedCount": 178,
-      "full": {
-        "realSec": 13.66,
-        "userSec": 11.06,
-        "sysSec": 3.25,
-        "maxRssBytes": 1036664832,
+        "realSec": 13.53,
+        "userSec": 10.72,
+        "sysSec": 3.23,
+        "maxRssBytes": 1032142848,
         "errors": 0,
         "warnings": 2289
-      },
-      "scoped": {
-        "realSec": 12.31,
-        "userSec": 10.8,
-        "sysSec": 2.78,
-        "maxRssBytes": 1040531456,
-        "errors": 0,
-        "warnings": 2283
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "4963a156b4b7ecabcaf3c8ddddb9ed8fcd6391aa",
-      "subject": "Merge pull request #2667 from chalbert/lane/4067-live-daemon-status-page",
-      "head": "5832ba016dd4768dfd6660ccf9a27cb58344ec5a",
-      "changedCount": 8,
-      "linkedCount": 3,
-      "full": {
-        "realSec": 11.11,
-        "userSec": 10.21,
-        "sysSec": 2.16,
-        "maxRssBytes": 1030651904,
-        "errors": 0,
-        "warnings": 2284
-      },
-      "scoped": {
-        "realSec": 10.9,
-        "userSec": 10.13,
-        "sysSec": 2.07,
-        "maxRssBytes": 1025753088,
-        "errors": 0,
-        "warnings": 2278
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "bf209c4a56bff5b2ebdae620205696b71c738b9d",
-      "subject": "Merge pull request #2665 from chalbert/lane/4071-cost-tracking-per-daemon-and-per-bot",
-      "head": "71f9b152b0bb4458c654b59778023d3e89fdaf85",
-      "changedCount": 5,
-      "linkedCount": 17,
-      "full": {
-        "realSec": 11,
-        "userSec": 10.22,
-        "sysSec": 2.09,
-        "maxRssBytes": 1029341184,
-        "errors": 0,
-        "warnings": 2280
-      },
-      "scoped": {
-        "realSec": 11.5,
-        "userSec": 10.26,
-        "sysSec": 2.16,
-        "maxRssBytes": 1045626880,
-        "errors": 0,
-        "warnings": 2274
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
