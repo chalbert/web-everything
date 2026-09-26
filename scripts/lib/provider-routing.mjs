@@ -246,18 +246,66 @@ export function externalTierEquivalent(provider, model) {
 }
 
 /**
- * THE CRITICAL-WORK GATE (#3906). A dispatch of one of these kinds builds or repairs product code, and no
- * non-Claude worker is allowed to do that until #4034 (the critical-work test) exists — whatever its trial
- * record says. For a gated kind the Gemini, Codex and dual-dispatch steps are skipped and the dispatch takes
- * the Claude tier table. Other kinds, and any caller that names no `kind` (an interactive session asking for
- * advice), are unaffected. Removing a kind from this list is how #4034 enables it.
+ * THE CRITICAL-WORK GATE (#3906, opened per taskType by #4034). A dispatch of one of these `kinds` builds or
+ * repairs product code. For a gated kind the Gemini, Codex and dual-dispatch steps are skipped and the dispatch
+ * takes the Claude tier table — UNLESS every one of these holds:
+ *
+ *   1. the task's `taskType` row in `openForNonCritical` is `true` (an explicit, per-taskType operator switch;
+ *      every row lands `false`, so today nothing changes);
+ *   2. the caller supplied the critical-work verdict (`context.criticalWork`, from
+ *      `we:scripts/lib/critical-work.mjs#criticalWorkVerdict`) and it says NOT critical — a missing verdict
+ *      fails closed;
+ *   3. the caller supplied the critical-miss list (`context.criticalMisses`, from `critical-work.mjs#criticalMissesFor`)
+ *      — a missing list fails closed. A {provider, model, taskType} triple on that list is HARD-VETOED: a miss on
+ *      critical work is never outweighed by any clean streak.
+ *
+ * Even then the provider must still earn the work on its own trials (`evaluateProviderFitness`), and an opened
+ * gated kind never takes the dual-dispatch (`both`) step. Supervision is unchanged: every such PR still gets the
+ * full review plus the A2/A3 seats. Other kinds, and a caller with no `kind` (an interactive session asking for
+ * advice), are unaffected.
+ *
+ * To open one taskType, flip its row to `true` — one line, reviewed like any other change.
  */
 // @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
 export const CRITICAL_WORK_GATE = Object.freeze({
   kinds: Object.freeze(['build', 'fix', 'ci-heal']),
-  until: '#4034',
-  reason: 'no non-Claude builder or fixer until #4034 (the critical-work test) exists',
+  openForNonCritical: Object.freeze({
+    'build-new-feature': false,
+    'bugfix': false,
+    'conflict-resolution': false,
+    'doc-fix': false,
+  }),
+  basis: '#4034',
+  reason: 'a non-Claude worker takes build/fix/ci-heal work only for a non-critical task of an opened taskType (#4034)',
 });
+
+/**
+ * Decide the critical-work gate for one dispatch. Pure. Returns `null` when the kind is not gated (the gate does
+ * not apply), else `{open, reason, vetoes}` — `vetoes` being the critical-miss triples for this taskType.
+ * @param {object} gate
+ * @param {string} kind
+ * @param {string} taskType
+ * @param {object} context
+ */
+function decideCriticalWorkGate(gate, kind, taskType, context) {
+  if (!gate.kinds.includes(kind)) return null;
+  const rows = gate.openForNonCritical && typeof gate.openForNonCritical === 'object' ? gate.openForNonCritical : {};
+  const closed = (why) => ({ open: false, reason: `kind '${kind}' is gated: ${why}`, vetoes: [] });
+  if (rows[taskType] !== true) return closed(`taskType '${taskType}' is not opened in CRITICAL_WORK_GATE.openForNonCritical`);
+  const verdict = context?.criticalWork;
+  if (!verdict || typeof verdict.critical !== 'boolean') return closed('no critical-work verdict supplied (fail closed)');
+  const misses = context?.criticalMisses;
+  if (!Array.isArray(misses)) return closed('no critical-miss list supplied (fail closed)');
+  if (verdict.critical) {
+    const why = Array.isArray(verdict.reasons) ? verdict.reasons.map((r) => r?.proxy).filter(Boolean).join(', ') : '';
+    return closed(`critical work${why ? ` (${why})` : ''} never leaves Claude`);
+  }
+  return {
+    open: true,
+    reason: `taskType '${taskType}' is opened for non-critical work, and this task is not critical`,
+    vetoes: misses.filter((m) => m && m.taskType === taskType),
+  };
+}
 
 /**
  * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
@@ -412,7 +460,7 @@ function getSortedRecordsForProviderAndTask(scorecards, providers, taskType) {
  * @param {string|undefined} [preferredModel]
  * @returns {{ fit: boolean, fitModel: string|null, reason: string }}
  */
-function evaluateProviderFitness(providerNames, taskType, filesTouched, estimatedSize, scorecards, preferredModel) {
+function evaluateProviderFitness(providerNames, taskType, filesTouched, estimatedSize, scorecards, preferredModel, vetoes = []) {
   const providerLabel = providerNames[0];
 
   // Criterion 5: architectural-decision or triage-research always require human/Claude judgment
@@ -457,9 +505,16 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
     };
   }
 
+  let vetoed = 0;
   for (const model of models) {
     const modelRecords = records.filter((r) => r.model === model);
     if (modelRecords.length === 0) continue;
+
+    // #4034 — HARD VETO: a critical miss on record for this {provider, model, taskType} triple.
+    if (vetoes.some((v) => providerNames.includes(v?.provider) && v.model === model && v.taskType === taskType)) {
+      vetoed += 1;
+      continue;
+    }
 
     // Criterion 1: at least one clean trial with verifiedBy in ('claude-subagent', 'independent-claude')
     const verifiedCleanTrials = modelRecords.filter((r) =>
@@ -487,7 +542,9 @@ function evaluateProviderFitness(providerNames, taskType, filesTouched, estimate
   return {
     fit: false,
     fitModel: null,
-    reason: `No model under ${providerLabel} has a qualifying clean track record without unresolved findings for '${taskType}'.`,
+    reason: vetoed > 0
+      ? `Hard veto: ${vetoed} ${providerLabel} model(s) have a critical miss on record for '${taskType}' (#4034); no other model qualifies.`
+      : `No model under ${providerLabel} has a qualifying clean track record without unresolved findings for '${taskType}'.`,
   };
 }
 
@@ -548,15 +605,19 @@ export function selectProvider(task, context) {
 
   // #3906 — the critical-work gate: a gated kind never reaches an external provider (steps 1-3 are skipped).
   // `context.criticalWorkGate` replaces the default only when a caller states a different gate on purpose.
+  // #4034 — a gated kind opens only per taskType, only for non-critical work, and never for a vetoed triple.
   const gate = context?.criticalWorkGate && Array.isArray(context.criticalWorkGate.kinds) ? context.criticalWorkGate : CRITICAL_WORK_GATE;
-  const gated = gate.kinds.includes(kind);
-  const gatedFit = { fit: false, fitModel: null, reason: `kind '${kind}' is gated: ${gate.reason ?? CRITICAL_WORK_GATE.reason}.` };
-  if (gated) {
+  const gateDecision = decideCriticalWorkGate(gate, kind, taskType, context);
+  const gated = gateDecision !== null && !gateDecision.open;
+  const gatedKindOpen = gateDecision !== null && gateDecision.open;
+  const vetoes = gatedKindOpen ? gateDecision.vetoes : [];
+  const gatedFit = { fit: false, fitModel: null, reason: gated ? `${gateDecision.reason}.` : '' };
+  if (gateDecision) {
     auditTrail.push({
       criterion: 'critical-work-gate',
-      result: 'claude-only',
-      dataConsulted: `kind='${kind}', gated kinds=${gate.kinds.join(',')}`,
-      reasoning: gatedFit.reason,
+      result: gatedKindOpen ? 'open-non-critical' : 'claude-only',
+      dataConsulted: `kind='${kind}', taskType='${taskType}', gated kinds=${gate.kinds.join(',')}, critical=${context?.criticalWork?.critical ?? 'unknown'}, criticalMissVetoes=${vetoes.length}`,
+      reasoning: gateDecision.reason,
     });
   }
 
@@ -569,7 +630,8 @@ export function selectProvider(task, context) {
     filesTouched,
     estimatedSize,
     scorecards,
-    preferredModel
+    preferredModel,
+    vetoes
   );
   auditTrail.push({
     criterion: 'gemini-fitness',
@@ -598,7 +660,8 @@ export function selectProvider(task, context) {
     filesTouched,
     estimatedSize,
     scorecards,
-    preferredModel
+    preferredModel,
+    vetoes
   );
   auditTrail.push({
     criterion: 'codex-fitness',
@@ -629,6 +692,9 @@ export function selectProvider(task, context) {
   if (gated) {
     bothFit = false;
     bothReason = gatedFit.reason;
+  } else if (gatedKindOpen) {
+    bothFit = false;
+    bothReason = `kind '${kind}' is opened for a single earned provider only; a gated kind never takes dual dispatch (#4034).`;
   } else if (hasStatuteFile) {
     bothFit = false;
     bothReason = 'Statute-tier paths touched; policy requires Claude Opus, not external dual dispatch.';
