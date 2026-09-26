@@ -82,7 +82,7 @@ import { readJsonConfig, withTrustedDirs, withoutTrustedDirs, TRUST_PATH } from 
 import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
-import { briefTokensForRepo } from '../lib/repo-profile.mjs';
+import { briefTokensForRepo, repoKeyForScope } from '../lib/repo-profile.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions } from '../lib/gh-app-shim.mjs';
 // #xrv69j6 — the pool-dir basenames a lane lives under (`web-everything` / `webeverything`), so the ONE lane
 // a dispatch will use can be resolved to an absolute path the same way `bootstrap-session.mjs#poolRoots`
@@ -108,7 +108,11 @@ import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 // #3645/#3906 — WHICH LAUNCH KINDS HAVE A MECHANICAL PROVIDER. Every row lands OFF on main (`agent`), see the
 // registry's own header; {@link routeDispatchProvider} below is its only reader here.
 import { DISPATCH_PROVIDER_REGISTRY, dispatchModesFromEnv, dispatchProviderEntry } from './dispatch-provider-registry.mjs';
-import { DETACHED_HANDLE_PREFIX } from './detached-dispatch.mjs';
+// #3645/#4212 — the detached-wrapper handle primitives. `defaultIsPidAlive`/`detachedHandlePid` let a `pid:<n>`
+// handle (a mechanical build's own PID, not a `claude` session id) answer its own liveness from the KERNEL
+// rather than from `claude agents --json`, which never heard of it; `deliveryDispatchLogPath` names where its
+// narration went for the observer's `unresolved` message. See {@link isDispatchHandleLive}.
+import { DETACHED_HANDLE_PREFIX, defaultIsPidAlive, deliveryDispatchLogPath, detachedHandlePid } from './detached-dispatch.mjs';
 
 /**
  * The three native Claude model ids {@link ../lib/dispatch-contracts.mjs#CLAUDE_NATIVE_MODEL_BY_TIER} maps to
@@ -245,6 +249,9 @@ export function readTick({
   loadItems = () => defaultLoadItems(root),
   listInFlightDispatches = (key) => inFlightDispatchesFor(key),
   listAgents = () => defaultListAgents({ exec }),
+  // #3645/#4212 — see {@link isDispatchHandleLive}: a mechanical build's handle is a pid, not a `claude`
+  // session id, so the double-dispatch guard's liveness read needs a kernel probe too, not only a listing.
+  isPidAlive = defaultIsPidAlive,
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
@@ -344,7 +351,7 @@ export function readTick({
     return keys.map((id) => readTick({
       num: id, root, exec, bookkeepingFile,
       runNode: () => tickJson, readText: cachedText, loadItems: () => items,
-      listInFlightDispatches, listAgents: cachedAgents, recordLiveness, laneRefForPr, checkAlreadyDone,
+      listInFlightDispatches, listAgents: cachedAgents, isPidAlive, recordLiveness, laneRefForPr, checkAlreadyDone,
       readScorecards: scorecardsOnce, readSizePolicy: sizePolicyOnce, readPromotions: promotionsOnce,
       enforceSupervision, readDeliveryAgentOverride, dispatchModes: modesOnce,
       now: () => observedAt,
@@ -523,7 +530,7 @@ export function readTick({
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
     // carrying the live/gone/unknown answer {@link stampLiveness} got for its handle.
-    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents })),
+    inFlightDispatches: recordLiveness(stampLiveness(listInFlightDispatches(key), { listAgents, isPidAlive })),
     // WHEN THIS READ WAS TAKEN. The declaration ages the double-dispatch guard out (`dispatchStillHolds`) and
     // is pure, so the clock has to arrive as DATA rather than be read there. Omitted or unparseable → nothing
     // ages out and every in-flight record holds, which is the fail-closed direction.
@@ -716,6 +723,39 @@ export function listedSessionIds(sessions) {
 }
 
 /**
+ * IS `handle` ONE OF THE SESSIONS IN THIS LISTING — the ONE comparison both {@link stampLiveness} and {@link
+ * createDispatchObservers} used to inline separately. Extracted so the two readers cannot drift, and so {@link
+ * isDispatchHandleLive} has a `claude`-listing question to compose with the pid one.
+ *
+ * @param {unknown} handle
+ * @param {unknown[]} sessions
+ * @returns {boolean}
+ */
+export function isHandleListed(handle, sessions) {
+  const h = normalizeHandle(handle);
+  if (!h) return false;
+  return listedSessionIds(sessions).has(h);
+}
+
+/**
+ * THE ONE LIVENESS QUESTION, for BOTH handle shapes — a `claude --bg` session id (asked of the agent listing via
+ * {@link isHandleListed}, as before #3645) and a detached-wrapper `pid:<n>` handle (asked of the kernel via
+ * {@link ../detached-dispatch.mjs#defaultIsPidAlive}). Every reader that used to compare a handle against a
+ * listing directly now calls this instead, so the two shapes cannot drift out of an io-shell read that composes
+ * a moved primitive (`detachedHandlePid`) with an io-shell read (`isHandleListed`, the `claude agents` listing).
+ *
+ * @param {unknown} handle
+ * @param {unknown[]} sessions - a `claude agents --json` listing; IGNORED for a `pid:` handle.
+ * @param {{isPidAlive?: (pid: number) => boolean}} [io]
+ * @returns {boolean}
+ */
+export function isDispatchHandleLive(handle, sessions, { isPidAlive = defaultIsPidAlive } = {}) {
+  const pid = detachedHandlePid(handle);
+  if (pid !== null) return Boolean(isPidAlive(pid));
+  return isHandleListed(handle, sessions);
+}
+
+/**
  * ASK `claude agents --json` WHETHER EACH IN-FLIGHT DISPATCH IS STILL ALIVE, and stamp the answer onto its row.
  *
  * WHY THE GUARD NEEDS THIS AT ALL (PR #1211 round 2, G1). The double-dispatch guard used to release a record
@@ -739,13 +779,26 @@ export function listedSessionIds(sessions) {
  * backstop and says so; it must not take down a dispatch read, which is also the tick read.
  *
  * @param {{runs?: object[], unreadable?: number}} inFlight - what {@link inFlightDispatchesFor} returned.
- * @param {{listAgents?: () => object[]}} [o]
- * @returns {{runs: object[], unreadable: number, livenessSource: 'claude-agents'|'unreadable'|'not-needed'}}
+ * @param {{listAgents?: () => object[], isPidAlive?: (pid: number) => boolean}} [o]
+ * @returns {{runs: object[], unreadable: number, livenessSource: 'claude-agents'|'unreadable'|'not-needed'|'wrapper-pid'}}
  */
-export function stampLiveness(inFlight, { listAgents } = {}) {
+export function stampLiveness(inFlight, { listAgents, isPidAlive = defaultIsPidAlive } = {}) {
   const rows = Array.isArray(inFlight?.runs) ? inFlight.runs : [];
   const unreadable = Number(inFlight?.unreadable) > 0 ? Number(inFlight.unreadable) : 0;
   if (!rows.length) return { runs: [], unreadable, livenessSource: 'not-needed' };
+
+  // #3645/#4212 — A MECHANICAL BUILD'S HANDLE IS A PID, AND THE KERNEL ANSWERS IT. When EVERY row in flight is
+  // one of those, no `claude agents` listing is needed at all — and asking for one would mean an unreadable or
+  // absent `claude` degraded a pid probe that cannot fail into `livenessSource: 'unreadable'`, i.e. the strong
+  // answer reported as the weak one. Same reason the listing is skipped for zero rows above: do not shell
+  // `claude` to ask about handles it has never heard of.
+  if (rows.every((r) => !r.handle || detachedHandlePid(r.handle) !== null)) {
+    return {
+      runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, [], { isPidAlive }) : null })),
+      unreadable,
+      livenessSource: 'wrapper-pid',
+    };
+  }
 
   let sessions = null;
   try {
@@ -771,7 +824,10 @@ export function stampLiveness(inFlight, { listAgents } = {}) {
     return { runs: rows.map((r) => ({ ...r, live: null })), unreadable, livenessSource: 'unreadable' };
   }
   return {
-    runs: rows.map((r) => ({ ...r, live: r.handle ? listed.has(normalizeHandle(r.handle)) : null })),
+    // #3645/#4212 — through {@link isDispatchHandleLive}, so a MIXED set (an agent-path dispatch and a
+    // mechanical one in flight at once) answers each row with the right question. A `pid:` row never consults
+    // `sessions`.
+    runs: rows.map((r) => ({ ...r, live: r.handle ? isDispatchHandleLive(r.handle, sessions, { isPidAlive }) : null })),
     unreadable,
     livenessSource: 'claude-agents',
   };
@@ -1668,18 +1724,22 @@ export function dispatchSessionCwd(sessionId, opts = {}) {
 }
 
 /**
- * EVERY POOL DIRECTORY this dispatcher's own lanes could live under — `<workspace>/.lanes/web-everything` AND
- * `<workspace>/.lanes/webeverything`, mirroring `bootstrap-session.mjs#poolRoots`'s own two-basename probe
- * (`CONSTELLATION_REPOS.we.dirs`) rather than re-deriving which basename this host actually uses. Hardcoded to
- * the `we` profile — same stated scope as {@link briefTokensForRepo}'s own call site above (#3960 multi-repo
- * slice 5's job, not this one's): every launch this file dispatches plans against the WE backlog/PR pool only.
+ * EVERY POOL DIRECTORY a given repo's lanes could live under — `<workspace>/.lanes/<one of that repo's own
+ * `dirs`>`, mirroring `bootstrap-session.mjs#poolRoots`'s own two-basename probe (`CONSTELLATION_REPOS.we.dirs`)
+ * rather than re-deriving which basename this host actually uses. `repoKey` DEFAULTS to `'we'` — byte-identical
+ * to every call site that predates xftsbsg and never passes one — but is no longer hardcoded: `we`/`frontierui`/
+ * `plateau-app` each number their own lanes from 1 (all three exist simultaneously on a real host), so a caller
+ * that KNOWS which repo a lane number belongs to (see {@link dispatchLaneGrant}) must say so, or this would
+ * resolve a `frontierui`/`plateau-app` lane number to WE's own unrelated same-numbered lane — the xftsbsg defect.
  * PURE.
  * @param {string} [root]
+ * @param {string} [repoKey]
  * @returns {string[]}
  */
-function laneWorkspacePoolDirs(root = REPO_ROOT) {
+function laneWorkspacePoolDirs(root = REPO_ROOT, repoKey = 'we') {
   const workspace = workspaceRootOf(root);
-  return CONSTELLATION_REPOS.we.dirs.map((d) => join(workspace, '.lanes', d));
+  const dirs = CONSTELLATION_REPOS[repoKey]?.dirs ?? CONSTELLATION_REPOS.we.dirs;
+  return dirs.map((d) => join(workspace, '.lanes', d));
 }
 
 /**
@@ -1697,12 +1757,15 @@ function laneWorkspacePoolDirs(root = REPO_ROOT) {
  * exists yet (a lane number the pool has not grown to) still returns a real, deterministic path — better than
  * refusing to grant anything, and harmless: granting a not-yet-existing directory changes nothing the CLI
  * would otherwise refuse differently.
+ *
+ * `repoKey` (xftsbsg, default `'we'`, unchanged for every pre-existing caller) selects WHICH repo's pool to
+ * probe — see {@link laneWorkspacePoolDirs}'s own header for why this can no longer be hardcoded.
  * @param {string|number} laneNum
- * @param {{root?:string, exists?:Function}} [o]
+ * @param {{root?:string, exists?:Function, repoKey?:string}} [o]
  * @returns {string}
  */
-export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync } = {}) {
-  const candidates = laneWorkspacePoolDirs(root).map((poolDir) => join(poolDir, `lane-${laneNum}`));
+export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync, repoKey = 'we' } = {}) {
+  const candidates = laneWorkspacePoolDirs(root, repoKey).map((poolDir) => join(poolDir, `lane-${laneNum}`));
   return candidates.find((p) => exists(p)) ?? candidates[0];
 }
 
@@ -1711,13 +1774,14 @@ export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync } = 
  * primary checkout. Reached only when a dispatch payload carries no lane number at all, which the
  * `assigned-lane` guard above means should not happen through the normal `dispatch-lane` CLI path; kept so a
  * caller that invokes {@link createDispatchSinks}'s sink directly, bypassing that guard, still grants SOME
- * scoped directory rather than nothing. PURE over `exists`.
+ * scoped directory rather than nothing. PURE over `exists`. `repoKey` — see {@link laneDirFor}'s own header.
  * @param {string} [root]
  * @param {Function} [exists]
+ * @param {string} [repoKey]
  * @returns {string[]}
  */
-export function laneRootsFor(root = REPO_ROOT, exists = existsSync) {
-  return laneWorkspacePoolDirs(root).filter((p) => exists(p));
+export function laneRootsFor(root = REPO_ROOT, exists = existsSync, repoKey = 'we') {
+  return laneWorkspacePoolDirs(root, repoKey).filter((p) => exists(p));
 }
 
 /**
@@ -1726,15 +1790,22 @@ export function laneRootsFor(root = REPO_ROOT, exists = existsSync) {
  * {@link laneDirFor}'s own header for why this is always available today); its absence falls back to every
  * existing lanes-pool root ({@link laneRootsFor}) rather than refusing to grant anything. NEVER a primary
  * checkout either way. PURE over `exists`.
- * @param {{lane?:string|number|null}} payload
+ *
+ * xftsbsg — WHICH REPO'S POOL to resolve the lane number against is read off `payload.scope` (the same
+ * repo-qualified scope {@link ../lib/repo-profile.mjs#repoKeyForScope} already knows how to read — every
+ * mechanical build/fix/ci-heal payload carries one; see `we:scripts/operations/dispatch-lane-io.mjs#findItem`).
+ * An empty/unrecognized scope falls back to `'we'` — byte-identical to this function's behavior before
+ * xftsbsg, which is exactly right for the pre-existing (WE-only) callers whose own scope already reads `we:`.
+ * @param {{lane?:string|number|null, scope?:string|string[]|null}} payload
  * @param {{root?:string, exists?:Function}} [o]
  * @returns {{additionalDirectories:string[], allow:string[]}}
  */
 export function dispatchLaneGrant(payload, { root = REPO_ROOT, exists = existsSync } = {}) {
   const lane = payload?.lane;
+  const repoKey = repoKeyForScope(payload?.scope) ?? 'we';
   const dirs = (lane != null && String(lane).trim() !== '')
-    ? [laneDirFor(lane, { root, exists })]
-    : laneRootsFor(root, exists);
+    ? [laneDirFor(lane, { root, exists, repoKey })]
+    : laneRootsFor(root, exists, repoKey);
   const rules = dirs.flatMap((d) => [`Edit(${d}/**)`, `Write(${d}/**)`]);
   return { additionalDirectories: dirs, allow: rules };
 }
@@ -2143,12 +2214,16 @@ export function resumeSucceeded({ printedId, requestedSessionId, agentsAfter }) 
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT readers go through. See
  *   {@link readTick} for why this is a second seam and not the same one.
  * @param {() => Date} [o.now]
+ * @param {(pid: number) => boolean} [o.isPidAlive] - #3645/#4212: the liveness probe for a DETACHED
+ *   delivery-wrapper handle (`pid:<n>`). Injectable for the same reason `listAgents`/`listPrs` are: the whole
+ *   axis must be testable with no real process to signal.
  * @returns {Record<string, Function>} effect type → `async (entry, ctx) => {status, result?, error?}`.
  */
 export function createDispatchObservers({
   exec = execFileSync,
   listAgents = () => defaultListAgents({ exec }),
   listPrs = () => defaultListPrs({ exec }),
+  isPidAlive = defaultIsPidAlive,
   now = () => new Date(),
 } = {}) {
   // `undefined` is the not-yet-read sentinel, NOT `null`: a reader that returns `null` (or anything else the
@@ -2200,8 +2275,30 @@ export function createDispatchObservers({
         }
       }
 
-      // ── AXIS 2: LIVENESS. Unchanged — it is what answers while no PR exists yet, which is every dispatch
-      //    for most of its life, and the dominant case until real dispatch lands.
+      // ── AXIS 2: LIVENESS. What answers while no PR exists yet, which is every dispatch for most of its
+      //    life, and the dominant case until real dispatch lands.
+      //
+      // #3645/#4212 — A MECHANICAL BUILD IS ANSWERED BY THE KERNEL, BEFORE ANY `claude agents` CALL. The
+      // delivery wrapper runs in its own detached process and was never a `--bg` session, so it is not in that
+      // listing and never will be; asking anyway would read "gone" for a delivery that is an hour into its
+      // build. The grace-window and `unresolved` branches below are shared verbatim — only the liveness
+      // QUESTION differs, not what is done with its answer.
+      const detachedPid = detachedHandlePid(handle);
+      if (detachedPid !== null) {
+        if (isPidAlive(detachedPid)) return { status: 'running', result: null };
+        const startedDetached = entry?.startedAt ? Date.parse(entry.startedAt) : NaN;
+        if (!Number.isNaN(startedDetached) && now().getTime() - startedDetached < LISTING_GRACE_MS) {
+          return { status: 'running', result: null };
+        }
+        return {
+          status: 'unresolved',
+          error: `the delivery wrapper process ${handle} has exited, which reports liveness and not outcome, and no `
+            + 'MERGED PR for this item can be attributed to this dispatch — whether the build finished cleanly cannot '
+            + `be told from here. Read its log (\`${deliveryDispatchLogPath(entry?.payload?.sessionSlug ?? '')}\`) and `
+            + 'its delivery report, then close the entry out.',
+        };
+      }
+
       if (listed === undefined) listed = listAgents();
       const sessions = listed;
       if (!Array.isArray(sessions)) {
@@ -2220,7 +2317,9 @@ export function createDispatchObservers({
           + 'not understood, which is not evidence that any session ended',
         );
       }
-      const live = listedIds.has(normalizeHandle(handle));
+      // #3645/#4212 — through {@link isHandleListed}, so this reader and {@link stampLiveness}'s own listing
+      // compare cannot drift.
+      const live = isHandleListed(handle, sessions);
       if (live) return { status: 'running', result: null };
 
       // NOT-YET-LISTED IS NOT GONE. `--bg` returns before the session is necessarily visible, so a poll inside

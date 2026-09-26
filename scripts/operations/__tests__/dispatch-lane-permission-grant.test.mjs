@@ -80,6 +80,46 @@ describe('dispatchLaneGrant — the grant for one dispatch payload', () => {
     const grant = dispatchLaneGrant({ lane: '' }, { root: ROOT, exists: () => false });
     expect(grant.additionalDirectories).toEqual([]);
   });
+
+  // xftsbsg (epic #3383) — LIVE-CONFIRMED defect: every constellation repo's lane pool numbers its own lanes
+  // from 1, so `.lanes/web-everything/lane-1`, `.lanes/frontierui/lane-1` and `.lanes/plateau-app/lane-1` all
+  // exist on a real host AT THE SAME TIME. Before this fix, `dispatchLaneGrant` always probed WE's own pool
+  // dirs regardless of which repo the dispatch was actually for, so a frontierui/plateau-app build's pre-spawn
+  // grant resolved to WE's own unrelated same-numbered lane whenever it happened to exist too.
+  it('reads the repo off payload.scope and grants that repo\'s OWN lane, not WE\'s same-numbered one', () => {
+    const grant = dispatchLaneGrant(
+      { lane: 1, scope: ['plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts'] },
+      {
+        root: ROOT,
+        // BOTH pools have a lane-1 — the exact live collision this test proves is resolved correctly.
+        exists: existsOnly([
+          '/Users/op/workspace/.lanes/web-everything/lane-1',
+          '/Users/op/workspace/.lanes/plateau-app/lane-1',
+        ]),
+      },
+    );
+    expect(grant.additionalDirectories).toEqual(['/Users/op/workspace/.lanes/plateau-app/lane-1']);
+    expect(grant.allow).toEqual([
+      'Edit(/Users/op/workspace/.lanes/plateau-app/lane-1/**)',
+      'Write(/Users/op/workspace/.lanes/plateau-app/lane-1/**)',
+    ]);
+  });
+
+  it('resolves frontierui scope to frontierui\'s own pool dir the same way', () => {
+    const grant = dispatchLaneGrant(
+      { lane: 3, scope: ['frontierui:plugs/webdirectives/ssr/net/for-each.mjs'] },
+      { root: ROOT, exists: existsOnly(['/Users/op/workspace/.lanes/frontierui/lane-3']) },
+    );
+    expect(grant.additionalDirectories).toEqual(['/Users/op/workspace/.lanes/frontierui/lane-3']);
+  });
+
+  it('an empty/unrecognized scope still falls back to WE — byte-identical to pre-xftsbsg behavior', () => {
+    const grant = dispatchLaneGrant(
+      { lane: 40, scope: [] },
+      { root: ROOT, exists: existsOnly(['/Users/op/workspace/.lanes/web-everything/lane-40']) },
+    );
+    expect(grant.additionalDirectories).toEqual(['/Users/op/workspace/.lanes/web-everything/lane-40']);
+  });
 });
 
 describe('createDispatchSinks — grants the lane BEFORE spawning the agent', () => {

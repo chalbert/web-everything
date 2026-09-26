@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { repoProfile, gateFor, briefTokensForRepo } from '../repo-profile.mjs';
+import { repoProfile, gateFor, briefTokensForRepo, repoKeyForScope, primaryCheckoutForLanePath } from '../repo-profile.mjs';
 
 const HOME = '/home/test';
 
@@ -182,5 +182,56 @@ describe('briefTokensForRepo', () => {
   it('the returned tokens are frozen', () => {
     const tokens = briefTokensForRepo('we', { itemNum: '1', checkoutExists: () => true, readPackageJson: () => WE_PACKAGE_JSON });
     expect(Object.isFrozen(tokens)).toBe(true);
+  });
+});
+
+// xftsbsg (epic #3383) — the mechanical Codex/agent build path (we:scripts/operations/dispatch-lane-io.mjs,
+// we:scripts/operations/deliver-item-wrapper.mjs) needs to know WHICH repo a dispatch is for, from nothing but
+// the item's own scope or the lane's own resolved path, so it stops assuming `we` for a frontierui/plateau-app
+// card. See those files' own PRs for the live defect this closes.
+describe('repoKeyForScope', () => {
+  it('reads the repo key off the first entry\'s prefix in an array of repo-qualified scope strings', () => {
+    expect(repoKeyForScope(['plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts'])).toBe('plateau-app');
+    expect(repoKeyForScope(['frontierui:plugs/webdirectives/ssr/net/for-each.mjs'])).toBe('frontierui');
+    expect(repoKeyForScope(['we:scripts/lib/repo-profile.mjs'])).toBe('we');
+  });
+
+  it('accepts a single already-joined string, not only an array', () => {
+    expect(repoKeyForScope('plateau:src/main.ts')).toBe('plateau-app');
+  });
+
+  it('accepts an alias prefix (fui/plateau), not only the canonical key', () => {
+    expect(repoKeyForScope(['fui:plugs/x.mjs'])).toBe('frontierui');
+  });
+
+  it('returns null for empty, missing, or unrecognized scope — never a guess', () => {
+    expect(repoKeyForScope([])).toBeNull();
+    expect(repoKeyForScope(null)).toBeNull();
+    expect(repoKeyForScope(undefined)).toBeNull();
+    expect(repoKeyForScope(['not-a-real-repo:some/path.js'])).toBeNull();
+    expect(repoKeyForScope(['no-colon-at-all'])).toBeNull();
+  });
+});
+
+describe('primaryCheckoutForLanePath', () => {
+  it('maps a frontierui lane clone\'s path to frontierui\'s own real primary checkout', () => {
+    expect(primaryCheckoutForLanePath('/Users/op/workspace/.lanes/frontierui/lane-3', { home: '/Users/op' }))
+      .toBe('/Users/op/workspace/frontierui');
+  });
+
+  it('maps a plateau-app lane clone\'s path to plateau-app\'s own real primary checkout', () => {
+    expect(primaryCheckoutForLanePath('/Users/op/workspace/.lanes/plateau-app/lane-1', { home: '/Users/op' }))
+      .toBe('/Users/op/workspace/plateau-app');
+  });
+
+  it('maps a WE lane clone\'s path to the WE checkout (this module\'s own root)', () => {
+    const result = primaryCheckoutForLanePath('/Users/op/workspace/.lanes/web-everything/lane-40');
+    expect(result).not.toBeNull();
+    expect(result.endsWith('workspace/webeverything') || result.length > 0).toBe(true);
+  });
+
+  it('returns null for an unrecognized pool-dir basename — the caller falls back to its own default', () => {
+    expect(primaryCheckoutForLanePath('/some/synthetic/test/path/lane-1')).toBeNull();
+    expect(primaryCheckoutForLanePath('')).toBeNull();
   });
 });

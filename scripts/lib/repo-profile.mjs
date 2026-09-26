@@ -24,10 +24,10 @@
  */
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CONSTELLATION_REPOS, repoKeyForSlug } from './constellation-repos.mjs';
+import { CONSTELLATION_REPOS, repoKeyForDir, repoKeyForSlug } from './constellation-repos.mjs';
 
 // This module's OWN checkout root — the `we` entry's `path: ''` means "wherever this file is physically
 // checked out" (the primary checkout or a lane clone of it), never a fixed location. Computed once from
@@ -171,6 +171,56 @@ export function gateFor(keyOrSlugOrPrefix, { home, checkoutExists = existsSync, 
  *   touching the real filesystem).
  * @returns {{REPO: string, LANE_REPO: string, GATE_COMMAND: string, WE_ROOT: string, ATTRIBUTION: string}|null}
  */
+/**
+ * xftsbsg (epic #3383) — WHICH REPO a dispatch's own repo-qualified `scope:` names, so a caller that only has
+ * the scope (never a resolved lane path — this is asked BEFORE `lane-pool.mjs acquire` has run, at the exact
+ * point `we:scripts/operations/dispatch-lane-io.mjs#dispatchLaneGrant` pre-grants a lane directory) can tell
+ * `we` apart from `frontierui`/`plateau-app` instead of assuming `we` unconditionally.
+ *
+ * Accepts the same shape `we:scripts/operations/dispatch-lane-io.mjs#findItem` already hands through on the
+ * payload — an array of repo-qualified scope strings (`['plateau-app:src/...', ...]`) — or a single string
+ * (a caller that already joined it, or a bare one-entry scope). Reads the FIRST entry whose prefix resolves to
+ * a real repo profile; a scope with no entries, or whose entries carry no `<repo>:` prefix this table
+ * recognizes, returns `null` (never a guess) so the caller can fall back to its OWN existing default rather
+ * than this function silently choosing one. PURE.
+ * @param {string|string[]|null|undefined} scope
+ * @returns {string|null}
+ */
+export function repoKeyForScope(scope) {
+  const entries = Array.isArray(scope) ? scope : (scope == null ? [] : [scope]);
+  for (const raw of entries) {
+    const s = String(raw ?? '');
+    const i = s.indexOf(':');
+    if (i <= 0) continue;
+    const key = resolveProfileKey(s.slice(0, i));
+    if (key !== null) return key;
+  }
+  return null;
+}
+
+/**
+ * xftsbsg (epic #3383) — THE REAL PRIMARY CHECKOUT a lane clone's own absolute PATH belongs to, given nothing
+ * but that path: the pool-dir basename directly above `lane-<N>` (`.lanes/<basename>/lane-<N>`) is exactly
+ * what {@link ../lib/constellation-repos.mjs#repoKeyForDir} already maps to a repo key, and {@link repoProfile}
+ * turns that key into the checkout the Codex sandbox deny-map needs to seal off — the repo's OWN live primary
+ * checkout (which routinely holds another session's in-flight uncommitted work), not whichever repo the
+ * dispatching process itself happens to be checked out from.
+ *
+ * Returns `null` for a path this cannot place (an unrecognized pool-dir basename, or a path with no parent
+ * segment at all — e.g. a synthetic path a test hands in) — the caller decides what that means; every existing
+ * caller today falls back to its own current default (this repo's own `REPO_ROOT`), so a `null` here is
+ * byte-identical to before this function existed. PURE.
+ * @param {string} lanePath
+ * @param {{home?: string}} [o]
+ * @returns {string|null}
+ */
+export function primaryCheckoutForLanePath(lanePath, { home } = {}) {
+  const poolDirBasename = basename(dirname(String(lanePath ?? '')));
+  const key = repoKeyForDir(poolDirBasename);
+  if (key === null) return null;
+  return repoProfile(key, { home })?.checkoutPath ?? null;
+}
+
 export function briefTokensForRepo(keyOrSlugOrPrefix, { itemNum = null, prNum = null, home, checkoutExists, readPackageJson } = {}) {
   const profile = repoProfile(keyOrSlugOrPrefix, { home });
   if (!profile) return null;
