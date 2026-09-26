@@ -428,6 +428,124 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(res.committed).toBe(true);
   });
 
+  it('rewrites a pending-hash citation in scripts/conveyor/flows/*.flow.json, in the SAME land commit (#4075/xmd4pfa)', () => {
+    // Reproduces the live incident: a flow file cites a card's backlog file by its pre-numbering hash name
+    // (`backlog/<hash>-slug.md:LINE`); without this sweep the cite dangles the instant the card lands
+    // numbered — exactly how build-dispatch.flow.json's `backlog/xr05jjl-…` cite turned main's CI red.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('scripts/conveyor/flows/build-dispatch.flow.json', JSON.stringify({
+      id: 'build-dispatch',
+      cite: 'backlog/xhash01-alpha.md:1',
+    }));
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+    // The flow's own citation is rewritten to the landed number, in the SAME commit as the numbering —
+    // proving the #4075/xmd4pfa widening reaches scripts/conveyor/flows/ the same way #2428 reached
+    // docs/agent/ and #3100 reached agent-memory-src/.
+    const flow = JSON.parse(readFileSync(join(repo, 'scripts/conveyor/flows/build-dispatch.flow.json'), 'utf8'));
+    expect(flow.cite).toBe('backlog/2201-alpha.md:1');
+    expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('leaves an untracked/absent scripts/conveyor/flows/*.flow.json alone — never fatal when the dir has no match (#4075/xmd4pfa)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash04-delta.md', '---\nkind: story\nstatus: resolved\n---\n# Delta\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+    // No scripts/conveyor/flows/ directory exists at all in this throwaway repo.
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash04', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('REFUSES to number — never pushes a red main — when a citation OUTSIDE the swept dirs would dangle (#4075 hardening)', () => {
+    // Replays today's incident for a DIFFERENT, still-unswept file type — proving the sweep-scope list
+    // falling behind again can never again silently push a broken citation. A real recurrence would be a
+    // NEW citing file kind nobody has taught the sweep about yet; this fixture stands in for that (a plain
+    // script, not one of the four swept dirs) citing a card by its pre-numbering hash FILE PATH.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('scripts/some-new-thing.mjs', '// see backlog/xhash01-alpha.md:1 for context\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    // Refused, not silently numbered-with-a-dangling-ref: nothing assigned, nothing committed.
+    expect(res.assigned).toEqual([]);
+    expect(res.committed).toBe(false);
+    expect(res.error).toMatch(/hash-path citation outside the rewrite scope/);
+    expect(res.error).toContain('scripts/some-new-thing.mjs');
+    // The tree is untouched — no partial rename, no rewrite, nothing staged.
+    expect(git('status', '--porcelain').trim()).toBe('');
+    expect(backlogNames()).toContain('xhash01-alpha.md');
+  });
+
+  it('numbers cleanly once the unswept citation is fixed — the very next pass (#4075 hardening)', () => {
+    // Same setup as the refusal above, but the offending citation is gone before this pass runs — proving
+    // the refusal is a DEFERRAL, not a permanent block: the hash numbers on the very next attempt.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('does not refuse over a hash-path citation for a DIFFERENT hash that isn\'t pending this pass', () => {
+    // The unswept-citation check is scoped to THIS pass's own ledgered hashes — an unrelated, already-landed
+    // #NNN's stale prose mention of some other hash-shaped word must never block a real, unrelated numbering.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    // Cites a hash that is NOT in this pass's ledger (no backlog/xnotone-*.md exists at all) — irrelevant noise.
+    write('scripts/unrelated.mjs', '// once referenced backlog/xnotone-something.md, now gone\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('does not refuse over a HISTORICAL ledger hash cited by path — only this pass\'s own hashes gate it (PR #2757 review)', () => {
+    // The ledger is append-only: a hash numbered in some past pass stays in it forever. A stale prose
+    // mention of that old hash's path (its backlog file long renamed away) must not block an unrelated,
+    // genuinely pending hash from numbering — else one historical mention would stall JIT numbering for good.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('reports/old-note.md', 'Historical: see backlog/xblk001-old-card.md for the original write-up.\n');
+    write(LEDGER_REL, JSON.stringify({ xblk001: '2150' }));
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'reports', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('REFUSES when a pending hash-path citation follows an unrelated one on the SAME line (PR #2757 review)', () => {
+    // Every citation on a line counts, not just the first: an unrelated hash path first must not hide the
+    // pending one after it.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('scripts/mixed.mjs', '// see backlog/xnotone-other.md and backlog/xhash01-alpha.md\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([]);
+    expect(res.committed).toBe(false);
+    expect(res.error).toContain('scripts/mixed.mjs cites xhash01');
+    expect(backlogNames()).toContain('xhash01-alpha.md');
+  });
+
   it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xland01-item.md', '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');

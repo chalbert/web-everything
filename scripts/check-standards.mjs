@@ -102,6 +102,7 @@ import {
   makeMemoizedLineCounter, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
+  HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
 // #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
@@ -1667,6 +1668,48 @@ try {
 }
 
 mark("6f-ii-b. REFERENCE-RESOLUTION gates (5b/5c/5d — 2026-09-06 staleness audit)");
+// ── 6f-ii-c. HASH-PATH CITATION outside backlog/ (#4075 follow-up, xmd4pfa) ────────────────────────
+// A hash-named BACKLOG FILE PATH (`backlog/x<hash>-<slug>.md`) cited from anywhere outside backlog/ itself
+// is the citation shape that dangles the moment the drain's JIT numbering (#2288) renames the card away —
+// the live incident: scripts/conveyor/flows/build-dispatch.flow.json cited `backlog/xr05jjl-….md`, the card
+// landed as #4220, and the dangling reference turned main's CI red for every PR (#4075). Pure detector:
+// findHashPathCiteOutsideBacklog (scripts/lib/citation-check.mjs) — deliberately SCOPE-INDEPENDENT (see its
+// own header): it fires in ANY dir, not a maintained list, because a maintained list (the JIT-numbering
+// rewrite scope itself) is exactly what fell behind here. `git grep`, not a per-dir readdir walk — the whole
+// point is catching a citing file TYPE nobody has scoped a scanner to yet, so there is no fixed dir list to
+// hand a walker in the first place. DELIBERATELY OUTSIDE the Rust-port branch above (same reasoning as
+// 6f-ii-b): a brand-new gate the port doesn't know about must never silently not-run just because the port
+// happens to be built.
+//
+// WARN-level, matching the rest of this gate family (CITATION_GATES_ENFORCED) — a handful of historical
+// `reports/`/`audits/` write-ups already name a card by its birth-hash path in prose, predating this rule,
+// and are not being re-litigated; a NEW instance (the thing this rule exists to catch) is what gets surfaced.
+try {
+  const emit3 = CITATION_GATES_ENFORCED ? err : warn;
+  let hits = [];
+  try {
+    hits = execFileSync(
+      'git', ['grep', '--threads=1', '-nE', HASH_PATH_CITE_SOURCE, '--', '.', ':!node_modules', ':!backlog'],
+      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
+    ).split('\n').filter(Boolean);
+  } catch { /* git grep exits 1 on no match, or git unavailable — no findings either way, never a gate crash */ }
+  const seen = new Set();
+  for (const { file: rel, path: cited, hash } of findHashPathCitesInGrepLines(hits)) {
+    const key = `${rel}\u0000${cited}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emit3(`${rel}: cites a card by its hash-named FILE PATH (\`${cited}\`) — the drain's JIT numbering ` +
+      `(#2288) renames that exact path away the moment the card lands, so this citation dangles the instant ` +
+      `it does (#4075, the build-dispatch.flow.json incident). Cite the card by its stable id instead ` +
+      `(\`#${hash}\` while pending, or its resolved \`#NNN\` once landed) — both resolve against the ` +
+      `target's own \`bornAs\` frontmatter and survive the rename.`,
+      { kind: 'citation-hash-path-outside-backlog', file: rel });
+  }
+} catch (e) {
+  err(`hash-path citation gate failed: ${e.message}`);
+}
+
+mark("6f-ii-c. HASH-PATH CITATION outside backlog/ (#4075 follow-up, xmd4pfa)");
 // ── 6f-iii. PROVENANCE gate (#3026) — a backticked identifier in prose must resolve, or be marked ──
 // The one citation form the #2821 subset cannot reach. Gates 3/5/10 are all LOCUS-shaped (a path, a line,
 // an anchor); a bare `` `validateTodoMarkerBlock` `` in a sentence is none of those, so the highest-frequency

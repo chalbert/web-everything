@@ -74,6 +74,7 @@ import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
 import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences } from './backlog/id.mjs';
+import { HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines } from './lib/citation-check.mjs'; // #4075 follow-up (xmd4pfa) — the pre-push hash-path-citation backstop, one pattern shared with check:standards' own gate
 // #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
@@ -601,8 +602,12 @@ const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
  * permanently once the item lands with a real NNN, proven twice — repaired by hand in PR #408), AND
  * `agent-memory-src/*.md` (#3100 — the compiled agent-memory bundle every future session loads into
  * context; a dangling hash there is silently READ and misdirects every session from then on, not merely
- * discoverable like a stale backlog cross-ref) — numbering each item AND repairing any cross-lane
- * `blockedBy`/`parent`/`#ref` that still points at an already-numbered blocker by its old hash.
+ * discoverable like a stale backlog cross-ref), AND `scripts/conveyor/flows/*.flow.json` (#4075/xmd4pfa — a
+ * flow's own `cite`s name a backlog file by its pre-numbering hash the same way a docs page does; without
+ * this sweep the cite dangles the moment the card lands numbered, which is exactly how main's CI went red
+ * — build-dispatch.flow.json's `backlog/xr05jjl-…` cite outlived the card's own rename to #4220) —
+ * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
+ * already-numbered blocker by its old hash.
  * Missing local mappings for explicit references fall back to bornAs on origin/main (#2903).
  * Unresolved references are warned and returned as `unresolvedReferences`, distinguishing visible
  * in-flight targets from potentially dead/unobservable targets. This does not change the numbering trigger.
@@ -613,6 +618,7 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const BL = join(CWD, 'backlog');
   const DOCS = join(CWD, 'docs', 'agent');
   const MEMORY = join(CWD, 'agent-memory-src');
+  const FLOWS = join(CWD, 'scripts', 'conveyor', 'flows');
   let stems;
   try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
   catch { return { assigned: [], committed: false, error: 'cannot read backlog/' }; }
@@ -655,7 +661,24 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
     .filter((rel) => trackedMemory.has(rel))
     .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
 
-  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles];
+  // #4075/xmd4pfa — extend the blind rewrite scope to `scripts/conveyor/flows/*.flow.json`: a flow file
+  // cites a pending hash's backlog file BY NAME (`backlog/<hash>-slug.md:LINE`) the same way a docs page or
+  // an agent-memory note cites one, and without this sweep that citation is left dangling permanently once
+  // the item lands numbered — exactly the failure that turned main's CI red (build-dispatch.flow.json's
+  // `backlog/xr05jjl-…` cite outliving the card's own rename to #4220). `readdirSync` here is deliberately
+  // NON-recursive, so it sweeps only the top-level `<id>.flow.json` files, never `test-fixtures/**` — same
+  // shape as docsFiles/memoryFiles: `name` is the full repo-relative path, so `pathFor` below routes it
+  // through the same `includes('/')` branch with no new case needed. Only TRACKED files are read/rewritten.
+  let flowsNames;
+  try { flowsNames = readdirSync(FLOWS).filter((f) => f.endsWith('.flow.json')); }
+  catch { flowsNames = []; } // scripts/conveyor/flows/ missing is not fatal — just nothing to sweep there
+  const trackedFlows = new Set((quietGit(CWD, ['ls-files', 'scripts/conveyor/flows/*.flow.json']) || '').split('\n').filter(Boolean));
+  const flowsFiles = flowsNames
+    .map((f) => `scripts/conveyor/flows/${f}`)
+    .filter((rel) => trackedFlows.has(rel))
+    .map((rel) => ({ name: rel, content: readFileSync(join(CWD, rel), 'utf8') }));
+
+  const files = [...stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') })), ...docsFiles, ...memoryFiles, ...flowsFiles];
   const contentByName = new Map(files.map((f) => [f.name, f.content]));
   // Resolve a `files` entry's `name` to its on-disk absolute + commit-relative path — a backlog stem (bare,
   // no `/`) lives under `backlog/`; a docs entry (`name` already a full repo-relative path) lives as-is.
@@ -774,6 +797,48 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   for (const file of resolvedFiles) {
     if (!rewrittenNames.has(file.name) && file.content !== contentByName.get(file.name)) rewrites.push(file);
   }
+
+  // #4075 follow-up (xmd4pfa, hardening after the build-dispatch.flow.json incident) — NEVER COMMIT A
+  // RENAME THIS PASS CAN PROVE LEAVES A DANGLING CITATION. The four dirs swept above (backlog/, docs/agent/,
+  // agent-memory-src/, scripts/conveyor/flows/) are a FIXED, MAINTAINED list — and a maintained list can lag
+  // a new citing file TYPE, exactly how `scripts/conveyor/flows/` itself lagged before this same incident
+  // added it (a flow file cited `backlog/xr05jjl-….md`; the card landed as #4220; every PR's CI went red on
+  // the 404'd path). Before writing or committing anything, re-check the REAL, WHOLE tracked tree — not just
+  // the dirs this pass already knows to fix — for a file this pass CANNOT fix still citing one of THIS
+  // pass's hashes by its file path. One `git grep` over the same HASH_PATH_CITE_SOURCE pattern check:standards'
+  // own gate uses (scripts/lib/citation-check.mjs — one source of truth, never two independently-drifting
+  // copies); repo-wide is still cheap (`--threads=1`, the #4166-measured win: a few tens of ms here).
+  //
+  // A hit outside this pass's own swept files means some file the sweep doesn't know how to fix would be
+  // left pointing at a path that is about to stop existing — so this pass REFUSES to number ANY of its
+  // pending hashes (fail closed, whole-pass, not a partial per-hash carve-out: committing SOME renames while
+  // leaving others' cross-refs half-rewritten risks a new, harder-to-see inconsistency, and the existing
+  // numbering-mutex-contention path above already defers the WHOLE pass on a lesser obstacle). The hash(es)
+  // stay pending and are retried on the very next land — same shape as that mutex deferral.
+  // Gate on THIS pass's own renames only — never the whole append-only ledger: a hash numbered in some past
+  // pass stays in the ledger forever, and a stale historical mention of its path must not block every later
+  // numbering (PR #2757 review).
+  const sweptRelPaths = new Set(files.map((f) => pathFor(f.name).relPath));
+  const renamingNow = new Set(assigned.map((a) => a.hash));
+  let unsweptHashPathCites = [];
+  try {
+    const hits = execFileSync(
+      'git', ['grep', '--threads=1', '-nE', HASH_PATH_CITE_SOURCE, '--', '.', ':!node_modules', ':!backlog'],
+      { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
+    ).split('\n').filter(Boolean);
+    unsweptHashPathCites = findHashPathCitesInGrepLines(hits)
+      // sweptRelPaths: this pass already rewrites that exact file's content below
+      .filter((c) => !sweptRelPaths.has(c.file) && renamingNow.has(c.hash))
+      .map((c) => ({ path: c.file, hash: c.hash }));
+  } catch { /* git grep exits 1 on no match, or git unavailable — no findings either way, never abort on that alone */ }
+  if (unsweptHashPathCites.length) {
+    const detail = unsweptHashPathCites.map((f) => `${f.path} cites ${f.hash}`).join('; ');
+    console.warn(`[numberPendingHashes] refusing this pass — a citation outside the rewrite scope would ` +
+      `dangle post-rename: ${detail}. Widen the sweep scope (scripts/lane-drain.mjs#numberPendingHashes) or ` +
+      `fix the citation, then this hash numbers on the next pass.`);
+    return { assigned: [], committed: false, error: `hash-path citation outside the rewrite scope: ${detail}` };
+  }
+
   // #2400 — path-value refs are derived from UNTRUSTED backlog content, so CONFINE them to inside the repo
   // before acting: a crafted `relatedReport`/body token like `../../../outside/notes-<hash>.md` would
   // otherwise make `writeFileSync(join(CWD, to))` + `git rm from` write outside the tree and delete an

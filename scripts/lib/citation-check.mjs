@@ -43,7 +43,11 @@ export const CITATION_GATES_ENFORCED = false;
 // these dirs. A hash slug cited from anywhere else never self-heals → dead link post-land (#2821 gate 3).
 // `agent-memory-src/` joined this set at #3100 — the compiled agent-memory bundle every future session
 // loads into context, so a dangling hash there silently misdirects every session, not just one card.
-export const HASH_REWRITE_DIRS = ['backlog/', 'docs/agent/', 'agent-memory-src/'];
+// `scripts/conveyor/flows/` joined at #4075/xmd4pfa — a flow's own `cite`s name a backlog file by its
+// pre-numbering hash, and without this sweep the cite dangles the moment the card lands numbered (the
+// live incident: build-dispatch.flow.json's `backlog/xr05jjl-…` cite outliving the card's rename to #4220,
+// turning main's CI red for every PR).
+export const HASH_REWRITE_DIRS = ['backlog/', 'docs/agent/', 'agent-memory-src/', 'scripts/conveyor/flows/'];
 
 // The dirs the rewriter does NOT cover but where a hash-slug citation still renders / is cite-able.
 // Same set as DERIVED_ARTIFACT_DIRS in check-standards-rules.mjs (#2180) — kept as its own constant so the
@@ -73,6 +77,75 @@ export const CROSS_REPO_LOCI = new Set(['fui:', 'plateau:']);
 // A provisional hash-slug id: `x` + exactly 6 lowercase-alnum chars (the born-as id form, e.g. `x9kptqv`).
 // Mirrors the two-form id in check-standards-rules.mjs ITEM_REF_RX (`x[0-9a-z]{6}`).
 const HASH_SLUG = 'x[0-9a-z]{6}';
+
+/**
+ * Gate NEW (#4075 follow-up, xmd4pfa) — a hash-named BACKLOG FILE PATH cited from ANYWHERE outside
+ * `backlog/` itself: `backlog/x<hash>-<slug>.md`. This exact shape is what dangled in
+ * `scripts/conveyor/flows/build-dispatch.flow.json` (#4075): the file existed only until the drain's JIT
+ * numbering (#2288) renamed the card to `#4220`, at which point every citation to it by its OLD path 404'd
+ * — turning main's CI red for every PR. A citation should name the card by its STABLE id (a bare `#xHASH`
+ * pending, or `#NNN` once landed — both resolvable against `bornAs`), never by the file's CURRENT path,
+ * which JIT numbering can and does rename out from under it.
+ *
+ * This is DELIBERATELY broader than gate 3 (`findOutOfScopeHashSlugs`, which is scoped to a FIXED historical
+ * dir list — `reports/` and the two research dirs). Gate 3's scope is "the rewriter never covers this dir,
+ * so this citation shape can never self-heal there." This gate is scope-INDEPENDENT — it fires in ANY dir
+ * outside `backlog/`, including dirs the JIT-numbering rewrite scope (`HASH_REWRITE_DIRS`) DOES cover today
+ * — because that scope is a maintained LIST, and a list can lag a new citing file TYPE exactly the way it
+ * lagged `scripts/conveyor/flows/` until this same incident added it. The rule has to be scope-independent
+ * even though the REWRITE remains scope-limited: the rewrite is the (bounded, maintained) cure, this is the
+ * (unbounded, scope-blind) detector that catches the rewrite scope falling behind again.
+ *
+ * `backlog/` itself is exempt — a backlog item legitimately mentions a SIBLING hash-named file mid-flight
+ * (a `relatedReport`, a cross-ref during drafting) and that dir is the ledger's own numbering target, always
+ * rewritten in the SAME pass regardless of any other scope question.
+ *
+ * @param text the file body (raw).
+ * @param relPath the file's repo-relative path (decides in/out of scope: `backlog/` is exempt).
+ * @returns array of `{ path, hash }` — one entry per distinct hash-named path cited (deduped per file).
+ */
+export const HASH_PATH_CITE_SOURCE = 'backlog/(x[0-9a-z]{6,7})-[A-Za-z0-9-]+\\.md';
+const HASH_PATH_CITE_RE = new RegExp(`\\b${HASH_PATH_CITE_SOURCE}\\b`, 'g');
+
+export function findHashPathCiteOutsideBacklog(text, relPath) {
+  const findings = [];
+  if (typeof text !== 'string' || text === '' || typeof relPath !== 'string') return findings;
+  if (relPath.startsWith('backlog/')) return findings; // the ledger's own numbering target — always exempt
+  // A test file's synthetic hash-named-path fixture string is not a real citation —
+  // same reasoning as isIndexableSourcePath's own test-file exclusion. Without this the gate mostly reports
+  // its OWN suite's fixtures back to it, which is exactly the wolf-cry failure mode a noisy gate produces.
+  if (PROVENANCE_TEST_FILE_RE.test(relPath)) return findings;
+  const seen = new Set();
+  for (const m of text.matchAll(HASH_PATH_CITE_RE)) {
+    if (seen.has(m[0])) continue;
+    seen.add(m[0]);
+    findings.push({ path: m[0], hash: m[1] });
+  }
+  return findings;
+}
+
+/**
+ * Scan `git grep -n` output lines (`<file>:<lineno>:<text>`) with findHashPathCiteOutsideBacklog — the ONE
+ * detector both production scanners (check:standards' gate and the drain's pre-number backstop) route
+ * through, so a change to what counts as a citation lands in both at once. Every citation on a line is
+ * reported, not only the first (PR #2757 review).
+ *
+ * @param lines raw `git grep -n` output lines.
+ * @returns array of `{ file, path, hash }` — `file` is the citing file, `path`/`hash` the cited card.
+ */
+export function findHashPathCitesInGrepLines(lines) {
+  const out = [];
+  for (const line of lines) {
+    const i = line.indexOf(':');
+    if (i === -1) continue;
+    const j = line.indexOf(':', i + 1);
+    const file = line.slice(0, i);
+    for (const f of findHashPathCiteOutsideBacklog(j === -1 ? line.slice(i + 1) : line.slice(j + 1), file)) {
+      out.push({ file, ...f });
+    }
+  }
+  return out;
+}
 
 /**
  * Build the anchor → owning-items map from backlog front-matter. A platform-decisions `#anchor` is owned
@@ -737,7 +810,11 @@ const PROVENANCE_SRC_EXT_RE = /\.(mjs|cjs|mts|cts|js|jsx|ts|tsx|json|njk|html|cs
  *  invented it. This is the same self-resolution failure `stripSourceComments` fixes, one level up. */
 const PROVENANCE_PROSE_DIR_RE = /^(backlog|docs|reports|plans|research)\//;
 /** TEST files. */
-const PROVENANCE_TEST_FILE_RE = /(^|\/)(__tests__|__mocks__|__fixtures__)\/|\.(test|spec)\.[A-Za-z]+$/;
+// Exported (not just PROVENANCE-local) because findHashPathCiteOutsideBacklog's own callers need the same
+// exclusion: a test fixture's synthetic hash-named-path string literal is not a real citation any more than
+// a test's invented identifier is real vocabulary (see isIndexableSourcePath's own header for that identical
+// reasoning) — without this, the gate drowns in fixture noise from its own suite.
+export const PROVENANCE_TEST_FILE_RE = /(^|\/)(__tests__|__mocks__|__fixtures__)\/|\.(test|spec)\.[A-Za-z]+$/;
 
 /**
  * Is this tracked path part of the tree's VOCABULARY — i.e. should its body feed the resolution index?
