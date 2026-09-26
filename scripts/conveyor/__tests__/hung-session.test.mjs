@@ -243,3 +243,96 @@ describe('readHungInfo — the IO shell, against a REAL temp project store', () 
     expect(info).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
   });
 });
+
+// ── CLAUDE AUTH-EXPIRED DETECTION — live incident, night of 2026-09-25/26 ET ────────────────────────────────────
+// The fixture line below is the REAL transcript shape read off the actual dead sessions
+// (`~/.claude/projects/*/f61f0de3-*.jsonl` and `751f205c-*.jsonl`, both `ci-heal-*` sessions dispatched
+// overnight): the session's ENTIRE transcript is one synthetic assistant turn carrying this exact shape.
+function authExpiredLine() {
+  return JSON.stringify({
+    type: 'assistant',
+    timestamp: new Date().toISOString(),
+    message: { role: 'assistant', content: [{ type: 'text', text: 'Login expired · Please run /login' }] },
+    error: 'authentication_failed',
+    isApiErrorMessage: true,
+  });
+}
+
+describe('classifyClaudeAuthExpired — PURE core', () => {
+  it('detects the real "Login expired · Please run /login" transcript shape', async () => {
+    const { classifyClaudeAuthExpired } = await import('../hung-session.mjs');
+    const entries = [{ kind: 'assistant', blocks: [{ kind: 'text', text: 'Login expired · Please run /login' }] }];
+    expect(classifyClaudeAuthExpired(entries)).toEqual({ authExpired: true, reason: 'claude-auth' });
+  });
+
+  it('matches case-insensitively and the generic 401/Unauthorized fallback wording', async () => {
+    const { classifyClaudeAuthExpired } = await import('../hung-session.mjs');
+    expect(classifyClaudeAuthExpired([{ kind: 'assistant', blocks: [{ kind: 'text', text: 'LOGIN EXPIRED, please run /LOGIN' }] }]))
+      .toEqual({ authExpired: true, reason: 'claude-auth' });
+    expect(classifyClaudeAuthExpired([{ kind: 'assistant', blocks: [{ kind: 'text', text: 'request failed: 401 Unauthorized' }] }]))
+      .toEqual({ authExpired: true, reason: 'claude-auth' });
+  });
+
+  it('never fires on an unrelated assistant turn, or a user-role entry merely quoting the phrase', async () => {
+    const { classifyClaudeAuthExpired } = await import('../hung-session.mjs');
+    expect(classifyClaudeAuthExpired([{ kind: 'assistant', blocks: [{ kind: 'text', text: 'PR #2711 is green, landing now' }] }]))
+      .toEqual({ authExpired: false, reason: 'no-signal' });
+    // A `user`-role entry (e.g. an injected brief) is never scanned — mirrors
+    // `transcriptShowsIntendedBlockedOnInfra`'s own `kind === 'assistant'` guard.
+    expect(classifyClaudeAuthExpired([{ kind: 'user', blocks: [{ kind: 'text', text: 'Login expired · Please run /login' }] }]))
+      .toEqual({ authExpired: false, reason: 'no-signal' });
+  });
+
+  it('newest match wins — an older auth failure followed by real work is not flagged', async () => {
+    const { classifyClaudeAuthExpired } = await import('../hung-session.mjs');
+    const entries = [
+      { kind: 'assistant', blocks: [{ kind: 'text', text: 'Login expired · Please run /login' }] },
+      { kind: 'assistant', blocks: [{ kind: 'text', text: 'back online, resuming the fix' }] },
+    ];
+    expect(classifyClaudeAuthExpired(entries)).toEqual({ authExpired: false, reason: 'no-signal' });
+  });
+
+  it('empty/missing entries answer no-signal, never a guess', async () => {
+    const { classifyClaudeAuthExpired } = await import('../hung-session.mjs');
+    expect(classifyClaudeAuthExpired([])).toEqual({ authExpired: false, reason: 'no-signal' });
+    expect(classifyClaudeAuthExpired(undefined)).toEqual({ authExpired: false, reason: 'no-signal' });
+  });
+});
+
+describe('readClaudeAuthExpiredInfo — the IO shell, against the REAL transcript shape', () => {
+  let root, projects, cwd, sessionId, transcriptFile, readClaudeAuthExpiredInfo;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'auth-expired-test-'));
+    projects = join(root, 'projects');
+    cwd = '/Users/fixture/workspace/.operations/dispatch/e265b052-6d35-4a66-a0bb-ba4c2fac7e34';
+    sessionId = 'f61f0de3-f0ad-406c-b392-614272ece0f1';
+    const slug = cwd.replaceAll('/', '-');
+    mkdirSync(join(projects, slug), { recursive: true });
+    transcriptFile = join(projects, slug, `${sessionId}.jsonl`);
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    ({ readClaudeAuthExpiredInfo } = await import('../hung-session.mjs'));
+  });
+  afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+  it('flags the real dead-session transcript shape as auth-expired', () => {
+    writeFileSync(transcriptFile, `${authExpiredLine()}\n`);
+    const info = readClaudeAuthExpiredInfo({ cwd, sessionId });
+    expect(info.authExpired).toBe(true);
+    expect(info.reason).toBe('claude-auth');
+    expect(info.transcriptPath).toBe(transcriptFile);
+  });
+
+  it('a normal, non-auth-failed transcript is never flagged', () => {
+    writeFileSync(transcriptFile, `${entryLine('assistant', new Date().toISOString(), [{ type: 'text', text: 'working the fix now' }])}\n`);
+    const info = readClaudeAuthExpiredInfo({ cwd, sessionId });
+    expect(info.authExpired).toBe(false);
+    expect(info.reason).toBe('no-signal');
+  });
+
+  it('missing cwd/sessionId, or no transcript on disk, answers no-signal, never a guess', () => {
+    expect(readClaudeAuthExpiredInfo({})).toEqual({ authExpired: false, reason: 'no-signal' });
+    expect(readClaudeAuthExpiredInfo({ cwd, sessionId: 'no-such-session' })).toEqual({ authExpired: false, reason: 'no-signal' });
+  });
+});

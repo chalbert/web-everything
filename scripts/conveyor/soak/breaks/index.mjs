@@ -29,6 +29,7 @@ import skippedTickOnTick from './skipped-tick-ontick.mjs';
 import stickySmokeRejection from './sticky-smoke-rejection.mjs';
 import sessionJunkInDaemonClone from './session-junk-in-daemon-clone.mjs';
 import shortJobBehindFullSuite from './short-job-behind-full-suite.mjs';
+import claudeAuthExpired from './claude-auth-expired.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -41,6 +42,7 @@ export const BREAKS = Object.freeze([
   stickySmokeRejection,
   sessionJunkInDaemonClone,
   shortJobBehindFullSuite,
+  claudeAuthExpired,
 ]);
 
 export function breakById(id) {

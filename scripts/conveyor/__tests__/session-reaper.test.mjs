@@ -26,10 +26,12 @@ import {
   STOP_RETRY_BACKOFF_MS,
   runSessionReaperPass,
   makeHungResolver,
+  makeAuthExpiredResolver,
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
   BLOCKED_ON_INFRA_OUTCOME,
   STALLED_OUTCOME,
+  CLAUDE_AUTH_OUTCOME_LABEL,
   transcriptShowsIntendedBlockedOnInfra,
   lastCommitAheadOfBaseMs,
   lastReviewCommentMs,
@@ -616,6 +618,71 @@ describe('makeHungResolver — the IO-shell resolver over hung-session.mjs (epic
   });
 });
 
+// Live incident, night of 2026-09-25/26 ET — the operator's Claude login expired; every daemon-dispatched
+// session (`ci-heal-2711`/`ci-heal-2712`) ended immediately on the CLI's own auth failure and sat `blocked`
+// for hours. Mirrors the hung-transcript axis describe block above, one for one.
+describe('classifySessionReapWithGroundTruth — Claude auth-expired detection (live incident, night of 2026-09-25/26 ET)', () => {
+  const alwaysAuthExpired = () => ({ authExpired: true, reason: 'claude-auth' });
+  const neverAuthExpired = () => ({ authExpired: false, reason: 'no-signal' });
+
+  it('a `working` session confirmed auth-expired is reaped', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2711' }), null, { authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'claude-auth-expired:claude-auth' });
+  });
+
+  it('a `blocked` session confirmed auth-expired is reaped too — THE LIVE CASE (ci-heal-2711/2712, sat blocked for hours)', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'ci-heal-2712' }), null, { authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'claude-auth-expired:claude-auth' });
+  });
+
+  it('OVERRIDES `neverReapWorking:true` — same tier as the hung-transcript/no-outcome axes, same reasoning', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2711' }), null, { neverReapWorking: true, authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'claude-auth-expired:claude-auth' });
+  });
+
+  it('overrides a `wrong-cwd` verdict too — a dispatched session\'s cwd is its own scratch dir, never the daemon\'s allowedCwd', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'ci-heal-2711', cwd: '/Users/x/workspace/.operations/dispatch/abc' }), null, { allowedCwd: '/daemon-clone', authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'claude-auth-expired:claude-auth' });
+  });
+
+  it('tried BEFORE ground-truth/completion — a resolver answering true short-circuits everything after it', () => {
+    let groundTruthCalled = false;
+    const groundTruthFor = () => { groundTruthCalled = true; return { resolved: false }; };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'blocked', name: 'ci-heal-2711' }), groundTruthFor, { authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'claude-auth-expired:claude-auth' });
+    expect(groundTruthCalled).toBe(false);
+  });
+
+  it('a resolver answering not-auth-expired falls through to every later axis unaffected', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2711' }), null, { neverReapWorking: true, authExpiredFor: neverAuthExpired }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('a resolver that throws is treated as unknown, never a guess, and never crashes the pass', () => {
+    const throws = () => { throw new Error('unreadable transcript'); };
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2711' }), null, { authExpiredFor: throws }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('omitting authExpiredFor entirely is byte-identical to before — additive only', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'working', name: 'ci-heal-2711' }), null, { neverReapWorking: true }))
+      .toEqual({ reap: false, reason: 'not-terminal' });
+  });
+
+  it('an already-terminal `done` session is unaffected — this axis only ever runs after the base `not-terminal` check', () => {
+    expect(classifySessionReapWithGroundTruth(bg({ state: 'done', name: 'ci-heal-2711' }), null, { authExpiredFor: alwaysAuthExpired }))
+      .toEqual({ reap: true, reason: 'done' });
+  });
+});
+
+describe('makeAuthExpiredResolver — the IO-shell resolver over hung-session.mjs (live incident, night of 2026-09-25/26 ET)', () => {
+  it('delegates to readClaudeAuthExpiredInfo, never throwing on a bad row', () => {
+    const resolver = makeAuthExpiredResolver();
+    const { cwd, sessionId, ...noTranscript } = bg({ state: 'blocked' });
+    expect(resolver(noTranscript)).toEqual({ authExpired: false, reason: 'no-signal' });
+  });
+});
+
 describe('classifySessionReapWithGroundTruth — the completion-record axis (epic #3383, #3436)', () => {
   it('a `blocked` session whose completion record reports done is reaped, tried BEFORE backlog/PR ground truth', () => {
     let groundTruthCalled = false;
@@ -808,6 +875,33 @@ describe('planBackstopCompletion — the root-cause fix, not just detection (xbv
     const now = () => '2026-09-25T15:00:00.000Z';
     expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, false, true)).toMatchObject({ outcome: STALLED_OUTCOME });
     expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, true, true)).toMatchObject({ outcome: STALLED_OUTCOME });
+  });
+
+  // Live incident fix, night of 2026-09-25/26 ET — the 6th `authExpired` param.
+  it('mints BLOCKED_ON_INFRA_OUTCOME + the claude-auth label when the 6th `authExpired` param is true', () => {
+    const rec = planBackstopCompletion({ name: 'fix-2647' }, null, () => '2026-09-26T11:00:00.000Z', false, false, true);
+    expect(rec).toMatchObject({ session: 'fix-2647', status: 'done', outcome: BLOCKED_ON_INFRA_OUTCOME, label: CLAUDE_AUTH_OUTCOME_LABEL });
+  });
+
+  it('`authExpired` outranks a bare `blockedOnInfra` when both are somehow true — same outcome, but the specific label wins', () => {
+    const rec = planBackstopCompletion({ name: 'fix-2647' }, null, () => '2026-09-26T11:00:00.000Z', true, false, true);
+    expect(rec).toMatchObject({ outcome: BLOCKED_ON_INFRA_OUTCOME, label: CLAUDE_AUTH_OUTCOME_LABEL });
+  });
+
+  it('`stalled` still outranks `authExpired` — a no-outcome verdict is this reaper\'s own stronger conclusion', () => {
+    const rec = planBackstopCompletion({ name: 'fix-2647' }, null, () => '2026-09-26T11:00:00.000Z', false, true, true);
+    expect(rec).toMatchObject({ outcome: STALLED_OUTCOME });
+    expect(rec.label).not.toBe(CLAUDE_AUTH_OUTCOME_LABEL);
+  });
+
+  it('never mints one for ci-heal-<pr> even with `authExpired: true` — no completion-record kind exists for it', () => {
+    expect(planBackstopCompletion({ name: 'ci-heal-2711' }, null, undefined, false, false, true)).toBeNull();
+  });
+
+  it('omitting `authExpired` (or false) is byte-identical to before — no `label` field touched', () => {
+    const now = () => '2026-09-26T11:00:00.000Z';
+    expect(planBackstopCompletion({ name: 'fix-2647' }, null, now)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME, label: null });
+    expect(planBackstopCompletion({ name: 'fix-2647' }, null, now, false, false, false)).toMatchObject({ outcome: UNREPORTED_EXIT_OUTCOME, label: null });
   });
 });
 

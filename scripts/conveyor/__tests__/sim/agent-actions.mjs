@@ -25,9 +25,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { transcriptPath } from '../../../operations/__tests__/helpers/fake-claude-shim.mjs';
@@ -289,6 +289,42 @@ export function hang() {
     run(ctx, session) {
       ctx.claude.setState(session.id, 'working', { hung: true });
       // Deliberately no touchTranscript(ctx, session) call here.
+    },
+  };
+}
+
+/**
+ * Live incident, night of 2026-09-25/26 ET (epic #3383/#4075 continuation) — the operator's own Claude login
+ * expired, and every daemon-dispatched session ended IMMEDIATELY on the CLI's own auth failure. Appends the
+ * REAL failure shape (measured live off `~/.claude/projects/<slug>/f61f0de3-....jsonl` — see
+ * `we:scripts/conveyor/hung-session.mjs`'s own file header) directly to the session's own transcript file —
+ * NOT `touchTranscript` (this is real content the shared detector reads, not a bare mtime bump) — and
+ * deliberately leaves `state`/`pid` UNTOUCHED: the whole point of the live incident is that these sessions
+ * were never killed, just sat there with a still-live pid, never advancing. `we:scripts/conveyor/soak/breaks/
+ * claude-auth-expired.mjs` proves the daemon still frees the PR anyway once `reconcile-core.mjs#assessLiveness`
+ * knows to look.
+ */
+export function authExpiredFail() {
+  return {
+    kind: 'authExpiredFail',
+    run(ctx, session) {
+      const home = ctx.env?.FAKE_CLAUDE_HOME;
+      if (!home || !session?.cwd || !session?.sessionId) return;
+      const path = transcriptPath({ home, cwd: session.cwd, sessionId: session.sessionId });
+      mkdirSync(dirname(path), { recursive: true });
+      // No timestamp dependency on the sim clock: the shared detector (`hung-session.mjs
+      // #classifyClaudeAuthExpired`) matches on the newest assistant turn's TEXT CONTENT alone, never on when
+      // it was written — an instant, unconditional signal, unlike the hung-transcript axis's own staleness
+      // window.
+      const line = JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Login expired · Please run /login' }] },
+        error: 'authentication_failed',
+        isApiErrorMessage: true,
+      });
+      appendFileSync(path, `${line}\n`);
+      // Deliberately NO ctx.claude.setState / killPid call — see the doc above.
     },
   };
 }

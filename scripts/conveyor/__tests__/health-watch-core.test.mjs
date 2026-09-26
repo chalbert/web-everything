@@ -19,6 +19,7 @@ import badCredentials from '../health-smells/bad-credentials.mjs';
 import laneStarvation from '../health-smells/lane-starvation.mjs';
 import healthTickOverrun from '../health-smells/health-tick-overrun.mjs';
 import heavyQueueWait from '../health-smells/heavy-queue-wait.mjs';
+import claudeAuthExpired from '../health-smells/claude-auth-expired.mjs';
 
 const sample = (name, text, over = {}) => ({ name, mtimeMs: 0, sizeBytes: text.length, text, bootstrap: false, defaultIntervalMs: 120_000, ...over });
 
@@ -282,6 +283,69 @@ describe('smell: bad-credentials', () => {
   });
 });
 
+// Live incident, night of 2026-09-25/26 ET — the operator's Claude login expired; every daemon-dispatched
+// session hit the CLI's own auth failure and sat dead all night with nothing alerting the operator.
+describe('smell: claude-auth-expired (live incident, night of 2026-09-25/26 ET)', () => {
+  it('RED→GREEN: 2 auth-expired sessions in 30 min opens; a single one does not', () => {
+    let state = emptyHealthState();
+    let r = runHealthTick(state, { authExpired: [{ name: 'ci-heal-2711', startedAt: 0 }] }, [claudeAuthExpired], 0);
+    expect(r.transitions.some((t) => t.type === 'opened' && t.key === 'claude-auth-expired::claude-auth')).toBe(false);
+
+    state = r.state;
+    r = runHealthTick(state, { authExpired: [
+      { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 5 * MINUTE },
+    ] }, [claudeAuthExpired], 6 * MINUTE);
+    expect(r.transitions.some((t) => t.type === 'opened' && t.key === 'claude-auth-expired::claude-auth')).toBe(true);
+    const ep = r.state.episodes['claude-auth-expired::claude-auth'];
+    expect(ep.summary).toMatch(/ci-heal-2711/);
+    expect(ep.summary).toMatch(/ci-heal-2712/);
+    expect(ep.recommendation).toMatch(/\/login/);
+  });
+
+  it('a session whose failure is OLDER than the 30-minute window no longer counts', () => {
+    const state = emptyHealthState();
+    const r = runHealthTick(state, { authExpired: [
+      { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 31 * MINUTE },
+    ] }, [claudeAuthExpired], 31 * MINUTE);
+    // Only ci-heal-2712 is within the 30-minute window — one session, below the minCount:2 threshold.
+    expect(r.transitions.some((t) => t.type === 'opened')).toBe(false);
+  });
+
+  it('THE URGENT NOTIFY EXCEPTION: opens with a `notify` action that is NEVER suppressed, even in shadow mode', () => {
+    const state = emptyHealthState();
+    const r = runHealthTick(state, { authExpired: [
+      { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 0 },
+    ] }, [claudeAuthExpired], 0, { config: { mode: 'shadow' } });
+    expect(r.transitions.some((t) => t.type === 'opened')).toBe(true);
+    const notify = r.plan.find((p) => p.kind === 'notify' && p.key === 'claude-auth-expired::claude-auth');
+    expect(notify).toBeDefined();
+    expect(notify.suppressed).toBeNull();
+  });
+
+  it('closes after `closeAfter` (1) clean sample once the auth-expired count drops below minCount', () => {
+    let state = emptyHealthState();
+    let r = runHealthTick(state, { authExpired: [
+      { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 0 },
+    ] }, [claudeAuthExpired], 0);
+    state = r.state;
+    expect(state.episodes['claude-auth-expired::claude-auth'].status).toBe('open');
+
+    r = runHealthTick(state, { authExpired: [] }, [claudeAuthExpired], MINUTE);
+    expect(r.transitions.some((t) => t.type === 'closed' && t.key === 'claude-auth-expired::claude-auth')).toBe(true);
+  });
+
+  it('a probe that did not sample this tick (no `authExpired` key) never moves the episode', () => {
+    let state = emptyHealthState();
+    let r = runHealthTick(state, { authExpired: [
+      { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 0 },
+    ] }, [claudeAuthExpired], 0);
+    state = r.state;
+    r = runHealthTick(state, {}, [claudeAuthExpired], MINUTE); // no `authExpired` probe this tick
+    expect(r.transitions).toEqual([]);
+    expect(r.state.episodes['claude-auth-expired::claude-auth'].status).toBe('open');
+  });
+});
+
 describe('smell: lane-starvation', () => {
   it('opens after openAfter=2 samples (not 1); acquirable>demand + no recent no-lane closes after 3', () => {
     let state = emptyHealthState();
@@ -532,6 +596,30 @@ describe('planActions', () => {
 
     const investigate = plan.find((p) => p.kind === 'investigate' && p.key === 'd::p');
     expect(investigate.suppressed).toMatch(/shadow mode/);
+  });
+
+  // #4077 continuation — `claude-auth-expired`'s one opt-in exception to shadow-mode notify suppression.
+  it('a smell with `notifyEvenInShadow: true` is never suppressed, even in shadow mode — every other smell is unaffected', () => {
+    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert', notifyEvenInShadow: true };
+    const ORDINARY = { id: 'd', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert' };
+    const r = stepEpisodes(emptyHealthState(), [
+      { smell: URGENT, results: [{ subject: 'p', breach: true }] },
+      { smell: ORDINARY, results: [{ subject: 'p', breach: true }] },
+    ], 0);
+    const plan = planActions(r.transitions, { u: URGENT, d: ORDINARY }, { mode: 'shadow' });
+
+    const urgentNotify = plan.find((p) => p.kind === 'notify' && p.key === 'u::p');
+    expect(urgentNotify.suppressed).toBeNull();
+
+    const ordinaryNotify = plan.find((p) => p.kind === 'notify' && p.key === 'd::p');
+    expect(ordinaryNotify.suppressed).toBe('shadow mode');
+  });
+
+  it('`notifyEvenInShadow` is irrelevant outside shadow mode — never suppressed there either way', () => {
+    const URGENT = { id: 'u', openAfter: 1, closeAfter: 1, severity: 'high', action: 'alert', notifyEvenInShadow: true };
+    const r = stepEpisodes(emptyHealthState(), [{ smell: URGENT, results: [{ subject: 'p', breach: true }] }], 0);
+    const plan = planActions(r.transitions, { u: URGENT }, { mode: 'live' });
+    expect(plan.find((p) => p.kind === 'notify' && p.key === 'u::p').suppressed).toBeNull();
   });
 });
 

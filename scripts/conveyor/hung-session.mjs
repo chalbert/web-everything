@@ -264,3 +264,93 @@ export function classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs = null, no
   if ((nowMs - baseline) >= windowMs) return { stall: true, reason: 'no-outcome-window' };
   return { stall: false, reason: 'active' };
 }
+
+// ── CLAUDE AUTH-EXPIRED DETECTION (epic #3383/#4075 continuation) ──────────────────────────────────────────────
+// LIVE INCIDENT, night of 2026-09-25/26 ET: the operator's own Claude login expired. Every daemon-dispatched
+// session (`ci-heal-2711`/`ci-heal-2712`, re-dispatched repeatedly until 06:53) ended IMMEDIATELY — its entire
+// transcript is one synthetic assistant turn:
+//   {"type":"assistant","error":"authentication_failed","isApiErrorMessage":true,
+//    "message":{...,"content":[{"type":"text","text":"Login expired · Please run /login"}]}}
+// (measured live off the real sessions, `~/.claude/projects/*/f61f0de3-*.jsonl` / `751f205c-*.jsonl`). Neither
+// existing axis in this file catches it promptly: `classifyHungSession` only fires after `thresholdMs` (default
+// 30 min) of silence, and this failure IS the session's only content — nothing subsequent ever appends, so the
+// session is genuinely done the instant that one turn lands, not merely quiet. Reaping it on the generic hung
+// timer alone would have left it sitting `blocked`/`idle` (a live pid, nothing working it) for up to 30+ minutes
+// per session, all night, exactly what happened before this axis existed.
+//
+// `summarizeEntry` (this file's own shared reader) does not carry the top-level `error`/`isApiErrorMessage`
+// fields through — only `kind` (`o.type`) and `blocks` derived from `message.content` — so this axis matches on
+// the SAME text content the exact live failure carries, the same way `session-reaper.mjs
+// #transcriptShowsIntendedBlockedOnInfra` already matches its own phrase over the identical reader shape (WIDEN,
+// never grow a private second parser).
+
+/** The Claude CLI's own auth-failure phrasing, plus a generic 401/"Unauthorized" fallback for any future wording
+ *  change — case-insensitive, tolerant of the literal `/login` slash-command spelling. */
+export const CLAUDE_AUTH_EXPIRED_TEXT_RE = /login expired|please run\s*\/login|authentication_failed|\b401\b[^\n]{0,40}\bunauthoriz|unauthoriz[^\n]{0,40}\b401\b/i;
+
+// Bounded read — the failure is the newest (often only) real turn, so a short tail suffices; mirrors this
+// file's own `READ_TAIL_LINES`/`READ_MAX_BYTES`/`READ_FIELD_MAX` above.
+const AUTH_EXPIRED_TAIL_LINES = 15;
+const AUTH_EXPIRED_MAX_BYTES = 400_000;
+const AUTH_EXPIRED_FIELD_MAX = 500;
+
+/**
+ * we:scripts/conveyor/hung-session.mjs#classifyClaudeAuthExpired — PURE. Scans already-summarized transcript
+ * entries (`summarizeEntry`'s own shape — see {@link readClaudeAuthExpiredInfo} for the IO shell that builds
+ * them), NEWEST first, for an assistant `text`/`thinking` block matching {@link CLAUDE_AUTH_EXPIRED_TEXT_RE}.
+ * The first (newest) match wins — there is no need to scan past it. `entry.kind === 'assistant'` guards the
+ * match for the identical reason `transcriptShowsIntendedBlockedOnInfra` guards its own phrase: an injected
+ * agent BRIEF (a `user`-role entry) could otherwise echo unrelated text that happens to contain "401", though
+ * in practice this phrase is never part of any brief's own prose.
+ * @param {Array<{kind?:string, blocks?:Array<{kind?:string, text?:string}>}>} entries
+ * @returns {{authExpired:boolean, reason:string}}
+ */
+export function classifyClaudeAuthExpired(entries) {
+  for (let i = (entries?.length ?? 0) - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.kind !== 'assistant') continue; // never a `user`-role entry — see doc above
+    const textBlocks = (entry.blocks ?? []).filter((b) => b.kind === 'text' || b.kind === 'thinking');
+    if (!textBlocks.length) continue; // no text/thinking content in this turn (e.g. a bare tool_use) — keep
+    //                                    walking back for the newest turn that actually has some.
+    // This IS the newest assistant turn carrying real text content — decide off it ALONE and stop. An OLDER
+    // turn's auth failure must never outlive real work that came after it (a session that hit this failure,
+    // then recovered and kept going, is not auth-expired anymore) — mirrors `detectBlockedOnChild`'s own
+    // "inspect only the newest on-topic entry" discipline, never a whole-tail OR-scan.
+    const matched = textBlocks.some((b) => CLAUDE_AUTH_EXPIRED_TEXT_RE.test(b.text ?? ''));
+    return { authExpired: matched, reason: matched ? 'claude-auth' : 'no-signal' };
+  }
+  return { authExpired: false, reason: 'no-signal' };
+}
+
+/**
+ * we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo — THE IO SHELL for one session (same row
+ * shape `readHungInfo` takes: a `claude agents --json` row or a session-reaper listing row, both carrying
+ * `cwd`+`sessionId`). NEVER throws; any failure to locate or read the transcript answers
+ * `{ authExpired: false, reason: 'no-signal' }` rather than guessing — mirrors every other resolver in this
+ * file's own try/catch-to-null discipline.
+ * @param {{cwd?:string, sessionId?:string}} agent
+ * @param {{resolveTranscript?:Function, tailLinesFn?:Function, summarizeEntryFn?:Function}} [io]
+ * @returns {{authExpired:boolean, reason:string, transcriptPath?:string}}
+ */
+export function readClaudeAuthExpiredInfo(agent, {
+  resolveTranscript = resolveSessionTranscript,
+  tailLinesFn = tailLines,
+  summarizeEntryFn = summarizeEntry,
+} = {}) {
+  const cwd = agent?.cwd, sessionId = agent?.sessionId;
+  if (!cwd || !sessionId) return { authExpired: false, reason: 'no-signal' };
+  let file;
+  try {
+    file = resolveTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return { authExpired: false, reason: 'no-signal' }; // no transcript found — never guess
+  }
+  let entries;
+  try {
+    const { lines } = tailLinesFn(file, AUTH_EXPIRED_TAIL_LINES, AUTH_EXPIRED_MAX_BYTES);
+    entries = lines.map((l) => summarizeEntryFn(l, AUTH_EXPIRED_FIELD_MAX));
+  } catch {
+    return { authExpired: false, reason: 'no-signal' }; // unreadable transcript — never guess
+  }
+  return { ...classifyClaudeAuthExpired(entries), transcriptPath: file };
+}
