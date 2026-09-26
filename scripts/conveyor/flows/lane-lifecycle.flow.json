@@ -74,7 +74,7 @@
         "for": "a free, non-dirty, non-reserved lane — explicit --lane=N (tryClaimLane, atomic O_EXCL) or an auto-pick scan/poll loop",
         "timeout": null,
         "onTimeout": null,
-        "cite": "scripts/lane-pool.mjs:1767,1802-1809,1957-1994; backlog/4173-lane-pool-acquire-wait-ms-still-overshoots-under-concurrent.md (bornAs xj2k2pp, status: open)"
+        "cite": "scripts/lane-pool.mjs:1767,1802-1809,1957-1994; backlog/4173-lane-pool-acquire-wait-ms-still-overshoots-under-concurrent.md (bornAs 4172, status: open)"
       },
       "retries": {
         "what": "pool auto-growth on an empty acquirable scan (growPoolOnEmpty)",
@@ -83,7 +83,7 @@
         "cite": "scripts/lane-pool.mjs:1962-1977,2742-2787,1983-2000"
       },
       "escalation": null,
-      "notes": "The wait itself is entirely CALLER-supplied via --wait-ms (default 0 = instant fail, scripts/lane-pool.mjs:1767) — there is NO hard ceiling in the code for how long a caller may ask to wait, so timeout is recorded null (unbounded) here even though a caller can self-impose one. Worse: card xj2k2pp (backlog #4173, still open) measured that even a caller's own --wait-ms is not tight under concurrent load — 5 concurrent --wait-ms=20000 callers finished between 33s and 68s, up to 3.4x the requested wait, because the shared acquirability-scan lock serializes waiters (scripts/lane-pool.mjs:2533-2580). At the growth cap, acquire fails with a distinct 'all held/dirty' message (scripts/lane-pool.mjs:1983-2000) — the same acquire-failed terminus the ordinary exhausted-wait/lock-contention/provision-failure paths reach.",
+      "notes": "The wait itself is entirely CALLER-supplied via --wait-ms (default 0 = instant fail, scripts/lane-pool.mjs:1767) — there is NO hard ceiling in the code for how long a caller may ask to wait, so timeout is recorded null (unbounded) here even though a caller can self-impose one. Worse: card 4172 (backlog #4173, still open) measured that even a caller's own --wait-ms is not tight under concurrent load — 5 concurrent --wait-ms=20000 callers finished between 33s and 68s, up to 3.4x the requested wait, because the shared acquirability-scan lock serializes waiters (scripts/lane-pool.mjs:2533-2580). At the growth cap, acquire fails with a distinct 'all held/dirty' message (scripts/lane-pool.mjs:1983-2000) — the same acquire-failed terminus the ordinary exhausted-wait/lock-contention/provision-failure paths reach.",
       "ack": {
         "unbounded-wait": "#4173"
       }
@@ -98,9 +98,9 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "One of four distinct terminal messages: scan-timeout, lock-contention (the xj2k2pp case), provision-failure, or 'all held/dirty' (scripts/lane-pool.mjs:1983-2000). Nothing in lane-pool.mjs itself escalates this to an operator; it is the caller's own flow (e.g. build-dispatch) that decides what to do next.",
+      "notes": "One of four distinct terminal messages: scan-timeout, lock-contention (the 4172 case), provision-failure, or 'all held/dirty' (scripts/lane-pool.mjs:1983-2000). Nothing in lane-pool.mjs itself escalates this to an operator; it is the caller's own flow (e.g. build-dispatch) that decides what to do next.",
       "ack": {
-        "silent-failure": "xwuof33"
+        "silent-failure": "4235"
       }
     },
     {
@@ -182,7 +182,7 @@
       "escalation": null,
       "notes": "Priority axes (scripts/conveyor/lease-reaper.mjs:300-318): reserved (never reaped) > pr-merged/pr-closed > session-gone (grace window DISPATCH_GUARD_LISTING_GRACE_MINUTES before absence counts as gone, :538-542) > ttl-stale (the 4h backstop) > pid-dead (DORMANT today — the lease's recorded pid is the short-lived acquire CLI, never the agent, so this axis can never fire under the current schema, :612-626). NO CAP on how many leases are reaped in one pass (:795-809, iterates every candidate unconditionally) and NO retry/backoff/alert on a failed individual release — logged and skipped, non-zero PROCESS exit only for an external wrapper to notice (:805-808,843), no operator alert. Also: lease-reaper.mjs resolves its own POOL_ROOT independently (expandHome(LANE_POOL_ROOT) || homedir()/workspace/.lanes, lease-reaper.mjs:578) rather than through lane-pool-paths.mjs's hardened workspace-derived default — it remains exposed to the exact $HOME-vs-checkout-location class of bug lane-pool-paths.mjs was built to fix (scripts/lib/lane-pool-paths.mjs:8-13).",
       "ack": {
-        "uncapped-retry": "xb4yerj"
+        "uncapped-retry": "4232"
       }
     },
     {
@@ -205,7 +205,7 @@
       },
       "notes": "lane-pool-health-watch.mjs's auto-reclaim (#3383 gap 2) explicitly never touches a finished-needs-review/unknown-work verdict — 'left for a human' (:495-506). An operator can `keep` it: writes a .git/.lane-keep marker with a content fingerprint (HEAD sha + sorted dirty paths + sorted ahead shas) plus an optional --reason (scripts/lane-pool.mjs:3281-3300,659-667) — self-invalidating the moment any new commit/dirty change lands or a fresh acquire/reclaim happens (:3274-3280), never actively cleared otherwise. lane-pool.mjs itself never reads this marker for its own acquire/reset decisions; only lane-whois-core.mjs and operator-queue.mjs consume it.",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     }
   ],

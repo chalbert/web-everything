@@ -126,7 +126,7 @@
       "escalation": null,
       "notes": "Computed once per daemon tick (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:477) from readClaudeAuthHealth (scripts/conveyor/claude-auth-health.mjs:134) OR'd with a cheap probeClaudeLoggedIn (:156). While paused, fix AND ci-heal are both skipped outright with no round-cap comment spent (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:488-491). Self-clears purely via next tick's cheap probe; nothing pages a human beyond the daemon's own stderr log line (AUTH_PAUSE_LOG_MESSAGE, scripts/conveyor/claude-auth-health.mjs:67).",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     },
     {
@@ -143,7 +143,7 @@
         "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1011-1029,1122-1183"
       },
       "escalation": null,
-      "notes": "#4229 (bornAs xo2emdz, epic #4075/#3383) — FIXED. createQueueBudget (scripts/readiness/heavy-queue-projection.mjs:271, imported reconcile-fix-dispatch.mjs:79) still refuses 'queue-cap' every pass while the projected heavy-slot demand exceeds budget — dispatch keeps retrying, exactly as before, since queue congestion is expected to clear on its own (queue-cap-refusal-count.mjs's own header). What changed: each of the first 3 refusals now posts a durable, PR-comment-backed marker (recordQueueCapRefusal, reconcile-fix-dispatch.mjs:1161), so a restart never resets the count.",
+      "notes": "#4229 (bornAs 4229, epic #4075/#3383) — FIXED. createQueueBudget (scripts/readiness/heavy-queue-projection.mjs:271, imported reconcile-fix-dispatch.mjs:79) still refuses 'queue-cap' every pass while the projected heavy-slot demand exceeds budget — dispatch keeps retrying, exactly as before, since queue congestion is expected to clear on its own (queue-cap-refusal-count.mjs's own header). What changed: each of the first 3 refusals now posts a durable, PR-comment-backed marker (recordQueueCapRefusal, reconcile-fix-dispatch.mjs:1161), so a restart never resets the count.",
       "ack": {}
     },
     {
@@ -235,7 +235,7 @@
         "cite": "scripts/conveyor/reconcile-core.mjs:504,553-584; scripts/operations/completion-store.mjs#writeCompletion"
       },
       "escalation": null,
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. session-reaper.mjs's completion resolver stops the OS process immediately once the record says done, regardless of outcome (reconcile-core.mjs:504-508 docblock) — only the RECORD's cool-off (awaitingInfraCooloff:true) keeps the PR from being redispatched during the 15-minute window (reconcile-core.mjs:553-584). The completion STORE's write path (scripts/operations/completion-store.mjs#writeCompletion) now persists a durable per-SESSION `infraStreak`/`infraStreakSince` across dispatch generations; at INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — the cool-off grows and a person is notified, without ever stopping the retry outright."
+      "notes": "4227 (epic #4075/#3383) — FIXED. session-reaper.mjs's completion resolver stops the OS process immediately once the record says done, regardless of outcome (reconcile-core.mjs:504-508 docblock) — only the RECORD's cool-off (awaitingInfraCooloff:true) keeps the PR from being redispatched during the 15-minute window (reconcile-core.mjs:553-584). The completion STORE's write path (scripts/operations/completion-store.mjs#writeCompletion) now persists a durable per-SESSION `infraStreak`/`infraStreakSince` across dispatch generations; at INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — the cool-off grows and a person is notified, without ever stopping the retry outright."
     },
     {
       "id": "infra-retry-escalated",
@@ -255,7 +255,7 @@
         "how": "infra-retry-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:989-996; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
-      "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
+      "notes": "4227 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },
     {
       "id": "fixer-stood-down",
@@ -298,7 +298,7 @@
         "how": "round-cap-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:940-948,1171-1176,1267-1272,1379-1384,1422-1426"
       },
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1422-1426, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1171-1176, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1379-1384, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1267-1272, same cap, capKind `stacked-rebase`). Every ONE of these now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903) — the SAME 'refuse AND surface' shape the sibling ci-heal-exhausted path (reconcile-core.mjs:1103-1122) already used, now shared by every non-ci-heal cap population, each carrying `capKind` so the note names which population is exhausted (`fix`/`review`/`advisory-fix`/`conflict-fix`/`stacked-rebase`). Formerly a refusal-only entry (logged by the daemon's own formatRefusalLine, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538, to its own stderr/log file) — now also a durable PR comment via reconcile-note-comment.mjs and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes`."
+      "notes": "4227 (epic #4075/#3383) — FIXED. refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1422-1426, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1171-1176, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1379-1384, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1267-1272, same cap, capKind `stacked-rebase`). Every ONE of these now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903) — the SAME 'refuse AND surface' shape the sibling ci-heal-exhausted path (reconcile-core.mjs:1103-1122) already used, now shared by every non-ci-heal cap population, each carrying `capKind` so the note names which population is exhausted (`fix`/`review`/`advisory-fix`/`conflict-fix`/`stacked-rebase`). Formerly a refusal-only entry (logged by the daemon's own formatRefusalLine, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538, to its own stderr/log file) — now also a durable PR comment via reconcile-note-comment.mjs and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes`."
     }
   ],
   "transitions": [
@@ -648,7 +648,7 @@
         }
       ],
       "ack": {
-        "unprovided-assumption": "xrv69j6"
+        "unprovided-assumption": "4238"
       }
     }
   ]

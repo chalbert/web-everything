@@ -111,7 +111,7 @@
       },
       "retries": null,
       "escalation": null,
-      "notes": "Deliberately unbounded BY DESIGN ('mixed mode is permanent', plateau:tools/drain-daemon/README.md — a foreign holder is WAITED OUT, never contended). WE x5h527v closed the honest gap this used to be: past the timeout the daemon still never contends, but it now fires a ONE-TIME operator notice per holder episode (decideLeaseWaitEscalation) instead of staying silent forever."
+      "notes": "Deliberately unbounded BY DESIGN ('mixed mode is permanent', plateau:tools/drain-daemon/README.md — a foreign holder is WAITED OUT, never contended). WE 4222 closed the honest gap this used to be: past the timeout the daemon still never contends, but it now fires a ONE-TIME operator notice per holder episode (decideLeaseWaitEscalation) instead of staying silent forever."
     },
     {
       "id": "pass-running",
@@ -136,7 +136,7 @@
         "how": "best-effort desktop notification (osascript) once anomaly detection trips on the in-memory recent-pass window — never on every single failure",
         "cite": "plateau:tools/drain-daemon/daemon.mjs:122-141"
       },
-      "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream. WE x5h527v: the retry itself stays uncapped BY DESIGN (a drain must keep trying) — the cap only decides when to fire a one-time operator notice (decideFailureEscalation), never when to stop retrying."
+      "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream. WE 4222: the retry itself stays uncapped BY DESIGN (a drain must keep trying) — the cap only decides when to fire a one-time operator notice (decideFailureEscalation), never when to stop retrying."
     },
     {
       "id": "rebase-drop-attempt",
@@ -181,9 +181,9 @@
       "escalation": null,
       "notes": "KEY QUESTION answered (the #2729 shape): reduceCheckState's empty-rollup case reads 'unchecked', never 'red' (scripts/operations/pr-status.mjs:140-147) — so merge-ai-prs.mjs's own gate reports the flat, indistinguishable-from-still-running reason 'required check \"test\" is not green' (scripts/merge-ai-prs.mjs:602) every sweep, with no escalation and no comment posted. Upstream, scripts/progress-board.mjs#classifyPr's ciFailed() is `false` on an empty rollup (scripts/progress-board.mjs:466-472,510), so the SAME PR reads as board-status 'queued' — healthy-looking — meaning scripts/conveyor/reconcile-core.mjs's whole ci-red branch (ci-heal dispatch, cap-exhausted note) never even sees it either. Nobody owns this PR: not the drain (repeats the skip forever), not reconcile-core (never classifies it as needing help), not the operator queue (no distinguishing signal to surface). The most common real cause is exactly ci-heal.flow.json's base-retargeted state (a stacked PR's base merges, GitHub retargets it onto main with no fresh CI run) — but this state is reached whenever a head genuinely has zero check runs for ANY reason, not only that one.",
       "ack": {
-        "no-owner": "xi4od2p",
-        "unbounded-wait": "xi4od2p",
-        "uncapped-retry": "xi4od2p"
+        "no-owner": "4239",
+        "unbounded-wait": "4239",
+        "uncapped-retry": "4239"
       }
     },
     {
@@ -200,7 +200,7 @@
         "cite": "scripts/merge-ai-prs.mjs:4869-4886"
       },
       "escalation": null,
-      "notes": "PR #2763 (fix-couple-split, 2026-09-26): a cross-repo couple (a frontierui/plateau-app impl half + its WE carrier) lands WHOLE in one pass or not at all. Two mechanisms: (1) HOLD — every couple member whose partner is not landing this pass is held (fixpoint over held partners), contiguous ORDER — impl half(s) then the carrier immediately — so no other merge can move `main` between the two halves (scripts/lib/couple-cascade.mjs#planCoupleCascadeStep); (2) a carrier PREFLIGHT — right before an impl half merges, the carrier's FRESH re-read must still say 'merge', else BOTH halves are held (scripts/lib/couple-cascade.mjs#carrierPreflight, scripts/merge-ai-prs.mjs:4890-4907). Live incident this closes: pass 2026-09-26T20:32:20Z merged plateau-app#185 (impl), then web-everything#2746 (unrelated) moved WE main, then #2751 (#185's carrier) re-read BEHIND and was refused — the impl had already landed alone. The couple-gate's own hold-forever exposure (no cap on how many passes the SAME couple can be held if its partner genuinely never lands) is the SAME class of gap #2989 already tracks for the upstream couple-JOIN mechanism (joinImplToCouples, which decides which impl is attached to which carrier BEFORE this gate ever sees it) — adjacent, not identical, but acknowledged there rather than re-filed. RESIDUAL this gate cannot close: the carrier's own `gh pr merge` can still fail AFTER its impl half already landed (a GitHub error in the ~1s between the two writes — two repos cannot merge atomically); reported as `coupleSplit` (JSON + a loud stderr line, scripts/merge-ai-prs.mjs:4924-4926,4978,5152) but nothing beyond that log line pages an operator, retries with priority, or caps how many times the SAME split can recur silently-except-for-a-log-line — tracked as its own gap, card x3hwqqb.",
+      "notes": "PR #2763 (fix-couple-split, 2026-09-26): a cross-repo couple (a frontierui/plateau-app impl half + its WE carrier) lands WHOLE in one pass or not at all. Two mechanisms: (1) HOLD — every couple member whose partner is not landing this pass is held (fixpoint over held partners), contiguous ORDER — impl half(s) then the carrier immediately — so no other merge can move `main` between the two halves (scripts/lib/couple-cascade.mjs#planCoupleCascadeStep); (2) a carrier PREFLIGHT — right before an impl half merges, the carrier's FRESH re-read must still say 'merge', else BOTH halves are held (scripts/lib/couple-cascade.mjs#carrierPreflight, scripts/merge-ai-prs.mjs:4890-4907). Live incident this closes: pass 2026-09-26T20:32:20Z merged plateau-app#185 (impl), then web-everything#2746 (unrelated) moved WE main, then #2751 (#185's carrier) re-read BEHIND and was refused — the impl had already landed alone. The couple-gate's own hold-forever exposure (no cap on how many passes the SAME couple can be held if its partner genuinely never lands) is the SAME class of gap #2989 already tracks for the upstream couple-JOIN mechanism (joinImplToCouples, which decides which impl is attached to which carrier BEFORE this gate ever sees it) — adjacent, not identical, but acknowledged there rather than re-filed. RESIDUAL this gate cannot close: the carrier's own `gh pr merge` can still fail AFTER its impl half already landed (a GitHub error in the ~1s between the two writes — two repos cannot merge atomically); reported as `coupleSplit` (JSON + a loud stderr line, scripts/merge-ai-prs.mjs:4924-4926,4978,5152) but nothing beyond that log line pages an operator, retries with priority, or caps how many times the SAME split can recur silently-except-for-a-log-line — tracked as its own gap, card 4247.",
       "ack": {
         "uncapped-retry": "#2989"
       }
@@ -221,7 +221,7 @@
       "escalation": null,
       "notes": "A merge failure on a PR the SAME pass just rebase-dropped is expected (CI is re-running against the new tip) and is not treated as a fault (scripts/merge-ai-prs.mjs:4988-4993); every other merge failure is reported in failedMerges and simply retried the next sweep.",
       "ack": {
-        "uncapped-retry": "xb4yerj"
+        "uncapped-retry": "4232"
       }
     },
     {
@@ -242,9 +242,9 @@
       "outcome": "failure",
       "owner": null,
       "escalation": null,
-      "notes": "The couple-gate's own residual it cannot close (see couple-gate's notes): reached only when a carrier PASSED carrierPreflight (or already had merged impls) and its OWN `gh pr merge` still failed right after — a real, rare race (two repos, one write each, ~1s apart). Reported into the pass's JSON `coupleSplit` array plus one loud stderr line (scripts/merge-ai-prs.mjs:4924-4926) — that IS the whole escalation today; nothing pages an operator, nothing retries this specific carrier with priority, and nothing caps how many passes the SAME split can recur, each producing only another log line. The carrier itself still rejoins the ordinary merge-attempt retry loop next sweep (this state is an ADDITIONAL classification layered on that failure, not a replacement terminus) — tracked as its own gap, card x3hwqqb.",
+      "notes": "The couple-gate's own residual it cannot close (see couple-gate's notes): reached only when a carrier PASSED carrierPreflight (or already had merged impls) and its OWN `gh pr merge` still failed right after — a real, rare race (two repos, one write each, ~1s apart). Reported into the pass's JSON `coupleSplit` array plus one loud stderr line (scripts/merge-ai-prs.mjs:4924-4926) — that IS the whole escalation today; nothing pages an operator, nothing retries this specific carrier with priority, and nothing caps how many passes the SAME split can recur, each producing only another log line. The carrier itself still rejoins the ordinary merge-attempt retry loop next sweep (this state is an ADDITIONAL classification layered on that failure, not a replacement terminus) — tracked as its own gap, card 4247.",
       "ack": {
-        "silent-failure": "x3hwqqb"
+        "silent-failure": "4247"
       }
     },
     {
@@ -273,7 +273,7 @@
         "onCap": "failure-streak-escalated",
         "cite": "plateau:tools/drain-daemon/lib.mjs:435-440,475-476"
       },
-      "notes": "Detected only on exit 3 WITHOUT a carried reason (a bare process.exit(3) after the full report, never a fail('gh-error',...) call) — an exit 3 that DOES carry reason:'gh-error' (a transient gh error) takes the ordinary generic backoff instead and is never treated as this incident (plateau:tools/drain-daemon/lib.mjs:421-434). 'Polling cannot clear it' per the daemon's own README — this is explicitly an operator-only fix (WE #2318). WE x5h527v: a duplicate-NNN failure folds into the SAME consecutiveFailures counter as any other failed pass (decideFailureEscalation makes no special case for it), so the SAME 6-failure cap and the SAME shared failure-streak-escalated notice cover this incident too."
+      "notes": "Detected only on exit 3 WITHOUT a carried reason (a bare process.exit(3) after the full report, never a fail('gh-error',...) call) — an exit 3 that DOES carry reason:'gh-error' (a transient gh error) takes the ordinary generic backoff instead and is never treated as this incident (plateau:tools/drain-daemon/lib.mjs:421-434). 'Polling cannot clear it' per the daemon's own README — this is explicitly an operator-only fix (WE #2318). WE 4222: a duplicate-NNN failure folds into the SAME consecutiveFailures counter as any other failed pass (decideFailureEscalation makes no special case for it), so the SAME 6-failure cap and the SAME shared failure-streak-escalated notice cover this incident too."
     },
     {
       "id": "lease-wait-escalated",
@@ -288,7 +288,7 @@
         "how": "daemon.log line + desktop notification + state-file leaseWaitEscalated, once per holder",
         "cite": "plateau:tools/drain-daemon/lib.mjs:337-340"
       },
-      "notes": "The daemon still never contends — it keeps waiting out the SAME holder exactly as lease-arbitration always did (WE x5h527v only adds the notice, decideLeaseWaitEscalation). Loops back to lease-arbitration: the next tick re-arbitrates (still waiting, or the holder released/expired and this daemon acquires)."
+      "notes": "The daemon still never contends — it keeps waiting out the SAME holder exactly as lease-arbitration always did (WE 4222 only adds the notice, decideLeaseWaitEscalation). Loops back to lease-arbitration: the next tick re-arbitrates (still waiting, or the holder released/expired and this daemon acquires)."
     },
     {
       "id": "failure-streak-escalated",
@@ -303,7 +303,7 @@
         "how": "daemon.log line + desktop notification + state-file failureStreakEscalated, once per streak",
         "cite": "plateau:tools/drain-daemon/lib.mjs:475-476"
       },
-      "notes": "Reached from pass-running's ordinary exponential-backoff failures AND from duplicate-nnn-parked's exit-3 park — decideFailureEscalation folds both into the SAME consecutiveFailures counter (WE x5h527v), so one cap covers both causes. Loops back to pass-running: the drain keeps retrying at the same backoff ceiling (a drain must keep trying — the cap's exit is 'a person is told', not 'stop')."
+      "notes": "Reached from pass-running's ordinary exponential-backoff failures AND from duplicate-nnn-parked's exit-3 park — decideFailureEscalation folds both into the SAME consecutiveFailures counter (WE 4222), so one cap covers both causes. Loops back to pass-running: the drain keeps retrying at the same backoff ceiling (a drain must keep trying — the cap's exit is 'a person is told', not 'stop')."
     }
   ],
   "transitions": [
@@ -592,7 +592,7 @@
       "provides": [],
       "notes": "This assumption is never actually confirmed here (or anywhere else in this flow) — GitHub's rollup is trusted as-is whatever produced it. accepted-unchecked-no-ci is what happens when the assumption is false (zero runs at all); ci-heal.flow.json's base-retargeted state names the most common concrete cause.",
       "ack": {
-        "unprovided-assumption": "xi4od2p"
+        "unprovided-assumption": "4239"
       }
     },
     {

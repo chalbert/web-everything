@@ -114,8 +114,8 @@
       "escalation": null,
       "notes": "retargetStackedPrs (scripts/lib/pr-merge-gate.mjs:218) runs `gh pr edit --base <default>` the moment a PR's stacked base merges (scripts/merge-ai-prs.mjs:4888-4898), so the branch isn't deleted out from under it — but a base retarget is NOT a new commit event, so GitHub never enqueues a fresh CI run for it. Nothing anywhere re-checks that the PR's statusCheckRollup was ever computed against `main` at all; the PR just carries forward whatever check state it had before. KEY QUESTION (b) answered: no step anywhere provides `ci:required checks ran on head` on this path (see the assumes on pr-check-state-read's downstream consumers) — this is a genuine, unacknowledged gap, not merely a slow path.",
       "ack": {
-        "no-owner": "xi4od2p",
-        "unbounded-wait": "xi4od2p"
+        "no-owner": "4239",
+        "unbounded-wait": "4239"
       }
     },
     {
@@ -166,7 +166,7 @@
       "escalation": null,
       "notes": "KEY QUESTION (a), part 1: this state answers 'who performs the owed rerun' honestly — scripts/conveyor/reconcile-core.mjs:926-931 only REFUSES ('owed-ci-rerun') and names the file that should act; the actual mechanical rebase is scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery, and the ONLY thing that ever calls it with apply:true in production is reconcile-fix-dispatch-daemon.mjs (confirmed live via its own installed plist) — its own daemon-manifest.mjs entry (skills-src/conveyor/daemon-manifest.mjs:161) has NO launchd job. If main stays red indefinitely, this refusal re-fires every ~120s tick forever with no cap on how long — an honest unbounded wait, by the mechanism's own design (rebasing against a still-broken main proves nothing), but unbounded all the same.",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     },
     {
@@ -216,7 +216,7 @@
       },
       "retries": null,
       "escalation": null,
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:978-1029) still have no INTRINSIC time bound in the sense of ever killing the session — this NEVER kills or reaps it — but a 'live-process' verdict past LIVE_SESSION_OVERRUN_MS (90 minutes, default; overridable via planReconcile's own `liveSessionOverrunMs` option, no env read) now ALSO gets a surfaced `kind:'session-overrun'` note (reconcile-core.mjs:1023-1029), mirroring 'awaiting-permission''s own long-standing 'refuse AND surface' treatment. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) still tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all — so this note is, for now, the only mechanical signal a hung or silently-exited ci-heal session produces.",
+      "notes": "4227 (epic #4075/#3383) — FIXED. assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:978-1029) still have no INTRINSIC time bound in the sense of ever killing the session — this NEVER kills or reaps it — but a 'live-process' verdict past LIVE_SESSION_OVERRUN_MS (90 minutes, default; overridable via planReconcile's own `liveSessionOverrunMs` option, no env read) now ALSO gets a surfaced `kind:'session-overrun'` note (reconcile-core.mjs:1023-1029), mirroring 'awaiting-permission''s own long-standing 'refuse AND surface' treatment. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) still tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all — so this note is, for now, the only mechanical signal a hung or silently-exited ci-heal session produces.",
       "ack": {}
     },
     {
@@ -232,7 +232,7 @@
         "how": "session-overrun note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:1023-1029; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
-      "notes": "xilx617 (epic #4075/#3383) — STILL REFUSES, never kills: the underlying wait for the session to exit is the SAME ongoing one `ci-heal-session-running` already describes. This state is the one-tick note event, then monitoring resumes as before. The note's text states the BOUND (90 minutes), never the elapsed time, and its episode key is `kind + sessionId` (falling back to `pid`), so the SAME overrunning session posts exactly once."
+      "notes": "4227 (epic #4075/#3383) — STILL REFUSES, never kills: the underlying wait for the session to exit is the SAME ongoing one `ci-heal-session-running` already describes. This state is the one-tick note event, then monitoring resumes as before. The note's text states the BOUND (90 minutes), never the elapsed time, and its episode key is `kind + sessionId` (falling back to `pid`), so the SAME overrunning session posts exactly once."
     },
     {
       "id": "ci-heal-completed",
@@ -444,14 +444,14 @@
       "provides": [],
       "notes": "Neither this read nor GitHub's own API distinguishes a check run computed against the CURRENT base from one carried over from before a base retarget — this assumption is never actually confirmed on the base-retargeted path (nothing there provides the fact), and on the ordinary direct-push path it holds only because GitHub's own push-triggered CI happens to run against the current tree, never because anything here checks it.",
       "ack": {
-        "unprovided-assumption": "xi4od2p"
+        "unprovided-assumption": "4239"
       }
     },
     {
       "id": "claude-auth-gate",
       "state": "ci-heal-dispatch",
       "actor": "reconcile-fix-dispatch-daemon",
-      "does": "cheap `claude auth status` probe once per tick (card x5kagse); a broken login skips all fix/ci-heal dispatch this tick",
+      "does": "cheap `claude auth status` probe once per tick (card 4212); a broken login skips all fix/ci-heal dispatch this tick",
       "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:512",
       "canFail": true,
       "onFailure": "ci-heal-dispatch",
@@ -561,7 +561,7 @@
       ],
       "notes": "onFailure here models the brief's own instruction to stop and report 'ci-heal not-applicable (lane ref gone)' (fix-agent-ci-brief.md:74-75) — a stand-down comment, not an automatic repair; the PR falls back to being re-evaluated fresh next tick since the session is then no longer live.",
       "ack": {
-        "unprovided-assumption": "xrv69j6"
+        "unprovided-assumption": "4238"
       }
     }
   ]

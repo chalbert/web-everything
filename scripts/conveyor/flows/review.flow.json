@@ -137,7 +137,7 @@
       },
       "notes": "No timeout at all: the gate stays closed until either the health-watch episode closes or the direct transcript scan of the most recently dispatched session stops seeing the auth-failure text (scripts/conveyor/claude-auth-health.mjs:82-125). Every review this tick is deferred, not lost (deferredForAuth, skills-src/conveyor/review-daemon.mjs:261-268,303).",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     },
     {
@@ -210,7 +210,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the x00g3tt post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
+      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the 4195 post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
     },
     {
       "id": "changes-requested",
@@ -266,7 +266,7 @@
         "how": "round-cap-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:940-948,1422-1426"
       },
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:1103-1122): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1422-1426) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
+      "notes": "4227 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:1103-1122): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1422-1426) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
       "ack": {}
     },
     {
@@ -288,7 +288,7 @@
         "cite": "scripts/conveyor/reconcile-core.mjs:504,553-584; scripts/operations/completion-store.mjs#writeCompletion"
       },
       "escalation": null,
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. The 15-minute cool-off bounds ONE cycle; the completion STORE now persists a durable per-SESSION `infraStreak`/`infraStreakSince` ACROSS dispatch generations (a session name is reused every re-dispatch), so a persistently-unhealthy PR is counted rather than retrying silently forever. At INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — cool-off lengthens, a person is notified, and the retry continues (never stopped outright, since infra may still recover).",
+      "notes": "4227 (epic #4075/#3383) — FIXED. The 15-minute cool-off bounds ONE cycle; the completion STORE now persists a durable per-SESSION `infraStreak`/`infraStreakSince` ACROSS dispatch generations (a session name is reused every re-dispatch), so a persistently-unhealthy PR is counted rather than retrying silently forever. At INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — cool-off lengthens, a person is notified, and the retry continues (never stopped outright, since infra may still recover).",
       "ack": {}
     },
     {
@@ -309,7 +309,7 @@
         "how": "infra-retry-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:989-996; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
-      "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
+      "notes": "4227 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },
     {
       "id": "job-died-silently",
@@ -350,7 +350,7 @@
     },
     {
       "id": "red-team-advisory",
-      "label": "x00g3tt post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
+      "label": "4195 post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
       "terminal": true,
       "outcome": "success",
       "owner": "review-job",
