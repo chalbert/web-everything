@@ -31,6 +31,7 @@ describe('logDelegationTrial', () => {
       ...input, v: 1, subjectClass: 'work-agent', dispatchKind: 'session-delegation',
       rubricVersion: 'session-delegation.1', criteriaEvaluated: 0, score: null,
       deductions: [], handle: null, informative: false, rootCause: null, comparisonId: null,
+      changedFiles: null,
     });
     expect(readStore(io).records).toEqual([{ existing: true }, stored]);
   });
@@ -128,6 +129,39 @@ describe('logDelegationTrial', () => {
     const io = memIo();
     expect(() => logDelegationTrial({ ...baseRow(), comparisonId: 'leaked key AKIA1234567890ABCDEF' }, io)).toThrow('secret scrub');
     expect(readStore(io).records).toEqual([]);
+  });
+
+  it('accepts a changedFiles array, or null, and writes it to its own field (#4034 follow-up, card 4034b)', () => {
+    const storedFiles = logDelegationTrial({ ...baseRow(), changedFiles: ['scripts/a.mjs', 'scripts/b.mjs'] }, memIo());
+    expect(storedFiles.changedFiles).toEqual(['scripts/a.mjs', 'scripts/b.mjs']);
+
+    const storedNull = logDelegationTrial({ ...baseRow(), changedFiles: null }, memIo());
+    expect(storedNull.changedFiles).toBeNull();
+
+    const storedOmitted = logDelegationTrial(baseRow(), memIo());
+    expect(Object.hasOwn(storedOmitted, 'changedFiles')).toBe(true);
+    expect(storedOmitted.changedFiles).toBeNull();
+
+    const storedEmpty = logDelegationTrial({ ...baseRow(), changedFiles: [] }, memIo());
+    expect(storedEmpty.changedFiles).toEqual([]);
+  });
+
+  it('rejects a changedFiles value that is not an array of non-empty strings or null, by name, without writing', () => {
+    for (const changedFiles of ['scripts/a.mjs', 123, false, [1, 2], ['ok', ''], ['ok', '  ']]) {
+      const io = memIo();
+      expect(() => logDelegationTrial({ ...baseRow(), changedFiles }, io)).toThrow('changedFiles');
+      expect(readStore(io).records).toEqual([]);
+    }
+  });
+
+  it('CLI: --changed-files=a,b,c splits into an array, trimming entries', () => {
+    const io = memIo();
+    const code = main([
+      '--provider=codex', '--model=gpt-6-astra', '--task=x', '--task-type=bugfix',
+      '--outcome=landed', '--verified-by=claude-subagent', '--changed-files=a.mjs, b.mjs,c.mjs',
+    ], io);
+    expect(code).toBe(0);
+    expect(readStore(io).records[0].changedFiles).toEqual(['a.mjs', 'b.mjs', 'c.mjs']);
   });
 
   it.each(['taskType', 'outcome', 'verifiedBy'])('rejects an invalid %s before writing', (field) => {

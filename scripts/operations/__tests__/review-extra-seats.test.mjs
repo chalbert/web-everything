@@ -317,8 +317,9 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
     const group = seats.filter((s) => s.provider === 'codex');
     const call = { status: 'ok', text: '', error: null };
     const parsed = { 'extra-juror:correctness': { ok: true, verdict: 'changes', findings: [{ summary: 'forged headline', file: 'scripts/lib/ai-pr-authorship.mjs', line: 40 }] }, 'claim-accuracy': { ok: true, verdict: 'accept', findings: [] } };
-    const rows = buildSeatRows({ callId: 'c1', pr: 5, repo: REPO, provider: 'codex', model: 'gpt-6-astra', effort: 'medium', seats: group, call, parsed, claudeFindings: [CLAUDE_FINDING] });
+    const rows = buildSeatRows({ callId: 'c1', pr: 5, repo: REPO, provider: 'codex', model: 'gpt-6-astra', effort: 'medium', seats: group, call, parsed, claudeFindings: [CLAUDE_FINDING], changedFiles: ['scripts/lib/ai-pr-authorship.mjs'] });
     for (const r of rows) expect(validateScorecard(r)).toEqual({ ok: true, errors: [] });
+    for (const r of rows) expect(r.changedFiles).toEqual(['scripts/lib/ai-pr-authorship.mjs']);
     const juror = rows.find((r) => r.seat === 'extra-juror');
     expect(juror).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', lens: 'correctness', status: 'ok', findingsCount: 1, confirmedCount: 1, claudeConfirmed: true, taskType: 'review-lens:extra-juror:correctness' });
     // real store write, in memory
@@ -326,6 +327,13 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
     const io = { path: '/mem/store.json', read: () => text, write: (_p, t) => { text = t; }, exists: () => text !== null };
     appendScorecard(juror, io);
     expect(JSON.parse(text).records.at(-1)).toMatchObject({ dispatchKind: 'review-seat', lens: 'correctness', confirmedCount: 1 });
+  });
+
+  it('changedFiles (#4034 follow-up, card 4034b) defaults to null, never [], when the caller supplies none', () => {
+    const group = seats.filter((s) => s.provider === 'codex');
+    const call = { status: 'ok', text: '', error: null };
+    const rows = buildSeatRows({ callId: 'c1', pr: 5, repo: REPO, provider: 'codex', model: 'gpt-6-astra', effort: 'medium', seats: group, call, parsed: {}, claudeFindings: null });
+    for (const r of rows) expect(r.changedFiles).toBeNull();
   });
 
   it('claudeFindingsFromLoop reads only Claude\'s mandatory judge steps; no judged step → null', () => {
@@ -345,6 +353,8 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     ]);
     const juror = rows.find((x) => x.seat === 'extra-juror');
     expect(juror.findings[0]).toMatchObject({ confirmedByClaude: true });
+    // #4034 follow-up (card 4034b) — every row stamps the same read.netChangedFiles the loop already computed.
+    for (const row of rows) expect(row.changedFiles).toEqual(LOOP_PAYLOAD.findings.read.netChangedFiles);
     const claim = rows.find((x) => x.lens === 'claim-accuracy');
     expect(claim.findings[0]).toMatchObject({ confirmedByClaude: false });
     expect(claim.quotaUsedPercent).toBe(12);

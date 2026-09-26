@@ -77,6 +77,17 @@ export function logDelegationTrial(row, io = {}) {
   if (row.retroactive !== undefined && typeof row.retroactive !== 'boolean') {
     throw new Error('log-delegation-trial: retroactive must be a boolean');
   }
+  // `changedFiles` (#4034 follow-up, backlog card 4034b) — the PR's changed files, NET versus its base, the
+  // same evidence `we:scripts/lib/critical-work.mjs#isCriticalMiss` reads (as caller-supplied `evidence.
+  // filesTouched`) so a `reworked`/`rejected` row is never forced to fail closed as "unknown scope" (#2752's
+  // fail-closed default) purely because nobody stamped which files the reviewed PR actually touched. `null`
+  // means "not known at write time" (e.g. the row carries no `pr`, or the PR lookup failed) — never coerced to
+  // `[]`, which would read as "a PR that touched nothing". A caller that supplies it stamps a real, closed list.
+  if (row.changedFiles !== undefined && row.changedFiles !== null) {
+    if (!Array.isArray(row.changedFiles) || row.changedFiles.some((f) => !isNonEmptyString(f))) {
+      throw new Error('log-delegation-trial: changedFiles must be an array of non-empty strings, or null');
+    }
+  }
   // `informative` is a recorded fact, never inferred (platform-decisions.md#delegation-trial-record-graduation,
   // rule 4; #3888): a row that omits it is written with an explicit `false` below, never left absent, so no
   // reader of the store has to guess. A non-boolean value is refused by name rather than silently coerced.
@@ -106,6 +117,7 @@ export function logDelegationTrial(row, io = {}) {
       informative: row.informative ?? false,
       rootCause: row.rootCause ?? null,
       comparisonId: row.comparisonId ?? null,
+      changedFiles: row.changedFiles ?? null,
       ...(row.scoredAt ? { scoredAt: row.scoredAt } : {}),
     }, io);
   } catch {
@@ -120,7 +132,8 @@ const usage = `Usage: node scripts/conveyor/log-delegation-trial.mjs
   --outcome=landed|rejected|reworked
   --verified-by=claude-subagent|independent-claude|other
   [--findings=TEXT] [--item=NUMBER] [--pr=NUMBER] [--scored-at=TIMESTAMP]
-  [--informative=true|false] [--root-cause=TEXT] [--comparison-id=TEXT] [--retroactive] [--help]
+  [--informative=true|false] [--root-cause=TEXT] [--comparison-id=TEXT] [--retroactive]
+  [--changed-files=path/a.mjs,path/b.mjs] [--help]
 
 Quote values containing spaces. --retroactive marks reconstructed historical trials.
 --informative marks whether independent review found a real problem that was then fixed
@@ -128,7 +141,10 @@ Quote values containing spaces. --retroactive marks reconstructed historical tri
 --root-cause records, in its OWN field (never derived from --findings), why a confirmed miss happened;
 required before any post-miss trial counts toward restoration (rule 5; #3889). Omitted, it is null.
 --comparison-id links this row to its concurrent-baseline partner row (#3690 Fork 2; #3783) — normally
-stamped by scripts/conveyor/concurrent-baseline-comparison.mjs, not typed by hand. Omitted, it is null.`;
+stamped by scripts/conveyor/concurrent-baseline-comparison.mjs, not typed by hand. Omitted, it is null.
+--changed-files records the PR's changed files, NET versus its base (#4034 follow-up) — a comma-separated
+list, so a reworked/rejected row carries the scope evidence scripts/lib/critical-work.mjs needs to judge
+it non-critical instead of failing closed. Omitted, it is null.`;
 
 /** CLI seam accepts the store's injectable IO so tests never write the real store. */
 export function main(argv, io = {}) {
@@ -140,7 +156,7 @@ export function main(argv, io = {}) {
     provider: 'provider', model: 'model', task: 'taskDescription', 'task-type': 'taskType',
     outcome: 'outcome', 'verified-by': 'verifiedBy', findings: 'findings', item: 'item',
     pr: 'pr', 'scored-at': 'scoredAt', informative: 'informative', 'root-cause': 'rootCause',
-    'comparison-id': 'comparisonId',
+    'comparison-id': 'comparisonId', 'changed-files': 'changedFiles',
   };
   try {
     const row = {};
@@ -164,6 +180,8 @@ export function main(argv, io = {}) {
           throw new Error('--informative must be true or false');
         }
         row[fields[flag]] = value === 'true';
+      } else if (flag === 'changed-files') {
+        row[fields[flag]] = value.split(',').map((s) => s.trim()).filter(Boolean);
       } else {
         row[fields[flag]] = value;
       }

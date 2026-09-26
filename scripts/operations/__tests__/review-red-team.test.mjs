@@ -145,6 +145,8 @@ describe('x00g3tt — evidence, Claude re-check and confirmed misses', () => {
       [RED_TEAM_MISS_DISPATCH_KIND, 'builder', 'claude', 'claude-opus-5.5'],
     ]);
     expect(misses[0]).toMatchObject({ claudeSeat: 'judge', taskType: 'red-team-miss:review-lens:correctness', outcome: null });
+    // #4034 follow-up (card 4034b) — every row, seat AND both misses, stamps the loop's own net changed files.
+    for (const r of rows) expect(r.changedFiles).toEqual(['x.mjs']);
   });
 
   it('the accepting-seat model matches review-pr\'s mandatory seats', () => {
@@ -199,6 +201,9 @@ describe('x00g3tt — evidence, Claude re-check and confirmed misses', () => {
     const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept', body), env: {} }, io);
     expect(r.delegationTrial).toBe('logged');
     expect(trials[0]).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', outcome: 'reworked', informative: true, verifiedBy: 'independent-claude', pr: 5 });
+    // #4034 follow-up (card 4034b) — the builder's REWORKED delegation trial is exactly the row #4034's
+    // critical-work rule reads for a miss; it must carry scope, not just the evidence rows.
+    expect(trials[0].changedFiles).toEqual(['x.mjs']);
     expect(rows.at(-1)).toMatchObject({ missRole: 'builder', provider: 'codex', model: 'gpt-6-astra', taskType: 'red-team-miss:builder:bugfix' });
     const again = fakeIo({ readRecords: () => [{ dispatchKind: 'session-delegation', pr: 5, outcome: 'reworked' }] });
     expect((await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept', body), env: {} }, again.io)).delegationTrial).toBe('already-logged');
@@ -220,6 +225,27 @@ describe('x00g3tt — evidence, Claude re-check and confirmed misses', () => {
     const rows = buildMissRows({ pr: 5, repo: REPO, rev: REV, runCallId: 'c', redTeamProvider: 'codex', redTeamModel: 'm', builder: { provider: 'claude', model: 'claude-opus-5.5', taskType: null, source: 'co-authored-by' }, confirmed: [BREAK] });
     for (const r of rows) expect(validateScorecard(r).ok).toBe(true);
     expect(buildMissRows({ pr: 5, repo: REPO, rev: REV, confirmed: [], builder: {} })).toEqual([]);
+  });
+
+  it('miss rows stamp changedFiles when the caller supplies it, and null (never []) when it does not (#4034 follow-up)', () => {
+    const withFiles = buildMissRows({ pr: 5, repo: REPO, rev: REV, runCallId: 'c', redTeamProvider: 'codex', redTeamModel: 'm', builder: { provider: 'claude', model: 'claude-opus-5.5', taskType: null, source: 'co-authored-by' }, confirmed: [BREAK], changedFiles: ['x.mjs'] });
+    for (const r of withFiles) expect(r.changedFiles).toEqual(['x.mjs']);
+    const withoutFiles = buildMissRows({ pr: 5, repo: REPO, rev: REV, runCallId: 'c', redTeamProvider: 'codex', redTeamModel: 'm', builder: { provider: 'claude', model: 'claude-opus-5.5', taskType: null, source: 'co-authored-by' }, confirmed: [BREAK] });
+    for (const r of withoutFiles) expect(r.changedFiles).toBeNull();
+  });
+
+  it('resuming a red-team pass (a prior clean row already exists) carries the prior row\'s changedFiles forward, not a fresh diff', async () => {
+    const prior = {
+      dispatchKind: REVIEW_SEAT_DISPATCH_KIND, seat: RED_TEAM_SEAT.seat, status: 'ok',
+      provider: 'gemini', model: RED_TEAM_MODELS.gemini.model, callId: 'call-1', rev: REV,
+      pr: 5, findings: [{ ...BREAK, confirmedByRecheck: true }], builder: { provider: 'claude', model: 'claude-opus-5.5', source: 'co-authored-by' },
+      recheckStatus: 'ok', foldedVerdict: 'changes', changedFiles: ['prior/scope.mjs'],
+    };
+    const { io, rows } = fakeIo({ readRecords: () => [prior] });
+    await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {} }, io);
+    const misses = rows.filter((r) => r.dispatchKind === RED_TEAM_MISS_DISPATCH_KIND);
+    expect(misses.length).toBeGreaterThan(0);
+    for (const m of misses) expect(m.changedFiles).toEqual(['prior/scope.mjs']);
   });
 });
 
