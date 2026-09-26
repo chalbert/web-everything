@@ -308,7 +308,9 @@ const SESSION_CACHE = new Map(); // sessionId → { mtimeMs, digest }
 // `node `, then a quote/space-free path ending in backlog.mjs. Anchoring matters: it must NOT match a
 // command that merely MENTIONS the string — e.g. `grep 'backlog.mjs claim 1854'` (backlog.mjs sits inside
 // a quote, not at a command boundary) would otherwise be miscounted as a claim and leak a resolved item.
-const BACKLOG_VERB_RE = /(?:^|[\n;&|])\s*(?:node\s+)?[^\s'"]*backlog\.mjs\s+(claim|resolve|release)\s+(\d+)/g;
+// EXPORTED (backlog #3932) — `we:scripts/operations/agent-activity-io.mjs`'s claim-replay resolver reuses
+// this exact pattern rather than re-deriving it, so the two claim-replay readers can never drift apart.
+export const BACKLOG_VERB_RE = /(?:^|[\n;&|])\s*(?:node\s+)?[^\s'"]*backlog\.mjs\s+(claim|resolve|release)\s+(\d+)/g;
 
 function digestSession(jsonlPath) {
   let text;

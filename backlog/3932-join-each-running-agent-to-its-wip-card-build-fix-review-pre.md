@@ -3,8 +3,9 @@ bornAs: xa59gb9
 kind: story
 size: 3
 parent: "3931"
-status: open
+status: active
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-26"
 tags: []
 ---
 
