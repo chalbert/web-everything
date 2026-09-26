@@ -65,6 +65,53 @@
  * THE CADENCE. Each constellation repo runs this as its own resident `pass-daemon` watcher
  * (`we:skills-src/conveyor/daemon-manifest.mjs`, `parked-pr-conflict-watch-<repo>`); the headless runner's
  * `makeCliMechanicalPasses` also calls it when that runner is up.
+ *
+ * THE THIRD, PREVIOUSLY-INVISIBLE POPULATION — UNOWNED (#xs81oxb, parent #4075/#3383). Live-caught,
+ * `chalbert/web-everything#2709` (`fix(#4138)`, stacked on #2708 which merged at 02:13Z 2026-09-26): a DIRTY PR
+ * carrying NO review-workflow label at all — not `review:human`/`pending`/`changes` (the PARKED population above)
+ * and not `review:accepted`/`ready-to-merge` (the QUEUED population above) — matched neither. `classifyPr`
+ * (`we:progress-board.mjs`) still reads it as `conflicted`, so `we:scripts/conveyor/reconcile-core.mjs` keeps
+ * refusing it `owed-elsewhere` ("the branch needs a rebase") every tick, forever — the fix-dispatch daemon's own
+ * log for this exact PR. Nothing else in this repo will ever pick it up: the drain only lands a QUEUED PR (this
+ * one carries neither go-ahead label, so it is never even considered for a landing attempt, let alone the
+ * rebase-drop the drain tries as part of landing); `we:scripts/conveyor/ci-red-recovery-watch.mjs` /
+ * `we:scripts/conveyor/main-red-recovery.mjs` only act on a FAILING required check (this PR is not `ci-red`);
+ * and `reconcile-core.mjs`'s own STACKED-BASE CONFLICT branch (`#3383`) only fires when `baseRefName !==
+ * defaultBranch` — GitHub already retargeted this PR's base to `main` once its stacked base (#2708) merged and
+ * its branch was deleted, so that branch never even sees it either.
+ *
+ * {@link isUnownedConflictTarget} names this population precisely: `mergeable === 'CONFLICTING'`, a base equal
+ * to `main` (or unknown — a stacked base is the OTHER branch's job, unchanged), and NEITHER
+ * {@link isParkedConflictTarget} NOR {@link isQueuedConflictTarget} already claims it. UNLIKE the queued
+ * population, it gets NO grace period — {@link QUEUED_CONFLICT_GRACE_MS} exists to give the drain first try at
+ * a conflict it might rebase-drop while LANDING a queued PR, and this population is never queued, so there is no
+ * drain turn to wait out. On the very sweep that detects it, this file ATTEMPTS THE MECHANICAL FIX ITSELF
+ * ({@link defaultAttemptUnownedConflictRebase}) before ever bouncing anyone: it reuses the SAME proven,
+ * no-checkout plumbing the drain and `ci-red-recovery-watch.mjs` already trust
+ * (`we:scripts/lib/rebase-drop-manifest.mjs#rebaseDropManifest`) — DELIBERATELY NEVER the GitHub `PUT
+ * repos/{repo}/pulls/{n}/update-branch` REST endpoint, which `main-red-recovery.mjs`'s own file header already
+ * recorded (2026-09-25) reintroduces the exact shared `.lane-manifest.json` collision this plumbing exists to
+ * drop — a lesson this repo already paid for once, not one to re-learn on a third population. When the conflict
+ * turns out to be the shared-manifest shape (or the tip was merely behind), the rebuilt tip is pushed for real
+ * and nothing further happens — no label, no bounce, no fix agent spent on a conflict a two-line rebuild already
+ * cleared. Only when `rebaseDropManifest` itself reports a REAL (non-manifest) conflict does this population
+ * fall through into the SAME bounce+fix-dispatch pipeline the parked path already runs
+ * ({@link defaultPostConflictFinding} — `review:changes` + `CONFLICT_LABEL`, "reason: conflict" on the thread),
+ * which `reconcile-core.mjs`'s own `isConflictBounce` carve-out already caps on `CONFLICT_FIX_ROUND_CAP` and
+ * dispatches a real fix agent for, exactly like an ordinary reviewer-flagged conflict — so this never refuses
+ * forever, it just stops being silent about who owes the rebase.
+ *
+ * WHY HERE, NOT A NEW WATCHER OR A CHANGE TO `reconcile-core.mjs`'s ROUTING TABLE. This file already owns every
+ * piece the fix needs — the git-level manifest-vs-real disposition check ({@link defaultComputeConflictDisposition}
+ * already exists for the queued population), the label lifecycle, and the bounce-to-fix pipeline — so extending
+ * it is additive, not a new parallel mechanism. `reconcile-core.mjs`'s `owed-elsewhere` refusal for a `conflicted`
+ * PR remains factually TRUE even after this fix (a rebase genuinely is owed elsewhere) — the change is that
+ * "elsewhere" now has an owner, exactly the same shape `owed-ci-rerun` already has against
+ * `ci-red-recovery-watch.mjs`: that refusal never needed `reconcile-core.mjs` itself to change either, only a
+ * watcher that makes the thing it names actually happen. No new per-head-sha counter was added for the
+ * escalation cap either: `reconcile-core.mjs`'s existing liveness check already refuses a second fix dispatch
+ * while one is live on this exact PR, and `CONFLICT_FIX_ROUND_CAP` already bounds repeated real-conflict rounds
+ * — inventing a parallel per-sha marker here would duplicate a cap this population already inherits for free.
  */
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,7 +131,7 @@ import {
 } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
-import { parseMergeTree, manifestConflictDisposition } from '../lib/rebase-drop-manifest.mjs';
+import { parseMergeTree, manifestConflictDisposition, rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
 // #4118 (c) — the SAME name-based, gh-agents-truth liveness check `review-status-tag.mjs` already uses, and for
 // the identical reason its own docblock states: staying independent of `reconcile-core.mjs#assessLiveness`'s
 // much heavier transitive import graph (`rearm-review.mjs` → `review-set-label.mjs` → `merge-ai-prs.mjs`, which
@@ -156,6 +203,26 @@ export function isQueuedConflictTarget(pr) {
   if (String(pr?.mergeable || '').toUpperCase() !== 'CONFLICTING') return false;
   if (hasUnclearedReviewLabel(pr?.labels, { allowPending: false })) return false; // the parked path owns it
   return hasReviewLabel(pr?.labels, REVIEW_LABELS.accepted) || hasReviewLabel(pr?.labels, 'ready-to-merge');
+}
+
+/**
+ * Is this an UNOWNED conflicting PR — `mergeable === 'CONFLICTING'`, based on `main` (or an unknown base; a
+ * STACKED base is `reconcile-core.mjs#3383`'s STACKED-BASE CONFLICT branch's job, unchanged), and claimed by
+ * NEITHER {@link isParkedConflictTarget} (no uncleared `review:human`/`pending`/`changes` hold) NOR
+ * {@link isQueuedConflictTarget} (no `review:accepted`/`ready-to-merge` go-ahead either)? PURE. #xs81oxb
+ * (parent #4075/#3383) — live-caught on `chalbert/web-everything#2709`: a formerly-stacked PR whose base merged
+ * and was retargeted to `main`, left carrying only an unrelated `checking` label. See this file's own header,
+ * "THE THIRD, PREVIOUSLY-INVISIBLE POPULATION", for the full incident and why this population gets no grace
+ * period (unlike {@link isQueuedConflictTarget}'s own `QUEUED_CONFLICT_GRACE_MS}` wait).
+ * @param {{mergeable?:string, labels?:Array, baseRefName?:string|null}} pr
+ * @returns {boolean}
+ */
+export function isUnownedConflictTarget(pr) {
+  if (String(pr?.mergeable || '').toUpperCase() !== 'CONFLICTING') return false;
+  const baseRefName = pr?.baseRefName ?? null;
+  if (baseRefName && baseRefName !== 'main') return false; // stacked base — reconcile-core.mjs#3383 owns it
+  if (isParkedConflictTarget(pr) || isQueuedConflictTarget(pr)) return false; // already owned elsewhere
+  return true;
 }
 
 /**
@@ -250,6 +317,23 @@ export function defaultComputeConflictDisposition({ pr, cwd = REPO_ROOT, exec = 
   const parsed = parseMergeTree(stdout, exitCode);
   if (!parsed.tree) return null;
   return manifestConflictDisposition(parsed);
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultAttemptUnownedConflictRebase — THE REAL MECHANICAL FIX
+ * for {@link isUnownedConflictTarget} (#xs81oxb). Reuses the SAME proven, no-checkout plumbing the drain and
+ * `we:scripts/conveyor/ci-red-recovery-watch.mjs` already trust
+ * (`we:scripts/lib/rebase-drop-manifest.mjs#rebaseDropManifest`) — deliberately NEVER the GitHub `PUT
+ * repos/{repo}/pulls/{n}/update-branch` REST endpoint, which `we:scripts/conveyor/main-red-recovery.mjs`'s own
+ * file header already recorded (2026-09-25) reintroduces the exact shared `.lane-manifest.json` collision this
+ * plumbing exists to drop. Injectable (the `run` a caller's test double supplies flows straight through to
+ * `rebaseDropManifest`, which is itself already unit-tested against a fake runner — no real `git`/`gh` call is
+ * ever made from a test that injects one here).
+ * @param {{pr:{headRefName?:string}, cwd?:string, run?:Function}} o
+ * @returns {{action:('rebased'|'current'|'skip'|'error'), [key:string]:*}} rebaseDropManifest's own result shape
+ */
+export function defaultAttemptUnownedConflictRebase({ pr, cwd = REPO_ROOT, run } = {}) {
+  return rebaseDropManifest({ laneRef: pr?.headRefName, base: 'origin/main', cwd, ...(run ? { run } : {}) });
 }
 
 /**
@@ -1183,6 +1267,7 @@ export function watchParkedPrConflicts({
   labelAgeMs = defaultConflictLabelAgeMs,
   labelRemovedAtMs = defaultConflictLabelRemovedAtMs,
   computeConflictDisposition = defaultComputeConflictDisposition,
+  attemptMechanicalRebase = defaultAttemptUnownedConflictRebase,
   listAgents = defaultListAgents,
   now = Date.now(),
   queueScope = {},
@@ -1205,7 +1290,11 @@ export function watchParkedPrConflicts({
   for (const pr of Array.isArray(prs) ? prs : []) {
     const parked = isParkedConflictTarget(pr);
     const queued = !parked && isQueuedConflictTarget(pr);
-    const isConflicting = parked || queued;
+    // #xs81oxb — the THIRD population: neither parked nor queued (no review-workflow label at all). Folded into
+    // `isConflicting` so it shares the SAME label lifecycle (apply on detect, clear on resolve) as the other two;
+    // its own routing (mechanical rebase first, never a grace wait) is handled inside the `plan.add` branch below.
+    const unowned = !parked && !queued && isUnownedConflictTarget(pr);
+    const isConflicting = parked || queued || unowned;
     const plan = planConflictLabelChange({
       isConflicting, isResolved: String(pr?.mergeable || '').toUpperCase() === 'MERGEABLE', currentLabels: pr?.labels,
     });
@@ -1409,6 +1498,32 @@ export function watchParkedPrConflicts({
           entry.routedTo = 'deferred-to-reconcile (stacked base — see reconcile-core.mjs#3383, review labels untouched)';
           results.push(entry);
           continue;
+        }
+
+        // #xs81oxb — UNOWNED gets NO grace period (unlike `queued`, just below): nothing else will ever attempt
+        // this PR's rebase, so the mechanical fix runs on the SAME sweep that first detects it, before any label
+        // or bounce. `computeConflictDisposition` is the SAME read-only git-level check the queued-conflict grace
+        // path above already trusts; only on a genuinely mechanical shape (`clean`/`manifest-only`) is the REAL
+        // rebuild-and-push attempted. A `null` disposition (unreadable — no headRefName, an unresolvable ref, a
+        // git error) falls through to the ordinary bounce below unchanged, the safe direction: never invent a
+        // mechanical success from a probe that could not actually tell.
+        if (unowned) {
+          const disposition = computeConflictDisposition({ pr, repo: resolvedRepo });
+          entry.conflictDisposition = disposition;
+          if (disposition === 'clean' || disposition === 'manifest-only') {
+            const result = attemptMechanicalRebase({ pr, repo: resolvedRepo });
+            entry.mechanicalRebase = { action: result?.action, reason: result?.reason ?? null };
+            if (result?.action === 'rebased' || result?.action === 'current') {
+              // Resolved mechanically — no label, no bounce, no fix agent spent on a conflict a rebuild already
+              // cleared. GitHub's own `mergeable` flips on the next read of the PR once the push is seen.
+              entry.routedTo = 'mechanical-rebase';
+              results.push(entry);
+              continue;
+            }
+            // `action === 'skip'` (a REAL, non-manifest conflict the read-only probe missed — e.g. `main` moved
+            // between the probe and the attempt) or `'error'` (a plumbing failure) — fall through to the
+            // ordinary bounce below, exactly as an already-real-conflict disposition would.
+          }
         }
 
         // #4118 — read the thread ONCE, up front, so both the alert-comment dedup and the dispatch/stand-down

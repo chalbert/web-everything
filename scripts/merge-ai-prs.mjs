@@ -2127,7 +2127,10 @@ export function buildDrainReasonComment(kind, reasonText, auditLine) {
         // #2412 Gap 2 — the fifth kind: an unconditional before-land trace (head SHA + caller/session),
         // posted for every landing PR regardless of manifest or review-coverage state.
         : kind === MERGE_TRACE_KIND ? '📌 **Merge trace**'
-          : '· **Skipped by the drain**';
+          // #4138 — the sixth kind: warns a stacked PR, BEFORE the merge, that it may be closed momentarily
+          // by GitHub's own base-branch-delete cascade (a retarget attempt already failed for it).
+          : kind === STACKED_BASE_CLOSE_KIND ? '⚠️ **This PR may be closed by GitHub in a moment**'
+            : '· **Skipped by the drain**';
   const audit = auditLine ? `\n\n${auditLine}` : '';
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}${audit}`;
 }
@@ -2291,6 +2294,28 @@ export function buildMergeTraceReason({ headSha = null, caller = 'drain', sessio
   const who = typeof caller === 'string' && caller ? caller : 'unknown';
   const session = typeof sessionId === 'string' && sessionId ? sessionId : 'unknown';
   return `landed head \`${sha}\` — merged by ${who} (session ${session})`;
+}
+
+/**
+ * #4138 — the `drainReasonMarker` kind for a PR `retargetStackedPrs` (`we:scripts/lib/pr-merge-gate.mjs`,
+ * #3383) could NOT retarget before its base branch is deleted by the merge that is about to happen. GitHub's
+ * own base-branch-delete cascade closes such a PR moments later with NO comment of its own (confirmed live:
+ * chalbert/web-everything#2578, closed 2026-09-24 21:44:43Z by `web-everything[bot]`, zero comment on either
+ * of its two closes) — a silent close is exactly the #4138 gap. `retargetStackedPrs` already retargets the
+ * common case before the delete; this covers its residual best-effort failure (the listing/edit itself
+ * errored), where the close is about to happen anyway and the PR would otherwise carry no explanation at all.
+ * Its own marker ⇒ its own dedupe bucket, independent of park/skip/land/review-coverage/merge-trace.
+ */
+export const STACKED_BASE_CLOSE_KIND = 'stacked-base-close';
+
+/**
+ * #4138 — the reason text for `STACKED_BASE_CLOSE_KIND`, posted on a stacked PR BEFORE the merge below
+ * deletes its base branch out from under it. Pure.
+ * @param {{headRef?:string}} o
+ * @returns {string}
+ */
+export function buildStackedBaseCloseReason({ headRef = 'its base branch' } = {}) {
+  return `this PR's base branch (\`${headRef}\`) is about to be deleted by another PR landing, and an attempt to retarget this PR onto the default branch first did NOT succeed. GitHub will likely close this PR automatically as a result — that closure is NOT a merge/content decision about this PR. Once the delete has happened, GitHub permits neither a retarget nor a reopen on it (verified live recovering chalbert/web-everything#2578), so recovery is: re-target this PR's branch onto the default branch on a fresh PR, or ask an operator to run the #3383 recovery path (#3383/#4138).`;
 }
 
 /**
@@ -4871,7 +4896,15 @@ async function runCli() {
             const defBranch = defaultBranchOf(c.repo) || 'main';
             retargetStackedPrs({ repo: c.repo, headRef: c.headRef, defaultBranch: defBranch,
               onRetarget: (num) => { if (!AS_JSON) process.stderr.write(`  ↷ ${repoTag(c.repo)}${num} retargeted ${c.headRef}→${defBranch} before deleting the merged branch (#3383)\n`); },
-              onFailed: (num) => { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${num} could not be retargeted off ${c.headRef} before the merge — it may get closed by the branch delete (#3383)\n`); },
+              onFailed: (num) => {
+                if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(c.repo)}${num} could not be retargeted off ${c.headRef} before the merge — it may get closed by the branch delete (#3383)\n`);
+                // #4138 — a PR GitHub is about to close (via the base-branch-delete cascade) must ALWAYS carry
+                // a reason comment, posted BEFORE the close happens (never after — GitHub refuses both
+                // `pr edit --base` and reopen once it has actually closed, so "after" may be too late to even
+                // post against the right state). Best-effort like the retarget itself: a `gh pr comment` miss
+                // here must never block the merge that is about to run.
+                postDrainReasonComment(c.repo, num, STACKED_BASE_CLOSE_KIND, buildStackedBaseCloseReason({ headRef: c.headRef }), null);
+              },
             });
           }
           // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
