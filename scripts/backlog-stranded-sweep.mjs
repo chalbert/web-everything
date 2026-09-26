@@ -237,12 +237,119 @@ export function autoResolvableStrandings(cards = [], mainLog = []) {
 // #3916 — commit subjects reachable from `origin/main`, for `autoResolvableStrandings`'s ground-truth check.
 // Best-effort: no `git`/no network/detached-from-a-remote → `null`, and the caller degrades `--apply`/
 // `--dry-run` to "unavailable" rather than guessing off a possibly-stale local branch.
-function readMainLog(limit) {
+// EXPORTED (xvr2o8r) so `autoStrandedSweepPass` below — and the drain's own wiring — share this ONE read
+// rather than a second copy that could drift on the fetch/window behaviour.
+export function readMainLog(limit) {
   try { execFileSync('git', ['fetch', 'origin', 'main', '--quiet'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch { /* best-effort — a stale local origin/main still degrades safely below */ }
   try {
     const out = execFileSync('git', ['log', '--pretty=%s', ...(limit ? [`-n${limit}`] : []), 'origin/main'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
     return out.split('\n').filter(Boolean);
   } catch { return null; }
+}
+
+/** Read every `backlog/*.md` card off disk as `{stem, body}` — the one fs read both the CLI and the
+ * drain-wired auto-sweep share. Throws on an unreadable `backlog/` dir (caller decides how to degrade). */
+export function readBacklogCards(cwd = process.cwd()) {
+  const dir = join(cwd, 'backlog');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
+  return files.map((f) => {
+    try { return { stem: f.replace(/\.md$/, ''), body: readFileSync(join(dir, f), 'utf8') }; } catch { return null; }
+  }).filter(Boolean);
+}
+
+// xvr2o8r — the AUTO-WIRED default log-limit is a DELIBERATELY NARROW widening past the manual CLI's own 400
+// (above), not a jump to "wide enough to never miss anything". Live evidence while authoring this item is WHY:
+// running the strict check at --log-limit=2000 (a first attempt) surfaced not just the two live-stranded cards
+// this item exists to close (#3916 at origin/main position ~403, #4025 at ~438) but THREE FALSE POSITIVES
+// further back — #3634, #3881, #3751-adjacent commits whose trailing `(#NNNN)` cites a bigger PARENT
+// story/decision an unrelated follow-up commit happened to land against (e.g. "fix(auth): refresh the App
+// token per tick … (#3881)" — a partial follow-up on a story explicitly gated on a still-pending human step,
+// NOT its delivery). `commitSubjectDeliversItem` has no defense against this shape (unlike `isAnnotationPr`,
+// which only guards the general, report-only `sweepStrandings` signal) — the nearest such false positive at
+// authoring time sits at position ~660. 500 sits with real margin on BOTH sides: past #4025's ~438 (the
+// farther of the two live targets), short of the ~660 false-positive boundary. It is intentionally NOT pushed
+// further just to buy more drift-margin — that trade directly re-admits the false-positive class this
+// comment's own investigation exists to document. A stranding older than this window is exactly what
+// `we:scripts/backlog-stranded-sweep.mjs --apply --log-limit=<bigger>` (already shipped, #2661) is for: a
+// human-reviewed, supervised widening, not a silently-widened unattended default. Overridable via
+// `WE_STRANDED_SWEEP_LOG_LIMIT` for an operator who has weighed that tradeoff and wants a different bound
+// without a code change — including narrower, e.g. matching the CLI's own 400 exactly.
+export const AUTO_SWEEP_LOG_LIMIT = Number(process.env.WE_STRANDED_SWEEP_LOG_LIMIT) > 0
+  ? Number(process.env.WE_STRANDED_SWEEP_LOG_LIMIT)
+  : 500;
+
+/**
+ * xvr2o8r — THE ONE CALLABLE the drain (`we:scripts/merge-ai-prs.mjs`) uses to run the strict stranded-item
+ * auto-resolve as part of its own pass, and that this file's own CLI `main()` below now uses too (never a
+ * second copy of the read+resolve sequence). Strict proof only (`autoResolvableStrandings`) — the general,
+ * report-only `sweepStrandings` signal is deliberately NEVER reachable from here; anything short of a real
+ * commit-subject match to a card's own id stays report-only, exactly as `--apply` already promised.
+ *
+ * NEVER THROWS. Every failure mode — an unreadable `backlog/` dir, `git log` unavailable, an individual
+ * `resolveFn` call that errors — degrades to a reported field instead of propagating, because the drain's
+ * contract for this step is "log and continue", never "fail the pass" (mirrors #2899's resolve-on-land, which
+ * is already best-effort/non-fatal for the same reason).
+ *
+ * IDEMPOTENT BY CONSTRUCTION: `autoResolvableStrandings` (and `sweepStrandings` before it) already filters to
+ * `status: open`/`status: active` cards before considering them a candidate, so a card this pass just resolved
+ * reads back `status: resolved` on the very next call and is never a candidate again — no separate "already
+ * ran" bookkeeping is needed for a repeat pass to be a safe no-op.
+ *
+ * `apply:false` (the drain's own `--dry-run`, or a caller that just wants the report) computes and returns
+ * exactly what `apply:true` would resolve, without calling `resolveFn` at all — the live preview the drain's
+ * dry-run proof needs, with zero risk of a partial write.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.cwd]
+ * @param {boolean} [opts.apply]  false = compute + report only, matching `--dry-run`'s contract exactly
+ * @param {number} [opts.logLimit]
+ * @param {function} [opts.readCardsFn]  () => Array<{stem,body}> — injectable (tests never touch real fs)
+ * @param {function} [opts.readMainLogFn]  (limit) => string[]|null — injectable (tests never touch real git)
+ * @param {function} [opts.resolveFn]  (cwd, id, opts) => {flipped,alreadyResolved,reason?} — defaults to the
+ *   drain's own `resolveLandedItem` (never a second resolver); injectable for tests.
+ * @param {{sync?:boolean, publish?:boolean}} [opts.resolveOpts]  passed straight through to `resolveFn`.
+ *   Defaults to `resolveLandedItem`'s own defaults (`sync:true, publish:true` — this call syncs main and
+ *   publishes each flip itself), which is what a standalone `--apply` run needs since nothing else in that
+ *   run publishes for it. A caller that already syncs/publishes as part of its own pass (the drain, #2899 A5's
+ *   own resolve-on-land call) passes `{ sync:false, publish:false }` so the flip commit rides that pass's
+ *   existing sync/push instead of doing a second one.
+ * @returns {{ok:boolean, ran:boolean, autoResolvable:Array<{id:string,status:string,via:string}>,
+ *   applied:Array<{id:string,flipped:boolean,alreadyResolved:boolean,reason?:string}>,
+ *   mainLogUnavailable:boolean, mainLogWindowTruncated:boolean, mainLogLen:number, error:(string|null)}}
+ */
+export function autoStrandedSweepPass({
+  cwd = process.cwd(),
+  apply = false,
+  logLimit = AUTO_SWEEP_LOG_LIMIT,
+  readCardsFn = null,
+  readMainLogFn = readMainLog,
+  resolveFn = resolveLandedItem,
+  resolveOpts = {},
+} = {}) {
+  const empty = { ok: true, ran: false, autoResolvable: [], applied: [], mainLogUnavailable: false, mainLogWindowTruncated: false, mainLogLen: 0, error: null };
+  let cards;
+  try {
+    cards = typeof readCardsFn === 'function' ? readCardsFn() : readBacklogCards(cwd);
+  } catch (e) {
+    return { ...empty, ok: false, error: `cannot read backlog/: ${String((e && e.message) || e).split('\n')[0]}` };
+  }
+  let mainLog;
+  try { mainLog = readMainLogFn(logLimit); }
+  catch (e) { return { ...empty, ok: false, error: `readMainLogFn threw: ${String((e && e.message) || e).split('\n')[0]}` }; }
+  if (mainLog == null) return { ...empty, mainLogUnavailable: true }; // best-effort — no git/network/detached; report, never guess
+  const autoResolvable = autoResolvableStrandings(cards, mainLog);
+  const applied = [];
+  if (apply) {
+    for (const h of autoResolvable) {
+      try {
+        const flip = resolveFn(cwd, h.id, resolveOpts);
+        applied.push({ id: h.id, flipped: !!flip.flipped, alreadyResolved: !!flip.alreadyResolved, ...(flip.reason ? { reason: flip.reason } : {}) });
+      } catch (e) {
+        applied.push({ id: h.id, flipped: false, alreadyResolved: false, reason: String((e && e.message) || e).split('\n')[0] });
+      }
+    }
+  }
+  return { ok: true, ran: true, autoResolvable, applied, mainLogUnavailable: false, mainLogWindowTruncated: mainLog.length >= logLimit, mainLogLen: mainLog.length, error: null };
 }
 
 function main() {
@@ -278,31 +385,26 @@ function main() {
   // #3916 — the STRICT, git-ground-truth subset, computed independently of the `gh`-sourced `hits` above (never
   // guesses off it). `--dry-run` computes and reports this WITHOUT resolving anything; `--apply` (without
   // `--dry-run`) also flips each one through the drain's own `resolveLandedItem`.
+  // xvr2o8r — delegates to `autoStrandedSweepPass`, the ONE read+resolve sequence this file and the drain's own
+  // wiring (`we:scripts/merge-ai-prs.mjs`) both call, rather than a second inline copy. `readCardsFn` reuses the
+  // `cards` this CLI already read above (never a second `backlog/` scan); the manual CLI's own `--log-limit`
+  // flag rides straight through as `logLimit`, unchanged from before this refactor.
   let autoHits = [];
   let mainLogUnavailable = false;
   let mainLogTruncated = false;
   let mainLogLen = 0;
+  let applied = [];
   if (wantAuto) {
-    const mainLog = readMainLog(logLimit);
-    if (mainLog == null) mainLogUnavailable = true;
-    else {
-      autoHits = autoResolvableStrandings(cards, mainLog);
-      mainLogLen = mainLog.length;
-      // #3916 review round 1 — NO SILENT CAPS here either (same rule as the `gh` window below): a full log page
-      // means a delivery commit older than it was never checked, so "0 candidates" would be a false all-clear.
-      mainLogTruncated = mainLog.length >= logLimit;
-    }
-  }
-  const applied = [];
-  if (apply && !dryRun) {
-    for (const h of autoHits) {
-      try {
-        const flip = resolveLandedItem(process.cwd(), h.id);
-        applied.push({ id: h.id, flipped: !!flip.flipped, alreadyResolved: !!flip.alreadyResolved, ...(flip.reason ? { reason: flip.reason } : {}) });
-      } catch (e) {
-        applied.push({ id: h.id, flipped: false, alreadyResolved: false, reason: String((e && e.message) || e).split('\n')[0] });
-      }
-    }
+    // The manual CLI's own default (400, not `AUTO_SWEEP_LOG_LIMIT`) is preserved exactly — `logLimit` above
+    // already resolved to `--log-limit=<N>` or 400, so passing it through changes nothing about this CLI's
+    // existing behaviour; only the drain's own wiring uses the wider `AUTO_SWEEP_LOG_LIMIT` default.
+    const sweep = autoStrandedSweepPass({ cwd: process.cwd(), apply: apply && !dryRun, logLimit, readCardsFn: () => cards });
+    if (!sweep.ok) { process.stderr.write(`stranded-sweep ✗ ${sweep.error}\n`); process.exit(2); return; }
+    autoHits = sweep.autoResolvable;
+    mainLogUnavailable = sweep.mainLogUnavailable;
+    mainLogTruncated = sweep.mainLogWindowTruncated;
+    mainLogLen = sweep.mainLogLen;
+    applied = sweep.applied;
   }
 
   // #2899 jury — NO SILENT CAPS. `gh pr list --limit N` returns at most N, and a full page means the window may
