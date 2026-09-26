@@ -1,6 +1,6 @@
 {
-  "_doc": "check-standards scoped-mode replay proof (#4164, gates epic #4163). Regenerate: node scripts/readiness/check-standards-scope-replay.mjs --count=50 --out=scripts/readiness/check-standards-scope-replay-baseline.json",
-  "at": "2026-09-26T00:23:21.999Z",
+  "_doc": "check-standards scoped-mode replay proof (#4164, gates epic #4163). Regenerate: node scripts/readiness/check-standards-scope-replay.mjs --count=50 --out=scripts/readiness/check-standards-scope-replay-baseline.json. This run (#4167) additionally overlaid the #4167-patched scripts/check-standards.mjs onto each historical worktree checkout for the SCOPED invocation only (the FULL run is unaffected by #4167 — it never passes --local), since #4167's own commit does not yet exist in the replayed history — see agent-memory / the #4167 PR description for the exact method.",
+  "at": "2026-09-26T12:21:36.183Z",
   "base": "origin/main",
   "requestedCount": 50,
   "lockfileDrift": [],
@@ -10,15 +10,405 @@
     "erroredCount": 0,
     "totalMissed": 0,
     "diffsWithMisses": 0,
-    "fullRealAvg": 11.957000000000003,
-    "scopedRealAvg": 11.942400000000003,
-    "fullCpuAvg": 13.009799999999995,
-    "scopedCpuAvg": 12.953199999999997,
-    "realSavingsPct": 0.12210420674081401,
-    "cpuSavingsPct": 0.43505664960259427,
+    "fullRealAvg": 13.4974,
+    "scopedRealAvg": 13.377199999999998,
+    "fullCpuAvg": 14.061000000000002,
+    "scopedCpuAvg": 14.0054,
+    "realSavingsPct": 0.8905418821402833,
+    "cpuSavingsPct": 0.39541995590641754,
     "pass": true
   },
   "rows": [
+    {
+      "sha": "b20b8ae88da842b48e71e9bb2cb072e3a4c22b12",
+      "subject": "Merge pull request #2708 from chalbert/lane/3729-stale-ci-failed-mechanical-merge-commit",
+      "head": "6923e70bf4d0223a92f7d719f93a488ff7eee588",
+      "changedCount": 4,
+      "linkedCount": 8,
+      "full": {
+        "realSec": 14.77,
+        "userSec": 11.09,
+        "sysSec": 2.88,
+        "maxRssBytes": 1058521088,
+        "errors": 0,
+        "warnings": 2353
+      },
+      "scoped": {
+        "realSec": 13.48,
+        "userSec": 11.05,
+        "sysSec": 3.24,
+        "maxRssBytes": 1058373632,
+        "errors": 0,
+        "warnings": 2347
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "2c616db908fde3748b26dc5b73dd1c653f1b40fc",
+      "subject": "Merge pull request #2707 from chalbert/lane/xkyw1x4-queue-cap-fast-lane",
+      "head": "af005ffe62654a8187469cfe538fc09462896049",
+      "changedCount": 20,
+      "linkedCount": 10,
+      "full": {
+        "realSec": 14.07,
+        "userSec": 11.14,
+        "sysSec": 3.09,
+        "maxRssBytes": 1058750464,
+        "errors": 0,
+        "warnings": 2355
+      },
+      "scoped": {
+        "realSec": 12.95,
+        "userSec": 11.08,
+        "sysSec": 2.9,
+        "maxRssBytes": 1053278208,
+        "errors": 0,
+        "warnings": 2349
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "db5a9c73a153d03d3e508ab864da507d47637430",
+      "subject": "Merge pull request #2710 from chalbert/lane/x0uad06-wip-review-job-activity",
+      "head": "b22d76c3a4290b680f81fc666cb2898fce27f7e2",
+      "changedCount": 2,
+      "linkedCount": 0,
+      "full": {
+        "realSec": 13.31,
+        "userSec": 10.96,
+        "sysSec": 2.96,
+        "maxRssBytes": 1051967488,
+        "errors": 0,
+        "warnings": 2355
+      },
+      "scoped": {
+        "realSec": 12.58,
+        "userSec": 10.77,
+        "sysSec": 2.84,
+        "maxRssBytes": 1052835840,
+        "errors": 0,
+        "warnings": 2349
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "e2f338775c6b6dfee0304395ff979e1df5ca017a",
+      "subject": "Merge pull request #2636 from chalbert/lane/batch-2026-09-25-waveB4-3915",
+      "head": "6a21e400647b5e5398b29b3bbffa57f7b71c3a0e",
+      "changedCount": 12,
+      "linkedCount": 66,
+      "full": {
+        "realSec": 13.98,
+        "userSec": 11.43,
+        "sysSec": 3.55,
+        "maxRssBytes": 1051033600,
+        "errors": 0,
+        "warnings": 2335
+      },
+      "scoped": {
+        "realSec": 13.1,
+        "userSec": 11.29,
+        "sysSec": 3.23,
+        "maxRssBytes": 1060225024,
+        "errors": 0,
+        "warnings": 2329
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "ef877de1b2f9741a7f822473b13f17d9e9edec4b",
+      "subject": "Merge pull request #2706 from chalbert/lane/3949-delegation-trial-fix",
+      "head": "0557c9563b8b074a71c48a48003ecfc1c3f302b5",
+      "changedCount": 5,
+      "linkedCount": 47,
+      "full": {
+        "realSec": 12.77,
+        "userSec": 11.11,
+        "sysSec": 3.08,
+        "maxRssBytes": 1052426240,
+        "errors": 0,
+        "warnings": 2338
+      },
+      "scoped": {
+        "realSec": 12.15,
+        "userSec": 10.82,
+        "sysSec": 2.59,
+        "maxRssBytes": 1059471360,
+        "errors": 0,
+        "warnings": 2332
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "c4674568215d308d45a11a0a8da664517f2056ba",
+      "subject": "Merge pull request #2705 from chalbert/lane/xmk6p7w-file-daemon-followups",
+      "head": "67f55007006fda86254ecf82b921bdb40d3c97b3",
+      "changedCount": 10,
+      "linkedCount": 0,
+      "full": {
+        "realSec": 13.18,
+        "userSec": 11.07,
+        "sysSec": 2.9,
+        "maxRssBytes": 1042857984,
+        "errors": 0,
+        "warnings": 2342
+      },
+      "scoped": {
+        "realSec": 14.82,
+        "userSec": 11.3,
+        "sysSec": 3.44,
+        "maxRssBytes": 1061076992,
+        "errors": 0,
+        "warnings": 2336
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "01a1f1802c6c2641a1aaf4f470796281acd0be77",
+      "subject": "Merge pull request #2704 from chalbert/lane/4164-check-standards-scope-replay",
+      "head": "ace00ba6eb99148d24271679c4cd9b0ca16d202c",
+      "changedCount": 4,
+      "linkedCount": 6,
+      "full": {
+        "realSec": 15.24,
+        "userSec": 11.12,
+        "sysSec": 3.31,
+        "maxRssBytes": 1053343744,
+        "errors": 0,
+        "warnings": 2330
+      },
+      "scoped": {
+        "realSec": 12.56,
+        "userSec": 11.01,
+        "sysSec": 2.79,
+        "maxRssBytes": 1061502976,
+        "errors": 0,
+        "warnings": 2324
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "55ea3952a36efa16cac319da84e41fec896254c2",
+      "subject": "Merge pull request #2703 from chalbert/lane/xznd5za-ci-heal-cancelled-cap",
+      "head": "cae4229579f7e19928bf88f806bcf379210f4ccd",
+      "changedCount": 5,
+      "linkedCount": 46,
+      "full": {
+        "realSec": 14.03,
+        "userSec": 11.28,
+        "sysSec": 3.23,
+        "maxRssBytes": 1054982144,
+        "errors": 0,
+        "warnings": 2334
+      },
+      "scoped": {
+        "realSec": 14.13,
+        "userSec": 11.35,
+        "sysSec": 3.36,
+        "maxRssBytes": 1049296896,
+        "errors": 0,
+        "warnings": 2328
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "733666e6e8ae624fe33d0b6761fa66fde3796b3f",
+      "subject": "Merge pull request #2701 from chalbert/lane/xm5i1xm-dispatched-session-scratch-cwd",
+      "head": "3d9696ec803c79ea770b083df7cd558f5a89b605",
+      "changedCount": 23,
+      "linkedCount": 142,
+      "full": {
+        "realSec": 15.51,
+        "userSec": 11.37,
+        "sysSec": 3.73,
+        "maxRssBytes": 1044234240,
+        "errors": 0,
+        "warnings": 2325
+      },
+      "scoped": {
+        "realSec": 13.94,
+        "userSec": 11.07,
+        "sysSec": 2.95,
+        "maxRssBytes": 1050902528,
+        "errors": 0,
+        "warnings": 2319
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "f82f089dd24887a4b05d333675d2fe072d9829ac",
+      "subject": "Merge pull request #2685 from chalbert/lane/xgqz204-dispatcher-reexec-worker-marker",
+      "head": "dfdcf1c6d307ced453cb03d2e16940ab8885bd44",
+      "changedCount": 19,
+      "linkedCount": 61,
+      "full": {
+        "realSec": 12.51,
+        "userSec": 10.91,
+        "sysSec": 2.68,
+        "maxRssBytes": 1050443776,
+        "errors": 0,
+        "warnings": 2324
+      },
+      "scoped": {
+        "realSec": 12.55,
+        "userSec": 10.98,
+        "sysSec": 2.58,
+        "maxRssBytes": 1042251776,
+        "errors": 0,
+        "warnings": 2318
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "060ef9cd84a0d999a08df391d8c951e7d88972ff",
+      "subject": "Merge pull request #2700 from chalbert/lane/xvr2o8r-drain-stranded-sweep-wiring",
+      "head": "ad7b43c9cadf8a517755bddb8c57dccba67f73b4",
+      "changedCount": 4,
+      "linkedCount": 10,
+      "full": {
+        "realSec": 14.5,
+        "userSec": 11.4,
+        "sysSec": 3.32,
+        "maxRssBytes": 1056309248,
+        "errors": 0,
+        "warnings": 2326
+      },
+      "scoped": {
+        "realSec": 15.59,
+        "userSec": 11.32,
+        "sysSec": 3.45,
+        "maxRssBytes": 1043316736,
+        "errors": 0,
+        "warnings": 2320
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "a0840ad013bbdc6f6c57aefadca10a47d1341335",
+      "subject": "Merge pull request #2695 from chalbert/lane/xpl4fjv-reaper-future-recordedat",
+      "head": "9933fd503020b0dcfe0b5ed9d74469e2c1831db6",
+      "changedCount": 1,
+      "linkedCount": 0,
+      "full": {
+        "realSec": 14.36,
+        "userSec": 11.34,
+        "sysSec": 3.44,
+        "maxRssBytes": 1049526272,
+        "errors": 0,
+        "warnings": 2326
+      },
+      "scoped": {
+        "realSec": 13.59,
+        "userSec": 11.3,
+        "sysSec": 3.25,
+        "maxRssBytes": 1052491776,
+        "errors": 0,
+        "warnings": 2320
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "c9665a09504b122a32bf397da023254de0fa4335",
+      "subject": "Merge pull request #2684 from chalbert/lane/4155-scorecard-store-out-of-tree",
+      "head": "3b106f431de03cd5b4c92f74a3b69dbaa1f5907f",
+      "changedCount": 16,
+      "linkedCount": 112,
+      "full": {
+        "realSec": 12.98,
+        "userSec": 10.97,
+        "sysSec": 2.81,
+        "maxRssBytes": 1054998528,
+        "errors": 0,
+        "warnings": 2326
+      },
+      "scoped": {
+        "realSec": 14.44,
+        "userSec": 11.29,
+        "sysSec": 3.37,
+        "maxRssBytes": 1049247744,
+        "errors": 0,
+        "warnings": 2320
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "89fd761d84de97fd33fcfab1c25d1bc867fc2458",
+      "subject": "Merge pull request #2696 from chalbert/lane/xpc3krl-hermetic-host-state-tests",
+      "head": "5b2c84aec9e62709b272bdbc103859d3375c1359",
+      "changedCount": 6,
+      "linkedCount": 32,
+      "full": {
+        "realSec": 12.52,
+        "userSec": 10.88,
+        "sysSec": 2.71,
+        "maxRssBytes": 1044561920,
+        "errors": 0,
+        "warnings": 2322
+      },
+      "scoped": {
+        "realSec": 17.03,
+        "userSec": 11.08,
+        "sysSec": 2.91,
+        "maxRssBytes": 1032667136,
+        "errors": 0,
+        "warnings": 2316
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "cb2ab041093fc7d63b8b4b4b95e15da907a7541c",
+      "subject": "Merge pull request #2699 from chalbert/lane/fix-parallel-execute-gate-policy-x3emz1e",
+      "head": "c119ad6b4267bb88567e4272399aa41d3c8b42ec",
+      "changedCount": 4,
+      "linkedCount": 4,
+      "full": {
+        "realSec": 14.22,
+        "userSec": 11.51,
+        "sysSec": 3.41,
+        "maxRssBytes": 1050312704,
+        "errors": 0,
+        "warnings": 2326
+      },
+      "scoped": {
+        "realSec": 13.65,
+        "userSec": 11.45,
+        "sysSec": 3.37,
+        "maxRssBytes": 1046282240,
+        "errors": 0,
+        "warnings": 2320
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
     {
       "sha": "324d7a4923328aec870c281c51abc1049ec9800b",
       "subject": "Merge pull request #2698 from chalbert/lane/xj2k2pp-acquire-wait-ms-bound",
@@ -26,20 +416,20 @@
       "changedCount": 6,
       "linkedCount": 31,
       "full": {
-        "realSec": 11.71,
-        "userSec": 10.64,
-        "sysSec": 2.35,
-        "maxRssBytes": 1043349504,
+        "realSec": 13.9,
+        "userSec": 11.33,
+        "sysSec": 3.7,
+        "maxRssBytes": 1039515648,
         "errors": 0,
-        "warnings": 2322
+        "warnings": 2325
       },
       "scoped": {
-        "realSec": 11.49,
-        "userSec": 10.59,
-        "sysSec": 2.25,
-        "maxRssBytes": 1046691840,
+        "realSec": 13.83,
+        "userSec": 11.5,
+        "sysSec": 3.34,
+        "maxRssBytes": 1074331648,
         "errors": 0,
-        "warnings": 2322
+        "warnings": 2319
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -52,20 +442,20 @@
       "changedCount": 13,
       "linkedCount": 11,
       "full": {
-        "realSec": 11.11,
-        "userSec": 10.25,
-        "sysSec": 2.08,
-        "maxRssBytes": 1060978688,
+        "realSec": 12.18,
+        "userSec": 10.81,
+        "sysSec": 2.73,
+        "maxRssBytes": 1043857408,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 11.29,
-        "userSec": 10.37,
-        "sysSec": 2.25,
-        "maxRssBytes": 1063649280,
+        "realSec": 12.24,
+        "userSec": 10.78,
+        "sysSec": 2.71,
+        "maxRssBytes": 1030340608,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 2300
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -78,20 +468,20 @@
       "changedCount": 9,
       "linkedCount": 26,
       "full": {
-        "realSec": 11.16,
-        "userSec": 10.39,
-        "sysSec": 2.09,
-        "maxRssBytes": 1043890176,
+        "realSec": 13.09,
+        "userSec": 10.99,
+        "sysSec": 2.98,
+        "maxRssBytes": 1048608768,
         "errors": 0,
-        "warnings": 2323
+        "warnings": 2326
       },
       "scoped": {
-        "realSec": 11.38,
-        "userSec": 10.46,
-        "sysSec": 2.23,
-        "maxRssBytes": 1044463616,
+        "realSec": 14.15,
+        "userSec": 11.34,
+        "sysSec": 3.33,
+        "maxRssBytes": 1044955136,
         "errors": 0,
-        "warnings": 2323
+        "warnings": 2320
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -104,20 +494,20 @@
       "changedCount": 16,
       "linkedCount": 67,
       "full": {
-        "realSec": 11.77,
-        "userSec": 10.68,
-        "sysSec": 2.24,
-        "maxRssBytes": 1057210368,
+        "realSec": 17.02,
+        "userSec": 11.86,
+        "sysSec": 3.87,
+        "maxRssBytes": 1045757952,
         "errors": 0,
-        "warnings": 2324
+        "warnings": 2327
       },
       "scoped": {
-        "realSec": 11.54,
-        "userSec": 10.55,
-        "sysSec": 2.28,
-        "maxRssBytes": 1083195392,
+        "realSec": 15.45,
+        "userSec": 11.46,
+        "sysSec": 3.72,
+        "maxRssBytes": 1047330816,
         "errors": 0,
-        "warnings": 2324
+        "warnings": 2321
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -130,20 +520,20 @@
       "changedCount": 13,
       "linkedCount": 54,
       "full": {
-        "realSec": 11.09,
-        "userSec": 10.28,
-        "sysSec": 2.12,
-        "maxRssBytes": 1060913152,
+        "realSec": 15.41,
+        "userSec": 11.32,
+        "sysSec": 3.68,
+        "maxRssBytes": 1028489216,
         "errors": 0,
         "warnings": 2285
       },
       "scoped": {
-        "realSec": 11.29,
-        "userSec": 10.3,
-        "sysSec": 2.25,
-        "maxRssBytes": 1049247744,
+        "realSec": 13.83,
+        "userSec": 11.17,
+        "sysSec": 3.3,
+        "maxRssBytes": 1028227072,
         "errors": 0,
-        "warnings": 2285
+        "warnings": 2279
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -156,20 +546,20 @@
       "changedCount": 5,
       "linkedCount": 33,
       "full": {
-        "realSec": 11.93,
-        "userSec": 10.7,
-        "sysSec": 2.35,
-        "maxRssBytes": 1033830400,
+        "realSec": 13.72,
+        "userSec": 11.29,
+        "sysSec": 3.27,
+        "maxRssBytes": 1048838144,
         "errors": 0,
-        "warnings": 2316
+        "warnings": 2319
       },
       "scoped": {
-        "realSec": 12.49,
-        "userSec": 10.73,
-        "sysSec": 2.62,
-        "maxRssBytes": 1055686656,
+        "realSec": 15.09,
+        "userSec": 11.57,
+        "sysSec": 3.45,
+        "maxRssBytes": 1043595264,
         "errors": 0,
-        "warnings": 2316
+        "warnings": 2313
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -182,20 +572,20 @@
       "changedCount": 6,
       "linkedCount": 12,
       "full": {
-        "realSec": 14.08,
-        "userSec": 11.08,
-        "sysSec": 2.94,
-        "maxRssBytes": 1036779520,
+        "realSec": 19.78,
+        "userSec": 11.84,
+        "sysSec": 3.97,
+        "maxRssBytes": 1042153472,
         "errors": 0,
-        "warnings": 2318
+        "warnings": 2321
       },
       "scoped": {
-        "realSec": 12.24,
-        "userSec": 10.83,
-        "sysSec": 2.48,
-        "maxRssBytes": 1065451520,
+        "realSec": 15.34,
+        "userSec": 11.65,
+        "sysSec": 3.86,
+        "maxRssBytes": 1043464192,
         "errors": 0,
-        "warnings": 2318
+        "warnings": 2315
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -208,20 +598,20 @@
       "changedCount": 10,
       "linkedCount": 27,
       "full": {
-        "realSec": 12.33,
-        "userSec": 10.63,
-        "sysSec": 2.43,
-        "maxRssBytes": 1034158080,
+        "realSec": 15.54,
+        "userSec": 11.64,
+        "sysSec": 3.84,
+        "maxRssBytes": 1027964928,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 12.25,
-        "userSec": 10.59,
-        "sysSec": 2.64,
-        "maxRssBytes": 1030094848,
+        "realSec": 14.29,
+        "userSec": 11.33,
+        "sysSec": 3.43,
+        "maxRssBytes": 1041973248,
         "errors": 0,
-        "warnings": 2280
+        "warnings": 2274
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -234,20 +624,20 @@
       "changedCount": 2,
       "linkedCount": 17,
       "full": {
-        "realSec": 11.61,
-        "userSec": 10.53,
-        "sysSec": 2.44,
-        "maxRssBytes": 1059389440,
+        "realSec": 13.42,
+        "userSec": 11.18,
+        "sysSec": 3.26,
+        "maxRssBytes": 1036288000,
         "errors": 0,
         "warnings": 2310
       },
       "scoped": {
-        "realSec": 11.72,
-        "userSec": 10.56,
-        "sysSec": 2.53,
-        "maxRssBytes": 1056358400,
+        "realSec": 12.56,
+        "userSec": 10.84,
+        "sysSec": 2.99,
+        "maxRssBytes": 1033469952,
         "errors": 0,
-        "warnings": 2310
+        "warnings": 2304
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -260,20 +650,20 @@
       "changedCount": 26,
       "linkedCount": 57,
       "full": {
-        "realSec": 11.8,
-        "userSec": 10.59,
-        "sysSec": 2.54,
-        "maxRssBytes": 1056440320,
+        "realSec": 13.02,
+        "userSec": 10.9,
+        "sysSec": 3,
+        "maxRssBytes": 1048051712,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 11.83,
-        "userSec": 10.6,
-        "sysSec": 2.47,
-        "maxRssBytes": 1062240256,
+        "realSec": 13.88,
+        "userSec": 11.38,
+        "sysSec": 3.21,
+        "maxRssBytes": 1031110656,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 2300
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -286,20 +676,20 @@
       "changedCount": 2,
       "linkedCount": 10,
       "full": {
-        "realSec": 11.97,
-        "userSec": 10.66,
-        "sysSec": 2.56,
-        "maxRssBytes": 1038450688,
+        "realSec": 13.32,
+        "userSec": 10.95,
+        "sysSec": 2.98,
+        "maxRssBytes": 1039777792,
         "errors": 0,
-        "warnings": 2316
+        "warnings": 2319
       },
       "scoped": {
-        "realSec": 11.98,
-        "userSec": 10.64,
-        "sysSec": 2.58,
-        "maxRssBytes": 1036681216,
+        "realSec": 15.02,
+        "userSec": 11.04,
+        "sysSec": 3.23,
+        "maxRssBytes": 1044299776,
         "errors": 0,
-        "warnings": 2316
+        "warnings": 2313
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -312,20 +702,20 @@
       "changedCount": 45,
       "linkedCount": 68,
       "full": {
-        "realSec": 12.39,
-        "userSec": 10.82,
-        "sysSec": 2.42,
-        "maxRssBytes": 1059651584,
+        "realSec": 12.89,
+        "userSec": 10.58,
+        "sysSec": 2.76,
+        "maxRssBytes": 1041793024,
         "errors": 0,
-        "warnings": 2311
+        "warnings": 2314
       },
       "scoped": {
-        "realSec": 12.4,
-        "userSec": 10.87,
-        "sysSec": 2.61,
-        "maxRssBytes": 1059389440,
+        "realSec": 11.5,
+        "userSec": 10.4,
+        "sysSec": 2.33,
+        "maxRssBytes": 1039794176,
         "errors": 0,
-        "warnings": 2311
+        "warnings": 2308
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -338,20 +728,20 @@
       "changedCount": 8,
       "linkedCount": 10,
       "full": {
-        "realSec": 12.25,
-        "userSec": 10.77,
-        "sysSec": 2.52,
-        "maxRssBytes": 1038172160,
+        "realSec": 12.21,
+        "userSec": 10.65,
+        "sysSec": 2.6,
+        "maxRssBytes": 888979456,
         "errors": 0,
         "warnings": 2307
       },
       "scoped": {
-        "realSec": 14.13,
-        "userSec": 10.68,
-        "sysSec": 2.35,
-        "maxRssBytes": 1058095104,
+        "realSec": 11.42,
+        "userSec": 10.31,
+        "sysSec": 2.4,
+        "maxRssBytes": 1044594688,
         "errors": 0,
-        "warnings": 2307
+        "warnings": 2301
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -364,20 +754,20 @@
       "changedCount": 9,
       "linkedCount": 57,
       "full": {
-        "realSec": 11.7,
-        "userSec": 10.6,
-        "sysSec": 2.33,
-        "maxRssBytes": 1067892736,
+        "realSec": 11.83,
+        "userSec": 10.33,
+        "sysSec": 2.56,
+        "maxRssBytes": 1027506176,
         "errors": 0,
         "warnings": 2291
       },
       "scoped": {
-        "realSec": 11.46,
-        "userSec": 10.54,
-        "sysSec": 2.3,
-        "maxRssBytes": 1062338560,
+        "realSec": 11.25,
+        "userSec": 10.29,
+        "sysSec": 2.27,
+        "maxRssBytes": 1034338304,
         "errors": 0,
-        "warnings": 2291
+        "warnings": 2285
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -390,20 +780,20 @@
       "changedCount": 9,
       "linkedCount": 0,
       "full": {
-        "realSec": 11.21,
-        "userSec": 10.49,
-        "sysSec": 2.1,
-        "maxRssBytes": 1037664256,
+        "realSec": 12.81,
+        "userSec": 10.86,
+        "sysSec": 3.01,
+        "maxRssBytes": 1033322496,
         "errors": 0,
         "warnings": 2310
       },
       "scoped": {
-        "realSec": 11.26,
-        "userSec": 10.31,
-        "sysSec": 2.25,
-        "maxRssBytes": 1064271872,
+        "realSec": 12.47,
+        "userSec": 10.78,
+        "sysSec": 2.91,
+        "maxRssBytes": 1046478848,
         "errors": 0,
-        "warnings": 2310
+        "warnings": 2304
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -416,20 +806,20 @@
       "changedCount": 1,
       "linkedCount": 3,
       "full": {
-        "realSec": 11.27,
-        "userSec": 10.31,
-        "sysSec": 2.23,
-        "maxRssBytes": 1067302912,
+        "realSec": 13.83,
+        "userSec": 10.8,
+        "sysSec": 3.69,
+        "maxRssBytes": 1044824064,
         "errors": 0,
         "warnings": 2306
       },
       "scoped": {
-        "realSec": 11.19,
-        "userSec": 10.36,
-        "sysSec": 2.22,
-        "maxRssBytes": 1069711360,
+        "realSec": 13.02,
+        "userSec": 11.02,
+        "sysSec": 3.18,
+        "maxRssBytes": 1039990784,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 2300
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -442,20 +832,20 @@
       "changedCount": 11,
       "linkedCount": 44,
       "full": {
-        "realSec": 11.18,
-        "userSec": 10.37,
-        "sysSec": 2.2,
-        "maxRssBytes": 1062371328,
+        "realSec": 12.56,
+        "userSec": 10.8,
+        "sysSec": 3.03,
+        "maxRssBytes": 1049657344,
         "errors": 0,
         "warnings": 2303
       },
       "scoped": {
-        "realSec": 12.63,
-        "userSec": 10.72,
-        "sysSec": 2.6,
-        "maxRssBytes": 1074872320,
+        "realSec": 12.51,
+        "userSec": 10.73,
+        "sysSec": 3.1,
+        "maxRssBytes": 1045905408,
         "errors": 0,
-        "warnings": 2303
+        "warnings": 2297
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -468,20 +858,20 @@
       "changedCount": 15,
       "linkedCount": 57,
       "full": {
-        "realSec": 13.26,
-        "userSec": 10.76,
-        "sysSec": 2.69,
-        "maxRssBytes": 1035796480,
+        "realSec": 12.54,
+        "userSec": 10.84,
+        "sysSec": 3.07,
+        "maxRssBytes": 1042087936,
         "errors": 0,
         "warnings": 2290
       },
       "scoped": {
-        "realSec": 14.09,
-        "userSec": 11.09,
-        "sysSec": 2.92,
-        "maxRssBytes": 1064534016,
+        "realSec": 12.95,
+        "userSec": 10.89,
+        "sysSec": 3.36,
+        "maxRssBytes": 1040629760,
         "errors": 0,
-        "warnings": 2290
+        "warnings": 2284
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -494,20 +884,20 @@
       "changedCount": 1,
       "linkedCount": 1,
       "full": {
-        "realSec": 12.69,
-        "userSec": 10.76,
-        "sysSec": 2.52,
-        "maxRssBytes": 1028079616,
+        "realSec": 13,
+        "userSec": 10.96,
+        "sysSec": 3.26,
+        "maxRssBytes": 1035878400,
         "errors": 0,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 11.64,
-        "userSec": 10.57,
-        "sysSec": 2.31,
-        "maxRssBytes": 1058799616,
+        "realSec": 13.89,
+        "userSec": 11.29,
+        "sysSec": 3.35,
+        "maxRssBytes": 1041203200,
         "errors": 0,
-        "warnings": 2295
+        "warnings": 2289
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -520,20 +910,20 @@
       "changedCount": 3,
       "linkedCount": 13,
       "full": {
-        "realSec": 11.36,
-        "userSec": 10.33,
-        "sysSec": 2.25,
-        "maxRssBytes": 1048608768,
+        "realSec": 13.93,
+        "userSec": 11.07,
+        "sysSec": 3.25,
+        "maxRssBytes": 1036681216,
         "errors": 0,
         "warnings": 2291
       },
       "scoped": {
-        "realSec": 11.58,
-        "userSec": 10.46,
-        "sysSec": 2.38,
-        "maxRssBytes": 1018822656,
+        "realSec": 14.55,
+        "userSec": 11.3,
+        "sysSec": 3.56,
+        "maxRssBytes": 1003651072,
         "errors": 0,
-        "warnings": 2291
+        "warnings": 2285
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -546,20 +936,20 @@
       "changedCount": 1,
       "linkedCount": 0,
       "full": {
-        "realSec": 11.78,
-        "userSec": 10.68,
-        "sysSec": 2.28,
-        "maxRssBytes": 1059586048,
+        "realSec": 14.9,
+        "userSec": 11.21,
+        "sysSec": 3.4,
+        "maxRssBytes": 1040547840,
         "errors": 0,
         "warnings": 2299
       },
       "scoped": {
-        "realSec": 12.12,
-        "userSec": 10.7,
-        "sysSec": 2.37,
-        "maxRssBytes": 1050918912,
+        "realSec": 12.95,
+        "userSec": 10.82,
+        "sysSec": 3.08,
+        "maxRssBytes": 1039826944,
         "errors": 0,
-        "warnings": 2299
+        "warnings": 2293
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -572,20 +962,20 @@
       "changedCount": 21,
       "linkedCount": 128,
       "full": {
-        "realSec": 15.66,
-        "userSec": 10.85,
-        "sysSec": 5.28,
-        "maxRssBytes": 1064550400,
+        "realSec": 12.23,
+        "userSec": 10.82,
+        "sysSec": 2.7,
+        "maxRssBytes": 1041825792,
         "errors": 0,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 12.26,
-        "userSec": 10.68,
-        "sysSec": 2.44,
-        "maxRssBytes": 1041498112,
+        "realSec": 11.27,
+        "userSec": 10.45,
+        "sysSec": 2.15,
+        "maxRssBytes": 1030242304,
         "errors": 0,
-        "warnings": 2295
+        "warnings": 2289
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -598,20 +988,20 @@
       "changedCount": 31,
       "linkedCount": 91,
       "full": {
-        "realSec": 12.09,
-        "userSec": 10.65,
-        "sysSec": 2.44,
-        "maxRssBytes": 1033175040,
+        "realSec": 11.51,
+        "userSec": 10.5,
+        "sysSec": 2.19,
+        "maxRssBytes": 1031847936,
         "errors": 0,
         "warnings": 2297
       },
       "scoped": {
-        "realSec": 13.8,
-        "userSec": 10.49,
-        "sysSec": 2.29,
-        "maxRssBytes": 1028538368,
+        "realSec": 11.36,
+        "userSec": 10.56,
+        "sysSec": 2.07,
+        "maxRssBytes": 1017118720,
         "errors": 0,
-        "warnings": 2297
+        "warnings": 2291
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -624,20 +1014,20 @@
       "changedCount": 14,
       "linkedCount": 36,
       "full": {
-        "realSec": 12.1,
-        "userSec": 10.52,
-        "sysSec": 2.32,
-        "maxRssBytes": 1058078720,
+        "realSec": 11.87,
+        "userSec": 10.49,
+        "sysSec": 2.24,
+        "maxRssBytes": 1024344064,
         "errors": 0,
         "warnings": 2292
       },
       "scoped": {
-        "realSec": 11.61,
-        "userSec": 10.5,
-        "sysSec": 2.29,
-        "maxRssBytes": 1051803648,
+        "realSec": 11.72,
+        "userSec": 10.59,
+        "sysSec": 2.39,
+        "maxRssBytes": 1022263296,
         "errors": 0,
-        "warnings": 2292
+        "warnings": 2286
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -650,20 +1040,20 @@
       "changedCount": 5,
       "linkedCount": 28,
       "full": {
-        "realSec": 11.49,
-        "userSec": 10.75,
-        "sysSec": 2.31,
-        "maxRssBytes": 979337216,
+        "realSec": 11.04,
+        "userSec": 10.25,
+        "sysSec": 1.97,
+        "maxRssBytes": 1018871808,
         "errors": 0,
         "warnings": 2303
       },
       "scoped": {
-        "realSec": 11.22,
-        "userSec": 10.49,
-        "sysSec": 2.18,
-        "maxRssBytes": 1021804544,
+        "realSec": 10.68,
+        "userSec": 10.22,
+        "sysSec": 1.91,
+        "maxRssBytes": 851116032,
         "errors": 0,
-        "warnings": 2303
+        "warnings": 2297
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -676,20 +1066,20 @@
       "changedCount": 6,
       "linkedCount": 26,
       "full": {
-        "realSec": 11.44,
-        "userSec": 10.46,
-        "sysSec": 2.31,
-        "maxRssBytes": 1064058880,
+        "realSec": 11.7,
+        "userSec": 10.54,
+        "sysSec": 2.3,
+        "maxRssBytes": 1040039936,
         "errors": 0,
         "warnings": 2292
       },
       "scoped": {
-        "realSec": 12.02,
-        "userSec": 10.67,
-        "sysSec": 2.27,
-        "maxRssBytes": 1034321920,
+        "realSec": 13.39,
+        "userSec": 11.05,
+        "sysSec": 3.12,
+        "maxRssBytes": 1023508480,
         "errors": 0,
-        "warnings": 2292
+        "warnings": 2286
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -702,20 +1092,20 @@
       "changedCount": 14,
       "linkedCount": 67,
       "full": {
-        "realSec": 11.74,
-        "userSec": 10.58,
-        "sysSec": 2.49,
-        "maxRssBytes": 1034354688,
+        "realSec": 13.16,
+        "userSec": 10.71,
+        "sysSec": 3,
+        "maxRssBytes": 1029931008,
         "errors": 0,
         "warnings": 2293
       },
       "scoped": {
-        "realSec": 11.64,
-        "userSec": 10.63,
-        "sysSec": 2.32,
-        "maxRssBytes": 1061060608,
+        "realSec": 13.75,
+        "userSec": 11.01,
+        "sysSec": 3.43,
+        "maxRssBytes": 901218304,
         "errors": 0,
-        "warnings": 2293
+        "warnings": 2287
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -728,20 +1118,20 @@
       "changedCount": 3,
       "linkedCount": 12,
       "full": {
-        "realSec": 12.67,
-        "userSec": 10.6,
-        "sysSec": 2.68,
-        "maxRssBytes": 1043365888,
+        "realSec": 12.46,
+        "userSec": 10.66,
+        "sysSec": 3.11,
+        "maxRssBytes": 1019953152,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 13.74,
-        "userSec": 10.61,
-        "sysSec": 2.77,
-        "maxRssBytes": 1049067520,
+        "realSec": 12.52,
+        "userSec": 10.78,
+        "sysSec": 2.93,
+        "maxRssBytes": 1035059200,
         "errors": 0,
-        "warnings": 2280
+        "warnings": 2274
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -754,20 +1144,20 @@
       "changedCount": 3,
       "linkedCount": 7,
       "full": {
-        "realSec": 11.91,
-        "userSec": 10.41,
-        "sysSec": 2.33,
-        "maxRssBytes": 1038467072,
+        "realSec": 13.34,
+        "userSec": 10.92,
+        "sysSec": 3.21,
+        "maxRssBytes": 1046953984,
         "errors": 0,
         "warnings": 2289
       },
       "scoped": {
-        "realSec": 11.3,
-        "userSec": 10.31,
-        "sysSec": 2.29,
-        "maxRssBytes": 1056800768,
+        "realSec": 14.21,
+        "userSec": 11.22,
+        "sysSec": 3.51,
+        "maxRssBytes": 1038991360,
         "errors": 0,
-        "warnings": 2289
+        "warnings": 2283
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -780,20 +1170,20 @@
       "changedCount": 1,
       "linkedCount": 34,
       "full": {
-        "realSec": 11.64,
-        "userSec": 10.33,
-        "sysSec": 2.31,
-        "maxRssBytes": 1032142848,
+        "realSec": 13.91,
+        "userSec": 11.08,
+        "sysSec": 3.41,
+        "maxRssBytes": 1023590400,
         "errors": 0,
         "warnings": 2290
       },
       "scoped": {
-        "realSec": 11.43,
-        "userSec": 10.39,
-        "sysSec": 2.12,
-        "maxRssBytes": 1024294912,
+        "realSec": 14.21,
+        "userSec": 11.09,
+        "sysSec": 3.46,
+        "maxRssBytes": 1022394368,
         "errors": 0,
-        "warnings": 2290
+        "warnings": 2284
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -806,20 +1196,20 @@
       "changedCount": 13,
       "linkedCount": 23,
       "full": {
-        "realSec": 11.24,
-        "userSec": 10.31,
-        "sysSec": 2.03,
-        "maxRssBytes": 1046085632,
+        "realSec": 13.85,
+        "userSec": 11.05,
+        "sysSec": 3.35,
+        "maxRssBytes": 1032929280,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 10.77,
-        "userSec": 10.12,
-        "sysSec": 1.96,
-        "maxRssBytes": 1039859712,
+        "realSec": 13.05,
+        "userSec": 11.04,
+        "sysSec": 3.03,
+        "maxRssBytes": 1029177344,
         "errors": 0,
-        "warnings": 2280
+        "warnings": 2274
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -832,20 +1222,20 @@
       "changedCount": 9,
       "linkedCount": 39,
       "full": {
-        "realSec": 11.1,
-        "userSec": 10.35,
-        "sysSec": 2.06,
-        "maxRssBytes": 1040596992,
+        "realSec": 15.18,
+        "userSec": 11.12,
+        "sysSec": 3.64,
+        "maxRssBytes": 1023787008,
         "errors": 0,
         "warnings": 2289
       },
       "scoped": {
-        "realSec": 11.11,
-        "userSec": 10.37,
-        "sysSec": 2.03,
-        "maxRssBytes": 1032732672,
+        "realSec": 19.24,
+        "userSec": 11.15,
+        "sysSec": 3.48,
+        "maxRssBytes": 1037025280,
         "errors": 0,
-        "warnings": 2289
+        "warnings": 2283
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -858,20 +1248,20 @@
       "changedCount": 35,
       "linkedCount": 178,
       "full": {
-        "realSec": 12.42,
-        "userSec": 10.63,
-        "sysSec": 2.23,
-        "maxRssBytes": 1059880960,
+        "realSec": 13.66,
+        "userSec": 11.06,
+        "sysSec": 3.25,
+        "maxRssBytes": 1036664832,
         "errors": 0,
         "warnings": 2289
       },
       "scoped": {
-        "realSec": 12.78,
-        "userSec": 10.84,
-        "sysSec": 2.56,
-        "maxRssBytes": 1065205760,
+        "realSec": 12.31,
+        "userSec": 10.8,
+        "sysSec": 2.78,
+        "maxRssBytes": 1040531456,
         "errors": 0,
-        "warnings": 2289
+        "warnings": 2283
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -884,20 +1274,20 @@
       "changedCount": 8,
       "linkedCount": 3,
       "full": {
-        "realSec": 13.18,
-        "userSec": 11.04,
-        "sysSec": 3,
-        "maxRssBytes": 1032880128,
+        "realSec": 11.11,
+        "userSec": 10.21,
+        "sysSec": 2.16,
+        "maxRssBytes": 1030651904,
         "errors": 0,
         "warnings": 2284
       },
       "scoped": {
-        "realSec": 12.65,
-        "userSec": 10.86,
-        "sysSec": 2.63,
-        "maxRssBytes": 1055604736,
+        "realSec": 10.9,
+        "userSec": 10.13,
+        "sysSec": 2.07,
+        "maxRssBytes": 1025753088,
         "errors": 0,
-        "warnings": 2284
+        "warnings": 2278
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -910,410 +1300,20 @@
       "changedCount": 5,
       "linkedCount": 17,
       "full": {
-        "realSec": 12.13,
-        "userSec": 10.55,
-        "sysSec": 2.38,
-        "maxRssBytes": 1041891328,
+        "realSec": 11,
+        "userSec": 10.22,
+        "sysSec": 2.09,
+        "maxRssBytes": 1029341184,
         "errors": 0,
         "warnings": 2280
       },
       "scoped": {
-        "realSec": 11.9,
-        "userSec": 10.62,
-        "sysSec": 2.19,
-        "maxRssBytes": 1062469632,
+        "realSec": 11.5,
+        "userSec": 10.26,
+        "sysSec": 2.16,
+        "maxRssBytes": 1045626880,
         "errors": 0,
-        "warnings": 2280
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "809f6baa7373d2e56c4420249b095ccb72ede4aa",
-      "subject": "Merge pull request #2666 from chalbert/lane/x9gnyt9-ci-heal-scope-optional",
-      "head": "4b36312fe11de6f639ba431ce43b914ba6f73b81",
-      "changedCount": 6,
-      "linkedCount": 46,
-      "full": {
-        "realSec": 11.69,
-        "userSec": 10.35,
-        "sysSec": 2.23,
-        "maxRssBytes": 1033142272,
-        "errors": 0,
-        "warnings": 2282
-      },
-      "scoped": {
-        "realSec": 11.28,
-        "userSec": 10.41,
-        "sysSec": 2.21,
-        "maxRssBytes": 1031028736,
-        "errors": 0,
-        "warnings": 2282
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "b30323af83f896221f6ac800ca04f8a23562b87c",
-      "subject": "Merge pull request #2662 from chalbert/lane/4076-cap-bot-concurrency-by-machine-load",
-      "head": "ccefea2b5ab481ef0cff911f8817457bc67c5af0",
-      "changedCount": 5,
-      "linkedCount": 30,
-      "full": {
-        "realSec": 11.4,
-        "userSec": 10.46,
-        "sysSec": 2.37,
-        "maxRssBytes": 997457920,
-        "errors": 0,
-        "warnings": 2291
-      },
-      "scoped": {
-        "realSec": 11.66,
-        "userSec": 10.43,
-        "sysSec": 2.47,
-        "maxRssBytes": 1047478272,
-        "errors": 0,
-        "warnings": 2291
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "3a68bb81ebd811660693237451468a834f5d53d7",
-      "subject": "Merge pull request #2647 from chalbert/lane/3168-lane-occupancy-protection-is-opt-in-and-fails-open-until-ado",
-      "head": "ff7dd2473602c0a5baeb47eba5bee0b3e3971672",
-      "changedCount": 5,
-      "linkedCount": 35,
-      "full": {
-        "realSec": 11.25,
-        "userSec": 10.36,
-        "sysSec": 2.23,
-        "maxRssBytes": 1013940224,
-        "errors": 0,
-        "warnings": 2261
-      },
-      "scoped": {
-        "realSec": 11.27,
-        "userSec": 10.25,
-        "sysSec": 2.26,
-        "maxRssBytes": 1030619136,
-        "errors": 0,
-        "warnings": 2261
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "859225cc37915b325f620d20f401e496cb1a5295",
-      "subject": "Merge pull request #2663 from chalbert/lane/4052-daemon-state-root",
-      "head": "f5cd4e7f47bfa1635a2c177bce3f921b71a44fce",
-      "changedCount": 8,
-      "linkedCount": 65,
-      "full": {
-        "realSec": 11.46,
-        "userSec": 10.33,
-        "sysSec": 2.4,
-        "maxRssBytes": 1044512768,
-        "errors": 0,
-        "warnings": 2281
-      },
-      "scoped": {
-        "realSec": 11.35,
-        "userSec": 10.25,
-        "sysSec": 2.33,
-        "maxRssBytes": 1052082176,
-        "errors": 0,
-        "warnings": 2281
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "867c52949047176d713799eaba36e783190afb5a",
-      "subject": "Merge pull request #2657 from chalbert/lane/4120-ratify-daemon-jobs",
-      "head": "d71d66f189e50876bf400f6f26d370542b82ddb4",
-      "changedCount": 8,
-      "linkedCount": 9,
-      "full": {
-        "realSec": 13.21,
-        "userSec": 10.85,
-        "sysSec": 2.91,
-        "maxRssBytes": 1029308416,
-        "errors": 0,
-        "warnings": 2292
-      },
-      "scoped": {
-        "realSec": 13.78,
-        "userSec": 11.1,
-        "sysSec": 2.96,
-        "maxRssBytes": 865550336,
-        "errors": 0,
-        "warnings": 2292
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "b05e0182122ac8545358c9c0b92724c8117d7b5a",
-      "subject": "Merge pull request #2659 from chalbert/lane/xmcmvnk-review-loops-fix",
-      "head": "a7a93e1dfd5ab463d9d59a272248a2b8a3432986",
-      "changedCount": 5,
-      "linkedCount": 27,
-      "full": {
-        "realSec": 11.88,
-        "userSec": 10.49,
-        "sysSec": 2.6,
-        "maxRssBytes": 1045430272,
-        "errors": 0,
-        "warnings": 2301
-      },
-      "scoped": {
-        "realSec": 12.02,
-        "userSec": 10.8,
-        "sysSec": 2.37,
-        "maxRssBytes": 895156224,
-        "errors": 0,
-        "warnings": 2301
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "b202caf7eae63539ac35ee2fe757c55901c6182a",
-      "subject": "Merge pull request #2655 from chalbert/lane/batch-2026-09-25-waveC2-3856",
-      "head": "0b9eace04bcd2f533efdd79666339e9f8ce148b8",
-      "changedCount": 11,
-      "linkedCount": 29,
-      "full": {
-        "realSec": 12.6,
-        "userSec": 10.6,
-        "sysSec": 2.57,
-        "maxRssBytes": 1019166720,
-        "errors": 0,
-        "warnings": 2279
-      },
-      "scoped": {
-        "realSec": 11.19,
-        "userSec": 10.25,
-        "sysSec": 2.2,
-        "maxRssBytes": 1040285696,
-        "errors": 0,
-        "warnings": 2279
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "d87c175961516bc2035061aca3bc01b99c469bc0",
-      "subject": "Merge pull request #2656 from chalbert/lane/x0mn6x0-daemons-log-refusal-reasons",
-      "head": "df652755a719183818ae911892acd2ea11e8513f",
-      "changedCount": 7,
-      "linkedCount": 67,
-      "full": {
-        "realSec": 11.24,
-        "userSec": 10.35,
-        "sysSec": 2.22,
-        "maxRssBytes": 1017331712,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "scoped": {
-        "realSec": 11.33,
-        "userSec": 10.42,
-        "sysSec": 2.19,
-        "maxRssBytes": 1018642432,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "8c6531fc0b04dac3508aa8f89c2128c59ef3f496",
-      "subject": "Merge pull request #2654 from chalbert/lane/batch-2026-09-25-waveC2-3902",
-      "head": "59225bbd4d705bb6c033f25cbe7960319357a2ac",
-      "changedCount": 18,
-      "linkedCount": 35,
-      "full": {
-        "realSec": 12.37,
-        "userSec": 10.93,
-        "sysSec": 2.5,
-        "maxRssBytes": 1014398976,
-        "errors": 0,
-        "warnings": 2299
-      },
-      "scoped": {
-        "realSec": 12.62,
-        "userSec": 10.58,
-        "sysSec": 2.56,
-        "maxRssBytes": 1041301504,
-        "errors": 0,
-        "warnings": 2299
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "b6e7609bc15f735b37287359e7cf5c64b533f221",
-      "subject": "Merge pull request #2651 from chalbert/lane/batch-2026-09-25-waveC2-3863",
-      "head": "8c450d5405749467b3a5567aa82ebcdc239fbd3a",
-      "changedCount": 1,
-      "linkedCount": 3,
-      "full": {
-        "realSec": 12.28,
-        "userSec": 10.73,
-        "sysSec": 2.55,
-        "maxRssBytes": 998391808,
-        "errors": 0,
-        "warnings": 2292
-      },
-      "scoped": {
-        "realSec": 12.34,
-        "userSec": 10.97,
-        "sysSec": 2.67,
-        "maxRssBytes": 989806592,
-        "errors": 0,
-        "warnings": 2292
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "2de6fd0cdada1fe8007ae100615165b6ddffafcd",
-      "subject": "Merge pull request #2652 from chalbert/lane/x0jphk5-fix-dispatch-claim",
-      "head": "cab7ce0675d716c26246b031c5f4c5569a6baefd",
-      "changedCount": 6,
-      "linkedCount": 22,
-      "full": {
-        "realSec": 12.5,
-        "userSec": 10.8,
-        "sysSec": 2.93,
-        "maxRssBytes": 1004404736,
-        "errors": 0,
-        "warnings": 2288
-      },
-      "scoped": {
-        "realSec": 11.75,
-        "userSec": 10.51,
-        "sysSec": 2.27,
-        "maxRssBytes": 1021083648,
-        "errors": 0,
-        "warnings": 2288
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "8c7e61efc0bace26efa267c803cae88bba78ca84",
-      "subject": "Merge pull request #2649 from chalbert/lane/xs5b4fj-wire-ci-heal-pr-dispatch-into-runner",
-      "head": "abcc2420d8a10e1162219f3cdb8e61bfad176d6d",
-      "changedCount": 4,
-      "linkedCount": 3,
-      "full": {
-        "realSec": 10.95,
-        "userSec": 10.08,
-        "sysSec": 2.08,
-        "maxRssBytes": 1046364160,
-        "errors": 0,
-        "warnings": 2288
-      },
-      "scoped": {
-        "realSec": 11.2,
-        "userSec": 10.4,
-        "sysSec": 2.12,
-        "maxRssBytes": 1052180480,
-        "errors": 0,
-        "warnings": 2288
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "dab9ed58edbd65a271014b7084a1ac74d4e90f18",
-      "subject": "Merge pull request #2650 from chalbert/lane/workflow-relay-guard",
-      "head": "60863cff6a507db35842d0cddf790e958fb81e20",
-      "changedCount": 3,
-      "linkedCount": 3,
-      "full": {
-        "realSec": 11.69,
-        "userSec": 10.38,
-        "sysSec": 2.54,
-        "maxRssBytes": 1028096000,
-        "errors": 0,
-        "warnings": 2290
-      },
-      "scoped": {
-        "realSec": 12.17,
-        "userSec": 11.05,
-        "sysSec": 2.68,
-        "maxRssBytes": 902103040,
-        "errors": 0,
-        "warnings": 2290
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "53f3f10f3d44c954630c59dbe726a9e90e5dc20d",
-      "subject": "Merge pull request #2629 from chalbert/lane/batch-2026-09-25-waveB4-3896",
-      "head": "8b118df9468ff386c8a301e9fa8177d6803e8731",
-      "changedCount": 8,
-      "linkedCount": 23,
-      "full": {
-        "realSec": 11.64,
-        "userSec": 10.55,
-        "sysSec": 2.41,
-        "maxRssBytes": 1018757120,
-        "errors": 0,
-        "warnings": 2285
-      },
-      "scoped": {
-        "realSec": 11.23,
-        "userSec": 10.59,
-        "sysSec": 2.18,
-        "maxRssBytes": 974209024,
-        "errors": 0,
-        "warnings": 2285
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "309ce0fd5e4ac7c4a03ab8cb527540402435b6fc",
-      "subject": "Merge pull request #2648 from chalbert/lane/xkw1yqc-file-daemon-delivery-cards",
-      "head": "362d342fc51d00316c2f2e076ca5340c23e3f28a",
-      "changedCount": 5,
-      "linkedCount": 4,
-      "full": {
-        "realSec": 11.23,
-        "userSec": 10.25,
-        "sysSec": 2.24,
-        "maxRssBytes": 1049985024,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "scoped": {
-        "realSec": 11.7,
-        "userSec": 10.39,
-        "sysSec": 2.46,
-        "maxRssBytes": 1045069824,
-        "errors": 0,
-        "warnings": 2289
+        "warnings": 2274
       },
       "missedCount": 0,
       "laneRelevantCount": 0,

@@ -15,7 +15,11 @@
  *                         list>` scopes the blocking set to findings on those files; `--local` additionally
  *                         demotes path-less GLOBAL/RELATIONAL findings (dup ids, the blockedBy cycle walk,
  *                         registry joins) to notes — a lane in its own worktree can't cause a cross-lane
- *                         invariant, so those are the MERGE gate's job, not the lane's.
+ *                         invariant, so those are the MERGE gate's job, not the lane's. #4167: a section whose
+ *                         findings `--local` would ALWAYS demote this way doesn't run at all under `--local` —
+ *                         it checks `LOCAL_MODE` (declared right below, before any section runs) and skips its
+ *                         own work instead of computing a finding this mode discards anyway. Same verdict, less
+ *                         work; the default no-flag run is untouched (`LOCAL_MODE` is false).
  */
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -115,6 +119,16 @@ const INC = join(ROOT, 'src/_includes');
 // conformance auto-fix agent (#095) can target failures structurally instead of
 // scraping ANSI text. Human output is unchanged when the flag is absent.
 const JSON_MODE = process.argv.includes('--json');
+
+// #4167 — read BEFORE any section below runs, so a section whose findings `--local` would ALWAYS demote
+// (a path-less GLOBAL/RELATIONAL finding — dup ids, the blockedBy cycle walk — or a `descriptor.global`-
+// marked one like the AGENTS.md inventory / leash-pin checks) can skip its work entirely instead of
+// computing it and then discarding it at the bottom (`partitionLocal`, scripts/readiness/claimScope.mjs).
+// Each such section is guarded `if (!LOCAL_MODE)` at its own call site below — same verdict, less work.
+// The scope-attribution mechanics themselves (the actual demotion of whatever DOES still run) stay at the
+// bottom, unchanged, because they need the full `errors` array assembled first. The default no-flag run
+// is untouched: LOCAL_MODE is false, so every section still runs exactly as before (CI / close-out).
+const LOCAL_MODE = process.argv.includes('--local');
 
 // Each entry is { message, descriptor? }. The optional descriptor is the structured,
 // agent-targetable form of the failure — populated for every class a fixer (deterministic
@@ -549,53 +563,59 @@ dupCheck(backlog, 'backlog/');
 for (const item of backlog) {
   if (!item.num) err(`Backlog item "${item.id}" is missing the NNN- id prefix — rename to "<NNN>-${item.id}.md"`);
 }
-// #2248 — the duplicate-NNN tripwire, now a pure unit-tested detector (was inline). A collision silently drops
-// one item from the loader's last-wins byNum Map, so it must ERROR (caught on the second colliding PR's CI).
-for (const msg of duplicateBacklogNums(backlog)) err(msg);
-// One item minted twice — same `bornAs`, two NNNs. Neither of the checks above can see it: the numbers
-// differ (so it is not a duplicate NNN) and both filenames are numeric (so no hash is stranded).
-{
-  const born = duplicateBornAs(backlog);
-  for (const msg of born.errors) err(msg);
-  for (const msg of born.warnings) warn(msg);
-}
-// #2319 — hash-on-main invariant: a backlog file on origin/main with a non-numeric leading id means a land route
-// bypassed JIT numbering (#2288) and stranded a hash. Read the MAIN tree (not the working tree) so in-lane
-// pre-land hashes on a lane/* branch don't false-trip. Fail-SOFT: origin/main unresolvable (fresh/offline
-// clone) → skip, never wedge the gate on a git hiccup.
-try {
-  const mainBacklog = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8' })
-    .split('\n').filter(Boolean);
-  // #2956 — a hash-led file touched within the drain's own JIT-numbering window (see strandedHashesOnMain's
-  // doc comment) is downgraded to a warning rather than a hard error. `commitTimeFor` is a live, local-only
-  // git call (no fetch) per candidate path — cheap, since there are normally zero or one of these.
-  //
-  // `--first-parent` is NOT optional (independent review, #2956 r1). The drain lands with a real `--no-ff`
-  // merge (`pr-land.mjs`'s default `--method=merge`), and that merge commit's tree for a path added purely
-  // in the lane is byte-identical to the lane parent's — a merge git log calls TREESAME. Without
-  // `--first-parent`, git's pathspec history simplification walks PAST the merge and returns the LANE
-  // commit's own timestamp (push → PR → CI → queue latency baked in — measured 947-4605s on this repo's
-  // real history), not the merge's. `--first-parent` pins the walk to mainline, so the merge commit's own
-  // time comes back — verified against this repo's real #2954 land: merge `269a4f1a` at 09:53:14 vs. the
-  // lane commit's own 09:48:06 that a plain `git log` returns for the same path.
-  const commitTimeFor = (path) => {
-    try {
-      const raw = execFileSync('git', ['log', '-1', '--first-parent', '--format=%ct', 'origin/main', '--', path], { cwd: ROOT, encoding: 'utf8' }).trim();
-      const epoch = Number.parseInt(raw, 10);
-      return Number.isFinite(epoch) ? epoch : null;
-    } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
-  };
-  const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) });
-  for (const msg of stranded.errors) err(msg);
-  for (const msg of stranded.warnings) warn(msg);
-  // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
-  // Guarded by WE_SKIP_HAND_NUMBERED_GATE (same family as WE_MERGE_BREAK_GLASS/STALE_LANE_OK/LANE_CLOBBER_OK)
-  // because pr-land.mjs's runHeal() self-check runs on a locally-renumbered, not-yet-pushed tree that this
-  // gate cannot distinguish from a real mistake — the heal IS the sanctioned numbering path.
-  if (!process.env.WE_SKIP_HAND_NUMBERED_GATE) {
-    for (const msg of handNumberedNewItems(backlog, mainBacklog)) err(msg);
+// #4167 — every finding in this block is path-less (dup ids / stranded hashes / hand-numbered items — no
+// single owning file, RELATIONAL across the whole backlog set), so `--local` always demotes it to a note
+// (`partitionLocal`). Skip the whole block — including the `git ls-tree`/`git log` calls below, real
+// subprocess spawns — rather than compute it and throw it away; identical verdict under `--local`, less work.
+if (!LOCAL_MODE) {
+  // #2248 — the duplicate-NNN tripwire, now a pure unit-tested detector (was inline). A collision silently drops
+  // one item from the loader's last-wins byNum Map, so it must ERROR (caught on the second colliding PR's CI).
+  for (const msg of duplicateBacklogNums(backlog)) err(msg);
+  // One item minted twice — same `bornAs`, two NNNs. Neither of the checks above can see it: the numbers
+  // differ (so it is not a duplicate NNN) and both filenames are numeric (so no hash is stranded).
+  {
+    const born = duplicateBornAs(backlog);
+    for (const msg of born.errors) err(msg);
+    for (const msg of born.warnings) warn(msg);
   }
-} catch { /* origin/main not resolvable here — the drain's post-land assert still guards the land path */ }
+  // #2319 — hash-on-main invariant: a backlog file on origin/main with a non-numeric leading id means a land route
+  // bypassed JIT numbering (#2288) and stranded a hash. Read the MAIN tree (not the working tree) so in-lane
+  // pre-land hashes on a lane/* branch don't false-trip. Fail-SOFT: origin/main unresolvable (fresh/offline
+  // clone) → skip, never wedge the gate on a git hiccup.
+  try {
+    const mainBacklog = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+    // #2956 — a hash-led file touched within the drain's own JIT-numbering window (see strandedHashesOnMain's
+    // doc comment) is downgraded to a warning rather than a hard error. `commitTimeFor` is a live, local-only
+    // git call (no fetch) per candidate path — cheap, since there are normally zero or one of these.
+    //
+    // `--first-parent` is NOT optional (independent review, #2956 r1). The drain lands with a real `--no-ff`
+    // merge (`pr-land.mjs`'s default `--method=merge`), and that merge commit's tree for a path added purely
+    // in the lane is byte-identical to the lane parent's — a merge git log calls TREESAME. Without
+    // `--first-parent`, git's pathspec history simplification walks PAST the merge and returns the LANE
+    // commit's own timestamp (push → PR → CI → queue latency baked in — measured 947-4605s on this repo's
+    // real history), not the merge's. `--first-parent` pins the walk to mainline, so the merge commit's own
+    // time comes back — verified against this repo's real #2954 land: merge `269a4f1a` at 09:53:14 vs. the
+    // lane commit's own 09:48:06 that a plain `git log` returns for the same path.
+    const commitTimeFor = (path) => {
+      try {
+        const raw = execFileSync('git', ['log', '-1', '--first-parent', '--format=%ct', 'origin/main', '--', path], { cwd: ROOT, encoding: 'utf8' }).trim();
+        const epoch = Number.parseInt(raw, 10);
+        return Number.isFinite(epoch) ? epoch : null;
+      } catch { return null; } // unknown → strandedHashesOnMain treats as NOT in-flight (fails toward erroring)
+    };
+    const stranded = strandedHashesOnMain(mainBacklog, { commitTimeFor, inLane: isLaneLocus(resolveReal(ROOT), sep) });
+    for (const msg of stranded.errors) err(msg);
+    for (const msg of stranded.warnings) warn(msg);
+    // #2548 — hand-numbered-new-item gate: a working-tree item with a hand-picked NNN not yet on origin/main.
+    // Guarded by WE_SKIP_HAND_NUMBERED_GATE (same family as WE_MERGE_BREAK_GLASS/STALE_LANE_OK/LANE_CLOBBER_OK)
+    // because pr-land.mjs's runHeal() self-check runs on a locally-renumbered, not-yet-pushed tree that this
+    // gate cannot distinguish from a real mistake — the heal IS the sanctioned numbering path.
+    if (!process.env.WE_SKIP_HAND_NUMBERED_GATE) {
+      for (const msg of handNumberedNewItems(backlog, mainBacklog)) err(msg);
+    }
+  } catch { /* origin/main not resolvable here — the drain's post-land assert still guards the land path */ }
+}
 // Every item's num — for `blockedBy`/parent resolution below (the dup check above owns collision reporting).
 const seenNums = new Set(backlog.map((i) => i.num).filter(Boolean));
 
@@ -895,7 +915,9 @@ for (const item of backlog) {
 }
 // Cycle detection over the resolved edges (DFS with a colour map). A back-edge means A blocks B
 // blocks … blocks A — no item could ever start, so the readiness function would never converge.
-{
+// #4167 — the finding is path-less (no single owning file — it names the whole cycle), so `--local`
+// always demotes it; skip the walk itself under `--local` rather than run it and discard the result.
+if (!LOCAL_MODE) {
   const WHITE = 0, GREY = 1, BLACK = 2;
   const colour = new Map();
   const reported = new Set();
@@ -1628,15 +1650,20 @@ try {
 }
 
 // ── 7. AGENTS.md inventory must be in sync (generated, not hand-edited) ────────
-try {
-  const agentsPath = join(ROOT, 'AGENTS.md');
-  const current = readFileSync(agentsPath, 'utf8');
-  if (spliceInventory(current, renderInventory()) !== current)
-    // `global: true` — AGENTS.md is a DERIVED artifact the integrator regenerates ONCE after merge; an
-    // isolated `--local` lane never runs `gen:inventory`, so this defers to the per-merge gate (#1159).
-    err('AGENTS.md inventory is stale — run `npm run gen:inventory`', { kind: 'inventory', file: 'AGENTS.md', global: true });
-} catch (e) {
-  err(`AGENTS.md inventory check failed: ${e.message}`);
+// #4167 — `renderInventory()` reads the WHOLE repo's registries to re-derive AGENTS.md, and the one finding
+// it can produce is unconditionally `global: true` (see below): an isolated `--local` lane defers this to
+// the per-merge gate regardless (#1159), so under `--local` don't pay for the render at all.
+if (!LOCAL_MODE) {
+  try {
+    const agentsPath = join(ROOT, 'AGENTS.md');
+    const current = readFileSync(agentsPath, 'utf8');
+    if (spliceInventory(current, renderInventory()) !== current)
+      // `global: true` — AGENTS.md is a DERIVED artifact the integrator regenerates ONCE after merge; an
+      // isolated `--local` lane never runs `gen:inventory`, so this defers to the per-merge gate (#1159).
+      err('AGENTS.md inventory is stale — run `npm run gen:inventory`', { kind: 'inventory', file: 'AGENTS.md', global: true });
+  } catch (e) {
+    err(`AGENTS.md inventory check failed: ${e.message}`);
+  }
 }
 
 // ── 8. No compiled artifacts shadowing TS sources ────────────────────────────
@@ -2301,7 +2328,9 @@ try {
 // against the real `scoreEscalation`, so neither a reclassification nor a rubric edit can quietly hand the
 // contract (and with it the shadow→enforce flip) to an agent panel. Pure rule + its rationale live in
 // check-standards-rules.mjs (`checkLeashPin`); this only wires the real roster, rubric and filesystem in.
-{
+// #4167 — every finding `checkLeashPin` can produce is unconditionally `global: true` (its own
+// `descriptor()` helper always sets it), so `--local` always demotes it; skip the whole check.
+if (!LOCAL_MODE) {
   const pin = checkLeashPin({
     specBasenames: POLICY_SPEC_BASENAMES,
     roster: TRUST_CHAIN,
@@ -2598,8 +2627,9 @@ if (scopeSession) {
 // authority (#1159). Combined, `--local --files=<lane files>` blocks ONLY on the lane's own file-local
 // findings. Applied AFTER
 // `--scope` so the two compose (scope demotes concurrent sessions' files; --files/--local narrows further).
+// (`LOCAL_MODE` itself is read at the TOP of the file, #4167 — sections that produce only
+// always-demoted-under-`--local` findings check it there and skip their own work entirely.)
 const filesArg = process.argv.find((a) => a.startsWith('--files='));
-const LOCAL_MODE = process.argv.includes('--local');
 let localNote = null;
 let list = null;
 if (filesArg || LOCAL_MODE) {
