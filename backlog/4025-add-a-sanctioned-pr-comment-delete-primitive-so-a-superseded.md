@@ -1,9 +1,10 @@
 ---
 bornAs: x03o6zh
 kind: task
-status: open
+status: resolved
 scope: ["we:scripts/lib/review-label-provider.mjs", "we:scripts/conveyor/parked-pr-conflict-watch.mjs"]
 dateOpened: "2026-09-24"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
