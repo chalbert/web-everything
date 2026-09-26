@@ -46,10 +46,24 @@ export function deliveryReportsDir(root = DELIVERY_REPORTS_ROOT) {
   return join(root, '.operations', 'delivery-reports');
 }
 
-/** The canonical directory every consumer resolves to; `OPERATION_DELIVERY_REPORTS_DIR` wins when set. */
-export function resolveDeliveryReportsDir() {
+/**
+ * The canonical directory every consumer resolves to; `OPERATION_DELIVERY_REPORTS_DIR` wins when set.
+ *
+ * `root` (optional, #3383 mechanical-dispatcher fix) — pass the RESOLVED LANE PATH here whenever the caller
+ * knows which lane the report belongs to (every wrapper's own `provider.spawn`/read-back does). Without it,
+ * this falls back to `deliveryReportsDir()`'s own script-location default, which resolves to whichever
+ * checkout the CURRENTLY RUNNING copy of this file lives in — correct when the agent's own in-lane process
+ * calls this with no override, but NEVER correct for a wrapper process that itself always runs from the
+ * primary checkout regardless of which lane it is dispatching into. Root cause of the finding filed for #3476:
+ * the wrapper resolved this ONCE via ITS OWN script location (always the primary checkout) and handed the
+ * result down as `OPERATION_DELIVERY_REPORTS_DIR`, so the spawned agent was told to write its completion
+ * report OUTSIDE its own lane. Claude's `--restricted` mode only guards Edit/Write tool calls via
+ * `guard-lane.mjs`, never a Bash-shelled write, so it silently tolerated this; Codex's real OS-level lane
+ * jail correctly refused with `EPERM`. Every caller that knows its lane now passes it here explicitly instead.
+ */
+export function resolveDeliveryReportsDir(root) {
   const env = process.env.OPERATION_DELIVERY_REPORTS_DIR;
-  return env && env.trim() ? resolve(env.trim()) : deliveryReportsDir();
+  return env && env.trim() ? resolve(env.trim()) : deliveryReportsDir(root);
 }
 
 /** The on-disk path of one session's delivery report. Refuses a slug that is not filename-safe. */
