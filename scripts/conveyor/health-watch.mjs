@@ -24,6 +24,7 @@
  * Usage:
  *   node scripts/conveyor/health-watch.mjs tick    [--json] [--force-gh] [--no-gh] [--dry-run] [--state-root=DIR]
  *                                                  [--logs-dir=DIR] [--lock-root=DIR] [--self-sync-dir=DIR]
+ *                                                  [--ps-fixture=FILE] [--machine-load-fixture=FILE]  # machine-overload's inputs, real by default
  *   node scripts/conveyor/health-watch.mjs section [--state-root=DIR]      # the HEALTH section (operator queue)
  *   node scripts/conveyor/health-watch.mjs silence --smell=ID [--subject=S] --card=NNN [--hours=72]
  *   node scripts/conveyor/health-watch.mjs unsilence --smell=ID [--subject=S]
@@ -32,12 +33,12 @@ import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, renameSync, openSync, readSync, closeSync, unlinkSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, loadavg, cpus } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, MINUTE,
+  DEFAULT_HEALTH_CONFIG, emptyHealthState, runHealthTick, renderEpisodeReport, renderHealthSection, summarizeDiagnosisOutput, scrubText, scrubDeep, parsePsOutput, MINUTE,
 } from './health-watch-core.mjs';
 import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
@@ -249,6 +250,22 @@ function run(cmd, args, { timeoutMs = CHILD_TIMEOUT_MS, cwd = REPO_ROOT } = {}) 
   return execFileSync(cmd, args, { cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
+/** `machine-overload`'s own process snapshot: every live process, BSD/macOS `ps` column order
+ *  `pid,ppid,pcpu,etime,command` (parsed by the pure {@link parsePsOutput}). `--ps-fixture=FILE` (tick()) reads
+ *  this same column order from a file instead — the incident-reproduction path (no load generator is ever run
+ *  to test this smell). */
+export function probeProcesses({ exec = run } = {}) {
+  return parsePsOutput(exec('ps', ['-Ao', 'pid,ppid,pcpu,etime,command'], { timeoutMs: 15_000 }));
+}
+
+/** `machine-overload`'s own load signal: `os.loadavg()` (1/5/15 min) + core count, so the smell can normalize
+ *  loadavg to "per core". `--machine-load-fixture=FILE` (tick()) reads `{load1,load5,load15,cpuCount}` JSON
+ *  instead — real `os.loadavg()` right now reads whatever this machine's normal load is, never the incident. */
+export function probeMachineLoad({ getLoadAvg = loadavg, getCpuCount = () => cpus().length } = {}) {
+  const [load1, load5, load15] = getLoadAvg();
+  return { load1, load5, load15, cpuCount: Math.max(1, getCpuCount()) };
+}
+
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
@@ -364,6 +381,15 @@ export async function tick(flags = {}) {
   probes.heavyQueue = attempt('heavyQueue', () => (flags['heavy-status-file']
     ? JSON.parse(readFileSync(flags['heavy-status-file'], 'utf8'))
     : JSON.parse(run(process.execPath, [join(REPO_ROOT, 'scripts/readiness/heavy-admission.mjs'), 'status', '--json'], { timeoutMs: 15_000 }))));
+  // `machine-overload`'s own inputs — every tick, cheap, never gh-gated. `--ps-fixture`/`--machine-load-fixture`
+  // are the incident-reproduction path: this repo never runs a load generator to test this smell (see that
+  // smell's own header) — it feeds a real-shaped `ps` snapshot through the exact same tick instead.
+  probes.processes = attempt('processes', () => (flags['ps-fixture']
+    ? parsePsOutput(readFileSync(flags['ps-fixture'], 'utf8'))
+    : probeProcesses()));
+  probes.machineLoad = attempt('machineLoad', () => (flags['machine-load-fixture']
+    ? JSON.parse(readFileSync(flags['machine-load-fixture'], 'utf8'))
+    : probeMachineLoad()));
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
