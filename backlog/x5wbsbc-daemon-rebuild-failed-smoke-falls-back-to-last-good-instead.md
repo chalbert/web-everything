@@ -22,8 +22,10 @@ Every daemon rebuild since #2731 (we:scripts/lib/daemon-rebuild.mjs off-lock can
   `candidateSmokeEnv` (explicit `LANE_POOL_ROOT` + `WE_DISPATCH_CWD_ROOT` resolved from the LIVE clone).
 - `spawn git ENOENT` / `no repo profile/gate resolved for "we"` (16:19 UTC only): NOT a PATH or profile bug. The
   review and fix daemons share the clone and both smoked the SAME fixed candidate path concurrently (smokes of
-  167 s and 72 s overlapping); the first to finish removed the worktree under the second. Fixed by a per-clone
-  candidate lock (`smoke-in-flight`).
+  167 s and 72 s overlapping); the first to finish removed the worktree under the second. Fixed by #2731's
+  single-flight build lease (`rebuild-in-progress`, unique candidate path per lease), merged into this branch;
+  the whole fallback (candidate, plain main, last-good control) runs under that one lease.
+- Also resolves #2731's card `xa4qo7n` (this branch carries all of #2731, including its review fix 85223ccbf).
 - `gh-pr-list` 30 s timeout: same window, two concurrent smokes; budget is unchanged from the old smoke (30 s).
 
 ## Design
