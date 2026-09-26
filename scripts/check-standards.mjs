@@ -102,7 +102,7 @@ import {
   makeMemoizedLineCounter, CITATION_GATES_ENFORCED,
   findUnresolvedIdentifiers, buildIdentifierIndex, isIndexableSourcePath, PROVENANCE_ESCAPE_MARKERS,
   makeRepoResolver, findDanglingSymbolAnchors, findDanglingGraduatedTargets,
-  HASH_PATH_CITE_SOURCE, PROVENANCE_TEST_FILE_RE,
+  HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines,
 } from './lib/citation-check.mjs';
 import { TRUST_CHAIN, POLICY_SPEC_BASENAMES } from './lib/gate-config.mjs';
 // #2892 — the leash-pin rule asserts against the REAL rubric, not a copy of its predicate.
@@ -1693,21 +1693,15 @@ try {
       { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
     ).split('\n').filter(Boolean);
   } catch { /* git grep exits 1 on no match, or git unavailable — no findings either way, never a gate crash */ }
-  const hashPathRe = new RegExp(HASH_PATH_CITE_SOURCE);
   const seen = new Set();
-  for (const line of hits) {
-    const idx = line.indexOf(':');
-    const rel = idx === -1 ? line : line.slice(0, idx);
-    if (PROVENANCE_TEST_FILE_RE.test(rel)) continue; // a test's synthetic fixture string, not a real citation
-    const m = line.match(hashPathRe);
-    if (!m) continue;
-    const key = `${rel}\u0000${m[0]}`;
+  for (const { file: rel, path: cited, hash } of findHashPathCitesInGrepLines(hits)) {
+    const key = `${rel}\u0000${cited}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    emit3(`${rel}: cites a card by its hash-named FILE PATH (\`${m[0]}\`) — the drain's JIT numbering ` +
+    emit3(`${rel}: cites a card by its hash-named FILE PATH (\`${cited}\`) — the drain's JIT numbering ` +
       `(#2288) renames that exact path away the moment the card lands, so this citation dangles the instant ` +
       `it does (#4075, the build-dispatch.flow.json incident). Cite the card by its stable id instead ` +
-      `(\`#${m[1]}\` while pending, or its resolved \`#NNN\` once landed) — both resolve against the ` +
+      `(\`#${hash}\` while pending, or its resolved \`#NNN\` once landed) — both resolve against the ` +
       `target's own \`bornAs\` frontmatter and survive the rename.`,
       { kind: 'citation-hash-path-outside-backlog', file: rel });
   }

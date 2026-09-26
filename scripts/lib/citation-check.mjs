@@ -125,6 +125,29 @@ export function findHashPathCiteOutsideBacklog(text, relPath) {
 }
 
 /**
+ * Scan `git grep -n` output lines (`<file>:<lineno>:<text>`) with findHashPathCiteOutsideBacklog — the ONE
+ * detector both production scanners (check:standards' gate and the drain's pre-number backstop) route
+ * through, so a change to what counts as a citation lands in both at once. Every citation on a line is
+ * reported, not only the first (PR #2757 review).
+ *
+ * @param lines raw `git grep -n` output lines.
+ * @returns array of `{ file, path, hash }` — `file` is the citing file, `path`/`hash` the cited card.
+ */
+export function findHashPathCitesInGrepLines(lines) {
+  const out = [];
+  for (const line of lines) {
+    const i = line.indexOf(':');
+    if (i === -1) continue;
+    const j = line.indexOf(':', i + 1);
+    const file = line.slice(0, i);
+    for (const f of findHashPathCiteOutsideBacklog(j === -1 ? line.slice(i + 1) : line.slice(j + 1), file)) {
+      out.push({ file, ...f });
+    }
+  }
+  return out;
+}
+
+/**
  * Build the anchor → owning-items map from backlog front-matter. A platform-decisions `#anchor` is owned
  * by EVERY backlog item that resolves to it — an anchor is genuinely multi-owner on this corpus (measured:
  * 109 anchors resolve, 32 have 2+ owners; `#constellation-placement` alone has 43). Two front-matter fields

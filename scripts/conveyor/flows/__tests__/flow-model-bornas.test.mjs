@@ -34,6 +34,20 @@ describe('resolveBornAsCite', () => {
     expect(resolved).toBe('backlog/xr05jjl-describe-every-conveyor-flow.md');
   });
 
+  it('ignores a bornAs line in a card BODY — only the frontmatter record counts (PR #2757 review)', () => {
+    // A card quoting another card's frontmatter (an example, a pasted snippet) must not "resolve" a
+    // genuinely dangling citation to itself.
+    const files = {
+      '2300-quotes-an-example.md': '---\nkind: story\n---\n\nExample frontmatter:\n\nbornAs: xr05jjl\n',
+    };
+    const resolved = resolveBornAsCite('backlog/xr05jjl-describe-every-conveyor-flow.md', {
+      exists: () => false,
+      listBacklogFiles: () => Object.keys(files),
+      readBacklogFile: (name) => files[name],
+    });
+    expect(resolved).toBe('backlog/xr05jjl-describe-every-conveyor-flow.md');
+  });
+
   it('passes a path through unchanged when it already exists (no resolution needed)', () => {
     const resolved = resolveBornAsCite('backlog/4220-describe-every-conveyor-flow.md', {
       exists: () => true,

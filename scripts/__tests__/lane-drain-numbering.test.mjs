@@ -514,6 +514,38 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(res.committed).toBe(true);
   });
 
+  it('does not refuse over a HISTORICAL ledger hash cited by path — only this pass\'s own hashes gate it (PR #2757 review)', () => {
+    // The ledger is append-only: a hash numbered in some past pass stays in it forever. A stale prose
+    // mention of that old hash's path (its backlog file long renamed away) must not block an unrelated,
+    // genuinely pending hash from numbering — else one historical mention would stall JIT numbering for good.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('reports/old-note.md', 'Historical: see backlog/xblk001-old-card.md for the original write-up.\n');
+    write(LEDGER_REL, JSON.stringify({ xblk001: '2150' }));
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'reports', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+  });
+
+  it('REFUSES when a pending hash-path citation follows an unrelated one on the SAME line (PR #2757 review)', () => {
+    // Every citation on a line counts, not just the first: an unrelated hash path first must not hide the
+    // pending one after it.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n');
+    write('scripts/mixed.mjs', '// see backlog/xnotone-other.md and backlog/xhash01-alpha.md\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([]);
+    expect(res.committed).toBe(false);
+    expect(res.error).toContain('scripts/mixed.mjs cites xhash01');
+    expect(backlogNames()).toContain('xhash01-alpha.md');
+  });
+
   it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
     write('backlog/xland01-item.md', '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');

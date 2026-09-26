@@ -42,6 +42,7 @@ import {
   codeSpans,
   PROVENANCE_ESCAPE_MARKERS,
   findHashPathCiteOutsideBacklog,
+  findHashPathCitesInGrepLines,
   HASH_PATH_CITE_SOURCE,
 } from '../lib/citation-check.mjs';
 
@@ -368,6 +369,17 @@ describe('findHashPathCiteOutsideBacklog — #4075 follow-up (xmd4pfa): a hash-n
     // `git grep -E`; this only proves the ECMA half compiles and matches the same shape.
     expect(new RegExp(HASH_PATH_CITE_SOURCE).test('backlog/xr05jjl-a.md')).toBe(true);
     expect(new RegExp(HASH_PATH_CITE_SOURCE).test('backlog/4220-a.md')).toBe(false);
+  });
+
+  it('findHashPathCitesInGrepLines reports EVERY cite on a git-grep line, and keeps the test-file exemption', () => {
+    const hits = findHashPathCitesInGrepLines([
+      'scripts/mixed.mjs:3:// see backlog/xnotone-other.md and backlog/xhash01-alpha.md',
+      'scripts/__tests__/x.test.mjs:9:fixture backlog/xhash02-beta.md',
+    ]);
+    expect(hits).toEqual([
+      { file: 'scripts/mixed.mjs', path: 'backlog/xnotone-other.md', hash: 'xnotone' },
+      { file: 'scripts/mixed.mjs', path: 'backlog/xhash01-alpha.md', hash: 'xhash01' },
+    ]);
   });
 });
 

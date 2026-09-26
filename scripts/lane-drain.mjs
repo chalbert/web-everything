@@ -74,7 +74,7 @@ import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, extractManifestFromBody, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
 import { isHash, isNum, idFromName, applyLedger, swapHashes, mapHashReferences } from './backlog/id.mjs';
-import { HASH_PATH_CITE_SOURCE, PROVENANCE_TEST_FILE_RE } from './lib/citation-check.mjs'; // #4075 follow-up (xmd4pfa) — the pre-push hash-path-citation backstop, one pattern shared with check:standards' own gate
+import { HASH_PATH_CITE_SOURCE, findHashPathCitesInGrepLines } from './lib/citation-check.mjs'; // #4075 follow-up (xmd4pfa) — the pre-push hash-path-citation backstop, one pattern shared with check:standards' own gate
 // #2603 — the drain's resolve-reachable check reads `status:` FRONTMATTER-strict (see `resolveReachableFromBody`),
 // never loose over the whole body. `readField` parses only the first `---`…`---` block.
 import { readField } from './backlog/frontmatter.mjs';
@@ -815,22 +815,21 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   // leaving others' cross-refs half-rewritten risks a new, harder-to-see inconsistency, and the existing
   // numbering-mutex-contention path above already defers the WHOLE pass on a lesser obstacle). The hash(es)
   // stay pending and are retried on the very next land — same shape as that mutex deferral.
+  // Gate on THIS pass's own renames only — never the whole append-only ledger: a hash numbered in some past
+  // pass stays in the ledger forever, and a stale historical mention of its path must not block every later
+  // numbering (PR #2757 review).
   const sweptRelPaths = new Set(files.map((f) => pathFor(f.name).relPath));
+  const renamingNow = new Set(assigned.map((a) => a.hash));
   let unsweptHashPathCites = [];
   try {
     const hits = execFileSync(
       'git', ['grep', '--threads=1', '-nE', HASH_PATH_CITE_SOURCE, '--', '.', ':!node_modules', ':!backlog'],
       { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 },
     ).split('\n').filter(Boolean);
-    const hashPathRe = new RegExp(HASH_PATH_CITE_SOURCE);
-    for (const line of hits) {
-      const idx = line.indexOf(':');
-      const path = idx === -1 ? line : line.slice(0, idx);
-      if (sweptRelPaths.has(path)) continue; // this pass already rewrites this exact file's content below
-      if (PROVENANCE_TEST_FILE_RE.test(path)) continue; // a test's synthetic fixture string, not a real citation
-      const m = line.match(hashPathRe);
-      if (m && ledger[m[1]] !== undefined) unsweptHashPathCites.push({ path, hash: m[1] });
-    }
+    unsweptHashPathCites = findHashPathCitesInGrepLines(hits)
+      // sweptRelPaths: this pass already rewrites that exact file's content below
+      .filter((c) => !sweptRelPaths.has(c.file) && renamingNow.has(c.hash))
+      .map((c) => ({ path: c.file, hash: c.hash }));
   } catch { /* git grep exits 1 on no match, or git unavailable — no findings either way, never abort on that alone */ }
   if (unsweptHashPathCites.length) {
     const detail = unsweptHashPathCites.map((f) => `${f.path} cites ${f.hash}`).join('; ');
