@@ -3,7 +3,7 @@
   "title": "Build dispatch — cleared queue row to landed/parked PR",
   "summary": "A cleared conveyor-queue item is admitted past capacity/load/queue-time gates by tick-core.mjs#planTick, then must be picked up by an OPERATOR-ATTENDED /conveyor session (the ratified #2701 'judgment layer') to actually spawn a headless `claude --bg` builder session. That session's cwd is a scratch directory outside every checkout (#4174) with no --add-dir and no baked-in permission flags, so it must acquire its own lane and then edit inside it on a permission grant nothing in the dispatch path actually provides — the live, measured #2701/#4174 gap (three real 'conveyor' sessions stuck on a permission prompt for 211.4h, backlog #3296; the detector for it, backlog #3149, is still open). If it gets through, it runs verify-lane and scripts/pr-land.mjs, which opens a PR labelled either ready-to-merge (hands off to @drain-land) or review:human/review:pending (hands off to @review).",
   "derivedFrom": {
-    "commit": "91cc453e4",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
@@ -23,8 +23,14 @@
     "scripts/conveyor/hung-session.mjs",
     "scripts/conveyor/reconcile-core.mjs",
     "scripts/conveyor/session-reaper.mjs",
+    "scripts/conveyor/lease-reaper.mjs",
     "scripts/pr-land.mjs",
     "scripts/lib/review-escalation.mjs",
+    "scripts/operations/dispatch-provider-registry.mjs",
+    "scripts/operations/dispatch-providers/build.mjs",
+    "scripts/operations/deliver-item-wrapper.mjs",
+    "scripts/operations/deliver-item-run.mjs",
+    "scripts/operations/delivery-agent-marker.mjs",
     "docs/agent/platform-decisions.md",
     "backlog/3149-surface-stuck-background-agent-permission-prompts-to-the-orc.md",
     "backlog/3296-nothing-reconciles-an-open-pr-against-a-live-process-so-ever.md",
@@ -311,6 +317,19 @@
         "cite": "scripts/pr-land.mjs:281-282,313; skills-src/conveyor/review-daemon.mjs:249,265-267"
       },
       "notes": "This is the literal 'hand-off @review' the brief names — reached only via --park or a forced #2307 escalation, not the default landing path."
+    },
+    {
+      "id": "mechanical-build-dispatched",
+      "label": "Detached, non-Claude-wrapper build dispatch (dispatch-providers/build.mjs)",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "scripts/operations/dispatch-providers/build.mjs#deliverItemDetachedProvider (detached child, no parent session)",
+      "ownerCite": "scripts/operations/dispatch-providers/build.mjs:1-45; scripts/operations/dispatch-provider-registry.mjs:88-94",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "PR #2753 (#3903, 2026-09-26) graduated this end-to-end; verified live on this flow's own basis commit (f264b7f81): scripts/operations/deliver-item-run.mjs exists and scripts/operations/deliver-item-wrapper.mjs's CODEX_PROVIDER is a real, live-verified spawn (its own header: '#3580. NO LONGER A SEAM'), structurally parallel to the CLAUDE_RESTRICTED_PROVIDER (`vendor:'claude'`) this whole flow otherwise assumes is the only option. Reached only when an operator sets WE_BUILD_DISPATCH_MODE=mechanical for the 'build' row (registry defaultMode is 'agent' — dispatch-provider-registry.mjs:79-87 — so an unset environment still takes every state above this one, unchanged); the item's own `deliveryAgent:` frontmatter marker (scripts/operations/delivery-agent-marker.mjs:39,86; read at scripts/operations/dispatch-providers/build.mjs:117-121) then picks 'claude-restricted' (default) or 'codex' inside deliverItem's provider registry (scripts/operations/deliver-item-wrapper.mjs:963-981). The returned handle is a durable `pid:<n>` (scripts/operations/detached-dispatch.mjs), which scripts/operations/dispatch-lane-io.mjs#isDispatchHandleLive and scripts/conveyor/lease-reaper.mjs's own pid-dead axis (scripts/conveyor/lease-reaper.mjs:89,534) resolve WITHOUT the `claude agents` listing this flow's session-spawned/session-reaped-no-outcome states depend on — a genuinely different liveness mechanism this flow does not otherwise model. OUT OF SCOPE here (not modeled, not fixed, not a claimed gap): deliverItem's own internal gate/converge/commit/open-PR sequence — it opens its PR via scripts/operations/open-pr.mjs, not this flow's own scripts/pr-land.mjs, so it is NOT assumed to land in this flow's pr-opened-ready-to-merge/pr-opened-parked-for-review terminals; #3903's own card lists real remaining scope (scripts/operations/dispatch-task.mjs, the completion-record/completion-cli 'task' kind) as still open.",
+      "ack": {}
     }
   ],
   "transitions": [
@@ -345,9 +364,16 @@
     {
       "from": "awaiting-dispatch-invocation",
       "to": "session-spawned",
-      "on": "an operator's /conveyor session invokes dispatch-lane for this num",
+      "on": "an operator's /conveyor session invokes dispatch-lane for this num, and the 'build' row's dispatch mode is 'agent' (the default — dispatch-provider-registry.mjs's defaultMode, unset WE_BUILD_DISPATCH_MODE)",
       "kind": "normal",
-      "cite": "scripts/operations/dispatch-lane-io.mjs:1227"
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1227; scripts/operations/dispatch-provider-registry.mjs:79-94"
+    },
+    {
+      "from": "awaiting-dispatch-invocation",
+      "to": "mechanical-build-dispatched",
+      "on": "same invocation, but an operator set WE_BUILD_DISPATCH_MODE=mechanical for the 'build' row — routeDispatchProvider hands off to the registered detached provider instead of spawning claude --bg",
+      "kind": "normal",
+      "cite": "scripts/operations/dispatch-provider-registry.mjs:79-94; scripts/operations/dispatch-providers/build.mjs:100-121"
     },
     {
       "from": "session-spawned",

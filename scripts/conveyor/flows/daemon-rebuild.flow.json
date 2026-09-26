@@ -3,7 +3,7 @@
   "title": "Daemon clone rebuild (Modules A–E, #4041/#4044)",
   "summary": "A resident daemon (review-daemon, reconcile-fix-dispatch-daemon) runs from its own dedicated clone. Every tick, before doing its real dispatch work, it rebuilds that clone FRESH from origin/main plus its registered overlay list, in the object database, under the clone's own reader/writer lock, gated by a live smoke that runs while still holding the write lock. Pass -> reset --hard onto the new tree, then a restart-throttle decides whether to actually restart the process (launchd relaunches it) or keep ticking on the already-updated-on-disk tree. Fail -> roll back to the pre-move HEAD and the SAME tick continues on the old, still-in-memory code. A clone the rebuild cannot move stays behind main; a dispatch chokepoint elsewhere (main-staleness.mjs#assertMainNotStale) then refuses every dispatch from it as STALE. An operator (or a one-shot CLI) can also register an overlay ref by hand at any time, independent of the tick loop.",
   "derivedFrom": {
-    "commit": "91cc453e4",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
@@ -323,29 +323,29 @@
       "label": "Operator registers/removes an overlay ref out-of-band (daemon-overlay.mjs / daemon-load-overlay.mjs)",
       "terminal": false,
       "owner": "operator (or an automated caller running the same CLI)",
-      "ownerCite": "scripts/daemon-overlay.mjs:48-133; scripts/lib/daemon-load-overlay.mjs:143-168",
+      "ownerCite": "scripts/daemon-overlay.mjs:76-139; scripts/lib/daemon-load-overlay.mjs:143-168",
       "wait": {
-        "for": "the overlay list's own mkdir mutex (daemon-overlays.mjs's withListLock), THEN (unless --no-lock) the clone's write lock",
-        "timeout": "list mutex: 20000ms fixed (LIST_LOCK_WAIT_MS); write lock: 600000ms default (WE_DAEMON_CLONE_LOCK_WAIT_MS) since scripts/daemon-overlay.mjs:84 calls withWriteLock with NO waitMs override at all, unlike rebuildClone's own 60s bound",
+        "for": "the overlay list's own mkdir mutex only (daemon-overlays.mjs's withListLock) — add/remove no longer takes the clone's reader/writer lock at all (#4229/#2760 follow-up, PR #2765, 2026-09-26)",
+        "timeout": "20000ms fixed (LIST_LOCK_WAIT_MS)",
         "onTimeout": "cli-overlay-op-failed",
-        "cite": "scripts/lib/daemon-overlays.mjs:139-169; scripts/daemon-overlay.mjs:79-121,135-141"
+        "cite": "scripts/lib/daemon-overlays.mjs:139-169"
       },
       "retries": null,
       "escalation": null,
-      "notes": "GAP: this CLI's write-lock wait is 10x longer than rebuildClone's own tick-start wait (600s vs 60s) with no onBlocked logging at all (scripts/daemon-overlay.mjs:84 passes `{}`), so an operator running this by hand while a slow live-smoke is in progress can sit silently for up to 10 minutes before seeing 'write lock refused'. `daemon-load-overlay.mjs` additionally calls rebuildClone() right after registering (its OWN write-lock acquire, the 60s-bounded one) — so a real early-load goes through BOTH lock waits in sequence. Either wait's timeout lands on cli-overlay-op-failed below — a list-mutex timeout THROWS (uncaught inside addOverlay/removeOverlay, caught only by the CLI's top-level `.catch`); a write-lock timeout returns `{ok:false, reason}` and the CLI prints 'write lock refused' — both end in the same exit-1-and-stop outcome, neither retries automatically.",
+      "notes": "FIXED (PR #2765, 2026-09-26): daemon-overlay.mjs add/remove used to also take Module A's clone write lock around the mutation (the GAP this note used to describe — a 600s-default wait with no onBlocked logging, 10x rebuildClone's own 60s bound, live-incident PR #2760 failing to register 4 times in a row). The file's own header now states the fix plainly: add/remove is REGISTER-ONLY — addOverlay/removeOverlay (Module B) do their own atomic read-modify-write under the list's tiny mutex above and return immediately (scripts/daemon-overlay.mjs:115-130); the CLONE's tree is mutated later, by the next automatic rebuild (fetch-and-plan-overlays below), never by this CLI. `daemon-load-overlay.mjs` is the ONE exception that still needs the clone's write lock synchronously (an explicit 'register AND apply right now' operation, scripts/daemon-overlay.mjs's own header) — it registers via the SAME addOverlay/removeOverlay, then calls rebuildClone() itself, going through the tick's own acquire-write-lock state below (60s-bounded there already); that is a separate, later wait this state's own `wait` field no longer needs to describe.",
       "ack": {}
     },
     {
       "id": "cli-overlay-op-failed",
-      "label": "The overlay CLI exits non-zero (lock wait exhausted) — no automatic retry",
+      "label": "The overlay CLI exits non-zero (list-mutex wait exhausted, or a corrupt overlay state file) — no automatic retry",
       "terminal": true,
       "outcome": "failure",
       "owner": "none",
-      "ownerCite": "scripts/daemon-overlay.mjs:106-121,135-141; scripts/lib/daemon-overlays.mjs:157",
+      "ownerCite": "scripts/daemon-overlay.mjs:106-114,141-146; scripts/lib/daemon-overlays.mjs:157",
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "The operator (or whatever automated caller ran this CLI) sees a non-zero exit and a one-line stderr message; nothing here schedules a follow-up attempt.",
+      "notes": "The operator (or whatever automated caller ran this CLI) sees a non-zero exit and a one-line stderr message; nothing here schedules a follow-up attempt. Narrower than before PR #2765 (2026-09-26): the write-lock-refused exit this state used to also cover no longer exists for add/remove (register-only, no clone lock taken) — the two remaining causes are a stuck/exhausted list mutex (daemon-overlays.mjs:139-169, THROWS, caught by the CLI's top-level `.catch` at scripts/daemon-overlay.mjs:142-146) and `cmd==='list'` hitting a corrupt overlay state file (scripts/daemon-overlay.mjs:108-114).",
       "ack": {
         "silent-failure": "xwuof33"
       }
@@ -364,7 +364,7 @@
       "to": "operator-registers-overlay",
       "on": "out-of-band: an operator (or automated caller) runs daemon-overlay.mjs add/remove or daemon-load-overlay.mjs at any time, independent of the tick loop",
       "kind": "normal",
-      "cite": "scripts/daemon-overlay.mjs:48-133"
+      "cite": "scripts/daemon-overlay.mjs:76-139"
     },
     {
       "from": "acquire-write-lock",
@@ -390,9 +390,9 @@
     {
       "from": "operator-registers-overlay",
       "to": "tick-start",
-      "on": "daemon-overlay.mjs add/remove only mutates the list — no immediate rebuild; the NEXT regular tick's own acquire-write-lock picks the change up",
+      "on": "daemon-overlay.mjs add/remove only mutates the list — no immediate rebuild (register-only, PR #2765); the NEXT regular tick's own acquire-write-lock picks the change up",
       "kind": "normal",
-      "cite": "scripts/daemon-overlay.mjs:96-124"
+      "cite": "scripts/daemon-overlay.mjs:115-130"
     },
     {
       "from": "operator-registers-overlay",
@@ -586,9 +586,9 @@
     {
       "from": "operator-registers-overlay",
       "to": "cli-overlay-op-failed",
-      "on": "the list mutex (20s) or the write lock (600s default) times out",
+      "on": "the list mutex (20s) times out, or `cmd==='list'` reads a corrupt overlay state file — add/remove no longer has a write-lock wait to time out (PR #2765)",
       "kind": "timeout",
-      "cite": "scripts/lib/daemon-overlays.mjs:139-169; scripts/daemon-overlay.mjs:106-121"
+      "cite": "scripts/lib/daemon-overlays.mjs:139-169; scripts/daemon-overlay.mjs:106-114"
     }
   ],
   "steps": [
@@ -715,29 +715,28 @@
       "ack": {}
     },
     {
-      "id": "cli-take-write-lock",
+      "id": "cli-mutate-overlay-register-only",
       "state": "operator-registers-overlay",
-      "actor": "daemon-overlay.mjs add/remove (unless --no-lock)",
-      "does": "withWriteLock(root, () => fn(), {}) — NO waitMs override, so acquireWrite's own 600000ms default applies",
-      "cite": "scripts/daemon-overlay.mjs:79-121; scripts/lib/daemon-clone-lock.mjs:232-283",
+      "actor": "daemon-overlay.mjs add/remove",
+      "does": "addOverlay/removeOverlay (Module B) mutate the overlay list + appendOverlayEvent, then return immediately — no clone write lock is taken (PR #2765, 2026-09-26; the `cli-take-write-lock` step this flow used to describe here no longer exists in the code)",
+      "cite": "scripts/daemon-overlay.mjs:115-130",
       "canFail": true,
       "onFailure": "cli-overlay-op-failed",
       "assumes": [
         {
-          "kind": "cwd",
-          "name": "<daemon-clone>",
-          "cite": "scripts/daemon-overlay.mjs:56-58",
-          "note": "resolved from the operator's own --clone= flag, not from a launchd-provided cwd."
+          "kind": "lock",
+          "name": "daemon-overlay-list",
+          "cite": "scripts/lib/daemon-overlays.mjs:144-160"
         }
       ],
       "provides": [
         {
-          "kind": "lock",
-          "name": "daemon-clone-writer",
-          "cite": "scripts/lib/daemon-clone-lock.mjs:338-357"
+          "kind": "writes",
+          "name": "<overlay-state-file>",
+          "cite": "scripts/lib/daemon-overlays.mjs:189-197"
         }
       ],
-      "notes": "A refusal (concurrent-mover, or a 10-minute timeout) prints 'write lock refused (<reason>)' and exits 1 — no retry, no escalation beyond the CLI's own exit code. Ten minutes is a LONG silent wait for an interactive operator compared to rebuildClone's own 60s bound for the same lock.",
+      "notes": "The clone's tree is left untouched by this step on purpose — see operator-registers-overlay's own notes. `remove` additionally reports (not a failure) when the ref was never present (scripts/daemon-overlay.mjs:127-129) — not a usage error, exit 0.",
       "ack": {}
     }
   ]
