@@ -31,6 +31,7 @@ vi.mock('../../../scripts/conveyor/review-hold-reconcile.mjs', async (importOrig
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
   REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
+  explainPendingNotDispatched,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { tagReviewStatus } from '../../../scripts/conveyor/review-status-tag.mjs';
@@ -115,7 +116,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
     expect(out).toEqual({
       reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], notStarted: [], refusals: 0,
-      reconcileError: null, deferredForLanes: 0, deferredForAuth: 0, authPaused: false, authPauseReason: null,
+      pendingNotDispatched: [], reconcileError: null, deferredForLanes: 0, deferredForAuth: 0, authPaused: false, authPauseReason: null,
       holdReconcile: [], holdReconcileError: null,
     });
   });
@@ -865,6 +866,7 @@ describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mj
       allowedCwd: SESSION_REAPER_REPO_ROOT,
       neverReapWorking: true,
       idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
+      reapedLedger: expect.objectContaining({ has: expect.any(Function), add: expect.any(Function), save: expect.any(Function) }),
     });
     expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 });
   });
@@ -886,5 +888,67 @@ describe('realSleep — regression, live-caught on THIS daemon\'s own first laun
       clearTimeout(captured);
       global.setTimeout = real;
     }
+  });
+});
+
+// Live-caught 2026-09-26: WE PRs #2746–#2758 sat `review:pending` while every tick logged only "N owed" — no line
+// said WHY each parked PR was skipped, and a skipped tick printed "tick () — 0 owed" (an empty repo list).
+describe('review:pending PRs the tick did not dispatch — the daemon prints why', () => {
+  const pending = (number) => ({ number, labels: [{ name: 'review:pending' }] });
+
+  it('explainPendingNotDispatched: refusal, other-kind, lane-deferral and absent reasons; dispatched and unlabelled PRs skipped', () => {
+    const plan = {
+      dispatch: [{ kind: 'review', prNumber: 1 }, { kind: 'review', prNumber: 5 }, { kind: 'ci-heal', prNumber: 3, why: 'required check failing' }],
+      refusals: [{ kind: 'live-process', prNumber: 2, why: 'a bound session has a LIVE pid', cwd: '/lane-9', pid: 42 }],
+    };
+    const out = explainPendingNotDispatched({
+      prs: [pending(1), pending(2), { number: 3, labels: [{ name: 'ci:failed' }] }, pending(4), pending(5), { number: 6, labels: [] }],
+      plan, dispatchable: [{ prNumber: 1 }], deferredForLanes: [{ prNumber: 5 }],
+    });
+    expect(out).toEqual([
+      { prNumber: 2, labels: ['review:pending'], reasons: ['live-process: a bound session has a LIVE pid [cwd=/lane-9 pid=42]'] },
+      { prNumber: 3, labels: ['ci:failed'], reasons: ['owed a ci-heal, not a review — required check failing'] },
+      { prNumber: 4, labels: ['review:pending'], reasons: ['absent from the reconcile plan (no dispatch, no refusal)'] },
+      { prNumber: 5, labels: ['review:pending'], reasons: ['review owed, but no acquirable lane this tick'] },
+    ]);
+    expect(explainPendingNotDispatched({ prs: null, plan })).toEqual([]);
+  });
+
+  it('runReviewTick (shared reads) returns pendingNotDispatched, and onTick prints one line per PR', () => {
+    const prs = [pending(2746), pending(2758)];
+    const out = runReviewTick({
+      readPrs: () => prs, readAgents: () => [],
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 2758 }], refusals: [{ kind: 'live-process', prNumber: 2746, why: 'live pid' }] }),
+      dispatch: () => ({ mode: 'job', jobPid: 1 }), tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [], holdReconcile: () => [],
+    });
+    expect(out.pendingNotDispatched).toEqual([{ prNumber: 2746, labels: ['review:pending'], reasons: ['live-process: live pid'] }]);
+    const lines = [];
+    const fx = buildCliDaemonEffects({ owner: 'o', log: { error: (l) => lines.push(l) } });
+    fx.onTick({ repos: [{ repo: 'chalbert/web-everything' }], reviewsOwed: 1, dispatched: [], failed: [],
+      pendingNotDispatched: out.pendingNotDispatched.map((p) => ({ ...p, repo: 'chalbert/web-everything' })) });
+    expect(lines).toContain('review-daemon: chalbert/web-everything#2746 review:pending, no review dispatched — live-process: live pid');
+  });
+
+  it('runReviewTickAllRepos aggregates pendingNotDispatched with the repo', () => {
+    const r = runReviewTickAllRepos({ repos: ['a/b'], tick: () => ({ reviewsOwed: 0, refusals: 0, dispatched: [], failed: [], pendingNotDispatched: [{ prNumber: 9, reasons: ['x'] }] }) });
+    expect(r.pendingNotDispatched).toEqual([{ prNumber: 9, reasons: ['x'], repo: 'a/b' }]);
+  });
+
+  it('a withSelfSync-skipped tick prints its reason, never "tick ()"', () => {
+    const lines = [];
+    const fx = buildCliDaemonEffects({ owner: 'o', log: { error: (l) => lines.push(l) } });
+    fx.onTick({ skipped: true, reason: 'writer-active', repos: [], dispatched: [], failed: [], reviewsOwed: 0 });
+    expect(lines).toEqual(['review-daemon: tick skipped (writer-active) — no repo was read this tick']);
+  });
+
+  it('tickOnce reaps BEFORE discovery, so a hung session it stops frees its PR in the SAME tick', async () => {
+    const order = [];
+    const fx = buildCliDaemonEffects({
+      owner: 'o', log: { error: () => {} },
+      reapSessions: () => { order.push('reap'); return null; },
+      runReview: () => { order.push('review'); return { repos: [], reviewsOwed: 0, dispatched: [], failed: [] }; },
+    });
+    await fx.tickOnce();
+    expect(order).toEqual(['reap', 'review']);
   });
 });

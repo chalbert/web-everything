@@ -93,7 +93,7 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconcile.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
-import { runSessionReaperPass, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
+import { runSessionReaperPass, makeReapedLedger, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
@@ -138,6 +138,48 @@ export async function runDaemonLoop({
     await sleep(intervalMs);
     tick += 1;
   }
+}
+
+/** The labels whose PRs get a per-tick "why not dispatched" line: `review:pending` (the drain parked it for an
+ *  independent review, `review-escalation.mjs`) and `ci:failed` (a required check is red — owed a ci-heal). */
+export const EXPLAINED_HOLD_LABELS = ['review:pending', 'ci:failed'];
+
+/**
+ * Live-caught 2026-09-26 (WE PRs #2746–#2758 sat `review:pending` for ~an hour while every tick logged only
+ * "N owed" — nothing said WHY each parked PR was skipped, so a correct `live-process` refusal (a stale fix /
+ * ci-heal session still bound to the PR) looked exactly like a discovery bug). For every open PR carrying
+ * `review:pending` that this tick did NOT hand to `dispatch`, return the reason(s) straight from the reconcile
+ * plan — never re-derived. Pure. `prs` is the tick's own shared `gh pr list` read; `null` (the opt-out
+ * no-shared-reads path) returns `[]`, since there is then no label list to scan.
+ * @param {{prs:Array<object>|null, plan:{dispatch?:Array<object>, refusals?:Array<object>}, dispatchable:Array<object>,
+ *   deferredForLanes?:Array<object>, paused?:boolean}} o
+ * @returns {Array<{prNumber:number, labels:string[], reasons:string[]}>}
+ */
+export function explainPendingNotDispatched({ prs, plan, dispatchable = [], deferredForLanes = [], paused = false }) {
+  if (!Array.isArray(prs)) return [];
+  const labelName = (l) => (typeof l === 'string' ? l : l?.name);
+  const sent = new Set(dispatchable.map((d) => Number(d.prNumber)));
+  const deferred = new Set(deferredForLanes.map((d) => Number(d.prNumber)));
+  const out = [];
+  for (const pr of prs) {
+    const n = Number(pr?.number);
+    if (!Number.isInteger(n) || sent.has(n)) continue;
+    const held = (pr?.labels ?? []).map(labelName).filter((l) => EXPLAINED_HOLD_LABELS.includes(l));
+    if (held.length === 0) continue;
+    const reasons = [];
+    if (deferred.has(n)) reasons.push(paused ? 'review owed, but dispatch is paused (Claude login)' : 'review owed, but no acquirable lane this tick');
+    for (const d of (plan?.dispatch ?? [])) {
+      if (Number(d?.prNumber) === n && d.kind !== 'review') reasons.push(`owed a ${d.kind}, not a review — ${d.why ?? ''}`.trim());
+    }
+    for (const r of (plan?.refusals ?? [])) {
+      if (Number(r?.prNumber) !== n) continue;
+      const bind = r.cwd || r.pid != null ? ` [cwd=${r.cwd ?? '?'} pid=${r.pid ?? 'absent'}]` : '';
+      reasons.push(`${r.kind}: ${r.why ?? ''}${bind}`);
+    }
+    if (reasons.length === 0) reasons.push('absent from the reconcile plan (no dispatch, no refusal)');
+    out.push({ prNumber: n, labels: held, reasons });
+  }
+  return out;
 }
 
 /**
@@ -299,6 +341,9 @@ export function runReviewTick({
   }
   return {
     reviewsOwed: reviews.length, dispatched, failed, notStarted, refusals: (plan.refusals ?? []).length,
+    pendingNotDispatched: explainPendingNotDispatched({
+      prs: rawPrs, plan, dispatchable, deferredForLanes: reviews.slice(dispatchable.length), paused,
+    }),
     reconcileError: null, deferredForLanes, deferredForAuth,
     authPaused: paused, authPauseReason: paused ? pauseReason : null,
     holdReconcile: holdReconcileResults, holdReconcileError,
@@ -344,6 +389,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   const dispatched = [];
   const failed = [];
   const notStarted = [];
+  const pendingNotDispatched = [];
   // #xvzwiew — a RECONCILE-PHASE failure (`runReviewTick` now catches it and returns `reconcileError` instead
   // of throwing) reports through this SEPARATE bucket, never folded into `failed` as a bogus `prNumber: null`
   // dispatch failure — no PR was ever identified for a repo whose reconcile crashed, so reporting it as if a
@@ -379,10 +425,11 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
     deferredForAuth += result.deferredForAuth ?? 0;
     for (const d of result.dispatched) dispatched.push({ ...d, repo });
     for (const k of (result.notStarted ?? [])) notStarted.push({ ...k, repo });
+    for (const p of (result.pendingNotDispatched ?? [])) pendingNotDispatched.push({ ...p, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
   }
   return {
-    repos: perRepo, reviewsOwed, dispatched, failed, notStarted, refusals, reconcileFailed, deferredForLanes,
+    repos: perRepo, reviewsOwed, dispatched, failed, notStarted, pendingNotDispatched, refusals, reconcileFailed, deferredForLanes,
     deferredForAuth, authPaused: authGate.paused, authPauseReason: authGate.reason,
     holdReconcile: holdReconcileRemoved, holdReconcileFailed,
   };
@@ -448,6 +495,7 @@ export function defaultReapSessions() {
     allowedCwd: SESSION_REAPER_REPO_ROOT,
     neverReapWorking: true,
     idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
+    reapedLedger: makeReapedLedger(),
   });
 }
 
@@ -467,7 +515,10 @@ export function buildCliDaemonEffects({
   return {
     intervalMs,
     tickOnce: async () => {
-      const result = await runReview();
+      // Live-caught 2026-09-26: the reap runs BEFORE discovery, not after. A hung fix/ci-heal session bound to a
+      // `review:pending` PR makes reconcile refuse it (`live-process`); reaping it first lets THIS tick's
+      // discovery see the PR free, instead of the next tick — which, while the reaper re-stopped ~1,500 finished
+      // sessions every pass, was ~20 minutes later (see `session-reaper.mjs#makeReapedLedger`).
       // Best-effort, mirrors `runner.mjs`'s own `makeCliMechanicalPasses` discipline: a session-reap failure
       // is logged and swallowed, never lets a lingering `claude` process take down this tick's real job
       // (dispatching/tagging reviews).
@@ -477,17 +528,22 @@ export function buildCliDaemonEffects({
       } catch (e) {
         log.error(`review-daemon: session-reap failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
       }
+      const result = await runReview();
       return { ...result, sessionReap };
     },
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
+      // A `withSelfSync`-skipped tick (`skippedTick`: `repos: []`) used to print as "tick () — 0 owed", which read
+      // like discovery had watched NO repo. Say what actually happened.
+      if (result?.skipped) { log.error(`review-daemon: tick skipped (${result.reason ?? 'unknown'}) — no repo was read this tick`); return; }
       log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}${result.deferredForLanes ? `, deferred ${result.deferredForLanes} (no acquirable lane this tick, #3383)` : ''}`);
       // card x5kagse (epic #4075/#3383) — logged EVERY tick review dispatch stays paused, exact wording
       // required by the card and matched by the soak scenario/live-proof read.
       if (result.authPaused) log.error(`review-daemon: ${result.authPauseReason ?? 'paused: Claude login expired — run /login'}`);
       for (const k of (Array.isArray(result.notStarted) ? result.notStarted : [])) log.error(`review-daemon: ${k.repo}#${k.prNumber} not dispatched — ${k.reason}`);
       for (const d of (Array.isArray(result.dispatched) ? result.dispatched : [])) log.error(`review-daemon: ${d.repo}#${d.prNumber} dispatched as ${d.mode ?? 'session'}${d.jobPid ? ` (job pid ${d.jobPid})` : ''}${d.agentId ? ` (agent ${d.agentId})` : ''}`);
+      for (const p of (Array.isArray(result.pendingNotDispatched) ? result.pendingNotDispatched : [])) log.error(`review-daemon: ${p.repo}#${p.prNumber} ${(p.labels ?? []).join('+') || 'held'}, no review dispatched — ${p.reasons.join('; ')}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);
       // #xvzwiew — a reconcile-phase failure (discovery itself, e.g. a transient `claude agents --json`
       // ENOENT) reports here ONLY, never also folded into the `failed` (dispatch) line above — see
@@ -501,7 +557,7 @@ export function buildCliDaemonEffects({
       for (const hf of (result.holdReconcileFailed ?? [])) log.error(`review-daemon: ${hf.repo} hold-reconcile failed (non-fatal, other repos unaffected): ${hf.error}`);
       if (result.sessionReap && !result.sessionReap.unreadable) {
         const sr = result.sessionReap;
-        log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}, ${sr.kept} kept`);
+        log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}${sr.previouslyReaped ? `, ${sr.previouslyReaped} already reaped earlier (skipped)` : ''}, ${sr.kept} kept`);
       }
     },
     onTickError: (error) => {

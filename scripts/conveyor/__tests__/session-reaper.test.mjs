@@ -25,6 +25,7 @@ import {
   STOP_RETRY_ATTEMPTS,
   STOP_RETRY_BACKOFF_MS,
   runSessionReaperPass,
+  makeReapedLedger,
   makeHungResolver,
   makeAuthExpiredResolver,
   makeIdleFinishedResolver,
@@ -2244,5 +2245,47 @@ describe('runStampChatSpawnHook / runMarkChatEndedHook — the CLI hook bodies',
 
   it('mark-chat-ended never throws on a malformed payload', () => {
     expect(() => runMarkChatEndedHook({ readStdin: () => 'not json' })).not.toThrow();
+  });
+});
+
+// Live-caught 2026-09-26 (review-daemon log): the reaper re-issued `claude stop` for ~1,500 already-finished
+// sessions EVERY tick (238 `stopped` ones via the wrong-cwd upgrade axes; 1,228 `done` ones that stay `done`
+// after a stop), stretching a 2-minute review-daemon tick to ~20 minutes.
+describe('the reaper never re-stops what it already stopped', () => {
+  it('a `stopped` session in a foreign cwd is already-stopped, even when an upgrade axis (hung) would fire', () => {
+    const s = { id: 'a1', kind: 'background', state: 'stopped', cwd: '/scratch/x', name: 'ci-heal-2711' };
+    expect(classifySessionReapWithGroundTruth(s, null, { allowedCwd: '/daemon', hungFor: () => ({ hung: true }) }))
+      .toEqual({ reap: false, reason: 'already-stopped' });
+  });
+
+  it('with a ledger, a `done` session is stopped once, then skipped on later passes; pruned once unlisted', () => {
+    let disk = null;
+    const mk = () => makeReapedLedger({ file: '/ledger.json', readFile: () => { if (disk == null) throw new Error('ENOENT'); return disk; }, writeFile: (_f, t) => { disk = t; } });
+    let listing = [
+      { id: 'd1', kind: 'background', state: 'done', cwd: '/daemon', name: 'review-1' },
+      { id: 'w1', kind: 'background', state: 'working', cwd: '/scratch', name: 'fix-2', },
+    ];
+    const stops = [];
+    const pass = () => runSessionReaperPass({
+      listAgents: () => listing, groundTruthFor: null, completionFor: null, allowedCwd: '/daemon',
+      hungFor: (s) => ({ hung: s.id === 'w1' }), noOutcomeFor: null, chatSpawnGuardFor: null, authExpiredFor: null, idleFinishedFor: null,
+      backstopCompletion: false, stop: ({ handle }) => { stops.push(handle); return { alreadyGone: false }; }, log: () => {},
+      reapedLedger: mk(),
+    });
+    const first = pass();
+    expect(first.stopped).toBe(2);
+    expect(first.previouslyReaped).toBe(0);
+    const second = pass();
+    // d1 is terminal (`done`) and already stopped: skipped. w1 is still listed `working`: worth another try.
+    expect(second.previouslyReaped).toBe(1);
+    expect(stops).toEqual(['d1', 'w1', 'w1']);
+    listing = [];
+    pass();
+    expect(JSON.parse(disk).ids).toEqual([]);
+  });
+
+  it('a corrupt ledger file reads as empty (worst case: one pass of redundant stops)', () => {
+    const l = makeReapedLedger({ file: '/x', readFile: () => '{not json', writeFile: () => {} });
+    expect(l.ids()).toEqual([]);
   });
 });
