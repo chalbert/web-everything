@@ -3800,6 +3800,35 @@ async function runCli() {
             if (ok) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} ci-lifecycle → "${desired}" (reconcile)\n`); }
           }
         }
+      } else {
+        // #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PR #2748 (chalbert/web-everything):
+        // an otherwise fully-AI PR whose long-lived branch had absorbed the drain's OWN bookkeeping commits
+        // (`drain: resolve #NNNN on land …` / `drain: JIT-number …` / `drain: rebase … onto …`) reads
+        // `ciLifecycleCertified: false` here — `isAiGeneratedPr` does not (yet — see `we:scripts/lib/
+        // ai-pr-authorship.mjs`'s own `isDrainBookkeepingCommit`, landing separately) recognize those commits as
+        // mechanical — so the WHOLE branch above, add AND remove alike, was skipped for it every single pass.
+        // A `ci:failed` this reconcile had legitimately applied earlier (while the required check really was
+        // red) then NEVER CLEARED once that check went green: six ci-heal sessions in a row correctly found
+        // nothing to repair and stood down, yet the stale label kept `classifyPr` (`we:scripts/progress-board.mjs`)
+        // reading `ci-red` and reconcile-core kept dispatching another one (confirmed live — `gh api .../timeline`
+        // showed the label added once at 19:26Z and never removed, hours past the required check going green).
+        // REMOVING a label a PR is not entitled to is safe regardless of certification — only ADDING one
+        // requires it (an uncertified/human PR must never be handed ci-lifecycle bookkeeping it never asked
+        // for) — so this branch clears any OWNED ci-lifecycle label already present the instant the required
+        // check reads definitively green, with no certification gate at all.
+        if (isRequiredCheckGreen(p, REQUIRED)) {
+          const staleOwned = CI_LIFECYCLE_OWNED.filter((name) => hasLabel(p, name));
+          if (staleOwned.length) {
+            if (DRY_RUN) {
+              touched = true;
+              if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would clear stale ci-lifecycle label(s) (${staleOwned.join(', ')}) — required check green, PR uncertified\n`);
+            } else {
+              let ok = true;
+              for (const rm of staleOwned) { try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--remove-label', rm], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { ok = false; /* best-effort — the next pass retries */ } }
+              if (ok) { touched = true; if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} cleared stale ci-lifecycle label(s) (${staleOwned.join(', ')}) — required check green\n`); }
+            }
+          }
+        }
       }
       // ── Stale review:pending beside a real review:accepted — the drain's own sanctioned resolution
       //    (review-set-label.mjs --to=accepted) applied automatically instead of needing a human/session to

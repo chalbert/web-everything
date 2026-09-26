@@ -1882,3 +1882,39 @@ describe('pure helpers', () => {
     expect(() => applyVerb({ items: [], decisions: [] }, 'teleport', {})).toThrow(/unknown verb/);
   });
 });
+
+// #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753 (chalbert/web-
+// everything): the `ci:failed` label fallback xx6kg3f added (above, "trusts the durable ci:failed label…")
+// closed a DEGRADED-rollup gap by trusting the label unconditionally — which also means a STALE label survives
+// forever once THIS read's own rollup positively proves the required check green, since nothing ever re-checks
+// it. Six ci-heal sessions in a row on PR #2748 correctly found only `review-gate` red (by design, while
+// `review:pending` stood) and stood down, yet `classifyPr` kept reading `ci-red` off the stale label alone and
+// reconcile-core kept dispatching another one. These pin the fix: the label fallback now defers to a rollup
+// that AFFIRMATIVELY reports the required check's latest run as green, while still trusting the label exactly
+// as before when the rollup cannot prove that (empty, degraded, or the check simply has not concluded).
+describe('classifyPr — a stale ci:failed label must not outrank a rollup that already proves the required check green (xg790dh-follow-up)', () => {
+  it('PR #2748\'s real shape: test green, only review-gate red, stale ci:failed label — reads needs-review, not ci-red', () => {
+    const rollup = [
+      { name: 'review-gate', conclusion: 'FAILURE' },
+      { name: 'test-shard (1)', conclusion: 'SUCCESS' },
+      { name: 'daemon-soak', conclusion: 'SUCCESS' },
+      { name: 'smoke', conclusion: 'SUCCESS' },
+      { name: 'test', conclusion: 'SUCCESS' },
+    ];
+    expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: rollup }))).toBe('needs-review');
+  });
+
+  it('a stale ci:failed beside a GREEN required check reads through to needs-review even with no review label at all', () => {
+    const rollup = [{ name: 'test', conclusion: 'SUCCESS' }];
+    expect(classifyPr(pr({ labels: ['ci:failed'], statusCheckRollup: rollup }))).toBe('open');
+  });
+
+  it('still trusts the label when the required check has not concluded yet (never a blind override)', () => {
+    const rollup = [{ name: 'test', conclusion: '', state: 'IN_PROGRESS' }];
+    expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: rollup }))).toBe('ci-red');
+  });
+
+  it('still trusts the label when the rollup has no entry for the required check at all (the xx6kg3f degraded-read case, unchanged)', () => {
+    expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: [] }))).toBe('ci-red');
+  });
+});

@@ -89,6 +89,12 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import { computeOutputMix, ratioLabel } from './lib/output-mix.mjs';
 import { CI_TRUTH_EXCLUDED_CHECKS, FAILING_CONCLUSIONS } from './operations/pr-status.mjs';
+// #4260-ish (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753: the SAME `latestRequiredCheck`
+// read `merge-ai-prs.mjs`'s own ci-lifecycle label reconcile already trusts (#xkfv491's latest-run-wins rule),
+// reused here so `classifyPr`'s stale-label fallback (below) can tell "the label is our only signal" apart from
+// "the label is outdated — THIS read's own rollup already proves the required check green". Side-effect-free
+// import (`merge-ai-prs.mjs`'s CLI is behind an `IS_CLI` guard, mirrored by `pr-watch.mjs`'s identical import).
+import { isRequiredCheckGreen } from './merge-ai-prs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -522,7 +528,19 @@ export function classifyPr(pr) {
   // `review:*` label and stands down once it finds nothing red — `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s
   // own header) against the alternative this incident lived through — an accepted, genuinely red PR reading
   // as `queued`/nothing-owed indefinitely. OR'd with the live scan, never a replacement for it.
-  if (ciFailed(pr?.statusCheckRollup) || labels.has('ci:failed')) return 'ci-red';
+  if (ciFailed(pr?.statusCheckRollup)) return 'ci-red';
+  // xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753 (chalbert/web-
+  // everything): six ci-heal sessions in a row correctly found "no CI break — only `review-gate` is red (by
+  // design, while `review:pending` stands)" and stood down, yet the PR kept reading `ci-red` and kept getting
+  // re-dispatched, because the line above trusted a STALE `ci:failed` label UNCONDITIONALLY — even on a read
+  // whose OWN rollup affirmatively proves the required check green right now. The xx6kg3f fix (above this
+  // block's history) added the label fallback for the OPPOSITE gap — a rollup that came back empty/degraded and
+  // so could not prove anything — and that gap still needs the fallback: `isRequiredCheckGreen` reads `false`
+  // for a missing/not-yet-concluded check, so an empty or in-flight rollup still falls through to trust the
+  // label exactly as xx6kg3f fixed it (see the two pinned tests, `pr2739Labels`, immediately below). Only a
+  // rollup that POSITIVELY reports the required check's LATEST run as green may override the label — never a
+  // rollup that is merely silent on it.
+  if (labels.has('ci:failed') && !isRequiredCheckGreen(pr)) return 'ci-red';
   if (merge === 'DIRTY' || merge === 'BEHIND') return 'conflicted';
   if (labels.has('review:pending')) return 'needs-review';
   if (labels.has('review:accepted') || labels.has('ready-to-merge')) return 'queued';

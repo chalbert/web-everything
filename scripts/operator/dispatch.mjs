@@ -32,6 +32,11 @@ import { openSync, closeSync, statSync, writeFileSync, unlinkSync, existsSync } 
 import { join } from 'node:path';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
 import { markWorkerEnv } from '../operations/session-role.mjs';
+// #xg790dh-follow-up (epic #3383/#4075) — the SAME declared hold-check list `we:scripts/progress-board.mjs#ciFailed`
+// and `we:scripts/operations/pr-status.mjs` already use, reused here so `healCi`'s own "is anything really red"
+// scan can never disagree with them by re-deriving an ad-hoc `state === 'FAILURE'` filter with no exclusion at
+// all — see the call site below for the incident this closes.
+import { CI_TRUTH_EXCLUDED_CHECKS } from '../operations/pr-status.mjs';
 
 export const REPO = process.env.WE_REPO || '/Users/nicolasgilbert/workspace/webeverything';
 export const LANES = process.env.WE_LANES || '/Users/nicolasgilbert/workspace/.lanes/web-everything';
@@ -527,7 +532,16 @@ export async function healCi({ pr, branch, lane, repo = REPO, execFn = spawnSync
   } catch {
     return 'no-op (gh checks output unparseable — leaving as-is)';
   }
-  const failing = rows.filter((r) => r.state === 'FAILURE');
+  // #xg790dh-follow-up — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753 (chalbert/web-everything): `review-gate`
+  // (`we:.github/workflows/review-gate.yml` + `we:scripts/check-review-gate.mjs`) is BY DESIGN red for as long
+  // as `review:pending`/`review:human`/`review:changes` stands — that is its whole job, not a code-health signal
+  // — yet a plain `state === 'FAILURE'` scan with no exclusion counted it as a real failure: `failing.length`
+  // was never 0 on a PR merely awaiting review, so the stale-label clear below (the ONE thing this function
+  // exists to do first) never ran, and the function fell through toward dispatching a CI_HEAL fix agent at a
+  // PR with nothing actually broken. Excluding {@link CI_TRUTH_EXCLUDED_CHECKS} matches the SAME exclusion
+  // `we:scripts/progress-board.mjs#ciFailed` and `we:scripts/operations/pr-status.mjs` already apply — one
+  // declared list, reused here rather than a THIRD ad-hoc re-derivation of "which checks are hold-only".
+  const failing = rows.filter((r) => r.state === 'FAILURE' && !CI_TRUTH_EXCLUDED_CHECKS.includes(String(r?.name ?? '')));
   if (failing.length === 0) {
     // NOT A NO-OP — a stale label re-observed and left untouched can burn a whole round budget re-diagnosing
     // "stale" without ever clearing it (converge.py:509-515).
