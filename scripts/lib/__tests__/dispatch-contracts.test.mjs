@@ -28,7 +28,10 @@ describe('closed contracts and pure boundary', () => {
     // #3717 added `./dispatch-task-type.mjs` — the `taskType` derivation `decideDispatchRoute` composes with
     // `routeDispatch`. It is import-free, so the allow-list's real property (this module reaches nothing
     // impure) is unchanged.
-    expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual(['./provider-routing.mjs', './secret-scrub.mjs', './dispatch-thresholds.mjs', './codex-model-routing.mjs', './dispatch-task-type.mjs']);
+    // #4034 added `./critical-work.mjs` — the critical-work verdict and critical-miss vetoes `routeDispatch` hands
+    // the provider cascade. It composes deriveRisk (here), NEVER_SPOT_CHECK_PATH_PREFIXES and gate-config's pure
+    // path predicates, and is itself free of the forbidden primitives (its own test pins that).
+    expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual(['./provider-routing.mjs', './secret-scrub.mjs', './dispatch-thresholds.mjs', './codex-model-routing.mjs', './dispatch-task-type.mjs', './critical-work.mjs']);
     const lines = source.split('\n');
     // See the sibling assertion below for why three annotations are accepted since #3717 wired slice G2 and
     // #3887 added a second real runtime caller outside that wiring (review-dispatch.mjs).

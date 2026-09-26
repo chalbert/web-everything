@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import * as c from '../dispatch-contracts.mjs';
-import { workerTierFor } from '../provider-routing.mjs';
+import { workerTierFor, CRITICAL_WORK_GATE } from '../provider-routing.mjs';
 
 const profile = (extra = {}) => c.buildDispatchProfile({ taskType: 'doc-fix', estimatedLoc: 30, filesTouched: ['docs/readme.md'], acceptanceTestable: true, dependsOn: [], ...extra }).profile;
 const card = (extra = {}) => ({ kind: 'story', size: 3, scope: ['src/example.js'], preparedDate: '2026-09-20', ...extra });
@@ -331,5 +331,65 @@ describe('the model-tier table (#3857)', () => {
     const p = profile({ taskType: 'bugfix', filesTouched: ['scripts/lib/foo.mjs'] });
     const out = c.routeDispatch(p, { stage: 'task', kind: 'fix', tags: [] });
     expect(out.tier).toBe(workerTierFor({ kind: 'fix', taskType: 'bugfix', scopePaths: p.filesTouched, tags: [] }).tier);
+  });
+});
+
+// #4034 — routeDispatch (via decideDispatchRoute) wires criticalWorkVerdict (from the dispatch's own profile)
+// and criticalMissesFor (from the RAW scorecards) into selectProvider's critical-work gate, end to end. The
+// bugfix envelope is 250 LOC / 4 files (`PROVEN_TASK_ENVELOPES.bugfix`); `size: 2` -> 80 LOC, comfortably inside
+// it for every scope below (at most 3 files), so envelope fit is never what is under test here.
+describe('#4034 — routeDispatch wires the critical-work verdict and critical-miss vetoes', () => {
+  // Opens ONLY the bugfix row of the default gate — every other taskType stays closed.
+  const openBugfix = { ...CRITICAL_WORK_GATE, openForNonCritical: { ...CRITICAL_WORK_GATE.openForNonCritical, bugfix: true } };
+  const cleanCodexBugfixTrials = () => [
+    record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-10T00:00:00Z' }),
+    record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-12T00:00:00Z' }),
+    record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-15T00:00:00Z' }),
+  ];
+  // Real card #4081's scope: not critical (no proxy fires).
+  const dispatch4081 = (extra = {}) => ({ kind: 'fix', scopePaths: ['we:scripts/operations/operator-queue.mjs'], size: 2, ...extra });
+  // Real card #4124's scope: critical (never-spot-check + gate-self + daemon-drain all fire).
+  const dispatch4124 = (extra = {}) => ({
+    kind: 'fix',
+    scopePaths: ['we:scripts/merge-ai-prs.mjs', 'we:scripts/lane-drain.mjs', 'we:scripts/readiness/drain-lock.mjs'],
+    size: 2,
+    ...extra,
+  });
+
+  it('#4081 (non-critical, gate open, clean codex track record) routes to codex, executed stays claude', () => {
+    const out = c.decideDispatchRoute(dispatch4081(), { scorecards: cleanCodexBugfixTrials(), criticalWorkGate: openBugfix });
+    expect(out).toMatchObject({ routed: 'codex', executed: 'claude' });
+  });
+
+  it('#4124 (critical scope) stays on claude despite the gate being open and a clean codex track record', () => {
+    const out = c.decideDispatchRoute(dispatch4124(), { scorecards: cleanCodexBugfixTrials(), criticalWorkGate: openBugfix });
+    expect(out.routed).toBe('claude');
+  });
+
+  it('#4081 with the DEFAULT gate (bugfix not opened) stays on claude', () => {
+    const out = c.decideDispatchRoute(dispatch4081(), { scorecards: cleanCodexBugfixTrials() });
+    expect(out.routed).toBe('claude');
+  });
+
+  it('#4081 with a reworked codex bugfix row for the same model and NO filesTouched (legacy shape) fails closed to claude', () => {
+    const scorecards = [
+      ...cleanCodexBugfixTrials(),
+      record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'reworked', scoredAt: '2026-09-05T00:00:00Z' }),
+    ];
+    const out = c.decideDispatchRoute(dispatch4081(), { scorecards, criticalWorkGate: openBugfix });
+    expect(out.routed).toBe('claude');
+  });
+
+  it('the same reworked row carrying filesTouched (a non-critical scope) AND a later clean landed row (most recent is clean) routes to codex', () => {
+    const scorecards = [
+      ...cleanCodexBugfixTrials(),
+      record({
+        provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'reworked',
+        scoredAt: '2026-09-05T00:00:00Z', filesTouched: ['scripts/codex-direct-task.mjs'],
+      }),
+      record({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', verifiedBy: 'claude-subagent', outcome: 'landed', scoredAt: '2026-09-25T00:00:00Z' }),
+    ];
+    const out = c.decideDispatchRoute(dispatch4081(), { scorecards, criticalWorkGate: openBugfix });
+    expect(out.routed).toBe('codex');
   });
 });
