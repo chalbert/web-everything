@@ -60,7 +60,7 @@ import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-h
 
 /** The checkout this daemon runs from — its heavy-admission root is the host-wide `<workspace>/.lanes` one. */
 const DAEMON_REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
-import { sweepHungCiRecovery, sweepCiRedRecovery } from '../../scripts/conveyor/ci-red-recovery-watch.mjs';
+import { sweepHungCiRecovery, sweepCiRedRecovery, sweepMissingRunRecovery } from '../../scripts/conveyor/ci-red-recovery-watch.mjs';
 import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
@@ -430,6 +430,46 @@ export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, ti
 }
 
 /**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runMissingRunRecoveryAllRepos — xi4od2p (epic
+ * #4075/#3383), LIVE INCIDENT 2026-09-26: PR chalbert/web-everything#2729 sat `review:accepted` + `MERGEABLE`
+ * but `BLOCKED`, labelled `checking`, because its head never got a required-check run queued AT ALL — a THIRD,
+ * disjoint population from the `hungCi`/`mainRedRebase` halves below (see
+ * `we:scripts/conveyor/main-red-recovery.mjs`'s own "MISSING-CI-RUN RECOVERY" section for the full incident and
+ * why neither existing pass sees it). `we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepMissingRunRecovery`
+ * implements the real writes (prefer `PUT /pulls/{n}/update-branch`, else `gh workflow run`, plus clearing the
+ * stale `checking` label its own narrow true positive proves wrong) and is already registered per-repo in
+ * `we:skills-src/conveyor/daemon-manifest.mjs` (`ci-red-recovery-watch-<repo>`, same CLI entry point as its two
+ * siblings, per that file's own "same sweep invocation" comment) — but, mirroring EXACTLY the reason
+ * {@link runHungCiRecoveryAllRepos}/{@link runMainRedRebaseAllRepos} both ride THIS daemon instead of that
+ * `daemon-manifest.mjs` entry (no launchd job installs `pass-daemon.mjs` for it — only an `.example` plist
+ * exists), this rides the SAME already-live daemon too. Mirrors {@link runMainRedRebaseAllRepos}'s own per-repo
+ * fan-out, failure isolation, and `apply: true` always (`sweepMissingRunRecovery`'s own idempotent per-sha
+ * comment-count cap, `we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA`, makes
+ * this safe to run unconditionally on the default cadence — the same "efficiency no-op, not a safety refusal"
+ * trade every sibling pass-daemon entry in `daemon-manifest.mjs` already documents for itself).
+ * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to the real
+ *   `sweepMissingRunRecovery`); every other option is forwarded to it for EVERY repo except `repo` itself.
+ * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, dispatched:Array<object>,
+ *   refusals:Array<object>}} `dispatched`/`refusals` here are the pass's own `applied`/`dispatch`+`refusals`
+ *   rows, repo-tagged the same way {@link runMainRedRebaseAllRepos} tags its own.
+ */
+export function runMissingRunRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, tick = sweepMissingRunRecovery, ...tickOpts } = {}) {
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo, apply: true }));
+  const dispatched = [];
+  const refusals = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    for (const a of (result.applied ?? [])) dispatched.push({ ...a, repo, kind: 'trigger-ci' });
+    for (const r of (result.refusals ?? [])) if (r.kind !== 'not-overdue') refusals.push({ ...r, repo });
+  }
+  return { repos: perRepo, dispatched, refusals };
+}
+
+/**
  * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runTickAllRepos — #xngv3vn (epic #3383/#4075): the
  * daemon's WHOLE per-tick unit of work, composing BOTH halves this daemon now owns — the pre-existing `fix`
  * dispatch ({@link runReconcileFixDispatchAllRepos}) and the previously-uncalled `ci-heal` dispatch
@@ -466,7 +506,7 @@ export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, ti
  *   unpaused — the login break does not touch them.
  */
 export async function runTickAllRepos({
-  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, notesTick, notesDryRun,
+  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, missingRunTick, notesTick, notesDryRun,
   authGateOverride,
 } = {}) {
   // card x5kagse (epic #4075/#3383) — computed ONCE per tick, shared by both dispatching halves below. Real IO
@@ -494,6 +534,10 @@ export async function runTickAllRepos({
   // {@link runMainRedRebaseAllRepos}'s own docblock for why this daemon, specifically, is where it lives (same
   // reason `hungCi` already does — the pass's own `daemon-manifest.mjs` entry has no launchd job installed).
   const mainRedRebase = runMainRedRebaseAllRepos({ repos, ...(mainRedRebaseTick ? { tick: mainRedRebaseTick } : {}) });
+  // xi4od2p (#4075/#3383) — the SIXTH half this daemon now owns: see {@link runMissingRunRecoveryAllRepos}'s
+  // own docblock for why this daemon, specifically, is where it lives (same reason `hungCi`/`mainRedRebase`
+  // already do — the pass's own `daemon-manifest.mjs` entry has no launchd job installed).
+  const missingRun = runMissingRunRecoveryAllRepos({ repos, ...(missingRunTick ? { tick: missingRunTick } : {}) });
   // #4191 (epic #4075/#3383) — the FIFTH half this daemon now owns: surface `planReconcile`'s own `notes`
   // (`ci-heal-exhausted`/`awaiting-permission`) that neither `fix` nor `ci-heal` above ever forwards — see
   // {@link runReconcileNotesAllRepos}'s own docblock for why this is a separate, independent read rather than a
@@ -503,12 +547,13 @@ export async function runTickAllRepos({
   });
   return {
     repos: fix.repos, // same repo list every half ticked — the shape onTick's log already reads from
-    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched],
-    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals, ...notes.refusals],
+    dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched, ...missingRun.dispatched],
+    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals, ...missingRun.refusals, ...notes.refusals],
     reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? [])],
     ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
     hungCi, // the hung-ci-recovery half's own detail, same reason
     mainRedRebase, // the main-red-rebase half's own detail, same reason
+    missingRun, // the missing-run-recovery half's own detail, same reason (xi4od2p, #4075/#3383)
     authPaused: authGate.paused, // card x5kagse — fix/ci-heal dispatch skipped outright this tick
     authPauseReason: authGate.reason,
     notes: notes.notes, // #4191 — every surfaced note this tick saw, repo-tagged
@@ -566,6 +611,21 @@ export function formatMainRedRebaseActionLine(a) {
 }
 
 /**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatMissingRunActionLine — xi4od2p (#4075/#3383):
+ * ONE printable line per missing-run-trigger action this tick attempted, including whether the stale `checking`
+ * label was cleared. Mirrors {@link formatMainRedRebaseActionLine}'s own shape.
+ * @param {{repo?:string, prNumber?:(number|null), headRefName?:(string|null), ok?:boolean, action?:string,
+ *   labelCleared?:boolean, error?:string, why?:string}} a
+ * @returns {string}
+ */
+export function formatMissingRunActionLine(a) {
+  const prLabel = a?.prNumber == null ? '(no PR)' : `PR #${a.prNumber}`;
+  const outcome = a?.ok ? `applied ${a.action}` : `FAILED ${a.action}${a?.error ? ` (${a.error})` : ''}`;
+  const labelNote = a?.labelCleared ? ', cleared stale checking label' : '';
+  return `reconcile-fix-dispatch-daemon: missing-run-recovery ${a?.repo ?? '?'} ${prLabel} (${a?.headRefName ?? '?'}) — ${outcome}${labelNote} — ${a?.why ?? '(no reason recorded)'}`;
+}
+
+/**
  * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatNoteLine — #4191 (epic #4075/#3383): ONE
  * printable line per `planReconcile` note this tick saw (`ci-heal-exhausted`/`awaiting-permission`), with its
  * own reason — mirrors {@link formatRefusalLine}'s own "never just a count" discipline, applied to the
@@ -608,7 +668,7 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
       const {
-        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, notes = [], noteComments = [],
+        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, missingRun, notes = [], noteComments = [],
         authPaused = false, authPauseReason = null,
       } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
@@ -635,6 +695,8 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // x5uqim1 follow-up (#4075/#3383) — ONE LINE PER MECHANICAL-REBASE ACTION, same discipline as the
       // hung-run loop just above.
       for (const a of (mainRedRebase?.dispatched ?? [])) log.error(formatMainRedRebaseActionLine(a));
+      // xi4od2p (#4075/#3383) — ONE LINE PER MISSING-RUN-TRIGGER ACTION, same discipline as the two loops above.
+      for (const a of (missingRun?.dispatched ?? [])) log.error(formatMissingRunActionLine(a));
       // #4191 (epic #4075/#3383) — ONE LINE PER SURFACED NOTE (`ci-heal-exhausted`/`awaiting-permission`),
       // never just a count — the exact population this card exists to stop silently dropping, plus ONE LINE
       // PER note-comment decision (already-posted / dry-run would-post, with the full body / posted / failed).
