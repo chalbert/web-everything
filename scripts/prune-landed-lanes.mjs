@@ -68,18 +68,71 @@ export function openPrHeadRefs(prList) {
 }
 
 /**
+ * #4138 — `branch → [PR numbers]` for every OPEN PR BASED ON `branch` (`gh pr list --json
+ * headRefName,baseRefName,number`). Deleting a branch some other open PR is based on cascade-CLOSES that
+ * other PR — the exact #2578 incident this repo's drain already guards against on ITS OWN merge-and-delete
+ * path (`we:scripts/lib/pr-merge-gate.mjs`'s `retargetStackedPrs`, #3383). This sweep deletes `lane/*` refs
+ * too and had NO equivalent guard at all — a stacked PR based on a `lane/*` branch this sweep deletes was
+ * silently exposed to the identical cascade. Pure.
+ */
+export function openPrStackedBases(prList) {
+  const map = new Map();
+  for (const p of prList || []) {
+    if (!p || !p.baseRefName || p.number == null) continue;
+    const list = map.get(p.baseRefName) || [];
+    list.push(p.number);
+    map.set(p.baseRefName, list);
+  }
+  return map;
+}
+
+/**
  * The prune verdict for ONE lane branch. Pure — `mergeTree` is precomputed by the caller (the `git
  * merge-tree --write-tree origin/main origin/<branch>` I/O), so this is unit-testable without git.
- * @param {{hasOpenPr:boolean, mergeTree:{ok:boolean, treeEqualsMain?:boolean}|null}} ctx
+ * @param {{hasOpenPr:boolean, mergeTree:{ok:boolean, treeEqualsMain?:boolean}|null, stackedOpenPrNums?:Array<number|string>}} ctx
  * @returns {{verdict:'skip'|'delete'|'keep', reason:string}}
  */
-export function classifyLaneBranch(branch, { hasOpenPr, mergeTree } = {}) {
+export function classifyLaneBranch(branch, { hasOpenPr, mergeTree, stackedOpenPrNums = [] } = {}) {
   if (hasOpenPr) return { verdict: 'skip', reason: 'open PR — live work' };
+  // #4138 — checked BEFORE the content classification, same priority as `hasOpenPr` above: an open PR based
+  // on this branch is live work too, just indirectly (this branch is its foundation, not its own head).
+  if (Array.isArray(stackedOpenPrNums) && stackedOpenPrNums.length)
+    return { verdict: 'skip', reason: `open PR(s) #${stackedOpenPrNums.join(', #')} based on this branch — deleting it would cascade-close ${stackedOpenPrNums.length > 1 ? 'them' : 'it'} (#4138)` };
   if (!mergeTree || mergeTree.ok !== true)
     return { verdict: 'keep', reason: 'merge-tree conflict or error — needs manual review' };
   if (mergeTree.treeEqualsMain)
     return { verdict: 'delete', reason: 'content fully superseded (three-way merge into origin/main == main)' };
   return { verdict: 'keep', reason: 'has unmerged content and no open PR — needs manual review (possible orphaned WIP)' };
+}
+
+/**
+ * #4138 — the DELETE-TIME safety gate, re-run against a FRESH open-PR read taken immediately before the
+ * destructive `gh api DELETE` call (never the sweep-start snapshot `results` was classified from). Closes the
+ * TOCTOU a long sweep otherwise leaves open: `results` may classify a branch `delete`-eligible using an
+ * open-PR snapshot that is by now stale — an operator reopened a PR, or pushed a new one, in the (possibly
+ * long, `git merge-tree`-per-branch) interval between that snapshot and this exact ref's delete. Re-checking
+ * right here bounds the residual race to this one read-then-delete pair, not the whole sweep's duration.
+ * Pure — `fresh` is the caller's freshly-fetched `{heads:Set, stackedBases:Map}` (see `openPrHeadRefs` /
+ * `openPrStackedBases`).
+ * @returns {{safe:true}|{safe:false, reason:string, stackedPrs?:Array<number|string>}}
+ */
+export function isStillSafeToDelete(branch, { heads, stackedBases } = {}) {
+  if (heads instanceof Set && heads.has(branch))
+    return { safe: false, reason: 'now backs an open PR (opened or reopened since this sweep started)' };
+  const stacked = stackedBases instanceof Map ? stackedBases.get(branch) : null;
+  if (Array.isArray(stacked) && stacked.length)
+    return { safe: false, reason: `open PR(s) #${stacked.join(', #')} are now based on this branch`, stackedPrs: stacked };
+  return { safe: true };
+}
+
+/** #4138 — the near-miss comment marker + body: posted on a PR this sweep discovered (via the fresh
+ *  pre-delete re-check) right as it was about to delete that PR's own branch, or a branch that PR is based
+ *  on. Mirrors `we:scripts/merge-ai-prs.mjs`'s `drainReasonMarker`/`buildDrainReasonComment` idiom (its own
+ *  marker ⇒ its own dedupe bucket) without importing that file's much heavier drain machinery — this script
+ *  is deliberately a small, dependency-light periodic sweep. Pure. */
+export function nearMissCommentMarker() { return '<!-- prune-landed-lanes-near-miss -->'; }
+export function buildNearMissComment(branch, reason) {
+  return `${nearMissCommentMarker()}\n⚠️ **prune-landed-lanes stepped back from deleting \`${branch}\`**\n\nThis periodic ref-cleanup sweep (#2226) was about to delete \`${branch}\` (its content looked fully superseded by \`main\`), but a fresh check right before the delete found: ${reason}. Deleting it anyway could have closed this PR via GitHub's own base/head-branch-delete cascade (#3383/#4138), so the sweep withheld the delete instead — no action needed unless \`${branch}\` later goes stale again, in which case a future pass will re-evaluate it.`;
 }
 
 // ── CLI (the git/gh I/O boundary) ───────────────────────────────────────────────────────────────────────
@@ -102,10 +155,14 @@ if (IS_CLI) {
       .map((s) => s.replace(/^origin\//, ''))
       .filter(isLaneBranch);
 
+    const listOpenPrs = () => JSON.parse(sh('gh', ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'number,headRefName,baseRefName']) || '[]');
+
     let openHeads = new Set();
+    let stackedBases = new Map();
     try {
-      const prJson = JSON.parse(sh('gh', ['pr', 'list', '--state', 'open', '--limit', '200', '--json', 'headRefName']) || '[]');
+      const prJson = listOpenPrs();
       openHeads = openPrHeadRefs(prJson);
+      stackedBases = openPrStackedBases(prJson); // #4138
     } catch (e) {
       // fail-CLOSED on the safety check: if we can't confirm which refs are live, treat every ref as
       // possibly-live (skip all) rather than risk deleting one behind an unseen open PR.
@@ -120,8 +177,9 @@ if (IS_CLI) {
     const results = [];
     for (const branch of branches) {
       const hasOpenPr = openHeads.has(branch);
+      const stackedOpenPrNums = stackedBases.get(branch) || [];
       let mergeTree = null;
-      if (!hasOpenPr && mainTree) {
+      if (!hasOpenPr && !stackedOpenPrNums.length && mainTree) {
         try {
           const tree = sh('git', ['merge-tree', '--write-tree', 'origin/main', `origin/${branch}`]).trim();
           mergeTree = { ok: true, treeEqualsMain: tree === mainTree };
@@ -129,7 +187,7 @@ if (IS_CLI) {
           mergeTree = { ok: false }; // conflicting merge (or other error) — git exits non-zero
         }
       }
-      const { verdict, reason } = classifyLaneBranch(branch, { hasOpenPr, mergeTree });
+      const { verdict, reason } = classifyLaneBranch(branch, { hasOpenPr, mergeTree, stackedOpenPrNums });
       results.push({ branch, verdict, reason });
     }
 
@@ -138,9 +196,47 @@ if (IS_CLI) {
     const skipped = results.filter((r) => r.verdict === 'skip');
     const deleted = [];
     const failed = [];
+    const abortedNearMiss = []; // #4138 — classified 'delete' at sweep-start, withheld by the fresh pre-delete recheck
 
-    if (APPLY) {
+    if (APPLY && toDelete.length) {
+      // #4138 — a FRESH open-PR read, taken NOW (right before any delete in this pass runs), never reused
+      // from the sweep-start snapshot above: see `isStillSafeToDelete`'s doc for why the sweep-start read can
+      // be stale by the time execution reaches here (content classification above may have taken a while).
+      // Best-effort: a failed re-fetch fails CLOSED — treat every remaining delete as unsafe this pass rather
+      // than fall back to the stale snapshot.
+      let freshHeads = null;
+      let freshStackedBases = null;
+      try {
+        const freshPrJson = listOpenPrs();
+        freshHeads = openPrHeadRefs(freshPrJson);
+        freshStackedBases = openPrStackedBases(freshPrJson);
+      } catch (e) {
+        if (!AS_JSON) process.stderr.write(`  ⚠ pre-delete re-check could not list open PRs (${String(e.message || e).split('\n')[0]}) — withholding every delete this pass (#4138 fail-closed)\n`);
+      }
+
       for (const r of toDelete) {
+        const safety = (freshHeads && freshStackedBases)
+          ? isStillSafeToDelete(r.branch, { heads: freshHeads, stackedBases: freshStackedBases })
+          : { safe: false, reason: 'pre-delete open-PR re-check failed — fail closed' };
+        if (!safety.safe) {
+          abortedNearMiss.push({ branch: r.branch, reason: safety.reason });
+          if (!AS_JSON) process.stderr.write(`  ⚠ withheld delete of ${r.branch} — ${safety.reason} (#4138)\n`);
+          // #4138 — a PR this sweep almost cascade-closed ALWAYS gets a reason comment, posted here instead
+          // of the delete (never after a close: once GitHub closes a PR via a vanished base/head, both
+          // `pr edit --base` and reopen are refused — see we:scripts/lib/pr-merge-gate.mjs's #3383 doc — so
+          // "explain after the fact" is not a recoverable fallback for this hazard).
+          const targets = Array.isArray(safety.stackedPrs) && safety.stackedPrs.length ? safety.stackedPrs : (freshHeads && freshHeads.has(r.branch) ? [null] : []);
+          for (const prNum of targets) {
+            try {
+              const num = prNum != null ? prNum : JSON.parse(sh('gh', ['pr', 'list', '--state', 'open', '--head', r.branch, '--json', 'number']) || '[]')[0]?.number;
+              if (num == null) continue;
+              const existing = JSON.parse(sh('gh', ['pr', 'view', String(num), '--json', 'comments']) || '{}').comments || [];
+              if (existing.some((c) => String(c?.body || '').startsWith(nearMissCommentMarker()))) continue; // already recorded — no re-post
+              sh('gh', ['pr', 'comment', String(num), '--body', buildNearMissComment(r.branch, safety.reason)]);
+            } catch { /* best-effort — the withheld delete (the safety property that matters) already happened above */ }
+          }
+          continue;
+        }
         try {
           // #2226 — gh api DELETE, never `git push --delete` (see file header: the write-time push guard
           // can't statically verify a variable-driven ref, so route deletion outside that guarded class).
@@ -153,13 +249,13 @@ if (IS_CLI) {
     }
 
     if (AS_JSON) {
-      process.stdout.write(JSON.stringify({ dryRun: !APPLY, total: results.length, toDelete: toDelete.map((r) => r.branch), deleted, failed, kept, skipped }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ dryRun: !APPLY, total: results.length, toDelete: toDelete.map((r) => r.branch), deleted, failed, abortedNearMiss, kept, skipped }, null, 2) + '\n');
     } else {
       for (const r of results) {
         const mark = r.verdict === 'delete' ? (APPLY ? '✗ deleted' : '· would delete') : r.verdict === 'skip' ? '· skip' : '· keep';
         process.stderr.write(`  ${mark} ${r.branch} — ${r.reason}\n`);
       }
-      process.stderr.write(`${APPLY ? '' : 'DRY-RUN: '}${toDelete.length} superseded, ${kept.length} kept for review, ${skipped.length} skipped (open PR)${APPLY ? `; ${deleted.length} deleted, ${failed.length} failed` : ''}.\n`);
+      process.stderr.write(`${APPLY ? '' : 'DRY-RUN: '}${toDelete.length} superseded, ${kept.length} kept for review, ${skipped.length} skipped (open PR)${APPLY ? `; ${deleted.length} deleted, ${failed.length} failed, ${abortedNearMiss.length} withheld (#4138 pre-delete recheck)` : ''}.\n`);
       if (!APPLY && toDelete.length) process.stderr.write(`  re-run with --yes to delete the ${toDelete.length} superseded ref(s) above.\n`);
     }
 
