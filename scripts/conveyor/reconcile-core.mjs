@@ -284,6 +284,21 @@ const labelNames = (labels) => (Array.isArray(labels) ? labels : [])
 const commentBody = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#failingCheckNames — #4191 (epic #4075/#3383): the NAMED reason a
+ * `ci-heal-exhausted` note surfaces, so the operator reads "which check, still failing" instead of a bare
+ * attempt count. Mirrors `we:scripts/operations/operator-queue.mjs#evaluatePr`'s own `names(failing)` filter
+ * (`status === 'COMPLETED'` and a non-passing conclusion) rather than inventing a second rule for the same
+ * question — this file already reads `pr.statusCheckRollup` for `reduceCheckState`'s own `check.state`, this
+ * just names the specific rows behind a `red` state instead of only counting them. Pure.
+ * @param {Array<{name?:string, context?:string, status?:string, conclusion?:string}>} [rollup]
+ * @returns {string[]}
+ */
+const failingCheckNames = (rollup) => (Array.isArray(rollup) ? rollup : [])
+  .filter((c) => String(c?.status ?? '').toUpperCase() === 'COMPLETED'
+    && !['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(String(c?.conclusion ?? '').toUpperCase()))
+  .map((c) => c?.name || c?.context || 'unnamed check');
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#startedAtMs — `startedAt` as epoch ms, whichever shape it arrives in.
  *
  * MEASURED, NOT ASSUMED: `claude agents --json` returns `startedAt` as an epoch NUMBER
@@ -929,10 +944,16 @@ export function planReconcile({
         // attempt is exactly the case a person must be pulled in for, so it gets the SAME surfaced-note
         // treatment `awaiting-permission` already gets, with the literal phrase an operator (or an escalation
         // reader grepping for it) can search on.
+        // #4191 (epic #4075/#3383) — the operator's own queue/comment surfacing (see this note's callers) reads
+        // as "needs your decision: fix attempts exhausted", WITH the last failure reason — a bare attempt count
+        // makes the operator re-open the PR just to find out what is actually still red. `failingCheckNames`
+        // reads the SAME `pr.statusCheckRollup` `withPhase`/`check` above already derived `check.state` from;
+        // never re-fetched, never re-derived beyond naming the rows a `red` state already counted.
+        const lastFailureReason = failingCheckNames(pr?.statusCheckRollup).join(', ') || 'required check failing (no readable check name)';
         notes.push({
-          kind: 'ci-heal-exhausted', prNumber, attempts: ciHealAttempts, cap: ciHealCap,
+          kind: 'ci-heal-exhausted', prNumber, attempts: ciHealAttempts, cap: ciHealCap, lastFailureReason,
           text: `PR #${prNumber}: ci-heal attempts exhausted (${ciHealAttempts}/${ciHealCap}) — auto-heal cannot`
-            + ' repair this required-check failure any further; a person must take it over',
+            + ` repair this required-check failure any further; a person must take it over. Last failure: ${lastFailureReason}`,
         });
       } else {
         dispatch.push({

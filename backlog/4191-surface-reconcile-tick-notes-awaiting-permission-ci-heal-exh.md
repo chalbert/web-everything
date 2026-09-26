@@ -3,9 +3,10 @@ bornAs: xg460kw
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/operator-queue.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
 tags: []
 ---
 
