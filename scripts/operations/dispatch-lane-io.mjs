@@ -83,7 +83,11 @@ import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
-import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from '../lib/gh-app-shim.mjs';
+import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions } from '../lib/gh-app-shim.mjs';
+// #xrv69j6 — the pool-dir basenames a lane lives under (`web-everything` / `webeverything`), so the ONE lane
+// a dispatch will use can be resolved to an absolute path the same way `bootstrap-session.mjs#poolRoots`
+// already probes it, without re-deriving that table.
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { inFlight, notApplied } from './effect-executor.mjs';
 import { createFileRunStore } from './run-store.mjs';
 import { DEFAULT_EXPECTED_WITHIN_MINUTES, DISPATCH_EFFECT, DISPATCH_LISTING_GRACE_MINUTES, LAUNCH_KINDS } from './dispatch-lane.mjs';
@@ -1222,6 +1226,15 @@ export function createDispatchSinks({
   // seam rather than folded into the provider call.
   sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
   ensureSessionCwd = ensureDispatchSessionCwd,
+  // #xrv69j6 — the ONE lane this dispatch will use (or, defensively, every lanes-pool root — see
+  // {@link dispatchLaneGrant}'s own header), pre-granted as an additional directory + Edit/Write allow rule
+  // in the session's own `<cwd>/.claude/settings.local.json`, so its FIRST Edit (the brief's `lane-pool.mjs
+  // acquire` step, seconds after the session starts) lands inside a directory the CLI has already approved
+  // rather than an unattended `--bg` session sitting on an unanswerable permission prompt (live case:
+  // `fix-2735`, 36+ min blocked, #2735 stalled). Two seams, mirroring `resolveSettingsEnv`/`sessionCwdFor`
+  // above: `resolveLaneGrant` is the PURE computation, `grantLanePermission` the never-throwing side effect.
+  resolveLaneGrant = (payload) => dispatchLaneGrant(payload, { root }),
+  grantLanePermission = (cwd, grant) => ensureSettingsFilePermissions({ cwd, ...grant }),
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -1238,6 +1251,10 @@ export function createDispatchSinks({
       // #4174 — THE FIX: the session's cwd is a scratch directory OUTSIDE this checkout, never `root` itself.
       // See `dispatchSessionCwd`'s own header for why this location and not, say, an `os.tmpdir()` mkdtemp.
       const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
+      // #xrv69j6 — grant the lane BEFORE the agent is spawned into this cwd, so the settings file already
+      // carries the grant by the time the session's own first Bash/Edit tool call reads it. Best-effort (the
+      // function itself never throws) — a grant failure must never block the dispatch it is here to unblock.
+      grantLanePermission(sessionCwd, resolveLaneGrant(payload));
       // #3857 — the model-tier table's answer for this dispatch, read straight off `payload.routing`
       // (`decideDispatchRoute`'s record, computed upstream by the read step — never recomputed here). `null`
       // when the read carried no routing record (a hand-built fixture), which keeps `buildAgentArgv` on its
@@ -1648,6 +1665,78 @@ export function dispatchScratchRoot({ root = REPO_ROOT, env = process.env } = {}
  */
 export function dispatchSessionCwd(sessionId, opts = {}) {
   return join(dispatchScratchRoot(opts), String(sessionId));
+}
+
+/**
+ * EVERY POOL DIRECTORY this dispatcher's own lanes could live under — `<workspace>/.lanes/web-everything` AND
+ * `<workspace>/.lanes/webeverything`, mirroring `bootstrap-session.mjs#poolRoots`'s own two-basename probe
+ * (`CONSTELLATION_REPOS.we.dirs`) rather than re-deriving which basename this host actually uses. Hardcoded to
+ * the `we` profile — same stated scope as {@link briefTokensForRepo}'s own call site above (#3960 multi-repo
+ * slice 5's job, not this one's): every launch this file dispatches plans against the WE backlog/PR pool only.
+ * PURE.
+ * @param {string} [root]
+ * @returns {string[]}
+ */
+function laneWorkspacePoolDirs(root = REPO_ROOT) {
+  const workspace = workspaceRootOf(root);
+  return CONSTELLATION_REPOS.we.dirs.map((d) => join(workspace, '.lanes', d));
+}
+
+/**
+ * #xrv69j6 (epic #4075) — THE ABSOLUTE DIRECTORY a given lane NUMBER resolves to, on THIS host, right now.
+ *
+ * WHY THIS IS KNOWABLE AT DISPATCH TIME, NOT ONLY AFTER `lane-pool.mjs acquire` RUNS INSIDE THE SESSION:
+ * `we:scripts/operations/dispatch-lane.mjs`'s own `assigned-lane` guard THROWS before a dispatch is ever
+ * cleared if `launch.lane` is null/empty, for every one of the six launch kinds (build/prepare/
+ * prepare-decision/investigate/fix/ci-heal) — so by the time {@link createDispatchSinks}'s effect payload
+ * reaches this function, a lane NUMBER already exists; only its absolute PATH does not yet.
+ *
+ * EXISTS-FILTERED, THEN FIRST CANDIDATE, same pattern as `bootstrap-session.mjs#primaryCheckout`'s own
+ * basename probe: a real host has exactly one of the two pool-dir basenames provisioned, and probing for
+ * whichever exists is more robust than hardcoding one. Falling back to the first candidate when NEITHER
+ * exists yet (a lane number the pool has not grown to) still returns a real, deterministic path — better than
+ * refusing to grant anything, and harmless: granting a not-yet-existing directory changes nothing the CLI
+ * would otherwise refuse differently.
+ * @param {string|number} laneNum
+ * @param {{root?:string, exists?:Function}} [o]
+ * @returns {string}
+ */
+export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync } = {}) {
+  const candidates = laneWorkspacePoolDirs(root).map((poolDir) => join(poolDir, `lane-${laneNum}`));
+  return candidates.find((p) => exists(p)) ?? candidates[0];
+}
+
+/**
+ * THE DEFENSIVE FALLBACK's grant surface — every pool root that actually exists on this host, never a
+ * primary checkout. Reached only when a dispatch payload carries no lane number at all, which the
+ * `assigned-lane` guard above means should not happen through the normal `dispatch-lane` CLI path; kept so a
+ * caller that invokes {@link createDispatchSinks}'s sink directly, bypassing that guard, still grants SOME
+ * scoped directory rather than nothing. PURE over `exists`.
+ * @param {string} [root]
+ * @param {Function} [exists]
+ * @returns {string[]}
+ */
+export function laneRootsFor(root = REPO_ROOT, exists = existsSync) {
+  return laneWorkspacePoolDirs(root).filter((p) => exists(p));
+}
+
+/**
+ * #xrv69j6 — THE PERMISSION GRANT for one dispatch, given its effect payload. A lane number
+ * (`payload.lane`) resolves to exactly that lane's directory (the common, expected case — see
+ * {@link laneDirFor}'s own header for why this is always available today); its absence falls back to every
+ * existing lanes-pool root ({@link laneRootsFor}) rather than refusing to grant anything. NEVER a primary
+ * checkout either way. PURE over `exists`.
+ * @param {{lane?:string|number|null}} payload
+ * @param {{root?:string, exists?:Function}} [o]
+ * @returns {{additionalDirectories:string[], allow:string[]}}
+ */
+export function dispatchLaneGrant(payload, { root = REPO_ROOT, exists = existsSync } = {}) {
+  const lane = payload?.lane;
+  const dirs = (lane != null && String(lane).trim() !== '')
+    ? [laneDirFor(lane, { root, exists })]
+    : laneRootsFor(root, exists);
+  const rules = dirs.flatMap((d) => [`Edit(${d}/**)`, `Write(${d}/**)`]);
+  return { additionalDirectories: dirs, allow: rules };
 }
 
 /** Test/override hook for {@link grantDispatchTrust}'s trust file — mirrors {@link DISPATCH_CWD_ENV}. A

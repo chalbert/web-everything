@@ -1,4 +1,5 @@
 ---
+bornAs: x3vjug7
 kind: decision
 parent: "4075"
 status: open
@@ -7,7 +8,7 @@ preparedDate: "2026-09-26"
 preparedAgainstSha: "00413a56cc1f494d8dc5bcde091547d0050e957d"
 relatedReport: reports/2026-09-26-workflow-manager-flows-as-executable-config.md
 tags: [conveyor, daemons, workflow, flows, decision, decision-prep]
-relatedTo: ["4120", "3931", "xr05jjl", "3031"]
+relatedTo: ["4120", "3931", "4220", "3031"]
 ---
 
 # Workflow manager: flows as executable configuration
@@ -448,7 +449,7 @@ Most daemon breaks on 2026-09-26 were knock-on effects on a later step of a flow
 - a retargeted stacked PR → CI never re-ran;
 - plus states with no owner and waits with no bound.
 
-Replayed, the xr05jjl checker catches 6 of today's 7 breaks. It misses the App-auth misread: a wrong answer
+Replayed, the 4220 checker catches 6 of today's 7 breaks. It misses the App-auth misread: a wrong answer
 inside one check, which only a unit test or a runtime probe can catch.
 
 The checker's 57 findings on #2744 are exactly what an executing engine must not waive:

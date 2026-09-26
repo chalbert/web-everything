@@ -1,12 +1,14 @@
 ---
+bornAs: xr05jjl
 kind: story
 size: 8
 parent: "4075"
-status: active
+status: resolved
 scaffoldedBy: "flows-describe-4075"
 dateScaffolded: "2026-09-26"
 scope: ["we:scripts/conveyor/flows/README.md", "we:scripts/conveyor/flows/flow-model.mjs", "we:scripts/conveyor/flows/check.mjs", "we:scripts/conveyor/flows/graph.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
 ---
 
