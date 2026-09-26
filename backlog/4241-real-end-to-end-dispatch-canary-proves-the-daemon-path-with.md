@@ -2,9 +2,10 @@
 bornAs: x0nxuqd
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/canary.mjs", "we:scripts/conveyor/canary-stages.mjs", "we:scripts/conveyor/__tests__/canary-stages.test.mjs", "we:skills-src/conveyor/canary-agent-brief.md", "we:docs/agent/prototype-based-dev.md"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
