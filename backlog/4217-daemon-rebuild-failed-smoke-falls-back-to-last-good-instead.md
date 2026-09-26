@@ -1,4 +1,5 @@
 ---
+bornAs: x5wbsbc
 kind: story
 size: 8
 parent: "4075"
@@ -25,7 +26,7 @@ Every daemon rebuild since #2731 (we:scripts/lib/daemon-rebuild.mjs off-lock can
   167 s and 72 s overlapping); the first to finish removed the worktree under the second. Fixed by #2731's
   single-flight build lease (`rebuild-in-progress`, unique candidate path per lease), merged into this branch;
   the whole fallback (candidate, plain main, last-good control) runs under that one lease.
-- Also resolves #2731's card `xa4qo7n` (this branch carries all of #2731, including its review fix 85223ccbf).
+- Also resolves #2731's card `4218` (this branch carries all of #2731, including its review fix 85223ccbf).
 - `gh-pr-list` 30 s timeout: same window, two concurrent smokes; budget is unchanged from the old smoke (30 s).
 
 ## Design
