@@ -243,6 +243,21 @@ describe('createChecksRunner', () => {
     expect(r.checks[0]).toMatchObject({ name: 'verify-lane', outcome: 'pass' });
   });
 
+  it('includes the configured admission ceiling in the spawn timeout (#3383)', () => {
+    // Independently specified expectations — NOT recomputed via verifySpawnTimeoutMs — so reverting the spawn's
+    // bound to the suites-only 30 minutes fails here: a gate queued behind heavy commands would be killed as
+    // `unrun` before its suites even started.
+    const timeoutFor = (env) => {
+      let seen;
+      const spawn = (_cmd, _argv, opts) => { seen = opts.timeout; return { status: 0, stdout: '{"status":"green","sha":"abc"}' }; };
+      createChecksRunner({ spawn, env })({ cwd: '/x', mode: 'run' });
+      return seen;
+    };
+    const MIN = 60_000;
+    expect(timeoutFor({})).toBe((120 + 30 + 5) * MIN); // default 120-minute admission ceiling
+    expect(timeoutFor({ WE_HEAVY_ADMISSION_CEILING_MS: String(10 * MIN) })).toBe((10 + 30 + 5) * MIN);
+  });
+
   it('never throws when the home cannot be spawned', () => {
     const spawn = () => { throw new Error('ENOENT'); };
     expect(createChecksRunner({ spawn })({ cwd: '/x', mode: 'run' }).checks[0].outcome).toBe('unrun');

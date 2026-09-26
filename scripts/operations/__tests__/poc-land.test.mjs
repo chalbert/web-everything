@@ -348,4 +348,25 @@ describe('the lane lease is renewed around every gate run (#3383, a landing outl
       expect(JSON.parse(rf(join(gitDir, '.lane-lease'), 'utf8'))).toEqual({ session: 's', acquiredAt: '2026-09-24T08:00:00.000Z', ttlMinutes: 240, renewedAt: '2026-09-24T12:00:00.000Z' });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+
+  it('a renewal killed mid-write never leaves a torn lease behind (atomic temp+rename, #3383)', async () => {
+    const { defaultRenewLease } = await import('../poc-land.mjs');
+    const fsMod = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'poc-renew-torn-'));
+    try {
+      const gitDir = join(dir, '.git'); fsMod.mkdirSync(gitDir);
+      const leaseFile = join(gitDir, '.lane-lease');
+      const original = { session: 's', acquiredAt: '2026-09-24T08:00:00.000Z', ttlMinutes: 240 };
+      fsMod.writeFileSync(leaseFile, JSON.stringify(original));
+      const run = () => ({ status: 0, stdout: `${gitDir}\n`, stderr: '' });
+      const now = () => new Date('2026-09-24T12:00:00.000Z');
+      // The write is "killed" after truncating and writing half the body — whatever path it targets.
+      const killedWrite = (path, body) => { fsMod.writeFileSync(path, String(body).slice(0, 10)); throw new Error('SIGKILL'); };
+      const fs = { writeFileSync: killedWrite, renameSync: fsMod.renameSync, rmSync: fsMod.rmSync };
+      expect(defaultRenewLease({ cwd: dir, run, now, fs })).toBe(false);
+      // The real lease is still the whole, parseable original — never a torn prefix a reader treats as "no lease".
+      expect(JSON.parse(fsMod.readFileSync(leaseFile, 'utf8'))).toEqual(original);
+      expect(fsMod.readdirSync(gitDir)).toEqual(['.lane-lease']); // and no stray temp file is left behind
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
