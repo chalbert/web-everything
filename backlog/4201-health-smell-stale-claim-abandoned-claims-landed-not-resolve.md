@@ -3,10 +3,11 @@ bornAs: x4axhga
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/health-smells/stale-claim.mjs", "we:scripts/conveyor/health-smells/index.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/__tests__/health-watch.test.mjs", "we:scripts/conveyor/health-smells/__tests__/stale-claim.test.mjs"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
