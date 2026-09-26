@@ -60,6 +60,8 @@ import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
 import { collectHeavyQueue } from './heavy-queue-io.mjs';
+import { liveStateOperation, LIVE_STATE_OP } from './live-state.mjs';
+import { collectLiveState } from './live-state-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -407,6 +409,16 @@ export const OPERATIONS = Object.freeze({
     declaration: prioritySyncOperation({ readFacts: createPrioritySyncReader() }),
     sinks: createPrioritySyncSinks(),
     finish: finishPriorityOutcome,
+  }),
+  // Card xvz55jf (epic #3931, "Live work transparency on Plateau /wip") — ONE JSON snapshot of machine health:
+  // daemons, open health episodes, the test queue, lane pools, the drain's last pass, GitHub App auth, and
+  // machine load. Read-only, same no-sinks reasoning as `daemon-status`/`heavy-queue`: every step is `compute`.
+  // `collectLiveState`'s real reads (launchd/lease/log via the daemon-status collector, the heavy-admission
+  // pool, the health watch's own store, `lane-pool.mjs status --json` per constellation repo, the drain
+  // daemon's `history.jsonl`, the GitHub App status file, `os.loadavg`/`os.cpus`) are bound here, and ONLY here.
+  [LIVE_STATE_OP]: () => ({
+    declaration: liveStateOperation({ collect: collectLiveState }),
+    sinks: {},
   }),
 });
 

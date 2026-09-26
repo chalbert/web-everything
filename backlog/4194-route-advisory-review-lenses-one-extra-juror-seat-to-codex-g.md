@@ -3,10 +3,12 @@ bornAs: xmk6p7w
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 blockedBy: ["3949"]
-scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/codex-direct-task.mjs", "we:scripts/gemini-direct-task.mjs"]
+scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/codex-direct-task.mjs", "we:scripts/gemini-direct-task.mjs", "we:scripts/operations/review-extra-seats.mjs", "we:scripts/operations/review-job.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 

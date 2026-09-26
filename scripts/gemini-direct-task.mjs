@@ -29,7 +29,7 @@
  * fresh successful agy 1.2.2 stdin and file-write streams for this task. These are supplied observations,
  * not probes repeated by this implementation. #3632 tested a DIFFERENT, retired standalone Gemini CLI;
  * its verdict and flags do not apply. This implementation uses only agy's observed flag surface:
- * --input-format, --output-format, --disable-slash-commands, --dangerously-skip-permissions, --add-dir,
+ * --input-format, --output-format, --disable-slash-commands, --dangerously-skip-permissions (not with --review), --add-dir,
  * --model, --effort, --sandbox, --print-timeout, --print. Local `agy --help` also confirms --continue
  * (most recent conversation) and --conversation (resume by ID); retries use the latter unambiguously.
  * There is NO -C; Node spawn's cwd sets launch cwd.
@@ -51,7 +51,8 @@
  * stdin is then closed. No positional prompt, no argv-size exposure, no inherited stdin-trap pattern.
  * --disable-slash-commands is mandatory: leading '/' text otherwise gets intercepted before the model.
  * --dangerously-skip-permissions is mandatory for useful unattended editing: headless tool auto-denial
- * otherwise returns SUCCESS / exit 0 / empty response (#3633 probes 7 and 19).
+ * otherwise returns SUCCESS / exit 0 / empty response (#3633 probes 7 and 19). The one exception is --review
+ * (#4194), which omits it ON PURPOSE so shell, writes and reads outside --dir are denied (REVIEW_MODE_SUFFIX).
  *
  * Events carry `event`, not Codex's `type`. Completed step_update tools carry tool_name/tool_info;
  * only the last result carries terminal status, final response/error and inline token usage. No result
@@ -90,6 +91,18 @@ import { pathToFileURL } from 'node:url';
 export const AGY_CLI = 'agy';
 export const AGY_RESUME_PROMPT = 'Continue the task from where you left off and finish it. Do not restart from scratch or repeat already-completed work.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** #4194 — the suffix a `--review` task carries in place of the edit instruction. agy has NO read-only mode (see
+ *  the header: `--sandbox` confines only its shell, never its native file tools), and a review task carries
+ *  UNTRUSTED PR text that may try to steer the agent. So a review run omits `--dangerously-skip-permissions`, and
+ *  agy's headless permission check then DENIES its shell (`run_command`), its file writes (`write_to_file`) and
+ *  any read outside its cwd — re-probed live on agy 1.2.11 (2026-09-26, PR #2714): each came back in the result's
+ *  `denied_actions` and left no trace on disk. A read INSIDE its cwd (`--dir`, which for a review must be a
+ *  throwaway checkout of public PR code) is still allowed. A denied call ends the turn with no answer, so the task
+ *  must carry everything the model needs in its own text; this suffix tells the model so. */
+export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review: you cannot run commands or write any file (those tool '
+  + 'calls are denied and end your turn). Judge from the material in this message, then put your whole answer in '
+  + 'your final message.';
 const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
 
 function requireText(value, name) {
@@ -105,12 +118,16 @@ function validateTimeout(value) {
 }
 
 /** Pure argv AFTER agy. No required cwd flag exists; scope is supplied via spawn and the prompt. */
-export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null } = {}) {
+export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = false, printTimeoutMs, resumeConversationId = null, review = false } = {}) {
   // Resume supplies a non-empty continuation instruction via text-mode --print and an explicit conversation.
   // stream-json input is for the initial task only: it runs one turn per stdin message.
   const argv = ['--input-format', resumeConversationId === null ? 'stream-json' : 'text', '--output-format', 'stream-json',
-    '--disable-slash-commands', '--dangerously-skip-permissions'];
+    '--disable-slash-commands'];
+  // #4194 — without this flag agy denies shell, writes and out-of-cwd reads (see REVIEW_MODE_SUFFIX).
+  if (!review) argv.push('--dangerously-skip-permissions');
   if (!Array.isArray(addDirs)) throw new TypeError('gemini-direct-task: addDirs must be an array');
+  // An extra dir would re-grant reads outside --dir that a review run exists to deny.
+  if (review && addDirs.length) throw new TypeError('gemini-direct-task: --add-dir is not allowed with --review');
   for (const dir of addDirs) {
     requireText(dir, 'addDirs entry');
     argv.push('--add-dir', dir); // bookkeeping only — neither read nor write confinement.
@@ -138,10 +155,11 @@ export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = 
   return [...argv, '--print', resumeConversationId === null ? '' : AGY_RESUME_PROMPT]; // Initial prompt rides stdin with the required empty value.
 }
 
-export function buildAgyPrompt(task, absoluteDir) {
+export function buildAgyPrompt(task, absoluteDir, { review = false } = {}) {
   requireText(task, 'task');
   requireText(absoluteDir, 'absoluteDir');
   if (!isAbsolute(absoluteDir)) throw new TypeError('gemini-direct-task: absoluteDir must be an absolute path');
+  if (review) return `${task.trim()}\n\n---\n\n${REVIEW_MODE_SUFFIX}`;
   return `${task.trim()}\n\n---\n\n`
     + `The absolute target directory is ${JSON.stringify(absoluteDir)}. Stay inside this directory. `
     + "Use only absolute paths and never trust your shell's own cwd: it may be agy's internal scratch directory, "
@@ -379,14 +397,14 @@ export function runGate({ dir, mode, execFn = defaultExecFn }) {
  */
 export async function runAgyDirectExec({
   dir, task, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null,
+  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null, review = false,
 } = {}) {
   let argv = [];
   let stdinLine;
   try {
     validateTimeout(timeoutMs);
-    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId });
-    if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir));
+    argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId, review });
+    if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir, { review }));
     requireText(logFile, 'logFile');
     // A killed process can leave a partial final line. Separate attempts before appending new JSONL.
     if (resumeConversationId !== null) appendFileSync(logFile, '\n');
@@ -470,7 +488,7 @@ export async function runAgyDirectExec({
 /** Resolve target, record HEAD, run with at most one resume, capture diff, gate. NEVER commit/push/open a PR. */
 export async function geminiDirectTask({
   task, dir, repoRoot, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  gate = 'none', logFile, stream = true, installDeps = true, wireOriginToRemote = false,
+  gate = 'none', logFile, stream = true, installDeps = true, wireOriginToRemote = false, review = false,
   execFn = defaultExecFn, spawnFn = nodeSpawn, mkTempDir = mkdtempSync, existsFn = existsSync,
 } = {}) {
   requireText(task, 'task');
@@ -498,7 +516,7 @@ export async function geminiDirectTask({
   mkdirSync(dirname(resolvedLogFile), { recursive: true });
   const runOptions = {
     dir: targetDir, task, model, effort, addDirs, sandbox, timeoutMs,
-    logFile: resolvedLogFile, stream, spawnFn,
+    logFile: resolvedLogFile, stream, spawnFn, review,
   };
   let run = await runAgyDirectExec(runOptions);
   let summary = summarizeAgyEvents(parseJsonlEvents(run.stdout));
@@ -542,7 +560,7 @@ export async function geminiDirectTask({
 export function parseFlags(argv) {
   const flags = {};
   const values = ['task', 'task-file', 'dir', 'repo-root', 'model', 'effort', 'add-dir', 'timeout-ms', 'gate', 'log'];
-  const booleans = ['sandbox', 'no-stream', 'no-install', 'wire-origin-to-remote', 'json', 'help'];
+  const booleans = ['sandbox', 'no-stream', 'no-install', 'wire-origin-to-remote', 'json', 'help', 'review'];
   for (const arg of argv) {
     const eq = arg.indexOf('=');
     const key = arg.slice(2, eq === -1 ? undefined : eq);
@@ -576,6 +594,10 @@ export const HELP = `usage: node scripts/gemini-direct-task.mjs --task=<text>|--
                              human can push straight from it. Default: origin stays at the local repoRoot
                              path (not push-capable); the real remote is only printed. No effect with --dir.
   --json                     Full report only on stdout (implies --no-stream).
+  --review                   #4194: a READ-ONLY review task — agy runs without --dangerously-skip-permissions,
+                             so shell, file writes and reads outside --dir are denied; the task text must carry
+                             everything to judge, and the answer comes back in the final message
+                             (events.finalResponse). Point --dir at a throwaway checkout.
 Timeout or nonzero/null exit without a terminal result: resume exactly once via --conversation <ID>,
 only with a captured init conversation ID. No ID means no retry. Each attempt gets a fresh timeout
 budget (up to twice --timeout-ms); the original prompt is not replayed. Both attempts stay in the log.
@@ -636,6 +658,7 @@ export async function main(argv = process.argv.slice(2), { taskFn = geminiDirect
     gate: flags.gate ?? 'none', logFile: flags.log ? resolve(flags.log) : undefined,
     stream: !flags['no-stream'] && !flags.json, installDeps: !flags['no-install'],
     wireOriginToRemote: Boolean(flags['wire-origin-to-remote']),
+    review: Boolean(flags.review),
     // npm install normally inherits stdout. Keep --json machine-readable during scratch setup too.
     execFn: flags.json ? (bin, args, opts = {}) => defaultExecFn(bin, args, {
       ...opts, ...(opts.stdio === 'inherit' ? { stdio: ['ignore', 2, 2] } : {}),

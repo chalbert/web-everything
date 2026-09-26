@@ -33,6 +33,7 @@ import {
   bootstrapStatus,
   trustableDirs,
   withTrustedDirs,
+  withoutTrustedDirs,
   untrustedDirs,
   trustStatus,
   readJsonConfig,
@@ -845,6 +846,41 @@ describe('withTrustedDirs — additive, surgical, and never able to withdraw tru
     const next = withTrustedDirs({ projects: { '/w/lane-9': { hasTrustDialogAccepted: true } } }, ['/w/lane-1']);
     expect(next.projects['/w/lane-9'].hasTrustDialogAccepted).toBe(true);
     expect(JSON.stringify(next)).not.toContain('"hasTrustDialogAccepted":false');
+  });
+});
+
+// #4188 (bornAs x5qketq, epic #4075) — the counterpart `withTrustedDirs` deliberately refuses to offer. See
+// this function's own doc for why a NARROW caller (the session reaper's dispatch-scratch sweep, passing only
+// exact directories it just deleted itself) is safe where a PROBED bootstrap list would not be.
+describe('withoutTrustedDirs — surgical removal, for a caller with a much narrower blast radius than the bootstrap step', () => {
+  it('removes exactly the named project entry', () => {
+    const before = { projects: { '/w/lane-1': { hasTrustDialogAccepted: true } } };
+    const next = withoutTrustedDirs(before, ['/w/lane-1']);
+    expect(next.projects['/w/lane-1']).toBeUndefined();
+  });
+
+  it('leaves every OTHER project entry completely alone', () => {
+    const before = { projects: { '/a': { hasTrustDialogAccepted: true }, '/b': { hasTrustDialogAccepted: true } } };
+    const next = withoutTrustedDirs(before, ['/a']);
+    expect(next.projects['/b']).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it('is PURE — the input object is not mutated', () => {
+    const before = { projects: { '/w/lane-1': { hasTrustDialogAccepted: true } } };
+    withoutTrustedDirs(before, ['/w/lane-1']);
+    expect(before.projects['/w/lane-1']).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it('a directory not present at all is a harmless no-op', () => {
+    const before = { projects: { '/a': { hasTrustDialogAccepted: true } } };
+    const next = withoutTrustedDirs(before, ['/never-there']);
+    expect(next.projects['/a']).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it('tolerates a config with no `projects` key at all, and an empty/absent `dirs`', () => {
+    expect(withoutTrustedDirs({}, ['/a'])).toEqual({});
+    expect(withoutTrustedDirs({ projects: { '/a': {} } })).toEqual({ projects: { '/a': {} } });
+    expect(withoutTrustedDirs(null, ['/a'])).toEqual({});
   });
 });
 

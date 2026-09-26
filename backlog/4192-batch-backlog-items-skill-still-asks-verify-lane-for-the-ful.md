@@ -26,7 +26,7 @@ we:skills-src/batch-backlog-items/SKILL.md:86 hardcodes --gate="npm run test:uni
 
 `we:skills-src/batch-backlog-items/SKILL.md`'s exact hard-coded `--gate="npm run test:unit && npm run
 check:standards -- --scope=<batch-slug>"` line was already removed in commit `c119ad6b4` (PR resolving
-`#4182`/bornAs `x3emz1e`, "align batch-parallel-execute workflow with the diff-selected gate +
+`#4182`/bornAs `4182`, "align batch-parallel-execute workflow with the diff-selected gate +
 no-subagent policy"), landed 2026-09-25 19:19 — the same day this card was filed. That commit's own
 message calls out fixing "the equivalent stale gate in we:skills-src/batch-backlog-items/SKILL.md's
 serial `/batch` close-out" as part of its broader `we:skills-src/batch-backlog-items/parallel-execute.workflow.js`

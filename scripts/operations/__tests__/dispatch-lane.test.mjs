@@ -16,7 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,9 +92,11 @@ import {
   // #x36vidg — the Bash timeouts every dispatch carries.
   DISPATCH_BASH_TIMEOUT_ENV, resolveDispatchSettingsEnv,
   // #4174 — the dispatched session's cwd is a scratch directory, never `root`.
-  DISPATCH_CWD_ENV, dispatchSessionCwd, ensureDispatchSessionCwd,
+  DISPATCH_CWD_ENV, dispatchSessionCwd, dispatchScratchRoot, ensureDispatchSessionCwd,
   // #4174 live-caught — the CLI's own workspace-trust grant for that scratch directory.
   DISPATCH_TRUST_PATH_ENV, grantDispatchTrust,
+  // #4188 (bornAs x5qketq, epic #4075) — the reaper's counterpart revoke.
+  revokeDispatchTrust,
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
@@ -210,7 +212,8 @@ describe('the operation is callable at all', () => {
 describe('the lane comes from the tick core or nowhere', () => {
   it('does not declare a `lane` input — a caller cannot ask for one', () => {
     const { declaration } = registryFor();
-    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'num']);
+    // #3857 — `modelReason` is the one input added since: the reason a hand-set `--model` needs.
+    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'modelReason', 'num']);
     expect(declaration.input.num.type).toBe('string'); // an id may be a `xNNNNNN` hash, never only a number
     expect(declaration.input.expectedWithinMinutes.default).toBe(DEFAULT_EXPECTED_WITHIN_MINUTES);
   });
@@ -1144,6 +1147,91 @@ describe('#4174 live-caught — grantDispatchTrust: the CLI refused a fresh scra
   });
 });
 
+describe('#4174 — dispatchScratchRoot: the shared base every session cwd is a child of', () => {
+  it('never changes `dispatchSessionCwd`\'s own answer — same root, session id appended', () => {
+    expect(dispatchSessionCwd('sess-1', { root: PRIMARY })).toBe(join(dispatchScratchRoot({ root: PRIMARY }), 'sess-1'));
+  });
+  it('is relocatable via DISPATCH_CWD_ENV, same as `dispatchSessionCwd`', () => {
+    expect(dispatchScratchRoot({ root: PRIMARY, env: { [DISPATCH_CWD_ENV]: '/override/dispatch-scratch' } }))
+      .toBe('/override/dispatch-scratch');
+  });
+});
+
+// #4188 (bornAs x5qketq, epic #4075) — revokeDispatchTrust: the session reaper's counterpart to
+// grantDispatchTrust, removing a finished dispatch-scratch cwd's trust entry once its folder is gone.
+describe('#4188 — revokeDispatchTrust: removes exactly the given dispatch-scratch trust entries, atomically', () => {
+  let dir;
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'we-dispatch-untrust-')); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('removes exactly the named directory\'s trust entry, leaving every other one alone', () => {
+    const trustFile = join(dir, 'trust-revoke.json');
+    writeFileSync(trustFile, JSON.stringify({
+      projects: {
+        '/already/trusted': { hasTrustDialogAccepted: true },
+        '/some/scratch/dir': { hasTrustDialogAccepted: true },
+      },
+    }));
+    const result = revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile });
+    expect(result).toEqual({ revoked: ['/some/scratch/dir'] });
+    const written = JSON.parse(readFileSync(trustFile, 'utf8'));
+    expect(written.projects['/already/trusted']).toEqual({ hasTrustDialogAccepted: true }); // untouched
+    expect(written.projects['/some/scratch/dir']).toBeUndefined(); // gone
+  });
+
+  it('removes MULTIPLE directories in one call', () => {
+    const trustFile = join(dir, 'trust-revoke-multi.json');
+    writeFileSync(trustFile, JSON.stringify({
+      projects: { '/a': { hasTrustDialogAccepted: true }, '/b': { hasTrustDialogAccepted: true }, '/c': { hasTrustDialogAccepted: true } },
+    }));
+    const result = revokeDispatchTrust(['/a', '/b'], { trustPath: trustFile });
+    expect(result.revoked.sort()).toEqual(['/a', '/b']);
+    const written = JSON.parse(readFileSync(trustFile, 'utf8'));
+    expect(Object.keys(written.projects)).toEqual(['/c']);
+  });
+
+  it('an empty/absent dirs list is a no-op — never writes the file at all', () => {
+    const trustFile = join(dir, 'trust-revoke-noop.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/a': { hasTrustDialogAccepted: true } } }));
+    const before = readFileSync(trustFile, 'utf8');
+    expect(revokeDispatchTrust([], { trustPath: trustFile })).toEqual({ revoked: [] });
+    expect(readFileSync(trustFile, 'utf8')).toBe(before);
+  });
+
+  it('never throws when the trust file is present but unparseable — writes nothing', () => {
+    const trustFile = join(dir, 'trust-revoke-bad.json');
+    writeFileSync(trustFile, 'not json');
+    expect(() => revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile })).not.toThrow();
+    expect(readFileSync(trustFile, 'utf8')).toBe('not json'); // untouched
+  });
+
+  it('never throws when the trust file is simply absent — nothing to revoke', () => {
+    expect(revokeDispatchTrust(['/some/scratch/dir'], { trustPath: join(dir, 'does-not-exist.json') }))
+      .toEqual({ revoked: [] });
+  });
+
+  it('is relocatable via DISPATCH_TRUST_PATH_ENV, mirroring grantDispatchTrust\'s own override', () => {
+    const trustFile = join(dir, 'trust-revoke-env.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/some/scratch/dir': { hasTrustDialogAccepted: true } } }));
+    const prior = process.env[DISPATCH_TRUST_PATH_ENV];
+    process.env[DISPATCH_TRUST_PATH_ENV] = trustFile;
+    try {
+      revokeDispatchTrust(['/some/scratch/dir']); // no explicit trustPath — must read the env override
+    } finally {
+      if (prior === undefined) delete process.env[DISPATCH_TRUST_PATH_ENV]; else process.env[DISPATCH_TRUST_PATH_ENV] = prior;
+    }
+    expect(JSON.parse(readFileSync(trustFile, 'utf8')).projects['/some/scratch/dir']).toBeUndefined();
+  });
+
+  it('the write is genuinely atomic: no leftover `.tmp` file survives a successful revoke', () => {
+    const trustFile = join(dir, 'trust-revoke-atomic.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/some/scratch/dir': { hasTrustDialogAccepted: true } } }));
+    revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile });
+    const leftovers = readdirSync(dir).filter((f) => f.includes('.tmp'));
+    expect(leftovers).toEqual([]);
+  });
+});
+
 describe('#4174 — the sink actually wires the new cwd through: never `root`, every seam still injectable', () => {
   it('the DEFAULT sink spawns into `dispatchSessionCwd(sessionId, {root})` — not `root`', async () => {
     const { run } = runTo();
@@ -1916,6 +2004,8 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
         // #3457/#3460 — stubbed so this suite never shells the real `gh` (readTick calls it lazily whenever a
         // launch clears, and every test here clears one).
         checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
+        // #3906 — hermetic routing evidence: no trials, never the host's shared scorecard store.
+        readScorecards: () => [],
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
@@ -2019,9 +2109,11 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // #x36vidg — `--settings` always carries the Bash timeouts (plus the gh-shim PATH on an opted-in host).
     const settingsAt = spawned[0].argv.indexOf('--settings');
     expect(JSON.parse(spawned[0].argv[settingsAt + 1]).env).toMatchObject(DISPATCH_BASH_TIMEOUT_ENV);
+    // #3857/#3906 — the ONE deliberate argv change: the model-tier table's `--model` (a `build` is Sonnet).
     expect(spawned[0].argv.filter((_, i) => i !== settingsAt && i !== settingsAt + 1)).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+      '--model', 'sonnet',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
@@ -2238,6 +2330,7 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
         laneRefForPr: () => laneRef,
         // #3457/#3460 — same stub as the earlier `dispatchThrough` above, and for the same reason.
         checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
+        readScorecards: () => [],
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });

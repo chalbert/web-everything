@@ -29,7 +29,11 @@ import {
   THIN_TRIAL_THRESHOLD,
   workerTierFor,
   DISPATCH_MACHINERY_PATHS,
+  EXTERNAL_WORKER_CANDIDATES,
+  externalTierEquivalent,
+  CRITICAL_WORK_GATE,
 } from '../provider-routing.mjs';
+import { CODEX_MODEL } from '../codex-model-routing.mjs';
 
 // ── Fixture Scorecard Helpers ──────────────────────────────────────────────────
 
@@ -1279,5 +1283,92 @@ describe('workerTierFor — the checked-in model-tier table (#3857)', () => {
     // Never sonnet again once a row matches opus for the same underlying facts plus more.
     expect(workerTierFor({ ...base, scopePaths: ['docs/agent/x.md', 'scripts/foo.mjs'] }).tier).toBe(CLAUDE_TIERS.OPUS);
     expect(workerTierFor(base)).toEqual(workerTierFor({ ...base }));
+  });
+});
+
+// #3906 — EXTERNAL_WORKER_CANDIDATES / externalTierEquivalent, and the critical-work gate that holds
+// Gemini, Codex and dual-dispatch out of `build`/`fix`/`ci-heal` until #4034.
+describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-work gate (#3906)', () => {
+  // A clean, verified Codex trial for both taskTypes the gated-kind tests below exercise, built the same
+  // way the cascade-branch tests above build their fixtures (single small file, one clean claude-subagent
+  // trial, well within the proven envelope).
+  const cleanCodexContext = (taskType) => ({
+    filesTouched: ['scripts/lib/example.mjs'],
+    estimatedSize: 40,
+    scorecards: [
+      makeRecord({ provider: 'codex', model: CODEX_MODEL, taskType, scoredAt: '2026-09-20T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }),
+    ],
+  });
+
+  it('astra is listed exactly once, at tierEquivalent opus, and its model equals CODEX_MODEL', () => {
+    const rows = EXTERNAL_WORKER_CANDIDATES.filter((r) => r.provider === 'codex' && r.model === CODEX_MODEL);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tierEquivalent).toBe(CLAUDE_TIERS.OPUS);
+    expect(rows.filter((r) => r.model === CODEX_MODEL)).toHaveLength(1);
+  });
+
+  it('externalTierEquivalent returns opus for the astra pair and null for an unlisted pair', () => {
+    expect(externalTierEquivalent('codex', CODEX_MODEL)).toBe(CLAUDE_TIERS.OPUS);
+    expect(externalTierEquivalent('codex', 'some-other-model')).toBeNull();
+    expect(externalTierEquivalent('gemini', 'gemini-3.1-pro')).toBeNull();
+  });
+
+  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal until #4034', () => {
+    expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal']);
+    expect(CRITICAL_WORK_GATE.until).toBe('#4034');
+  });
+
+  it('a gated kind (build/fix/ci-heal) recommends claude despite a clean Codex track record, auditing a critical-work-gate entry', () => {
+    for (const kind of ['build', 'fix', 'ci-heal']) {
+      const task = { taskType: 'build-new-feature' };
+      const context = { ...cleanCodexContext('build-new-feature'), kind };
+      const res = selectProvider(task, context);
+      expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+      const gateEntry = res.auditTrail.find((a) => a.criterion === 'critical-work-gate');
+      expect(gateEntry).toBeTruthy();
+      expect(gateEntry.result).toBe('claude-only');
+    }
+  });
+
+  it('the same context with no kind at all (an interactive advisory call) recommends codex with tierEquivalent opus — proving the gate is the only thing holding it', () => {
+    const task = { taskType: 'build-new-feature' };
+    const context = cleanCodexContext('build-new-feature'); // no `kind` field
+    const res = selectProvider(task, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CODEX);
+    expect(res.tierEquivalent).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.auditTrail.some((a) => a.criterion === 'critical-work-gate')).toBe(false);
+  });
+
+  it('the same context with kind: fix plus an explicit criticalWorkGate: { kinds: [] } also recommends codex with tierEquivalent opus', () => {
+    const task = { taskType: 'build-new-feature' };
+    const context = { ...cleanCodexContext('build-new-feature'), kind: 'fix', criticalWorkGate: { kinds: [] } };
+    const res = selectProvider(task, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CODEX);
+    expect(res.tierEquivalent).toBe(CLAUDE_TIERS.OPUS);
+    expect(res.auditTrail.some((a) => a.criterion === 'critical-work-gate')).toBe(false);
+  });
+
+  it('a bugfix-typed clean Codex trial is also held for gated kinds', () => {
+    const task = { taskType: 'bugfix' };
+    const context = { ...cleanCodexContext('bugfix'), kind: 'ci-heal' };
+    const res = selectProvider(task, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    expect(res.auditTrail.find((a) => a.criterion === 'codex-fitness').result).toBe('unfit');
+  });
+
+  it('Gemini trials are also held for gated kinds', () => {
+    const task = { taskType: 'bugfix' };
+    const context = {
+      filesTouched: ['scripts/lib/example.mjs'],
+      estimatedSize: 40,
+      kind: 'build',
+      scorecards: [
+        makeRecord({ provider: 'gemini', model: 'gemini-3.1-pro', taskType: 'bugfix', scoredAt: '2026-09-20T01:00:00.000Z', verifiedBy: 'claude-subagent', findings: null }),
+      ],
+    };
+    const res = selectProvider(task, context);
+    expect(res.recommendation).toBe(RECOMMENDATIONS.CLAUDE);
+    const geminiAudit = res.auditTrail.find((a) => a.criterion === 'gemini-fitness');
+    expect(geminiAudit.result).toBe('unfit');
   });
 });

@@ -30,6 +30,16 @@ describe('formatGithubAppStatus — pure, given a status record or null', () => 
     expect(out).toContain('mint attempt failed');
   });
 
+  // Live-caught 2026-09-26: a repo-access verification failure (the installation-info read AND the repo
+  // listing both failing) used to be indistinguishable from a confirmed gap — this reason and its message
+  // say plainly that the mint itself succeeded and nothing was actually confirmed missing.
+  it("access-check-failed explains a couldn't-verify outcome, distinctly from a confirmed gap", () => {
+    const out = formatGithubAppStatus({ applied: false, reason: 'access-check-failed', checkedAt: '2026-09-26T14:05:00.000Z' });
+    expect(out).toContain('NOT APPLIED');
+    expect(out).toContain("Couldn't verify");
+    expect(out).not.toContain('missing access it needs');
+  });
+
   it('insufficient-access — THE LIVE CASE — names the exact permissions and repos to grant', () => {
     const out = formatGithubAppStatus({
       applied: false,

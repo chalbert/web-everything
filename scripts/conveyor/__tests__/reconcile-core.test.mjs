@@ -31,7 +31,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions, CI_HEAL_ROUND_CAP,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
+  markAuthExpiredSessions, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
@@ -1368,7 +1369,7 @@ describe('case 6 — the discovery queries, pinned literally (#3296)', () => {
   });
 });
 
-describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920 staleness, x5v8yy9)', () => {
+describe('selectStatusCandidates — which PRs deserve a review-status refresh (PR #1920/#2472/#2711 staleness, x5v8yy9/x8who76)', () => {
   it('includes an owed-elsewhere refusal (e.g. ci-red) — it is a real conveyor PR, not an unrelated one', () => {
     // `needs-human` no longer produces `owed-elsewhere` (xpprcdz dispatches `review` for it instead) — `ci-red`
     // is the current real example of a phase this pass refuses as someone else's job.
@@ -1376,13 +1377,25 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
-  it('excludes ONLY nothing-owed', () => {
+  it('no longer excludes nothing-owed (x8who76 — see the dedicated test below for why)', () => {
     const refusals = [
       { prNumber: 1, kind: 'nothing-owed', phase: 'queued' },
       { prNumber: 2, kind: 'owed-elsewhere', phase: 'ci-red' },
       { prNumber: 3, kind: 'cap-exhausted' },
     ];
-    expect(selectStatusCandidates([], refusals).map((r) => r.prNumber)).toEqual([2, 3]);
+    expect(selectStatusCandidates([], refusals).map((r) => r.prNumber)).toEqual([1, 2, 3]);
+  });
+
+  // Live-caught 2026-09-26, PR #2711, card x8who76: SAME BUG CLASS as #1920/#2472 above, a third exclusion.
+  // `nothing-owed` used to be dropped outright on the premise it never carries anything live — true in
+  // steady state, false at the exact tick a PR TRANSITIONS into it. #2711 got `review:accepted` (phase
+  // `queued` → refusal kind `nothing-owed`) while still carrying `review-status:reviewing` from the round
+  // that had just finished; excluding `nothing-owed` meant `review-status-tag.mjs` was never called again to
+  // notice the review session/job was gone and clear it — the label sat stale, "accepted AND reviewing" at
+  // once, a live contradiction the operator caught.
+  it('includes a nothing-owed refusal — a PR that just went quiet still deserves one more status refresh to clear a stale label', () => {
+    const refusals = [{ prNumber: 2711, kind: 'nothing-owed', phase: 'queued' }];
+    expect(selectStatusCandidates([], refusals)).toEqual(refusals);
   });
 
   it('includes every reviewsOwed entry regardless of refusals', () => {
@@ -1403,14 +1416,14 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates([], [], fixesOwed)).toEqual(fixesOwed);
   });
 
-  it('combines reviewsOwed + fixesOwed + non-nothing-owed refusals, all three sources at once', () => {
+  it('combines reviewsOwed + fixesOwed + every refusal (including nothing-owed), all three sources at once', () => {
     const reviewsOwed = [{ prNumber: 1, kind: 'review' }];
     const fixesOwed = [{ prNumber: 2, kind: 'fix' }];
     const refusals = [{ prNumber: 3, kind: 'owed-elsewhere' }, { prNumber: 4, kind: 'nothing-owed' }];
-    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed).map((c) => c.prNumber)).toEqual([1, 2, 3]);
+    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed).map((c) => c.prNumber)).toEqual([1, 2, 3, 4]);
   });
 
-  it('a 2-arg call (fixesOwed omitted) is byte-identical to before this fix — every existing caller unaffected', () => {
+  it('a 2-arg call (fixesOwed omitted) still passes every refusal through unfiltered', () => {
     const reviewsOwed = [{ prNumber: 1 }];
     const refusals = [{ prNumber: 2, kind: 'owed-elsewhere' }];
     expect(selectStatusCandidates(reviewsOwed, refusals)).toEqual([{ prNumber: 1 }, { prNumber: 2, kind: 'owed-elsewhere' }]);
@@ -1535,6 +1548,60 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── LIVE INCIDENT, night of 2026-09-25/26 ET — the operator's Claude login expired; every daemon-dispatched
+// session (`ci-heal-2711`/`ci-heal-2712`) ended immediately on the CLI's own auth failure, sat `blocked` for
+// hours with a still-LIVE pid, and `assessLiveness` read that as `live-process` forever — see
+// `reconcile-core.mjs#assessLiveness`'s own doc for the full incident. Mirrors the hung-transcript describe
+// block above, one for one.
+describe('markAuthExpiredSessions + assessLiveness — Claude auth-expired detection (live incident, night of 2026-09-25/26 ET)', () => {
+  const T0 = Date.parse('2026-09-26T10:53:00.000Z'); // ci-heal-2712's real startedAt, measured live.
+  const blockedRow = { name: 'ci-heal-2712', state: 'blocked', status: 'idle', startedAt: T0, pid: 4343, cwd: '/Users/x/workspace/.operations/dispatch/e265b052', sessionId: 's-2712' };
+  const authExpiredFor = () => ({ authExpired: true, reason: 'claude-auth' });
+
+  it('THE LIVE CASE: a `blocked` ci-heal row whose transcript shows the auth failure → authExpired, PR freed', () => {
+    const [a] = markAuthExpiredSessions([blockedRow], authExpiredFor);
+    expect(a.authExpired).toBe(true);
+    expect(a.authExpiredReason).toBe('claude-auth');
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('overrides a LIVE pid — the whole point of this axis is that these sessions were never killed', () => {
+    const [a] = markAuthExpiredSessions([blockedRow], authExpiredFor);
+    expect(assessLiveness([{ agent: { ...a, pidAlive: true }, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('a resolver that answers not-auth-expired, throws, or is absent leaves the row untouched', () => {
+    expect(markAuthExpiredSessions([blockedRow], () => ({ authExpired: false }))[0]).toBe(blockedRow);
+    expect(markAuthExpiredSessions([blockedRow], () => { throw new Error('unreadable transcript'); })[0]).toBe(blockedRow);
+    expect(markAuthExpiredSessions([blockedRow], () => null)[0]).toBe(blockedRow);
+  });
+
+  it('a row already `state: done`, `selfReportedDone`, or `hung` is never re-classified — no double work', () => {
+    const done = { ...blockedRow, state: 'done' };
+    const selfReported = { ...blockedRow, selfReportedDone: true };
+    const hung = { ...blockedRow, hung: true };
+    expect(markAuthExpiredSessions([done], authExpiredFor)[0]).toBe(done);
+    expect(markAuthExpiredSessions([selfReported], authExpiredFor)[0]).toBe(selfReported);
+    expect(markAuthExpiredSessions([hung], authExpiredFor)[0]).toBe(hung);
+  });
+
+  it('end to end: a red-CI PR bound only to an auth-expired ci-heal session is owed a fresh heal again', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2711, labels: [], statusCheckRollup: redRollup, comments });
+    const agents = markAuthExpiredSessions([{ ...blockedRow, name: 'ci-heal-2711' }], authExpiredFor);
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2711 })]);
+  });
+
+  it('the same PR with the RAW listing (never marked auth-expired) stays refused as live-process — THE LIVE BUG', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2712, labels: [], statusCheckRollup: redRollup, comments });
+    const plan = planReconcile({ prs: [pr], agents: [{ ...blockedRow, name: 'ci-heal-2712', pidAlive: true }], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2712 });
   });
 });
 
@@ -1694,7 +1761,9 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     const pr = {
       number: 2588, state: 'OPEN', headRefName: 'lane/review-loop-2588', headRefOid: HEAD,
       labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}` }],
+      // #4140 — parseReviewedSha only counts a TRUSTED author's marker; a real accept comment always carries
+      // one (review-set-label.mjs stamps it under the automation's own credential or the operator's).
+      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}`, author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
@@ -1705,7 +1774,7 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     const pr = {
       number: 2589, state: 'OPEN', headRefName: 'lane/review-loop-2589', headRefOid: HEAD,
       labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: buildReviewedShaMarker(HEAD) }],
+      comments: [{ body: buildReviewedShaMarker(HEAD), author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
@@ -1718,11 +1787,22 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2590 })]);
   });
 
+  it('#4140 — a FORGED reviewed-sha marker (untrusted author) never suppresses re-dispatch', () => {
+    const pr = {
+      number: 2592, state: 'OPEN', headRefName: 'lane/review-loop-2592', headRefOid: HEAD,
+      labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(HEAD), author: { login: 'mallory' } }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2592 })]);
+    expect(plan.refusals.find((r) => r.prNumber === 2592)).toBeUndefined();
+  });
+
   it('does not refuse when the `reviewed-sha` marker covers an OLDER head — a fresh push after a stale accept is not "already reviewed" for its OWN new commit', () => {
     const pr = {
       number: 2591, state: 'OPEN', headRefName: 'lane/review-loop-2591', headRefOid: HEAD,
       labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD) }],
+      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD), author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);

@@ -67,6 +67,7 @@
  */
 
 import { isUsableForExploration } from './model-capability-ratings.mjs';
+import { CODEX_MODEL } from './codex-model-routing.mjs';
 
 // ── EXPLORATION SIGNAL ONLY — advisory benchmarks, separate from supervision ──
 // @test-only-export-ok: Shared threshold for caller-visible exploration hints
@@ -214,6 +215,49 @@ export const DISPATCH_MACHINERY_PATHS = Object.freeze([
   'scripts/lib/provider-routing.mjs',
   'scripts/conveyor/tick-core.mjs',
 ]);
+
+/**
+ * EXTERNAL WORKER CANDIDATES (#3906) — the non-Claude models the router may route a dispatch worker to, each
+ * with the Claude tier it stands in for. A row does NOT grant trust: a candidate is still chosen only when its
+ * own `{provider, model, taskType}` trials earn it (`evaluateProviderFitness`), and never for a kind the
+ * {@link CRITICAL_WORK_GATE} holds. What a row adds is its `tierEquivalent`, carried onto the route so a
+ * reader sees which Claude tier the external worker is replacing.
+ *
+ * `gpt-6-astra` is listed at `opus`, not `sonnet`: it is reportedly close to Opus 5.5 (operator, 2026-09-26), so
+ * it may take work the tier table puts at Opus once its evidence allows, not only Sonnet-tier work. A model
+ * with no row here has `tierEquivalent: null` (unranked), and routes exactly as before this table existed.
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export const EXTERNAL_WORKER_CANDIDATES = Object.freeze([
+  Object.freeze({ provider: 'codex', model: CODEX_MODEL, tierEquivalent: CLAUDE_TIERS.OPUS }),
+]);
+
+/**
+ * The Claude tier an external `{provider, model}` stands in for, from {@link EXTERNAL_WORKER_CANDIDATES}, or
+ * `null` when the pair has no row. Pure.
+ * @param {string} provider
+ * @param {string|null} model
+ * @returns {string|null}
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export function externalTierEquivalent(provider, model) {
+  const row = EXTERNAL_WORKER_CANDIDATES.find((c) => c.provider === provider && c.model === model);
+  return row ? row.tierEquivalent : null;
+}
+
+/**
+ * THE CRITICAL-WORK GATE (#3906). A dispatch of one of these kinds builds or repairs product code, and no
+ * non-Claude worker is allowed to do that until #4034 (the critical-work test) exists — whatever its trial
+ * record says. For a gated kind the Gemini, Codex and dual-dispatch steps are skipped and the dispatch takes
+ * the Claude tier table. Other kinds, and any caller that names no `kind` (an interactive session asking for
+ * advice), are unaffected. Removing a kind from this list is how #4034 enables it.
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export const CRITICAL_WORK_GATE = Object.freeze({
+  kinds: Object.freeze(['build', 'fix', 'ci-heal']),
+  until: '#4034',
+  reason: 'no non-Claude builder or fixer until #4034 (the critical-work test) exists',
+});
 
 /**
  * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
@@ -502,10 +546,24 @@ export function selectProvider(task, context) {
   const statuteFiles = filesTouched.filter(isStatuteTierPath);
   const hasStatuteFile = statuteFiles.length > 0;
 
+  // #3906 — the critical-work gate: a gated kind never reaches an external provider (steps 1-3 are skipped).
+  // `context.criticalWorkGate` replaces the default only when a caller states a different gate on purpose.
+  const gate = context?.criticalWorkGate && Array.isArray(context.criticalWorkGate.kinds) ? context.criticalWorkGate : CRITICAL_WORK_GATE;
+  const gated = gate.kinds.includes(kind);
+  const gatedFit = { fit: false, fitModel: null, reason: `kind '${kind}' is gated: ${gate.reason ?? CRITICAL_WORK_GATE.reason}.` };
+  if (gated) {
+    auditTrail.push({
+      criterion: 'critical-work-gate',
+      result: 'claude-only',
+      dataConsulted: `kind='${kind}', gated kinds=${gate.kinds.join(',')}`,
+      reasoning: gatedFit.reason,
+    });
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Step 1: Gemini / Antigravity Fitness Check
   // ──────────────────────────────────────────────────────────────────────────
-  const geminiCheck = evaluateProviderFitness(
+  const geminiCheck = gated ? gatedFit : evaluateProviderFitness(
     ['gemini', 'antigravity'],
     taskType,
     filesTouched,
@@ -534,7 +592,7 @@ export function selectProvider(task, context) {
   // ──────────────────────────────────────────────────────────────────────────
   // Step 2: Codex Fitness Check
   // ──────────────────────────────────────────────────────────────────────────
-  const codexCheck = evaluateProviderFitness(
+  const codexCheck = gated ? gatedFit : evaluateProviderFitness(
     ['codex'],
     taskType,
     filesTouched,
@@ -554,6 +612,8 @@ export function selectProvider(task, context) {
     return {
       recommendation: RECOMMENDATIONS.CODEX,
       claudeTier: null,
+      // #3906 — the Claude tier this external model stands in for (`EXTERNAL_WORKER_CANDIDATES`), or null.
+      tierEquivalent: externalTierEquivalent('codex', codexCheck.fitModel),
       auditTrail,
       reasoning,
       explorationHint: getExplorationHint(taskType, scorecards, context),
@@ -566,7 +626,10 @@ export function selectProvider(task, context) {
   let bothFit = false;
   let bothReason = '';
 
-  if (hasStatuteFile) {
+  if (gated) {
+    bothFit = false;
+    bothReason = gatedFit.reason;
+  } else if (hasStatuteFile) {
     bothFit = false;
     bothReason = 'Statute-tier paths touched; policy requires Claude Opus, not external dual dispatch.';
   } else if (taskType === 'architectural-decision' || taskType === 'triage-research') {
@@ -896,5 +959,90 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
     requiredCleanStreak,
     hasInformativeTrial,
     mostRecentVetoed: mostRecentHasFinding,
+  };
+}
+
+// ── REVIEW-SEAT ROUTING (#4194) — which non-Claude provider backs one ADDED review seat ─────────────────
+//
+// An added review seat (an ADVISORY lens, or the one extra juror seat) sits BESIDE Claude's mandatory seats and
+// can only ADD findings — its failure or silence never blocks or accepts a PR (`review-extra-seats.mjs`). So,
+// unlike `selectProvider`'s work cascade, a seat needs NO graduated track record before it may run: a miss is
+// still covered by Claude's mandatory seats. What the record DOES decide is WHICH provider backs each seat:
+//   1. a provider the caller reports unavailable (CLI missing, quota exhausted, daily cap) is never picked;
+//   2. a provider whose MOST RECENT seat row for this lens failed (error / timeout / unparseable / quota) is
+//      ranked after one whose last row was clean — the same "most recent trial must be clean" test
+//      `evaluateProviderFitness` applies (criterion 2), fail-closed on an unknown status;
+//   3. then the provider carrying less of THIS review's planned load (spread seats across providers);
+//   4. then the provider with FEWER recorded rows for this lens (explore evenly, so both earn a record);
+//   5. then a stable per-lens tie-break (never a clock, never random).
+// The rows read are the `review-seat` rows `review-extra-seats.mjs` appends to the shared scorecard store, keyed
+// by `taskType: reviewSeatTaskType(lens)` — a prefixed subject that can never collide with a work taskType, so a
+// review seat's history never counts toward a work triple's graduation streak (#3801 Fork 3).
+
+/** The non-Claude providers an added review seat can be routed to, in tie-break order. */
+export const REVIEW_SEAT_PROVIDERS = Object.freeze(['codex', 'gemini']);
+
+/** The `dispatchKind` every added-review-seat evidence row carries. */
+export const REVIEW_SEAT_DISPATCH_KIND = 'review-seat';
+
+/** The prefixed `taskType` subject of one lens's seat rows — never a work taskType. PURE. */
+export function reviewSeatTaskType(lens) {
+  return `review-lens:${String(lens ?? '').trim()}`;
+}
+
+function stableLensHash(text) {
+  let h = 0;
+  for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) % 1_000_003;
+  return h;
+}
+
+/**
+ * SELECT THE PROVIDER FOR ONE ADDED REVIEW SEAT (#4194). PURE and deterministic over its arguments.
+ * @param {object} o
+ * @param {string} o.lens - the seat's lens (an advisory lens, or the extra juror's lens).
+ * @param {string[]} [o.available] - providers the caller found usable right now (subset of REVIEW_SEAT_PROVIDERS).
+ * @param {Array<object>|{records:Array<object>}} [o.scorecards] - the shared store's rows (caller-loaded).
+ * @param {Record<string, number>} [o.plannedLoad] - seats already assigned per provider in THIS review.
+ * @returns {{provider: (string|null), auditTrail: Array<{criterion:string,result:string,reasoning:string}>, reasoning: string}}
+ */
+export function selectReviewSeatProvider({ lens, available = REVIEW_SEAT_PROVIDERS, scorecards = [], plannedLoad = {} } = {}) {
+  const records = Array.isArray(scorecards) ? scorecards : (Array.isArray(scorecards?.records) ? scorecards.records : []);
+  const taskType = reviewSeatTaskType(lens);
+  const auditTrail = [];
+  const candidates = REVIEW_SEAT_PROVIDERS.filter((p) => Array.isArray(available) && available.includes(p));
+  auditTrail.push({
+    criterion: 'available',
+    result: candidates.join(',') || 'none',
+    reasoning: candidates.length ? `usable now: ${candidates.join(', ')}` : 'no non-Claude provider is usable right now',
+  });
+  if (!candidates.length) {
+    return { provider: null, auditTrail, reasoning: `no provider for the "${lens}" seat: none available` };
+  }
+  const rowsFor = (p) => records
+    .filter((r) => r && r.dispatchKind === REVIEW_SEAT_DISPATCH_KIND && r.provider === p && r.taskType === taskType)
+    .sort((a, b) => String(b.scoredAt ?? '').localeCompare(String(a.scoredAt ?? '')));
+  const base = stableLensHash(taskType);
+  const ranked = candidates.map((p, i) => {
+    const rows = rowsFor(p);
+    return {
+      provider: p,
+      recentFailure: rows.length > 0 && rows[0].status !== 'ok' ? 1 : 0,
+      load: Number(plannedLoad?.[p]) || 0,
+      history: rows.length,
+      tie: (base + i) % candidates.length,
+    };
+  }).sort((a, b) => a.recentFailure - b.recentFailure || a.load - b.load || a.history - b.history || a.tie - b.tie);
+  for (const r of ranked) {
+    auditTrail.push({
+      criterion: `rank:${r.provider}`,
+      result: `recentFailure=${r.recentFailure} load=${r.load} history=${r.history} tie=${r.tie}`,
+      reasoning: r.recentFailure ? 'most recent seat row for this lens was not clean — ranked after a clean one' : 'last seat row clean (or none yet)',
+    });
+  }
+  const pick = ranked[0].provider;
+  return {
+    provider: pick,
+    auditTrail,
+    reasoning: `"${lens}" seat → ${pick} (recent-failure, then planned load, then fewest recorded ${taskType} rows, then a stable tie-break)`,
   };
 }

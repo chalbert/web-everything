@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { laneNeedsVerifyDispatch, spawnGateBounded, GATE_STARTED_MARKER } from '../verify-dispatch.mjs';
+import { heldSlots, admissionLockRoot } from '../../readiness/heavy-admission.mjs';
 
 describe('laneNeedsVerifyDispatch — the pure dispatch decision', () => {
   it('dispatches a running marker for the lane\'s own current HEAD', () => {
@@ -129,18 +130,30 @@ describe('verify-dispatch CLI — the hard wall-clock ceiling (epic #3383, live 
   // A real hang, simulated: the gate sleeps far longer than the test-scoped ceiling, then touches a marker
   // file — the marker file existing later is proof the CHAIN kept running (an orphan), not just that the one
   // pid `execFileSync`'s own `timeout` option signals directly.
-  it('kills a gate that outruns VERIFY_DISPATCH_TIMEOUT_MS — including the tree beneath it, not just the pid dispatch spawned', () => {
+  it('kills a gate that outruns VERIFY_DISPATCH_TIMEOUT_MS — including the tree beneath it, not just the pid dispatch spawned', async () => {
+    // #4075 follow-up (ci-heal-2721, 2026-09-26): this test's own fixture sleep (was 3s) and its "returns
+    // promptly" bound (was 2500ms against a 300ms ceiling — under 10x headroom) both flaked TWICE under real
+    // load (~3 runnable procs/core): killing the whole shell→sleep→touch tree and propagating the exit back
+    // through `verify-dispatch.mjs`/`spawnSync` costs real OS scheduling time that grows with contention, not
+    // with the ceiling being tested. The fixture sleep is widened to GATE_SLEEP_MS so a much larger, load-
+    // tolerant return bound still lands comfortably before the sleep would finish on its own — preserving the
+    // one thing this test actually proves (the process was PREEMPTED, not merely fast) — and the later proof
+    // check polls instead of firing one fixed-delay `setTimeout`, so a delayed poll only means "checked later
+    // and still absent", never a false failure.
+    const GATE_SLEEP_MS = 15_000;
+    const RETURN_CEILING_MS = 9_000; // generous vs. the 300ms ceiling under test; still « GATE_SLEEP_MS
     const proofFile = join(base, 'still-running.proof');
-    const req = runVerifyLane(['request', `--repo=${laneDir}`, `--gate=sleep 3 && touch ${proofFile}`, '--json'], laneDir);
+    const req = runVerifyLane(['request', `--repo=${laneDir}`, `--gate=sleep ${GATE_SLEEP_MS / 1000} && touch ${proofFile}`, '--json'], laneDir);
     expect(req.code).toBe(0);
 
     const started = Date.now();
     const r = runDispatch(['--json'], { LANE_POOL_ROOT: poolRoot, VERIFY_DISPATCH_TIMEOUT_MS: '300' });
     const elapsedMs = Date.now() - started;
 
-    // The dispatch call itself returns promptly (near the 300ms ceiling), never waiting out the 3s sleep —
-    // this is the actual driver-unblocking behavior: the tick moves on instead of hanging.
-    expect(elapsedMs).toBeLessThan(2500);
+    // The dispatch call itself returns promptly (near the 300ms ceiling), never waiting out the whole
+    // sleep — this is the actual driver-unblocking behavior: the tick moves on instead of hanging. The bound
+    // is generous (load-tolerant) but still well under GATE_SLEEP_MS, so a pass still proves preemption.
+    expect(elapsedMs).toBeLessThan(RETURN_CEILING_MS);
 
     const body = JSON.parse(r.out);
     expect(body.dispatched).toEqual([]);
@@ -152,16 +165,19 @@ describe('verify-dispatch CLI — the hard wall-clock ceiling (epic #3383, live 
     const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
     expect(JSON.parse(after.out).status).toBe('running');
 
-    // Proof the WHOLE tree died, not just the immediate `verify-lane.mjs` pid: wait past the original 3s
-    // sleep the gate was running and confirm the `touch` after it never ran. A naive single-pid SIGTERM would
-    // leave the shell → sleep → touch chain orphaned and it WOULD still create this file around the 3s mark.
-    return new Promise((res) => {
-      setTimeout(() => {
-        expect(existsSync(proofFile)).toBe(false);
-        res();
-      }, 3500 - elapsedMs > 0 ? 3500 - elapsedMs : 100);
-    });
-  });
+    // Proof the WHOLE tree died, not just the immediate `verify-lane.mjs` pid: poll until well past the
+    // original sleep the gate was running, confirming the `touch` after it never runs at any check point. A
+    // naive single-pid SIGTERM would leave the shell → sleep → touch chain orphaned and it WOULD still create
+    // this file once the sleep naturally elapses; polling (rather than one delayed check) means a slow test
+    // process only delays when we look, never causes us to look too early.
+    const deadline = started + GATE_SLEEP_MS + 5_000; // generous margin past the natural sleep completion
+    while (Date.now() < deadline) {
+      expect(existsSync(proofFile)).toBe(false);
+      // eslint-disable-next-line no-await-in-loop -- deliberate poll, not a fixed single sleep
+      await new Promise((res) => setTimeout(res, 250));
+    }
+    expect(existsSync(proofFile)).toBe(false);
+  }, 30_000);
 
   it('a run that finishes within the ceiling is never touched by it', () => {
     const req = runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir);
@@ -267,8 +283,26 @@ describe('verify-dispatch CLI — real admission-queue contention does not trip 
       env: admissionEnv,
       stdio: 'ignore',
     });
-    // Give the holder a moment to actually win the slot before dispatch starts racing it.
-    await new Promise((res) => setTimeout(res, 200));
+    // #4075 follow-up (ci-heal-2721, 2026-09-26): a fixed "give the holder a moment" 200ms sleep flaked under
+    // real load — spawning + scheduling the holder process itself can take longer than 200ms when the host is
+    // busy, so `started` below could begin BEFORE the holder actually won its slot, or well after part of its
+    // hold was already spent; either way the fixed `elapsedMs >= HOLD_MS - 300` bound below no longer means
+    // what it says. Fix: poll the REAL slot-lock state (`heldSlots`, the same primitive `heavy-admission.mjs
+    // status` reads) until the holder provably has the slot, and read the lock's own real acquisition instant
+    // off it — never guess from our own polling latency — so the "how much hold is left" math stays correct
+    // regardless of how long detection itself took under load.
+    const lockRoot = admissionLockRoot(poolRoot, admissionEnv);
+    const pollDeadline = Date.now() + 10_000;
+    let holderEntry;
+    while (Date.now() < pollDeadline) {
+      holderEntry = heldSlots({ lockRoot, cap: 1 }).find((s) => s.owner === 'test-holder');
+      if (holderEntry) break;
+      // eslint-disable-next-line no-await-in-loop -- deliberate poll, not a fixed single sleep
+      await new Promise((res) => setTimeout(res, 25));
+    }
+    expect(holderEntry, 'the holder never showed up as holding slot-0 within 10s').toBeTruthy();
+    const holderAcquiredAt = Date.parse(holderEntry.meta?.acquiredAt || holderEntry.heartbeatAt);
+    expect(Number.isFinite(holderAcquiredAt)).toBe(true);
 
     const req = runVerifyLane(['request', `--repo=${laneDir}`, '--gate=true', '--json'], laneDir);
     expect(req.code).toBe(0);
@@ -287,12 +321,15 @@ describe('verify-dispatch CLI — real admission-queue contention does not trip 
     const body = JSON.parse(r.out);
     expect(body.failures).toEqual([]);
     expect(body.dispatched[0]).toMatchObject({ pool: 'flagtest', lane: 1 });
-    // Proof real queuing happened, not a lucky fast path: total elapsed must have actually included the wait.
-    expect(elapsedMs).toBeGreaterThanOrEqual(HOLD_MS - 300);
+    // Proof real queuing happened, not a lucky fast path: total elapsed must have actually included whatever
+    // of the holder's real HOLD_MS was still remaining at the moment WE started measuring — computed from the
+    // holder's own real acquisition timestamp, never assumed to equal the nominal HOLD_MS.
+    const remainingHoldMsAtStart = Math.max(0, HOLD_MS - (started - holderAcquiredAt));
+    expect(elapsedMs).toBeGreaterThanOrEqual(Math.max(0, remainingHoldMsAtStart - 300));
 
     const after = runVerifyLane(['check', `--repo=${laneDir}`, '--json'], laneDir);
     expect(JSON.parse(after.out).status).toBe('green');
 
     await new Promise((res) => holder.on('exit', res));
-  }, 15000);
+  }, 30_000);
 });

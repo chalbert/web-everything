@@ -52,6 +52,10 @@ export function dispatchEligibilityOperation({ readTick } = {}) {
             unreadableRunRecords: read.unreadableRunRecords,
             dispatchLiveness: read.dispatchLiveness,
             observedAt: row.observedAt ?? null,
+            // #3906 — the computed route and the worker model the tier table plans, so the whole-queue report
+            // shows WHO would run each item, not only WHETHER it would dispatch.
+            route: routeSummary(row.routing),
+            plannedWorkerModel: row.plannedWorkerModel ?? null,
             buildAdmission: row.admission ?? null,
             markers: {
               status: row.item?.status ?? null,
@@ -82,10 +86,22 @@ export function dispatchEligibilityOperation({ readTick } = {}) {
           droppedBookkeeping: row.droppedBookkeeping,
           unreadableRunRecords: row.unreadableRunRecords,
           dispatchLiveness: row.dispatchLiveness,
+          route: row.route,
+          plannedWorkerModel: row.plannedWorkerModel,
         })),
       }),
     }),
   });
+}
+
+/** #3906 — the routing record's decision fields, without its audit trail (the report stays one line per item). */
+function routeSummary(routing) {
+  if (!routing || typeof routing !== 'object') return null;
+  return {
+    outcome: routing.outcome ?? null, taskType: routing.taskType ?? null, routed: routing.routed ?? null,
+    executed: routing.executed ?? null, model: routing.model ?? null, tier: routing.tier ?? null,
+    supervision: routing.supervision ?? null, refusal: routing.refusal ?? null,
+  };
 }
 
 /** Name the failing condition already recorded by the dispatcher, without evaluating it again. */

@@ -33,6 +33,7 @@ import {
   REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
+import { tagReviewStatus } from '../../../scripts/conveyor/review-status-tag.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../../scripts/conveyor/session-reaper.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -114,7 +115,8 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(tagRound).toHaveBeenCalledWith({ pr: 10, repo: expect.any(String), round: 2 }); // attempts+1
     expect(out).toEqual({
       reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], notStarted: [], refusals: 0,
-      reconcileError: null, deferredForLanes: 0, holdReconcile: [], holdReconcileError: null,
+      reconcileError: null, deferredForLanes: 0, deferredForAuth: 0, authPaused: false, authPauseReason: null,
+      holdReconcile: [], holdReconcileError: null,
     });
   });
 
@@ -197,6 +199,47 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(out).toMatchObject({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 1 });
     expect(tagStatus).toHaveBeenCalledTimes(1);
   });
+
+  // Live-caught 2026-09-26, PR chalbert/web-everything#2711, card x8who76 — END-TO-END with #2711's REAL label
+  // sequence and the REAL `selectStatusCandidates`/`tagReviewStatus` (only the `gh` provider is faked): #2711
+  // got `review:accepted` + `ready-to-merge` (phase `queued` → `classifyPr`), which `reconcile-pass.mjs`'s real
+  // `runReconcilePass` refuses as `nothing-owed` — NOT a review/fix dispatch entry, and (before this fix)
+  // silently dropped by `selectStatusCandidates`'s own `nothing-owed` exclusion. No `review-<pr>`/`fix-<pr>`
+  // session or job was live (the review job had already finished; `review-2711.log` was the only thing left in
+  // `.operations/review-jobs/`), yet `review-status:reviewing` (added while the review round was still live)
+  // sat on the PR uncleared — "accepted AND reviewing" at once. This proves the daemon's real per-tick wiring,
+  // not just the pure `selectStatusCandidates`/`tagReviewStatus` units in isolation.
+  it('#2711: a PR that just went from review-owed to accepted+ready-to-merge gets review-status:reviewing cleared within one tick', () => {
+    const pr2711Labels = [
+      { name: 'review:accepted' }, { name: 'ready-to-merge' },
+      { name: 'review-round:2' }, { name: 'review-status:reviewing' }, { name: 'checking' },
+    ];
+    const reconcile = vi.fn(() => ({
+      dispatch: [],
+      refusals: [{ kind: 'nothing-owed', prNumber: 2711, phase: 'queued' }],
+    }));
+    const readPrs = () => [{ number: 2711, labels: pr2711Labels }];
+    // No `review-2711`/`fix-2711` row at all — the job already finished and its record was already removed
+    // (`listAgentsWithReviewJobs`'s own "a dead/absent job must not keep a PR looking busy forever" contract).
+    const readAgents = () => [];
+    const setLabelsCalls = [];
+    const fakeProvider = {
+      readLabels: () => { throw new Error('must use the shared currentLabels, never re-read'); },
+      ensureLabel: () => {},
+      setLabels: (repo, pr, spec) => setLabelsCalls.push({ repo, pr, spec }),
+    };
+    const tagStatus = (opts) => tagReviewStatus({ ...opts, provider: fakeProvider });
+    const out = runReviewTick({
+      reconcile, readPrs, readAgents, tagStatus,
+      dispatch: () => { throw new Error('nothing should be dispatched — #2711 owes nothing'); },
+      tagRound: () => { throw new Error('no round tag on a non-dispatched PR'); },
+    });
+    expect(out.reviewsOwed).toBe(0);
+    expect(out.dispatched).toEqual([]);
+    expect(setLabelsCalls).toEqual([
+      { repo: 'chalbert/web-everything', pr: 2711, spec: { add: undefined, remove: ['review-status:reviewing'] } },
+    ]);
+  });
 });
 
 describe('runReviewTick — #3383 bug 3: dispatch is capped by acquirableLanes, never by reviews owed alone', () => {
@@ -266,6 +309,115 @@ describe('runReviewTick — #3383 bug 3: dispatch is capped by acquirableLanes, 
     });
     expect(statusCandidates).toHaveBeenCalledTimes(1);
     expect(statusCandidates.mock.calls[0][0]).toHaveLength(4); // all 4 owed reviews, not just the 1 dispatched
+  });
+});
+
+// Card x5kagse (epic #4075/#3383) — the follow-up to #2717: while the operator's Claude login is broken, no NEW
+// review session is dispatched. Mirrors the acquirableLanes suite just above (`paused` behaves exactly like
+// `acquirableLanes: () => 0`, but for a different cause) — see `we:scripts/conveyor/claude-auth-health.mjs`'s
+// own file header for the full incident and design.
+describe('runReviewTick — the Claude-auth-broken gate skips dispatch outright (card x5kagse)', () => {
+  const owedPlan = (entries, refusals = []) => ({ dispatch: entries, refusals });
+  const reviewsPlan = (n) => owedPlan(Array.from({ length: n }, (_, i) => ({ kind: 'review', prNumber: 100 + i, attempts: 0 })));
+
+  it('paused: dispatches nothing, defers every owed review under deferredForAuth (never deferredForLanes)', () => {
+    const dispatch = vi.fn();
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(3), dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [],
+      paused: true, pauseReason: 'paused: Claude login expired — run /login',
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(out.reviewsOwed).toBe(3); // still owed — a pause is not a loss
+    expect(out.deferredForAuth).toBe(3);
+    expect(out.deferredForLanes).toBe(0);
+    expect(out.authPaused).toBe(true);
+    expect(out.authPauseReason).toBe('paused: Claude login expired — run /login');
+  });
+
+  it('paused overrides an otherwise-generous acquirableLanes — the gate is checked first', () => {
+    const dispatch = vi.fn();
+    const out = runReviewTick({
+      reconcile: () => reviewsPlan(2), dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [],
+      acquirableLanes: () => 10, paused: true,
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(out.deferredForAuth).toBe(2);
+  });
+
+  it('not paused (the default): behaves exactly as every pre-existing test already proves — no authPaused/deferredForAuth cost', () => {
+    const dispatch = vi.fn(({ pr }) => ({ agentId: `agent-${pr}` }));
+    const out = runReviewTick({ reconcile: () => reviewsPlan(2), dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [] });
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(out.authPaused).toBe(false);
+    expect(out.deferredForAuth).toBe(0);
+    expect(out.authPauseReason).toBeNull();
+  });
+
+  it('deferred (paused) reviews still feed statusCandidates — nothing owed is silently dropped', () => {
+    const statusCandidates = vi.fn(() => []);
+    runReviewTick({
+      reconcile: () => reviewsPlan(4), dispatch: vi.fn(), tagRound: () => {}, tagStatus: () => {},
+      statusCandidates, paused: true,
+    });
+    expect(statusCandidates.mock.calls[0][0]).toHaveLength(4);
+  });
+});
+
+describe('runReviewTickAllRepos — the Claude-auth-broken gate is computed ONCE and forwarded to every repo (card x5kagse)', () => {
+  it('paused: no repo\'s tick ever dispatches, and the aggregate reports authPaused/authPauseReason', () => {
+    const dispatch = vi.fn();
+    const tick = (opts) => runReviewTick({
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 1, attempts: 0 }], refusals: [] }),
+      dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [], ...opts,
+    });
+    const out = runReviewTickAllRepos({
+      repos: ['repo-a', 'repo-b'], tick,
+      authGateOverride: () => ({ paused: true, reason: 'paused: Claude login expired — run /login' }),
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(out.dispatched).toEqual([]);
+    expect(out.deferredForAuth).toBe(2); // one owed review per repo, both deferred
+    expect(out.authPaused).toBe(true);
+    expect(out.authPauseReason).toBe('paused: Claude login expired — run /login');
+  });
+
+  it('not paused via authGateOverride: dispatch proceeds exactly as an unpaused tick would', () => {
+    const dispatch = vi.fn(({ pr }) => ({ agentId: `a${pr}` }));
+    const tick = (opts) => runReviewTick({
+      reconcile: () => ({ dispatch: [{ kind: 'review', prNumber: 1, attempts: 0 }], refusals: [] }),
+      dispatch, tagRound: () => {}, tagStatus: () => {}, statusCandidates: () => [], ...opts,
+    });
+    const out = runReviewTickAllRepos({
+      repos: ['repo-a'], tick, authGateOverride: () => ({ paused: false, reason: null }),
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(out.authPaused).toBe(false);
+  });
+
+  it('with a fake `tick` (not the real runReviewTick) and no authGateOverride, the gate defaults unpaused rather than shelling out (test hermeticity)', () => {
+    const tick = vi.fn(() => ({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 0 }));
+    const out = runReviewTickAllRepos({ repos: ['repo-a'], tick });
+    expect(out.authPaused).toBe(false);
+    expect(tick).toHaveBeenCalledWith({ repo: 'repo-a', paused: false, pauseReason: null });
+  });
+});
+
+describe('buildCliDaemonEffects.onTick — logs the exact pause line when authPaused (card x5kagse)', () => {
+  it('logs the required wording when result.authPaused is true', () => {
+    const lines = [];
+    const fx = buildCliDaemonEffects({ owner: 'o', log: { error: (l) => lines.push(l) }, reapSessions: () => null, runReview: () => ({}) });
+    fx.onTick({
+      repos: [{ repo: 'chalbert/web-everything' }], reviewsOwed: 0, dispatched: [], failed: [],
+      authPaused: true, authPauseReason: 'paused: Claude login expired — run /login',
+    });
+    expect(lines).toContain('review-daemon: paused: Claude login expired — run /login');
+  });
+
+  it('logs nothing extra when not paused', () => {
+    const lines = [];
+    const fx = buildCliDaemonEffects({ owner: 'o', log: { error: (l) => lines.push(l) }, reapSessions: () => null, runReview: () => ({}) });
+    fx.onTick({ repos: [{ repo: 'chalbert/web-everything' }], reviewsOwed: 0, dispatched: [], failed: [], authPaused: false });
+    expect(lines.some((l) => l.includes('paused: Claude login expired'))).toBe(false);
   });
 });
 
@@ -541,7 +693,10 @@ describe('runReviewTickAllRepos — one runReviewTick call per watched repo', ()
     const tick = vi.fn(() => ({ reviewsOwed: 0, dispatched: [], failed: [], refusals: 0 }));
     const dispatch = () => ({});
     runReviewTickAllRepos({ repos: ['repo-a'], tick, dispatch });
-    expect(tick).toHaveBeenCalledWith({ dispatch, repo: 'repo-a' });
+    // card x5kagse — `tick` here is a fake (not the real `runReviewTick`), so the auth gate defaults to
+    // not-paused without any real IO; `paused`/`pauseReason` are still forwarded into every call, same as any
+    // other shared per-tick fact (`acquirableLanes`, `readPrs`, ...).
+    expect(tick).toHaveBeenCalledWith({ dispatch, repo: 'repo-a', paused: false, pauseReason: null });
   });
 
   // Regression, #xvzwiew live-caught 2026-09-23: a repo whose `runReviewTick` catches its own reconcile

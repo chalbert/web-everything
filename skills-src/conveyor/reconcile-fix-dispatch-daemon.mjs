@@ -54,6 +54,9 @@ import { runReconcileFixDispatch } from '../../scripts/conveyor/reconcile-fix-di
 import { runReconcileCiHealDispatch } from '../../scripts/operations/ci-heal-pr-dispatch.mjs';
 import { resolveLiveQueueBaseline } from '../../scripts/readiness/heavy-admission.mjs'; // card xkyw1x4
 import { createQueueBudget } from '../../scripts/readiness/heavy-queue-projection.mjs'; // card xkyw1x4
+import { runReconcilePass, defaultReadPrs } from '../../scripts/conveyor/reconcile-pass.mjs'; // #4191
+import { planNoteComment, postNoteComment } from '../../scripts/conveyor/reconcile-note-comment.mjs'; // #4191
+import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
 
 /** The checkout this daemon runs from — its heavy-admission root is the host-wide `<workspace>/.lanes` one. */
 const DAEMON_REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -214,6 +217,113 @@ export async function runReconcileCiHealDispatchAllRepos({ repos = FIX_DISPATCH_
 }
 
 /**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#defaultReadNotesForRepo — #4191 (epic #4075/#3383):
+ * "reconcile-core.mjs#planReconcile emits `notes` (`ci-heal-exhausted`, `awaiting-permission`) that nothing
+ * downstream reads" — NEITHER `runReconcileFixDispatch` (`we:scripts/conveyor/reconcile-fix-dispatch.mjs`) NOR
+ * `runReconcileCiHealDispatch` (`we:scripts/operations/ci-heal-pr-dispatch.mjs`) forwards its own
+ * `reconciled.notes` out of their return shape (both already forward `reconciled.refusals` as
+ * `reconcileRefusalDetails` — see either one's own docblock — `notes` was simply never added alongside it). This
+ * card's own file scope deliberately does NOT touch either of those two files (both are actively owned by other
+ * in-flight cards this same epic runs concurrently — see the delivery plan's file-ownership table), so rather
+ * than thread a new field through either one's return shape, this is a THIRD, independent, per-repo call to
+ * {@link runReconcilePass} — the SAME pure `planReconcile` plan both of those files already read, unchanged, no
+ * new export. The only addition here is capturing the raw PR list `readPrs` already fetches, keyed by PR
+ * number, so the comment-episode dedup below (`we:scripts/conveyor/reconcile-note-comment.mjs#planNoteComment`)
+ * can read each note's own PR's `comments` without a FOURTH gh round-trip.
+ * @param {{repo:string, reconcile?:Function, readPrs?:Function}} o
+ * @returns {{notes:Array<object>, prsByNumber:Map<number,object>}}
+ */
+export function defaultReadNotesForRepo({ repo, reconcile = runReconcilePass, readPrs = defaultReadPrs } = {}) {
+  let capturedPrs = [];
+  const result = reconcile({
+    repo,
+    readPrs: (o) => { capturedPrs = readPrs(o); return capturedPrs; },
+  });
+  return {
+    notes: Array.isArray(result?.notes) ? result.notes : [],
+    prsByNumber: new Map((Array.isArray(capturedPrs) ? capturedPrs : []).map((pr) => [pr.number, pr])),
+  };
+}
+
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#defaultNoteCommentDryRun — #4191: this repo's own
+ * "land the write path OFF, prove it live, then turn it on" convention (see the delivery plan's "Routing
+ * decisions" — supervision enforcement lands OFF until real miss data), applied to a brand-new PR-write action.
+ * Dry-run (compute + log the comment that WOULD post, never call `gh`) unless `WE_CONVEYOR_POST_NOTE_COMMENTS=1`
+ * is set in the daemon's own environment — an explicit operator opt-in, never this card's own default. This
+ * card's own Done-when already accepts a QUEUED comment payload as sufficient (we:backlog/4191-*.md, item 1's
+ * own parenthetical), so nothing this card is scored on is lost by defaulting to dry-run.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function defaultNoteCommentDryRun(env = process.env) {
+  return env?.WE_CONVEYOR_POST_NOTE_COMMENTS !== '1';
+}
+
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#runReconcileNotesAllRepos — fan out
+ * {@link defaultReadNotesForRepo} over every watched repo (mirrors {@link runReconcileFixDispatchAllRepos}'s own
+ * per-repo isolation via {@link forEachRepo}), then plan — and, unless `dryRun`, actually post — exactly ONE
+ * durable PR comment per note episode ({@link planNoteComment}, `we:scripts/conveyor/reconcile-note-comment.mjs`)
+ * that a trusted principal has not already posted. `dryRun` defaults to {@link defaultNoteCommentDryRun}'s own
+ * env-gated answer; a test (or the live proof) passes `dryRun: true` explicitly regardless of environment, per
+ * this card's own PROOF section ("don't post real PR comments in tests or the proof").
+ * @param {{repos?:string[], tick?:Function, postComment?:Function, dryRun?:boolean}} [o]
+ * @returns {{repos:Array<object>, notes:Array<object>, refusals:Array<object>, comments:Array<object>}}
+ *   `comments` — one row per note this tick saw, `{repo, prNumber, kind, key, body?, alreadyPosted, posted,
+ *   dryRun, error?}` (`body` is present only when a comment was newly planned — omitted once `alreadyPosted`,
+ *   nothing new to show).
+ */
+export function runReconcileNotesAllRepos({
+  repos = FIX_DISPATCH_DAEMON_REPOS, tick = defaultReadNotesForRepo, postComment = postNoteComment,
+  dryRun = defaultNoteCommentDryRun(), ...tickOpts
+} = {}) {
+  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
+  const notes = [];
+  const refusals = [];
+  const comments = [];
+  for (const entry of perRepo) {
+    if (entry.error) {
+      refusals.push({ repo: entry.repo, prNumber: null, kind: 'tick-failed', why: entry.error });
+      continue;
+    }
+    const { repo, result } = entry;
+    const prsByNumber = result?.prsByNumber ?? new Map();
+    for (const n of (result?.notes ?? [])) {
+      const tagged = { ...n, repo };
+      notes.push(tagged);
+      const pr = prsByNumber.get(n.prNumber);
+      const plan = planNoteComment(tagged, pr?.comments);
+      if (plan.alreadyPosted) {
+        comments.push({
+          repo, prNumber: n.prNumber, kind: n.kind, key: plan.key, alreadyPosted: true, posted: false, dryRun,
+        });
+        continue;
+      }
+      if (dryRun) {
+        comments.push({
+          repo, prNumber: n.prNumber, kind: n.kind, key: plan.key, body: plan.body, alreadyPosted: false, posted: false, dryRun: true,
+        });
+        continue;
+      }
+      const outcome = postComment({ repo, pr: n.prNumber, body: plan.body });
+      comments.push({
+        repo,
+        prNumber: n.prNumber,
+        kind: n.kind,
+        key: plan.key,
+        body: plan.body,
+        alreadyPosted: false,
+        posted: !!outcome.ok,
+        dryRun: false,
+        ...(outcome.ok ? {} : { error: outcome.error }),
+      });
+    }
+  }
+  return { repos: perRepo, notes, refusals, comments };
+}
+
+/**
  * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one repo?
  * (see `runReconcileFixDispatchAllRepos`: a whole-repo tick failure — including the stale-main refusal thrown
  * near the top of `runReconcileFixDispatch` — lands in `refusals` as `{repo, prNumber:null, kind:'tick-failed',
@@ -331,40 +441,78 @@ export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, ti
  * tick log at all. Each half keeps its OWN per-repo isolation internally; a `fix`-side failure for one repo
  * never skips that SAME repo's `ci-heal` attempt, and vice versa — two independent per-repo ticks, merged only
  * for reporting.
- * @param {{repos?:string[], fixTick?:Function, ciHealTick?:Function}} [o] - both ticks default to the real
- *   dispatch functions; injecting either is for tests only.
+ * @param {{repos?:string[], fixTick?:Function, ciHealTick?:Function, notesTick?:Function, notesDryRun?:boolean,
+ *   authGateOverride?:Function}} [o]
+ *   - every tick defaults to the real dispatch function; injecting one is for tests only. `notesDryRun`
+ *   forwards to {@link runReconcileNotesAllRepos}'s own `dryRun` (omit to use ITS OWN default). `authGateOverride`
+ *   (card x5kagse) is a test-only injection point for {@link planClaudeAuthDispatchGate}'s own real IO decision —
+ *   see the block below for when the real one runs instead.
  * @returns {Promise<{repos:Array<object>, dispatched:Array<object>, refusals:Array<object>,
- *   reconcileRefusals:Array<object>, ciHeal:object, hungCi:object}>} `reconcileRefusals` (#x0mn6x0, epic
- *   #4075/#3383) merges both halves' own reconcile-layer refusal arrays — see
+ *   reconcileRefusals:Array<object>, ciHeal:object, hungCi:object, notes:Array<object>,
+ *   noteComments:Array<object>, authPaused:boolean, authPauseReason:(string|null)}>} `reconcileRefusals`
+ *   (#x0mn6x0, epic #4075/#3383) merges both halves' own reconcile-layer refusal arrays — see
  *   {@link runReconcileFixDispatchAllRepos}'s own field for the shape/why. `onTick` (below) logs these
  *   SEPARATELY from `refusals`: they are a different population (a PR reconcile refused outright, never even
  *   offered to `fix`/`ci-heal`), not a duplicate count of the same thing. `hungCi` (xd1sfms, epic #4075/#3383)
  *   is the THIRD half this daemon now owns — see {@link runHungCiRecoveryAllRepos}'s own docblock for why this
  *   daemon, specifically, is where it lives (it is the one daemon confirmed live and ticking; the pass's own
- *   `daemon-manifest.mjs` entry has no launchd job installed).
+ *   `daemon-manifest.mjs` entry has no launchd job installed). `notes`/`noteComments` (#4191, epic #4075/#3383)
+ *   are the FIFTH half — see {@link runReconcileNotesAllRepos}'s own docblock. `authPaused`/`authPauseReason`
+ *   (card x5kagse, epic #4075/#3383) — while the operator's Claude login is broken
+ *   (`we:scripts/conveyor/claude-auth-health.mjs`), `fix` and `ci-heal` — the two halves that actually dispatch
+ *   a fresh Claude session — are SKIPPED OUTRIGHT this tick, never merely attempted-and-failed: nothing is
+ *   dispatched, so no fix/ci-heal attempt and no round-cap comment marker is ever spent on a login that cannot
+ *   work. `hungCi`/`mainRedRebase`/`notes` (mechanical git/gh passes, no Claude session involved) keep running
+ *   unpaused — the login break does not touch them.
  */
 export async function runTickAllRepos({
-  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick,
+  repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, notesTick, notesDryRun,
+  authGateOverride,
 } = {}) {
+  // card x5kagse (epic #4075/#3383) — computed ONCE per tick, shared by both dispatching halves below. Real IO
+  // (`planClaudeAuthDispatchGate`'s own `claude agents --json --all` read + health read + cheap probe) runs
+  // ONLY for a genuine production tick — mirrors `queueAdmission`'s own "only read when a real tick runs" rule
+  // just below: a test that injects EITHER `fixTick` or `ciHealTick` never wants this file to shell out for a
+  // gate decision it did not ask about, unless it explicitly injects `authGateOverride` to test the gate itself.
+  const authGate = authGateOverride ? authGateOverride()
+    : ((fixTick || ciHealTick) ? { paused: false, reason: null } : planClaudeAuthDispatchGate());
+  const pausedDispatchResult = () => ({
+    repos: repos.map((repo) => ({ repo, result: { dispatched: [], refusals: [] } })),
+    dispatched: [], refusals: [], reconcileRefusals: [],
+  });
   // Card xkyw1x4 — the live heavy-test queue gate: ONE baseline read and ONE budget per daemon pass, shared by
   // every repo's fix and CI-heal dispatch, so each dispatch in the pass sees the demand of the ones before it.
-  // Only read when a real tick runs (an injected test tick never needs it).
-  const queueAdmission = (fixTick && ciHealTick) ? null : createQueueBudget(resolveLiveQueueBaseline({ checkoutRoot: DAEMON_REPO_ROOT }));
-  const fix = runReconcileFixDispatchAllRepos({ repos, ...(fixTick ? { tick: fixTick } : { queueAdmission }) });
-  const ciHeal = await runReconcileCiHealDispatchAllRepos({ repos, ...(ciHealTick ? { tick: ciHealTick } : { queueAdmission }) });
+  // Only read when a real tick runs (an injected test tick never needs it) AND dispatch is not paused (card
+  // x5kagse — no reason to read live queue capacity for a pass that is about to dispatch nothing at all).
+  const queueAdmission = (authGate.paused || (fixTick && ciHealTick)) ? null : createQueueBudget(resolveLiveQueueBaseline({ checkoutRoot: DAEMON_REPO_ROOT }));
+  const fix = authGate.paused ? pausedDispatchResult()
+    : runReconcileFixDispatchAllRepos({ repos, ...(fixTick ? { tick: fixTick } : { queueAdmission }) });
+  const ciHeal = authGate.paused ? pausedDispatchResult()
+    : await runReconcileCiHealDispatchAllRepos({ repos, ...(ciHealTick ? { tick: ciHealTick } : { queueAdmission }) });
   const hungCi = runHungCiRecoveryAllRepos({ repos, ...(hungCiTick ? { tick: hungCiTick } : {}) });
   // x5uqim1 follow-up (#4075/#3383) — the FOURTH half this daemon now owns: see
   // {@link runMainRedRebaseAllRepos}'s own docblock for why this daemon, specifically, is where it lives (same
   // reason `hungCi` already does — the pass's own `daemon-manifest.mjs` entry has no launchd job installed).
   const mainRedRebase = runMainRedRebaseAllRepos({ repos, ...(mainRedRebaseTick ? { tick: mainRedRebaseTick } : {}) });
+  // #4191 (epic #4075/#3383) — the FIFTH half this daemon now owns: surface `planReconcile`'s own `notes`
+  // (`ci-heal-exhausted`/`awaiting-permission`) that neither `fix` nor `ci-heal` above ever forwards — see
+  // {@link runReconcileNotesAllRepos}'s own docblock for why this is a separate, independent read rather than a
+  // field threaded through either of those two.
+  const notes = runReconcileNotesAllRepos({
+    repos, ...(notesTick ? { tick: notesTick } : {}), ...(notesDryRun == null ? {} : { dryRun: notesDryRun }),
+  });
   return {
     repos: fix.repos, // same repo list every half ticked — the shape onTick's log already reads from
     dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched],
-    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals],
+    refusals: [...fix.refusals, ...ciHeal.refusals, ...hungCi.refusals, ...mainRedRebase.refusals, ...notes.refusals],
     reconcileRefusals: [...(fix.reconcileRefusals ?? []), ...(ciHeal.reconcileRefusals ?? [])],
     ciHeal, // the ci-heal half's own detail, kept available rather than discarded once merged above
     hungCi, // the hung-ci-recovery half's own detail, same reason
     mainRedRebase, // the main-red-rebase half's own detail, same reason
+    authPaused: authGate.paused, // card x5kagse — fix/ci-heal dispatch skipped outright this tick
+    authPauseReason: authGate.reason,
+    notes: notes.notes, // #4191 — every surfaced note this tick saw, repo-tagged
+    noteComments: notes.comments, // #4191 — one row per note: posted / would-post (dryRun) / already-posted
   };
 }
 
@@ -417,6 +565,38 @@ export function formatMainRedRebaseActionLine(a) {
   return `reconcile-fix-dispatch-daemon: main-red-rebase ${a?.repo ?? '?'} ${prLabel} (${a?.headRefName ?? '?'}) — ${outcome}`;
 }
 
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatNoteLine — #4191 (epic #4075/#3383): ONE
+ * printable line per `planReconcile` note this tick saw (`ci-heal-exhausted`/`awaiting-permission`), with its
+ * own reason — mirrors {@link formatRefusalLine}'s own "never just a count" discipline, applied to the
+ * population this whole card exists to stop dropping.
+ * @param {{repo?:string, kind?:string, prNumber?:(number|null), text?:string}} n
+ * @returns {string}
+ */
+export function formatNoteLine(n) {
+  const prLabel = n?.prNumber == null ? '(no PR)' : `PR #${n.prNumber}`;
+  return `reconcile-fix-dispatch-daemon: note ${n?.kind ?? 'unknown'} ${n?.repo ?? '?'} ${prLabel} — ${n?.text ?? '(no detail recorded)'}`;
+}
+
+/**
+ * we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs#formatNoteCommentLine — #4191: ONE printable line per
+ * note-comment decision this tick made (`we:scripts/conveyor/reconcile-note-comment.mjs#runReconcileNotesAllRepos`
+ * — already-posted / dry-run would-post / posted / failed). The dry-run case prints the FULL comment body (not
+ * just its key) — this is this card's own "don't post real PR comments in tests or the proof; show the comment
+ * text it WOULD post" requirement, satisfied at the log line itself rather than a separate code path.
+ * @param {{repo?:string, prNumber?:(number|null), kind?:string, key?:string, body?:string, alreadyPosted?:boolean,
+ *   posted?:boolean, dryRun?:boolean, error?:string}} c
+ * @returns {string}
+ */
+export function formatNoteCommentLine(c) {
+  const prLabel = c?.prNumber == null ? '(no PR)' : `PR #${c.prNumber}`;
+  const head = `reconcile-fix-dispatch-daemon: note-comment ${c?.kind ?? 'unknown'} ${c?.repo ?? '?'} ${prLabel} (${c?.key ?? '?'})`;
+  if (c?.alreadyPosted) return `${head} — already posted, skipping`;
+  if (c?.dryRun) return `${head} — DRY-RUN, would post:\n${c?.body ?? '(no body)'}`;
+  if (c?.posted) return `${head} — posted`;
+  return `${head} — FAILED to post${c?.error ? ` (${c.error})` : ''}`;
+}
+
 /** Build the real effects for {@link runDaemonLoop}: a real tick of {@link runTickAllRepos} (`fix` +
  *  `ci-heal`, #xngv3vn), a real interval sleep, and a real keyed lease heartbeat. Kept as its own factory
  *  (mirroring `buildCliTickEffects` in runner.mjs) so `main()` stays a thin wire-up. */
@@ -428,9 +608,14 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
       const {
-        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase,
+        repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, notes = [], noteComments = [],
+        authPaused = false, authPauseReason = null,
       } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
+      // card x5kagse (epic #4075/#3383) — logged EVERY tick fix/ci-heal dispatch stays paused, exact wording
+      // required by the card and matched by the soak scenario/live-proof read; never merely implied by an
+      // empty `dispatched` count.
+      if (authPaused) log.error(`reconcile-fix-dispatch-daemon: ${authPauseReason ?? 'paused: Claude login expired — run /login'}`);
       for (const r of repos) if (r.error) log.error(`reconcile-fix-dispatch-daemon: ${r.repo} tick failed (non-fatal, other repos unaffected): ${r.error}`);
       // #x0mn6x0 — ONE LINE PER REFUSAL, never just the count above. `refusals` = a PR the plan offered to
       // `fix`/`ci-heal` but the dispatch itself refused (no-lane, held, dispatch-failed, unsupported-repo,
@@ -450,6 +635,11 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // x5uqim1 follow-up (#4075/#3383) — ONE LINE PER MECHANICAL-REBASE ACTION, same discipline as the
       // hung-run loop just above.
       for (const a of (mainRedRebase?.dispatched ?? [])) log.error(formatMainRedRebaseActionLine(a));
+      // #4191 (epic #4075/#3383) — ONE LINE PER SURFACED NOTE (`ci-heal-exhausted`/`awaiting-permission`),
+      // never just a count — the exact population this card exists to stop silently dropping, plus ONE LINE
+      // PER note-comment decision (already-posted / dry-run would-post, with the full body / posted / failed).
+      for (const n of notes) log.error(formatNoteLine(n));
+      for (const c of noteComments) log.error(formatNoteCommentLine(c));
     },
     onTickError: (error) => {
       log.error(`reconcile-fix-dispatch-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);

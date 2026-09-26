@@ -19,7 +19,10 @@
  *      expire, and a high-severity reminder.
  *   4. {@link planActions} — what the shell would do (diagnose, notify, investigate, file). In `shadow` mode
  *      (slice 1 ships in shadow) only deterministic diagnoses and reports run; notify/investigate/file are
- *      planned but suppressed, so the operator can see what WOULD have happened.
+ *      planned but suppressed, so the operator can see what WOULD have happened — EXCEPT a smell that opts in
+ *      via `notifyEvenInShadow` (#4077 continuation: `claude-auth-expired`), whose `notify` entries are never
+ *      suppressed, in any mode. See {@link ../health-watch.mjs}'s own "THE MINIMAL NOTIFY PATH" doc for the
+ *      execution side — before this, `notify` was planned but never actually SENT, in any mode, for any smell.
  *   5. {@link renderEpisodeReport} / {@link renderHealthSection} — the recommendation channel (4065 Fork 4):
  *      a durable per-episode report, and the HEALTH section the operator queue prints, whose first line is the
  *      health watch's own last-tick-completed age.
@@ -147,6 +150,27 @@ export function parseDaemonLog(text) {
     }
   }
   close();
+  return out;
+}
+
+// ── 1b. `ps` output parsing (machine-overload's own input) ──────────────────────────────────────────────────────
+
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\S+)\s+(.*)$/;
+
+/**
+ * PURE: parse `ps -Ao pid,ppid,pcpu,etime,command` output (any BSD/macOS `ps` in that column order) into rows.
+ * Skips the header line and anything else that does not start with `<pid> <ppid> <pcpu>` — never throws on a
+ * malformed line, so one odd row never loses the rest of the snapshot.
+ * @param {string} text
+ * @returns {Array<{pid:number, ppid:number, pcpu:number, etime:string, command:string}>}
+ */
+export function parsePsOutput(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split('\n')) {
+    const m = PS_ROW.exec(raw);
+    if (!m) continue;
+    out.push({ pid: Number(m[1]), ppid: Number(m[2]), pcpu: Number(m[3]), etime: m[4], command: m[5].trim() });
+  }
   return out;
 }
 
@@ -357,6 +381,13 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
  * PURE: turn transitions into the actions the shell performs. Deterministic diagnoses always run (on open);
  * notify / investigate / file are SUPPRESSED in shadow mode — listed with `suppressed` so the report shows
  * what would have happened.
+ *
+ * `smell.notifyEvenInShadow: true` is the ONE opt-in exception to that shadow-mode suppression (added for the
+ * `claude-auth-expired` sign, #4077 continuation — an expired operator login left every daemon-dispatched
+ * session dead all night with no alert, because `notify` was never actually wired to send anything in ANY
+ * mode; see `health-watch.mjs`'s own "THE MINIMAL NOTIFY PATH" doc for the execution side). A smell that does
+ * NOT set this flag is completely unaffected — its `notify` entries stay suppressed in shadow exactly as
+ * before this flag existed. Never applies to `investigate`/`file` (still slice-2/slice-5 work, not shipped).
  */
 export function planActions(transitions, smellsById, { mode = 'shadow' } = {}) {
   const plan = [];
@@ -364,13 +395,14 @@ export function planActions(transitions, smellsById, { mode = 'shadow' } = {}) {
     const ep = t.episode;
     const smell = smellsById[ep?.smell];
     if (!ep || !smell) continue;
+    const shadowSuppressed = mode === 'shadow' && !smell.notifyEvenInShadow;
     if (t.type === 'opened' || t.type === 'flapping') {
       if (smell.diagnose) plan.push({ kind: 'diagnose', key: t.key, diagnose: smell.diagnose });
-      if (ep.severity === 'high' && !ep.tracked) plan.push({ kind: 'notify', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode' : null });
+      if (ep.severity === 'high' && !ep.tracked) plan.push({ kind: 'notify', key: t.key, suppressed: shadowSuppressed ? 'shadow mode' : null });
       if (smell.action === 'investigate') plan.push({ kind: 'investigate', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode (agent investigation is slice 2, #4078)' : 'not built yet (slice 2, #4078)' });
       if (smell.action === 'file') plan.push({ kind: 'file', key: t.key, suppressed: mode === 'shadow' ? 'shadow mode' : 'not built yet (slice 5)' });
     } else if (t.type === 'reminder' || t.type === 'silence-expired') {
-      plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: mode === 'shadow' ? 'shadow mode' : null });
+      plan.push({ kind: 'notify', key: t.key, reason: t.type, suppressed: shadowSuppressed ? 'shadow mode' : null });
     }
   }
   return plan;

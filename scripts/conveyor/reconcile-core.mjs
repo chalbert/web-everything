@@ -284,6 +284,21 @@ const labelNames = (labels) => (Array.isArray(labels) ? labels : [])
 const commentBody = (c) => (typeof c === 'string' ? c : c?.body);
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#failingCheckNames — #4191 (epic #4075/#3383): the NAMED reason a
+ * `ci-heal-exhausted` note surfaces, so the operator reads "which check, still failing" instead of a bare
+ * attempt count. Mirrors `we:scripts/operations/operator-queue.mjs#evaluatePr`'s own `names(failing)` filter
+ * (`status === 'COMPLETED'` and a non-passing conclusion) rather than inventing a second rule for the same
+ * question — this file already reads `pr.statusCheckRollup` for `reduceCheckState`'s own `check.state`, this
+ * just names the specific rows behind a `red` state instead of only counting them. Pure.
+ * @param {Array<{name?:string, context?:string, status?:string, conclusion?:string}>} [rollup]
+ * @returns {string[]}
+ */
+const failingCheckNames = (rollup) => (Array.isArray(rollup) ? rollup : [])
+  .filter((c) => String(c?.status ?? '').toUpperCase() === 'COMPLETED'
+    && !['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(String(c?.conclusion ?? '').toUpperCase()))
+  .map((c) => c?.name || c?.context || 'unnamed check');
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#startedAtMs — `startedAt` as epoch ms, whichever shape it arrives in.
  *
  * MEASURED, NOT ASSUMED: `claude agents --json` returns `startedAt` as an epoch NUMBER
@@ -557,6 +572,48 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#markAuthExpiredSessions — mark each listed session whose OWN
+ * transcript ends on the Claude CLI's own synthetic auth-failure turn (`isApiErrorMessage` with an
+ * `authentication_failed` error or `Login expired · Please run /login`) as `authExpired: true`. Pure (the
+ * classification is injected via `authExpiredInfoFor`); modeled directly on {@link markHungSessions} just
+ * above — a SEPARATE pre-pass over AGENT rows, run before {@link assessLiveness}, never a change to that
+ * pinned function itself.
+ *
+ * WHY THIS EXISTS, SEPARATELY FROM `markHungSessions` (live incident, night of 2026-09-25/26 ET): the
+ * operator's own Claude login expired, so every daemon-dispatched session (`ci-heal-2711`/`ci-heal-2712`,
+ * re-dispatched repeatedly until 06:53) ended IMMEDIATELY with one synthetic assistant turn carrying the CLI's
+ * own auth-failure text — never producing another transcript line for anything to go stale on. Left to
+ * `markHungSessions`'s own 30-minute default threshold, each session would eventually be caught, but (a) that
+ * is 30+ minutes per session of `reconcile-refused live-process` noise this pass emits instead of dispatching a
+ * fresh fixer, all night, and (b) the reaper (`we:scripts/conveyor/session-reaper.mjs`) that would otherwise
+ * `claude stop` these sessions promptly shares the identical blind spot — see that file's own Claude-auth-
+ * expired axis, built alongside this one, reading the SAME shared detector
+ * (`we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo` — ONE implementation, not two, mirroring
+ * `markHungSessions`'s own `hung-session.mjs` reuse).
+ *
+ * A ci-heal session carries no completion-record schema at all ({@link
+ * ../operations/completion-record.mjs#COMPLETION_KINDS} has no `ci-heal` entry — see
+ * `session-reaper.mjs#BACKSTOP_COMPLETION_KINDS`'s own doc for why), so `markSelfReportedDone`'s
+ * `outcome:'blocked-on-infra'` cool-off can never apply to one; THIS mark is what frees such a PR to be
+ * reconciled again, immediately, the same way `hung` already does for a session with no self-report at all —
+ * no synthetic cool-off invented for a kind whose schema was never meant to hold one.
+ * @param {Array<object>} agents - the `claude agents --json` rows (optionally already carrying `selfReportedDone`
+ *   from {@link markSelfReportedDone} and/or `hung` from {@link markHungSessions}, run first).
+ * @param {(agent:object) => ({authExpired:boolean, reason?:string}|null)} authExpiredInfoFor
+ * @returns {Array<object>} the same rows; auth-expired ones gain `authExpired: true`, `authExpiredReason`
+ */
+export function markAuthExpiredSessions(agents, authExpiredInfoFor) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (String(a?.state ?? '').toLowerCase() === 'done' || a?.selfReportedDone === true || a?.hung === true) return a;
+    let info = null;
+    try { info = authExpiredInfoFor(a); } catch { info = null; }
+    if (!info || info.authExpired !== true) return a;
+    return { ...a, authExpired: true, authExpiredReason: info.reason ?? null };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#assessLiveness — the liveness verdict for ONE PR, over the sessions
  * bound to it. Pure, and it is refusal 4 in code.
  *
@@ -594,6 +651,15 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
  * as `live-process` and free its PR to be reconciled again.
  *
+ * AND the same holds for a session {@link markAuthExpiredSessions} has independently confirmed hit the Claude
+ * CLI's own auth-failure (`authExpired: true`) — live incident, night of 2026-09-25/26 ET. Same reasoning as
+ * `hung` immediately above: an upstream, pre-computed AGENT-level fact from a separate detector
+ * (`we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo`) this function trusts exactly the way it
+ * already trusts `selfReportedDone`/`hung`. Excluding it here is the fix for the live incident's own reconcile
+ * symptom: `reconcile-refused live-process … PR #2711` / `#2712` — these sessions had a LIVE pid (never
+ * stopped promptly) and no self-report, so without this exclusion they read as `live-process` FOREVER, and the
+ * fix-dispatch daemon never sent a fresh fixer even after the operator logged back in.
+ *
  * `state === 'stopped'` is ALSO finished — live-caught 2026-09-25 (PR #2647/#2625, both `chalbert/web-everything`,
  * both stuck at an informative `review-status:review-stalled`/`reviewing` label with nothing live and nothing
  * retrying). Root cause, confirmed against a real `claude agents --json --all` listing off the running review
@@ -624,7 +690,8 @@ export function assessLiveness(bound) {
   const isFinished = (agent) => {
     if (agent?.awaitingInfraCooloff === true) return false; // #4149 — the record's cool-off outranks `state`
     const state = String(agent?.state ?? '').toLowerCase();
-    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
+    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true
+      || agent?.authExpired === true;
   };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({
@@ -877,10 +944,16 @@ export function planReconcile({
         // attempt is exactly the case a person must be pulled in for, so it gets the SAME surfaced-note
         // treatment `awaiting-permission` already gets, with the literal phrase an operator (or an escalation
         // reader grepping for it) can search on.
+        // #4191 (epic #4075/#3383) — the operator's own queue/comment surfacing (see this note's callers) reads
+        // as "needs your decision: fix attempts exhausted", WITH the last failure reason — a bare attempt count
+        // makes the operator re-open the PR just to find out what is actually still red. `failingCheckNames`
+        // reads the SAME `pr.statusCheckRollup` `withPhase`/`check` above already derived `check.state` from;
+        // never re-fetched, never re-derived beyond naming the rows a `red` state already counted.
+        const lastFailureReason = failingCheckNames(pr?.statusCheckRollup).join(', ') || 'required check failing (no readable check name)';
         notes.push({
-          kind: 'ci-heal-exhausted', prNumber, attempts: ciHealAttempts, cap: ciHealCap,
+          kind: 'ci-heal-exhausted', prNumber, attempts: ciHealAttempts, cap: ciHealCap, lastFailureReason,
           text: `PR #${prNumber}: ci-heal attempts exhausted (${ciHealAttempts}/${ciHealCap}) — auto-heal cannot`
-            + ' repair this required-check failure any further; a person must take it over',
+            + ` repair this required-check failure any further; a person must take it over. Last failure: ${lastFailureReason}`,
         });
       } else {
         dispatch.push({
@@ -1205,21 +1278,20 @@ export function planReconcile({
  * `review-status:*` refresh (`we:scripts/conveyor/review-status-tag.mjs`) this tick, given this pass's own
  * `dispatch`/`refusals` output.
  *
- * EVERY PR THIS PASS HAS AN OPINION ABOUT, EXCEPT `nothing-owed`. `nothing-owed` is the ONLY refusal kind that
- * genuinely means "reviewed and queued, already landed, or a signal-free PR unrelated to this loop" — see
- * {@link OWED_ELSEWHERE}. `owed-elsewhere` does NOT mean that: it fires for a `needs-human`/`conflicted` phase
- * alike (`ci-red` moved OFF this table at multi-repo slice 7 — it is a real `dispatch` entry, `kind:'ci-heal'`,
- * now, not a refusal), which are real conveyor-dispatched PRs stuck on something this pass does not run (a
- * human clear, a rebase) — NOT unrelated PRs. Before this function existed,
- * `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded `owed-elsewhere` wholesale on the mistaken
- * premise that it "covers every unrelated human PR" — confirmed live 2026-09-05 on PR #1920: its `needs-human`
- * refusal (kind `owed-elsewhere`) was excluded from every tick's refresh sweep, so its stale
- * `review-status:reviewing` label — left over from a session that no longer exists in `claude agents --json`
- * at all — was NEVER re-derived and cleared. `review-status-tag.mjs` is idempotent and name-keyed (matches
- * `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a PR with nothing live simply clears any
- * stale label — safe to call on every candidate this returns, including a genuinely-foreign PR that happens to
- * reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst, never a wrong label).
- * SAME BUG CLASS, THIRD TIME (live-caught 2026-09-22, PR #2472): a PR that moves to being owed a FIX
+ * EVERY PR THIS PASS HAS AN OPINION ABOUT — including `nothing-owed`. `owed-elsewhere` never meant "unrelated
+ * PR": it fires for a `needs-human`/`conflicted` phase alike (`ci-red` moved OFF this table at multi-repo
+ * slice 7 — it is a real `dispatch` entry, `kind:'ci-heal'`, now, not a refusal), which are real
+ * conveyor-dispatched PRs stuck on something this pass does not run (a human clear, a rebase) — NOT unrelated
+ * PRs. Before this function existed, `we:skills-src/conveyor/runner.mjs`'s own inline filter excluded
+ * `owed-elsewhere` wholesale on the mistaken premise that it "covers every unrelated human PR" — confirmed
+ * live 2026-09-05 on PR #1920: its `needs-human` refusal (kind `owed-elsewhere`) was excluded from every
+ * tick's refresh sweep, so its stale `review-status:reviewing` label — left over from a session that no
+ * longer exists in `claude agents --json` at all — was NEVER re-derived and cleared. `review-status-tag.mjs`
+ * is idempotent and name-keyed (matches `review-<pr>`/`fix-<pr>` sessions fresh each call), so calling it on a
+ * PR with nothing live simply clears any stale label — safe to call on every candidate this returns, including
+ * a genuinely-foreign PR that happens to reach `owed-elsewhere` (a wasted `gh`/`claude agents` read at worst,
+ * never a wrong label).
+ * SAME BUG CLASS, SECOND TIME (live-caught 2026-09-22, PR #2472): a PR that moves to being owed a FIX
  * (`plan.dispatch`'s `kind:'fix'` entries — e.g. a `review:changes` bounce) used to be in NEITHER
  * `reviewsOwed` NOR `refusals`, so its status label never got re-derived once it left the review-owed
  * state. PR #2472's own `review-2472` session finished and posted its real `review:changes` verdict, but
@@ -1227,18 +1299,29 @@ export function planReconcile({
  * for it again to notice the session was `done` and clear the label. Exactly the same root shape as the
  * `owed-elsewhere` miss documented above (a real, currently-relevant PR silently excluded from the refresh
  * sweep), just a different exclusion. Fixed by adding `fixesOwed` as a THIRD candidate source, included the
- * same unconditional way `reviewsOwed` already is — `review-status-tag.mjs` stays idempotent and
- * name-keyed, so including a fix-owed PR here costs one wasted read at worst on a genuinely quiet PR, never
- * a wrong label.
+ * same unconditional way `reviewsOwed` already is.
+ * SAME BUG CLASS, THIRD TIME (live-caught 2026-09-26, PR #2711, card x8who76): `nothing-owed` used to be
+ * excluded outright on the premise that it "genuinely means reviewed and queued, already landed, or a
+ * signal-free PR unrelated to this loop" — true of its STEADY STATE, but false at the exact instant a PR
+ * TRANSITIONS into it. `classifyPr` resolves `review:accepted`/`ready-to-merge` to phase `queued`, which is
+ * neither in `OWED` nor `OWED_ELSEWHERE`, so it refuses as `nothing-owed` — and that exclusion meant a PR
+ * whose review had JUST been accepted (carrying a `review-status:reviewing` label from the round that just
+ * finished) never got `review-status-tag.mjs` called again to notice the review session/job was gone and
+ * clear it. Confirmed live: PR #2711 got `review:accepted` at 13:07Z and `ready-to-merge` at 13:08Z but still
+ * carried `review-status:reviewing` (added 12:59Z) at 13:12Z — the operator read "accepted AND reviewing",
+ * a live contradiction. Fixed the same way as the other two: stop excluding it. `review-status-tag.mjs`'s own
+ * idempotency argument above applies identically to `nothing-owed` — a PR that was NEVER live costs one
+ * wasted read (or nothing at all when reads are shared, #4133) and no label ever gets written; a PR that just
+ * WENT quiet finally gets its stale label cleared within one tick instead of never.
  * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
  * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
  * @param {Array<{prNumber:number}>} [fixesOwed] - the `kind:'fix'` subset of this pass's own `dispatch`
- * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed, plus every refusal except `nothing-owed`
+ * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed + every refusal, `nothing-owed` included
  */
 export function selectStatusCandidates(reviewsOwed, refusals, fixesOwed) {
   return [
     ...(Array.isArray(reviewsOwed) ? reviewsOwed : []),
     ...(Array.isArray(fixesOwed) ? fixesOwed : []),
-    ...(Array.isArray(refusals) ? refusals : []).filter((r) => r && r.kind !== 'nothing-owed'),
+    ...(Array.isArray(refusals) ? refusals : []),
   ];
 }

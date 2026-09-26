@@ -111,6 +111,54 @@ export async function mintInstallationToken({
   return { token: data.token, expiresAt: data.expires_at, permissions: data.permissions ?? {} };
 }
 
+/**
+ * Read the installation's OWN resource — `GET /app/installations/{id}`, authenticated as the App itself (the
+ * App's own JWT, `Authorization: Bearer <jwt>`) — NEVER an installation access token: live-confirmed
+ * 2026-09-26 that this endpoint answers 401 to an installation token, only a JWT works.
+ *
+ * WHY THIS CALL EXISTS, GIVEN `mintInstallationToken` ALREADY RETURNS `permissions`. Live-caught 2026-09-26:
+ * `we:scripts/lib/github-app-auth-env.mjs#findInstallationGaps`'s repo check depended entirely on enumerating
+ * `GET /installation/repositories` (`defaultListInstallationRepos`) — a listing endpoint that can lag the
+ * installation's own `repository_selection` field for a short window right after a permission/repo-access
+ * change (the fleet hit exactly this: both daemons logged every one of `REQUIRED_APP_REPOS` as missing while
+ * a fresh, independent mint at the same moment showed every permission correctly granted and the listing
+ * endpoint itself returning all three required repos once it caught up). `repository_selection` (`'all'` or
+ * `'selected'`) is a field on the installation resource itself, set synchronously the moment the operator
+ * changes it on github.com — never subject to the listing endpoint's own lag — so a caller that already knows
+ * it is `'all'` never needs to enumerate anything to know every repo is covered.
+ * @param {{appId: string|number, installationId: string|number, privateKeyPath: string,
+ *   readKey?: (path: string) => string, buildJwt?: typeof buildAppJwt, fetchImpl?: typeof fetch,
+ *   now?: number}} o
+ * @returns {Promise<{permissions: object, repositorySelection: string|null}>}
+ */
+export async function getInstallationInfo({
+  appId, installationId, privateKeyPath,
+  readKey = (p) => readFileSync(p, 'utf8'),
+  buildJwt = buildAppJwt,
+  fetchImpl = fetch,
+  now = Date.now(),
+} = {}) {
+  if (!appId) throw new TypeError('github-app-token: appId is required');
+  if (!installationId) throw new TypeError('github-app-token: installationId is required');
+  if (!privateKeyPath) throw new TypeError('github-app-token: privateKeyPath is required');
+  const privateKeyPem = readKey(privateKeyPath);
+  const jwt = buildJwt({ appId, privateKeyPem, now });
+  const res = await fetchImpl(`https://api.github.com/app/installations/${installationId}`, {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    // Never echo the JWT or key material — only the API's own response body, same discipline as mintInstallationToken.
+    throw new Error(`github-app-token: installation info fetch failed (HTTP ${res.status}): ${body.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  return { permissions: data.permissions ?? {}, repositorySelection: data.repository_selection ?? null };
+}
+
 // ── IO SHELL (runs only as a CLI) ───────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {

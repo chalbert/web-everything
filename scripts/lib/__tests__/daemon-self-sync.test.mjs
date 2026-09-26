@@ -866,5 +866,8 @@ describe('a skipped tick is an empty tick every real daemon onTick can log (#404
       expect(() => effects.onTick(skippedTick('writer-active'), 0)).not.toThrow();
       expect(() => effects.onTick(skippedTick('quarantine'), 0)).not.toThrow();
     }
-  });
+    // Two cold dynamic imports of whole daemon module graphs: ~1.6 s on an idle Mac, past vitest's 5 s default
+    // under a loaded host (reproduced on origin/main at load average ~230, 2026-09-26). The assertion is about
+    // onTick's behaviour, not import speed, so it gets an explicit budget rather than failing the gate on load.
+  }, 60_000);
 });

@@ -92,6 +92,7 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 // exact gap this wiring closes.
 import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconcile.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
 import { runSessionReaperPass, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
@@ -181,6 +182,13 @@ export function runReviewTick({
   // existing fresh reads exactly as before. The real daemon (`buildCliDaemonEffects`, below) opts in.
   readPrs = null,
   readAgents = null,
+  // card x5kagse (epic #4075/#3383) — while the operator's Claude login is broken
+  // (`we:scripts/conveyor/claude-auth-health.mjs`), no NEW review session is dispatched, full stop: `false` by
+  // default so every pre-existing test of this function (none of which pass this) is unaffected. The real
+  // daemon (`runReviewTickAllRepos`, below) computes this ONCE per tick (host-global, not per-repo) and forwards
+  // it into every repo's own call.
+  paused = false,
+  pauseReason = null,
 } = {}) {
   // #x01u7az — runs FIRST and INDEPENDENTLY of `reconcile`'s own plan: it is a plain `gh pr list` + label read
   // over the whole repo, not scoped to whatever this tick's discovery found owed, so a `reconcile` failure
@@ -250,9 +258,14 @@ export function runReviewTick({
   // reappears in the next tick's plan 120s later, by which point growth/reclaim/releases may well have freed
   // up capacity. `Math.max(0, …)` tolerates a negative/garbage read the same way `Math.min` below tolerates
   // an oversized one — both fail toward "dispatch nothing this tick", never toward "dispatch more than asked".
-  const acquirable = Math.max(0, Number(acquirableLanes({ repo })) || 0);
+  // card x5kagse — a login-broken tick dispatches NOTHING (`acquirable` forced to 0 rather than skipping this
+  // whole block): every review stays owed exactly like a lane-starved tick already does (`reviewsOwed` and
+  // `statusCandidates` below are unaffected), so nothing here re-derives a second "was anything dispatched"
+  // path — it is the SAME deferred-not-lost shape `deferredForLanes` already models, just for a different cause.
+  const acquirable = paused ? 0 : Math.max(0, Number(acquirableLanes({ repo })) || 0);
   const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
-  const deferredForLanes = reviews.length - dispatchable.length;
+  const deferredForLanes = paused ? 0 : reviews.length - dispatchable.length;
+  const deferredForAuth = paused ? reviews.length - dispatchable.length : 0;
   const dispatched = [];
   const failed = [];
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
@@ -286,7 +299,8 @@ export function runReviewTick({
   }
   return {
     reviewsOwed: reviews.length, dispatched, failed, notStarted, refusals: (plan.refusals ?? []).length,
-    reconcileError: null, deferredForLanes,
+    reconcileError: null, deferredForLanes, deferredForAuth,
+    authPaused: paused, authPauseReason: paused ? pauseReason : null,
     holdReconcile: holdReconcileResults, holdReconcileError,
   };
 }
@@ -305,15 +319,28 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  * per-PR, one level up. Every downstream step this daemon already calls (`reconcile-pass.mjs`,
  * `review-dispatch.mjs`, both tag scripts) was already fully repo-generic before this — the daemon's own tick
  * was the only WE-hardcoded link (see `runReviewTick`'s own `repo` fix above, filed the same day this was).
- * @param {{repos?:string[], tick?:Function}} [o] - `tick` is injectable (defaults to `runReviewTick`); every
- *   other option is forwarded to it for EVERY repo except `repo` itself, which this loop supplies per-iteration.
+ * @param {{repos?:string[], tick?:Function, authGateOverride?:Function}} [o] - `tick` is injectable (defaults to
+ *   `runReviewTick`); every other option is forwarded to it for EVERY repo except `repo` itself, which this
+ *   loop supplies per-iteration. `authGateOverride` (card x5kagse) is a test-only injection point for
+ *   {@link planClaudeAuthDispatchGate}'s own real IO decision — see the block below for when the real one runs.
  * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, reviewsOwed:number,
  *   dispatched:Array<object>, failed:Array<object>, refusals:number, reconcileFailed:Array<{repo:string, error:string}>,
- *   deferredForLanes:number, holdReconcile:Array<{num:number, remove:string[], repo:string}>,
+ *   deferredForLanes:number, deferredForAuth:number, authPaused:boolean, authPauseReason:(string|null),
+ *   holdReconcile:Array<{num:number, remove:string[], repo:string}>,
  *   holdReconcileFailed:Array<{repo:string, error:string}>}}
  */
-export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, ...tickOpts } = {}) {
-  const perRepo = forEachRepo(repos, (repo) => tick({ ...tickOpts, repo }));
+export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, authGateOverride, ...tickOpts } = {}) {
+  // card x5kagse (epic #4075/#3383) — computed ONCE per tick (the login is a host-global fact, not per-repo),
+  // then forwarded into every repo's own `runReviewTick` call below. Real IO runs only for a genuine production
+  // tick (`tick` left at its real default) — mirrors `runTickAllRepos`'s own identical rule in
+  // `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs`: a test that injects a fake `tick` never wants
+  // this file to shell out for a gate decision it did not ask about, unless it explicitly injects
+  // `authGateOverride` to test the gate itself.
+  const authGate = authGateOverride ? authGateOverride()
+    : (tick === runReviewTick ? planClaudeAuthDispatchGate() : { paused: false, reason: null });
+  const perRepo = forEachRepo(repos, (repo) => tick({
+    ...tickOpts, repo, paused: authGate.paused, pauseReason: authGate.reason,
+  }));
   const dispatched = [];
   const failed = [];
   const notStarted = [];
@@ -333,6 +360,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   let reviewsOwed = 0;
   let refusals = 0;
   let deferredForLanes = 0;
+  let deferredForAuth = 0;
   for (const entry of perRepo) {
     if (entry.error) {
       failed.push({ prNumber: null, repo: entry.repo, error: entry.error });
@@ -348,12 +376,14 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
     reviewsOwed += result.reviewsOwed;
     refusals += result.refusals;
     deferredForLanes += result.deferredForLanes ?? 0;
+    deferredForAuth += result.deferredForAuth ?? 0;
     for (const d of result.dispatched) dispatched.push({ ...d, repo });
     for (const k of (result.notStarted ?? [])) notStarted.push({ ...k, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
   }
   return {
     repos: perRepo, reviewsOwed, dispatched, failed, notStarted, refusals, reconcileFailed, deferredForLanes,
+    deferredForAuth, authPaused: authGate.paused, authPauseReason: authGate.reason,
     holdReconcile: holdReconcileRemoved, holdReconcileFailed,
   };
 }
@@ -453,6 +483,9 @@ export function buildCliDaemonEffects({
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
     onTick: (result) => {
       log.error(`review-daemon: tick (${result.repos.map((r) => r.repo).join(', ')}) — ${result.reviewsOwed} owed, dispatched ${result.dispatched.length}, failed ${result.failed.length}${result.deferredForLanes ? `, deferred ${result.deferredForLanes} (no acquirable lane this tick, #3383)` : ''}`);
+      // card x5kagse (epic #4075/#3383) — logged EVERY tick review dispatch stays paused, exact wording
+      // required by the card and matched by the soak scenario/live-proof read.
+      if (result.authPaused) log.error(`review-daemon: ${result.authPauseReason ?? 'paused: Claude login expired — run /login'}`);
       for (const k of (Array.isArray(result.notStarted) ? result.notStarted : [])) log.error(`review-daemon: ${k.repo}#${k.prNumber} not dispatched — ${k.reason}`);
       for (const d of (Array.isArray(result.dispatched) ? result.dispatched : [])) log.error(`review-daemon: ${d.repo}#${d.prNumber} dispatched as ${d.mode ?? 'session'}${d.jobPid ? ` (job pid ${d.jobPid})` : ''}${d.agentId ? ` (agent ${d.agentId})` : ''}`);
       for (const f of result.failed) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} failed (non-fatal): ${f.error}`);

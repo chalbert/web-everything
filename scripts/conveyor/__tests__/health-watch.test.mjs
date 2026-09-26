@@ -5,13 +5,14 @@
  *   `tick()` also reads the real GitHub App status file from the home dir — read-only, harmless, left alone.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
-  probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probePrs, probeStaleState, probeMergedPrs,
+  probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
+  probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad,
 } from '../health-watch.mjs';
 
 let dir;
@@ -124,6 +125,139 @@ describe('probeLanePools', () => {
 
   it('skips a repo with no lane-pool-health-watch log', () => {
     expect(probeLanePools(join(dir, 'empty'))).toEqual([]);
+  });
+});
+
+// ── probeAuthExpiredSessions — live incident, night of 2026-09-25/26 ET ─────────────────────────────────────
+describe('probeAuthExpiredSessions', () => {
+  const bgAgent = (over = {}) => ({ name: 'ci-heal-2711', kind: 'background', cwd: '/x/dispatch/abc', sessionId: 's-1', startedAt: '2026-09-26T10:53:00.000Z', ...over });
+
+  it('flags a background session the injected reader confirms auth-expired, carrying its own startedAt', () => {
+    const readInfo = () => ({ authExpired: true, reason: 'claude-auth' });
+    const out = probeAuthExpiredSessions([bgAgent()], { readInfo });
+    expect(out).toEqual([{ name: 'ci-heal-2711', startedAt: Date.parse('2026-09-26T10:53:00.000Z') }]);
+  });
+
+  it('never flags a session the reader clears, or one that throws', () => {
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => ({ authExpired: false, reason: 'no-signal' }) })).toEqual([]);
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => { throw new Error('unreadable'); } })).toEqual([]);
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => null })).toEqual([]);
+  });
+
+  it('skips a non-background row (interactive terminal session), or one missing cwd/sessionId, without calling the reader', () => {
+    let called = false;
+    const readInfo = () => { called = true; return { authExpired: true }; };
+    probeAuthExpiredSessions([{ ...bgAgent(), kind: 'interactive' }], { readInfo });
+    probeAuthExpiredSessions([{ ...bgAgent(), cwd: undefined }], { readInfo });
+    probeAuthExpiredSessions([{ ...bgAgent(), sessionId: undefined }], { readInfo });
+    expect(called).toBe(false);
+  });
+
+  it('empty/non-array input is never a guess', () => {
+    expect(probeAuthExpiredSessions(undefined)).toEqual([]);
+    expect(probeAuthExpiredSessions([])).toEqual([]);
+  });
+
+  it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
+    const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
+    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
+  });
+});
+
+// ── probeProcesses / probeMachineLoad — machine-overload's own inputs (#4075 continuation, card xzdgabp) ─────
+
+describe('probeProcesses', () => {
+  it('shells `ps -Ao pid,ppid,pcpu,etime,command` and parses it via parsePsOutput', () => {
+    const exec = (cmd, args) => {
+      expect(cmd).toBe('ps');
+      expect(args).toEqual(['-Ao', 'pid,ppid,pcpu,etime,command']);
+      return '  PID  PPID %CPU     ELAPSED COMMAND\n    1     0   0.0  01:00:00 /sbin/launchd\n';
+    };
+    expect(probeProcesses({ exec })).toEqual([{ pid: 1, ppid: 0, pcpu: 0, etime: '01:00:00', command: '/sbin/launchd' }]);
+  });
+});
+
+describe('probeMachineLoad', () => {
+  it('normalizes os.loadavg() + core count into {load1,load5,load15,cpuCount}', () => {
+    const out = probeMachineLoad({ getLoadAvg: () => [293, 210, 90], getCpuCount: () => 8 });
+    expect(out).toEqual({ load1: 293, load5: 210, load15: 90, cpuCount: 8 });
+  });
+
+  it('never reports a zero/negative core count (would divide-by-zero downstream)', () => {
+    expect(probeMachineLoad({ getLoadAvg: () => [1, 1, 1], getCpuCount: () => 0 }).cpuCount).toBe(1);
+  });
+});
+
+// ── tick() end-to-end: the machine-overload incident fixture (#4075 continuation, card xzdgabp) ─────────────
+//    Reproduces the LIVE incident (2026-09-26 ~10:34-10:55 ET) via `--ps-fixture`/`--machine-load-fixture` — no
+//    load generator is ever run to test this smell.
+
+describe('tick() — machine-overload: normal snapshot never opens, the incident fixture does', () => {
+  const psFixture = (dir2, copies) => {
+    const path = join(dir2, 'xzdgabp-ps-fixture.txt');
+    const lines = ['  PID  PPID %CPU     ELAPSED COMMAND', '    1     0   0.0  05-01:00:00 /sbin/launchd'];
+    let pid = 25000;
+    for (let i = 0; i < copies; i += 1) {
+      const scriptPid = pid++;
+      const nodePid = pid++;
+      lines.push(`${scriptPid}     1  92.0       00:19:40 /bin/sh /Users/nicolasgilbert/workspace/webeverything/scratchpad/spawn-hog2.sh`);
+      lines.push(`${nodePid} ${scriptPid}  98.0       00:00:02 node -e 1`);
+    }
+    writeFileSync(path, lines.join('\n'));
+    return path;
+  };
+  const loadFixture = (dir2, load1, cpuCount) => {
+    const path = join(dir2, 'xzdgabp-load-fixture.json');
+    writeFileSync(path, JSON.stringify({ load1, load5: load1, load15: load1, cpuCount }));
+    return path;
+  };
+
+  it('a normal-load snapshot never opens an episode (2 ticks)', async () => {
+    const stateRoot = join(dir, 'state-normal');
+    const flags = {
+      'state-root': stateRoot, 'logs-dir': join(dir, 'logs-normal'), 'lock-root': join(dir, 'locks-normal'),
+      'self-sync-dir': join(dir, 'sync-normal'), 'no-gh': true, 'no-diagnose': true,
+      'ps-fixture': psFixture(dir, 0), 'machine-load-fixture': loadFixture(dir, 1.2, 8),
+    };
+    mkdirSync(flags['logs-dir'], { recursive: true });
+    mkdirSync(flags['lock-root'], { recursive: true });
+    mkdirSync(flags['self-sync-dir'], { recursive: true });
+
+    const first = await tick(flags);
+    const second = await tick(flags);
+    expect(first.transitions.find((t) => t.key.startsWith('machine-overload'))).toBeUndefined();
+    expect(second.transitions.find((t) => t.key.startsWith('machine-overload'))).toBeUndefined();
+    expect(second.section.join('\n')).not.toContain('machine-overload');
+  });
+
+  it('opens exactly one machine-overload episode after 2 ticks of the incident fixture, naming the culprit', async () => {
+    const stateRoot = join(dir, 'state-incident');
+    const flags = {
+      'state-root': stateRoot, 'logs-dir': join(dir, 'logs-incident'), 'lock-root': join(dir, 'locks-incident'),
+      'self-sync-dir': join(dir, 'sync-incident'), 'no-gh': true, 'no-diagnose': true,
+      'ps-fixture': psFixture(dir, 50), 'machine-load-fixture': loadFixture(dir, 293, 8),
+    };
+    mkdirSync(flags['logs-dir'], { recursive: true });
+    mkdirSync(flags['lock-root'], { recursive: true });
+    mkdirSync(flags['self-sync-dir'], { recursive: true });
+
+    const first = await tick(flags);
+    expect(first.transitions.find((t) => t.type === 'opened' && t.key.startsWith('machine-overload'))).toBeUndefined();
+
+    const second = await tick(flags);
+    const opens = second.transitions.filter((t) => t.type === 'opened' && t.key.startsWith('machine-overload'));
+    expect(opens.length).toBe(1);
+    // Notified even in shadow mode (the one opt-in exception, same as claude-auth-expired).
+    expect(second.plan.find((p) => p.kind === 'notify' && p.key === opens[0].key)?.suppressed).toBeFalsy();
+
+    const episodesDir = join(healthDir(stateRoot), 'episodes');
+    const report = readdirSync(episodesDir).find((f) => f.includes('machine-overload') && f.endsWith('.md'));
+    expect(report).toBeTruthy();
+    const text = readFileSync(join(episodesDir, report), 'utf8');
+    expect(text).toContain('50 ×');
+    expect(text).toContain('spawn-hog2.sh');
+    expect(text).toContain('orphaned, parent launchd');
+    expect(text).toContain('stop tree 25000');
   });
 });
 

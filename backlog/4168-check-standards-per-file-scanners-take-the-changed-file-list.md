@@ -3,10 +3,11 @@ bornAs: xw5iz6g
 kind: story
 size: 5
 parent: "4163"
-status: open
+status: resolved
 blockedBy: ["4164"]
 scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/lib/rust-scan-bridge.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
