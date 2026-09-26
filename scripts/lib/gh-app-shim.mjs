@@ -253,6 +253,7 @@ export function renderGhShimScript({ realGhPath, cachePath, ghThrottleCliPath = 
 'use strict';
 const { spawnSync } = require('node:child_process');
 const { readFileSync, unlinkSync, existsSync } = require('node:fs');
+const { pathToFileURL } = require('node:url');
 
 const REAL_GH = ${JSON.stringify(realGhPath)};
 const CACHE_PATH = ${JSON.stringify(cachePath)};
@@ -284,17 +285,29 @@ function warnFallback(reason) {
 function runDirect(argv, env) {
   return spawnSync(REAL_GH, argv, { stdio: ['inherit', 'pipe', 'pipe'], env, maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)} });
 }
-function throttleCliMissing(result) {
+// Does GH_THROTTLE_CLI's own module graph fail to load? Preloaded via \`--import\` in a fresh process with an
+// empty \`-e\` program — never run as the entry point, so its own \`import.meta.url === argv[1]\` guard keeps
+// main() from firing and this never invokes gh. ESM links the WHOLE static graph before evaluating any of it,
+// so a stranded entry file or a stranded sibling import (heavy-admission.mjs, file-locks.mjs, ...) at any depth
+// fails here with ERR_MODULE_NOT_FOUND; any other probe outcome is NOT proof, so it never triggers a replay.
+function throttleCliFailsToLoad(env) {
+  const probe = spawnSync(process.execPath, ['--import', pathToFileURL(GH_THROTTLE_CLI).href, '-e', ''], {
+    stdio: ['ignore', 'ignore', 'pipe'], env,
+    timeout: 10000, // a hung probe (status null) is never proof — it returns the original result, no replay
+  });
+  return probe.status !== 0 && /ERR_MODULE_NOT_FOUND/.test(probe.stderr ? probe.stderr.toString('utf8') : '');
+}
+function throttleCliMissing(result, env) {
   if (!result || result.error || result.status === 0) return false;
   const err = result.stderr ? result.stderr.toString('utf8') : '';
-  // Broadened past "GH_THROTTLE_CLI itself is missing": a lane reset can equally strand one of gh-throttle.mjs's
-  // OWN sibling imports (heavy-admission.mjs, file-locks.mjs, ...) while the entry file itself still exists, and
-  // that fails with the SAME "Cannot find module" shape but a DIFFERENT (sibling) path in the message — matching
-  // only \`err.includes(GH_THROTTLE_CLI)\` missed exactly that case. Any module-resolution failure out of a process
-  // that only ever runs GH_THROTTLE_CLI is the throttle CLI's own infra being broken, never a real \`gh\` failure
-  // (gh hasn't even been invoked yet on this path) — so the broader match is still safe, never a false fallback
-  // out of a genuine \`gh\` error.
-  return /Cannot find module/.test(err);
+  if (!/Cannot find module/.test(err)) return false;
+  // PR #2772 review: the stderr text ALONE is never proof. gh-throttle.mjs relays the REAL gh's stderr
+  // byte-for-byte, so a genuine gh failure (a Node-based extension, a broken Node git hook) can print the same
+  // "Cannot find module" text AFTER gh already ran — and replaying it via runDirect would duplicate a mutating
+  // call. Nor is \`err.includes(GH_THROTTLE_CLI)\` enough: a stranded SIBLING import names the sibling's path,
+  // not the entry file's. So the text only triggers a side-effect-free re-check of the throttle CLI's own
+  // module graph; the fallback fires only when THAT fails to load too — i.e. gh was never reached.
+  return throttleCliFailsToLoad(env);
 }
 function runThrottled(argv, env) {
   if (!existsSync(GH_THROTTLE_CLI)) {
@@ -310,7 +323,7 @@ function runThrottled(argv, env) {
   });
   // The checkout vanished between the existsSync above and node resolving the entry (or one of its OWN
   // imports did) — same degrade.
-  if (throttleCliMissing(result)) {
+  if (throttleCliMissing(result, env)) {
     warnFallback('throttle CLI at ' + GH_THROTTLE_CLI + ' failed to load (its checkout or one of its own imports is unavailable)');
     return runDirect(argv, env);
   }

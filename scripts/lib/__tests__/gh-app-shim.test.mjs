@@ -17,7 +17,7 @@
  *   module's own shared lock instead of the lane pool).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, readFileSync, existsSync, statSync, mkdirSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -294,6 +294,55 @@ describe('renderGhShimScript — pure text, and REALLY RUN against a fake real g
         expect(JSON.parse(r.stdout)).toEqual({ ok: true, via: 'real-gh' });
         expect(r.stderr).toContain('gh-shim:');
         expect(r.stderr).toContain('falling back to direct, unthrottled gh');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // PR #2772 review:changes — the throttle CLI relays the REAL gh's stderr byte-for-byte, so a genuine gh
+    // failure (a Node-based extension, a broken Node git hook) whose OWN stderr says "Cannot find module" must
+    // never be mistaken for the throttle CLI failing to load: that would re-run the SAME, possibly mutating,
+    // command a second time via the direct fallback. The throttle CLI here loads fine and runs gh exactly once.
+    it('does not replay a real gh failure whose own relayed stderr contains "Cannot find module" — the mutating call runs exactly once', () => {
+      // realpath'd: macOS's tmpdir is a symlink (/var → /private/var), which would make the relay CLI's own
+      // entry-point guard below silently false — the same trap defaultGhThrottleCliPath realpaths against.
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), 'we-gh-shim-live-')));
+      try {
+        const counter = join(dir, 'invocations');
+        const realGh = join(dir, 'real-gh');
+        // A mutating "real gh": records the invocation, then fails for a reason UNRELATED to the throttle CLI.
+        writeFileSync(
+          realGh,
+          '#!/usr/bin/env node\n'
+            + `require('node:fs').appendFileSync(${JSON.stringify(counter)}, 'x');\n`
+            + "process.stderr.write(\"Error: Cannot find module '/some/unrelated/hook.js'\\n\");\n"
+            + 'process.exitCode = 1;\n',
+          'utf8',
+        );
+        chmodSync(realGh, 0o755);
+        // A healthy throttle CLI that transparently relays the real gh (the same contract gh-throttle.mjs's own
+        // runGhCliPassthrough keeps), guarded like the real one so importing it has no side effect.
+        const relayCli = join(dir, 'healthy-throttle', 'gh-throttle.mjs');
+        mkdirSync(join(dir, 'healthy-throttle'), { recursive: true });
+        writeFileSync(
+          relayCli,
+          "import { spawnSync } from 'node:child_process';\n"
+            + "import { pathToFileURL } from 'node:url';\n"
+            + "if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {\n"
+            + "  const r = spawnSync(process.env.WE_GH_THROTTLE_GH_BIN, process.argv.slice(2), { stdio: ['inherit', 'pipe', 'pipe'] });\n"
+            + '  process.stdout.write(r.stdout); process.stderr.write(r.stderr); process.exitCode = r.status;\n'
+            + '}\n',
+          'utf8',
+        );
+        const cachePath = join(dir, 'cache.json');
+        const shimPath = join(dir, 'gh');
+        writeFileSync(shimPath, renderGhShimScript({ realGhPath: realGh, cachePath, ghThrottleCliPath: relayCli }), 'utf8');
+        chmodSync(shimPath, 0o755);
+        const r = spawnSync(shimPath, ['pr', 'comment', '1', '--body', 'x'], { encoding: 'utf8', env: { ...process.env, GH_TOKEN: undefined } });
+        expect(readFileSync(counter, 'utf8')).toBe('x'); // exactly one real invocation — never a silent replay
+        expect(r.status).toBe(1); // the genuine failure is preserved, not masked by a fallback's result
+        expect(r.stderr).toContain("Cannot find module '/some/unrelated/hook.js'");
+        expect(r.stderr).not.toContain('gh-shim:');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
