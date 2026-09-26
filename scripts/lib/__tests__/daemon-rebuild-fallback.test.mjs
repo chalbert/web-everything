@@ -12,14 +12,14 @@ import {
   describe, it, expect, beforeEach, afterEach, vi,
 } from 'vitest';
 import {
-  mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync,
+  mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync,
 } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import {
-  rebuildClone, readRebuildState, candidateSmokeEnv, acquireCandidateLock, candidateLockPath,
+  rebuildClone, readRebuildState, candidateSmokeEnv, rebuildStatePath,
   candidateWorktreePath, failsSameChecks, DISPATCH_CWD_ROOT_ENV,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, removeOverlay } from '../daemon-overlays.mjs';
@@ -345,54 +345,62 @@ describe('smoke-harness-broken (x5wbsbc)', () => {
   });
 });
 
-// ── f. candidate lock — one candidate smoke per clone at a time ────────────────────────────────────────────
+// ── f. single flight — #2731's build lease covers the WHOLE fallback (A, B, C), not just the first smoke ──────
 
-describe('candidate lock (x5wbsbc)', () => {
-  it('a lock held by the current live process returns smoke-in-flight without smoking', async () => {
+describe('single-flight build lease across the fallback (x5wbsbc on #2731)', () => {
+  const writeBuilding = (cloneDir, env, building) => {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    const cur = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+    writeFileSync(file, JSON.stringify({ ...cur, building }));
+  };
+
+  it('a live sibling lease returns rebuild-in-progress without smoking', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'lock1.txt', 'x\n'));
-    const lockPath = candidateLockPath(cloneDir, env);
-    mkdirSync(dirname(lockPath), { recursive: true });
-    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() }));
-
+    writeBuilding(cloneDir, env, {
+      token: 'sib', pid: process.ppid, host: hostname(), startedAt: new Date().toISOString(), path: '/nonexistent',
+    });
     const runSmoke = passSmoke();
     const result = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
-
-    expect(result.reason).toBe('smoke-in-flight');
-    expect(result.heldBy).toBe(`${hostname()}:${process.pid}`);
+    expect(result.reason).toBe('rebuild-in-progress');
     expect(runSmoke).not.toHaveBeenCalled();
   });
 
-  it('a lock held by a dead pid on the same host is taken over', async () => {
+  it('a dead-pid lease is taken over and the build adopts', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'lock2.txt', 'x\n'));
-    const lockPath = candidateLockPath(cloneDir, env);
-    mkdirSync(dirname(lockPath), { recursive: true });
-    writeFileSync(lockPath, JSON.stringify({ pid: 999999, host: hostname(), startedAt: new Date().toISOString() }));
-
+    writeBuilding(cloneDir, env, {
+      token: 'dead', pid: 999999, host: hostname(), startedAt: new Date().toISOString(), path: '/nonexistent',
+    });
     const runSmoke = passSmoke();
     const result = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
-
-    expect(result.reason).not.toBe('smoke-in-flight');
     expect(result.adopted).toBe(true);
     expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
   });
 
-  it('acquireCandidateLock directly: ok, and releasing then re-acquiring succeeds', () => {
-    const { cloneDir, env } = makeFixture();
-    const first = acquireCandidateLock({ root: cloneDir, env });
-    expect(first.ok).toBe(true);
-    const blocked = acquireCandidateLock({ root: cloneDir, env });
-    expect(blocked.ok).toBe(false);
-    expect(blocked.heldBy).toBe(`${hostname()}:${process.pid}`);
-    first.release();
-    const after = acquireCandidateLock({ root: cloneDir, env });
-    expect(after.ok).toBe(true);
-    after.release();
+  it('the lease stays held through the plain-main and last-good smokes, and is released at the end', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/lease-bad', (dir) => writeFile(dir, 'lease-bad.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/lease-bad', pinned: true }, { env });
+    const heldDuring = [];
+    const runSmoke = vi.fn(async ({ root }) => {
+      heldDuring.push(!!readRebuildState(cloneDir, env).building);
+      return existsSync(join(root, 'lease-bad.txt'))
+        ? { verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] } }
+        : { verdict: 'pass', attempts: 1, smoke: { results: [] } };
+    });
+    const result = await rebuildClone({
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+    expect(result.reason).toBe('smoke-rejected');
+    expect(heldDuring).toEqual([true, true]); // candidate + last-good control, both under the lease
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
   });
 });
 
