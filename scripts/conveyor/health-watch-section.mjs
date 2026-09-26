@@ -32,3 +32,29 @@ export function healthSectionLines({ stateRoot, now = Date.now() } = {}) {
   const lastTick = readJson(join(dir, 'last-tick.json'), state?.lastTick ?? null);
   return renderHealthSection({ ...(state || {}), lastTick }, { now, reportDir: join(dir, 'episodes') });
 }
+
+/**
+ * Card xvz55jf (epic #3931) — the SAME store {@link healthSectionLines} renders, as structured data instead
+ * of formatted lines, for a machine consumer (the `live-state` operation) that needs to grade severity itself
+ * rather than parse text back out of a rendered row. Reads the identical files at the identical path
+ * ({@link healthDir}) and applies the identical "open episode" filter {@link
+ * ./health-watch-core.mjs#renderHealthSection} already uses (`status !== 'pending'`) — a NON-pending episode
+ * is one that has actually opened (or is flapping); a `pending` one is still accumulating breach streak and
+ * has never been surfaced anywhere else either. Never throws: a missing or corrupt store reads as "never
+ * ticked, no episodes" — the same fail-open shape `healthSectionLines` gives a caller.
+ * @param {{stateRoot?:string, now?:number}} [o]
+ * @returns {{lastTick: object|null, running: boolean, episodes: Array<{key:string, smell:string,
+ *   subject:string, severity:string, status:string, openedAt:number|null, summary:string}>}}
+ */
+export function openHealthEpisodesData({ stateRoot } = {}) {
+  const dir = healthDir(stateRoot);
+  const state = readJson(join(dir, 'state.json'), null);
+  const lastTick = readJson(join(dir, 'last-tick.json'), state?.lastTick ?? null);
+  const episodes = Object.values(state?.episodes ?? {})
+    .filter((e) => e.status !== 'pending')
+    .map((e) => ({
+      key: e.key, smell: e.smell, subject: e.subject, severity: e.severity ?? 'medium', status: e.status,
+      openedAt: e.openedAt ?? null, summary: e.recommendation || e.summary || '',
+    }));
+  return { lastTick, running: !!lastTick, episodes };
+}
