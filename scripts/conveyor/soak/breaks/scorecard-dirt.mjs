@@ -42,9 +42,11 @@ export default {
     where: 'lane/4044-daemon-rebuild-and-clone-lock',
     paths: ['scripts/conveyor/run-scorecard-store.mjs', 'scripts/lib/daemon-rebuild.mjs'],
   },
+  // Either fix counts: lane/4044's daemon-clone routing (`isDaemonManagedClone`), or #4155's successor that moves
+  // the store out of every git tree and drops that routing (`LEGACY_IN_TREE_STORE` names the old tracked home).
   fixPresent(root) {
     try {
-      return /isDaemonManagedClone/.test(readFileSync(join(root, 'scripts/conveyor/run-scorecard-store.mjs'), 'utf8'));
+      return /isDaemonManagedClone|LEGACY_IN_TREE_STORE/.test(readFileSync(join(root, 'scripts/conveyor/run-scorecard-store.mjs'), 'utf8'));
     } catch { return false; }
   },
   run({ log } = {}) {

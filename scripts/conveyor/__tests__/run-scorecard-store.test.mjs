@@ -1,10 +1,13 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { join } from 'node:path';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { join, resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
+import * as storeModule from '../run-scorecard-store.mjs';
 import {
   validateScorecard, readStore, writeStore, appendScorecard, meanScore,
-  resolveScorecardStorePath, DEFAULT_SCORECARD_STORE_PATH,
+  resolveScorecardStorePath, LEGACY_IN_TREE_STORE, LEGACY_MIGRATION_ID,
+  mergeLegacyStores, migrateLegacyStore, readLegacyStoreTexts,
 } from '../run-scorecard-store.mjs';
 
 const baseRow = () => ({
@@ -147,58 +150,41 @@ describe('meanScore — the required-rubricVersion/provider/model aggregate, nev
   });
 });
 
-describe('resolveScorecardStorePath — CONVEYOR_STATE_ROOT (#4052)', () => {
+// #4155 — live 2026-09-25: a review round's codex advisory seat appended a row to the TRACKED in-tree store
+// inside the review-daemon clone; its self-sync refused the dirty clone, it fell behind main, and every review
+// dispatch refused as STALE. The store now lives outside every git tree, whatever checkout writes it.
+describe('resolveScorecardStorePath — one shared file outside every git tree (#4155)', () => {
   const savedEnv = { ...process.env };
   afterEach(() => {
-    if (savedEnv.CONVEYOR_STATE_ROOT === undefined) delete process.env.CONVEYOR_STATE_ROOT;
-    else process.env.CONVEYOR_STATE_ROOT = savedEnv.CONVEYOR_STATE_ROOT;
+    for (const k of ['CONVEYOR_STATE_ROOT', 'WE_DAEMON_STATE_DIR']) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
   });
 
-  it('defaults to the script-colocated, git-tracked location — TODAY\'s location, unchanged', () => {
-    expect(resolveScorecardStorePath({})).toBe(DEFAULT_SCORECARD_STORE_PATH);
+  it('defaults to the conveyor state root under the daemon state dir — never a path inside this checkout', () => {
+    const path = resolveScorecardStorePath({ WE_DAEMON_STATE_DIR: '/tmp/daemon-state' });
+    expect(path).toBe(join('/tmp/daemon-state', 'conveyor-state', '.conveyor', 'run-scorecards.json'));
+    const repoRoot = join(import.meta.dirname, '..', '..', '..');
+    expect(path.startsWith(repoRoot)).toBe(false);
   });
 
-  it('moves under the pinned root, OUT of this repo\'s git tree, once CONVEYOR_STATE_ROOT is set', () => {
-    const path = resolveScorecardStorePath({ CONVEYOR_STATE_ROOT: '/tmp/operator-primary' });
-    expect(path).toBe(join('/tmp/operator-primary', '.conveyor', 'run-scorecards.json'));
-    expect(path).not.toBe(DEFAULT_SCORECARD_STORE_PATH);
+  it('the unset default is under ~/.claude, not the repo', () => {
+    const path = resolveScorecardStorePath({ HOME: process.env.HOME });
+    expect(path).toMatch(/\.claude[\\/]daemon-self-sync-state[\\/]conveyor-state[\\/]\.conveyor[\\/]run-scorecards\.json$/);
+    expect(path.endsWith(LEGACY_IN_TREE_STORE)).toBe(false);
   });
 
-  it('readStore/writeStore honor the live pin (not a frozen import-time default)', () => {
+  it('CONVEYOR_STATE_ROOT (#4052) still pins it', () => {
+    const path = resolveScorecardStorePath({ CONVEYOR_STATE_ROOT: '/tmp/op', WE_DAEMON_STATE_DIR: '/tmp/d' });
+    expect(path).toBe(join('/tmp/op', '.conveyor', 'run-scorecards.json'));
+  });
+
+  it('readStore/writeStore honor the live env (not a frozen import-time default)', () => {
     process.env.CONVEYOR_STATE_ROOT = '/tmp/never-actually-touched-because-io-is-injected';
     const writes = [];
     writeStore({ version: 1, records: [] }, { write: (p) => writes.push(p) });
     expect(writes[0]).toBe(join('/tmp/never-actually-touched-because-io-is-injected', '.conveyor', 'run-scorecards.json'));
-  });
-});
-
-// Live 2026-09-25 13:36 ET: a review session appended a row to the TRACKED in-tree store inside the review-daemon
-// clone; the rebuild refused the dirty clone, it fell 10 commits behind main, and every dispatch refused as STALE.
-describe('resolveScorecardStorePath — a daemon-managed clone never writes the tracked file', () => {
-  it('resolves under the daemon state dir when the module runs from a daemon-managed clone', () => {
-    const path = resolveScorecardStorePath({ WE_DAEMON_STATE_DIR: '/tmp/daemon-state' }, {
-      repoRoot: '/some/daemon-clone', isDaemonClone: () => true,
-    });
-    expect(path).toBe(join('/tmp/daemon-state', 'conveyor-state', '.conveyor', 'run-scorecards.json'));
-  });
-
-  it('CONVEYOR_STATE_ROOT still wins over the daemon default', () => {
-    const path = resolveScorecardStorePath({ CONVEYOR_STATE_ROOT: '/tmp/op', WE_DAEMON_STATE_DIR: '/tmp/d' }, {
-      isDaemonClone: () => true,
-    });
-    expect(path).toBe(join('/tmp/op', '.conveyor', 'run-scorecards.json'));
-  });
-
-  it('a plain checkout keeps the in-tree default', () => {
-    expect(resolveScorecardStorePath({}, { isDaemonClone: () => false })).toBe(DEFAULT_SCORECARD_STORE_PATH);
-  });
-
-  it('a missing out-of-tree store reads the tracked history as its seed, never an empty history', () => {
-    const files = { '/seed.json': JSON.stringify({ version: 1, records: [{ a: 1 }] }) };
-    const io = { read: (p) => files[p], exists: (p) => p in files };
-    expect(readStore({ ...io, path: '/pinned.json', seedPath: '/seed.json' }).records).toEqual([{ a: 1 }]);
-    files['/pinned.json'] = JSON.stringify({ version: 1, records: [{ a: 1 }, { b: 2 }] });
-    expect(readStore({ ...io, path: '/pinned.json', seedPath: '/seed.json' }).records).toHaveLength(2);
   });
 
   it('the default writer creates the out-of-tree directory on first write', () => {
@@ -210,5 +196,215 @@ describe('resolveScorecardStorePath — a daemon-managed clone never writes the 
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('a write keeps the migration stamp', () => {
+    const io = memIo({ version: 1, records: [], migrations: [LEGACY_MIGRATION_ID] });
+    appendScorecard(baseRow(), io);
+    expect(JSON.parse(io.read()).migrations).toEqual([LEGACY_MIGRATION_ID]);
+  });
+});
+
+describe('mergeLegacyStores — union, never clobber (#4155)', () => {
+  const legacy = JSON.stringify({ version: 1, records: [{ a: 1 }, { b: 2 }] });
+
+  it('seeds an absent shared store from the legacy history and stamps it', () => {
+    const { store, added } = mergeLegacyStores(null, [legacy], ['stamp-a']);
+    expect(store.records).toEqual([{ a: 1 }, { b: 2 }]);
+    expect(store.migrations).toEqual(['stamp-a']);
+    expect(added).toBe(2);
+  });
+
+  it('records a stamp even when the source carried no rows', () => {
+    const { store, added } = mergeLegacyStores({ version: 1, records: [{ c: 3 }], migrations: [] }, [], ['stamp-a']);
+    expect(store).toEqual({ version: 1, records: [{ c: 3 }], migrations: ['stamp-a'] });
+    expect(added).toBe(0);
+  });
+
+  it('keeps every row the shared store already has, adds only the missing legacy rows, first', () => {
+    const { store, added } = mergeLegacyStores({ version: 1, records: [{ b: 2 }, { c: 3 }], migrations: [] }, [legacy, legacy]);
+    expect(store.records).toEqual([{ a: 1 }, { b: 2 }, { c: 3 }]);
+    expect(added).toBe(1);
+  });
+
+  it('returns null (no stamp) when no legacy text parses', () => {
+    expect(mergeLegacyStores(null, ['not json'])).toBeNull();
+    expect(mergeLegacyStores(null, [])).toBeNull();
+  });
+});
+
+describe('migrateLegacyStore — against a real git repo whose store was untracked (#4155)', () => {
+  let dir, repo, target;
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  function setup({ untrack }) {
+    dir = mkdtempSync(join(tmpdir(), 'scorecard-migrate-'));
+    repo = join(dir, 'repo');
+    target = join(dir, 'state', '.conveyor', 'run-scorecards.json');
+    mkdirSync(join(repo, 'scripts', 'conveyor'), { recursive: true });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'commit.gpgsign', 'false');
+    writeFileSync(join(repo, LEGACY_IN_TREE_STORE), JSON.stringify({ version: 1, records: [{ legacy: 1 }, { legacy: 2 }] }));
+    git('add', '.'); git('commit', '-qm', 'tracked store');
+    if (untrack) { git('rm', '-q', LEGACY_IN_TREE_STORE); git('commit', '-qm', 'untrack store'); }
+  }
+
+  it('recovers the history from the untracking commit\'s parent even though the file is gone from disk', () => {
+    setup({ untrack: true });
+    expect(existsSync(join(repo, LEGACY_IN_TREE_STORE))).toBe(false);
+    expect(readLegacyStoreTexts({ repoRoot: repo })).toHaveLength(1);
+    const result = migrateLegacyStore({ path: target, repoRoot: repo });
+    expect(result).toMatchObject({ migrated: true, added: 2 });
+    const store = JSON.parse(readFileSync(target, 'utf8'));
+    expect(store.records).toEqual([{ legacy: 1 }, { legacy: 2 }]);
+    expect(store.migrations).toEqual([storeModule.legacyGitStamp(repo)]);
+  });
+
+  it('merges into a shared store that already has rows, and runs once', () => {
+    setup({ untrack: true });
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, JSON.stringify({ version: 1, records: [{ legacy: 2 }, { fresh: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 1 });
+    expect(JSON.parse(readFileSync(target, 'utf8')).records).toEqual([{ legacy: 1 }, { legacy: 2 }, { fresh: 1 }]);
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+  });
+
+  it('carries an on-disk copy an older process modified, on top of the committed history', () => {
+    setup({ untrack: false });
+    writeFileSync(join(repo, LEGACY_IN_TREE_STORE), JSON.stringify({ version: 1, records: [{ legacy: 1 }, { legacy: 2 }, { late: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 3 });
+  });
+
+  it('never overwrites a shared store it cannot parse', () => {
+    setup({ untrack: true });
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, 'corrupt');
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: false, reason: 'shared-store-unparsable' });
+    expect(readFileSync(target, 'utf8')).toBe('corrupt');
+  });
+
+  it('leaves the store unstamped when the checkout is not a git repo (git could not answer — retry later)', () => {
+    setup({ untrack: true });
+    const empty = join(dir, 'not-a-repo');
+    mkdirSync(empty);
+    expect(migrateLegacyStore({ path: target, repoRoot: empty })).toMatchObject({ migrated: false, reason: 'no-legacy-history' });
+    expect(existsSync(target)).toBe(false);
+  });
+});
+
+// Review of PR #2684 (review:changes, 2026-09-25): four findings against the migration above.
+describe('migrateLegacyStore — review findings on PR #2684', () => {
+  let dir;
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  const git = (repo, ...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  function makeRepo(name, records) {
+    const repo = join(dir, name);
+    mkdirSync(join(repo, 'scripts', 'conveyor'), { recursive: true });
+    git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.email', 't@t'); git(repo, 'config', 'user.name', 't'); git(repo, 'config', 'commit.gpgsign', 'false');
+    if (records) {
+      writeFileSync(join(repo, LEGACY_IN_TREE_STORE), JSON.stringify({ version: 1, records }));
+      git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'tracked store');
+      git(repo, 'rm', '-q', LEGACY_IN_TREE_STORE); git(repo, 'commit', '-qm', 'untrack store');
+    } else {
+      writeFileSync(join(repo, 'README'), 'x');
+      git(repo, 'add', '.'); git(repo, 'commit', '-qm', 'no store ever');
+    }
+    return repo;
+  }
+  const newDir = () => { dir = mkdtempSync(join(tmpdir(), 'scorecard-review-')); return join(dir, 'state', '.conveyor', 'run-scorecards.json'); };
+  const records = (p) => JSON.parse(readFileSync(p, 'utf8')).records;
+
+  it('migration preserves an append made during legacy-history retrieval (no lost update)', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', [{ legacy: 1 }]);
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, JSON.stringify({ version: 1, records: [{ before: 1 }] }));
+    const realGit = (args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    let appended = false;
+    const slowGit = (args) => {
+      // Another process's append lands while this one is still reading the legacy history out of git.
+      if (!appended && args[0] === 'show') { appended = true; appendScorecard({ ...baseRow(), score: 90 }, { path: target }); }
+      return realGit(args);
+    };
+    expect(migrateLegacyStore({ path: target, repoRoot: repo, git: slowGit })).toMatchObject({ migrated: true });
+    expect(appended).toBe(true);
+    const after = records(target);
+    expect(after.map((r) => r.score ?? null)).toContain(90);
+    expect(after).toContainEqual({ legacy: 1 });
+    expect(after).toContainEqual({ before: 1 });
+  });
+
+  it('imports distinct legacy rows from a second checkout after the first migration', () => {
+    const target = newDir();
+    const repoA = makeRepo('a', [{ fromA: 1 }]);
+    const repoB = makeRepo('b', [{ fromB: 1 }]);
+    expect(migrateLegacyStore({ path: target, repoRoot: repoA })).toMatchObject({ migrated: true, added: 1 });
+    expect(migrateLegacyStore({ path: target, repoRoot: repoB })).toMatchObject({ migrated: true, added: 1 });
+    expect(records(target)).toEqual([{ fromB: 1 }, { fromA: 1 }]);
+    expect(migrateLegacyStore({ path: target, repoRoot: repoA })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+    expect(migrateLegacyStore({ path: target, repoRoot: repoB })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+  });
+
+  it('stamps a checkout with no legacy history, so git is not spawned again', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', null);
+    mkdirSync(join(dir, 'state', '.conveyor'), { recursive: true });
+    writeFileSync(target, JSON.stringify({ version: 1, records: [{ fresh: 1 }] }));
+    let gitCalls = 0;
+    const countingGit = (args) => { gitCalls += 1; return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    migrateLegacyStore({ path: target, repoRoot: repo, git: countingGit });
+    const callsAfterFirst = gitCalls;
+    expect(callsAfterFirst).toBeGreaterThan(0);
+    expect(migrateLegacyStore({ path: target, repoRoot: repo, git: countingGit })).toMatchObject({ migrated: false, reason: 'already-migrated' });
+    expect(gitCalls).toBe(callsAfterFirst);
+    expect(records(target)).toEqual([{ fresh: 1 }]);
+  });
+
+  it('re-imports an on-disk copy an older process kept appending to', () => {
+    const target = newDir();
+    const repo = makeRepo('repo', [{ legacy: 1 }]);
+    const onDisk = join(repo, LEGACY_IN_TREE_STORE);
+    mkdirSync(join(repo, 'scripts', 'conveyor'), { recursive: true });
+    writeFileSync(onDisk, JSON.stringify({ version: 1, records: [{ legacy: 1 }, { late: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 2 });
+    writeFileSync(onDisk, JSON.stringify({ version: 1, records: [{ legacy: 1 }, { late: 1 }, { later: 1 }] }));
+    expect(migrateLegacyStore({ path: target, repoRoot: repo })).toMatchObject({ migrated: true, added: 1 });
+    expect(records(target)).toEqual([{ later: 1 }, { legacy: 1 }, { late: 1 }]);
+  });
+});
+
+describe('readStore() — the lazy first-read migration of the DEFAULT store (#4155)', () => {
+  const saved = process.env.CONVEYOR_STATE_ROOT;
+  let dir;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CONVEYOR_STATE_ROOT; else process.env.CONVEYOR_STATE_ROOT = saved;
+    rmSync(dir, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it('runs the migration on the first no-argument read, once per process', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'scorecard-lazy-'));
+    process.env.CONVEYOR_STATE_ROOT = dir;
+    vi.resetModules();
+    const fresh = await import('../run-scorecard-store.mjs');
+    const path = fresh.resolveScorecardStorePath();
+    expect(existsSync(path)).toBe(false);
+    fresh.readStore();
+    // This checkout is a git repo, so the migration examined its history and stamped it, whatever it held.
+    const moduleRepoRoot = resolve(import.meta.dirname, '..', '..', '..');
+    expect(JSON.parse(readFileSync(path, 'utf8')).migrations).toContain(fresh.legacyGitStamp(moduleRepoRoot));
+    rmSync(path);
+    fresh.readStore();
+    expect(existsSync(path)).toBe(false);
+  }, 30_000); // real `git rev-list` over this checkout's history
+
+  it('never migrates when the caller injects IO', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'scorecard-lazy-'));
+    process.env.CONVEYOR_STATE_ROOT = dir;
+    vi.resetModules();
+    const fresh = await import('../run-scorecard-store.mjs');
+    fresh.readStore({ exists: () => false });
+    expect(existsSync(fresh.resolveScorecardStorePath())).toBe(false);
   });
 });

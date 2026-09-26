@@ -185,6 +185,12 @@ skills-src/drain/review-baseline-state.json
 # gates lane-pool recycling), starving the lane pool (#1153 hit this before). Nobody reads the committed
 # copy as source of truth — every workflow reference re-runs the command. Generate on demand instead.
 audits/backlog-health-audit.md
+# The run-scorecard store's OLD home (#4155). It was git-tracked, so every review round's codex advisory seat
+# (#3907) appending a row dirtied the review-daemon clone, its self-sync refused to move it, the clone fell
+# behind main and every review dispatch refused as stale. The store now lives outside every checkout
+# (scripts/conveyor/run-scorecard-store.mjs#resolveScorecardStorePath) and migrates this file's history there;
+# ignoring the path keeps a copy an older process still writes from ever dirtying a checkout again.
+scripts/conveyor/run-scorecards.json
 # #4077 health watch state (episodes, per-daemon memory, last-tick stamp) — local state under the pinned state
 # root, never committed; the plist example points CONVEYOR_STATE_ROOT at the operator's own checkout.
 .conveyor/health/

@@ -4,7 +4,7 @@
  * router (`selectSupervisionLevel`) instead of re-deriving its own findings-based predicates — the prior
  * version disagreed with the router because it treated any non-null `findings` as a problem, even on the
  * 14 `landed` rows that carry praise there. These cases assert the router semantics directly, over both
- * synthetic fixtures and the real `we:scripts/conveyor/run-scorecards.json` file.
+ * synthetic fixtures and a frozen snapshot of the real scorecard history (`fixtures/run-scorecards-2026-09-25.json`).
  */
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,9 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AS_OF = '2026-09-15T06:00:00.000Z';
-const REAL_SCORECARDS_PATH = resolve(HERE, '..', '..', 'conveyor', 'run-scorecards.json');
+// The real trial history as it stood when the store moved out of the git tree (#4155) — a frozen snapshot of the
+// last tracked `scripts/conveyor/run-scorecards.json`, so these real-data assertions stay deterministic.
+const REAL_SCORECARDS_PATH = resolve(HERE, 'fixtures', 'run-scorecards-2026-09-25.json');
 const REAL_RECORDS = JSON.parse(readFileSync(REAL_SCORECARDS_PATH, 'utf8')).records;
 
 const ABSENT_SOURCE = { source: 'absent', entries: [] };
@@ -202,7 +204,7 @@ describe('graduation-progress-report-io: promotions and probation sources', () =
   });
 });
 
-describe('graduation report: real we:scripts/conveyor/run-scorecards.json data', () => {
+describe('graduation report: real scorecard data (frozen 2026-09-25 snapshot)', () => {
   const report = buildGraduationProgressReport({ records: REAL_RECORDS, asOfIso: AS_OF, promotions: ABSENT_SOURCE, probation: ABSENT_SOURCE, ...ROUTER });
 
   it('matches the exact real-data triples named in the card', () => {

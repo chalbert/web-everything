@@ -32,12 +32,13 @@ import {
   CODE_CHANGE_DISPATCH_KINDS, ROLE_DISPATCH_KINDS, TASK_TYPES_WITHOUT_PRODUCING_KIND, taskTypeFor,
 } from './lib/dispatch-task-type.mjs';
 import { decideDispatchRoute } from './lib/dispatch-contracts.mjs';
+import { readStore, resolveScorecardStorePath } from './conveyor/run-scorecard-store.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** The doc the generated block lives in. */
 export const RUNBOOK = join(ROOT, 'docs', 'agent', 'dispatcher-runbook.md');
-/** The scorecards the table is computed against. */
-export const SCORECARDS = join(ROOT, 'scripts', 'conveyor', 'run-scorecards.json');
+/** The scorecards the table is computed against — the shared store, resolved through its own resolver (#4155). */
+export const SCORECARDS = resolveScorecardStorePath();
 
 export const BEGIN = '<!-- BEGIN GENERATED: dispatch routing table — `npm run gen:dispatch-routing-table` -->';
 export const END = '<!-- END GENERATED: dispatch routing table -->';
@@ -70,10 +71,14 @@ export const TABLE_SIZE = 3;
  * @param {{read?: (p: string) => string}} [io]
  * @returns {{version: unknown, records: object[]}}
  */
-export function loadScorecards({ read = (p) => readFileSync(p, 'utf8') } = {}) {
-  const parsed = JSON.parse(String(read(SCORECARDS)));
-  const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : [];
-  return { version: Array.isArray(parsed) ? null : parsed?.version ?? null, records };
+export function loadScorecards({ read } = {}) {
+  if (read) {
+    const parsed = JSON.parse(String(read(SCORECARDS)));
+    const records = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.records) ? parsed.records : [];
+    return { version: Array.isArray(parsed) ? null : parsed?.version ?? null, records };
+  }
+  const { version, records } = readStore();
+  return { version, records };
 }
 
 const cell = (v) => (v == null || v === '' ? '—' : `\`${v}\``);
@@ -97,7 +102,7 @@ export function renderRoutingTable(scorecards) {
     '`we:scripts/lib/provider-routing.mjs`). Edit the code, not this block;',
     '`scripts/__tests__/dispatch-routing-table.test.mjs` fails when the two disagree.',
     '',
-    `Computed against \`we:scripts/conveyor/run-scorecards.json\` (version ${JSON.stringify(scorecards.version)}, `
+    `Computed against the shared run-scorecard store (version ${JSON.stringify(scorecards.version)}, `
       + `${scorecards.records.length} record(s)) at size ${TABLE_SIZE}.`,
     '',
     '| dispatch | derived `taskType` | routed | executed | supervision | why |',
@@ -153,8 +158,9 @@ export function spliceBlock(doc, block) {
 }
 
 /** The runbook as it SHOULD be, given today's code and scorecards. */
-export function expectedRunbook({ read = (p) => readFileSync(p, 'utf8') } = {}) {
-  return spliceBlock(String(read(RUNBOOK)), renderRoutingTable(loadScorecards({ read })));
+export function expectedRunbook({ read } = {}) {
+  const readRunbook = read ?? ((p) => readFileSync(p, 'utf8'));
+  return spliceBlock(String(readRunbook(RUNBOOK)), renderRoutingTable(loadScorecards({ read })));
 }
 
 if (process.argv[1] && process.argv[1].endsWith('gen-dispatch-routing-table.mjs')) {

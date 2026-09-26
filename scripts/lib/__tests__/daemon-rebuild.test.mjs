@@ -1261,6 +1261,45 @@ describe('rebuildClone — daemon runtime state in a tracked file is carried out
     expect(result.alerts.some((a) => a.kind === 'state-file-migrated' && a.detail?.path === SC && a.detail?.added === 3)).toBe(true);
   });
 
+  // #4155 — the file is untracked on main (git rm + .gitignore) while an OLD-code process in the daemon clone has
+  // just modified its tracked copy. The rebuild must still move the clone onto the untracking commit, carrying
+  // the rows, and leave it clean — the self-heal the review daemon depends on the first tick after #4155 lands.
+  it('self-heals onto the commit that UNTRACKS the store while the clone\'s tracked copy is modified', async () => {
+    const fx = stateFixture();
+    advanceMain(fx.originDir, (dir) => {
+      rmSync(join(dir, SC));
+      writeFile(dir, '.gitignore', `${SC}\n`);
+    });
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'late-row' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.reason).not.toBe('dirty');
+    expect(result.moved).toBe(true);
+    expect(gitOk(fx.cloneDir, ['status', '--porcelain']).trim()).toBe('');
+    expect(gitOk(fx.cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(gitOk(fx.cloneDir, ['rev-parse', 'origin/main']).trim());
+    expect(gitOk(fx.cloneDir, ['ls-files', '--', SC]).trim()).toBe('');
+    expect(JSON.parse(readFileSync(fx.pinned, 'utf8')).records.map((r) => r.id)).toEqual(['committed', 'late-row']);
+  });
+
+  it('keeps the store\'s migration stamp when it carries rows into it (#4155)', async () => {
+    const fx = stateFixture();
+    writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json',
+      `${JSON.stringify({ version: 1, records: [{ id: 'committed' }], migrations: ['legacy-in-tree-store-4155'] })}\n`);
+    writeFile(fx.cloneDir, SC, store([{ id: 'committed' }, { id: 'row-1' }]));
+
+    const result = await rebuildClone({
+      root: fx.cloneDir, env: fx.env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+    });
+
+    expect(result.moved).toBe(true);
+    const pinned = JSON.parse(readFileSync(fx.pinned, 'utf8'));
+    expect(pinned.records.map((r) => r.id)).toEqual(['committed', 'row-1']);
+    expect(pinned.migrations).toEqual(['legacy-in-tree-store-4155']);
+  });
+
   it('unions into an existing pinned store — no row lost, none duplicated', async () => {
     const fx = stateFixture();
     writeFile(fx.stateDir, 'conveyor-state/.conveyor/run-scorecards.json', store([{ id: 'committed' }, { id: 'already-pinned' }]));

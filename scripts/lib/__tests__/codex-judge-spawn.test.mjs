@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // #3383 mechanical-dispatcher Bug 2 fix — `codexJudgeSpawn` now calls `recordCodexRunScorecard` (real default:
 // `../conveyor/run-quality-record.mjs`) after every real spawn. That real default's own real default, in
-// turn, appends to the tracked `we:scripts/conveyor/run-scorecards.json` — exactly the kind of disk side
+// turn, appends to the real shared scorecard store (`we:scripts/conveyor/run-scorecard-store.mjs`) — exactly the kind of disk side
 // effect this suite (and every other suite that exercises `codexJudgeSpawn` without naming its own
 // `recordScorecard` override) must never touch. Mocked at the MODULE level, once, rather than threading a
 // `recordScorecard: vi.fn()` override into every one of this file's many direct `codexJudgeSpawn({...})`
