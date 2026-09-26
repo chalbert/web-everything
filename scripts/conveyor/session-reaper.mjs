@@ -2178,8 +2178,12 @@ export function runSessionReaperPass({
     anomalies,
     backstopWritten: dryRun ? 0 : backstopWritten,
     wouldWriteBackstop: dryRun ? wouldBackstop : undefined,
+    // `orderedReap`, NOT the raw `reap` — a `--dry-run` plan is a preview of what a real pass WOULD do,
+    // including the ORDER a budget-bounded pass would spend its stops in (see `prioritizeReapCandidates`'s own
+    // doc); reporting the plan's own pre-priority order here would silently lie about which candidates a
+    // budgeted real pass reaches first.
     wouldStop: dryRun
-      ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
+      ? orderedReap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
       : undefined,
     collected: dryRun ? undefined : done,
     kept: keep.length,

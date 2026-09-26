@@ -1011,6 +1011,18 @@ describe('runSessionReaperPass — per-tick reap budget (#3383 follow-up, live-c
     expect(result.collected).toEqual([{ id: 'blocker', sessionId: 'blocker-full', name: 'fix-2771', reason: 'done', alreadyGone: false }]);
     expect(result.deferred).toBe(5);
   });
+
+  it('a dry-run plan (`wouldStop`) reports the SAME priority order a real budgeted pass would spend its stops in — never the plan\'s own pre-priority order', () => {
+    const listAgents = () => [
+      ...sessions(3), // review-1000..1002, unrelated backlog
+      { id: 'blocker', sessionId: 'blocker-full', kind: 'background', state: 'done', name: 'fix-2771' },
+    ];
+    const result = runSessionReaperPass({
+      listAgents, groundTruthFor: () => ({ resolved: false }), completionFor: () => null,
+      backstopCompletion: false, dryRun: true, priorityNames: new Set(['fix-2771']), log: () => {},
+    });
+    expect(result.wouldStop.map((w) => w.name)).toEqual(['fix-2771', 'review-1000', 'review-1001', 'review-1002']);
+  });
 });
 
 describe('planBackstopCompletion — the root-cause fix, not just detection (xbv32pg follow-up, epic #3383)', () => {
