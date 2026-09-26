@@ -426,6 +426,81 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
   });
 });
 
+// Card x5kagse (epic #4075/#3383) — the follow-up to #2717: while the operator's Claude login is broken, `fix`
+// and `ci-heal` (the two halves that dispatch a FRESH Claude session) must be skipped OUTRIGHT, never merely
+// attempted — see `we:scripts/conveyor/claude-auth-health.mjs`'s own file header for the full incident and
+// design. `authGateOverride` is this test suite's injection point for the gate decision.
+describe('runTickAllRepos — the Claude-auth-broken gate skips fix/ci-heal dispatch outright (card x5kagse)', () => {
+  it('paused: neither fixTick nor ciHealTick is ever called, and both report empty dispatched/refusals', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [{ pr: 999 }], refusals: [{ kind: 'should-never-run' }] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [{ pr: 998 }], refusals: [] }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick,
+      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      authGateOverride: () => ({ paused: true, reason: 'paused: Claude login expired — run /login' }),
+    });
+    expect(fixTick).not.toHaveBeenCalled();
+    expect(ciHealTick).not.toHaveBeenCalled();
+    expect(out.dispatched).toEqual([]);
+    expect(out.refusals).toEqual([]);
+    expect(out.authPaused).toBe(true);
+    expect(out.authPauseReason).toBe('paused: Claude login expired — run /login');
+    // the mechanical (non-dispatching) halves still ran — the login break does not touch them.
+    expect(out.repos.map((r) => r.repo)).toEqual(['repo-a', 'repo-b']);
+  });
+
+  it('not paused: authGateOverride reporting healthy runs fix/ci-heal exactly as before (no behavior change)', async () => {
+    const fixTick = vi.fn(({ repo }) => ({ dispatched: repo === 'repo-a' ? [{ pr: 1 }] : [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick,
+      hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+      authGateOverride: () => ({ paused: false, reason: null }),
+    });
+    expect(fixTick).toHaveBeenCalledTimes(2);
+    expect(ciHealTick).toHaveBeenCalledTimes(2);
+    expect(out.dispatched).toEqual([{ pr: 1, repo: 'repo-a' }]);
+    expect(out.authPaused).toBe(false);
+    expect(out.authPauseReason).toBeNull();
+  });
+
+  it('with neither fixTick nor ciHealTick nor authGateOverride injected, the gate defaults to not-paused rather than shelling out (test hermeticity)', async () => {
+    // Both dispatch ticks ARE injected here (fixTick/ciHealTick), so per this file's own "only read when a real
+    // tick runs" rule the gate never calls the real IO-backed `planClaudeAuthDispatchGate` — proven indirectly:
+    // this test has no `claude`/`gh` on PATH beyond whatever the host happens to have, and it still resolves
+    // instantly to unpaused rather than blocking on/erroring out of a real child-process probe.
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, notesTick: noopNotesTick,
+    });
+    expect(out.authPaused).toBe(false);
+    expect(fixTick).toHaveBeenCalledTimes(1);
+    expect(ciHealTick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('buildCliDaemonEffects — onTick logs the exact pause line when authPaused (card x5kagse)', () => {
+  it('logs the required wording when result.authPaused is true', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'test-owner', log });
+    effects.onTick({
+      repos: [{ repo: 'chalbert/web-everything' }], dispatched: [], refusals: [], reconcileRefusals: [],
+      authPaused: true, authPauseReason: 'paused: Claude login expired — run /login',
+    });
+    expect(log.error).toHaveBeenCalledWith('reconcile-fix-dispatch-daemon: paused: Claude login expired — run /login');
+  });
+
+  it('logs nothing extra when not paused', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'test-owner', log });
+    effects.onTick({
+      repos: [{ repo: 'chalbert/web-everything' }], dispatched: [], refusals: [], reconcileRefusals: [], authPaused: false,
+    });
+    expect(log.error.mock.calls.some((c) => String(c[0]).includes('paused: Claude login expired'))).toBe(false);
+  });
+});
+
 // #xngv3vn — SOURCE-CONTRACT proof that the REAL `buildCliDaemonEffects` (no injection point for its own
 // `tickOnce`, which always builds the real dispatch functions — see this file's existing `buildCliDaemonEffects`
 // suite, which deliberately never CALLS `tickOnce`, only checks its shape, for the same reason) is wired to
