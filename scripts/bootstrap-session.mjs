@@ -686,6 +686,28 @@ export function untrustedDirs(config, dirs = []) {
 }
 
 /**
+ * The counterpart {@link withTrustedDirs} deliberately does NOT offer (see that function's own doc: "a
+ * bootstrap that could withdraw trust on a bad derivation is one that can lock an agent out of every lane at
+ * once"). That reasoning is about the `SessionStart` BOOTSTRAP step, which derives its dir list by PROBING the
+ * filesystem (`trustableDirs`) — a wrong probe there really could delist a lane still in use. This function is
+ * for a DIFFERENT caller with a DIFFERENT, much narrower blast radius (card #4188, bornAs `x5qketq`, epic
+ * #4075): the session reaper's dispatch-scratch cleanup, which only ever passes EXACT, already-deleted
+ * `.operations/dispatch/<uuid>` directory paths it minted and just removed itself — never a probed or derived
+ * list, never a lane or primary checkout. PURE, same shape as {@link withTrustedDirs}: deep-clones rather than
+ * mutates, deletes exactly the given project keys, and touches nothing else.
+ * @param {object|null} config
+ * @param {string[]} [dirs]
+ * @returns {object}
+ */
+export function withoutTrustedDirs(config, dirs = []) {
+  const next = JSON.parse(JSON.stringify(config ?? {}));
+  if (next.projects && typeof next.projects === 'object') {
+    for (const dir of dirs) delete next.projects[dir];
+  }
+  return next;
+}
+
+/**
  * The `trust` step's decision, in the same `planned`/`ok`/`drift` vocabulary every other step reports. PURE.
  *
  * @param {{dirs: string[], config: object|null, write: boolean, dryRun?: boolean}} o

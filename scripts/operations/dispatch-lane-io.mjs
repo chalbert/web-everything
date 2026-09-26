@@ -74,7 +74,12 @@ import { workspaceRootOf } from '../guard-lane.mjs';
 // writer's own backup-first discipline) so a test/soak world can point it at a throwaway file instead of the
 // operator's real `~/.claude.json`, the same reason `dispatchSessionCwd` itself is relocatable via
 // {@link DISPATCH_CWD_ENV}.
-import { readJsonConfig, withTrustedDirs, TRUST_PATH } from '../bootstrap-session.mjs';
+import { readJsonConfig, withTrustedDirs, withoutTrustedDirs, TRUST_PATH } from '../bootstrap-session.mjs';
+// #4188 (bornAs x5qketq, epic #4075) — the atomic (temp-file + rename), validated writer {@link
+// revokeDispatchTrust} uses. See that function's own doc for why a plain `writeFileSync` (this file's own
+// `grantDispatchTrust`, below, still uses that) is not enough for a REMOVAL: reads that raced a torn write
+// would corrupt this same operator-wide file for every OTHER repo's trust state too, not just this one entry.
+import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
@@ -1310,21 +1315,33 @@ export const DISPATCH_CWD_ENV = 'WE_DISPATCH_CWD_ROOT';
  * PER-SESSION, not one shared directory: two sessions dispatched close together must never collide on the same
  * filename before either has acquired its own lane.
  *
- * NEVER CLEANED UP HERE. Whatever a session drops before it moves into its lane is now harmless clutter
- * (outside every checkout, never read by anything), not a live daemon hazard — reclaiming it is a housekeeping
- * concern for whoever owns `.operations/` scratch generally (`wake.mjs` already reclaims `explore`'s), not a
- * correctness requirement this card's proof depends on.
+ * NEVER CLEANED UP HERE. Whatever a session drops before it moves into its lane is harmless clutter (outside
+ * every checkout, never read by anything), not a live daemon hazard for #4174's OWN proof — reclaiming it was
+ * left to whoever owns `.operations/` scratch generally. UPDATE (#4188, bornAs `x5qketq`, epic #4075): that
+ * owner now exists — `we:scripts/conveyor/session-reaper.mjs`'s dispatch-scratch sweep removes a finished
+ * session's own folder here (plus the trust entry {@link grantDispatchTrust} granted it, via
+ * {@link revokeDispatchTrust}) once it is old enough — this function's OWN root computation is what that sweep
+ * enumerates, so the two can never disagree about where a dispatch's scratch cwd lives.
  *
+ * @param {object} [o]
+ * @param {string} [o.root] - this repo's checkout root (the dispatcher's own).
+ * @param {Record<string, string|undefined>} [o.env]
+ * @returns {string} the directory EVERY session's own scratch cwd is a child of — never a session-specific path.
+ */
+export function dispatchScratchRoot({ root = REPO_ROOT, env = process.env } = {}) {
+  const override = String(env[DISPATCH_CWD_ENV] ?? '').trim();
+  return override ? resolve(override) : join(workspaceRootOf(root), '.operations', 'dispatch');
+}
+
+/**
  * @param {string} sessionId - the same id {@link createDispatchSinks} mints for this dispatch; the path segment.
  * @param {object} [o]
  * @param {string} [o.root] - this repo's checkout root (the dispatcher's own).
  * @param {Record<string, string|undefined>} [o.env]
  * @returns {string}
  */
-export function dispatchSessionCwd(sessionId, { root = REPO_ROOT, env = process.env } = {}) {
-  const override = String(env[DISPATCH_CWD_ENV] ?? '').trim();
-  const base = override ? resolve(override) : join(workspaceRootOf(root), '.operations', 'dispatch');
-  return join(base, String(sessionId));
+export function dispatchSessionCwd(sessionId, opts = {}) {
+  return join(dispatchScratchRoot(opts), String(sessionId));
 }
 
 /** Test/override hook for {@link grantDispatchTrust}'s trust file — mirrors {@link DISPATCH_CWD_ENV}. A
@@ -1356,25 +1373,85 @@ function resolveDispatchTrustPath(env = process.env) {
  *
  * FAIL-SOFT ON PURPOSE, same as `resolveGhShimSettingsEnv`: an unreadable/unparseable trust file writes
  * nothing (never rebuilds an operator's whole per-project CLI state from `{}`), and any other failure (no
- * permission, a concurrent writer) is swallowed — the spawn still gets attempted, and if trust genuinely could
- * not be granted, the CLI's own refusal surfaces exactly as it did before this existed, visibly, rather than
- * this function pretending to have fixed it.
+ * permission, a lock-acquire timeout) is swallowed — the spawn still gets attempted, and if trust genuinely
+ * could not be granted, the CLI's own refusal surfaces exactly as it did before this existed, visibly, rather
+ * than this function pretending to have fixed it.
+ *
+ * LOCK-SAFE (#4188 follow-up, live-caught 2026-09-26) — the read-modify-write below now runs inside
+ * {@link withFileLock}, the SAME lock {@link revokeDispatchTrust} takes on this identical file. Live evidence
+ * this matters: a real dispatch-scratch revoke pass on this machine reported entries removed, but a fresh read
+ * of `~/.claude.json` moments later still had every one of them — THIS function, running concurrently and
+ * unlocked, had read a stale pre-revoke snapshot and written it straight back. Two callers of the SAME
+ * unlocked read-modify-write can always silently undo each other; the lock is what makes "revoked" and
+ * "granted" answers durable against each other, not just individually non-corrupting.
  * @param {string} dir
  * @param {{trustPath?: string}} [o] - injectable ONLY so a test can point it at a throwaway file instead of
  *   overriding process.env — the same seam `exec`/`spawnAgent` already are on this sink.
  */
 export function grantDispatchTrust(dir, { trustPath = resolveDispatchTrustPath() } = {}) {
   try {
-    const before = readJsonConfig(trustPath);
-    // `null` = present but unparseable (bootstrap-session.mjs's own `readJsonConfig` contract) — write
-    // nothing, exactly as bootstrap-session.mjs's own trust step refuses to in that case.
-    if (before === null) return;
-    const next = withTrustedDirs(before, [dir]);
-    // Backup-first, exactly matching bootstrap-session.mjs's own `writeTrust` discipline for this same file —
-    // it holds the operator's whole per-project CLI state, not just this one directory's trust flag.
-    if (existsSync(trustPath)) copyFileSync(trustPath, `${trustPath}.bak`);
-    writeFileSync(trustPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    withFileLock(`${trustPath}.lock`, () => {
+      const before = readJsonConfig(trustPath);
+      // `null` = present but unparseable (bootstrap-session.mjs's own `readJsonConfig` contract) — write
+      // nothing, exactly as bootstrap-session.mjs's own trust step refuses to in that case.
+      if (before === null) return;
+      const next = withTrustedDirs(before, [dir]);
+      // Backup-first, exactly matching bootstrap-session.mjs's own `writeTrust` discipline for this same file —
+      // it holds the operator's whole per-project CLI state, not just this one directory's trust flag.
+      if (existsSync(trustPath)) copyFileSync(trustPath, `${trustPath}.bak`);
+      writeFileSync(trustPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    });
   } catch { /* see docblock — never blocks a dispatch */ }
+}
+
+/**
+ * #4188 (bornAs `x5qketq`, epic #4075) — {@link grantDispatchTrust}'s counterpart: REVOKE the trust entries a
+ * finished, already-deleted dispatch-scratch cwd no longer needs. Called ONLY by the session reaper's
+ * dispatch-scratch sweep (`we:scripts/conveyor/session-reaper.mjs`), and only ever with EXACT directory paths
+ * that sweep just removed from disk itself — never a probed/derived list, never a lane or a primary checkout
+ * (see {@link ../bootstrap-session.mjs#withoutTrustedDirs}'s own doc for why THAT distinction is what makes
+ * this safe where the bootstrap step's own `withTrustedDirs` deliberately refuses to ever remove anything).
+ *
+ * WHY ATOMIC *AND* LOCKED, unlike {@link grantDispatchTrust}'s own plain `writeFileSync` (BEFORE this same
+ * card also put it behind the identical lock — see that function's own doc): this file grows one entry per
+ * dispatch forever (the whole reason #4188 exists), so a REMOVAL sweep runs unattended, on a schedule, against
+ * the SAME `~/.claude.json` every other repo's trust state lives in. {@link writeJsonAtomic} (temp file +
+ * rename, validated twice) makes a partial write structurally impossible; {@link withFileLock} (the SAME lock
+ * `grantDispatchTrust` now takes) makes a LOST UPDATE impossible too. LIVE EVIDENCE THIS SECOND GUARANTEE IS
+ * NEEDED, not merely defensive: before the lock existed, a real pass on this machine reported 81 entries
+ * revoked, and a re-read of `~/.claude.json` moments later still had every one of them — a concurrent,
+ * still-unlocked `grantDispatchTrust` call had clobbered the atomic write with its own stale snapshot. Atomicity
+ * alone never protected against that; only mutual exclusion between the two writers does.
+ *
+ * FAIL-SOFT ON PURPOSE, same convention as `grantDispatchTrust`: an absent file, an unparseable one, or any
+ * write failure (no permission, a lock-acquire timeout) all answer `{ revoked: [] }` rather than throwing — the
+ * caller (the reaper) already deleted the scratch folder itself by the time this runs, so a trust-revoke
+ * failure is a harmless stale entry, never a reason to treat the whole sweep as failed.
+ * @param {string[]} dirs - exact directory paths to remove from `~/.claude.json`'s `projects` map.
+ * @param {{trustPath?: string}} [o]
+ * @returns {{revoked: string[]}}
+ */
+export function revokeDispatchTrust(dirs, { trustPath = resolveDispatchTrustPath() } = {}) {
+  const list = Array.isArray(dirs) ? dirs.filter((d) => typeof d === 'string' && d) : [];
+  if (!list.length) return { revoked: [] };
+  // Unlike `grantDispatchTrust` (which legitimately creates the file fresh the first time anything is
+  // trusted), a REVOKE has nothing to do if the file was never there — there is nothing to remove, and
+  // creating an operator's `~/.claude.json` from scratch just to say "empty" would be a pointless, asymmetric
+  // side effect a cleanup pass should never have.
+  if (!existsSync(trustPath)) return { revoked: [] };
+  try {
+    return withFileLock(`${trustPath}.lock`, () => {
+      const before = readJsonConfig(trustPath);
+      // `null` = present but unparseable — write nothing, same refusal `grantDispatchTrust` makes.
+      if (before === null) return { revoked: [] };
+      const next = withoutTrustedDirs(before, list);
+      if (existsSync(trustPath)) copyFileSync(trustPath, `${trustPath}.bak`);
+      writeJsonAtomic(trustPath, next);
+      return { revoked: list };
+    });
+  } catch {
+    return { revoked: [] }; // see docblock — never blocks the reaper's own sweep
+  }
 }
 
 /**

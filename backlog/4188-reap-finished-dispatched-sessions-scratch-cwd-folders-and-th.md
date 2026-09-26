@@ -3,9 +3,11 @@ bornAs: x5qketq
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
