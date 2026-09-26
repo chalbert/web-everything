@@ -3,10 +3,11 @@ bornAs: xpt9fvd
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/guard-lane.mjs", "we:scripts/guard-bash.mjs", "we:scripts/lib/daemon-clone-registry.mjs", "we:scripts/__tests__/guard-lane.test.mjs", "we:scripts/__tests__/guard-bash.test.mjs"]
 dateOpened: "2026-09-26"
 dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
