@@ -3,9 +3,10 @@ bornAs: xa1ex02
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/__tests__/verify-dispatch.test.mjs", "we:scripts/operations/__tests__/runner-activity-io.test.mjs", "we:scripts/__tests__/lane-pool-acquire-shares-scan-cache.test.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
