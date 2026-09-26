@@ -74,9 +74,9 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { assertNotALaneCheckout, REPO_ROOT, resolveGhShimSettingsEnv } from './dispatch-lane-io.mjs';
@@ -90,6 +90,7 @@ import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
 import { ACTOR_ENV } from '../lib/review-independence.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../conveyor/reconcile-core.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
+import { extraSeatsEnabled, resolveSeatTimeoutMs } from './review-extra-seats.mjs';
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 
@@ -236,7 +237,47 @@ export function createReviewJobIo({ root = REPO_ROOT, env = process.env, dir = r
       };
     },
     releaseLane: (slug) => node(['scripts/lane-pool.mjs', 'release', '--all-pools', `--session=${slug}`], { timeoutMs: 5 * 60 * 1000 }),
+    // #4194 — the ADDED non-Claude seats, run in their own process AFTER the verdict is decided, under a hard wall.
+    // Whatever happens in there comes back as a status; nothing here can throw into the arc.
+    runExtraSeats: ({ pr, repo, lanePath, loopPayload, slug }) => {
+      if (!extraSeatsEnabled(env)) return { status: 'disabled', reason: 'kill switch thrown' };
+      const loopFile = join(dir, `${slug}.loop.json`);
+      try {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(loopFile, JSON.stringify(loopPayload));
+        const r = node([
+          'scripts/operations/review-extra-seats.mjs', 'run', `--pr=${pr}`, `--repo=${repo}`, `--lane=${lanePath}`, `--loop-json=${loopFile}`,
+        ], { timeoutMs: resolveSeatTimeoutMs(env) + 5 * 60 * 1000 });
+        for (const line of String(r.stderr ?? '').split('\n').filter((l) => l && !/DeprecationWarning|trace-deprecation/.test(l))) {
+          writeLineSync(2, `  ${line}`);
+        }
+        const last = String(r.stdout ?? '').trim().split('\n').pop() ?? '';
+        try { return JSON.parse(last); } catch { return { status: 'error', reason: `seat runner exit ${r.status}${r.signal ? ` (${r.signal})` : ''}, no result` }; }
+      } catch (e) {
+        return { status: 'error', reason: String(e?.message ?? e).slice(0, 300) };
+      } finally {
+        try { rmSync(loopFile, { force: true }); } catch { /* best effort */ }
+      }
+    },
     log: (line) => writeLineSync(2, `[${new Date().toISOString()}] ${line}`),
+  };
+}
+
+/** #4194 — the compact form of the added seats' result the job prints (the full rows live in the store). */
+export function summarizeExtraSeats(r) {
+  if (!r || typeof r !== 'object') return null;
+  return {
+    status: r.status ?? null,
+    ...(r.reason ? { reason: r.reason } : {}),
+    ...(Array.isArray(r.seats) ? {
+      seats: r.seats.map((x) => ({
+        seat: x.seat, lens: x.lens, provider: x.provider, model: x.model, status: x.status, verdict: x.seatVerdict ?? null,
+        findings: (x.findings ?? []).map((f) => ({ summary: f.summary, file: f.file, line: f.line, impact: f.impactIfUnfixed, confirmedByClaude: f.confirmedByClaude })),
+      })),
+    } : {}),
+    ...(Array.isArray(r.skipped) && r.skipped.length ? { skipped: r.skipped } : {}),
+    ...(r.rowsWritten != null ? { rowsWritten: r.rowsWritten } : {}),
+    ...(r.callsUsedToday != null ? { callsUsedToday: r.callsUsedToday, dailyCap: r.dailyCap } : {}),
   };
 }
 
@@ -251,16 +292,39 @@ function tail(text, n = 400) {
  *   1. acquire a lane (bounded wait);
  *   2. run `review-loop-cli.mjs --json` ONCE under a fresh actor id and a hard timeout;
  *   3. report `done` with the classified outcome / loop verdict / run id;
- *   4. release the lane and drop the job record — in `finally`, so every exit path cleans up.
+ *   4. release the lane and drop the job record — in `finally`, so every exit path cleans up;
+ *   5. (#4194) only then, when the loop printed a finished review, run the ADDED non-Claude seats
+ *      (`review-extra-seats.mjs`) and attach their summary as `extraSeats` — advisory, never read by any verdict.
  * @param {{pr:number|string, repo:string, laneWaitMs?:number, loopTimeoutMs?:number}} o
  * @param {ReturnType<typeof createReviewJobIo>} [io]
  * @returns {{pr:number, repo:string, sessionSlug:string, outcome:string, verdict:(string|null),
  *   loopOutcome:(string|null), runId:(string|null), lanePath:(string|null), label:(string|null), refused?:boolean,
  *   timings:{acquireMs:(number|null), loopMs:(number|null), totalMs:number}}}
  */
-export function runReviewJob({
+export function runReviewJob(opts = {}, io = createReviewJobIo()) {
+  const seatsBox = {};
+  const out = runReviewArc(opts, io, seatsBox);
+  // #4194 — THE ADDED NON-CLAUDE SEATS (advisory lenses + one extra juror on Codex/Gemini), beside Claude's
+  // mandatory seats and strictly AFTER the arc is over: the verdict is labelled, `done` is reported, the lane is
+  // released and the job slot dropped — so the seats never delay the pipeline and nothing they do can touch the
+  // outcome above. A missing hook, a crash, a timeout, a thrown kill switch: each is only a status in `extraSeats`.
+  if (seatsBox.input && typeof io.runExtraSeats === 'function') {
+    let extraSeats;
+    try {
+      extraSeats = io.runExtraSeats(seatsBox.input);
+    } catch (e) {
+      extraSeats = { status: 'error', reason: tail(e?.message ?? e, 300) };
+    }
+    io.log(`review-job ${out.sessionSlug}: added seats — ${extraSeats?.status ?? 'none'}${extraSeats?.reason ? ` (${extraSeats.reason})` : ''}`
+      + `${Array.isArray(extraSeats?.seats) ? `: ${extraSeats.seats.map((x) => `${x.lens}@${x.provider}=${x.status}/${x.findingsCount ?? 0}f/${x.confirmedCount ?? 0}c`).join(', ')}` : ''}`);
+    out.extraSeats = summarizeExtraSeats(extraSeats);
+  }
+  return out;
+}
+
+function runReviewArc({
   pr, repo, laneWaitMs = REVIEW_JOB_LANE_WAIT_MS, loopTimeoutMs = resolveLoopTimeoutMs(), pid = process.pid,
-} = {}, io = createReviewJobIo()) {
+} = {}, io, seatsBox = {}) {
   const planned = planReviewDispatch({ pr, repo });
   const slug = planned.sessionSlug;
   const t0 = io.now();
@@ -336,6 +400,8 @@ export function runReviewJob({
       else loopSpan?.ok({ outcome: classified.outcome, verdict: classified.verdict, loopOutcome: classified.loopOutcome, runId: classified.runId });
     } catch { /* telemetry */ }
     io.log(`review-job ${slug}: loop finished in ${timings.loopMs}ms — ${classified.outcome} (verdict ${classified.verdict ?? '-'}, loop ${classified.loopOutcome ?? '-'}, run ${classified.runId ?? '-'})`);
+    // #4194 — hand the added seats what they need; they run in `runReviewJob` once this arc has fully finished.
+    if (parsed && !loop.timedOut) seatsBox.input = { pr: planned.pr, repo: planned.repo, lanePath, loopPayload: parsed, slug };
     return result({ ...classified, lanePath });
   } catch (e) {
     classified = { outcome: BLOCKED_ON_INFRA, verdict: null, loopOutcome: null, runId: null, label: tail(e?.message ?? e, 500) };
