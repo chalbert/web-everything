@@ -9,8 +9,16 @@
  *   lease acquired moments ago must never be reaped just because its session isn't listed yet — #3283's
  *   failure shape, reintroduced) and the ALL-EMPTY-LISTING degrade (zero background rows must read as "axis
  *   off", never "everyone's gone").
+ *
+ *   #3383 (2026-09-14 mechanical-dispatcher incident) — ALSO pins the PHANTOM-LISTING widening: a
+ *   `claude agents --json --all` row can be LISTED, in a non-terminal state, with NO backing OS process at all
+ *   (confirmed live: 12 of 14 "leased" lanes had no corroborating process anywhere on the box via `ps`/`lsof`,
+ *   several sessions silent 4+ hours, none within their 240-minute TTL). `sessionPidAliveByName` (the real
+ *   process-liveness reduction, reusing `driver-watchdog.mjs`'s own two-signal probe) and
+ *   `sessionGoneForLease`'s new `pidAlive` input are exercised directly, proving a listed-but-dead session now
+ *   reaps even while its recorded state is still `working`/`blocked` and its lease is nowhere near TTL.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   classifyReap,
   reapPlan,
@@ -25,6 +33,7 @@ import {
   sessionStateByName,
   sessionStatesForReap,
   sessionGoneForLease,
+  sessionPidAliveByName,
   AGENT_GONE_STATES,
   repoKeyForPool,
   fetchPrStatesForRepo,
@@ -559,6 +568,126 @@ describe('sessionGoneForLease — THE FIX: is the lease\'s own delivery-agent se
     expect(sessionGoneForLease({ session: 'ci-heal-1872' }, states, { nowMs: NOW })).toBe(false); // listed, still working → not gone
     // Absent + past the grace window → gone, exactly like an item-kind session already worked.
     expect(sessionGoneForLease({ session: 'inspect-1873', acquiredAt: new Date(NOW - (GRACE_MS + 5 * 60_000)).toISOString() }, states, { nowMs: NOW })).toBe(true);
+  });
+
+  // ── #3383 (2026-09-14) — THE PHANTOM-LISTING WIDENING: a LISTED, non-terminal session with NO real process ──
+
+  it('LIVE INCIDENT SHAPE: listed as "working" (not terminal) but pidAlive=false → gone, no grace/age needed', () => {
+    // This is exactly what made 12 of 14 lane leases un-reapable for hours: the registered session still shows
+    // up in the listing with a perfectly ordinary in-progress state, so neither the absence branch nor
+    // AGENT_GONE_STATES ever fires — only a REAL liveness read catches it.
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-62', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-62' }, states, { pidAlive: false })).toBe(true);
+    // No nowMs supplied at all — the pidAlive branch needs no age/clock, unlike the absence branch.
+    expect(sessionGoneForLease({ session: 'conveyor-62' }, states, { pidAlive: false })).toBe(true);
+  });
+  it('listed as "blocked" with pidAlive=false → gone too (any non-terminal state, not just "working")', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-63', state: 'blocked' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-63' }, states, { pidAlive: false })).toBe(true);
+  });
+  it('pidAlive=false wins even for a lease acquired moments ago — it is a direct read, not an inference needing a grace window', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-64', state: 'working' }]);
+    const justAcquired = { session: 'conveyor-64', acquiredAt: new Date(NOW - 5_000).toISOString() };
+    expect(sessionGoneForLease(justAcquired, states, { nowMs: NOW, pidAlive: false })).toBe(true);
+  });
+  it('pidAlive=true → unchanged (a listed, non-terminal, REALLY alive session stays kept)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-65', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-65' }, states, { pidAlive: true })).toBe(false);
+  });
+  it('pidAlive=null (unknown/not supplied) → falls through to the pre-#3383 listed-state logic unchanged', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-66', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-66' }, states, { pidAlive: null })).toBe(false);
+    expect(sessionGoneForLease({ session: 'conveyor-66' }, states)).toBe(false); // default omitted entirely
+  });
+  it('pidAlive=false on a session absent from the listing altogether → still gone (the stronger signal still fires)', () => {
+    const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+    expect(sessionGoneForLease({ session: 'conveyor-67' }, states, { pidAlive: false })).toBe(true);
+  });
+});
+
+describe('sessionPidAliveByName — #3383 real process-liveness per session, reusing driver-watchdog\'s own probe', () => {
+  it('a row with its own pid uses the direct kill(pid,0) probe, never the ps scan', () => {
+    const isPidAlive = vi.fn((pid) => pid === 111);
+    const m = sessionPidAliveByName(
+      [{ kind: 'background', name: 'conveyor-1', pid: 111 }, { kind: 'background', name: 'conveyor-2', pid: 222 }],
+      { psOutput: 'irrelevant', isPidAlive },
+    );
+    expect(m.get('conveyor-1')).toBe(true);
+    expect(m.get('conveyor-2')).toBe(false);
+  });
+  it('a row with only a sessionId falls back to scanning the ps aux capture for its full id', () => {
+    const m = sessionPidAliveByName(
+      [
+        { kind: 'background', name: 'conveyor-live', sessionId: 'aaaa1111-bbbb-cccc-dddd-eeeeeeeeeeee' },
+        { kind: 'background', name: 'conveyor-dead', sessionId: 'ffff2222-bbbb-cccc-dddd-eeeeeeeeeeee' },
+      ],
+      { psOutput: 'claude --resume=aaaa1111-bbbb-cccc-dddd-eeeeeeeeeeee some-other-flags' },
+    );
+    expect(m.get('conveyor-live')).toBe(true);
+    expect(m.get('conveyor-dead')).toBe(false);
+  });
+  it('no pid, no sessionId, or psOutput unavailable → null (unknown, never a false death)', () => {
+    const m = sessionPidAliveByName([{ kind: 'background', name: 'conveyor-x' }], { psOutput: null });
+    expect(m.get('conveyor-x')).toBe(null);
+  });
+  it('interactive rows are excluded, matching sessionStateByName\'s own guard', () => {
+    const m = sessionPidAliveByName([{ kind: 'interactive', name: 'conveyor-1', pid: 111 }], { isPidAlive: () => true });
+    expect(m.has('conveyor-1')).toBe(false);
+  });
+  it('malformed/empty input → empty map', () => {
+    expect(sessionPidAliveByName([null, {}, { kind: 'background' }]).size).toBe(0);
+    expect(sessionPidAliveByName([]).size).toBe(0);
+    expect(sessionPidAliveByName(null).size).toBe(0);
+  });
+});
+
+describe('reapPlan — the #3383 phantom-listing shape end to end (classifyReap + sessionGoneForLease + sessionPidAliveByName)', () => {
+  it('a fresh, well-within-TTL lease whose session is listed "working" but has NO real process → reaped as session-gone', () => {
+    // The exact incident shape: lane-62's lease looked identical to a healthy in-progress build from every axis
+    // except real process liveness — acquired recently, session still in the listing, state ordinary, TTL nowhere
+    // close. Only the ps-scan-backed pidAlive read tells them apart.
+    const lease = fresh({ session: 'conveyor-62' });
+    const sessions = [{ kind: 'background', name: 'conveyor-62', sessionId: 'dead0000-0000-0000-0000-000000000000', state: 'working' }];
+    const sessionStates = sessionStatesForReap(sessions);
+    const pidAliveByName = sessionPidAliveByName(sessions, { psOutput: 'no matching session ids in this ps aux capture' });
+    const signalsFor = (c) => ({
+      prState: null,
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs: NOW, pidAlive: pidAliveByName.get(c.lease.session) ?? null }),
+      pidAlive: null,
+    });
+    const { reap, keep } = reapPlan([{ pool: 'web-everything', lane: 62, dir: '/x/lane-62', lease }], { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    expect(reap).toHaveLength(1);
+    expect(reap[0].reason).toBe('session-gone');
+    expect(keep).toHaveLength(0);
+  });
+  it('the SAME shape but the ps aux capture DOES contain the session id (a real live process) → kept', () => {
+    const lease = fresh({ session: 'conveyor-63' });
+    const sessions = [{ kind: 'background', name: 'conveyor-63', sessionId: 'aliv0000-0000-0000-0000-000000000000', state: 'working' }];
+    const sessionStates = sessionStatesForReap(sessions);
+    const pidAliveByName = sessionPidAliveByName(sessions, { psOutput: 'claude --resume=aliv0000-0000-0000-0000-000000000000' });
+    const signalsFor = (c) => ({
+      prState: null,
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs: NOW, pidAlive: pidAliveByName.get(c.lease.session) ?? null }),
+      pidAlive: null,
+    });
+    const { reap, keep } = reapPlan([{ pool: 'web-everything', lane: 63, dir: '/x/lane-63', lease }], { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    expect(reap).toHaveLength(0);
+    expect(keep).toHaveLength(1);
+  });
+  it('a RESERVED lease is never reaped even when its session reads phantom-dead (reserved short-circuits first)', () => {
+    const lease = fresh({ session: 'mem-lane', reserved: true });
+    const sessions = [{ kind: 'background', name: 'mem-lane', sessionId: 'dead0000-0000-0000-0000-000000000000', state: 'working' }];
+    const sessionStates = sessionStatesForReap(sessions);
+    const pidAliveByName = sessionPidAliveByName(sessions, { psOutput: '' });
+    const signalsFor = (c) => ({
+      prState: null,
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs: NOW, pidAlive: pidAliveByName.get(c.lease.session) ?? null }),
+      pidAlive: null,
+    });
+    const { reap, keep } = reapPlan([{ pool: 'web-everything', lane: 7, dir: '/x/lane-7', lease }], { nowMs: NOW, ttlMs: TTL_MS, signalsFor });
+    expect(reap).toHaveLength(0);
+    expect(keep).toHaveLength(1);
+    expect(keep[0].reason).toBe('reserved');
   });
 });
 

@@ -34,10 +34,21 @@
  * `pr-land.mjs` already exported it (for the drain's own CLI-shelled reuse) before this port existed; moving it
  * here is a relocation, not new surface.
  *
+ * DEFAULT `exec` IS THROTTLED (epic #3383's git-manager slice) — `we:scripts/lib/gh-throttle.mjs#runGhSync`,
+ * the same byte-for-byte-transparent-on-success wrapper `review-label-provider.mjs` already adopted, gives
+ * every call this provider makes the shared concurrency cap + rate-limit backoff for free. The `create()`
+ * method additionally opts into HEADER SELF-CALIBRATION (`throttle.calibrateHeaders`) — this is the exact
+ * `gh pr create` that failed twice in one day with no automatic retry at all (the incident that motivated
+ * this pass): a secondary-rate-limit hit here now backs off using GitHub's own told `Retry-After` wait
+ * instead of a blind guess. Every OTHER method here (reads: `pr view`/`pr list`/`pr checks`, and the label/body
+ * edits) stays on the plain throttle — retried, but not header-calibrated — since none of them is the call
+ * that has actually failed in production; see `gh-throttle.mjs`'s own module header for why calibration is
+ * opt-in per call rather than the wrapper's default.
+ *
  * IMPURE by construction in `createGhLandProvider`; the module itself is pure.
  */
 
-import { execFileSync } from 'node:child_process';
+import { runGhSync } from './gh-throttle.mjs';
 
 /** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
 export function mergeMethodFlag(method) {
@@ -122,7 +133,16 @@ export const GH_ARGV = Object.freeze({
  */
 export function createGhLandProvider({
   cwd,
-  exec = (args) => execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(),
+  // The DEFAULT `exec` now routes through `runGhSync` (#3383) rather than a bare `execFileSync` — every
+  // method gets the shared concurrency cap + rate-limit retry for free, with IDENTICAL success-return shape
+  // (a trimmed string) to before. `callOpts` is an optional second argument a specific METHOD (below, only
+  // `create()`) passes to opt that one call into extra `throttle` config (e.g. header self-calibration) —
+  // every other call site here still invokes `exec(args)` with no second argument, so `callOpts` defaults to
+  // `{}` and those calls are unaffected beyond gaining the throttle itself.
+  exec = (args, callOpts = {}) => runGhSync(args, {
+    cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    throttle: { op: callOpts?.throttle?.op || null, calibrateHeaders: !!callOpts?.throttle?.calibrateHeaders },
+  }).trim(),
 } = {}) {
   return {
     name: 'gh',
@@ -130,9 +150,13 @@ export function createGhLandProvider({
     /** Returns the raw create output (the PR URL text) — the caller extracts the PR number from it, same as
      *  before the port existed. Same (semantic-params-in, argv-built-internally) convention as every other
      *  method here — `buildCreateArgs` stays a SEPARATE pure export too, since `pr-land.mjs` also needs its
-     *  argv for the dry-run plan render, where nothing is executed. */
+     *  argv for the dry-run plan render, where nothing is executed.
+     *
+     *  THE ONE CALL THAT OPTS INTO HEADER SELF-CALIBRATION (#3383) — this is the exact `gh pr create` that
+     *  failed twice in one day with no automatic retry; see this file's own header and `gh-throttle.mjs`'s
+     *  module doc for why calibration is opt-in per call rather than the wrapper's default. */
     create(args) {
-      return exec(buildCreateArgs(args));
+      return exec(buildCreateArgs(args), { throttle: { op: 'pr-create', calibrateHeaders: true } });
     },
 
     listOpenByHead(head) {
