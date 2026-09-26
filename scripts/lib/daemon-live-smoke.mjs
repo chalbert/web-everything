@@ -822,10 +822,10 @@ export async function probeGithubAuth({ env, runChild = runBounded, budgets = re
   const slug = CONSTELLATION_REPOS.we.slug;
   try {
     await runChild('gh', ['api', '--method', 'GET', `repos/${slug}`], { env, timeoutMs: budgets.ghApiMs });
-    return { authFailed: false, detail: `gh api repos/${slug} ok with the smoke env` };
+    return { authFailed: false, detail: `gh api --method GET repos/${slug} ok with the smoke env` };
   } catch (e) {
     const text = `${String((e && e.message) || e)}\n${String(e?.stderr ?? '')}`;
-    return { authFailed: GITHUB_AUTH_FAILURE_RE.test(text), detail: `gh api repos/${slug} failed with the smoke env: ${failureLine(e)}` };
+    return { authFailed: GITHUB_AUTH_FAILURE_RE.test(text), detail: `gh api --method GET repos/${slug} failed with the smoke env:${failureLine(e)}` };
   }
 }
 
