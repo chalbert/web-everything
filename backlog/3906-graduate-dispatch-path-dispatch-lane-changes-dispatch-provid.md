@@ -249,7 +249,7 @@ union both `we:scripts/operations/dispatch-lane.mjs` conflicts above need.
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-lane-build-wiring.test.mjs` to #3903 — it imports a module #3903 owns.
 - 2026-09-24: graduation-import-check moved `we:scripts/operations/__tests__/dispatch-kind-axes.test.mjs` to #3904 — it imports a module #3904 owns.
 
-## Routing slice delivered as child x71zmu7 (2026-09-26)
+## Routing slice delivered as child 4208 (2026-09-26)
 
 Landed the ROUTING half of this card, adapted to main (operator brief 2026-09-26: "this card only wires routing"):
 `readTick` loads the scorecards (the shared store, #4155, read-only), the size policy, the promotion record and the

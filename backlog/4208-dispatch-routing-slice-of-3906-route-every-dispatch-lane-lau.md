@@ -1,4 +1,5 @@
 ---
+bornAs: x71zmu7
 kind: story
 size: 5
 parent: "3906"
@@ -19,4 +20,4 @@ The routing half of #3906, delivered as its own slice so #3906 stays open for th
 2. **Probed live** — a read-only dry-run over the live queue routes every item x launch kind to Claude, identically with the live scorecards and with none; `claude --bg` gets `--model sonnet` (build, fix, ci-heal, prepare, investigate) or `--model opus` (prepare-decision, statute-scoped work) — the current-model aliases, never an older pinned id.
 3. **Executable** — `dispatch-eligibility` admission verdicts over the live queue are identical to main's.
 
-Delivered by PR #2728's replacement (branch `lane/x71zmu7-dispatch-routing`). Resolves #3857.
+Delivered by PR #2728's replacement (branch `lane/4208-dispatch-routing`). Resolves #3857.
