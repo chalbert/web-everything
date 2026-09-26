@@ -3,9 +3,10 @@ bornAs: x8who76
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs", "we:skills-src/conveyor/review-daemon.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
