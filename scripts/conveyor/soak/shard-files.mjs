@@ -10,10 +10,11 @@
  *
  * Break files are discovered from disk (`breaks/*.soak.test.mjs`), never from `breaks/index.mjs`'s registry —
  * adding a new break (one file) therefore lands in a shard automatically, no shard-list edit, which is the
- * "stays flat as scenarios grow" half of this split's whole point. Round-robin (not a static count-based cut)
- * keeps the assignment stable as files are added: each new file's bucket is `(index in sorted list) % bucketCount`,
- * so existing files rarely reshuffle shards wholesale when one more break is appended at the end of the
- * alphabetical list.
+ * "stays flat as scenarios grow" half of this split's whole point. Round-robin by sorted index
+ * (`(index in sorted list) % bucketCount`) keeps shards balanced to within one file. Stability is partial, and the
+ * tests pin exactly this: a break that sorts LAST leaves every existing file in its shard; a break inserted
+ * mid-list leaves the files sorting before it in place and shifts the ones after it by one bucket. That shift
+ * is harmless (every file still runs somewhere) — balance, not assignment stability, is the property that matters.
  */
 
 import { readdirSync } from 'node:fs';

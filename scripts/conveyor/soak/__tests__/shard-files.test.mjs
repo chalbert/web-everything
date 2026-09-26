@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { shardFiles, parseShardArg, listBreakTestFiles, BASELINE_FILE } from '../shard-files.mjs';
 
 describe('soak shard-files — deterministic baseline-alone + round-robin break split', () => {
@@ -28,20 +31,34 @@ describe('soak shard-files — deterministic baseline-alone + round-robin break 
     expect(files[0]).toBe('scripts/conveyor/soak/daemon-soak.soak.test.mjs');
   });
 
-  it('is stable when scenarios are appended: existing files keep the same bucket', () => {
-    // Simulate "one more break added at the end of the alphabetical list" by shrinking the break set by one
-    // and checking every remaining file's shard assignment is unchanged relative to the full set.
-    const total = 4;
-    const before = {};
-    for (let shard = 2; shard <= total; shard += 1) {
-      for (const f of shardFiles({ shard, total })) before[f] = shard;
+  // Real append/insert fixtures (a temp `breaks/` dir via the `breaksDir` override), not two calls on one list.
+  function assignments(names, total = 4) {
+    const dir = mkdtempSync(join(tmpdir(), 'soak-shard-'));
+    try {
+      for (const n of names) writeFileSync(join(dir, n), '');
+      const out = {};
+      for (let shard = 2; shard <= total; shard += 1) {
+        for (const f of shardFiles({ shard, total, breaksDir: dir, repoRoot: dir })) out[f.split('/').pop()] = shard;
+      }
+      return out;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-    // Re-deriving from the same on-disk set must reproduce identical assignments (determinism, not just coverage).
-    const after = {};
-    for (let shard = 2; shard <= total; shard += 1) {
-      for (const f of shardFiles({ shard, total })) after[f] = shard;
-    }
-    expect(after).toEqual(before);
+  }
+  const BASE = ['b.soak.test.mjs', 'd.soak.test.mjs', 'f.soak.test.mjs', 'h.soak.test.mjs', 'j.soak.test.mjs', 'l.soak.test.mjs'];
+
+  it('appending a break (sorts last) keeps every existing file in its shard', () => {
+    const before = assignments(BASE);
+    const after = assignments([...BASE, 'z.soak.test.mjs']);
+    for (const f of BASE) expect(after[f], f).toBe(before[f]);
+    expect(after['z.soak.test.mjs']).toBeDefined();
+  });
+
+  it('inserting a break mid-list keeps every file that sorts before it in its shard', () => {
+    const before = assignments(BASE);
+    const after = assignments([...BASE, 'g.soak.test.mjs']); // sorts between f and h
+    for (const f of BASE.filter((n) => n < 'g.soak.test.mjs')) expect(after[f], f).toBe(before[f]);
+    // Files sorting AFTER the insert may shift a bucket under index round-robin — allowed, not required.
   });
 
   it('more shards than break files leaves the extra shards empty, not erroring', () => {

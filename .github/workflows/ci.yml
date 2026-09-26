@@ -245,8 +245,8 @@ jobs:
   #                 flat as scenarios grow instead of creeping back up. A matrix job, so its own check names are
   #                 `soak-shard (1..4)`, NOT required (mirrors `test-shard`'s non-required matrix checks).
   #   job `daemon-soak` — THE required aggregating check, name UNCHANGED: skips in ~10s when `daemon-soak-scope`
-  #                 found no daemon code touched (identical observable behavior to before the split), otherwise
-  #                 red unless EVERY shard succeeded. Full coverage is preserved — sharding only changes WHERE
+  #                 found no daemon code touched (identical observable behavior to before the split), red if the
+  #                 scope job itself failed (fail closed), otherwise red unless EVERY shard succeeded. Full coverage is preserved — sharding only changes WHERE
   #                 each scenario runs, never WHETHER it runs; every scenario still runs on every daemon PR.
   daemon-soak-scope:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
@@ -303,8 +303,9 @@ jobs:
         run: npm run test:soak:shard -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # THE required `daemon-soak` check (name unchanged from before the split — see the header above for why that
-  # matters). Skips green in ~10s when `daemon-soak-scope` found no daemon code touched, same as the single-job
-  # version; otherwise red unless every `soak-shard` matrix entry succeeded — a `soak-shard` that got SKIPPED
+  # matters). Skips green in ~10s when `daemon-soak-scope` SUCCEEDED and found no daemon code touched, same as the
+  # single-job version; red if the scope job itself failed (fail closed — test: soak/__tests__/daemon-soak-gate);
+  # otherwise red unless every `soak-shard` matrix entry succeeded — a `soak-shard` that got SKIPPED
   # (its `needs` dep failing, or the matrix simply not running) is not `success`, so a broken shard can never
   # silently read as satisfied, same guard the `test` aggregator above uses for `test-shard`.
   daemon-soak:
@@ -315,10 +316,18 @@ jobs:
     steps:
       - name: Gate on shard results
         run: |
-          if [ "${{ needs.daemon-soak-scope.outputs.run }}" != "true" ]; then
-            echo "No daemon code touched — soak not needed."
-            exit 0
+          # Fail CLOSED on the scope job itself: a crashed `daemon-soak-scope` leaves `outputs.run` empty, and an
+          # empty value must never read as "no daemon code touched" (that would green the required check with the
+          # soak never run). Only an explicit `run=false` from a SUCCESSFUL scope job skips the soak.
+          if [ "${{ needs.daemon-soak-scope.result }}" != "success" ]; then
+            echo "daemon-soak-scope did not succeed (result: ${{ needs.daemon-soak-scope.result }}) — cannot tell whether daemon code was touched."
+            exit 1
           fi
+          case "${{ needs.daemon-soak-scope.outputs.run }}" in
+            false) echo "No daemon code touched — soak not needed."; exit 0 ;;
+            true) ;;
+            *) echo "daemon-soak-scope emitted no usable run output (got: '${{ needs.daemon-soak-scope.outputs.run }}')."; exit 1 ;;
+          esac
           if [ "${{ needs.soak-shard.result }}" != "success" ]; then
             echo "One or more soak shards did not succeed (soak-shard result: ${{ needs.soak-shard.result }})."
             exit 1
