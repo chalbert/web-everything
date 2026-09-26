@@ -169,6 +169,29 @@ describe('classifyPr', () => {
     expect(ciFailed([{ conclusion: 'TIMED_OUT' }])).toBe(true);
   });
 
+  // #xznd5za (epic #3383/#4075) — LIVE INCIDENT 2026-09-25: `chalbert/web-everything#2636`'s required check
+  // `test-shard (1)` concluded CANCELLED (the daemon's own hung-ci-recovery cancel, applied only once ITS OWN
+  // hung-recovery cap was exhausted — never re-run). `ciFailed` used to hand-roll its own conclusion list
+  // (`FAILURE`/`TIMED_OUT`/`ACTION_REQUIRED`/`STARTUP_FAILURE`) that OMITTED `CANCELLED` — so `classifyPr` read
+  // this exact rollup as having no failing check and returned `'open'`, never `'ci-red'`, and
+  // `reconcile-core.mjs`'s entire ci-heal branch (dispatch AND its cap-exhausted escalation) was skipped. This
+  // is the REAL rollup read live off PR #2636 via `gh pr view 2636 --repo chalbert/web-everything --json
+  // statusCheckRollup` at the moment of the incident (trimmed to the fields `ciFailed`/`classifyPr` read).
+  it('reads a CANCELLED required check as ci-red — PR #2636\'s real live rollup, 2026-09-25 (#xznd5za)', () => {
+    const pr2636Rollup = [
+      { __typename: 'CheckRun', name: 'test-shard (1)', status: 'COMPLETED', conclusion: 'CANCELLED' },
+      { __typename: 'CheckRun', name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-shard (2)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-shard (3)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-shard (4)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'test-selection-measure', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', name: 'visual', status: 'COMPLETED', conclusion: 'SKIPPED' },
+    ];
+    expect(ciFailed(pr2636Rollup)).toBe(true);
+    expect(classifyPr(pr({ labels: ['ci:failed'], mergeStateStatus: 'BLOCKED', statusCheckRollup: pr2636Rollup }))).toBe('ci-red');
+  });
+
   it('ranks the operator\'s status above every other', () => {
     const ranks = Object.entries(PR_STATUS).map(([k, v]) => [k, v.rank]);
     expect(Math.min(...ranks.map(([, r]) => r))).toBe(PR_STATUS['needs-human'].rank);

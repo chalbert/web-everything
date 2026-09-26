@@ -59,7 +59,7 @@ import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-le
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { resolveDefaultGate, describeGate } from './lib/verify-lane-gate.mjs';
-import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV } from './readiness/heavy-admission.mjs';
+import { admissionLockRoot, resolveCap, resolveTimeoutMs, acquireSlotBlocking, releaseOwnedSlot, ADMISSION_HELD_ENV, classifyCommandKind } from './readiness/heavy-admission.mjs';
 
 // ── tiny arg parsing (matches push-if-green.mjs / lane-pool.mjs) ─────────────────────────────────────
 const flags = {};
@@ -257,6 +257,9 @@ const laneMatch = /lane-(\d+)/.exec(REPO);
 const admission = await acquireSlotBlocking({
   lockRoot: ADMISSION_LOCK_ROOT, cap: ADMISSION_CAP, owner: REPO, timeoutMs: ADMISSION_TIMEOUT_MS,
   lane: laneMatch ? laneMatch[1] : null,
+  // Card xkyw1x4 — the gate's kind (a diff-driven `selected` run vs a FULL suite) picks its queue lane: a short
+  // selected check rides the fast lane and never waits behind a full-suite waiter.
+  kind: classifyCommandKind(GATE),
 });
 if (admission.timedOut) {
   process.stderr.write(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${ADMISSION_CAP}) — proceeding unslotted.\n`);

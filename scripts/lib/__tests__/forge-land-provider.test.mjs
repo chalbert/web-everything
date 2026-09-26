@@ -103,6 +103,23 @@ describe('the gh adapter', () => {
     expect(seen).toEqual([buildAddLabelArgs({ pr: 60, label: 'ready-to-merge' })]);
   });
 
+  it('#3383: create() opts the exec call into header self-calibration; every other method does not', () => {
+    const seenCallOpts = [];
+    const p = createGhLandProvider({ cwd: '/repo', exec: (args, callOpts) => { seenCallOpts.push(callOpts); return '[]'; } });
+    p.create({ base: 'main', head: 'lane/2153-x' });
+    expect(seenCallOpts[0]).toEqual({ throttle: { op: 'pr-create', calibrateHeaders: true } });
+
+    p.listOpenByHead('lane/x');
+    p.viewPr(7, 'body');
+    p.editBody(7, 'x');
+    p.removeLabel(7, 'l');
+    p.ensureLabel('l', { color: 'c', description: 'd' });
+    p.requiredChecks(7);
+    p.addLabel(60, 'ready-to-merge');
+    // every OTHER method calls exec with just the one argument — no second (throttle) argument at all.
+    expect(seenCallOpts.slice(1)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
   it('never adds a --repo flag — pr-land relies on gh inferring the repo from cwd, unlike review-label-provider', () => {
     expect(GH_ARGV.listOpenByHead('lane/x')).not.toContain('--repo');
     expect(GH_ARGV.viewPr(7, 'body')).not.toContain('--repo');

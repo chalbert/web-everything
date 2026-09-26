@@ -3,10 +3,12 @@ bornAs: x8v2xw9
 kind: story
 size: 5
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3895"]
 scope: ["we:scripts/lib/gh-throttle.mjs", "we:scripts/lib/__tests__/gh-throttle.test.mjs", "we:scripts/lib/forge-land-provider.mjs", "we:scripts/lib/__tests__/forge-land-provider.test.mjs", "we:scripts/pr-land.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/operations/host-process-sample.mjs", "we:scripts/operations/__tests__/host-process-sample.test.mjs", "we:scripts/operations/__tests__/telemetry.test.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/lib/review-escalation.mjs", "we:scripts/lib/review-core.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/operations/run-store.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/effect-executor.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/deliver-item-run.mjs", "we:scripts/operations/run-record.mjs", "we:scripts/operations/deliver-item-wrapper.mjs", "we:scripts/operations/open-pr.mjs", "we:scripts/operations/delivery-report-store.mjs", "we:scripts/operations/run.mjs"]
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-24"
+dateResolved: "2026-09-24"
 tags: []
 ---
 

@@ -22,7 +22,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import {
-  admissionStatus, admissionLockRoot, resolveCap, readLaneLease, isRankableWaiter,
+  admissionStatus, admissionLockRoot, resolveCap, readLaneLease, isRankableWaiter, resolveQueueBaseline, resolveFastSlots,
 } from '../readiness/heavy-admission.mjs';
 import { SELECTED_GATE_MERGE_SHA } from './heavy-queue.mjs';
 import { redactCommandLine } from './command-redact.mjs';
@@ -83,6 +83,8 @@ function buildRawRow(entry, resolveRepo, { readCommand, isAncestorCached, readLe
     owner: entry.owner ?? null, pid: Number.isInteger(entry.pid) ? entry.pid : null, repo, lane, lease,
     command, isSelectedBase: repo ? isAncestorCached(repo) : null,
     heartbeatAt: entry.heartbeatAt ?? null, requestedAt: entry.requestedAt ?? null,
+    // Card xkyw1x4 — the kind the admission code recorded (held slot `meta.kind`, waiting marker `kind`), if any.
+    kind: entry.meta?.kind ?? entry.kind ?? null,
   };
 }
 
@@ -95,11 +97,15 @@ export function collectHeavyQueue({
   repo = process.cwd(), env = process.env, now = () => Date.now(),
   readAdmission = admissionStatus, readCommand = readProcessCommand, isAncestor = gitIsAncestor,
   readLease = readLaneLease, isLiveWaiter = isRankableWaiter,
+  // Card xkyw1x4 — the queue baseline behind "projected wait if you start now". `null` skips it (the report then
+  // carries no `queueAdmission` section); a throw is swallowed the same way.
+  readBaseline = resolveQueueBaseline,
 } = {}) {
   const cap = resolveCap(env);
   const lockRoot = admissionLockRoot(repo, env);
   const nowMs = now();
-  const status = readAdmission({ lockRoot, cap, nowMs });
+  // Card xkyw1x4 — the fast-lane slots are added on top of the heavy cap, so the snapshot must include them.
+  const status = readAdmission({ lockRoot, cap, nowMs, fastSlots: resolveFastSlots(env) });
 
   const ancestorCache = new Map();
   const isAncestorCached = (r) => {
@@ -116,9 +122,14 @@ export function collectHeavyQueue({
     live: isLiveWaiter(w, { nowMs }),
   }));
 
+  let queue = null;
+  if (typeof readBaseline === 'function') {
+    try { queue = readBaseline({ lockRoot, cap, nowMs, env }); } catch { queue = null; }
+  }
+
   return {
     observedAt: new Date(nowMs).toISOString(),
-    cap: status.cap, heldCount: status.heldCount, freeCount: status.freeCount, staleWaiting: status.staleWaiting,
-    held, waiting,
+    cap: status.cap, fastSlots: status.fastSlots ?? 0, heldCount: status.heldCount, freeCount: status.freeCount, staleWaiting: status.staleWaiting,
+    held, waiting, queue,
   };
 }
