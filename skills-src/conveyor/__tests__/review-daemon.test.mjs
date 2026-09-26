@@ -31,7 +31,7 @@ vi.mock('../../../scripts/conveyor/review-hold-reconcile.mjs', async (importOrig
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
   REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
-  explainPendingNotDispatched,
+  explainPendingNotDispatched, priorityNamesForLiveProcessPrs,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { tagReviewStatus } from '../../../scripts/conveyor/review-status-tag.mjs';
@@ -117,7 +117,7 @@ describe('runReviewTick — the per-tick sequence', () => {
     expect(out).toEqual({
       reviewsOwed: 1, dispatched: [{ prNumber: 10, agentId: 'agent-10' }], failed: [], notStarted: [], refusals: 0,
       pendingNotDispatched: [], reconcileError: null, deferredForLanes: 0, deferredForAuth: 0, authPaused: false, authPauseReason: null,
-      holdReconcile: [], holdReconcileError: null,
+      holdReconcile: [], holdReconcileError: null, liveProcessPrs: [],
     });
   });
 
@@ -826,6 +826,90 @@ describe('buildCliDaemonEffects.tickOnce — now also runs a session-reap pass e
     effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [], sessionReap: null });
     expect(log.error.mock.calls.some((c) => /session-reap —/.test(c[0]))).toBe(false);
   });
+
+  // #3383 follow-up (live-caught 2026-09-26) — onTick surfaces a non-zero `deferred` (this pass's reap
+  // budget was hit, and some genuine reap candidates carried to the next tick) so an operator reading the
+  // log sees it, never a silent gap between `scanned` and `stopped`.
+  it('onTick logs the deferred-to-next-tick count and budget when the reap pass hit its budget', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    effects.onTick({
+      repos: [], reviewsOwed: 0, dispatched: [], failed: [],
+      sessionReap: {
+        scanned: 1500, stopped: 150, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0, deferred: 1350,
+        reapBudget: { maxStops: 150, maxDurationMs: 45_000, exhausted: true },
+      },
+    });
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/1350 deferred to next tick \(reap budget: 150 stops \/ 45000ms, #3383\)/));
+  });
+});
+
+describe('priorityNamesForLiveProcessPrs — #3383 follow-up: which session names a budget-bounded reap should clear first', () => {
+  it('mints every role\'s session name (review/fix/ci-heal) for each live-process-blocked PR', () => {
+    const names = priorityNamesForLiveProcessPrs([{ repo: 'chalbert/web-everything', prNumber: 2771 }]);
+    expect(names).toEqual(new Set(['review-2771', 'fix-2771', 'ci-heal-2771']));
+  });
+
+  it('tags a non-WE repo\'s session names correctly (never bare numbers for a sibling repo)', () => {
+    const names = priorityNamesForLiveProcessPrs([{ repo: 'chalbert/plateau-app', prNumber: 55 }]);
+    expect(names).toEqual(new Set(['review-pa-55', 'fix-pa-55', 'ci-heal-pa-55']));
+  });
+
+  it('skips an unresolvable repo rather than throwing, and handles an empty/missing list', () => {
+    expect(priorityNamesForLiveProcessPrs([{ repo: 'not/a-repo', prNumber: 1 }])).toEqual(new Set());
+    expect(priorityNamesForLiveProcessPrs([])).toEqual(new Set());
+    expect(priorityNamesForLiveProcessPrs(undefined)).toEqual(new Set());
+  });
+});
+
+describe('runReviewTick — liveProcessPrs (#3383 follow-up): the PR numbers reconcile refused `live-process` this tick', () => {
+  it('collects prNumber from every live-process refusal, ignoring every other refusal kind', () => {
+    const reconcile = vi.fn(() => ({
+      dispatch: [],
+      refusals: [
+        { kind: 'live-process', prNumber: 2771 },
+        { kind: 'nothing-owed', prNumber: 99 },
+        { kind: 'live-process', prNumber: 2772 },
+      ],
+    }));
+    const out = runReviewTick({ reconcile, dispatch: vi.fn(), tagRound: vi.fn(), tagStatus: vi.fn(), statusCandidates: () => [] });
+    expect(out.liveProcessPrs).toEqual([2771, 2772]);
+  });
+
+  it('empty when nothing was refused live-process this tick', () => {
+    const reconcile = vi.fn(() => ({ dispatch: [], refusals: [{ kind: 'nothing-owed', prNumber: 1 }] }));
+    const out = runReviewTick({ reconcile, dispatch: vi.fn(), tagRound: vi.fn(), tagStatus: vi.fn(), statusCandidates: () => [] });
+    expect(out.liveProcessPrs).toEqual([]);
+  });
+});
+
+describe('runReviewTickAllRepos — liveProcessPrs (#3383 follow-up): aggregated across repos, repo-tagged', () => {
+  it('tags each entry with the repo it came from', () => {
+    const tick = vi.fn(({ repo }) => ({
+      reviewsOwed: 0, dispatched: [], failed: [], refusals: 0, reconcileError: null,
+      liveProcessPrs: repo === 'chalbert/web-everything' ? [10] : [],
+    }));
+    const out = runReviewTickAllRepos({ repos: ['chalbert/web-everything', 'chalbert/plateau-app'], tick });
+    expect(out.liveProcessPrs).toEqual([{ repo: 'chalbert/web-everything', prNumber: 10 }]);
+  });
+});
+
+describe('buildCliDaemonEffects.tickOnce — carries liveProcessPrs into the NEXT tick\'s reapSessions call as priorityNames (#3383 follow-up)', () => {
+  it('the first tick reaps with an empty priorityNames; the second tick reaps with names derived from the FIRST tick\'s own liveProcessPrs', async () => {
+    let call = 0;
+    const runReview = () => {
+      call += 1;
+      return call === 1
+        ? { repos: [], reviewsOwed: 0, dispatched: [], failed: [], liveProcessPrs: [{ repo: 'chalbert/web-everything', prNumber: 2771 }] }
+        : { repos: [], reviewsOwed: 0, dispatched: [], failed: [], liveProcessPrs: [] };
+    };
+    const reapSessions = vi.fn(() => ({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 }));
+    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview });
+    await effects.tickOnce();
+    expect(reapSessions).toHaveBeenNthCalledWith(1, { priorityNames: new Set() });
+    await effects.tickOnce();
+    expect(reapSessions).toHaveBeenNthCalledWith(2, { priorityNames: new Set(['review-2771', 'fix-2771', 'ci-heal-2771']) });
+  });
 });
 
 describe('buildCliDaemonEffects.onTick — logs the review-hold reconcile sweep\'s own findings (#x01u7az)', () => {
@@ -867,6 +951,7 @@ describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mj
       neverReapWorking: true,
       idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
       reapedLedger: expect.objectContaining({ has: expect.any(Function), add: expect.any(Function), save: expect.any(Function) }),
+      priorityNames: null, // #3383 follow-up — omitted by every pre-existing caller, forwarded as-is
     });
     expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 });
   });

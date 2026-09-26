@@ -94,9 +94,10 @@ import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconc
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
 import { runSessionReaperPass, makeReapedLedger, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
+import { mintSessionSlug } from '../../scripts/conveyor/session-slug.mjs';
 import { freeLaneNumbers } from '../../scripts/conveyor/reconcile-fix-dispatch.mjs';
 import { repoProfile } from '../../scripts/lib/repo-profile.mjs';
-import { CONSTELLATION_REPOS } from '../../scripts/lib/constellation-repos.mjs';
+import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constellation-repos.mjs';
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
@@ -347,6 +348,14 @@ export function runReviewTick({
     reconcileError: null, deferredForLanes, deferredForAuth,
     authPaused: paused, authPauseReason: paused ? pauseReason : null,
     holdReconcile: holdReconcileResults, holdReconcileError,
+    // #3383 follow-up (live-caught 2026-09-26) — the PR numbers THIS tick's own reconcile refused
+    // `live-process` (`we:scripts/conveyor/reconcile-core.mjs#assessLiveness`: "a bound session has a LIVE
+    // pid — something is already working this PR, however stale its transcript looks"). Fed into the NEXT
+    // tick's own session-reap pass as `priorityNames` (see `buildCliDaemonEffects`'s `tickOnce`, below) so a
+    // budget-bounded reap spends its limited stops on the sessions actually STARVING a PR's own dispatch
+    // first — reaping one promptly is what frees that PR for the tick right after, instead of it sitting
+    // behind an unrelated backlog of hundreds of already-finished, lower-stakes sessions.
+    liveProcessPrs: (plan.refusals ?? []).filter((r) => r?.kind === 'live-process').map((r) => r.prNumber),
   };
 }
 
@@ -407,6 +416,7 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
   let refusals = 0;
   let deferredForLanes = 0;
   let deferredForAuth = 0;
+  const liveProcessPrs = [];
   for (const entry of perRepo) {
     if (entry.error) {
       failed.push({ prNumber: null, repo: entry.repo, error: entry.error });
@@ -427,11 +437,13 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
     for (const k of (result.notStarted ?? [])) notStarted.push({ ...k, repo });
     for (const p of (result.pendingNotDispatched ?? [])) pendingNotDispatched.push({ ...p, repo });
     for (const f of result.failed) failed.push({ ...f, repo });
+    for (const prNumber of (result.liveProcessPrs ?? [])) liveProcessPrs.push({ repo, prNumber });
   }
   return {
     repos: perRepo, reviewsOwed, dispatched, failed, notStarted, pendingNotDispatched, refusals, reconcileFailed, deferredForLanes,
     deferredForAuth, authPaused: authGate.paused, authPauseReason: authGate.reason,
     holdReconcile: holdReconcileRemoved, holdReconcileFailed,
+    liveProcessPrs, // #3383 follow-up — see `runReviewTick`'s own field for the why; consumed by `buildCliDaemonEffects`
   };
 }
 
@@ -490,13 +502,45 @@ export function realSleep(ms) { return new Promise((resolve) => { setTimeout(res
  * Every other option (the listing read, the ground-truth resolver, the completion-record resolver, the real
  * `claude stop`) is `session-reaper.mjs`'s own default. Injectable so a test can swap it for a fake.
  */
-export function defaultReapSessions() {
+/**
+ * @param {{priorityNames?:Set<string>|null}} [o] - #3383 follow-up: forwarded straight through to
+ *   {@link runSessionReaperPass}'s own `priorityNames` (its `maxStops`/`maxDurationMs` budget stays at THAT
+ *   function's own env-resolved defaults — see its own doc — so this daemon is bounded with no extra wiring
+ *   here). `null`/omitted (every pre-existing caller) reaps in the plan's own existing order, unchanged.
+ */
+export function defaultReapSessions({ priorityNames = null } = {}) {
   return runSessionReaperPass({
     allowedCwd: SESSION_REAPER_REPO_ROOT,
     neverReapWorking: true,
     idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
     reapedLedger: makeReapedLedger(),
+    priorityNames,
   });
+}
+
+/**
+ * PURE: the session names worth reaping FIRST this tick, given the LAST tick's own `liveProcessPrs` (a PR
+ * `reconcile-core.mjs#assessLiveness` refused `live-process` for — see `runReviewTick`'s own field doc). A
+ * blocking session's ROLE (review/fix/ci-heal) is not recorded on that refusal, so all three of a PR's
+ * possible session names are minted and included — harmless when one doesn't exist (the reap plan simply
+ * never matches it), and correct whichever role the actual blocker turns out to be.
+ * @param {Array<{repo:string, prNumber:number}>} liveProcessPrs
+ * @returns {Set<string>}
+ */
+export function priorityNamesForLiveProcessPrs(liveProcessPrs) {
+  const names = new Set();
+  for (const { repo, prNumber } of (Array.isArray(liveProcessPrs) ? liveProcessPrs : [])) {
+    // `mintSessionSlug` takes the repo KEY ('we'/'plateau-app'/'frontierui'), never the full `owner/name`
+    // slug this daemon otherwise threads around (`REVIEW_DAEMON_REPOS`/`result.repo` are slugs) — same
+    // slug→key translation `we:scripts/conveyor/review-status-tag.mjs#tagReviewStatus` already does before
+    // its own `deriveReviewStatus` call.
+    const repoKey = repoKeyForSlug(repo);
+    if (repoKey === null) continue;
+    for (const kind of ['review', 'fix', 'ci-heal']) {
+      try { names.add(mintSessionSlug({ kind, id: prNumber, repo: repoKey })); } catch { /* an unresolvable id mints nothing — skip it, never guess */ }
+    }
+  }
+  return names;
 }
 
 export function buildCliDaemonEffects({
@@ -512,6 +556,12 @@ export function buildCliDaemonEffects({
     acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
   }),
 } = {}) {
+  // #3383 follow-up (live-caught 2026-09-26) — carries the LAST tick's own `liveProcessPrs` across the
+  // `await`/closure boundary into the NEXT tick's `reapSessions()` call, below. A plain closure variable is
+  // correct here (never a race): `runDaemonLoop` awaits ONE `tickOnce()` to completion before ever calling it
+  // again — see that function's own `for (;;) { await tickOnce(); ... }` shape — so there is never a second,
+  // concurrent tick reading or writing this while one is in flight.
+  let priorityNames = new Set();
   return {
     intervalMs,
     tickOnce: async () => {
@@ -519,16 +569,30 @@ export function buildCliDaemonEffects({
       // `review:pending` PR makes reconcile refuse it (`live-process`); reaping it first lets THIS tick's
       // discovery see the PR free, instead of the next tick — which, while the reaper re-stopped ~1,500 finished
       // sessions every pass, was ~20 minutes later (see `session-reaper.mjs#makeReapedLedger`).
+      //
+      // #3383 follow-up, SAME incident — an UNBOUNDED reap running first is worse than one running last: it
+      // blocked discovery+dispatch and status tagging for the reap's ENTIRE duration, every tick, not merely
+      // the next one. `reapSessions` (real default: {@link defaultReapSessions}) is now BUDGETED (see
+      // `session-reaper.mjs#DEFAULT_REAP_MAX_STOPS_PER_PASS`/`DEFAULT_REAP_MAX_DURATION_MS`) so this call
+      // always returns quickly; `priorityNames` — this closure's own memory of the LAST tick's
+      // `live-process`-blocked PRs — makes a budget-bounded pass spend its limited stops on exactly the
+      // sessions worth clearing first, so the "reap first, so a freed PR is picked up THIS tick" intent above
+      // still mostly holds even when the full backlog can't fit in one budget.
+      //
       // Best-effort, mirrors `runner.mjs`'s own `makeCliMechanicalPasses` discipline: a session-reap failure
       // is logged and swallowed, never lets a lingering `claude` process take down this tick's real job
       // (dispatching/tagging reviews).
       let sessionReap = null;
       try {
-        sessionReap = reapSessions();
+        sessionReap = reapSessions({ priorityNames });
       } catch (e) {
         log.error(`review-daemon: session-reap failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
       }
       const result = await runReview();
+      // Refreshed for the NEXT tick's own reap call, above — always recomputed from THIS tick's fresh
+      // discovery, never accumulated, so a PR that frees up (or a new one that blocks) is reflected within
+      // one 120s cycle either way.
+      priorityNames = priorityNamesForLiveProcessPrs(result?.liveProcessPrs);
       return { ...result, sessionReap };
     },
     sleep: realSleep,
@@ -557,7 +621,7 @@ export function buildCliDaemonEffects({
       for (const hf of (result.holdReconcileFailed ?? [])) log.error(`review-daemon: ${hf.repo} hold-reconcile failed (non-fatal, other repos unaffected): ${hf.error}`);
       if (result.sessionReap && !result.sessionReap.unreadable) {
         const sr = result.sessionReap;
-        log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}${sr.previouslyReaped ? `, ${sr.previouslyReaped} already reaped earlier (skipped)` : ''}, ${sr.kept} kept`);
+        log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}${sr.previouslyReaped ? `, ${sr.previouslyReaped} already reaped earlier (skipped)` : ''}, ${sr.kept} kept${sr.deferred ? `, ${sr.deferred} deferred to next tick (reap budget: ${sr.reapBudget?.maxStops} stops / ${sr.reapBudget?.maxDurationMs}ms, #3383)` : ''}`);
       }
     },
     onTickError: (error) => {

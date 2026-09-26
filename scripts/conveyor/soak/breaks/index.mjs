@@ -37,6 +37,7 @@ import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
 import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
 import claudeAuthDispatchPause from './claude-auth-dispatch-pause.mjs';
 import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
+import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -57,6 +58,7 @@ export const BREAKS = Object.freeze([
   brokenSmokeHarnessHoldsLastGood,
   claudeAuthDispatchPause,
   rebuildConcurrentCandidates,
+  largeReapBacklogStarvesDispatch,
 ]);
 
 export function breakById(id) {

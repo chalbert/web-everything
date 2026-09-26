@@ -56,6 +56,7 @@ import { resolveLiveQueueBaseline } from '../../scripts/readiness/heavy-admissio
 import { createQueueBudget } from '../../scripts/readiness/heavy-queue-projection.mjs'; // card xkyw1x4
 import { runReconcilePass, defaultReadPrs } from '../../scripts/conveyor/reconcile-pass.mjs'; // #4191
 import { planNoteComment, postNoteComment } from '../../scripts/conveyor/reconcile-note-comment.mjs'; // #4191
+import { applyReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs'; // #3383 follow-up — tag at dispatch, see runTickAllRepos
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
 
 /** The checkout this daemon runs from — its heavy-admission root is the host-wide `<workspace>/.lanes` one. */
@@ -508,6 +509,16 @@ export function runMissingRunRecoveryAllRepos({ repos = FIX_DISPATCH_DAEMON_REPO
 export async function runTickAllRepos({
   repos = FIX_DISPATCH_DAEMON_REPOS, fixTick, ciHealTick, hungCiTick, mainRedRebaseTick, missingRunTick, notesTick, notesDryRun,
   authGateOverride,
+  // #3383 follow-up (live-caught 2026-09-26, PR #2771) — apply this daemon's OWN `review-status:*` tag the
+  // instant it dispatches a fix/ci-heal session, never waiting on the SEPARATE Review daemon's own tick to
+  // notice (see `we:scripts/conveyor/review-status-tag.mjs#applyReviewStatus`'s own docblock for the full
+  // incident and why a fresh `claude agents --json` read right after dispatch would race and often no-op).
+  // `null` (the default) is DELIBERATELY OPT-IN, mirroring `we:skills-src/conveyor/review-daemon.mjs#runReviewTick`'s
+  // own `readPrs`/`readAgents` convention: every pre-existing test of this function injects a fake
+  // `fixTick`/`ciHealTick` and never expects a real `gh`/label-provider call to fire underneath it — a non-null
+  // default here would spend one for every dispatched row those fakes produce. The real daemon
+  // (`buildCliDaemonEffects`, below) opts in via {@link defaultTagDispatchStatus}.
+  tagDispatchStatus = null,
 } = {}) {
   // card x5kagse (epic #4075/#3383) — computed ONCE per tick, shared by both dispatching halves below. Real IO
   // (`planClaudeAuthDispatchGate`'s own `claude agents --json --all` read + health read + cheap probe) runs
@@ -545,6 +556,23 @@ export async function runTickAllRepos({
   const notes = runReconcileNotesAllRepos({
     repos, ...(notesTick ? { tick: notesTick } : {}), ...(notesDryRun == null ? {} : { dryRun: notesDryRun }),
   });
+  // #3383 follow-up — tag EVERY freshly-dispatched fix/ci-heal session's PR right away, `fix`+`ci-heal`
+  // ONLY: `hungCi`/`mainRedRebase`/`missingRun` are mechanical git/gh actions with no live Claude session bound
+  // to a `fix-<pr>`/`ci-heal-<pr>` name, so `review-status:*` (a label about a SESSION, not a mechanical patch)
+  // has nothing to say about them. One try/catch per PR — the exact "cosmetic, never fails the tick" discipline
+  // `we:scripts/conveyor/review-status-tag.mjs`'s own header already documents for this label family.
+  const statusTags = [];
+  if (typeof tagDispatchStatus === 'function') {
+    for (const d of [...fix.dispatched, ...ciHeal.dispatched]) {
+      if (d?.pr == null) continue;
+      try {
+        const result = tagDispatchStatus({ pr: d.pr, repo: d.repo });
+        statusTags.push({ pr: d.pr, repo: d.repo, ...result });
+      } catch (e) {
+        statusTags.push({ pr: d.pr, repo: d.repo, changed: false, error: String((e && e.message) || e).split('\n')[0] });
+      }
+    }
+  }
   return {
     repos: fix.repos, // same repo list every half ticked — the shape onTick's log already reads from
     dispatched: [...fix.dispatched, ...ciHeal.dispatched, ...hungCi.dispatched, ...mainRedRebase.dispatched, ...missingRun.dispatched],
@@ -558,7 +586,19 @@ export async function runTickAllRepos({
     authPauseReason: authGate.reason,
     notes: notes.notes, // #4191 — every surfaced note this tick saw, repo-tagged
     noteComments: notes.comments, // #4191 — one row per note: posted / would-post (dryRun) / already-posted
+    statusTags, // #3383 follow-up — one row per dispatch-time `review-status:*` tag attempt this tick made
   };
+}
+
+/** The real `tagDispatchStatus` effect for {@link buildCliDaemonEffects}: a fresh fix/ci-heal dispatch is
+ *  always "fixing" the instant it's confirmed spawned — `we:scripts/conveyor/review-status-tag.mjs`'s own
+ *  `STATUS_LABEL_RE` has no distinct `ci-heal`-specific state yet (only `fixing`/`fix-stalled`), so a ci-heal
+ *  dispatch is tagged `fixing` here too; the Review daemon's own periodic {@link tagReviewStatus} pass (fed by
+ *  `reconcile-core.mjs#selectStatusCandidates`) is what later corrects a STALLED session to `fix-stalled`, or
+ *  clears the tag once the session finishes — this function only ever seeds the initial, confidently-known
+ *  "something just started" state. */
+export function defaultTagDispatchStatus({ pr, repo }) {
+  return applyReviewStatus({ pr, repo, state: 'fixing' });
 }
 
 /**
@@ -663,13 +703,13 @@ export function formatNoteCommentLine(c) {
 export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS, log = console } = {}) {
   return {
     intervalMs,
-    tickOnce: () => runTickAllRepos(),
+    tickOnce: () => runTickAllRepos({ tagDispatchStatus: defaultTagDispatchStatus }),
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: RECONCILE_FIX_DISPATCH_LEASE_KEY }),
     onTick: (result) => {
       const {
         repos = [], dispatched = [], refusals = [], reconcileRefusals = [], hungCi, mainRedRebase, missingRun, notes = [], noteComments = [],
-        authPaused = false, authPauseReason = null,
+        authPaused = false, authPauseReason = null, statusTags = [],
       } = result || {};
       log.error(`reconcile-fix-dispatch-daemon: tick (${repos.map((r) => r.repo).join(', ')}) — dispatched ${dispatched.length}, refused ${refusals.length}`);
       // card x5kagse (epic #4075/#3383) — logged EVERY tick fix/ci-heal dispatch stays paused, exact wording
@@ -702,6 +742,12 @@ export function buildCliDaemonEffects({ owner, intervalMs = DEFAULT_INTERVAL_MS,
       // PER note-comment decision (already-posted / dry-run would-post, with the full body / posted / failed).
       for (const n of notes) log.error(formatNoteLine(n));
       for (const c of noteComments) log.error(formatNoteCommentLine(c));
+      // #3383 follow-up — ONE LINE PER DISPATCH-TIME STATUS TAG attempt, same discipline as every other loop
+      // above: a failed tag is cosmetic (never fails the tick) but must still be VISIBLE, never silent.
+      for (const t of statusTags) {
+        if (t?.error) log.error(`reconcile-fix-dispatch-daemon: ${t.repo}#${t.pr} review-status tag failed (non-fatal): ${t.error}`);
+        else if (t?.changed) log.error(`reconcile-fix-dispatch-daemon: ${t.repo}#${t.pr} tagged ${t.label} at dispatch`);
+      }
     },
     onTickError: (error) => {
       log.error(`reconcile-fix-dispatch-daemon: tick failed (non-fatal): ${String((error && error.message) || error).split('\n')[0]}`);
