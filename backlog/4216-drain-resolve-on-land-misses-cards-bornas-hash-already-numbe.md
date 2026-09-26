@@ -3,9 +3,10 @@ bornAs: xqpqyr2
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/open-pr-items.mjs", "we:scripts/__tests__/merge-ai-prs-ai-detection-and-drain-ordering.test.mjs", "we:scripts/lib/__tests__/open-pr-items.test.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
