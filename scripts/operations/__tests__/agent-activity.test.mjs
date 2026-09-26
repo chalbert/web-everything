@@ -88,8 +88,23 @@ describe('resolveAgentActivity — the card ↔ run join, one fixture per resolv
     expect(unmatched).toEqual([]);
     expect(runs).toMatchObject([
       { runId: 'parent', card: '3436', joinVia: 'name' },
-      { runId: 'child', card: '3436', joinVia: 'parent', parentRunId: 'sess-parent', role: 'subagent' },
+      { runId: 'child', card: '3436', joinVia: 'parent', parentRunId: 'parent', role: 'subagent' },
     ]);
+  });
+
+  it('parentRunId is the parent\'s EMITTED runId, never its sessionId (referential integrity, PR #2715 review)', () => {
+    const rows = [
+      { id: 'child', sessionId: null, kind: 'subagent', parentSessionId: 'sess-p', workflowLane: false },
+      { id: 'run-p', sessionId: 'sess-p', name: 'conveyor-3436', kind: 'background' },
+      // An unresolvable parent still emits a runId (in `unmatched`); its weak-mention child must point at it.
+      { id: 'run-q', sessionId: 'sess-q', name: 'unrelated-task', kind: 'background' },
+      { id: 'child-q', sessionId: null, kind: 'subagent', parentSessionId: 'sess-q', workflowLane: false, firstMessageText: 'look at #3444' },
+    ];
+    const { runs, unmatched } = resolveAgentActivity(rows);
+    const emitted = new Set([...runs, ...unmatched].map((r) => r.runId));
+    for (const r of runs.filter((x) => x.parentRunId)) expect(emitted.has(r.parentRunId)).toBe(true);
+    expect(runs.find((r) => r.runId === 'child').parentRunId).toBe('run-p');
+    expect(runs.find((r) => r.runId === 'child-q').parentRunId).toBe('run-q');
   });
 
   it('resolver 3 (parent): inherits regardless of row order (parent listed after its child)', () => {

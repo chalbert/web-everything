@@ -6,15 +6,16 @@
  * for the pure resolver. An injected `run`/`readFileSync` stub has no clone geometry and no directory tree —
  * see `heavy-queue-io-real.test.mjs`'s header for the shipped bug (#3264) this discipline exists to catch.
  */
-import { mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, writeFileSync, utimesSync, openSync, writeSync, closeSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { it, expect } from 'vitest';
 import { withRealRepo } from './helpers/real-repo.mjs';
 import {
   readLaneLeases, indexLeasesBySession, codexThreadRows, subagentRowsFor, claimedNumsFromTranscript,
-  firstMessageText, interactiveRows, projectSlugFor,
+  firstMessageText, interactiveRows, projectSlugFor, createAgentActivityReader,
 } from '../agent-activity-io.mjs';
+import { resolveAgentActivity } from '../agent-activity.mjs';
 
 function assistantLine(toolCalls) {
   return JSON.stringify({ type: 'assistant', message: { content: toolCalls } });
@@ -109,6 +110,53 @@ it('claimedNumsFromTranscript replays REAL claim/release Bash calls off a real t
     writeFileSync(p, lines.join('\n') + '\n');
     expect(claimedNumsFromTranscript(p)).toEqual(['3555']);
   });
+});
+
+it('claimedNumsFromTranscript: a repeated claim moves the card to the latest position (A, B, A → A wins)', async () => {
+  await withRealRepo(async ({ root }) => {
+    const p = join(root, 'sess.jsonl');
+    const lines = ['claim 3401', 'claim 3555', 'claim 3401'].map((v) =>
+      assistantLine([{ type: 'tool_use', name: 'Bash', input: { command: `node scripts/backlog.mjs ${v}` } }]));
+    writeFileSync(p, lines.join('\n') + '\n');
+    const owned = claimedNumsFromTranscript(p);
+    expect(owned).toEqual(['3555', '3401']);
+    // …and the resolver's "most recent claim wins" rule therefore picks A, end to end.
+    const { runs } = resolveAgentActivity([{ id: 's', sessionId: 's', kind: 'background', claimedNums: owned }]);
+    expect(runs[0]).toMatchObject({ card: '3401', joinVia: 'claim' });
+  });
+});
+
+it('claimedNumsFromTranscript reads only a BOUNDED tail — a transcript far past V8\'s max string length still yields its recent claims', async () => {
+  await withRealRepo(async ({ root }) => {
+    const p = join(root, 'huge.jsonl');
+    // A real ~600 MB (sparse) file: a whole-file readFileSync(utf8) ABORTS the process (V8 FATAL, uncatchable) on it.
+    const tail = `\n${assistantLine([{ type: 'tool_use', name: 'Bash', input: { command: 'node scripts/backlog.mjs claim 3932' } }])}\n`;
+    const fd = openSync(p, 'w');
+    try { writeSync(fd, tail, 600 * 1024 * 1024); } finally { closeSync(fd); }
+    expect(claimedNumsFromTranscript(p)).toEqual(['3932']);
+  });
+});
+
+it('createAgentActivityReader\'s DEFAULT listing never passes --all, and drops terminal-state sessions (PR #2715 review)', () => {
+  const calls = [];
+  const exec = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    return JSON.stringify([
+      { id: 'a', sessionId: 'sa', name: 'conveyor-9001', state: 'done', startedAt: '2020-01-01' },
+      { id: 'b', sessionId: 'sb', name: 'conveyor-9002', state: 'failed' },
+      { id: 'c', sessionId: 'sc', name: 'conveyor-9003', state: 'stopped' },
+      { id: 'd', sessionId: 'sd', name: 'conveyor-9004', state: 'working' },
+    ]);
+  };
+  const io = { listJobs: () => [], run: () => '{"lanes":[]}', root: '/nonexistent', projectsDir: '/nonexistent' };
+  const { rows } = createAgentActivityReader({ exec, ...io })({});
+  expect(calls).toEqual([['claude', 'agents', '--json']]);
+  expect(rows.map((r) => r.name)).toEqual(['conveyor-9004']);
+  // The reviewer's exact repro: an injected listing carrying a `done` session must not surface as a run.
+  const injected = createAgentActivityReader({
+    listAgents: () => [{ name: 'conveyor-9001', state: 'done', startedAt: '2020-01-01' }], ...io,
+  });
+  expect(resolveAgentActivity(injected({}).rows).runs).toEqual([]);
 });
 
 it('claimedNumsFromTranscript returns [] for a real path that does not exist', async () => {

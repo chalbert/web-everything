@@ -163,10 +163,13 @@ function role(row, joinResult) {
   return joinResult?.joinVia === 'lane' || joinResult?.joinVia === 'claim' ? 'session' : 'unknown';
 }
 
-function toRun(row, result) {
+function toRun(row, result, runIdBySession) {
+  // The parent's EMITTED runId (its row `id`), never its sessionId — the two differ, and a consumer links runs
+  // by runId. Null when the parent isn't among `rows` at all: there is no emitted run to point at.
+  const parentRunId = row.parentSessionId ? runIdBySession.get(row.parentSessionId) ?? null : null;
   const out = {
     runId: row.id, runtime: row.runtime || 'claude', role: role(row, result), name: row.name ?? null,
-    parentRunId: row.parentSessionId ?? null, card: result.card ?? null, joinVia: result.joinVia,
+    parentRunId, card: result.card ?? null, joinVia: result.joinVia,
     state: row.state ?? null, startedAt: row.startedAt ?? null, lastEventAt: row.lastEventAt ?? null,
   };
   if (result.pr) out.pr = result.pr;
@@ -188,6 +191,8 @@ function toRun(row, result) {
 export function resolveAgentActivity(rows, { prToCard = {} } = {}) {
   if (!Array.isArray(rows)) throw new TypeError('agent-activity: rows must be an array');
   const ctx = { prToCard, resolvedBySession: new Map() };
+  const runIdBySession = new Map();
+  for (const row of rows) if (row.sessionId && !runIdBySession.has(row.sessionId)) runIdBySession.set(row.sessionId, row.id);
   const pending = new Map(rows.map((row, i) => [i, row]));
   const runs = [];
   const unmatched = [];
@@ -203,7 +208,7 @@ export function resolveAgentActivity(rows, { prToCard = {} } = {}) {
       for (const resolver of resolversFor(row)) { result = resolver(row, ctx); if (result) break; }
       if (result) {
         if (row.sessionId) ctx.resolvedBySession.set(row.sessionId, { card: result.card, pr: result.pr });
-        runs.push(toRun(row, result));
+        runs.push(toRun(row, result, runIdBySession));
       } else if (row.kind !== 'interactive') {
         unmatched.push({ runId: row.id, runtime: row.runtime || 'claude', name: row.name ?? null, kind: row.kind, cwd: row.cwd ?? null });
       }

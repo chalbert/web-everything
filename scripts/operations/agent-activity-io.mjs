@@ -5,7 +5,7 @@
  * decides a join; it only gathers.
  *
  * SOURCES (design: plateau:docs/wip-live-agent.md §1.1, extended for what's actually on this machine today):
- *  - `claude agents --json --all` (background sessions) + live review-job records (`./review-job-store.mjs`
+ *  - `claude agents --json` (LIVE background sessions — never `--all`, which adds finished ones) + live review-job records (`./review-job-store.mjs`
  *    — PR #2674 made reviews detached node jobs, not `claude --bg` sessions; `listAgentsWithReviewJobs`
  *    already merges the two into one `claude-agents`-shaped array, so both ride the same row-building code).
  *  - Each of those sessions' OWN direct subagents (`<claude-projects>/<cwd-slug>/<sessionId>/subagents/…`) —
@@ -29,7 +29,7 @@
  *    in `unmatched`") is satisfied without it.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -52,22 +52,38 @@ export function projectSlugFor(cwd) {
 }
 
 const TAIL_BYTES = 131072; // matches active-progress-watch.mjs's own bound
+const HEAD_BYTES = 1024 * 1024; // a first message (a dispatch brief) is tens of KB; a line past this is unparseable anyway
+
+/** Read at most `length` bytes at `position` — never the whole file. A `readFileSync` of a multi-hundred-MB
+ *  transcript aborts the process outright (V8's max string length is a FATAL error, not a catchable throw —
+ *  reproduced on PR #2715's review), so every transcript read here goes through an explicit buffer. */
+function readBytes(path, pick) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const { size } = fstatSync(fd);
+    const { position, length } = pick(size);
+    const buf = Buffer.alloc(length);
+    const n = readSync(fd, buf, 0, length, position);
+    return buf.toString('utf8', 0, n);
+  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+}
 
 function readTail(path) {
-  let text;
-  try { text = readFileSync(path, 'utf8'); } catch { return null; }
-  return text.length > TAIL_BYTES ? text.slice(-TAIL_BYTES) : text;
+  return readBytes(path, (size) => ({ position: Math.max(0, size - TAIL_BYTES), length: Math.min(size, TAIL_BYTES) }));
+}
+
+function readHead(path) {
+  return readBytes(path, (size) => ({ position: 0, length: Math.min(size, HEAD_BYTES) }));
 }
 
 /** The child's first user message as plain text (string or joined text-blocks) — used by resolver 6
  *  (mention) and the workflow-lane branch of resolver 3. Reads only the first line. Null when unreadable. */
 export function firstMessageText(path) {
-  let head;
-  try {
-    const text = readFileSync(path, 'utf8');
-    const nl = text.indexOf('\n');
-    head = nl === -1 ? text : text.slice(0, nl);
-  } catch { return null; }
+  const text = readHead(path);
+  if (text === null) return null;
+  const nl = text.indexOf('\n');
+  const head = nl === -1 ? text : text.slice(0, nl);
   let ev;
   try { ev = JSON.parse(head); } catch { return null; }
   const content = ev?.message?.content;
@@ -97,8 +113,10 @@ export function claimedNumsFromTranscript(path) {
       BACKLOG_VERB_RE.lastIndex = 0;
       while ((m = BACKLOG_VERB_RE.exec(b.input.command))) {
         const num = m[2];
-        if (m[1] === 'claim') { if (!owned.includes(num)) owned.push(num); }
-        else { const i = owned.indexOf(num); if (i !== -1) owned.splice(i, 1); }
+        // A re-claim MOVES the card to the end, so "most recently claimed wins" holds for A, B, A → A.
+        const i = owned.indexOf(num);
+        if (i !== -1) owned.splice(i, 1);
+        if (m[1] === 'claim') owned.push(num);
       }
     }
   }
@@ -217,13 +235,19 @@ export function interactiveRows(knownSessionIds, projectsDir = claudeProjectsDir
   return rows;
 }
 
+/** `claude agents` states that mean the session has finished — measured live (session-reaper.mjs's header). */
+const TERMINAL_STATES = new Set(['done', 'failed', 'stopped']);
+
 /**
  * Build the injected `readActivity(input)` the declared operation calls. Every real read (`claude agents`,
  * the review-job store, lane-pool status, the harness's own project directories) is bound here, and ONLY
  * here — the declaration and the pure resolver import none of it.
  */
 export function createAgentActivityReader({
-  listAgents = () => defaultListAgents({ all: true }),
+  exec = execFileSync,
+  // NO `all: true`: `--all` also lists COMPLETED sessions, which would join every finished build to its card as
+  // if it were still running (dispatch-lane-io.mjs#defaultListAgents; PR #2715 review). Same as runner-activity-io.
+  listAgents = () => defaultListAgents({ exec }),
   listJobs,
   root = REPO_ROOT,
   projectsDir = claudeProjectsDir(),
@@ -236,6 +260,9 @@ export function createAgentActivityReader({
     const known = new Set();
     const rows = [];
     for (const a of base) {
+      // Belt to the listing's braces: an injected (or future) listing that still carries a finished session
+      // must not surface it as a live run.
+      if (TERMINAL_STATES.has(a.state)) continue;
       const sessionId = a.sessionId ?? null;
       if (sessionId) known.add(sessionId);
       const kind = a.kind === REVIEW_JOB_KIND ? REVIEW_JOB_KIND : 'background';
