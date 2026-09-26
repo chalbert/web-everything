@@ -111,3 +111,113 @@ it('defaultReadAheadBy reads ahead_by off the real compare-endpoint shape, and d
   execFileSync.mockImplementationOnce(() => { throw new Error('gh: not found'); });
   expect(defaultReadAheadBy('deadbeef', {})).toBeNull();
 });
+
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
+// own header for the incident. These pin the IO shell that computes `alreadyLandedInMain` off per-file blob
+// identity against `main`'s own history, injected so the whole path is exercisable with no real git/gh.
+it('enrichPrsWithAlreadyLandedFacts skips a PR with no merge-status:conflicting label entirely — zero extra IO', async () => {
+  const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
+  const readFiles = vi.fn();
+  const prs = [{ number: 1, labels: [{ name: 'review:changes' }] }];
+  const out = enrichPrsWithAlreadyLandedFacts(prs, { readFiles });
+  expect(readFiles).not.toHaveBeenCalled();
+  expect(out).toEqual(prs);
+  expect(out[0].alreadyLandedInMain).toBeUndefined();
+});
+
+it('enrichPrsWithAlreadyLandedFacts attaches alreadyLandedInMain with the attributed carrier PR when every file matches (PR #2752\'s real shape)', async () => {
+  const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
+  const pr = {
+    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: '253d75c2b82988be773903cba4e5ed172be57fb8',
+    labels: [{ name: 'review:changes' }, { name: 'merge-status:conflicting' }],
+  };
+  const readFiles = vi.fn(() => ['scripts/lib/critical-work.mjs', 'scripts/lib/__tests__/critical-work.test.mjs']);
+  const fetchRef = vi.fn();
+  const readBlobAt = vi.fn((ref, file) => `${ref}:${file}`.slice(0, 10)); // any stable per-(ref,file) fake blob
+  const findMatchingCommit = vi.fn(() => '22faaaa916445657928d5e30720881b830387ab6');
+  const readPulls = vi.fn(() => [2759]);
+  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles, fetchRef, readBlobAt, findMatchingCommit, readPulls });
+  expect(readFiles).toHaveBeenCalledWith(2752, { repo: null });
+  expect(fetchRef).toHaveBeenCalledWith('lane/4034-critical-work-gate', {});
+  expect(out[0].alreadyLandedInMain).toEqual({ carrierPr: 2759 });
+  // one pulls lookup per DISTINCT matched commit, never one per file.
+  expect(readPulls).toHaveBeenCalledTimes(1);
+});
+
+it('enrichPrsWithAlreadyLandedFacts leaves the PR untouched when even one file has no match — never guesses partial containment', async () => {
+  const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
+  const pr = {
+    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: 'deadbeef',
+    labels: [{ name: 'merge-status:conflicting' }],
+  };
+  const readFiles = vi.fn(() => ['a.mjs', 'b.mjs']);
+  const readBlobAt = vi.fn(() => 'someblob');
+  const findMatchingCommit = vi.fn((file) => (file === 'a.mjs' ? 'commit1' : null));
+  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles, fetchRef: vi.fn(), readBlobAt, findMatchingCommit, readPulls: vi.fn() });
+  expect(out[0].alreadyLandedInMain).toBeUndefined();
+});
+
+it('enrichPrsWithAlreadyLandedFacts never guesses containment when the PR\'s files could not even be read', async () => {
+  const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
+  const pr = { number: 2752, headRefOid: 'deadbeef', labels: [{ name: 'merge-status:conflicting' }] };
+  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles: () => [] });
+  expect(out[0].alreadyLandedInMain).toBeUndefined();
+});
+
+it('defaultReadPrFiles reads the changed-file paths off `gh pr view --json files`, degrading to [] on any failure', async () => {
+  const { execFileSyncThrottled } = await import('../../lib/gh-throttle.mjs');
+  execFileSyncThrottled.mockReturnValueOnce(JSON.stringify({ files: [{ path: 'a.mjs' }, { path: 'b.mjs' }] }));
+  const { defaultReadPrFiles } = await import('../reconcile-pass.mjs');
+  expect(defaultReadPrFiles(2752, { repo: 'chalbert/web-everything' })).toEqual(['a.mjs', 'b.mjs']);
+  expect(execFileSyncThrottled).toHaveBeenCalledWith('gh', ['pr', 'view', '2752', '--json', 'files', '--repo', 'chalbert/web-everything'], expect.any(Object));
+
+  execFileSyncThrottled.mockImplementationOnce(() => { throw new Error('gh: not found'); });
+  expect(defaultReadPrFiles(2752, {})).toEqual([]);
+});
+
+// These four inject `exec` EXPLICITLY (mirroring `we:scripts/conveyor/__tests__/reconcile-core.test.mjs`'s own
+// `spyExec` pattern) rather than relying on the module-level `node:child_process` mock: that mock is already
+// proven to work for `execFileSyncThrottled` (a SEPARATE mocked module wrapping it) elsewhere in this file, but
+// a direct default-parameter reference to the bare `execFileSync` binding inside a freshly-added function here
+// was measured, live, to bypass it and run REAL git — explicit injection is the reliable, established way this
+// codebase asserts an exact argv with no dependence on that mock's own quirks.
+it('defaultReadBlobAt reads a git blob OID via rev-parse, degrading to null on any failure', async () => {
+  const { defaultReadBlobAt } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn(() => '774a24d2703ada7a5c3bec4ced8696b13a5f6026\n');
+  expect(defaultReadBlobAt('253d75c2b', 'scripts/lib/critical-work.mjs', { exec })).toBe('774a24d2703ada7a5c3bec4ced8696b13a5f6026');
+  expect(exec).toHaveBeenCalledWith('git', ['rev-parse', '253d75c2b:scripts/lib/critical-work.mjs'], expect.any(Object));
+
+  const throwingExec = vi.fn(() => { throw new Error('fatal: bad revision'); });
+  expect(defaultReadBlobAt('deadbeef', 'missing.mjs', { exec: throwingExec })).toBeNull();
+});
+
+it('defaultFindMatchingMainCommit walks main\'s own log for the file and returns the first blob-identical commit, most-recent-first', async () => {
+  const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn(() => 'commitA\ncommitB\ncommitC\n');
+  const readBlobAt = vi.fn((ref) => (ref === 'commitB' ? 'targetblob' : 'other'));
+  const found = defaultFindMatchingMainCommit('scripts/lib/critical-work.mjs', 'targetblob', { exec, readBlobAt });
+  expect(found).toBe('commitB');
+  expect(exec).toHaveBeenCalledWith('git', [
+    'log', '--format=%H', '-n300', 'origin/main', '--', 'scripts/lib/critical-work.mjs',
+  ], expect.any(Object));
+});
+
+it('defaultFindMatchingMainCommit returns null (never throws) with no target blob, or when the log read fails', async () => {
+  const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+  expect(defaultFindMatchingMainCommit('a.mjs', null)).toBeNull();
+  const throwingExec = vi.fn(() => { throw new Error('not a git repo'); });
+  expect(defaultFindMatchingMainCommit('a.mjs', 'blob', { exec: throwingExec })).toBeNull();
+});
+
+it('defaultReadPullsForCommit reads the PR numbers GitHub associates with a commit, degrading to [] on any failure', async () => {
+  const { execFileSyncThrottled } = await import('../../lib/gh-throttle.mjs');
+  execFileSyncThrottled.mockReturnValueOnce('2759\n');
+  const { defaultReadPullsForCommit } = await import('../reconcile-pass.mjs');
+  expect(defaultReadPullsForCommit('22faaaa9', { repo: 'chalbert/web-everything' })).toEqual([2759]);
+  expect(execFileSyncThrottled).toHaveBeenCalledWith('gh', [
+    'api', 'repos/chalbert/web-everything/commits/22faaaa9/pulls', '--jq', '.[].number',
+  ], expect.any(Object));
+
+  execFileSyncThrottled.mockImplementationOnce(() => { throw new Error('404'); });
+  expect(defaultReadPullsForCommit('deadbeef', {})).toEqual([]);
+});

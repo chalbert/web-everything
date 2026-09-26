@@ -332,6 +332,185 @@ export function enrichPrsWithMainRedFacts(prs, {
   return { prs: enriched, mainRedWindows };
 }
 
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
+// own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
+// plain merge-tree/current-content diff.
+import { CONFLICT_LABEL } from './conflict-label.mjs';
+import { computeAlreadyLandedVerdict, attributeCarrierPr } from '../lib/already-landed-content.mjs';
+
+/** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
+ *  before giving up on that file (mirrors `we:scripts/backlog-stranded-sweep.mjs#AUTO_SWEEP_LOG_LIMIT`'s own
+ *  "bounded, not silently widened" doctrine). NEVER GUESS past the window: a file whose match sits further back
+ *  simply reads as `matchedCommit: null` for this pass — the safe direction (falls through to the ordinary
+ *  dispatch paths, exactly as if this whole detector did not exist). */
+export const ALREADY_LANDED_LOG_WINDOW = 300;
+
+/** Bare label-name membership test, matching `gh --json labels`'s tolerant `{name}`-or-bare-string shape
+ *  (mirrors `we:scripts/conveyor/duplicate-pr-watch.mjs#hasLabelNamed`, not imported from that file so this
+ *  module never pulls in its unrelated duplicate-PR detection machinery for one boolean check). */
+function hasLabel(labels, name) {
+  return (Array.isArray(labels) ? labels : [])
+    .map((l) => (typeof l === 'string' ? l : l?.name))
+    .filter(Boolean)
+    .includes(name);
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadPrFiles — the file paths this PR's own diff touches
+ * (`gh pr view <n> --json files`, NOT part of `defaultReadPrs`'s own bulk `--json` query — fetching `files` for
+ * every open PR on every tick would cost one extra call per PR for a fact only the already-landed check needs).
+ * @param {number} prNumber
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {string[]}
+ */
+export function defaultReadPrFiles(prNumber, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const argv = ['pr', 'view', String(prNumber), '--json', 'files'];
+    if (repo) argv.push('--repo', repo);
+    const out = exec('gh', argv, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const parsed = JSON.parse(String(out || '{}'));
+    return Array.isArray(parsed?.files) ? parsed.files.map((f) => f?.path).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef — best-effort `git fetch` of one ref, so a PR's own
+ * head commit (which this checkout may never have seen before) is present locally before it is `rev-parse`d.
+ * Never throws — a fetch failure just means the blob reads below will also fail closed to `null` (never landed).
+ * @param {string} ref
+ * @param {{exec?:Function, remote?:string}} [o]
+ */
+export function defaultFetchRef(ref, { exec = execFileSync, remote = 'origin' } = {}) {
+  if (!ref) return;
+  try {
+    exec('git', ['fetch', remote, ref, '--quiet'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
+  } catch { /* best-effort — the blob read below degrades to null, never to a guess */ }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadBlobAt — the git blob OID a path holds at a commit
+ * (`git rev-parse <ref>:<path>`), or `null` when the path does not exist there / the commit is unreachable.
+ * @param {string} ref
+ * @param {string} file
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultReadBlobAt(ref, file, { exec = execFileSync } = {}) {
+  try {
+    const out = exec('git', ['rev-parse', `${ref}:${file}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
+    const oid = String(out || '').trim();
+    return oid || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFindMatchingMainCommit — walk `origin/<defaultBranch>`'s own
+ * commit log for `file` (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) and return the first
+ * commit whose blob for that path equals `targetBlob`, or `null`. THIS is the signal
+ * `we:scripts/lib/already-landed-content.mjs`'s own header explains is robust to a rebase (blob identity does
+ * not care about commit-graph shape) and to later refinement on `main` (the match can sit anywhere in the log,
+ * not just at the tip) — unlike a plain `git merge-tree`/current-content diff, both measured to false-negative
+ * on the live incident this detector exists for.
+ * @param {string} file
+ * @param {string|null} targetBlob
+ * @param {{exec?:Function, defaultBranch?:string, windowLimit?:number, readBlobAt?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultFindMatchingMainCommit(file, targetBlob, {
+  exec = execFileSync, defaultBranch = 'main', windowLimit = ALREADY_LANDED_LOG_WINDOW, readBlobAt = defaultReadBlobAt,
+} = {}) {
+  if (!targetBlob) return null;
+  let commits;
+  try {
+    const out = exec('git', ['log', '--format=%H', `-n${windowLimit}`, `origin/${defaultBranch}`, '--', file], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    commits = String(out || '').split('\n').filter(Boolean);
+  } catch {
+    return null;
+  }
+  for (const c of commits) {
+    if (readBlobAt(c, file, { exec }) === targetBlob) return c;
+  }
+  return null;
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadPullsForCommit — the PR number(s) GitHub associates with one
+ * commit (`GET /repos/{o}/{r}/commits/{sha}/pulls`) — the attribution primitive
+ * `we:scripts/lib/already-landed-content.mjs#attributeCarrierPr` needs, one call per DISTINCT matched commit.
+ * @param {string} sha
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {number[]}
+ */
+export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const out = exec('gh', ['api', `repos/${repo || '{owner}/{repo}'}/commits/${sha}/pulls`, '--jq', '.[].number'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    return String(out || '').split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts — live incident, chalbert/web-everything
+ * PR #2752 (#4034/#2748): attach `alreadyLandedInMain: {carrierPr}` to any open PR whose own content is already,
+ * file-by-file, present on `main` — see `we:scripts/lib/already-landed-content.mjs`'s own header for the full
+ * incident and why this needs blob identity rather than a plain diff.
+ *
+ * PAYS THE EXTRA READS ONLY FOR A PR CARRYING `merge-status:conflicting` — the population
+ * `we:scripts/conveyor/parked-pr-conflict-watch.mjs` already narrows this to (a real merge conflict on a
+ * review-parked PR), and the ONLY phase `reconcile-core.mjs`'s own `isConflictBounce` would otherwise dispatch a
+ * mechanical conflict-fix for. A pass with no such PR (the common case) costs nothing beyond the label scan
+ * `defaultReadPrs` already fetched every field for.
+ * @param {Array<object>} prs
+ * @param {{readFiles?:Function, fetchRef?:Function, readBlobAt?:Function, findMatchingCommit?:Function,
+ *   readPulls?:Function, repo?:string|null, defaultBranch?:string}} [o]
+ * @returns {Array<object>}
+ */
+export function enrichPrsWithAlreadyLandedFacts(prs, {
+  readFiles = defaultReadPrFiles, fetchRef = defaultFetchRef, readBlobAt = defaultReadBlobAt,
+  findMatchingCommit = defaultFindMatchingMainCommit, readPulls = defaultReadPullsForCommit,
+  repo = null, defaultBranch = 'main',
+} = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  return list.map((pr) => {
+    if (!hasLabel(pr?.labels, CONFLICT_LABEL)) return pr;
+    const prNumber = Number(pr?.number);
+    const headSha = pr?.headRefOid;
+    if (!Number.isInteger(prNumber) || !headSha) return pr;
+
+    const files = readFiles(prNumber, { repo });
+    if (!files.length) return pr; // could not even read the diff — never guess containment from nothing
+
+    fetchRef(pr.headRefName, {});
+    const fileMatches = files.map((file) => {
+      const blob = readBlobAt(headSha, file, {});
+      const matchedCommit = blob ? findMatchingCommit(file, blob, { defaultBranch }) : null;
+      return { file, matchedCommit };
+    });
+
+    const verdict = computeAlreadyLandedVerdict(fileMatches);
+    if (!verdict.landed) return pr;
+
+    const uniqueCommits = [...new Set(fileMatches.map((m) => m.matchedCommit).filter(Boolean))];
+    const pullsByCommit = {};
+    for (const c of uniqueCommits) pullsByCommit[c] = readPulls(c, { repo });
+    const carrierPr = attributeCarrierPr(fileMatches, pullsByCommit);
+
+    return { ...pr, alreadyLandedInMain: { carrierPr } };
+  });
+}
+
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#formatReport — the human half of the output, and it is not decoration.
  *
@@ -369,12 +548,14 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
- * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
+ * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function,
+ *   enrichAlreadyLanded?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
-  enrichMainRed = enrichPrsWithMainRedFacts, now = Date.now(), repo = null, defaultBranch = 'main',
+  enrichMainRed = enrichPrsWithMainRedFacts, enrichAlreadyLanded = enrichPrsWithAlreadyLandedFacts,
+  now = Date.now(), repo = null, defaultBranch = 'main',
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -387,7 +568,11 @@ export function runReconcilePass({
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  const { prs: redPrs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
+  // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
+  // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
+  const prs = enrichAlreadyLanded(redPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
   const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows });
   return { ...plan, prs: prs.length, agents: agents.length };
