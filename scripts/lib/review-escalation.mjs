@@ -19,9 +19,9 @@ import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivatio
 export { isStatutePath, isDeclarativeLeashPath };
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
-// #4140 — the shared trusted-author gate `parseReviewedSha`/`parseReviewedDiff` now run every comment through
-// before matching REVIEWED_SHA_MARKER/REVIEWED_DIFF_MARKER, closing the residual `marker-authorship.mjs`'s own
-// header named as a flagged follow-up (that pair was the one durable marker left reading ANY commenter).
+// #4140 — the shared trusted-author gate every coverage-deciding marker reader (`parseReviewedSha`,
+// `parseReviewedDiff`, `parseReviewedContribution`, `parseLatestHumanClearedSha`) now runs every comment through
+// before matching its marker, closing the residual `marker-authorship.mjs`'s own header named as a follow-up.
 import { isTrustedMarkerAuthor } from './marker-authorship.mjs';
 
 /** Shared operation identity; core consumers must not import operation declarations. */
@@ -1499,6 +1499,11 @@ export function parseOperatorClearance(comments) {
  *
  * @returns {string|null} the reviewed SHA, lowercased, ONLY when the latest accept-shaped comment was a
  *   `clear-human` ceremony; `null` when it was a plain accept, or no accept-shaped comment exists at all.
+ *
+ * #4140 — TRUSTED-AUTHOR GATED, same as `parseReviewedSha`: an untrusted comment is skipped outright, so it can
+ * neither BE the latest accept-shaped comment nor supply the `cleared-human` half of one. Without this, a forged
+ * `reviewed-sha` + `cleared-human` comment posted after a REAL plain accept upgraded that accept into a human
+ * clearance (review round 1 on PR #2716 — the "piggyback").
  */
 export function parseLatestHumanClearedSha(comments) {
   let latestSha = null;
@@ -1506,6 +1511,7 @@ export function parseLatestHumanClearedSha(comments) {
   for (const c of Array.isArray(comments) ? comments : []) {
     const body = c && typeof c.body === 'string' ? c.body : '';
     if (!body) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // #4140 — an untrusted commenter's marker is never counted
     REVIEWED_SHA_RE.lastIndex = 0;
     let m;
     let bodySha = null;
@@ -1538,9 +1544,9 @@ export function parseLatestHumanClearedSha(comments) {
  *
  * KNOWN RESIDUAL, ACCEPTED — a forged clearance CAN suppress THIS specific park (security review, PR #1459).
  * `parseLatestHumanClearedSha` reads marker CONTENT from `gh pr view --json comments`, never comment AUTHORSHIP
- * — the `cleared-human` marker is NOT trusted-author gated (unlike `reviewed-sha`/`reviewed-diff`, closed by
- * #4140; this one remains a flagged follow-up, same footing #4140 itself started from). Before this function
- * existed, `#2440`'s park was UNCONDITIONAL on a tampering hit — no
+ * — #4140 now runs every comment through the trusted-author gate first, which closes the EXTERNAL-commenter
+ * half of this residual (any other GitHub login); what remains is the shared-credential half described in (b)
+ * below. Before this function existed, `#2440`'s park was UNCONDITIONAL on a tampering hit — no
  * comment content was ever consulted, so it was comment-immune. This function removes that immunity: on a PR
  * that already carries a REAL `review:accepted` label (comment-forgery alone cannot set that), an actor with
  * mere comment-post access (not label-write access) can post one comment carrying both markers for a NEW,
@@ -1573,14 +1579,15 @@ export function buildReviewedContributionMarker(diffOrFingerprint) {
 
 /** Extract the reviewed-contribution fingerprint from a PR's comments — LATEST marker wins, mirroring
  *  `parseReviewedSha` / `parseReviewedDiff`. `null` when absent → the gate behaves exactly as it did before
- *  #x9xqexm. NOT trusted-author gated (unlike its two siblings, closed by #4140) — this marker is outside
- *  #4140's declared scope and remains a flagged follow-up; the same forge residual `parseReviewedSha` used to
- *  carry still applies here. */
+ *  #x9xqexm. #4140 — TRUSTED-AUTHOR GATED, same as its two siblings: it is the THIRD independent OR-branch of
+ *  `acceptanceCoversHead`, and its fingerprint is computable offline from the PR's public diff, so leaving it
+ *  ungated let an untrusted comment satisfy coverage on its own (review round 1 on PR #2716). */
 export function parseReviewedContribution(comments) {
   let latest = null;
   for (const c of Array.isArray(comments) ? comments : []) {
     const body = c && typeof c.body === 'string' ? c.body : '';
     if (!body) continue;
+    if (!isTrustedMarkerAuthor(c)) continue; // #4140 — an untrusted commenter's marker is never counted
     let m;
     REVIEWED_CONTRIBUTION_RE.lastIndex = 0;
     while ((m = REVIEWED_CONTRIBUTION_RE.exec(body)) !== null) latest = m[1].toLowerCase();

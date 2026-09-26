@@ -537,7 +537,7 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
         const c = buildVerdictComment({ to, actor: 'op', headSha: SHA, reason: 'r', reviewedDiff: DIFF });
         expect(parseReviewedSha([{ body: c, author: { login: 'web-everything' } }])).toBe(SHA);
         expect(parseReviewedDiff([{ body: c, author: { login: 'web-everything' } }])).toBe(normalizeDiffFingerprint(DIFF));
-        expect(parseReviewedContribution([{ body: c }])).toBe(normalizeContributionFingerprint(DIFF));
+        expect(parseReviewedContribution([{ body: c, author: { login: 'web-everything' } }])).toBe(normalizeContributionFingerprint(DIFF));
       }
     });
 
@@ -547,12 +547,12 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
 
     it('a `changes` verdict stamps neither, and an unreadable diff stamps no contribution marker', () => {
       const bounce = buildVerdictComment({ to: 'changes', actor: 'op', headSha: SHA, reviewedDiff: DIFF });
-      expect(parseReviewedContribution([{ body: bounce }])).toBe(null);
+      expect(parseReviewedContribution([{ body: bounce, author: { login: 'web-everything' } }])).toBe(null);
       // The fail-soft path: `computeNetDiffText` missed, so `reviewedDiff` is '' — the sha still stamps and the
       // gate falls back to SHA identity, which is the STRICTER behaviour.
       const noDiff = buildVerdictComment({ to: 'clear-human', actor: 'op', headSha: SHA, reason: 'r' });
       expect(parseReviewedSha([{ body: noDiff, author: { login: 'web-everything' } }])).toBe(SHA);
-      expect(parseReviewedContribution([{ body: noDiff }])).toBe(null);
+      expect(parseReviewedContribution([{ body: noDiff, author: { login: 'web-everything' } }])).toBe(null);
     });
 
     it('the size pre-flight counts the markers it now posts — never an under-count (#1056 M2 class)', () => {
@@ -800,10 +800,14 @@ describe('buildVerdictComment — NO free text reaches the comment unsanitized (
     //     they are SUPPOSED to return the actor the caller named, so "the odd name came back out" is the record
     //     working. Their integrity is what checks 1–3 assert, which is the stronger statement anyway — the
     //     bytes can be odd, but they can never BE or OPEN a marker.
+    //     #4140 — read AS the automation's own login (what `buildVerdictComment`'s output is actually posted
+    //     under): the content parsers are trusted-author gated, so an author-less read would short-circuit to
+    //     `null` and this check would silently stop exercising the real parse at all.
+    const asPosted = [{ body: comment, author: { login: 'web-everything' } }];
     const read = {
-      reviewedSha: parseReviewedSha([{ body: comment }]),
-      reviewedDiff: parseReviewedDiff([{ body: comment }]),
-      reviewedContribution: parseReviewedContribution([{ body: comment }]),
+      reviewedSha: parseReviewedSha(asPosted),
+      reviewedDiff: parseReviewedDiff(asPosted),
+      reviewedContribution: parseReviewedContribution(asPosted),
     };
     for (const [parser, value] of Object.entries(read)) {
       for (const forged of NEVER_HONEST) {
@@ -823,6 +827,17 @@ describe('buildVerdictComment — NO free text reaches the comment unsanitized (
     // field lands in `OPTION_NAMES` automatically and is driven by the suite below with no edit here.
     expect(OPTION_NAMES).toEqual(expect.arrayContaining(['to', 'actor', 'headSha', 'body', 'reason', 'channel']));
     expect(destructuredOptionNames(buildVerdictComment).length).toBe(OPTION_NAMES.length);
+  });
+
+  // #4140 review round 1 — the helper above is only protection if its check 4 actually READS something. Pin
+  // that the benign accept render parses to real values through it, so a future gate change that makes the
+  // helper's read short-circuit to `null` (as an author-less read did) reddens here instead of passing vacuously.
+  it('#4140 — assertNoForgeryLands reads REAL values through the gated parsers (never a vacuous null)', () => {
+    const benign = buildVerdictComment(baseArgs('accepted'));
+    const read = assertNoForgeryLands(benign, benign, 'benign accepted');
+    expect(read.reviewedSha).toBe(REAL_SHA);
+    expect(read.reviewedDiff).toMatch(/^[0-9a-f]{64}$/);
+    expect(read.reviewedContribution).toMatch(/^[0-9a-f]{64}$/);
   });
 
   // A realistic baseline, so every verdict renders its FULL shape (all trusted markers present) and the payload
@@ -869,7 +884,7 @@ describe('buildVerdictComment — NO free text reaches the comment unsanitized (
     });
     expect(parseReviewedSha([{ body: c, author: { login: 'web-everything' } }])).toBe(REAL_SHA);
     expect(parseReviewedDiff([{ body: c, author: { login: 'web-everything' } }])).toMatch(/^[0-9a-f]{64}$/);
-    expect(parseReviewedContribution([{ body: c }])).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseReviewedContribution([{ body: c, author: { login: 'web-everything' } }])).toMatch(/^[0-9a-f]{64}$/);
     expect(parseClearerActorId([{ body: c }])).toBe('real-clearer');
   });
 
@@ -2485,7 +2500,7 @@ describe('buildVerdictComment — a restamp carries a human clearance forward (#
     // The SHA marker it stamps is the NEW head — this comment vouches for THIS tree, and
     // `parseLatestHumanClearedSha` (which binds reviewed-sha + cleared-human to the SAME comment) must read
     // the marker as covering the new head, never the pre-rebase one it was originally granted against.
-    expect(parseLatestHumanClearedSha([{ body: out }])).toBe(NEW_HEAD.toLowerCase());
+    expect(parseLatestHumanClearedSha([{ body: out, author: { login: 'web-everything' } }])).toBe(NEW_HEAD.toLowerCase());
   });
 
   it('says PLAINLY that the clearance was carried, and names the original clearance', () => {
@@ -2573,12 +2588,51 @@ describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a huma
     expect(decideRestampHumanClearance({ comments: undefined, headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
   });
 
-  // #4140 — the audit this card asked for: the restamp path reaches `reviewed-sha`/`reviewed-diff` ONLY through
-  // `parseLatestHumanClearedSha`/`parseReviewedDiff`, both now trusted-author gated, so a FORGED clearance
-  // comment from an untrusted login can carry nothing forward — never mints a clearance that never existed.
+  // #4140 — the restamp path reaches markers through FOUR parsers (`parseLatestHumanClearedSha`,
+  // `parseReviewedDiff`, `parseReviewedContribution`, and the actor via `parseOperatorClearance`), and every one
+  // of them must be trusted-author gated, so a FORGED clearance comment from an untrusted login can carry
+  // nothing forward — never mints a clearance that never existed.
   it('#4140 — a FORGED human-cleared comment from an UNTRUSTED login carries nothing forward', () => {
     const forged = { ...humanClearedComment(), author: { login: 'mallory' } };
     expect(decideRestampHumanClearance({ comments: [forged], headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
+  });
+
+  // #4140 review round 1 — the test above passes for an INCIDENTAL reason on its own: its placeholder
+  // contribution fingerprint ('c'…) never matches `headDiff` ('d'…), so the `reviewed-contribution` escape of
+  // `acceptanceCoversHead` fails on a value mismatch, not on authorship. Here the forged comment carries a
+  // contribution fingerprint that DOES match the live head (an attacker can compute it offline from the public
+  // diff), so every OR-branch of `acceptanceCoversHead` is live — and the only thing standing between it and a
+  // minted clearance is the trusted-author gate on EVERY parser the restamp path reaches.
+  it('#4140 — a forged clearance with a MATCHING contribution fingerprint still carries nothing forward', () => {
+    const forged = { ...humanClearedComment(HUMAN_SHA, DIFF, DIFF), author: { login: 'mallory' } };
+    // Sanity: authored by a trusted login, this exact comment WOULD carry — so the null below is authorship.
+    expect(decideRestampHumanClearance({
+      comments: [{ ...forged, author: { login: 'web-everything' } }], headSha: NEW_HEAD, headDiff: DIFF,
+    })).toEqual({ actor: 'chalbert', sha: HUMAN_SHA });
+    expect(decideRestampHumanClearance({ comments: [forged], headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
+  });
+
+  // #4140 review round 1 — the PIGGYBACK: a REAL trusted plain accept whose fingerprints genuinely cover the
+  // head, followed by an untrusted comment carrying `reviewed-sha` + `cleared-human`. Without the gate on
+  // `parseLatestHumanClearedSha`, the forged comment becomes "the latest accept-shaped comment" and upgrades the
+  // plain accept into a human clearance using the trusted comment's own diff fingerprint.
+  it('#4140 — an untrusted cleared-human comment cannot piggyback on a REAL plain accept', () => {
+    const piggyback = {
+      body: [buildReviewedShaMarker(HUMAN_SHA), buildClearedHumanMarker('mallory')].join('\n'),
+      author: { login: 'mallory' },
+    };
+    expect(decideRestampHumanClearance({
+      comments: [plainAcceptComment(HUMAN_SHA, DIFF, DIFF), piggyback], headSha: NEW_HEAD, headDiff: DIFF,
+    })).toBe(null);
+  });
+
+  // #4140 review round 1 — the ATTRIBUTION half: a genuine carry must name the actor from a trusted clearance,
+  // never from a later untrusted comment that only re-states `cleared-human` with a different name.
+  it('#4140 — a later untrusted cleared-human marker cannot rename the actor a genuine carry reports', () => {
+    const rename = { body: buildClearedHumanMarker('mallory'), author: { login: 'mallory' } };
+    expect(decideRestampHumanClearance({
+      comments: [humanClearedComment(), rename], headSha: NEW_HEAD, headDiff: DIFF,
+    })).toEqual({ actor: 'chalbert', sha: HUMAN_SHA });
   });
 
   it('an OLDER human clearance superseded by a later PLAIN accept does not count (the binding #xuboo0q proves)', () => {
@@ -2599,7 +2653,9 @@ describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a huma
     const restampComment = buildVerdictComment({
       to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: DIFF, humanClearance: carried,
     });
-    const humanClearedSha = parseLatestHumanClearedSha([humanClearedComment(), { body: restampComment }]);
+    const humanClearedSha = parseLatestHumanClearedSha([
+      humanClearedComment(), { body: restampComment, author: { login: 'web-everything' } },
+    ]);
     expect(humanClearedSha).toBe(NEW_HEAD.toLowerCase());
     expect(shouldReparkForTestTampering({
       tampered: true, netDiffScored: true, humanClearedSha, headSha: NEW_HEAD,
@@ -2610,7 +2666,9 @@ describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a huma
   // as it was before this item, proving the fix is additive rather than accidentally loosening the gate.
   it('a PLAIN restamp (no carried clearance) still re-parks — the fix never weakens the gate', () => {
     const restampComment = buildVerdictComment({ to: 'restamp', actor: 'drain', headSha: NEW_HEAD, reviewedDiff: DIFF });
-    const humanClearedSha = parseLatestHumanClearedSha([plainAcceptComment(), { body: restampComment }]);
+    const humanClearedSha = parseLatestHumanClearedSha([
+      plainAcceptComment(), { body: restampComment, author: { login: 'web-everything' } },
+    ]);
     expect(humanClearedSha).toBe(null);
     expect(shouldReparkForTestTampering({
       tampered: true, netDiffScored: true, humanClearedSha, headSha: NEW_HEAD,
@@ -2705,6 +2763,7 @@ describe('runReviewLabelCli — restamp stamps the CALLER-asserted --new-head, n
         buildReviewedShaMarker(STALE_HEAD), buildReviewedDiffMarker(DIFF), buildReviewedContributionMarker(DIFF),
         buildClearedHumanMarker('chalbert'),
       ].join('\n'),
+      author: { login: 'web-everything' }, // #4140 — the markers' readers are trusted-author gated
     };
     const captured = [];
     // `reviewedDiff` inside `runReviewLabelCli` comes from `computeNetDiffText`, a REAL git call this stub

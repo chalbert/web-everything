@@ -1255,18 +1255,34 @@ describe('#x9xqexm — a clearance covers a CONTRIBUTION, not the base it sits o
   it('the marker round-trips through parse, latest wins, and feeds straight back into the gate', () => {
     const marker = buildReviewedContributionMarker(CLEARED);
     expect(marker).toMatch(/^<!-- reviewed-contribution: [0-9a-f]{64} -->$/);
-    expect(parseReviewedContribution([{ body: `✅ cleared\n\n${marker}` }]))
+    // #4140 — `author` matches the real shape (the reader is trusted-author gated).
+    const bot = { login: 'web-everything' };
+    expect(parseReviewedContribution([{ body: `✅ cleared\n\n${marker}`, author: bot }]))
       .toBe(normalizeContributionFingerprint(CLEARED));
-    const second = buildReviewedContributionMarker(REBASED.replace('+const stale = false;', '+const other = 1;'));
-    expect(parseReviewedContribution([{ body: marker }, { body: second }])).not.toBe(normalizeContributionFingerprint(CLEARED));
-    expect(parseReviewedContribution([{ body: 'no marker' }, {}, null])).toBe(null);
+    const secondSrc = REBASED.replace('+const stale = false;', '+const other = 1;');
+    const second = buildReviewedContributionMarker(secondSrc);
+    expect(parseReviewedContribution([{ body: marker, author: bot }, { body: second, author: bot }]))
+      .toBe(normalizeContributionFingerprint(secondSrc));
+    expect(parseReviewedContribution([{ body: 'no marker', author: bot }, {}, null])).toBe(null);
     expect(buildReviewedContributionMarker('')).toBe('');
     // The drain reads a STORED digest on the accept side and a RAW diff on the live side — both must land on
     // the same value or the escape could never fire in production.
-    const stored = parseReviewedContribution([{ body: marker }]);
+    const stored = parseReviewedContribution([{ body: marker, author: bot }]);
     expect(acceptanceCoversHead({
       acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedContribution: stored, headContribution: REBASED,
     }).covers).toBe(true);
+  });
+
+  // #4140 review round 1 — the THIRD independent OR-branch of `acceptanceCoversHead`. Its fingerprint is
+  // computable offline from the PR's public diff, so an untrusted author's marker must never be counted.
+  it('#4140 — a forged reviewed-contribution marker from an UNTRUSTED login is ignored, never counted', () => {
+    const marker = buildReviewedContributionMarker(REBASED);
+    expect(parseReviewedContribution([{ body: marker, author: { login: 'mallory' } }])).toBe(null);
+    expect(parseReviewedContribution([{ body: marker }])).toBe(null); // no author at all → fail closed
+    const real = buildReviewedContributionMarker(CLEARED);
+    expect(parseReviewedContribution([
+      { body: real, author: { login: 'web-everything' } }, { body: marker, author: { login: 'mallory' } },
+    ])).toBe(normalizeContributionFingerprint(CLEARED));
   });
 
   // ── ROUND-2 BLOCKER 1: the digest must not collide on a RELOCATION of the contribution. ──────────────────
@@ -1919,16 +1935,36 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
   });
 
   it('#xuboo0q — parseLatestHumanClearedSha binds the SHA and the clear-human marker to the SAME comment', () => {
-    // A real clear-human comment stamps BOTH markers together, in one comment.
-    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}` };
+    // A real clear-human comment stamps BOTH markers together, in one comment. #4140 — posted under the
+    // automation's own login, as every real one is (the reader is trusted-author gated).
+    const bot = { login: 'web-everything' };
+    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}`, author: bot };
     expect(parseLatestHumanClearedSha([clearHumanAt111])).toBe('1111111');
     // A plain accept stamps ONLY reviewed-sha — never covers a tampering finding.
-    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222') };
+    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222'), author: bot };
     expect(parseLatestHumanClearedSha([plainAcceptAt222])).toBe(null);
     // No accept-shaped comment at all.
-    expect(parseLatestHumanClearedSha([{ body: 'an ordinary review comment' }])).toBe(null);
+    expect(parseLatestHumanClearedSha([{ body: 'an ordinary review comment', author: bot }])).toBe(null);
     expect(parseLatestHumanClearedSha([])).toBe(null);
     expect(parseLatestHumanClearedSha(null)).toBe(null);
+  });
+
+  // #4140 review round 1 — the PIGGYBACK, at the parser: an untrusted comment carrying reviewed-sha +
+  // cleared-human must neither BE the latest accept-shaped comment nor upgrade a real plain accept.
+  it('#4140 — parseLatestHumanClearedSha ignores an UNTRUSTED author entirely (forged or piggybacking)', () => {
+    const forged = {
+      body: `${buildReviewedShaMarker('5555555')}\n${buildClearedHumanMarker('mallory')}`, author: { login: 'mallory' },
+    };
+    expect(parseLatestHumanClearedSha([forged])).toBe(null);
+    expect(parseLatestHumanClearedSha([{ body: forged.body }])).toBe(null); // no author → fail closed
+    const realPlainAccept = { body: buildReviewedShaMarker('5555555'), author: { login: 'web-everything' } };
+    expect(parseLatestHumanClearedSha([realPlainAccept, forged])).toBe(null);
+    // …and a forged plain accept cannot mask a REAL, latest-trusted clear-human either.
+    const realClear = {
+      body: `${buildReviewedShaMarker('6666666')}\n${buildClearedHumanMarker('Ada')}`, author: { login: 'chalbert' },
+    };
+    const forgedPlain = { body: buildReviewedShaMarker('7777777'), author: { login: 'mallory' } };
+    expect(parseLatestHumanClearedSha([realClear, forgedPlain])).toBe('6666666');
   });
 
   it('#xuboo0q — THE ORDERING BUG this function exists to avoid: an older clear-human must NOT cover a newer plain accept', () => {
@@ -1937,12 +1973,13 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
     // = 3333333" (from the new plain accept) — even though no human ever looked at 3333333. That combination
     // would let #2440's anti-gaming gate be silently bypassed by a plain agent accept riding on a stale human
     // clearance. This function must report null for the new head instead.
-    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}` };
-    const laterPlainAcceptAt333 = { body: buildReviewedShaMarker('3333333') };
+    const bot = { login: 'web-everything' };
+    const clearHumanAt111 = { body: `${buildReviewedShaMarker('1111111')}\n${buildClearedHumanMarker('Ada')}`, author: bot };
+    const laterPlainAcceptAt333 = { body: buildReviewedShaMarker('3333333'), author: bot };
     expect(parseLatestHumanClearedSha([clearHumanAt111, laterPlainAcceptAt333])).toBe(null);
     // …but the reverse order — clear-human is genuinely the LATEST accept-shaped comment — correctly covers it.
-    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222') };
-    const laterClearHumanAt444 = { body: `${buildReviewedShaMarker('4444444')}\n${buildClearedHumanMarker('Ada')}` };
+    const plainAcceptAt222 = { body: buildReviewedShaMarker('2222222'), author: bot };
+    const laterClearHumanAt444 = { body: `${buildReviewedShaMarker('4444444')}\n${buildClearedHumanMarker('Ada')}`, author: bot };
     expect(parseLatestHumanClearedSha([plainAcceptAt222, laterClearHumanAt444])).toBe('4444444');
   });
 

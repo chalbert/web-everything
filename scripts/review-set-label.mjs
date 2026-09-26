@@ -76,6 +76,9 @@ import {
   parseReviewedDiff, parseReviewedContribution, parseOperatorClearance,
   parseLatestHumanClearedSha, acceptanceCoversHead,
 } from './lib/review-escalation.mjs';
+// #4140 — `decideRestampHumanClearance` names the carried clearance's actor from TRUSTED comments only, so a later
+// untrusted `cleared-human` marker cannot rename it (the other three parsers it reaches gate themselves).
+import { isTrustedMarkerAuthor } from './lib/marker-authorship.mjs';
 // #2844 — WHO cleared this verdict, and the refusal when that is the PR's own author. See that module's header
 // for what the id rests on (the harness session identity, NOT the free-text `--actor`) and for the residual.
 import {
@@ -543,7 +546,7 @@ export function decideRestampHumanClearance({ comments, headSha, headDiff } = {}
     headContribution: headDiff,
   });
   if (!coverage.covers) return null;
-  const clearance = parseOperatorClearance(comments);
+  const clearance = parseOperatorClearance((Array.isArray(comments) ? comments : []).filter(isTrustedMarkerAuthor));
   return { actor: clearance ? clearance.actor : 'the operator', sha: humanClearedSha };
 }
 

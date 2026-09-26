@@ -33,14 +33,18 @@
  * however sympathetic-looking the text: {@link isTrustedMarkerAuthor} is the single gate every counter above now
  * runs its comments through before matching a marker line.
  *
- * #4140 UPDATE: `we:scripts/lib/review-escalation.mjs#parseReviewedSha` / `#parseReviewedDiff` were the one
- * follow-up named below that this item itself was filed to close, and it is now closed — both now run every
- * comment through {@link isTrustedMarkerAuthor} before matching REVIEWED_SHA_MARKER/REVIEWED_DIFF_MARKER,
- * exactly mirroring this file's own pattern. `review-set-label.mjs`'s restamp path (`decideRestampHumanClearance`)
- * needed NO changes of its own: it only ever reaches those markers through `parseReviewedDiff`, so it inherits
- * the gate for free. `parseReviewedContribution` (the `reviewed-contribution` marker) and
- * `parseLatestHumanClearedSha` (`cleared-human`) were NOT touched — outside #4140's declared scope — and remain
- * open follow-ups with the identical forge residual.
+ * #4140 UPDATE: every coverage-deciding marker reader in `we:scripts/lib/review-escalation.mjs` —
+ * `#parseReviewedSha`, `#parseReviewedDiff`, `#parseReviewedContribution` and `#parseLatestHumanClearedSha` —
+ * now runs every comment through {@link isTrustedMarkerAuthor} before matching its marker, exactly mirroring
+ * this file's own pattern. All four are needed together: `acceptanceCoversHead` ORs THREE independent coverage
+ * branches (SHA, diff fingerprint, contribution fingerprint), and `review-set-label.mjs`'s restamp path
+ * (`decideRestampHumanClearance`) reaches all of them plus `cleared-human` — gating only some left the others
+ * as a forge path (review round 1 on PR #2716). That restamp path also names the carried actor from TRUSTED
+ * comments only. `parseOperatorClearance` itself stays ungated, and ONE caller still reads it over every
+ * comment: `we:scripts/merge-ai-prs.mjs` feeds it to `decideReviewGate`, where (since #3184) a clearance
+ * record also withholds re-applying `review:human` on a pass whose live diff read failed. That never lands
+ * anything — the gate still parks — but a forged `cleared-human` comment can delay the hold's re-imposition.
+ * Open follow-up, outside this item's file scope: filter that read through {@link isTrustedMarkerAuthor} too.
  *
  * NOT IN SCOPE HERE (documented residuals, unchanged by this file, each with its own existing acknowledgment):
  *   - `we:scripts/conveyor/stuck-pr-dispatch-marker.mjs` gates an inspection DISPATCH (diagnosis only — no
