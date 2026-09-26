@@ -557,6 +557,48 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#markAuthExpiredSessions — mark each listed session whose OWN
+ * transcript ends on the Claude CLI's own synthetic auth-failure turn (`isApiErrorMessage` with an
+ * `authentication_failed` error or `Login expired · Please run /login`) as `authExpired: true`. Pure (the
+ * classification is injected via `authExpiredInfoFor`); modeled directly on {@link markHungSessions} just
+ * above — a SEPARATE pre-pass over AGENT rows, run before {@link assessLiveness}, never a change to that
+ * pinned function itself.
+ *
+ * WHY THIS EXISTS, SEPARATELY FROM `markHungSessions` (live incident, night of 2026-09-25/26 ET): the
+ * operator's own Claude login expired, so every daemon-dispatched session (`ci-heal-2711`/`ci-heal-2712`,
+ * re-dispatched repeatedly until 06:53) ended IMMEDIATELY with one synthetic assistant turn carrying the CLI's
+ * own auth-failure text — never producing another transcript line for anything to go stale on. Left to
+ * `markHungSessions`'s own 30-minute default threshold, each session would eventually be caught, but (a) that
+ * is 30+ minutes per session of `reconcile-refused live-process` noise this pass emits instead of dispatching a
+ * fresh fixer, all night, and (b) the reaper (`we:scripts/conveyor/session-reaper.mjs`) that would otherwise
+ * `claude stop` these sessions promptly shares the identical blind spot — see that file's own Claude-auth-
+ * expired axis, built alongside this one, reading the SAME shared detector
+ * (`we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo` — ONE implementation, not two, mirroring
+ * `markHungSessions`'s own `hung-session.mjs` reuse).
+ *
+ * A ci-heal session carries no completion-record schema at all ({@link
+ * ../operations/completion-record.mjs#COMPLETION_KINDS} has no `ci-heal` entry — see
+ * `session-reaper.mjs#BACKSTOP_COMPLETION_KINDS`'s own doc for why), so `markSelfReportedDone`'s
+ * `outcome:'blocked-on-infra'` cool-off can never apply to one; THIS mark is what frees such a PR to be
+ * reconciled again, immediately, the same way `hung` already does for a session with no self-report at all —
+ * no synthetic cool-off invented for a kind whose schema was never meant to hold one.
+ * @param {Array<object>} agents - the `claude agents --json` rows (optionally already carrying `selfReportedDone`
+ *   from {@link markSelfReportedDone} and/or `hung` from {@link markHungSessions}, run first).
+ * @param {(agent:object) => ({authExpired:boolean, reason?:string}|null)} authExpiredInfoFor
+ * @returns {Array<object>} the same rows; auth-expired ones gain `authExpired: true`, `authExpiredReason`
+ */
+export function markAuthExpiredSessions(agents, authExpiredInfoFor) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (String(a?.state ?? '').toLowerCase() === 'done' || a?.selfReportedDone === true || a?.hung === true) return a;
+    let info = null;
+    try { info = authExpiredInfoFor(a); } catch { info = null; }
+    if (!info || info.authExpired !== true) return a;
+    return { ...a, authExpired: true, authExpiredReason: info.reason ?? null };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#assessLiveness — the liveness verdict for ONE PR, over the sessions
  * bound to it. Pure, and it is refusal 4 in code.
  *
@@ -594,6 +636,15 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * interpret itself. Excluding it here is what lets a `state: 'working'`-but-actually-dead session stop reading
  * as `live-process` and free its PR to be reconciled again.
  *
+ * AND the same holds for a session {@link markAuthExpiredSessions} has independently confirmed hit the Claude
+ * CLI's own auth-failure (`authExpired: true`) — live incident, night of 2026-09-25/26 ET. Same reasoning as
+ * `hung` immediately above: an upstream, pre-computed AGENT-level fact from a separate detector
+ * (`we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo`) this function trusts exactly the way it
+ * already trusts `selfReportedDone`/`hung`. Excluding it here is the fix for the live incident's own reconcile
+ * symptom: `reconcile-refused live-process … PR #2711` / `#2712` — these sessions had a LIVE pid (never
+ * stopped promptly) and no self-report, so without this exclusion they read as `live-process` FOREVER, and the
+ * fix-dispatch daemon never sent a fresh fixer even after the operator logged back in.
+ *
  * `state === 'stopped'` is ALSO finished — live-caught 2026-09-25 (PR #2647/#2625, both `chalbert/web-everything`,
  * both stuck at an informative `review-status:review-stalled`/`reviewing` label with nothing live and nothing
  * retrying). Root cause, confirmed against a real `claude agents --json --all` listing off the running review
@@ -624,7 +675,8 @@ export function assessLiveness(bound) {
   const isFinished = (agent) => {
     if (agent?.awaitingInfraCooloff === true) return false; // #4149 — the record's cool-off outranks `state`
     const state = String(agent?.state ?? '').toLowerCase();
-    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true;
+    return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true
+      || agent?.authExpired === true;
   };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({

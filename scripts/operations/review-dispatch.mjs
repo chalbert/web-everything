@@ -161,12 +161,84 @@ import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-stal
 export { assertMainNotStale } from '../lib/main-staleness.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
+// #4194 — the added non-Claude review seats' routing (see `reviewSeatRoutes`).
+import { ADVISORY_LENSES, MANDATE_LENSES } from '../lib/jury-core.mjs';
+import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider } from '../lib/provider-routing.mjs';
+import { CODEX_MODEL } from '../lib/codex-model-routing.mjs';
+import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
 
 // re-exported so nothing that already imports `reviewSessionSlug` from this file has to change (#3437) — the
 // slug itself now lives in `we:scripts/conveyor/review-session-slug.mjs`, a PURE module both this file and
 // `we:scripts/conveyor/reconcile-core.mjs` import, so the pure reconciler never pulls in this file's impure
 // transitive imports (`node:child_process`/`node:crypto`/`node:fs`, via `dispatch-lane-io.mjs`).
 export { reviewSessionSlug };
+
+// ── #4194 — ADDED NON-CLAUDE REVIEW SEATS: WHICH SEATS, ON WHICH PROVIDER ──────────────────────────────────────
+
+/**
+ * THE ADVISORY LENSES routed to a non-Claude seat. Every `ADVISORY_LENSES` member EXCEPT `simplicity`, which
+ * `review-pr` already seats on Codex itself (the tool-free `judgeAdvisory` seat, #xqa9ttq) — routing it again
+ * would pay twice for one opinion. The two left are exactly the lenses a review-pr verdict reports as its
+ * SHORTFALL ("2 earned lens(es) (standards-conformance, claim-accuracy) did not sit"), and both need to READ the
+ * repo (a convention doc, a cited `path:line`) — which a tool-bearing direct-task seat can and a tool-free judge
+ * cannot. Derived, never retyped, so a lens added to `ADVISORY_LENSES` is routed without an edit here.
+ */
+export const ROUTED_ADVISORY_LENSES = Object.freeze(ADVISORY_LENSES.filter((l) => l !== MANDATE_LENSES.SIMPLICITY));
+
+/** The ONE extra juror seat: an independent, tool-bearing juror judging the correctness mandate — ADDED beside
+ *  Claude's own mandatory `correctness` seat, never in its place (it lives outside review-pr's reduction entirely,
+ *  so it can never block or accept). */
+export const EXTRA_JUROR_MANDATE = MANDATE_LENSES.CORRECTNESS;
+
+/** The pinned model + effort per provider for an added seat — never left to a CLI's implicit default. */
+export const REVIEW_SEAT_MODELS = Object.freeze({
+  codex: Object.freeze({ model: CODEX_MODEL, effort: 'medium' }),
+  // `gemini-3.1-pro` offers only `low`/`high` (agy refused `medium` live, 2026-09-26); `low` is the combination
+  // the review-pr Antigravity seat already runs (`ANTIGRAVITY_REVIEW_EFFORT`).
+  gemini: Object.freeze({ model: ANTIGRAVITY_MODEL, effort: 'low' }),
+});
+
+/** The routing key of one seat — its own subject in the scorecard store (`reviewSeatTaskType`). PURE. */
+export function reviewSeatKey(seat) {
+  return seat.seat === 'extra-juror' ? `extra-juror:${seat.lens}` : seat.lens;
+}
+
+/**
+ * ROUTE THE ADDED REVIEW SEATS (#4194). PURE. Every seat in {@link ROUTED_ADVISORY_LENSES} plus the one extra
+ * juror seat gets a non-Claude provider from `provider-routing.mjs#selectReviewSeatProvider`, or a named skip.
+ * NEVER a mandatory lens's own seat: Claude's `correctness`/`security` seats are review-pr's and are untouched
+ * here — this only ever ADDS seats beside them.
+ *
+ * `callsRemaining` is the day's remaining non-Claude call budget. One provider is one call (its seats share a
+ * prompt), so with 0 left every seat is skipped (`daily-cap`) and with 1 left every seat goes to the provider
+ * the first seat picked.
+ * @param {{available?: string[], scorecards?: Array<object>, callsRemaining?: number}} [o]
+ * @returns {{routes: Array<{seat:string, lens:string, key:string, provider:string, model:string, effort:string, reasoning:string}>,
+ *   skipped: Array<{seat:string, lens:string, key:string, reason:string}>}}
+ */
+export function reviewSeatRoutes({ available = REVIEW_SEAT_PROVIDERS, scorecards = [], callsRemaining = Infinity } = {}) {
+  const seats = [
+    { seat: 'extra-juror', lens: EXTRA_JUROR_MANDATE },
+    ...ROUTED_ADVISORY_LENSES.map((lens) => ({ seat: 'advisory-lens', lens })),
+  ].map((s) => ({ ...s, key: reviewSeatKey(s) }));
+  const routes = [];
+  const skipped = [];
+  if (!(callsRemaining > 0)) {
+    return { routes, skipped: seats.map((s) => ({ ...s, reason: 'daily-cap: no non-Claude seat calls left today' })) };
+  }
+  let usable = [...available];
+  const plannedLoad = {};
+  for (const s of seats) {
+    const pick = selectReviewSeatProvider({ lens: s.key, available: usable, scorecards, plannedLoad });
+    if (!pick.provider) { skipped.push({ ...s, reason: pick.reasoning }); continue; }
+    plannedLoad[pick.provider] = (plannedLoad[pick.provider] ?? 0) + 1;
+    // One call left: every later seat rides the call this first pick already costs.
+    if (callsRemaining < 2) usable = [pick.provider];
+    const { model, effort } = REVIEW_SEAT_MODELS[pick.provider];
+    routes.push({ ...s, provider: pick.provider, model, effort, reasoning: pick.reasoning });
+  }
+  return { routes, skipped };
+}
 
 /** The template `we:skills-src/review/review-agent-brief.md` — read once per dispatch, never cached across
  *  calls, so an edited brief takes effect on the very next dispatch with no process restart. */

@@ -463,6 +463,54 @@ export function normalizeFindings(rawList) {
   return arr.map(normalizeFinding).filter(Boolean);
 }
 
+/** #4194 — how close two cited lines in the same file must be to count as the same spot. */
+export const CORROBORATION_LINE_WINDOW = 8;
+
+const corroborationPath = (file) => String(file ?? '').trim().replace(/^(?:\.\/|[ab]\/)/, '').replace(/:\d+(?::\d+)?$/, '');
+const corroborationWords = (text) => new Set(
+  String(text ?? '').toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length >= 4),
+);
+function wordOverlap(a, b) {
+  const A = corroborationWords(a);
+  const B = corroborationWords(b);
+  if (!A.size || !B.size) return 0;
+  let hit = 0;
+  for (const w of A) if (B.has(w)) hit += 1;
+  return hit / Math.min(A.size, B.size);
+}
+
+/**
+ * #4194 — DID ANOTHER SEAT RAISE THE SAME PROBLEM? PURE, deterministic. Used to stamp an ADDED (non-Claude)
+ * review seat's finding with whether one of Claude's own seats confirmed it. Two findings corroborate when they
+ * cite the same file (the same path once a `./`/`a/`/`b/` prefix and a `:line` suffix are stripped — never a mere
+ * shared tail: `apps/api/lib/config.mjs` and `lib/config.mjs` are different files) AND either sit within {@link CORROBORATION_LINE_WINDOW} lines of each
+ * other or share at least a quarter of their significant summary words; with no file on one side, the words alone
+ * must overlap by at least half. A heuristic on purpose — it only LABELS an advisory finding, it never admits or
+ * blocks anything — and it errs toward "not confirmed" (a missed match costs nothing but a weaker label).
+ * @param {object} finding
+ * @param {Array<object>} others
+ * @returns {object|null} the first corroborating finding in `others`, or null.
+ */
+export function findingCorroboratedBy(finding, others = []) {
+  const f = normalizeFinding(finding);
+  if (!f) return null;
+  for (const raw of Array.isArray(others) ? others : []) {
+    const o = normalizeFinding(raw);
+    if (!o) continue;
+    const fp = corroborationPath(f.file);
+    const op = corroborationPath(o.file);
+    const words = wordOverlap(`${f.summary} ${f.failure_scenario ?? ''}`, `${o.summary} ${o.failure_scenario ?? ''}`);
+    if (fp && op) {
+      if (fp !== op) continue;
+      const near = Number.isInteger(f.line) && Number.isInteger(o.line) && Math.abs(f.line - o.line) <= CORROBORATION_LINE_WINDOW;
+      if (near || words >= 0.25) return raw;
+    } else if (words >= 0.5) {
+      return raw;
+    }
+  }
+  return null;
+}
+
 /**
  * #x6t2z6h — WHERE A FINDING'S CITATION STANDS AGAINST THE SUBJECT'S GROUND-TRUTH FILE LIST.
  *

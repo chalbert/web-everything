@@ -16,7 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,9 +92,11 @@ import {
   // #x36vidg — the Bash timeouts every dispatch carries.
   DISPATCH_BASH_TIMEOUT_ENV, resolveDispatchSettingsEnv,
   // #4174 — the dispatched session's cwd is a scratch directory, never `root`.
-  DISPATCH_CWD_ENV, dispatchSessionCwd, ensureDispatchSessionCwd,
+  DISPATCH_CWD_ENV, dispatchSessionCwd, dispatchScratchRoot, ensureDispatchSessionCwd,
   // #4174 live-caught — the CLI's own workspace-trust grant for that scratch directory.
   DISPATCH_TRUST_PATH_ENV, grantDispatchTrust,
+  // #4188 (bornAs x5qketq, epic #4075) — the reaper's counterpart revoke.
+  revokeDispatchTrust,
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
@@ -1142,6 +1144,91 @@ describe('#4174 live-caught — grantDispatchTrust: the CLI refused a fresh scra
       if (prior === undefined) delete process.env[DISPATCH_TRUST_PATH_ENV]; else process.env[DISPATCH_TRUST_PATH_ENV] = prior;
     }
     expect(JSON.parse(readFileSync(trustFile, 'utf8')).projects['/some/scratch/dir']).toEqual({ hasTrustDialogAccepted: true });
+  });
+});
+
+describe('#4174 — dispatchScratchRoot: the shared base every session cwd is a child of', () => {
+  it('never changes `dispatchSessionCwd`\'s own answer — same root, session id appended', () => {
+    expect(dispatchSessionCwd('sess-1', { root: PRIMARY })).toBe(join(dispatchScratchRoot({ root: PRIMARY }), 'sess-1'));
+  });
+  it('is relocatable via DISPATCH_CWD_ENV, same as `dispatchSessionCwd`', () => {
+    expect(dispatchScratchRoot({ root: PRIMARY, env: { [DISPATCH_CWD_ENV]: '/override/dispatch-scratch' } }))
+      .toBe('/override/dispatch-scratch');
+  });
+});
+
+// #4188 (bornAs x5qketq, epic #4075) — revokeDispatchTrust: the session reaper's counterpart to
+// grantDispatchTrust, removing a finished dispatch-scratch cwd's trust entry once its folder is gone.
+describe('#4188 — revokeDispatchTrust: removes exactly the given dispatch-scratch trust entries, atomically', () => {
+  let dir;
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'we-dispatch-untrust-')); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('removes exactly the named directory\'s trust entry, leaving every other one alone', () => {
+    const trustFile = join(dir, 'trust-revoke.json');
+    writeFileSync(trustFile, JSON.stringify({
+      projects: {
+        '/already/trusted': { hasTrustDialogAccepted: true },
+        '/some/scratch/dir': { hasTrustDialogAccepted: true },
+      },
+    }));
+    const result = revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile });
+    expect(result).toEqual({ revoked: ['/some/scratch/dir'] });
+    const written = JSON.parse(readFileSync(trustFile, 'utf8'));
+    expect(written.projects['/already/trusted']).toEqual({ hasTrustDialogAccepted: true }); // untouched
+    expect(written.projects['/some/scratch/dir']).toBeUndefined(); // gone
+  });
+
+  it('removes MULTIPLE directories in one call', () => {
+    const trustFile = join(dir, 'trust-revoke-multi.json');
+    writeFileSync(trustFile, JSON.stringify({
+      projects: { '/a': { hasTrustDialogAccepted: true }, '/b': { hasTrustDialogAccepted: true }, '/c': { hasTrustDialogAccepted: true } },
+    }));
+    const result = revokeDispatchTrust(['/a', '/b'], { trustPath: trustFile });
+    expect(result.revoked.sort()).toEqual(['/a', '/b']);
+    const written = JSON.parse(readFileSync(trustFile, 'utf8'));
+    expect(Object.keys(written.projects)).toEqual(['/c']);
+  });
+
+  it('an empty/absent dirs list is a no-op — never writes the file at all', () => {
+    const trustFile = join(dir, 'trust-revoke-noop.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/a': { hasTrustDialogAccepted: true } } }));
+    const before = readFileSync(trustFile, 'utf8');
+    expect(revokeDispatchTrust([], { trustPath: trustFile })).toEqual({ revoked: [] });
+    expect(readFileSync(trustFile, 'utf8')).toBe(before);
+  });
+
+  it('never throws when the trust file is present but unparseable — writes nothing', () => {
+    const trustFile = join(dir, 'trust-revoke-bad.json');
+    writeFileSync(trustFile, 'not json');
+    expect(() => revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile })).not.toThrow();
+    expect(readFileSync(trustFile, 'utf8')).toBe('not json'); // untouched
+  });
+
+  it('never throws when the trust file is simply absent — nothing to revoke', () => {
+    expect(revokeDispatchTrust(['/some/scratch/dir'], { trustPath: join(dir, 'does-not-exist.json') }))
+      .toEqual({ revoked: [] });
+  });
+
+  it('is relocatable via DISPATCH_TRUST_PATH_ENV, mirroring grantDispatchTrust\'s own override', () => {
+    const trustFile = join(dir, 'trust-revoke-env.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/some/scratch/dir': { hasTrustDialogAccepted: true } } }));
+    const prior = process.env[DISPATCH_TRUST_PATH_ENV];
+    process.env[DISPATCH_TRUST_PATH_ENV] = trustFile;
+    try {
+      revokeDispatchTrust(['/some/scratch/dir']); // no explicit trustPath — must read the env override
+    } finally {
+      if (prior === undefined) delete process.env[DISPATCH_TRUST_PATH_ENV]; else process.env[DISPATCH_TRUST_PATH_ENV] = prior;
+    }
+    expect(JSON.parse(readFileSync(trustFile, 'utf8')).projects['/some/scratch/dir']).toBeUndefined();
+  });
+
+  it('the write is genuinely atomic: no leftover `.tmp` file survives a successful revoke', () => {
+    const trustFile = join(dir, 'trust-revoke-atomic.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/some/scratch/dir': { hasTrustDialogAccepted: true } } }));
+    revokeDispatchTrust(['/some/scratch/dir'], { trustPath: trustFile });
+    const leftovers = readdirSync(dir).filter((f) => f.includes('.tmp'));
+    expect(leftovers).toEqual([]);
   });
 });
 

@@ -31,7 +31,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
-  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions, CI_HEAL_ROUND_CAP,
+  REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
+  markAuthExpiredSessions, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
@@ -1547,6 +1548,60 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── LIVE INCIDENT, night of 2026-09-25/26 ET — the operator's Claude login expired; every daemon-dispatched
+// session (`ci-heal-2711`/`ci-heal-2712`) ended immediately on the CLI's own auth failure, sat `blocked` for
+// hours with a still-LIVE pid, and `assessLiveness` read that as `live-process` forever — see
+// `reconcile-core.mjs#assessLiveness`'s own doc for the full incident. Mirrors the hung-transcript describe
+// block above, one for one.
+describe('markAuthExpiredSessions + assessLiveness — Claude auth-expired detection (live incident, night of 2026-09-25/26 ET)', () => {
+  const T0 = Date.parse('2026-09-26T10:53:00.000Z'); // ci-heal-2712's real startedAt, measured live.
+  const blockedRow = { name: 'ci-heal-2712', state: 'blocked', status: 'idle', startedAt: T0, pid: 4343, cwd: '/Users/x/workspace/.operations/dispatch/e265b052', sessionId: 's-2712' };
+  const authExpiredFor = () => ({ authExpired: true, reason: 'claude-auth' });
+
+  it('THE LIVE CASE: a `blocked` ci-heal row whose transcript shows the auth failure → authExpired, PR freed', () => {
+    const [a] = markAuthExpiredSessions([blockedRow], authExpiredFor);
+    expect(a.authExpired).toBe(true);
+    expect(a.authExpiredReason).toBe('claude-auth');
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('overrides a LIVE pid — the whole point of this axis is that these sessions were never killed', () => {
+    const [a] = markAuthExpiredSessions([blockedRow], authExpiredFor);
+    expect(assessLiveness([{ agent: { ...a, pidAlive: true }, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('a resolver that answers not-auth-expired, throws, or is absent leaves the row untouched', () => {
+    expect(markAuthExpiredSessions([blockedRow], () => ({ authExpired: false }))[0]).toBe(blockedRow);
+    expect(markAuthExpiredSessions([blockedRow], () => { throw new Error('unreadable transcript'); })[0]).toBe(blockedRow);
+    expect(markAuthExpiredSessions([blockedRow], () => null)[0]).toBe(blockedRow);
+  });
+
+  it('a row already `state: done`, `selfReportedDone`, or `hung` is never re-classified — no double work', () => {
+    const done = { ...blockedRow, state: 'done' };
+    const selfReported = { ...blockedRow, selfReportedDone: true };
+    const hung = { ...blockedRow, hung: true };
+    expect(markAuthExpiredSessions([done], authExpiredFor)[0]).toBe(done);
+    expect(markAuthExpiredSessions([selfReported], authExpiredFor)[0]).toBe(selfReported);
+    expect(markAuthExpiredSessions([hung], authExpiredFor)[0]).toBe(hung);
+  });
+
+  it('end to end: a red-CI PR bound only to an auth-expired ci-heal session is owed a fresh heal again', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2711, labels: [], statusCheckRollup: redRollup, comments });
+    const agents = markAuthExpiredSessions([{ ...blockedRow, name: 'ci-heal-2711' }], authExpiredFor);
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2711 })]);
+  });
+
+  it('the same PR with the RAW listing (never marked auth-expired) stays refused as live-process — THE LIVE BUG', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2712, labels: [], statusCheckRollup: redRollup, comments });
+    const plan = planReconcile({ prs: [pr], agents: [{ ...blockedRow, name: 'ci-heal-2712', pidAlive: true }], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2712 });
   });
 });
 

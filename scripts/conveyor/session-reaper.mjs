@@ -105,14 +105,14 @@
 import { parseSessionSlug } from './session-slug.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
-import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
+import { defaultListAgents, normalizeHandle, prListTimeoutMs, dispatchScratchRoot, revokeDispatchTrust } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import {
   applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
@@ -122,7 +122,7 @@ import {
   deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
 } from '../operations/delivery-report-store.mjs';
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
-import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo } from './hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from './hung-session.mjs';
@@ -246,6 +246,13 @@ export const BLOCKED_ON_INFRA_OUTCOME = 'blocked-on-infra';
  *  apart from a bot correctly stopped for looping. */
 export const STALLED_OUTCOME = 'stalled';
 
+/** The completion-record `label` a Claude-CLI-auth-expired backstop write carries (live incident, night of
+ *  2026-09-25/26 ET) — the outcome itself is the SAME {@link BLOCKED_ON_INFRA_OUTCOME} a genuine transcript-
+ *  stated infra block already mints (so `reconcile-core.mjs#markSelfReportedDone`'s existing 15-minute
+ *  infra-retry cool-off applies unchanged, no new downstream reader needed), with this label distinguishing
+ *  WHICH kind of infra outage it was for anyone who cares (an operator glancing at the record, a future sign). */
+export const CLAUDE_AUTH_OUTCOME_LABEL = 'claude-auth';
+
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
  *  actually accepts. `ci-heal` is a real PR-kind session name but has NO completion-record kind at all (its own
@@ -289,22 +296,32 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
  *   the CALLER ({@link runSessionReaperPass}, via {@link transcriptShowsIntendedBlockedOnInfra}) decides this;
  *   this function stays pure and takes the verdict as a plain boolean, never touching a transcript itself.
  * @param {boolean} [stalled] - #4090: the reap reason was this file's own no-net-outcome axis (a looping bot,
- *   never a crash) — mints {@link STALLED_OUTCOME} instead. Takes precedence over `blockedOnInfra` when both
- *   are somehow true (a no-outcome verdict is this reaper's OWN definite conclusion; a transcript's stray
- *   mention of infra trouble is comparatively weaker evidence and never overrides it). Only `review`/`fix`
- *   sessions can carry either — item-kind sessions (`conveyor`/`prepare`/`prepare-decision`) still have no
- *   completion-record schema at all, unchanged from before this card.
+ *   never a crash) — mints {@link STALLED_OUTCOME} instead. Takes precedence over `blockedOnInfra`/`authExpired`
+ *   when more than one is somehow true (a no-outcome verdict is this reaper's OWN definite conclusion; a
+ *   transcript's stray mention of infra trouble, or an auth failure, is comparatively weaker evidence and never
+ *   overrides it). Only `review`/`fix` sessions can carry any of the three — item-kind sessions
+ *   (`conveyor`/`prepare`/`prepare-decision`) still have no completion-record schema at all, unchanged from
+ *   before this card.
+ * @param {boolean} [authExpired] - live incident, night of 2026-09-25/26 ET (see `hung-session.mjs`'s own file
+ *   header for the full transcript shape): the reap reason was this file's own Claude-auth-expired axis. Mints
+ *   the SAME {@link BLOCKED_ON_INFRA_OUTCOME} `blockedOnInfra` already does (an expired login is exactly the
+ *   transient-infra-outage shape `markSelfReportedDone`'s 15-minute cool-off exists for — the operator logs back
+ *   in and retries make sense again), plus {@link CLAUDE_AUTH_OUTCOME_LABEL} so a reader can tell WHICH kind of
+ *   infra outage this was. Never overrides `stalled` (see above); outranks a bare `blockedOnInfra` when both are
+ *   somehow true, since this axis is a literal transcript-content match, not a heuristic phrase scan.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false, authExpired = false) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
-  const outcome = stalled ? STALLED_OUTCOME : (blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
-  return applyCompletionUpdate(base, { status: 'done', outcome }, now);
+  const outcome = stalled ? STALLED_OUTCOME : ((authExpired || blockedOnInfra) ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
+  const patch = { status: 'done', outcome };
+  if (!stalled && authExpired) patch.label = CLAUDE_AUTH_OUTCOME_LABEL;
+  return applyCompletionUpdate(base, patch, now);
 }
 
 /** How many transcript tail lines / bytes / chars-per-field {@link transcriptShowsIntendedBlockedOnInfra} reads
@@ -459,13 +476,14 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
   const {
     allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(),
-    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null,
+    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null, authExpiredFor = null,
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap) return base;
@@ -488,6 +506,22 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
     let info = null;
     try { info = noOutcomeFor(session); } catch { info = null; }
     if (info && info.stall === true) return { reap: true, reason: `no-outcome:${info.reason || 'stalled'}` };
+  }
+
+  // Axis AUTH — Claude CLI auth-expired detection (live incident, night of 2026-09-25/26 ET; see
+  // `hung-session.mjs`'s own file header for the full transcript shape). SAME TIER as axis -1/0 above/below,
+  // for the identical reason: a session whose OWN transcript shows the CLI's auth failure is independently
+  // confirmed done — its entire transcript IS that one failed turn, nothing ever appends after it — regardless
+  // of what the listing's own `state` says (these sessions sat `blocked`/`idle`, never advancing) and regardless
+  // of `cwd` (a dispatched fix/ci-heal session's `cwd` is its own per-session scratch dir, never the daemon's
+  // `allowedCwd`, so `wrong-cwd` would otherwise short-circuit this exactly the way #4149's own audit found for
+  // the hung/no-outcome axes). Checked ahead of axis 0's generic 30-minute hung-transcript timeout because this
+  // is a MORE SPECIFIC, INSTANT signal — no reason to wait out a staleness window when the transcript already
+  // names the exact cause.
+  if (typeof authExpiredFor === 'function') {
+    let info = null;
+    try { info = authExpiredFor(session); } catch { info = null; }
+    if (info && info.authExpired === true) return { reap: true, reason: `claude-auth-expired:${info.reason || 'claude-auth'}` };
   }
 
   // Axis 0 — hung-transcript detection. See doc above for why this runs BEFORE `neverReapWorking` below, and
@@ -555,6 +589,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -750,6 +785,25 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
   return function hungFor(session) {
     try {
       return readHungInfo(session, now(), thresholdMs);
+    } catch {
+      return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
+ * Build an `authExpiredFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}
+ * (live incident, night of 2026-09-25/26 ET — see `hung-session.mjs`'s own file header for the full transcript
+ * shape): reads the session's OWN transcript for the Claude CLI auth-failure signature via
+ * `we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo` — the SAME shared detector
+ * `reconcile-core.mjs`'s `markAuthExpiredSessions` uses, so this reaper and the reconciler can never disagree
+ * about what "auth-expired" means (mirrors {@link makeHungResolver}'s own reasoning for the identical property).
+ * @returns {(session:object) => ({authExpired:boolean, reason?:string}|null)}
+ */
+export function makeAuthExpiredResolver() {
+  return function authExpiredFor(session) {
+    try {
+      return readClaudeAuthExpiredInfo(session);
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
     }
@@ -1474,6 +1528,183 @@ export function runRetentionSweepPass({
   };
 }
 
+// ── DISPATCH-SCRATCH SWEEP (#4188, bornAs `x5qketq`, epic #4075) ───────────────────────────────────────────
+// PR #2701 (card #4174) gave every dispatched session its own scratch cwd, a fresh directory under
+// `<workspace>/.operations/dispatch/<sessionId>` (`dispatch-lane-io.mjs#dispatchSessionCwd`, keyed by the SAME
+// uuid `createDispatchSinks` mints and hands the CLI as the session's own `sessionId`), and grants it CLI
+// workspace trust in the operator's `~/.claude.json` (`#grantDispatchTrust`) so `claude --bg` does not refuse
+// it as untrusted. Nothing removed either once the owning session finished, so both grow forever — this
+// section is that removal, a THIRD independent axis from the STOP pass (is the process still doing anything)
+// and the #4089 RETENTION SWEEP above (has the session's semantic RECORD — a completion/delivery report keyed
+// by its `review-<PR>`/`fix-<PR>`/… NAME — aged out). This axis is keyed by the session's raw UUID instead,
+// because that is the only identity a dispatch-scratch folder carries; it never touches a completion record,
+// a delivery report, or `claude rm`.
+//
+// THE SAME TWO-PATH SHAPE AS THE RETENTION SWEEP, deliberately reused rather than invented fresh:
+//   PATH A — matched + finished + grace. The folder's own uuid names a row in `claude agents --json --all`
+//     (matched by `sessionId`, never `id` — see this file's own header on why the two fields are not
+//     interchangeable) whose `state` is terminal ({@link TERMINAL_REAP_STATES}/{@link ALREADY_STOPPED_STATES}),
+//     OR the uuid names NO row at all (the CLI has already forgotten it — "reaped", the card's own third
+//     qualifying word, alongside "stopped"/"done"). Either way, once the folder has sat at least `graceMs`
+//     (default 24h) past its own last-modified time, it is safe to remove.
+//   PATH B — the ceiling safety valve, for a folder whose match could not be resolved at all this tick (an
+//     unreadable/empty `claude agents` listing) rather than one confirmed finished: once a folder is older than
+//     `ceilingMs` (default 7 days) it is removed anyway, UNLESS some OTHER still-live row in the SAME listing
+//     reports this exact directory as its own `cwd` — the closest proxy this file has for "a live process is
+//     still using it" without shelling a platform-specific `lsof`/`/proc` scan (macOS has no `/proc`).
+// A folder younger than both thresholds is always kept — the same "never guess" discipline as the STOP axes.
+
+/** `WE_DISPATCH_SCRATCH_GRACE_HOURS` → path A's grace, in ms. Default 24h, matching the card's own wording. */
+export const DISPATCH_SCRATCH_GRACE_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+/** `WE_DISPATCH_SCRATCH_CEILING_DAYS` → path B's ceiling, in ms. Default 7 days — generous relative to path A's
+ *  24h grace (this is the safety valve for when path A's own listing read failed, not the common case). */
+export const DISPATCH_SCRATCH_CEILING_MS_DEFAULT = 7 * 24 * 60 * 60 * 1000;
+
+/** `WE_DISPATCH_SCRATCH_GRACE_HOURS` → path A's grace, in ms. See {@link DISPATCH_SCRATCH_GRACE_MS_DEFAULT}. */
+export function resolveDispatchScratchGraceMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_DISPATCH_SCRATCH_GRACE_HOURS, 60 * 60 * 1000, DISPATCH_SCRATCH_GRACE_MS_DEFAULT);
+}
+
+/** `WE_DISPATCH_SCRATCH_CEILING_DAYS` → path B's ceiling, in ms. See {@link DISPATCH_SCRATCH_CEILING_MS_DEFAULT}. */
+export function resolveDispatchScratchCeilingMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_DISPATCH_SCRATCH_CEILING_DAYS, 24 * 60 * 60 * 1000, DISPATCH_SCRATCH_CEILING_MS_DEFAULT);
+}
+
+/**
+ * THE PURE VERDICT for one dispatch-scratch folder. No fs/exec/clock — every signal is injected, same
+ * discipline as {@link classifyRetention}.
+ * @param {{ageMs: number|null, sessionRow: {state?:string}|null, liveCwdInUse: boolean}} candidate
+ * @param {{graceMs: number|null, ceilingMs: number|null}} opts
+ * @returns {{reap:boolean, reason:string}}
+ */
+export function classifyDispatchScratchEntry({ ageMs, sessionRow, liveCwdInUse } = {}, { graceMs, ceilingMs }) {
+  if (typeof ageMs !== 'number' || !Number.isFinite(ageMs) || ageMs < 0) return { reap: false, reason: 'unknown-age' };
+  const state = sessionRow?.state;
+  const matchedTerminal = sessionRow
+    ? (TERMINAL_REAP_STATES.has(state) || ALREADY_STOPPED_STATES.has(state))
+    : true; // no row at all for this uuid — the CLI has already forgotten it ("reaped"), the card's own 3rd case
+  if (sessionRow && !matchedTerminal) return { reap: false, reason: 'still-live' }; // working/blocked — never touch
+  // Path A — matched (or reaped) + finished, once its own grace period has elapsed.
+  if (matchedTerminal && graceMs !== null && ageMs >= graceMs) {
+    return { reap: true, reason: sessionRow ? `finished:${state}` : 'unregistered' };
+  }
+  // Path B — the ceiling safety valve, gated on no OTHER live row claiming this directory as its cwd.
+  if (ceilingMs !== null && ageMs >= ceilingMs && !liveCwdInUse) {
+    return { reap: true, reason: 'ceiling' };
+  }
+  return { reap: false, reason: 'not-yet' };
+}
+
+/**
+ * THE DISPATCH-SCRATCH SWEEP IO SHELL (#4188). Enumerates every folder directly under
+ * {@link dispatchScratchRoot}, matches each one's name (a session uuid) against a fresh `claude agents --json
+ * --all` listing by `sessionId` (never `id` — see the file header), and removes the ones
+ * {@link classifyDispatchScratchEntry} calls reapable: the directory tree itself, then (batched, ONE write) the
+ * `~/.claude.json` trust entries {@link revokeDispatchTrust} owns for every directory this pass actually
+ * deleted. A folder is NEVER removed and left un-revoked, or vice versa, within one pass — the folder delete
+ * happens first (the higher-value removal: a stale scratch dir is unbounded disk, the trust entry is a few
+ * bytes), and only directories that delete cleanly are ever handed to the trust revoke.
+ * @param {{
+ *   dispatchRoot?: string,
+ *   listAgents?: () => unknown[],
+ *   graceMs?: number|null,
+ *   ceilingMs?: number|null,
+ *   now?: number,
+ *   dryRun?: boolean,
+ *   readdirSyncFn?: Function,
+ *   statFn?: Function,
+ *   rmDirFn?: (dir:string) => void,
+ *   revokeTrust?: (dirs:string[]) => {revoked:string[]},
+ *   log?: (msg:string) => void,
+ * }} [o]
+ * @returns {{scanned:number, deleted:number, kept:number, trustRevoked:number, wouldDelete:Array|undefined}}
+ */
+export function runDispatchScratchSweepPass({
+  dispatchRoot = dispatchScratchRoot(),
+  listAgents = () => defaultListAgents({ exec: execFileSync, all: true }),
+  graceMs = resolveDispatchScratchGraceMs(),
+  ceilingMs = resolveDispatchScratchCeilingMs(),
+  now = Date.now(),
+  dryRun = false,
+  readdirSyncFn = readdirSync,
+  statFn = statSync,
+  rmDirFn = (dir) => rmSync(dir, { recursive: true, force: true }),
+  revokeTrust = (dirs) => revokeDispatchTrust(dirs),
+  log: logFn = log,
+} = {}) {
+  let names;
+  try {
+    names = readdirSyncFn(dispatchRoot, { withFileTypes: true })
+      .filter((e) => (typeof e.isDirectory === 'function' ? e.isDirectory() : true))
+      .map((e) => e.name)
+      // LIVE-CAUGHT (#4188, 2026-09-26): `dispatchScratchRoot()` is NOT exclusively this sweep's own namespace —
+      // a real machine was found with a `.lanes/.admission/gh` subtree living INSIDE `.operations/dispatch/`,
+      // an entirely different subsystem's state that merely shares the same parent directory. `isSafeSessionId`
+      // (this file's own filename-safety gate, reused rather than a second regex invented) rejects any name that
+      // doesn't start with an alnum — which a dotdir like `.lanes` never does — so this is never touched. A
+      // future non-uuid, non-dotfile collision is still theoretically possible; the STATE + trust match below
+      // (a real session row, or a confirmed-gone one) is the actual safety net for that, not this filter alone.
+      .filter((name) => isSafeSessionId(name));
+  } catch {
+    names = []; // no dispatch-scratch root at all yet (a fresh machine, or one that never dispatched) — nothing to do
+  }
+
+  let sessions;
+  try { sessions = listAgents() ?? []; } catch { sessions = []; } // an unreadable listing degrades to "no match for anyone" — Path A never fires, only Path B (ceiling) can act, and only once confirmed no live row claims the folder
+  const byId = new Map();
+  const liveCwds = new Set();
+  for (const s of sessions) {
+    if (s && s.sessionId != null) byId.set(String(s.sessionId), s);
+    const terminal = TERMINAL_REAP_STATES.has(s?.state) || ALREADY_STOPPED_STATES.has(s?.state);
+    if (!terminal && s?.cwd) liveCwds.add(String(s.cwd));
+  }
+
+  let deleted = 0;
+  let kept = 0;
+  const toRevoke = [];
+  const wouldDelete = dryRun ? [] : undefined;
+
+  for (const name of [...names].sort()) {
+    const dir = join(dispatchRoot, name);
+    let ageMs = null;
+    try { ageMs = now - statFn(dir).mtimeMs; } catch { /* stays null — `unknown-age` keeps it, never a guess */ }
+    const verdict = classifyDispatchScratchEntry(
+      { ageMs, sessionRow: byId.get(name) ?? null, liveCwdInUse: liveCwds.has(dir) },
+      { graceMs, ceilingMs },
+    );
+    if (!verdict.reap) { kept++; continue; }
+    if (dryRun) {
+      logFn(`  would remove dispatch-scratch ${name} (${verdict.reason})`);
+      wouldDelete.push({ dir: name, reason: verdict.reason });
+      continue;
+    }
+    try {
+      rmDirFn(dir);
+    } catch (e) {
+      logFn(`  ⚠ ${name}: dispatch-scratch rm failed: ${String(e?.message || e).split('\n')[0]}`);
+      kept++;
+      continue;
+    }
+    toRevoke.push(dir);
+    logFn(`  removed dispatch-scratch ${name} (${verdict.reason})`);
+    deleted++;
+  }
+
+  let trustRevoked = 0;
+  if (!dryRun && toRevoke.length) {
+    try { trustRevoked = (revokeTrust(toRevoke)?.revoked ?? []).length; } catch { /* best-effort — folders are already gone either way */ }
+  }
+
+  return {
+    scanned: names.length,
+    deleted: dryRun ? 0 : deleted,
+    kept,
+    trustRevoked: dryRun ? 0 : trustRevoked,
+    wouldDelete,
+  };
+}
+
 /**
  * The idle-timeout backstop's default threshold (6 hours) — see {@link classifySessionReapWithGroundTruth}'s
  * "Axis 3" doc for exactly when this applies (a `blocked` session, name+cwd already confirmed spawned by THIS
@@ -1572,6 +1803,7 @@ function parseFlags(argv) {
  *   hungFor?: ((session:object) => object|null)|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
@@ -1600,6 +1832,9 @@ export function runSessionReaperPass({
   // #4091 (epic #3383/#4075, statute clause 4) — default ON: a session with no recorded link is unaffected
   // (see this axis's own header for why), so this is safe to run unconditionally, same as every other axis.
   chatSpawnGuardFor = makeChatSpawnGuardResolver(),
+  // Live incident fix, night of 2026-09-25/26 ET (epic #3383/#4075) — default ON, same convention as every
+  // other axis this epic ships: see `hung-session.mjs#readClaudeAuthExpiredInfo`'s own file header for why.
+  authExpiredFor = makeAuthExpiredResolver(),
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -1636,7 +1871,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -1659,11 +1894,16 @@ export function runSessionReaperPass({
         // why it outranks a transcript's stray blocked-on-infra mention); derived from the reap `reason` string
         // {@link classifySessionReapWithGroundTruth}'s axis -1 stamps, never re-derived from the session itself.
         const stalled = typeof reason === 'string' && reason.startsWith('no-outcome:');
+        // Live incident fix, night of 2026-09-25/26 ET — same derive-from-`reason` discipline as `stalled`
+        // above: the Claude-auth-expired axis already ran (inside `sessionReapPlan`, via `authExpiredFor`) to
+        // produce this exact reap; re-reading the transcript here would be a second, redundant IO call for a
+        // fact `reason` already carries.
+        const authExpired = !stalled && typeof reason === 'string' && reason.startsWith('claude-auth-expired:');
         let blockedOnInfra = false;
-        if (!stalled && typeof blockedOnInfraFor === 'function') {
+        if (!stalled && !authExpired && typeof blockedOnInfraFor === 'function') {
           try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
         }
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled);
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled, authExpired);
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -1768,6 +2008,9 @@ function main(argv) {
   // `--no-chat-spawn-guard` is the same rollback escape hatch, for the #4091 chat-spawn scope guard — default
   // ON: a session with no recorded link is unaffected, so this is safe to run unconditionally.
   const chatSpawnGuardFor = flags['no-chat-spawn-guard'] ? null : makeChatSpawnGuardResolver();
+  // `--no-auth-expired-detection` is the same rollback escape hatch, for the Claude-auth-expired axis (live
+  // incident, night of 2026-09-25/26 ET) — default ON, same convention as every other axis this epic ships.
+  const authExpiredFor = flags['no-auth-expired-detection'] ? null : makeAuthExpiredResolver();
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -1775,9 +2018,14 @@ function main(argv) {
   // calls {@link runRetentionSweepPass} directly (already fully daemon-usable, no CLI needed) rather than
   // relying on this flag. Shares this CLI's own `--dry-run`.
   const runRetention = !!flags['retention-sweep'];
+  // `--dispatch-scratch-sweep` OPTS IN to the #4188 dispatch-scratch pass, same deliberate opt-in reasoning as
+  // `--retention-sweep` immediately above (it deletes directories and edits `~/.claude.json`). A resident
+  // daemon calls {@link runDispatchScratchSweepPass} directly. Shares this CLI's own `--dry-run`.
+  const runDispatchScratchSweep = !!flags['dispatch-scratch-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
+  const dispatchScratchResult = runDispatchScratchSweep ? runDispatchScratchSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -1786,7 +2034,7 @@ function main(argv) {
   }
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult, dispatchScratch: dispatchScratchResult }, null, 2) + '\n');
   } else {
     const { scanned, stopped, alreadyGone, failures, anomalies, backstopWritten, wouldStop, wouldWriteBackstop, kept } = result;
     log(
@@ -1797,6 +2045,12 @@ function main(argv) {
       log(
         `session-reaper retention: ${retentionResult.scanned} session record set(s) scanned · ` +
           `${dryRun ? `${(retentionResult.wouldDelete ?? []).length} would be deleted, ${(retentionResult.wouldPruneRuns ?? []).length} run record(s) would be pruned` : `${retentionResult.deleted} deleted, ${retentionResult.runsPruned} run record(s) pruned`} · ${retentionResult.kept} kept`,
+      );
+    }
+    if (dispatchScratchResult) {
+      log(
+        `session-reaper dispatch-scratch: ${dispatchScratchResult.scanned} folder(s) scanned · ` +
+          `${dryRun ? `${(dispatchScratchResult.wouldDelete ?? []).length} would be removed` : `${dispatchScratchResult.deleted} removed, ${dispatchScratchResult.trustRevoked} trust entr${dispatchScratchResult.trustRevoked === 1 ? 'y' : 'ies'} revoked`} · ${dispatchScratchResult.kept} kept`,
       );
     }
   }

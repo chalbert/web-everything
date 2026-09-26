@@ -56,7 +56,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
@@ -65,7 +65,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // consumer in this repo already shares.
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
-import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo } from './hung-session.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -123,13 +123,20 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * planReconcile}/`assessLiveness` — the mechanical backstop for exactly the case a crashed review agent's
  * unreported infra failure leaves behind (`review-agent-brief.md`'s "report done on exit" is prose, and prose
  * is not guaranteed to run).
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, now?:number, hungThresholdMs?:number, listJobs?:Function}} [o]
+ * THEN runs {@link markAuthExpiredSessions} (live incident, night of 2026-09-25/26 ET) after that, so a
+ * session whose OWN transcript shows the Claude CLI's own auth-failure (see that function's own doc for the
+ * full incident) ALSO stops reading as `live-process` — this one catches the failure the INSTANT it shows in
+ * the transcript, rather than waiting out the generic hung-transcript threshold, and (unlike `hung`) also
+ * covers `ci-heal` sessions, which carry no completion-record schema at all for `markSelfReportedDone` to ever
+ * apply to.
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, now?:number, hungThresholdMs?:number, listJobs?:Function}} [o]
  *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
 export function defaultReadAgents({
   exec = execFileSync, env = process.env, completionFor = tryReadCompletion,
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
+  authExpiredInfoFor = readClaudeAuthExpiredInfo,
   listJobs = undefined,
 } = {}) {
   // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
@@ -140,7 +147,10 @@ export function defaultReadAgents({
   // xpb0zyq — a session that already wrote its own completion record is finished, whatever the listing says.
   const selfReported = markSelfReportedDone(Array.isArray(listed) ? listed : [], completionFor, now);
   // #3383 continuation — a session whose OWN transcript has gone stale is finished too, self-report or not.
-  return markHungSessions(selfReported, hungInfoFor, now, hungThresholdMs);
+  const hungMarked = markHungSessions(selfReported, hungInfoFor, now, hungThresholdMs);
+  // Live incident fix, night of 2026-09-25/26 ET — a session whose OWN transcript shows the Claude CLI's own
+  // auth failure is finished too, whatever the listing's `state`/pid say.
+  return markAuthExpiredSessions(hungMarked, authExpiredInfoFor);
 }
 
 /**

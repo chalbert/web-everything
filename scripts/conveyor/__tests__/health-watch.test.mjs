@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
-  probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probePrs, probeStaleState, probeMergedPrs,
+  probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
+  probePrs, probeStaleState, probeMergedPrs,
 } from '../health-watch.mjs';
 
 let dir;
@@ -124,6 +125,42 @@ describe('probeLanePools', () => {
 
   it('skips a repo with no lane-pool-health-watch log', () => {
     expect(probeLanePools(join(dir, 'empty'))).toEqual([]);
+  });
+});
+
+// ── probeAuthExpiredSessions — live incident, night of 2026-09-25/26 ET ─────────────────────────────────────
+describe('probeAuthExpiredSessions', () => {
+  const bgAgent = (over = {}) => ({ name: 'ci-heal-2711', kind: 'background', cwd: '/x/dispatch/abc', sessionId: 's-1', startedAt: '2026-09-26T10:53:00.000Z', ...over });
+
+  it('flags a background session the injected reader confirms auth-expired, carrying its own startedAt', () => {
+    const readInfo = () => ({ authExpired: true, reason: 'claude-auth' });
+    const out = probeAuthExpiredSessions([bgAgent()], { readInfo });
+    expect(out).toEqual([{ name: 'ci-heal-2711', startedAt: Date.parse('2026-09-26T10:53:00.000Z') }]);
+  });
+
+  it('never flags a session the reader clears, or one that throws', () => {
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => ({ authExpired: false, reason: 'no-signal' }) })).toEqual([]);
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => { throw new Error('unreadable'); } })).toEqual([]);
+    expect(probeAuthExpiredSessions([bgAgent()], { readInfo: () => null })).toEqual([]);
+  });
+
+  it('skips a non-background row (interactive terminal session), or one missing cwd/sessionId, without calling the reader', () => {
+    let called = false;
+    const readInfo = () => { called = true; return { authExpired: true }; };
+    probeAuthExpiredSessions([{ ...bgAgent(), kind: 'interactive' }], { readInfo });
+    probeAuthExpiredSessions([{ ...bgAgent(), cwd: undefined }], { readInfo });
+    probeAuthExpiredSessions([{ ...bgAgent(), sessionId: undefined }], { readInfo });
+    expect(called).toBe(false);
+  });
+
+  it('empty/non-array input is never a guess', () => {
+    expect(probeAuthExpiredSessions(undefined)).toEqual([]);
+    expect(probeAuthExpiredSessions([])).toEqual([]);
+  });
+
+  it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
+    const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
+    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
   });
 });
 

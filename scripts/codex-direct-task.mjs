@@ -98,6 +98,13 @@ import {
 
 // ── constants ─────────────────────────────────────────────────────────────────────────────────────
 export const CODEX_CLI = 'codex';
+
+/** #4194 — the suffix a `--review` task carries in place of the edit instruction. Codex reads the checkout under its
+ *  own `read-only` sandbox; `gemini-direct-task.mjs#REVIEW_MODE_SUFFIX` differs on purpose (agy runs with its shell
+ *  and writes denied, so its task carries the PR text itself). */
+export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review. Do not edit, create or delete any file, do not run '
+  + '`git commit`/`git push`/`git add`, do not install dependencies, and do not open a pull request. Read what you '
+  + 'need, then put your whole answer in your final message.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — an open-ended coding task, not a quick judge call.
 
 /**
@@ -154,11 +161,14 @@ export function buildCodexDirectTaskArgv({
   effort = CODEX_TIER_EFFORT.sonnet,
   ephemeral = false,
   addDirs = [],
+  review = false,
 } = {}) {
   if (typeof cwd !== 'string' || !cwd.trim()) {
     throw new TypeError('codex-direct-task: `cwd` must be a non-empty path');
   }
-  const argv = ['exec', '--json', '-s', 'workspace-write', '--skip-git-repo-check', '-C', cwd];
+  // #4194 — REVIEW MODE runs Codex under its own `read-only` sandbox: a review seat reads the checkout and reports
+  // findings; it must never edit anything. Every other caller keeps `workspace-write`, unchanged.
+  const argv = ['exec', '--json', '-s', review ? 'read-only' : 'workspace-write', '--skip-git-repo-check', '-C', cwd];
   if (outputLastMessageFile) {
     if (typeof outputLastMessageFile !== 'string' || !outputLastMessageFile.trim()) {
       throw new TypeError('codex-direct-task: `outputLastMessageFile` must be a non-empty path when given');
@@ -198,10 +208,13 @@ export function buildCodexDirectTaskArgv({
  * @param {string} task
  * @returns {string}
  */
-export function buildCodexPrompt(task) {
+export function buildCodexPrompt(task, { review = false } = {}) {
   if (typeof task !== 'string' || !task.trim()) {
     throw new TypeError('codex-direct-task: `task` must be a non-empty string');
   }
+  // #4194 — a REVIEW task's deliverable is its final message, not a diff: say so, instead of the default
+  // "make the change directly" suffix that would contradict a read-only review brief.
+  if (review) return `${task.trim()}\n\n---\n\n${REVIEW_MODE_SUFFIX}`;
   return (
     `${task.trim()}\n\n---\n\n`
     + 'Make the change directly by editing files in this working directory. When you are done, STOP — do '
@@ -609,6 +622,7 @@ export async function runCodexDirectExec({
   stream = true,
   spawnFn = nodeSpawn,
   cli = CODEX_CLI,
+  review = false,
 } = {}) {
   // Inside `.git/` — NEVER inside the working tree. A real live run against this very script found the bug
   // this avoids: a last-message/log file written into `dir` shows up as an untracked `??` file and pollutes
@@ -616,8 +630,8 @@ export async function runCodexDirectExec({
   // `we:scripts/lane-pool.mjs`'s own `DEPS_MARKER`/`LEASE_MARKER` convention — inside `.git/` is "never
   // tracked or git-cleaned... never seen by `git status --porcelain`" for exactly this reason.
   const outputLastMessageFile = join(dir, '.git', 'codex-direct-task-last-message.txt');
-  const argv = buildCodexDirectTaskArgv({ cwd: dir, outputLastMessageFile, model, effort, ephemeral });
-  const prompt = buildCodexPrompt(task);
+  const argv = buildCodexDirectTaskArgv({ cwd: dir, outputLastMessageFile, model, effort, ephemeral, review });
+  const prompt = buildCodexPrompt(task, { review });
   writeFileSync(logFile, ''); // truncate/create — this run owns the file from byte 0.
 
   return new Promise((resolvePromise, reject) => {
@@ -741,6 +755,7 @@ export async function codexDirectTask({
   installDeps = true,
   wireOriginToRemote = false,
   clearRolloutAfterRun = false,
+  review = false,
   env = process.env,
   execFn = defaultExecFn,
   spawnFn = nodeSpawn,
@@ -780,7 +795,7 @@ export async function codexDirectTask({
   const resolvedEffort = resolveCodexEffort({ tier, effort });
 
   const run = await runCodexDirectExec({
-    dir: targetDir, task, model, effort: resolvedEffort, ephemeral, timeoutMs, logFile: resolvedLogFile, stream, spawnFn,
+    dir: targetDir, task, model, effort: resolvedEffort, ephemeral, timeoutMs, logFile: resolvedLogFile, stream, spawnFn, review,
   });
   const events = parseJsonlEvents(run.stdout);
   const summary = summarizeEvents(events);
@@ -862,7 +877,9 @@ async function main() {
       'usage: node scripts/codex-direct-task.mjs --task=<text>|--task-file=<path> [--dir=<checkout>] '
       + '[--repo-root=<path>] [--model=<m>] [--effort=low|medium|high|xhigh|max|ultra] [--tier=haiku|sonnet|opus] '
       + '[--timeout-ms=<n>] [--gate=none|standards|full] [--ephemeral] [--clear-rollout-after-run] '
-      + '[--no-stream] [--log=<path>] [--no-install] [--wire-origin-to-remote] [--json]\n'
+      + '[--no-stream] [--log=<path>] [--no-install] [--wire-origin-to-remote] [--review] [--json]\n'
+      + '  --review (#4194): a READ-ONLY review task — Codex runs under `-s read-only` and is told to answer in its '
+      + 'final message (the report\'s `lastMessage`) instead of editing files.\n'
       + '  --model defaults to the ratified CODEX_MODEL pin (#x8wbivt); --effort/--tier default to the '
       + "sonnet rung's `medium` — neither is ever left to codex's own implicit default. --tier is ignored "
       + 'when --effort is also given.\n'
@@ -899,6 +916,7 @@ async function main() {
       installDeps: !flags['no-install'],
       wireOriginToRemote: Boolean(flags['wire-origin-to-remote']),
       clearRolloutAfterRun: Boolean(flags['clear-rollout-after-run']),
+      review: Boolean(flags.review),
     });
   } catch (e) {
     console.error(`codex-direct-task: ${e.message}`);
