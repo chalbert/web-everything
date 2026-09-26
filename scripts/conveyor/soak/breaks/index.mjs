@@ -22,6 +22,7 @@
 import unsupportedRepoDirt from './unsupported-repo-dirt.mjs';
 import scorecardDirt from './scorecard-dirt.mjs';
 import ghShimMidRebuild from './gh-shim-mid-rebuild.mjs';
+import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
 import ciHealEmptyScope from './ci-heal-empty-scope.mjs';
 import laneAcquireUnderLoad from './lane-acquire-under-load.mjs';
 import fixDaemonLockWait from './fix-daemon-lock-wait.mjs';
@@ -34,7 +35,6 @@ import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
 import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
 import daemonOverlayLockWait from './daemon-overlay-lock-wait.mjs';
 import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
-import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
 import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
 import claudeAuthDispatchPause from './claude-auth-dispatch-pause.mjs';
 import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
@@ -49,6 +49,7 @@ export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
   scorecardDirt,
   ghShimMidRebuild,
+  pinnedOverlayConflictSkipped,
   ciHealEmptyScope,
   laneAcquireUnderLoad,
   fixDaemonLockWait,
@@ -61,7 +62,6 @@ export const BREAKS = Object.freeze([
   rebuildSmokeOffLock,
   daemonOverlayLockWait,
   badOverlayFallsBack,
-  pinnedOverlayConflictSkipped,
   brokenSmokeHarnessHoldsLastGood,
   claudeAuthDispatchPause,
   rebuildConcurrentCandidates,
