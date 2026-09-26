@@ -15,9 +15,10 @@
  * exactly (it is the contract with the `claude` CLI), and no `claude` process is ever started by the suite.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve as resolvePath } from 'node:path';
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { importGraph } from './import-graph.mjs';
@@ -92,6 +93,8 @@ import {
   DISPATCH_BASH_TIMEOUT_ENV, resolveDispatchSettingsEnv,
   // #4174 — the dispatched session's cwd is a scratch directory, never `root`.
   DISPATCH_CWD_ENV, dispatchSessionCwd, ensureDispatchSessionCwd,
+  // #4174 live-caught — the CLI's own workspace-trust grant for that scratch directory.
+  DISPATCH_TRUST_PATH_ENV, grantDispatchTrust,
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
@@ -1058,7 +1061,10 @@ describe('#4174 — dispatchSessionCwd: the session cwd is never `root`', () => 
 describe('#4174 — ensureDispatchSessionCwd: makes the directory real, but NEVER throws', () => {
   it('calls the injected mkdir with the exact directory and returns it', () => {
     const calls = [];
-    expect(ensureDispatchSessionCwd('/some/scratch/dir', { mkdir: (d) => calls.push(d) })).toBe('/some/scratch/dir');
+    // grantTrust stubbed to a no-op — this test is about the mkdir seam, not the real ~/.claude.json writer,
+    // and a stubbed mkdir "succeeding" would otherwise make the DEFAULT grantTrust reach the real file.
+    expect(ensureDispatchSessionCwd('/some/scratch/dir', { mkdir: (d) => calls.push(d), grantTrust: () => {} }))
+      .toBe('/some/scratch/dir');
     expect(calls).toEqual(['/some/scratch/dir']);
   });
 
@@ -1068,6 +1074,62 @@ describe('#4174 — ensureDispatchSessionCwd: makes the directory real, but NEVE
     })).not.toThrow();
     expect(ensureDispatchSessionCwd('/no/permission', { mkdir: () => { throw new Error('boom'); } }))
       .toBe('/no/permission');
+  });
+
+  it('grants trust ONLY when mkdir actually succeeded — never for a directory that was never made', () => {
+    const grants = [];
+    ensureDispatchSessionCwd('/no/permission', {
+      mkdir: () => { throw new Error('boom'); },
+      grantTrust: (d) => grants.push(d),
+    });
+    expect(grants).toEqual([]);
+    ensureDispatchSessionCwd('/some/scratch/dir', {
+      mkdir: () => {},
+      grantTrust: (d) => grants.push(d),
+    });
+    expect(grants).toEqual(['/some/scratch/dir']);
+  });
+});
+
+describe('#4174 live-caught — grantDispatchTrust: the CLI refused a fresh scratch cwd as "not trusted"; grant it', () => {
+  // A REAL, writable scratch dir for the trust FILE itself — this is the one seam (`trustPath`) deliberately
+  // NOT stubbed, so the test proves the real `readJsonConfig`/`withTrustedDirs`/write composition end to end,
+  // exactly as `ensureDispatchSessionCwd`'s "only when mkdir succeeded" test above proves the OTHER half. It
+  // is never the operator's real `~/.claude.json` — that is the whole point of `trustPath` being injectable.
+  let dir;
+  beforeAll(() => { dir = mkdtempSync(join(tmpdir(), 'we-dispatch-trust-')); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('marks the directory trusted in the injected trust file, additively', () => {
+    const trustFile = join(dir, 'trust-additive.json');
+    writeFileSync(trustFile, JSON.stringify({ projects: { '/already/trusted': { hasTrustDialogAccepted: true } } }));
+    grantDispatchTrust('/some/scratch/dir', { trustPath: trustFile });
+    const written = JSON.parse(readFileSync(trustFile, 'utf8'));
+    expect(written.projects['/already/trusted']).toEqual({ hasTrustDialogAccepted: true }); // additive
+    expect(written.projects['/some/scratch/dir']).toEqual({ hasTrustDialogAccepted: true });
+  });
+
+  it('never throws when the trust file is present but unparseable — writes nothing (bootstrap-session.mjs\'s own rule)', () => {
+    const trustFile = join(dir, 'trust-bad.json');
+    writeFileSync(trustFile, 'not json');
+    expect(() => grantDispatchTrust('/some/scratch/dir', { trustPath: trustFile })).not.toThrow();
+    expect(readFileSync(trustFile, 'utf8')).toBe('not json'); // untouched
+  });
+
+  it('never throws when the write itself fails (no permission, a concurrent writer)', () => {
+    expect(() => grantDispatchTrust('/some/scratch/dir', { trustPath: '/no/such/dir/trust.json' })).not.toThrow();
+  });
+
+  it('is relocatable via DISPATCH_TRUST_PATH_ENV, mirroring dispatchSessionCwd\'s own DISPATCH_CWD_ENV', () => {
+    const trustFile = join(dir, 'trust-env.json');
+    const prior = process.env[DISPATCH_TRUST_PATH_ENV];
+    process.env[DISPATCH_TRUST_PATH_ENV] = trustFile;
+    try {
+      grantDispatchTrust('/some/scratch/dir'); // no explicit trustPath — must read the env override
+    } finally {
+      if (prior === undefined) delete process.env[DISPATCH_TRUST_PATH_ENV]; else process.env[DISPATCH_TRUST_PATH_ENV] = prior;
+    }
+    expect(JSON.parse(readFileSync(trustFile, 'utf8')).projects['/some/scratch/dir']).toEqual({ hasTrustDialogAccepted: true });
   });
 });
 

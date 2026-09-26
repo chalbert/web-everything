@@ -45,7 +45,7 @@
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -64,6 +64,17 @@ import { deleteCompletion } from './completion-store.mjs';
 // guard rather than re-derived, for the SAME reason `explore-io.mjs#exploreScratchRoot` imports it: the region
 // a dispatched agent may legitimately write into and the region this file computes must be one definition.
 import { workspaceRootOf } from '../guard-lane.mjs';
+// #4174 live-caught (2026-09-25) — a scratch cwd is a BRAND NEW directory `claude` has never seen, and `--bg`
+// refuses to start there ("Workspace not trusted") exactly like an interactive session would. A LANE clone
+// never hits this because `bootstrap-session.mjs`'s own `trustStatus`/`withTrustedDirs` pre-trusts the whole
+// (bounded, reused) lane pool once at machine setup. A fresh per-session scratch dir cannot be pre-trusted the
+// same way — there is a new one every dispatch — so this file grants it DYNAMICALLY. Only the PURE pieces are
+// imported (`readJsonConfig`/`withTrustedDirs`/`TRUST_PATH`) — never `defaultIo()`'s real writer, which has no
+// override hook: {@link grantDispatchTrust} does its own tiny, env-relocatable write below (mirroring that
+// writer's own backup-first discipline) so a test/soak world can point it at a throwaway file instead of the
+// operator's real `~/.claude.json`, the same reason `dispatchSessionCwd` itself is relocatable via
+// {@link DISPATCH_CWD_ENV}.
+import { readJsonConfig, withTrustedDirs, TRUST_PATH } from '../bootstrap-session.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
@@ -1316,20 +1327,82 @@ export function dispatchSessionCwd(sessionId, { root = REPO_ROOT, env = process.
   return join(base, String(sessionId));
 }
 
+/** Test/override hook for {@link grantDispatchTrust}'s trust file — mirrors {@link DISPATCH_CWD_ENV}. A
+ *  soak/sim world points this at a throwaway file under its own root, so the REAL production mechanism runs
+ *  unstubbed without ever touching the operator's actual `~/.claude.json`. */
+export const DISPATCH_TRUST_PATH_ENV = 'WE_DISPATCH_TRUST_PATH';
+
+function resolveDispatchTrustPath(env = process.env) {
+  const override = String(env[DISPATCH_TRUST_PATH_ENV] ?? '').trim();
+  return override ? resolve(override) : TRUST_PATH;
+}
+
 /**
- * ENSURE the directory a dispatched session's cwd is about to become actually exists. NEVER THROWS — the same
- * contract {@link resolveGhShimSettingsEnv} already holds itself to: a failure here (no permission, a read-only
- * workspace root, a stale non-directory at that path) must not itself block a dispatch. A `cwd` that could not
- * be created surfaces on its own, loudly, the moment the real spawn tries to start a process in it — which
- * `isPreSpawnRefusal` already classifies correctly (ENOENT/EACCES) rather than this function papering over it
- * one layer earlier.
+ * #4174 live-caught — GRANT THE CLI'S OWN WORKSPACE TRUST for a freshly minted scratch cwd, in `~/.claude.json`
+ * (or {@link DISPATCH_TRUST_PATH_ENV}'s override). NEVER THROWS. Reuses `bootstrap-session.mjs`'s PURE trust
+ * logic (`readJsonConfig`, `withTrustedDirs`) rather than re-deriving it — but writes through its OWN small,
+ * relocatable writer rather than that file's `defaultIo().writeTrust`, which is hardcoded to the real
+ * `TRUST_PATH` with no override hook. The ONLY difference from `bootstrap-session.mjs`'s own use of the same
+ * pieces is WHEN this runs: a lane pool is a small, bounded, REUSED set of directories, so trusting it once at
+ * bootstrap covers every future dispatch into it forever. A dispatch scratch dir is a brand-new, never-reused
+ * directory EVERY time (its own session id is the path segment), so there is no "once" to trust ahead of
+ * time — this grants it at the one moment it is knowable: right before the spawn that needs it.
+ *
+ * LIVE EVIDENCE THIS IS NEEDED (2026-09-25): the very first real dispatch into a scratch cwd failed with
+ * `claude --bg`'s own refusal — *"Workspace not trusted. Run \`claude\` in <dir> once and accept the trust
+ * prompt, then retry."* — proving `--bg` enforces the SAME per-directory trust an interactive session does,
+ * for a directory nothing had ever trusted before. Without this, EVERY dispatch into a fresh scratch dir would
+ * fail this same way — the exact regression this whole card exists to prevent, reintroduced one layer up.
+ *
+ * FAIL-SOFT ON PURPOSE, same as `resolveGhShimSettingsEnv`: an unreadable/unparseable trust file writes
+ * nothing (never rebuilds an operator's whole per-project CLI state from `{}`), and any other failure (no
+ * permission, a concurrent writer) is swallowed — the spawn still gets attempted, and if trust genuinely could
+ * not be granted, the CLI's own refusal surfaces exactly as it did before this existed, visibly, rather than
+ * this function pretending to have fixed it.
  * @param {string} dir
- * @param {{mkdir?: (d: string) => void}} [io] - injectable ONLY so a test can assert it without touching the
- *   real filesystem — the same seam `exec`/`spawnAgent` already are on this sink.
+ * @param {{trustPath?: string}} [o] - injectable ONLY so a test can point it at a throwaway file instead of
+ *   overriding process.env — the same seam `exec`/`spawnAgent` already are on this sink.
+ */
+export function grantDispatchTrust(dir, { trustPath = resolveDispatchTrustPath() } = {}) {
+  try {
+    const before = readJsonConfig(trustPath);
+    // `null` = present but unparseable (bootstrap-session.mjs's own `readJsonConfig` contract) — write
+    // nothing, exactly as bootstrap-session.mjs's own trust step refuses to in that case.
+    if (before === null) return;
+    const next = withTrustedDirs(before, [dir]);
+    // Backup-first, exactly matching bootstrap-session.mjs's own `writeTrust` discipline for this same file —
+    // it holds the operator's whole per-project CLI state, not just this one directory's trust flag.
+    if (existsSync(trustPath)) copyFileSync(trustPath, `${trustPath}.bak`);
+    writeFileSync(trustPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch { /* see docblock — never blocks a dispatch */ }
+}
+
+/**
+ * ENSURE the directory a dispatched session's cwd is about to become actually exists AND is trusted. NEVER
+ * THROWS — the same contract {@link resolveGhShimSettingsEnv} already holds itself to: a failure here (no
+ * permission, a read-only workspace root, a stale non-directory at that path) must not itself block a
+ * dispatch. A `cwd` that could not be created surfaces on its own, loudly, the moment the real spawn tries to
+ * start a process in it — which `isPreSpawnRefusal` already classifies correctly (ENOENT/EACCES) rather than
+ * this function papering over it one layer earlier.
+ *
+ * TRUST IS GRANTED ONLY WHEN `mkdir` ACTUALLY SUCCEEDED. Trusting a directory that was never created is
+ * meaningless (the spawn into it fails regardless), and — the reason this is stated rather than merely
+ * implied — it is what keeps this function inert against every FAKE root a unit test passes (`/primary/…`,
+ * `/repo`, …): `mkdirSync` genuinely fails there (no permission to create a directory under `/`), so no test
+ * that never overrides `mkdir` ever reaches the trust write at all, real filesystem or not.
+ * @param {string} dir
+ * @param {{mkdir?: (d: string) => void, grantTrust?: (d: string) => void}} [io] - injectable ONLY so a test can
+ *   assert it without touching the real filesystem/`~/.claude.json` — the same seam `exec`/`spawnAgent`
+ *   already are on this sink.
  * @returns {string} `dir`, unconditionally — the caller always gets a path back, made or not.
  */
-export function ensureDispatchSessionCwd(dir, { mkdir = (d) => mkdirSync(d, { recursive: true }) } = {}) {
-  try { mkdir(dir); } catch { /* see docblock — never blocks a dispatch */ }
+export function ensureDispatchSessionCwd(dir, {
+  mkdir = (d) => mkdirSync(d, { recursive: true }),
+  grantTrust = (d) => grantDispatchTrust(d),
+} = {}) {
+  let made = false;
+  try { mkdir(dir); made = true; } catch { /* see docblock — never blocks a dispatch */ }
+  if (made) grantTrust(dir);
   return dir;
 }
 
