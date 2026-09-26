@@ -3,12 +3,13 @@ bornAs: x9s10dt
 kind: story
 size: 3
 parent: "3383"
-status: active
+status: resolved
 blockedBy: ["3949"]
 relatedTo: ["4029", "3690", "4035"]
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/critical-work.mjs", "we:scripts/lib/__tests__/critical-work.test.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/__tests__/dispatch-contracts-route.test.mjs", "we:scripts/lib/__tests__/dispatch-contracts.test.mjs"]
 dateOpened: "2026-09-24"
 dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
