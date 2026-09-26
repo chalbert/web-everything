@@ -3,7 +3,7 @@
   "title": "Drain-land (resident merge-queue daemon)",
   "summary": "The plateau-app resident drain daemon (tools/drain-daemon/daemon.mjs) holds the whole-process drain lease and runs scripts/merge-ai-prs.mjs --label=ready-to-merge --json as a one-shot child pass on a 60s interval from a dedicated, self-syncing WE clone. All drain LOGIC (mergeability, JIT numbering, resolve-on-land, rebase-drop) stays single-sourced in WE scripts/; the daemon only schedules it. Confirmed live 2026-09-26: ~/Library/LaunchAgents/com.plateau.drain-daemon.plist is installed and running from /Users/nicolasgilbert/workspace/plateau-drain-daemon, driving the WE clone at .lanes/we-drain-daemon/lane-1.",
   "derivedFrom": {
-    "commit": "91cc453e4",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
@@ -12,6 +12,10 @@
     "plateau:tools/drain-daemon/README.md",
     "scripts/merge-ai-prs.mjs",
     "scripts/lib/pr-merge-gate.mjs",
+    "scripts/lib/rebase-drop-manifest.mjs",
+    "scripts/lib/rebase-drop-content.mjs",
+    "scripts/lib/git-run.mjs",
+    "scripts/lib/couple-cascade.mjs",
     "scripts/lane-drain.mjs",
     "scripts/pr-land.mjs",
     "scripts/progress-board.mjs",
@@ -91,7 +95,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "A single-PR FAST DRAIN (scripts/pr-land.mjs, scripts/lane-drain.mjs) can also land a PR by BYPASSING the whole-process lease entirely (README.md: '/pr\\`/\\`/finish\\` single-PR fast drains bypass the lease and stay instant') — not modeled as a separate entry here since it converges on the same merge-candidate-evaluation/merge-attempt machinery; the numbering mutex (scripts/merge-ai-prs.mjs:5088) is what actually serializes the two paths, not this state."
+      "notes": "A single-PR FAST DRAIN (scripts/pr-land.mjs, scripts/lane-drain.mjs) can also land a PR by BYPASSING the whole-process lease entirely (README.md: '/pr\\`/\\`/finish\\` single-PR fast drains bypass the lease and stay instant') — not modeled as a separate entry here since it converges on the same merge-candidate-evaluation/merge-attempt machinery; the numbering mutex (scripts/merge-ai-prs.mjs:5088) is what actually serializes the two paths, not this state. PR #2764 (2026-09-26, same incident as ci-heal.flow.json's ci-red transition) added a SEPARATE per-pass bookkeeping branch that runs here for EVERY PR in this sweep's context regardless of merge decision: once a PR's required check reads positively green (isRequiredCheckGreen), any CI_LIFECYCLE_OWNED label it still carries (checking/failed/blocked) is stripped via `gh pr edit --remove-label` (scripts/merge-ai-prs.mjs:3712,3819-3829) — best-effort, a failed removal is silently retried next pass, never blocks the sweep. This clears the STALE LABEL itself (what a human/board sees); it is independent of whether ci-heal.flow.json's own ci-red→ci-heal-dispatch branch ever ran for this PR."
     },
     {
       "id": "lease-arbitration",
@@ -135,6 +139,17 @@
       "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream. WE x5h527v: the retry itself stays uncapped BY DESIGN (a drain must keep trying) — the cap only decides when to fire a one-time operator notice (decideFailureEscalation), never when to stop retrying."
     },
     {
+      "id": "rebase-drop-attempt",
+      "label": "REBASE_DROP: rebuild a BEHIND/conflicting-manifest PR onto main, in-pass",
+      "terminal": false,
+      "owner": "merge-ai-prs.mjs (the child pass, REBASE_DROP branch)",
+      "ownerCite": "scripts/merge-ai-prs.mjs:4084-4174",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "CORRECTS a stale note this flow used to carry on merge-candidate-evaluation ('BEHIND ... is NOT repaired by this flow'): it IS repaired, in this SAME child pass, before classifyPr's per-PR evaluation ever sees a CONFLICTING/BEHIND verdict (or one that is landable but still carries the transient manifest, #2183). rebaseDropManifest (scripts/lib/rebase-drop-manifest.mjs) merge-trees the lane ref onto origin/main and commits+pushes a rebuilt tip; its own skip boundary (a real, non-manifest conflict) retries with the wider rebaseDropContent (scripts/lib/rebase-drop-content.mjs), which only auto-resolves when every conflicting hunk is non-overlapping (scripts/merge-ai-prs.mjs:4120-4131). A remote-repo PR with no sibling clone provisioned is left for its author (scripts/merge-ai-prs.mjs:4111-4114, 'skipped-remote'). #x8pcbf3 (live incident, PR #2752, fixed PR #2761, 2026-09-26): when either rebuild's own merge-tree probe fails `fatal: refusing to merge unrelated histories`, that failure is FIXED AND RETRIED once — never surfaced as a real conflict on the first try — via the shared `ensureFullHistory` helper (scripts/lib/git-run.mjs:165-174, `parseIsShallow` at :135-141): probe `git rev-parse --is-shallow-repository`; if shallow, `git fetch <remote> --unshallow` once and retry the SAME merge-tree once (scripts/lib/rebase-drop-manifest.mjs:149-164; scripts/lib/rebase-drop-content.mjs:317-329). A checkout that was never shallow, or one that is still shallow after a failed unshallow fetch, or one that STILL fails 'unrelated histories' after a successful unshallow, all fall through to the ordinary conflict/error handling unchanged — this is a bounded, one-shot fix, never a loop, and never a distinct new state/status of its own. The SAME shared helper also fixes this identical checkout defect in two OTHER cadences this flow file does not model at all — scripts/conveyor/branch-sync.mjs (its own merge-tree probe, branch-sync.mjs:276-296) and scripts/conveyor/branch-drift.mjs (its own drift computation, branch-drift.mjs:188-199) — genuinely out of scope here; see their own file headers, not a flow file, for how they behave."
+    },
+    {
       "id": "merge-candidate-evaluation",
       "label": "Per-PR merge/skip decision (merge-ai-prs.mjs#classifyPr)",
       "terminal": false,
@@ -143,7 +158,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "decision==='merge' requires ALL of: producer-certified, required check green, mergeable==='MERGEABLE', mergeStateStatus CLEAN/UNSTABLE, non-empty body, and no uncleared review hold (scripts/merge-ai-prs.mjs:584-615). BEHIND (needs a rebase) is reported here as an ordinary skip and is NOT repaired by this flow — the fix-agent-ci-brief / #2183 rebuild path handles a landable-but-behind PR, out of this file's scope."
+      "notes": "decision==='merge' requires ALL of: producer-certified, required check green, mergeable==='MERGEABLE', mergeStateStatus CLEAN/UNSTABLE, non-empty body, and no uncleared review hold (scripts/merge-ai-prs.mjs:584-615). A verdict that reaches here still BEHIND/conflicting-manifest is one rebase-drop-attempt (upstream, same pass) either skipped (real conflict beyond auto-resolution, or no sibling clone for a remote repo) or never ran (REBASE_DROP disabled) — reported here as an ordinary skip, retried next sweep unchanged."
     },
     {
       "id": "accepted-unchecked-no-ci",
@@ -169,6 +184,25 @@
         "no-owner": "xi4od2p",
         "unbounded-wait": "xi4od2p",
         "uncapped-retry": "xi4od2p"
+      }
+    },
+    {
+      "id": "couple-gate",
+      "label": "fix-couple-split: hold either half of a cross-repo couple whose partner isn't landing this pass",
+      "terminal": false,
+      "owner": "merge-ai-prs.mjs (planCoupleCascadeStep / carrierPreflight, scripts/lib/couple-cascade.mjs)",
+      "ownerCite": "scripts/merge-ai-prs.mjs:4869-4907; scripts/lib/couple-cascade.mjs:62,141",
+      "wait": null,
+      "retries": {
+        "what": "a held couple member (impl half or WE carrier) is re-evaluated fresh next sweep with no attempt count kept — if its partner never lands (e.g. the partner PR is closed/abandoned), nothing distinguishes that from a partner merely landing on a LATER pass",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/merge-ai-prs.mjs:4869-4886"
+      },
+      "escalation": null,
+      "notes": "PR #2763 (fix-couple-split, 2026-09-26): a cross-repo couple (a frontierui/plateau-app impl half + its WE carrier) lands WHOLE in one pass or not at all. Two mechanisms: (1) HOLD — every couple member whose partner is not landing this pass is held (fixpoint over held partners), contiguous ORDER — impl half(s) then the carrier immediately — so no other merge can move `main` between the two halves (scripts/lib/couple-cascade.mjs#planCoupleCascadeStep); (2) a carrier PREFLIGHT — right before an impl half merges, the carrier's FRESH re-read must still say 'merge', else BOTH halves are held (scripts/lib/couple-cascade.mjs#carrierPreflight, scripts/merge-ai-prs.mjs:4890-4907). Live incident this closes: pass 2026-09-26T20:32:20Z merged plateau-app#185 (impl), then web-everything#2746 (unrelated) moved WE main, then #2751 (#185's carrier) re-read BEHIND and was refused — the impl had already landed alone. The couple-gate's own hold-forever exposure (no cap on how many passes the SAME couple can be held if its partner genuinely never lands) is the SAME class of gap #2989 already tracks for the upstream couple-JOIN mechanism (joinImplToCouples, which decides which impl is attached to which carrier BEFORE this gate ever sees it) — adjacent, not identical, but acknowledged there rather than re-filed. RESIDUAL this gate cannot close: the carrier's own `gh pr merge` can still fail AFTER its impl half already landed (a GitHub error in the ~1s between the two writes — two repos cannot merge atomically); reported as `coupleSplit` (JSON + a loud stderr line, scripts/merge-ai-prs.mjs:4924-4926,4978,5152) but nothing beyond that log line pages an operator, retries with priority, or caps how many times the SAME split can recur silently-except-for-a-log-line — tracked as its own gap, card x3hwqqb.",
+      "ack": {
+        "uncapped-retry": "#2989"
       }
     },
     {
@@ -200,6 +234,18 @@
       "retries": null,
       "escalation": null,
       "notes": "withNumberingLock is a TTL-bounded mutex (scripts/merge-ai-prs.mjs:5088); on contention it proceeds WITHOUT the lock rather than waiting (scripts/merge-ai-prs.mjs:5178, 'numbered without it ... the #2318 duplicate-NNN tripwire is the backstop') — the tripwire is the ONLY thing that catches a real collision, and only on a LATER pass. resolve-on-land totality (scripts/merge-ai-prs.mjs:5143-5164) reports every landed item into exactly one of resolved/already-resolved/deferred/failed, so a withheld flip is at least visible in the pass's own stderr/--json — never a fully silent drop."
+    },
+    {
+      "id": "couple-split-detected",
+      "label": "Cross-repo couple split: impl half landed, its WE carrier's merge then failed",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": null,
+      "escalation": null,
+      "notes": "The couple-gate's own residual it cannot close (see couple-gate's notes): reached only when a carrier PASSED carrierPreflight (or already had merged impls) and its OWN `gh pr merge` still failed right after — a real, rare race (two repos, one write each, ~1s apart). Reported into the pass's JSON `coupleSplit` array plus one loud stderr line (scripts/merge-ai-prs.mjs:4924-4926) — that IS the whole escalation today; nothing pages an operator, nothing retries this specific carrier with priority, and nothing caps how many passes the SAME split can recur, each producing only another log line. The carrier itself still rejoins the ordinary merge-attempt retry loop next sweep (this state is an ADDITIONAL classification layered on that failure, not a replacement terminus) — tracked as its own gap, card x3hwqqb.",
+      "ack": {
+        "silent-failure": "x3hwqqb"
+      }
     },
     {
       "id": "pr-landed",
@@ -284,17 +330,52 @@
     },
     {
       "from": "pass-running",
+      "to": "rebase-drop-attempt",
+      "on": "child pass reads the candidate set; a verdict is CONFLICTING/BEHIND, or landable but still carrying the transient manifest (#2183), and REBASE_DROP is enabled",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:4084-4089"
+    },
+    {
+      "from": "pass-running",
       "to": "merge-candidate-evaluation",
-      "on": "child pass reads the ready-to-merge/review:accepted candidate set",
+      "on": "child pass reads the ready-to-merge/review:accepted candidate set; verdicts not eligible for rebase-drop go straight to evaluation",
       "kind": "normal",
       "cite": "plateau:tools/drain-daemon/daemon.mjs:288"
     },
     {
-      "from": "merge-candidate-evaluation",
-      "to": "merge-attempt",
-      "on": "decision === 'merge'",
+      "from": "rebase-drop-attempt",
+      "to": "merge-candidate-evaluation",
+      "on": "rebased onto main, or already current/manifest-free — decision flipped to 'merge', proceeds into this SAME pass's ordinary evaluation",
       "kind": "normal",
-      "cite": "scripts/merge-ai-prs.mjs:584-597"
+      "cite": "scripts/merge-ai-prs.mjs:4132-4168"
+    },
+    {
+      "from": "rebase-drop-attempt",
+      "to": "queued-for-merge",
+      "on": "skip: a real conflict beyond the content resolver's safe (non-overlapping) hunks, or a remote repo with no sibling clone provisioned — left for the PR's author, retried next sweep",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:4112,4169-4171"
+    },
+    {
+      "from": "merge-candidate-evaluation",
+      "to": "couple-gate",
+      "on": "decision === 'merge' — every ready candidate passes through the couple-atomicity gate; a plain (non-couple) PR is never held there",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:584-597,4869"
+    },
+    {
+      "from": "couple-gate",
+      "to": "merge-attempt",
+      "on": "not a couple member, or a couple member whose partner clears (already merged this pass, or lands right after it in the same contiguous group)",
+      "kind": "normal",
+      "cite": "scripts/lib/couple-cascade.mjs:62-140"
+    },
+    {
+      "from": "couple-gate",
+      "to": "queued-for-merge",
+      "on": "held: partner half not landing this pass (or its own carrier preflight failed) — decision downgraded to skip, re-evaluated fresh next sweep",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:4877,4886"
     },
     {
       "from": "merge-candidate-evaluation",
@@ -337,6 +418,13 @@
       "on": "merge failed (race lost, or a real fault) — retried next sweep",
       "kind": "failure",
       "cite": "scripts/merge-ai-prs.mjs:4980-4997"
+    },
+    {
+      "from": "merge-attempt",
+      "to": "couple-split-detected",
+      "on": "the failing PR is a WE carrier whose impl half(s) already merged THIS pass — an ADDITIONAL classification alongside the ordinary failure above, never a replacement for it",
+      "kind": "failure",
+      "cite": "scripts/merge-ai-prs.mjs:4924-4926,4978,5152"
     },
     {
       "from": "post-merge-housekeeping",

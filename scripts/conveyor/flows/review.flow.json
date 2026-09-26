@@ -3,7 +3,7 @@
   "title": "Review (job model)",
   "summary": "The review daemon ticks every 120s, discovers PRs owed an independent review (or re-armed after a fix), and dispatches each as a detached, deterministic job (not a Claude wrapper session): claim a job slot, acquire a lane, run one review-loop-cli.mjs round under a hard 45-minute timeout, classify the outcome, swap the PR's review:* label, release the lane, and — only after that arc fully finishes — run advisory non-Claude extra seats. Round-cap exhaustion, a review:human park, an infra timeout, and a hard-killed job are real states with weak or missing ownership; see the notes on round-cap-exhausted, human-hold, blocked-on-infra and job-died-silently.",
   "derivedFrom": {
-    "commit": "00413a56c",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
@@ -32,6 +32,7 @@
     "scripts/conveyor/review-status-tag.mjs",
     "scripts/conveyor/claude-auth-health.mjs",
     "scripts/conveyor/hung-session.mjs",
+    "scripts/conveyor/session-reaper.mjs",
     "scripts/review-runner.mjs",
     "scripts/lib/review-runner-core.mjs",
     "scripts/conveyor/health-smells/daemon-owed-no-dispatch.mjs",
@@ -114,7 +115,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "Not a wait state — every 120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/review-daemon.mjs:114) re-runs reconcile-pass.mjs's runReconcilePass (scripts/conveyor/reconcile-pass.mjs:368-386) through reconcile-core.mjs's planReconcile (scripts/conveyor/reconcile-core.mjs:781-1271), which re-derives the whole plan fresh from PR labels + live sessions/jobs each time. A PR can sit here indefinitely if lanes are starved (deferredForLanes) or Claude auth is broken (deferredForAuth) — both are 'stays owed, retried next tick', never a distinct backlog."
+      "notes": "Not a wait state — every 120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/review-daemon.mjs:114) re-runs reconcile-pass.mjs's runReconcilePass (scripts/conveyor/reconcile-pass.mjs:368-386) through reconcile-core.mjs's planReconcile (scripts/conveyor/reconcile-core.mjs:781-1271), which re-derives the whole plan fresh from PR labels + live sessions/jobs each time. A PR can sit here indefinitely if lanes are starved (deferredForLanes) or Claude auth is broken (deferredForAuth) — both are 'stays owed, retried next tick', never a distinct backlog. Live-caught 2026-09-26: the tick's `reap-finished-sessions` step now runs BEFORE `discover-owed-prs` (previously after) — see that step's own notes. Since the same day, every review:pending/ci:failed PR this tick does NOT hand to dispatch also gets a per-PR reason logged (explainPendingNotDispatched, skills-src/conveyor/review-daemon.mjs:145-177,341-344), drawn straight from THIS tick's own reconcile plan (dispatch/refusals) — pure observability, no new fact/state; a PR previously silent behind the tick's aggregate 'N owed' count now gets its own `<repo>#<pr> held, no review dispatched — <reasons>` log line (skills-src/conveyor/review-daemon.mjs:546)."
     },
     {
       "id": "claude-auth-paused",
@@ -576,6 +577,24 @@
     }
   ],
   "steps": [
+    {
+      "id": "reap-finished-sessions",
+      "state": "review-owed",
+      "actor": "review-daemon",
+      "does": "runSessionReaperPass over `claude agents --json`: `claude stop` every terminal-state session not already recorded in the on-disk reaped ledger, skipping anything whose state is already `stopped`",
+      "cite": "skills-src/conveyor/review-daemon.mjs:518-527; scripts/conveyor/session-reaper.mjs:1944-1948,1979-1987,2066,2077-2093",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude"
+        }
+      ],
+      "provides": [],
+      "notes": "Live-caught 2026-09-26 (skills-src/conveyor/review-daemon.mjs:518-521): moved to run BEFORE discover-owed-prs (previously the tick ran discovery first, reaping only after) so a hung fix/ci-heal session bound to a review:pending PR that THIS reap just stopped is seen as free by THIS SAME tick's own discovery, not ~120s later on the next one. Best-effort/non-fatal — a reap failure is logged and swallowed, never blocks discovery (onFailure loops back into the same review-owed state the next step already runs in). The on-disk reaped-session ledger (scripts/conveyor/session-reaper.mjs#makeReapedLedger/resolveReapedLedgerFile, ~/.claude/we-session-reaper/reaped.json, machine-wide) fixes a SEPARATE incident found the same day: a terminal (`done`/`failed`) session's state never changes after `claude stop`, so without a memory of what was already stopped, every tick re-issued `claude stop` against every already-finished session it could still see listed (measured live: 1,228 of 1,501 scanned, ~0.7s each — a 2-minute tick). ALREADY_STOPPED_STATES (session-reaper.mjs:161) plus the ledger now skip both re-classifying and re-stopping a session an earlier tick already finished; the ledger is pruned each pass to the ids the listing still shows (retainOnly), so it stays bounded by the listing's own size, never growing unbounded.",
+      "ack": {}
+    },
     {
       "id": "discover-owed-prs",
       "state": "review-owed",
