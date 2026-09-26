@@ -3,10 +3,11 @@ bornAs: xilx617
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 blockedBy: ["4220"]
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-note-comment.mjs", "we:scripts/operations/completion-store.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
 ---
 
