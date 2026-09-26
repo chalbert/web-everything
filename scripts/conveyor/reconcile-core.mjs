@@ -162,7 +162,10 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *
  *   `stood-down`         — a fixer already stopped to ask here (terminal; a person clears it).
  *   `no-findings`        — nothing to fix; a fixer would invent work.
- *   `cap-exhausted`      — the PR's own durable attempt count is at or above the cap.
+ *   `cap-exhausted`      — the PR's own durable attempt count is at or above the cap. For the `ci-red` branch
+ *                          specifically (#xznd5za), this ALSO surfaces a `kind:'ci-heal-exhausted'` note —
+ *                          mirroring `awaiting-permission`'s own "refuses AND surfaces" treatment below — so a
+ *                          capped, still-red required check is never merely one more line in the refusal list.
  *   `live-process`       — a bound session has a LIVE pid. Something is already working this PR.
  *   `awaiting-permission`— a bound session is blocked on a permission prompt: the fifth state, neither alive nor
  *                          dead. Refuses AND surfaces, because nobody is coming to answer it.
@@ -864,6 +867,20 @@ export function planReconcile({
         refuse('cap-exhausted', {
           ...withPhase, attempts: ciHealAttempts, cap: ciHealCap,
           why: `the PR's own durable CI-heal count is ${ciHealAttempts} against a cap of ${ciHealCap} — auto-heal is exhausted here and a person must take it`,
+        });
+        // #xznd5za (epic #3383/#4075) — a capped `ci-red` PR must never be MERELY refused. `cap-exhausted` was
+        // already the one dead end this whole ci-red branch could reach — a red required check with nothing
+        // live working it, past its own attempt cap — and, unlike `awaiting-permission` above (the ONE other
+        // refusal this file already promotes to a surfaced `note`), it was landing in the `refusals` array only:
+        // printed once per tick beside every other refusal (`reconcile-pass.mjs#formatReport`) and otherwise
+        // indistinguishable from an ordinary, expected `nothing-owed`. A PR that has burned every auto-heal
+        // attempt is exactly the case a person must be pulled in for, so it gets the SAME surfaced-note
+        // treatment `awaiting-permission` already gets, with the literal phrase an operator (or an escalation
+        // reader grepping for it) can search on.
+        notes.push({
+          kind: 'ci-heal-exhausted', prNumber, attempts: ciHealAttempts, cap: ciHealCap,
+          text: `PR #${prNumber}: ci-heal attempts exhausted (${ciHealAttempts}/${ciHealCap}) — auto-heal cannot`
+            + ' repair this required-check failure any further; a person must take it over',
         });
       } else {
         dispatch.push({
