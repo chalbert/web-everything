@@ -16,6 +16,9 @@ import {
   runIdFromDetailsUrl, isRunHung, buildHungCandidates, planHungCiRecoveries,
   DEFAULT_MAX_REBASE_RETRIES_PER_SHA, REBASE_ONTO_MAIN_COMMENT_MARKER,
   countRebaseOntoMainComments, buildRebaseOntoMainComment,
+  DEFAULT_MISSING_RUN_THRESHOLD_MS, DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA, MISSING_RUN_COMMENT_MARKER,
+  buildMissingRunCandidates, isMissingRunOverdue, planMissingRunRecoveries,
+  countMissingRunComments, buildMissingRunComment,
 } from '../main-red-recovery.mjs';
 
 // ── fixtures — measured off chalbert/web-everything, 2026-09-25 ────────────────────────────────────────────────
@@ -423,5 +426,151 @@ describe('main-red-recovery — planHungCiRecoveries', () => {
     const candidates = [{ prNumber: 5, headSha: 'x', runId: 1, startedAt: '2026-09-25T16:00:00Z', jobName: null, hungAttemptsForJob: 5 }];
     const plan = planHungCiRecoveries({ candidates, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'hung-cancel-rerun' })]);
+  });
+});
+
+// ── MISSING-CI-RUN RECOVERY (xi4od2p, #4075/#3383) ──────────────────────────────────────────────────────────
+// Fixture is PR chalbert/web-everything#2729's REAL, live-measured state, 2026-09-26: `gh pr view 2729 --json
+// statusCheckRollup` carries ONLY three `review-gate` CheckRun entries (all `SUCCESS`) — zero entries for
+// `test`/`smoke`/`daemon-soak`, its repo's real required contexts (`gh api repos/.../branches/main/protection
+// --jq '.required_status_checks.contexts'` → `["test","smoke","daemon-soak"]`). Its head
+// 19889a0edecfdf25794d39a868ff48f0860c6d39's own commit committedDate is 2026-09-26T14:20:26Z (`gh pr view 2729
+// --json commits`).
+describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue / planMissingRunRecoveries (PR #2729 fixture)', () => {
+  const REVIEW_GATE_ROLLUP = [
+    { __typename: 'CheckRun', name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-26T15:30:26Z' },
+    { __typename: 'CheckRun', name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-26T15:30:27Z' },
+    { __typename: 'CheckRun', name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: '2026-09-26T15:40:20Z' },
+  ];
+  const PR_2729 = {
+    number: 2729,
+    headRefName: 'lane/4166-check-standards-reference-checks-run-on-changed-linked-files',
+    headRefOid: '19889a0edecfdf25794d39a868ff48f0860c6d39',
+    statusCheckRollup: REVIEW_GATE_ROLLUP,
+  };
+  const REQUIRED_CONTEXTS = ['test', 'smoke', 'daemon-soak'];
+  const HEAD_COMMITTED_AT = '2026-09-26T14:20:26Z';
+  const NOW = Date.parse('2026-09-26T17:23:00Z'); // ~13:23 ET (EDT, UTC-4) — well past the 10min threshold
+
+  it('RED before the fix existed: buildHungCandidates (the pre-existing pass) skips #2729 entirely — zero rollup entries for the CI workflow at all', () => {
+    expect(buildHungCandidates([PR_2729], { requiredCheck: 'test', workflowName: 'CI' })).toEqual([]);
+  });
+
+  it('a PR with zero rollup entries for EVERY required context is a candidate', () => {
+    const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS });
+    expect(candidates).toEqual([{
+      prNumber: 2729, headRefName: PR_2729.headRefName, headSha: PR_2729.headRefOid, baseRefName: null,
+    }]);
+  });
+
+  it('a PR that has reported for even ONE required context is NOT a candidate — that population belongs to the other passes', () => {
+    const partiallyReported = {
+      ...PR_2729,
+      statusCheckRollup: [...REVIEW_GATE_ROLLUP, { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS' }],
+    };
+    expect(buildMissingRunCandidates([partiallyReported], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([]);
+  });
+
+  it('a PR whose required checks HAVE reported is never a candidate, whatever their outcome', () => {
+    const green = { ...PR_2729, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
+    expect(buildMissingRunCandidates([green], { requiredContexts: ['test'] })).toEqual([]);
+  });
+
+  it('an explicitly EMPTY required-context set yields no candidates — never substitutes the default (PR #2740 review)', () => {
+    expect(buildMissingRunCandidates([PR_2729], { requiredContexts: [] })).toEqual([]);
+  });
+
+  it('UNKNOWN required contexts (null) flags only a PR with no CI-workflow check at all — never a partially reported one', () => {
+    const ciSmoke = { __typename: 'CheckRun', name: 'smoke', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' };
+    expect(buildMissingRunCandidates([{ ...PR_2729, statusCheckRollup: [ciSmoke] }], { requiredContexts: null })).toEqual([]);
+    expect(buildMissingRunCandidates([PR_2729], { requiredContexts: null })).toEqual([expect.objectContaining({ prNumber: 2729 })]);
+  });
+
+  it('the missing-run marker records a fallen-back refresh outcome', () => {
+    expect(buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'workflow-dispatch', refresh: 'skip', refreshError: 'conflict' }))
+      .toContain('triggered CI via workflow-dispatch (refresh onto main first: skip — conflict)');
+  });
+
+  it('isMissingRunOverdue: false before the threshold, true past it, false on an unreadable timestamp', () => {
+    expect(isMissingRunOverdue({ headCommittedAt: HEAD_COMMITTED_AT, now: NOW, thresholdMs: DEFAULT_MISSING_RUN_THRESHOLD_MS })).toBe(true);
+    expect(isMissingRunOverdue({ headCommittedAt: '2026-09-26T17:20:00Z', now: NOW, thresholdMs: DEFAULT_MISSING_RUN_THRESHOLD_MS })).toBe(false);
+    expect(isMissingRunOverdue({ headCommittedAt: 'not-a-date', now: NOW })).toBe(false);
+  });
+
+  it('GREEN after the fix: planMissingRunRecoveries dispatches trigger-ci for #2729, preferring update-branch when it is behind main', () => {
+    const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS })
+      .map((c) => ({ ...c, headCommittedAt: HEAD_COMMITTED_AT, aheadBy: 3, triggerAttemptsForSha: 0 }));
+    const plan = planMissingRunRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      prNumber: 2729, kind: 'trigger-ci', preferUpdateBranch: true,
+    })]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('prefers a bare workflow dispatch (preferUpdateBranch: false) once the PR already has main\'s tip (aheadBy: 0)', () => {
+    const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS })
+      .map((c) => ({ ...c, headCommittedAt: HEAD_COMMITTED_AT, aheadBy: 0, triggerAttemptsForSha: 0 }));
+    const plan = planMissingRunRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2729, preferUpdateBranch: false })]);
+  });
+
+  it('refuses not-overdue for a head committed just now', () => {
+    const candidates = [{ prNumber: 1, headSha: 's', headCommittedAt: '2026-09-26T17:22:00Z' }];
+    const plan = planMissingRunRecoveries({ candidates, now: NOW });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 1, kind: 'not-overdue' })]);
+  });
+
+  it('refuses unknown-committed-at rather than guessing when the head commit date could not be read', () => {
+    const candidates = [{ prNumber: 1, headSha: 's', headCommittedAt: null }];
+    const plan = planMissingRunRecoveries({ candidates, now: NOW });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 1, kind: 'unknown-committed-at' })]);
+  });
+
+  it('caps at DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA — a head sha that keeps failing to produce a real run is handed to a human/ci-heal, not retried forever', () => {
+    const candidates = [{
+      prNumber: 2729, headSha: PR_2729.headRefOid, headCommittedAt: HEAD_COMMITTED_AT,
+      triggerAttemptsForSha: DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA,
+    }];
+    const plan = planMissingRunRecoveries({ candidates, now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2729, kind: 'missing-run-cap-exhausted' })]);
+  });
+});
+
+describe('main-red-recovery — countMissingRunComments / buildMissingRunComment', () => {
+  const AUTOMATION = { login: 'web-everything' };
+
+  it('counts a trusted marker scoped to the given head sha, ignoring an unrelated sha', () => {
+    const comments = [
+      { body: buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'update-branch' }), author: AUTOMATION },
+      { body: buildMissingRunComment({ headSha: 'sha-b', ok: true, action: 'workflow-dispatch' }), author: AUTOMATION },
+    ];
+    expect(countMissingRunComments(comments, 'sha-a')).toBe(1);
+    expect(countMissingRunComments(comments, 'sha-b')).toBe(1);
+    expect(countMissingRunComments(comments, 'sha-c')).toBe(0);
+  });
+
+  it('counts EVERY attempt regardless of outcome — a persistently failing trigger must still trip the cap', () => {
+    const comments = [
+      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'workflow-dispatch', error: 'workflow not found' }), author: AUTOMATION },
+      { body: buildMissingRunComment({ headSha: 'sha-a', ok: false, action: 'workflow-dispatch', error: 'workflow not found' }), author: AUTOMATION },
+    ];
+    expect(countMissingRunComments(comments, 'sha-a')).toBe(2);
+  });
+
+  it('never counts a forged marker from an untrusted login', () => {
+    const comments = [{ body: buildMissingRunComment({ headSha: 'sha-a' }), author: { login: 'some-rando' } }];
+    expect(countMissingRunComments(comments, 'sha-a')).toBe(0);
+  });
+
+  it('non-array input is 0, never throws', () => {
+    expect(countMissingRunComments(null)).toBe(0);
+    expect(countMissingRunComments(undefined)).toBe(0);
+  });
+
+  it('the built comment always leads with the stable marker, whatever the outcome', () => {
+    expect(buildMissingRunComment({ headRefName: 'lane/x', headSha: 'sha-a', ok: true, action: 'update-branch' }))
+      .toMatch(new RegExp(`^${MISSING_RUN_COMMENT_MARKER.replace(/[()]/g, '\\$&')}`));
+    expect(buildMissingRunComment({ ok: false, action: 'workflow-dispatch', error: 'boom' })).toContain('boom');
   });
 });

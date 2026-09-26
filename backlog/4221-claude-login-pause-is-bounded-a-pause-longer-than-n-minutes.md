@@ -1,9 +1,10 @@
 ---
+bornAs: x2h9na8
 kind: story
 size: 2
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/conveyor/claude-auth-health.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,11 +12,11 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Claude-login pause is bounded: a pause longer than N minutes notifies the operator (flow gaps, claude-auth-health)
 
-claude-auth-health: record when the fix/review dispatch gate first closed; past a bound (e.g. 20 min) raise a one-shot operator notice via the health-watch notify path. Clears fix login-broken-paused and review claude-auth-paused (xwo3j0l).
+claude-auth-health: record when the fix/review dispatch gate first closed; past a bound (e.g. 20 min) raise a one-shot operator notice via the health-watch notify path. Clears fix login-broken-paused and review claude-auth-paused (4237).
 
 ## Slice
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - fix login-broken-paused (unbounded-wait)

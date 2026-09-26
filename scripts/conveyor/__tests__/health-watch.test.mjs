@@ -160,7 +160,17 @@ describe('probeAuthExpiredSessions', () => {
 
   it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
     const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
-    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
+    expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1', status: null, waitingFor: null }]);
+  });
+
+  // #xrv69j6 — `status`/`waitingFor` carried through too: the real shape `claude agents --json` reports for a
+  // session blocked on Claude Code's own unanswerable permission prompt (live case: `fix-2735`), and the
+  // `dispatch-permission-stall` health smell's only input.
+  it('probeAgents carries status/waitingFor through — the dispatch-permission-stall smell\'s own input', () => {
+    const exec = () => JSON.stringify([{ name: 'fix-2735', state: 'blocked', status: 'waiting', waitingFor: 'permission prompt', kind: 'background', startedAt: '2026-09-26T17:28:00.000Z', cwd: '/x', sessionId: 's-2' }]);
+    const [row] = probeAgents({ exec });
+    expect(row.status).toBe('waiting');
+    expect(row.waitingFor).toBe('permission prompt');
   });
 });
 

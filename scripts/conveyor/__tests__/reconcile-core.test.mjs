@@ -32,7 +32,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
-  markAuthExpiredSessions, CI_HEAL_ROUND_CAP,
+  markAuthExpiredSessions, markIdleFinishedSessions, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
@@ -1024,7 +1024,9 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
     const plan = planReconcile({ prs: [pr1563({ comments: [finding(), ...shared] })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 5 })]);
-    expect(plan.refusals[0].capKind).toBeUndefined();
+    // xilx617 — the generic REFUSAL 3 now names its OWN population (`capKind: OWED[phase]`) so its
+    // `round-cap-exhausted` note can say WHICH auto-repair rounds were exhausted; a `bounced` phase owes `fix`.
+    expect(plan.refusals[0].capKind).toBe('fix');
   });
 
   it('`countConflictFixComments` narrows on the leading line, like every sibling counter', async () => {
@@ -1257,19 +1259,23 @@ describe('case 5i — STACKED-BASE CONFLICT dispatch, a `conflicted` PR whose ba
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', mode: 'stacked-rebase', attempts: CONFLICT_FIX_ROUND_CAP - 1 })]);
   });
 
-  it(`AT the cap (${CONFLICT_FIX_ROUND_CAP} durable conflict-fix comments) the PR is refused \`cap-exhausted\`, capKind \`conflict-fix\` — never \`owed-elsewhere\``, () => {
+  it(`AT the cap (${CONFLICT_FIX_ROUND_CAP} durable conflict-fix comments) the PR is refused \`cap-exhausted\`, capKind \`stacked-rebase\` — never \`owed-elsewhere\``, () => {
+    // xilx617 — `capKind` is now `stacked-rebase` here, DISTINCT from the plain conflict-fix bounce's
+    // `conflict-fix` above, even though both share the identical cap/counter (see this branch's own docblock) —
+    // the `round-cap-exhausted` note needs to say WHICH population is exhausted, and "a stacked PR's rebase
+    // against its own base" reads differently from "a bounced PR's conflict resolution against main".
     const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [prStacked({ comments })], agents: [], now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({
-      kind: 'cap-exhausted', prNumber: 2578, attempts: CONFLICT_FIX_ROUND_CAP, cap: CONFLICT_FIX_ROUND_CAP, capKind: 'conflict-fix',
+      kind: 'cap-exhausted', prNumber: 2578, attempts: CONFLICT_FIX_ROUND_CAP, cap: CONFLICT_FIX_ROUND_CAP, capKind: 'stacked-rebase',
     })]);
   });
 
   it('a caller-supplied `conflictFixCap` overrides the default here too', () => {
     const plan = planReconcile({ prs: [prStacked({ comments: [{ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }] })], agents: [], now: NOW, conflictFixCap: 1 });
     expect(plan.dispatch).toHaveLength(0);
-    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'stacked-rebase' })]);
   });
 
   it('REGRESSION — a `conflicted` PR whose base IS `main` (or unknown) is UNCHANGED: still `owed-elsewhere`', () => {
@@ -1602,6 +1608,60 @@ describe('markAuthExpiredSessions + assessLiveness — Claude auth-expired detec
     const plan = planReconcile({ prs: [pr], agents: [{ ...blockedRow, name: 'ci-heal-2712', pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2712 });
+  });
+});
+
+describe('markIdleFinishedSessions + assessLiveness — idle-turn-ended backstop (#4075/xg7m2wq, live incident PR #2724, 2026-09-26)', () => {
+  // ci-heal-2724's real shape: finished ~13:50 ET ("rebased PR #2724 onto main and pushed; no code change was
+  // needed") but still listed `working` at 14:10 — the fix-dispatch daemon logged `reconcile-refused
+  // live-process` for it the whole time, because `fix-agent-ci-brief.md` never reported completion.
+  const T0 = Date.parse('2026-09-26T13:50:00.000Z');
+  const workingRow = { name: 'ci-heal-2724', state: 'working', status: 'idle', startedAt: T0, pid: 5151, cwd: '/Users/x/workspace/.operations/dispatch/e265b052', sessionId: 's-2724' };
+  const idleFinishedFor = () => ({ finished: true, reason: 'turn-ended-idle' });
+
+  it('THE LIVE CASE: a `working` ci-heal row whose transcript shows the turn ended and idle > threshold → idleFinished, PR freed', () => {
+    const [a] = markIdleFinishedSessions([workingRow], idleFinishedFor, T0 + 20 * 60_000, 10 * 60_000);
+    expect(a.idleFinished).toBe(true);
+    expect(a.idleFinishedReason).toBe('turn-ended-idle');
+    expect(assessLiveness([{ agent: a, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('overrides a LIVE pid — the whole point of this axis is to catch a session nobody ever stopped', () => {
+    const [a] = markIdleFinishedSessions([workingRow], idleFinishedFor, T0 + 20 * 60_000, 10 * 60_000);
+    expect(assessLiveness([{ agent: { ...a, pidAlive: true }, cwd: '/c', sha: '' }])).toBeNull();
+  });
+
+  it('a resolver that answers not-finished, throws, or is absent leaves the row untouched', () => {
+    expect(markIdleFinishedSessions([workingRow], () => ({ finished: false }), T0, 10 * 60_000)[0]).toBe(workingRow);
+    expect(markIdleFinishedSessions([workingRow], () => { throw new Error('unreadable transcript'); }, T0, 10 * 60_000)[0]).toBe(workingRow);
+    expect(markIdleFinishedSessions([workingRow], () => null, T0, 10 * 60_000)[0]).toBe(workingRow);
+  });
+
+  it('a row already `state: done`, `selfReportedDone`, `hung`, or `authExpired` is never re-classified — the least specific axis runs last', () => {
+    const done = { ...workingRow, state: 'done' };
+    const selfReported = { ...workingRow, selfReportedDone: true };
+    const hung = { ...workingRow, hung: true };
+    const authExpired = { ...workingRow, authExpired: true };
+    expect(markIdleFinishedSessions([done], idleFinishedFor, T0, 10 * 60_000)[0]).toBe(done);
+    expect(markIdleFinishedSessions([selfReported], idleFinishedFor, T0, 10 * 60_000)[0]).toBe(selfReported);
+    expect(markIdleFinishedSessions([hung], idleFinishedFor, T0, 10 * 60_000)[0]).toBe(hung);
+    expect(markIdleFinishedSessions([authExpired], idleFinishedFor, T0, 10 * 60_000)[0]).toBe(authExpired);
+  });
+
+  it('end to end: a red-CI PR bound only to an idle-finished ci-heal session is owed a fresh heal again', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2724, labels: [], statusCheckRollup: redRollup, comments });
+    const agents = markIdleFinishedSessions([workingRow], idleFinishedFor, T0 + 20 * 60_000, 10 * 60_000);
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2724 })]);
+  });
+
+  it('the same PR with the RAW listing (never marked idle-finished) stays refused as live-process — THE LIVE BUG', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const pr = pr1563({ number: 2724, labels: [], statusCheckRollup: redRollup, comments });
+    const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2724 });
   });
 });
 

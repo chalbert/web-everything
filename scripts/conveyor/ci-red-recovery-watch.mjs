@@ -62,12 +62,14 @@ import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { countTrustedLeadingMarker } from '../lib/marker-authorship.mjs';
-import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
+import { latestRequiredCheck, isRequiredCheckFailed, CI_LIFECYCLE_LABELS } from '../merge-ai-prs.mjs';
 import {
   computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK,
   buildHungCandidates, planHungCiRecoveries, DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
   classifyCiFailureAttribution, countRebaseOntoMainComments, buildRebaseOntoMainComment,
   DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
+  DEFAULT_REQUIRED_CONTEXTS, DEFAULT_MISSING_RUN_THRESHOLD_MS, DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA,
+  buildMissingRunCandidates, planMissingRunRecoveries, countMissingRunComments, buildMissingRunComment,
 } from './main-red-recovery.mjs';
 import { defaultReadMainRuns, defaultReadAheadBy } from './reconcile-pass.mjs';
 import { rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
@@ -85,8 +87,9 @@ export const PR_LIST_LIMIT = 200;
  * @param {{exec?:Function, repo?:string|null}} [o]
  * @returns {Array<object>}
  */
-export function defaultReadOpenPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
-  const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,headRefOid,statusCheckRollup'];
+export function defaultReadOpenPrs({ exec = execFileSyncThrottled, repo = null, extraFields = [] } = {}) {
+  const fields = [...new Set(['number', 'headRefName', 'headRefOid', 'statusCheckRollup', ...extraFields])];
+  const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', fields.join(',')];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
@@ -559,6 +562,224 @@ export function formatHungReport({ dispatch = [], refusals = [], applied = [] } 
   return lines.join('\n');
 }
 
+// ── MISSING-CI-RUN RECOVERY (we:backlog/xi4od2p-*.md, parent #4075/#3383) ──────────────────────────────────────
+// See `we:scripts/conveyor/main-red-recovery.mjs`'s own "MISSING-CI-RUN RECOVERY" section header for the full
+// incident (PR chalbert/web-everything#2729) and why this is a THIRD, disjoint population from the main-red and
+// hung-run passes above: a required check that never even started, never CONCLUDED and never went
+// `IN_PROGRESS`/`QUEUED`. This half owns every real IO the missing-run pass needs: reading the LIVE required
+// context names off branch protection, the one extra per-candidate read (`gh api commits/<sha>` for the head
+// commit's own committed date — `gh pr list` never returns it), the two real triggers (a {@link refreshOntoMain}
+// rebase-and-push, or `gh workflow run`), the durable marker comment, and clearing the stale `checking` label
+// this card's own scope names.
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadRequiredContexts — the LIVE required-check-name set
+ * this pass watches, read off branch protection rather than hardcoded (`GET /repos/{repo}/branches/{branch}/
+ * protection`'s own `required_status_checks.contexts`) — per this card's own scope ("read the required contexts
+ * from branch protection"). Returns `null` (UNKNOWN) on a read failure (e.g. a token without the scope branch
+ * protection needs) or with no `repo` to read — never a substituted default: a guessed set like `['test']` would
+ * classify a PR that has already reported a DIFFERENT required context (`smoke`) as "missing every run" and
+ * trigger CI it does not need (PR #2740 review). An explicitly empty/absent contexts list is preserved as `[]`
+ * (no required context → nothing can be missing). On `null`, {@link buildMissingRunCandidates} falls back to its
+ * narrower name-free "no CI-workflow check at all" test.
+ * @param {{repo?:string|null, branch?:string, exec?:Function}} [o]
+ * @returns {string[]|null}
+ */
+export function defaultReadRequiredContexts({ repo = null, branch = 'main', exec = execFileSyncThrottled } = {}) {
+  if (!repo) return null;
+  try {
+    const out = exec('gh', ['api', `repos/${repo}/branches/${branch}/protection`, '--jq', '.required_status_checks.contexts'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const parsed = JSON.parse(String(out || '').trim() || 'null');
+    if (parsed === null) return [];
+    return Array.isArray(parsed) ? parsed.filter((n) => typeof n === 'string' && n) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadHeadCommittedAt — the one extra per-candidate read
+ * this pass needs (`gh pr list` never returns a head commit's own timestamp): the head sha's own commit date,
+ * read ONLY for a PR {@link buildMissingRunCandidates} already narrowed to — mirrors every other "pay for it
+ * only when needed" read in this file.
+ * @param {string|null} sha
+ * @param {{repo?:string|null, exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultReadHeadCommittedAt(sha, { repo = null, exec = execFileSyncThrottled } = {}) {
+  if (!sha || !repo) return null;
+  try {
+    const out = exec('gh', ['api', `repos/${repo}/commits/${sha}`, '--jq', '.commit.committer.date'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    return String(out || '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#triggerCiForPr — the ONE real write the missing-run pass
+ * performs. When the PR is behind `main` (`preferUpdateBranch`), refresh it through {@link refreshOntoMain} —
+ * the SAME `rebaseDropManifest` plumbing this file's header mandates — whose push of the rebuilt tip starts a
+ * fresh `pull_request` run AND closes the staleness in one step. NEVER the raw `PUT /pulls/{n}/update-branch`
+ * REST endpoint: that server-side merge reintroduces the `.lane-manifest.json` collision `rebaseDropManifest`
+ * exists to avoid (this file's own header; PR #2740 review). If the refresh pushed nothing (`current`) or could
+ * not rebase (`skip`/`error` — a real conflict, left for a human), fall through to asking GitHub to run the CI
+ * workflow on the PR's own branch (`gh workflow run`, which needs — and `we:.github/workflows/ci.yml` already
+ * declares — a `workflow_dispatch:` trigger), recording the refresh outcome. NEVER an empty-commit push: this
+ * card's own scope limits that alternative to "the product's own push path", which neither exists nor is needed
+ * here.
+ * @param {{prNumber:number, headRefName?:(string|null), baseRefName?:(string|null), preferUpdateBranch?:boolean}} d
+ * @param {{repo?:string|null, exec?:Function, workflowName?:string, refresh?:Function, root?:string,
+ *   defaultBranch?:string}} [o]
+ * @returns {{ok:boolean, action:string, error?:string, refresh?:string, refreshError?:string}}
+ */
+export function triggerCiForPr(d, {
+  repo = null, exec = execFileSyncThrottled, workflowName = DEFAULT_MAIN_WORKFLOW_NAME, refresh = refreshOntoMain,
+  root = resolveLanePoolRepoPath(repo) ?? REPO_ROOT, defaultBranch = 'main',
+} = {}) {
+  const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' };
+  const repoArgs = repo ? ['--repo', repo] : [];
+  const refreshNote = {};
+  // Only a PR whose own base IS `defaultBranch` may be rebased onto it: a STACKED PR (based on another lane)
+  // would get unrelated `main` commits pushed into its branch (PR #2740 review) — it gets the dispatch instead.
+  if (d?.preferUpdateBranch && d?.headRefName && d?.baseRefName === defaultBranch) {
+    const r = refresh(d.headRefName, { base: `origin/${defaultBranch}`, root });
+    if (r.ok && r.action === 'rebased') return { ok: true, action: 'rebase-onto-main' };
+    refreshNote.refresh = r.action;
+    if (r.error) refreshNote.refreshError = r.error;
+  }
+  try {
+    exec('gh', ['workflow', 'run', workflowName, '--ref', String(d?.headRefName ?? ''), ...repoArgs], opts);
+    return { ok: true, action: 'workflow-dispatch', ...refreshNote };
+  } catch (e) {
+    return { ok: false, action: 'workflow-dispatch', error: describeExecError(e), ...refreshNote };
+  }
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultPostMissingRunComment — post the durable marker comment
+ * ({@link buildMissingRunComment}) after EVERY missing-run trigger attempt, success or failure — mirrors
+ * {@link defaultPostRebaseComment}'s own discipline exactly.
+ * @param {number} prNumber
+ * @param {{exec?:Function, repo?:string|null, headRefName?:(string|null), headSha?:(string|null),
+ *   ok?:boolean, action?:string, error?:(string|null)}} [o]
+ */
+export function defaultPostMissingRunComment(prNumber, {
+  exec = execFileSyncThrottled, repo = null, headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
+  refresh = null, refreshError = null,
+} = {}) {
+  const argv = ['pr', 'comment', String(prNumber), '--body', buildMissingRunComment({
+    headRefName, headSha, ok, action, error, refresh, refreshError,
+  })];
+  if (repo) argv.push('--repo', repo);
+  exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#clearStaleCheckingLabel — this card's own "fix the `checking`
+ * label so it reflects reality" scope item, narrowly scoped: ONLY for a PR THIS pass's own read already proved
+ * has zero required-check rollup entries at all (never re-derives that proof, and never touches
+ * `we:scripts/merge-ai-prs.mjs#lifecycleLabelFromCiTruth`'s ratified 4-state taxonomy or any other caller of
+ * it). `checking`'s own label description (#2281) is "Required checks are still running — CI truth not yet
+ * known", which is false while no run has ever even started; removing it here corrects THIS pass's own narrow
+ * true positive, not a taxonomy change. The label is re-applied correctly by the EXISTING label reconciler on
+ * its own next tick, once the trigger above gives it a real, in-flight check to read.
+ * @param {number} prNumber
+ * @param {{repo?:string|null, exec?:Function, currentLabels?:string[]}} [o]
+ * @returns {boolean} true iff the label was present and a removal was attempted.
+ */
+export function clearStaleCheckingLabel(prNumber, { repo = null, exec = execFileSyncThrottled, currentLabels = [] } = {}) {
+  if (!currentLabels.includes(CI_LIFECYCLE_LABELS.checking)) return false;
+  const argv = ['pr', 'edit', String(prNumber), '--remove-label', CI_LIFECYCLE_LABELS.checking];
+  if (repo) argv.push('--repo', repo);
+  exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  return true;
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepMissingRunRecovery — THE IO SHELL for the missing-run pass
+ * (xi4od2p, #4075/#3383). Mirrors {@link sweepCiRedRecovery}/{@link sweepHungCiRecovery}'s own read/plan/act
+ * shape and injectability exactly — every reader/writer is injectable so the whole sweep is exercisable with no
+ * network and no credential.
+ * @param {{repo?:string|null, apply?:boolean, defaultBranch?:string, readOpenPrs?:Function,
+ *   readRequiredContexts?:Function, readHeadCommittedAt?:Function, readAheadBy?:Function, readComments?:Function,
+ *   trigger?:Function, postComment?:Function, clearLabel?:Function, thresholdMs?:number, maxRetriesPerSha?:number,
+ *   now?:number}} [o]
+ * @returns {{dispatch:Array<object>, refusals:Array<object>, applied:Array<object>}}
+ */
+export function sweepMissingRunRecovery({
+  repo = null, apply = false, defaultBranch = 'main',
+  readOpenPrs = defaultReadOpenPrs, readRequiredContexts = defaultReadRequiredContexts,
+  readHeadCommittedAt = defaultReadHeadCommittedAt, readAheadBy = defaultReadAheadBy,
+  readComments = defaultReadPrComments, trigger = triggerCiForPr, postComment = defaultPostMissingRunComment,
+  clearLabel = clearStaleCheckingLabel, thresholdMs = DEFAULT_MISSING_RUN_THRESHOLD_MS,
+  maxRetriesPerSha = DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA, now = Date.now(),
+} = {}) {
+  const prs = readOpenPrs({ repo, extraFields: ['labels', 'baseRefName'] });
+  // `null` (UNKNOWN — the protection read failed, as it does for the daemon's App token) is passed through as-is:
+  // {@link buildMissingRunCandidates} then uses its narrower "no CI-workflow check at all" test rather than a
+  // guessed name set (PR #2740 review).
+  const requiredContexts = readRequiredContexts({ repo, branch: defaultBranch });
+  const rawCandidates = buildMissingRunCandidates(prs, { requiredContexts: requiredContexts ?? null });
+  const prByNumber = new Map((Array.isArray(prs) ? prs : []).map((pr) => [Number(pr?.number), pr]));
+  // Every per-candidate extra read below only runs for a PR {@link buildMissingRunCandidates} already narrowed
+  // to (zero required-check rollup entries at all) — mirrors {@link sweepCiRedRecovery}/{@link sweepHungCiRecovery}'s
+  // own "pay for it only when needed" discipline; never one extra `gh` call per ordinary open PR on every tick.
+  const candidates = rawCandidates.map((c) => {
+    const headCommittedAt = readHeadCommittedAt(c.headSha, { repo });
+    const aheadBy = c.headSha ? readAheadBy(c.headSha, { repo, base: defaultBranch }) : null;
+    const comments = readComments(c.prNumber, { repo });
+    return {
+      ...c, headCommittedAt, aheadBy, triggerAttemptsForSha: countMissingRunComments(comments, c.headSha),
+    };
+  });
+  const plan = planMissingRunRecoveries({
+    candidates, now, thresholdMs, maxRetriesPerSha,
+  });
+
+  const applied = [];
+  if (apply) {
+    for (const d of plan.dispatch) {
+      const result = trigger(d, { repo, defaultBranch });
+      // Posted on EVERY attempt, success or failure — same discipline as every sibling durable marker in this
+      // file: a permanently-failing trigger must still trip {@link DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA}'s cap.
+      postComment(d.prNumber, {
+        repo, headRefName: d.headRefName, headSha: d.headSha, ok: result.ok, action: result.action, error: result.error ?? null,
+        refresh: result.refresh ?? null, refreshError: result.refreshError ?? null,
+      });
+      // Only clear `checking` once a real run was actually started — a failed trigger leaves no in-flight check,
+      // so {@link clearStaleCheckingLabel}'s own justification does not hold (PR #2740 review).
+      const pr = prByNumber.get(d.prNumber);
+      const currentLabels = (Array.isArray(pr?.labels) ? pr.labels : [])
+        .map((l) => (typeof l === 'string' ? l : l?.name))
+        .filter(Boolean);
+      const labelCleared = result.ok ? clearLabel(d.prNumber, { repo, currentLabels }) : false;
+      applied.push({
+        prNumber: d.prNumber, headRefName: d.headRefName, why: d.why, labelCleared, ...result,
+      });
+    }
+  }
+  return { ...plan, applied };
+}
+
+/** we:scripts/conveyor/ci-red-recovery-watch.mjs#formatMissingRunReport — one line per dispatch/refusal/applied
+ *  result for the missing-run pass, mirroring {@link formatReport}/{@link formatHungReport}'s own shape. */
+export function formatMissingRunReport({ dispatch = [], refusals = [], applied = [] } = {}) {
+  const lines = [`ci-red-recovery-watch (missing-run) — ${dispatch.length} owed a trigger, ${refusals.length} refusal(s), ${applied.length} applied`];
+  for (const d of dispatch) lines.push(`  → trigger-ci PR #${d.prNumber} (${d.headRefName ?? '?'}) — ${d.why}`);
+  for (const r of refusals) if (r.kind !== 'not-overdue') lines.push(`  ✗ ${r.kind} PR #${r.prNumber} — ${r.why}`);
+  for (const a of applied) lines.push(a.ok ? `  ✓ applied: ${a.action} PR #${a.prNumber}${a.labelCleared ? ' (cleared stale checking label)' : ''} — ${a.why ?? '(no reason recorded)'}` : `  ✗ apply ${a.action} PR #${a.prNumber} — ${a.error} (reason it was attempted: ${a.why ?? '(none)'})`);
+  return lines.join('\n');
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -604,11 +825,17 @@ async function main(argv) {
   // manifest entry that already schedules this script (see `we:skills-src/conveyor/daemon-manifest.mjs`'s own
   // `ci-red-recovery-watch` entries) gets the hung-run fix for free rather than needing a second entry.
   const hungResult = sweepHungCiRecovery({ repo: repoFlag, apply: !!flags.apply });
+  // xi4od2p (#4075/#3383) — the missing-run pass runs in the SAME `sweep` invocation too, for the identical
+  // reason the hung-run pass was folded in above rather than given a second CLI verb: both watch the same
+  // open-PR listing for the same reason (a PR wrongly stuck on `checking`), and the daemon-manifest entry that
+  // already schedules this script gets the missing-run fix for free rather than needing a third entry.
+  const missingRunResult = sweepMissingRunRecovery({ repo: repoFlag, apply: !!flags.apply });
   if (flags.json) {
-    writeAllSync(1, `${JSON.stringify({ mainRedRecovery: result, hungRecovery: hungResult })}\n`);
+    writeAllSync(1, `${JSON.stringify({ mainRedRecovery: result, hungRecovery: hungResult, missingRunRecovery: missingRunResult })}\n`);
   } else {
     writeLineSync(2, formatReport(result));
     writeLineSync(2, formatHungReport(hungResult));
+    writeLineSync(2, formatMissingRunReport(missingRunResult));
   }
   process.exitCode = 0;
 }

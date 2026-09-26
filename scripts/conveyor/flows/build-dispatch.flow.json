@@ -28,7 +28,7 @@
     "docs/agent/platform-decisions.md",
     "backlog/3149-surface-stuck-background-agent-permission-prompts-to-the-orc.md",
     "backlog/3296-nothing-reconciles-an-open-pr-against-a-live-process-so-ever.md",
-    "backlog/xr05jjl-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md"
+    "backlog/4220-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md"
   ],
   "entry": {
     "state": "cleared-in-queue",
@@ -137,7 +137,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "THE #2701/#4174 PERMISSION FACT, STATED PLAINLY: the session's cwd is a fresh scratch directory <workspace>/.operations/dispatch/<sessionId>, a sibling of every checkout, never the lane (dispatch-lane-io.mjs:1238-1240,1602-1651). Card #4174 introduced this to stop a stray file dispatched INTO the dispatcher's own clone (measured 125 invariant violations over 50 soak ticks before the fix); its own live-caught cost is recorded in backlog/xr05jjl-...md:15 — 'cwd moved to scratch broke lane edit permission after #2701'. buildAgentArgv's argv has NO --add-dir flag anywhere (grep-confirmed against dispatch-lane-io.mjs), and the file's own doc says so: 'NO PERMISSION FLAGS ARE BAKED IN... a dispatcher that hard-coded --dangerously-skip-permissions would silently widen every agent it ever launches' (dispatch-lane-io.mjs:1137-1141) — extraArgs defaults to [] unless an operator sets WE_DISPATCH_AGENT_ARGS.",
+      "notes": "THE #2701/#4174 PERMISSION FACT, STATED PLAINLY: the session's cwd is a fresh scratch directory <workspace>/.operations/dispatch/<sessionId>, a sibling of every checkout, never the lane (dispatch-lane-io.mjs:1238-1240,1602-1651). Card #4174 introduced this to stop a stray file dispatched INTO the dispatcher's own clone (measured 125 invariant violations over 50 soak ticks before the fix); its own live-caught cost is recorded in backlog/4220-...md:17 — 'cwd moved to scratch broke lane edit permission after #2701'. buildAgentArgv's argv has NO --add-dir flag anywhere (grep-confirmed against dispatch-lane-io.mjs), and the file's own doc says so: 'NO PERMISSION FLAGS ARE BAKED IN... a dispatcher that hard-coded --dangerously-skip-permissions would silently widen every agent it ever launches' (dispatch-lane-io.mjs:1137-1141) — extraArgs defaults to [] unless an operator sets WE_DISPATCH_AGENT_ARGS.",
       "steps": [
         "mint-scratch-cwd",
         "write-scratch-settings",
@@ -584,7 +584,7 @@
       "state": "session-editing-lane",
       "actor": "the spawned builder session (Edit/Write tool)",
       "does": "edits a file under the lane path — a path OUTSIDE the cwd (<scratch>) the session was actually granted at spawn",
-      "cite": "scripts/operations/dispatch-lane-io.mjs:1137-1141 (no --add-dir/permission flags baked in); backlog/xr05jjl-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md:15 ('cwd moved to scratch broke lane edit permission after #2701')",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1137-1141 (no --add-dir/permission flags baked in); backlog/4220-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md:17 ('cwd moved to scratch broke lane edit permission after #2701')",
       "canFail": true,
       "onFailure": "session-permission-stall",
       "assumes": [

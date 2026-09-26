@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
-  isDaemonManagedClone, daemonConveyorStateRoot,
+  isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
 import { gitRun } from '../main-staleness.mjs';
@@ -118,6 +118,15 @@ function passSmoke() {
   return vi.fn(async () => ({ verdict: 'pass', attempts: 1, smoke: { results: [] } }));
 }
 
+// x5wbsbc — a smoke that fails ONLY the candidate carrying `file` (the bad change) and passes every other tree,
+// in particular the last-good control the rebuild now smokes before calling a failure a code regression (a stub
+// that failed EVERY tree would read, correctly, as a broken harness — `smoke-harness-broken`).
+function failsWhenFile(file, result) {
+  return vi.fn(async ({ root }) => (existsSync(join(root, file))
+    ? result
+    : { verdict: 'pass', attempts: 1, smoke: { results: [] } }));
+}
+
 // Short lock waits — no reader ever contends in this suite, so acquireWrite should always succeed immediately,
 // but keep the budget small regardless per the design spec's "use short lock waits in tests".
 const LOCK_OPTS = { waitMs: 2000, pollMs: 20 };
@@ -193,7 +202,9 @@ describe('rebuildClone', () => {
     expect(lines.some((m) => /gave up after 60s/.test(m))).toBe(true);
   });
 
-  it('a smoke that holds the write lock 60s+ raises a smoke-slow alert with per-check timings', async () => {
+  // xa4qo7n: the smoke no longer holds any lock (it runs against a disposable candidate worktree) — this only
+  // checks the informational `smoke-slow` alert still fires and still carries per-check timings.
+  it('a smoke that takes 60s+ raises a smoke-slow alert with per-check timings', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'x.txt', 'x\n'));
     let t = 1_000_000;
@@ -363,12 +374,13 @@ describe('rebuildClone', () => {
   it('smoke "code" restores HEAD, records the rejection, and the next call short-circuits without smoking', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/broken', (dir) => writeFile(dir, 'broken.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: 'lane/broken' }, { env });
+    // pinned: a pinned overlay is never dropped by the plain-main fallback (x5wbsbc), so this exercises the hold.
+    addOverlay(cloneDir, { ref: 'lane/broken', pinned: true }, { env });
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
-    const runSmoke = vi.fn(async () => ({
+    const runSmoke = failsWhenFile('broken.txt', {
       verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const first = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
@@ -380,7 +392,7 @@ describe('rebuildClone', () => {
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
     expect(second.reason).toBe('still-rejected');
-    expect(runSmoke).toHaveBeenCalledTimes(1); // not called again
+    expect(runSmoke).toHaveBeenCalledTimes(2); // candidate + the last-good control (x5wbsbc); not called again
   });
 
   it('smoke "transient" restores HEAD, never records a rejection, and re-runs smoke next call', async () => {
@@ -612,61 +624,106 @@ describe('rebuildClone', () => {
   const OTHER_SHA = 'f'.repeat(40);
   const interruptedAlerts = (result) => result.alerts.filter((a) => a.kind.startsWith('rebuild-interrupted-'));
 
-  it('recovers an interrupted rebuild whose owner died after its reset landed (HEAD == target)', async () => {
+  // xa4qo7n: under this design a `reset --hard` NEVER runs before its candidate's live smoke has already
+  // passed (the smoke runs unlocked, against a disposable worktree, before root is ever touched — see
+  // daemon-rebuild.mjs's file header). So a crash with HEAD == target can only mean the smoke for that EXACT
+  // build already passed; recovery promotes it straight to `adopted` from the inProgress record's own echoed
+  // plan fields, with NO re-smoke (a real behavior change from the pre-fix design, where the smoke ran AFTER
+  // the reset and a crash here really could mean an unverified build on disk — PR #2625's own advisory).
+  it('recovers an interrupted rebuild whose owner died after its reset landed (HEAD == target) — promotes directly, no re-smoke', async () => {
     const { cloneDir, env } = makeFixture();
     const head = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
     seedInProgress(cloneDir, env, {
       pid: deadPid(), host: hostname(), prevHead: OTHER_SHA, target: head, startedAt: new Date().toISOString(),
+      inputsKey: 'seeded-inputs-key', mainSha: head, applied: [], verified: true,
     });
 
+    const runSmoke = passSmoke();
     const result = await rebuildClone({
-      root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS,
+      root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
 
     expect(interruptedAlerts(result).map((a) => a.kind)).toEqual(['rebuild-interrupted-recovered']);
-    // The reset landed but the smoke never ran — so it smokes now instead of adopting as `up-to-date`.
-    expect(result.reason).toBe('verified-after-interrupt');
+    expect(result.reason).toBe('recovered-adopted');
     expect(result.adopted).toBe(true);
+    expect(runSmoke).not.toHaveBeenCalled();
     expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+    expect(readRebuildState(cloneDir, env).adopted?.inputsKey).toBe('seeded-inputs-key');
   });
 
-  // PR #2625 advisory (correctness): a rebuild killed AFTER its `reset --hard <target>` but BEFORE its live smoke
-  // resolved left HEAD == target. The next call used to clear the marker, see `up-to-date`, and adopt the build
-  // without ever smoking it. These replay that crash window with real git.
+  // xa4qo7n / PR #2625 advisory: a rebuild killed AFTER its `reset --hard <target>` but BEFORE its state write
+  // landed leaves HEAD == target with `inProgress` still on disk. Replays that crash window with real git —
+  // the build it crashed onto is, BY THIS DESIGN'S OWN INVARIANT, always one whose smoke already passed (see
+  // the test just above), so recovery never re-smokes it.
   function crashAfterReset(cloneDir, env) {
-    writeFile(cloneDir, 'new-code.txt', 'unsmoked\n');
+    writeFile(cloneDir, 'new-code.txt', 'already-smoked\n');
     gitOk(cloneDir, ['add', '-A']);
-    gitOk(cloneDir, ['commit', '-q', '-m', 'the build the dead rebuild reset onto']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'the build the dead rebuild reset onto (its smoke already passed)']);
     gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
     const target = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD~1']).trim();
     seedInProgress(cloneDir, env, {
       pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString(),
+      inputsKey: 'ik-crash-1', mainSha: target, applied: [], verified: true,
     });
     return { target, prevHead };
   }
 
-  it('crash between reset and smoke: the next call SMOKES the build before adopting it (never adopts unverified)', async () => {
+  it('crash after reset landed but before the state write: the next call promotes it directly, with no re-smoke', async () => {
     const { cloneDir, env } = makeFixture();
     const { target } = crashAfterReset(cloneDir, env);
     const runSmoke = passSmoke();
     const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
-    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(runSmoke).not.toHaveBeenCalled();
     expect(result.adopted).toBe(true);
+    expect(result.reason).toBe('recovered-adopted');
     expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
-    expect(readRebuildState(cloneDir, env).unverified).toBeNull();
+    expect(readRebuildState(cloneDir, env).adopted.inputsKey).toBe('ik-crash-1');
   });
 
-  it('crash between reset and smoke: a failing smoke rolls back to the pre-crash head and records the rejection', async () => {
+  // PR #2731 review: a record written by the PRE-fix code (reset BEFORE smoke) carries no `verified` marker, and
+  // the pre-fix recovery could leave `state.unverified` behind. Either one at HEAD means a build that was NEVER
+  // smoked is on disk — it must be rolled back and re-smoked off-lock, never promoted straight to adopted.
+  function crashAfterLegacyReset(cloneDir, env, { asUnverified = false } = {}) {
+    const { target, prevHead } = crashAfterReset(cloneDir, env);
+    const file = rebuildStatePath(cloneDir, env);
+    const legacy = asUnverified
+      ? { unverified: { head: target, prevHead } }
+      : { inProgress: { pid: deadPid(), host: hostname(), prevHead, target, startedAt: new Date().toISOString() } };
+    writeFileSync(file, JSON.stringify(legacy));
+    return { target, prevHead };
+  }
+
+  it.each([
+    ['a legacy inProgress record (no verified marker)', false],
+    ['a legacy state.unverified record', true],
+  ])('%s at HEAD is never promoted unsmoked — a failing smoke leaves the clone back on prevHead', async (_label, asUnverified) => {
     const { cloneDir, env } = makeFixture();
-    const { prevHead } = crashAfterReset(cloneDir, env);
-    const runSmoke = vi.fn(async () => ({ verdict: 'code', attempts: 1, smoke: { results: [{ name: 'x', ok: false }] } }));
+    const { target, prevHead } = crashAfterLegacyReset(cloneDir, env, { asUnverified });
+    const runSmoke = vi.fn(async () => ({ verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'broken' }] } }));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    // x5wbsbc: the candidate, then the last-good (prevHead) control smoke — never an unsmoked promotion.
+    expect(runSmoke).toHaveBeenCalledTimes(2);
+    expect(result.adopted).toBeFalsy();
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.adopted?.head).not.toBe(target);
+    expect(state.inProgress).toBeNull();
+    expect(state.unverified).toBeNull();
+  });
+
+  it.each([
+    ['a legacy inProgress record (no verified marker)', false],
+    ['a legacy state.unverified record', true],
+  ])('%s at HEAD is re-smoked, then adopted once the smoke passes', async (_label, asUnverified) => {
+    const { cloneDir, env } = makeFixture();
+    const { target } = crashAfterLegacyReset(cloneDir, env, { asUnverified });
+    const runSmoke = passSmoke();
     const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
     expect(runSmoke).toHaveBeenCalledTimes(1);
-    expect(result.reason).toBe('smoke-rejected');
-    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
-    expect(readRebuildState(cloneDir, env).adopted).toBeNull();
-    expect(readRebuildState(cloneDir, env).rejected).not.toBeNull();
+    expect(result.adopted).toBe(true);
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(target);
+    expect(readRebuildState(cloneDir, env).adopted.head).toBe(target);
   });
 
   it('recovers an aged interrupted rebuild from another host when HEAD is back at a clean prevHead', async () => {
@@ -738,6 +795,73 @@ describe('rebuildClone', () => {
     expect(readRebuildState(cloneDir, env).inProgress).toMatchObject({ pid: process.pid });
   });
 
+  // ── single-flight build lease (PR #2731 review) ────────────────────────────────────────────────────────────
+
+  function seedBuilding(cloneDir, env, building) {
+    const file = rebuildStatePath(cloneDir, env);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ building }));
+  }
+
+  it('a live sibling build lease makes a second rebuild yield rebuild-in-progress — no candidate, no smoke', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const sibling = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 60000)'], { stdio: 'ignore' });
+    try {
+      const building = {
+        token: 'sib', pid: sibling.pid, host: hostname(), startedAt: new Date().toISOString(), path: join(env.WE_DAEMON_STATE_DIR, 'sib-candidate'),
+      };
+      seedBuilding(cloneDir, env, building);
+      const runSmoke = passSmoke();
+      const headBefore = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+      const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+      expect(result.reason).toBe('rebuild-in-progress');
+      expect(runSmoke).not.toHaveBeenCalled();
+      expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(headBefore);
+      expect(result.alerts.map((a) => a.kind)).not.toContain('clone-held-stale');
+      expect(readRebuildState(cloneDir, env).building).toEqual(building); // the sibling's lease is left alone
+    } finally {
+      sibling.kill('SIGKILL');
+    }
+  });
+
+  it.each([
+    ['a dead pid', () => ({ pid: deadPid(), startedAt: new Date().toISOString() }), true],
+    ['this process, but no build of ours is running (an unreleased lease)', () => ({ pid: process.pid, startedAt: new Date().toISOString() }), true],
+    // Aged but its owner may still be reading it: taken over, but its tree is left alone (unique paths never collide).
+    ['an aged lease from another host', () => ({ pid: 1, host: 'some-other-host', startedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString() }), false],
+  ])('an abandoned lease (%s) is taken over and the rebuild adopts; its leftover is torn down only if its owner is gone', async (_label, make, removed) => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const leftover = join(env.WE_DAEMON_STATE_DIR, 'abandoned-candidate');
+    mkdirSync(leftover, { recursive: true });
+    seedBuilding(cloneDir, env, {
+      token: 'old', host: hostname(), path: leftover, ...make(),
+    });
+    const runSmoke = passSmoke();
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(result.adopted).toBe(true);
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+    expect(existsSync(leftover)).toBe(!removed);
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
+  });
+
+  it('each attempt smokes its own unique candidate path, and a rejected build releases its lease', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'm.txt', 'x\n'));
+    const roots = [];
+    const runSmoke = vi.fn(async ({ root }) => {
+      roots.push(root);
+      return { verdict: 'transient', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'flake' }] } };
+    });
+    await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(readRebuildState(cloneDir, env).building).toBeNull();
+    await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+    expect(roots).toHaveLength(2);
+    expect(roots[0]).not.toBe(roots[1]);
+    for (const r of roots) expect(existsSync(r)).toBe(false);
+  });
+
   // ── Step 5/6: rollback failures on the live rebuildClone path (injected failing `run`) ──────────────────────
 
   /** The real git runner, except `reset --hard <sha>` for any of `failShas` exits non-zero. With `applyFirst`
@@ -754,57 +878,63 @@ describe('rebuildClone', () => {
   }
   const resetCalls = (run) => run.mock.calls.map((c) => c[0]).filter((a) => a[0] === 'reset').map((a) => a[2]);
 
+  // xa4qo7n: a smoke that fails (or throws) runs against a DISPOSABLE candidate worktree, before `root` is ever
+  // touched — so `root` never moves for a bad smoke, there is nothing to roll back, and no quarantine is
+  // possible from this path any more (unlike the pre-fix design, where `root` had already been reset onto the
+  // candidate BEFORE the smoke ran, so a bad smoke needed a real rollback that could itself fail).
   it.each([
-    ['code', 'smoke-code-rollback-failed'],
-    ['transient', 'smoke-transient-rollback-failed'],
-  ])('a failed rollback after a "%s" smoke verdict quarantines the clone and records no rejection', async (verdict, reason) => {
+    ['code', 'smoke-rejected'],
+    ['transient', 'smoke-transient'],
+  ])('a "%s" smoke verdict never touches root at all — no reset, no rollback, no quarantine', async (verdict, reason) => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, `lane/rollback-${verdict}`, (dir) => writeFile(dir, 'r.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}` }, { env });
+    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}`, pinned: true }, { env });
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
-    const runSmoke = vi.fn(async () => ({
+    // Even though this `run` would fail a `reset --hard` back to prevHead, it must never be CALLED for a
+    // failing smoke — root was never moved off prevHead in the first place.
+    const run = failingResetRun(prevHead);
+    const runSmoke = failsWhenFile('r.txt', {
       verdict, attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const result = await rebuildClone({
-      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
+      root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
 
     expect(result.moved).toBe(false);
-    expect(result.reason).toBe('rollback-failed');
-    expect(result.quarantine).toBe(true);
-    expect(result.alerts.some((a) => a.kind === 'rollback-failed' && a.detail?.prevHead === prevHead)).toBe(true);
+    expect(result.reason).toBe(reason);
+    expect(resetCalls(run)).toEqual([]); // never even attempted
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
     const state = readRebuildState(cloneDir, env);
-    expect(state.quarantine).toEqual({ prevHead, reason });
+    expect(state.quarantine).toBeNull();
     expect(state.inProgress).toBeNull();
-    expect(state.rejected).toBeNull();
-
-    // The next tick refuses to build anything on the unknown tree while the rollback keeps failing.
-    const next = await rebuildClone({
-      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
-    });
-    expect(next.reason).toBe('quarantined');
-    expect(runSmoke).toHaveBeenCalledTimes(1);
+    if (verdict === 'code') expect(state.rejected).not.toBeNull();
+    else expect(state.rejected).toBeNull();
   });
 
-  it('a smoke that throws, followed by a failed rollback, quarantines with reason rebuild-threw', async () => {
+  it('a smoke that throws is treated like a rejection — root untouched, no quarantine', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/throws', (dir) => writeFile(dir, 't.txt', 'x\n'));
     addOverlay(cloneDir, { ref: 'lane/throws' }, { env });
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
+    const run = failingResetRun(prevHead);
     const result = await rebuildClone({
-      root: cloneDir, env, run: failingResetRun(prevHead), runSmoke: vi.fn(async () => { throw new Error('smoke crashed'); }),
+      root: cloneDir, env, run, runSmoke: vi.fn(async () => { throw new Error('smoke crashed'); }),
       prState: async () => null, lockOpts: LOCK_OPTS,
     });
 
-    expect(result.reason).toBe('rollback-failed');
-    expect(result.quarantine).toBe(true);
-    expect(readRebuildState(cloneDir, env).quarantine).toEqual({ prevHead, reason: 'rebuild-threw' });
-    expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
+    expect(result.reason).toBe('smoke-threw');
+    expect(resetCalls(run)).toEqual([]);
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.quarantine).toBeNull();
+    expect(state.inProgress).toBeNull();
   });
 
-  it('a failed reset onto the target never smokes, rolls back, and clears inProgress', async () => {
+  // These two still fully apply: a PASSING smoke is always followed by the ONE real `reset --hard` this module
+  // performs (see finalizeRebuild), and that reset can still fail for its own (disk/permissions) reasons.
+  it('a failed reset onto the target (reached only after a passing smoke) rolls back, and clears inProgress', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/reset-fails', (dir) => writeFile(dir, 'u.txt', 'x\n'));
     addOverlay(cloneDir, { ref: 'lane/reset-fails' }, { env });
@@ -818,17 +948,17 @@ describe('rebuildClone', () => {
       root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
 
+    expect(runSmoke).toHaveBeenCalledTimes(1); // the smoke ran (and passed) BEFORE the reset was ever attempted
     expect(result.reason).toBe('reset-failed');
     expect(result.rolledBack).toBe(true);
     expect(resetCalls(run)).toEqual([plan.finalSha, prevHead]);
-    expect(runSmoke).not.toHaveBeenCalled();
     expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(prevHead);
     expect(existsSync(join(cloneDir, 'u.txt'))).toBe(false);
     expect(readRebuildState(cloneDir, env).inProgress).toBeNull();
     expect(readRebuildState(cloneDir, env).quarantine).toBeNull();
   });
 
-  it('a failed reset onto the target whose rollback ALSO fails quarantines the clone', async () => {
+  it('a failed reset onto the target whose rollback ALSO fails quarantines the clone (smoke had already passed)', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/reset-and-rollback-fail', (dir) => writeFile(dir, 'v.txt', 'x\n'));
     addOverlay(cloneDir, { ref: 'lane/reset-and-rollback-fail' }, { env });
@@ -839,17 +969,75 @@ describe('rebuildClone', () => {
     const runSmoke = passSmoke();
     const result = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
 
+    expect(runSmoke).toHaveBeenCalledTimes(1);
     expect(result.reason).toBe('reset-failed');
     expect(result.rolledBack).toBe(false);
     expect(result.quarantine).toBe(true);
-    expect(runSmoke).not.toHaveBeenCalled();
     const state = readRebuildState(cloneDir, env);
     expect(state.quarantine).toEqual({ prevHead, reason: 'reset-rollback-failed' });
     expect(state.inProgress).toBeNull();
 
+    // The next tick refuses to build anything on the unknown (half-reset) tree while quarantined — the
+    // quarantine recovery in Step 0 refuses before ever reaching another smoke, so the call count doesn't grow.
     const next = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
     expect(next.reason).toBe('quarantined');
-    expect(runSmoke).not.toHaveBeenCalled();
+    expect(runSmoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+// xa4qo7n LIVE BUG (2026-09-26 15:20 ET, proving this very fix on wev-review-daemon): a `node_modules/`
+// `.gitignore` entry (trailing slash — "directories only") does NOT match a SYMLINK of the same name, so the
+// node_modules symlink materializeCandidate creates made `daemon-live-smoke.mjs#checkTreeStaysClean` see the
+// candidate as dirty on EVERY rebuild in a repo with that (near-universal) ignore convention — poisoning the
+// reject-cache permanently (`tree-stays-clean` is `mayBeTransient:false`). Fixed by writing a bare `node_modules`
+// line (no trailing slash) to the repo's SHARED `info/exclude` — confirmed empirically it is NOT per-worktree.
+describe('materializeCandidate — node_modules symlink never reads as tree dirt (xa4qo7n)', () => {
+  it('a real node_modules DIRECTORY, ignored only via a trailing-slash .gitignore rule, symlinks in clean', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, '.gitignore', 'node_modules/\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add .gitignore']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    mkdirSync(join(cloneDir, 'node_modules', 'some-pkg'), { recursive: true });
+    writeFile(cloneDir, 'node_modules/some-pkg/index.js', 'module.exports = 1;\n');
+
+    const sha = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const result = materializeCandidate({
+      root: cloneDir, sha, run: gitRun, env,
+    });
+    expect(result.ok).toBe(true);
+    try {
+      const status = spawnSync('git', ['status', '--porcelain'], { cwd: result.path, encoding: 'utf8' });
+      expect(status.stdout.trim()).toBe(''); // the whole point: no `?? node_modules` line
+      expect(existsSync(join(result.path, 'node_modules', 'some-pkg', 'index.js'))).toBe(true);
+      // The main clone's own worktree is unaffected by the shared info/exclude addition — still clean.
+      const rootStatus = spawnSync('git', ['status', '--porcelain'], { cwd: cloneDir, encoding: 'utf8' });
+      expect(rootStatus.stdout.trim()).toBe('');
+    } finally {
+      removeCandidate({
+        root: cloneDir, path: result.path, run: gitRun, env,
+      });
+    }
+  });
+
+  it('is idempotent — a second candidate build never duplicates the info/exclude line', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, '.gitignore', 'node_modules/\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add .gitignore']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    mkdirSync(join(cloneDir, 'node_modules'), { recursive: true });
+    writeFile(cloneDir, 'node_modules/marker.js', '1\n');
+    const sha = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const first = materializeCandidate({ root: cloneDir, sha, run: gitRun, env });
+    removeCandidate({ root: cloneDir, path: first.path, run: gitRun, env });
+    const second = materializeCandidate({ root: cloneDir, sha, run: gitRun, env });
+    removeCandidate({ root: cloneDir, path: second.path, run: gitRun, env });
+
+    const excludeText = readFileSync(join(cloneDir, '.git', 'info', 'exclude'), 'utf8');
+    const lines = excludeText.split('\n').filter((l) => l.trim() === 'node_modules');
+    expect(lines.length).toBe(1);
   });
 });
 
@@ -925,11 +1113,11 @@ describe('dryRunRebuild', () => {
   it('reports stillRejected + "nothing (still-rejected)" when the plan matches the last recorded rejection', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/rejected', (dir) => writeFile(dir, 'rejected.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: 'lane/rejected' }, { env });
+    addOverlay(cloneDir, { ref: 'lane/rejected', pinned: true }, { env });
 
-    const runSmoke = vi.fn(async () => ({
+    const runSmoke = failsWhenFile('rejected.txt', {
       verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const rebuildResult = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
@@ -1156,7 +1344,7 @@ describe('overlay list — concurrent add vs. a rebuild auto-remove (two real pr
 // Both gh checks failed together (GitHub/network), the verdict came back `code`, and the rejection stuck: the clone
 // sat 3 commits behind origin/main and the fix-dispatch daemon refused every repo as stale, silently.
 describe('rebuildClone — an external-only (gh) smoke rejection retries with backoff and alerts while held', () => {
-  const ghOnlyFailure = () => vi.fn(async () => ({
+  const ghOnlyFailure = () => failsWhenFile('next.txt', {
     verdict: 'code', attempts: 1,
     smoke: {
       results: [
@@ -1165,7 +1353,7 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
         { name: 'gh-pr-list', ok: false, mayBeTransient: true, detail: 'gh pr list failed: exited 1: weird gh output' },
       ],
     },
-  }));
+  });
 
   it('rejects with a retryAt, holds (alerting clone-held-stale) until it is due, then re-smokes and adopts', async () => {
     const { originDir, cloneDir, env } = makeFixture();
@@ -1212,10 +1400,10 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
     const t0 = Date.now();
-    const treeFailure = vi.fn(async () => ({
+    const treeFailure = failsWhenFile('next.txt', {
       verdict: 'code', attempts: 1,
       smoke: { results: [{ name: 'reconcile-dry-run', ok: false, mayBeTransient: false, detail: 'boom' }] },
-    }));
+    });
     await rebuildClone({ root: cloneDir, env, runSmoke: treeFailure, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
     expect(readRebuildState(cloneDir, env).rejected.retryAt).toBeUndefined();
     const runSmoke = passSmoke();
