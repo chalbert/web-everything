@@ -22,6 +22,8 @@ import {
   defaultListPrFiles,
   GH_FILES_GRAPHQL_CAP,
   isQueuedConflictTarget,
+  isUnownedConflictTarget,
+  defaultAttemptUnownedConflictRebase,
   QUEUED_CONFLICT_GRACE_MS,
   defaultConflictLabelAgeMs,
   isAppendOnlyStatuteChange,
@@ -619,12 +621,25 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
     expect(routed).toEqual([]);
   });
 
-  it('ignores a CONFLICTING PR with no park label — not this pass\'s scope', () => {
+  // #xs81oxb (parent #4075/#3383) — RENAMED, 2026-09-26: a CONFLICTING PR with no park label used to be silently
+  // ignored here ("not this pass's scope"), which is exactly the gap live-caught on `chalbert/web-everything#2709`
+  // (`we:scripts/conveyor/reconcile-core.mjs` refusing it `owed-elsewhere` forever, nothing ever attempting the
+  // rebase it named). This population is no longer ignored — see the dedicated
+  // "unowned PRs that conflict with no review-workflow label at all (#xs81oxb)" describe block below for full
+  // coverage (the mechanical-fix path, the real-conflict bounce, and the stacked-base deferral). This PR has no
+  // `headRefName`, so the disposition read cannot resolve (returns `null`, the safe direction) and it falls
+  // through to the SAME ordinary bounce a real conflict would.
+  it('a CONFLICTING PR with no review-workflow label at all is no longer ignored — it is the UNOWNED population (#xs81oxb)', () => {
     const provider = fakeProvider();
+    const routed = [];
     const listPrs = () => [{ number: 1853, mergeable: 'CONFLICTING', labels: [] }];
-    const results = watchParkedPrConflicts({ repo: 'o/n', listPrs, provider });
-    expect(results).toEqual([]);
-    expect(provider.calls).toEqual([]);
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(o.pr.number),
+      computeConflictDisposition: () => null,
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([1853]);
   });
 
   it('dry-run: reports the plan, makes zero gh calls', () => {
@@ -2199,6 +2214,208 @@ describe('approved PRs that drift into a conflict (x832e2v)', () => {
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec, now })).toBe(40 * 60 * 1000);
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => 'null\n', now })).toBeNull();
     expect(defaultConflictLabelAgeMs({ pr: { number: 1 }, repo: 'o/n', exec: () => { throw new Error('x'); }, now })).toBeNull();
+  });
+});
+
+// #xs81oxb (parent #4075/#3383) — THE THIRD, PREVIOUSLY-INVISIBLE POPULATION: a DIRTY/CONFLICTING PR carrying NO
+// review-workflow label at all — neither the PARKED population (an uncleared review:human/pending/changes hold)
+// nor the QUEUED population (review:accepted/ready-to-merge). Live-caught on `chalbert/web-everything#2709`
+// (`fix(#4138)`, stacked on #2708 which merged and had its base retargeted to `main`): `mergeStateStatus: DIRTY`,
+// labels `[checking]`, no `review:*` label at all — before this fix, `watchParkedPrConflicts` silently skipped
+// it (see the RENAMED test just below, which used to assert exactly that as "not this pass's scope") and
+// `we:scripts/conveyor/reconcile-core.mjs` refused it `owed-elsewhere` forever.
+describe('unowned PRs that conflict with no review-workflow label at all (#xs81oxb)', () => {
+  const L = (...n) => n.map((name) => ({ name }));
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      postComment: (repo, pr, body) => { calls.push(['postComment', repo, pr]); },
+    };
+  };
+
+  it('isUnownedConflictTarget: CONFLICTING + based on main (or unknown base) + no review-workflow label at all', () => {
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('checking') })).toBe(true);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: [] })).toBe(true);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('checking'), baseRefName: 'main' })).toBe(true);
+    // already owned elsewhere — parked, queued, or a stacked base (reconcile-core.mjs#3383's own job):
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:human') })).toBe(false);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:pending') })).toBe(false);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:changes') })).toBe(false);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('review:accepted') })).toBe(false);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('ready-to-merge') })).toBe(false);
+    expect(isUnownedConflictTarget({ mergeable: 'CONFLICTING', labels: L('checking'), baseRefName: 'lane/2708-x' })).toBe(false);
+    // not actually conflicting, or unreadable — never a target:
+    expect(isUnownedConflictTarget({ mergeable: 'MERGEABLE', labels: L('checking') })).toBe(false);
+    expect(isUnownedConflictTarget({ labels: L('checking') })).toBe(false);
+  });
+
+  it('RED→GREEN, #2709\'s real shape (formerly "ignores a CONFLICTING PR with no park label — not this pass\'s scope") — a manifest-only/clean disposition is fixed MECHANICALLY: no label, no bounce, no fix agent spent', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let rebaseCalls = [];
+    const listPrs = () => [{
+      number: 2709, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', baseRefName: 'main',
+      headRefName: 'lane/2709-fix', labels: L('checking'),
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      computeConflictDisposition: (o) => { expect(o.pr.number).toBe(2709); return 'manifest-only'; },
+      attemptMechanicalRebase: (o) => { rebaseCalls.push(o.pr.number); return { action: 'rebased', newCommit: 'deadbeef' }; },
+    });
+    expect(results).toEqual([{
+      num: 2709, isConflicting: true, add: CONFLICT_LABEL, remove: [], newlyDetected: true, commented: false,
+      conflictDisposition: 'manifest-only', mechanicalRebase: { action: 'rebased', reason: null },
+      routedTo: 'mechanical-rebase',
+    }]);
+    expect(rebaseCalls).toEqual([2709]);
+    expect(routed).toEqual([]); // no fix dispatched — the mechanical rebuild already cleared it
+    expect(provider.calls).toEqual([]); // no label ever applied for a conflict that never needed a human/agent
+  });
+
+  it('a `current` mechanical result (tip already rebased and manifest-free) is treated the same as `rebased`', () => {
+    const provider = fakeProvider();
+    const listPrs = () => [{ number: 2710, mergeable: 'CONFLICTING', headRefName: 'lane/2710-x', labels: L('checking') }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      computeConflictDisposition: () => 'clean',
+      attemptMechanicalRebase: () => ({ action: 'current', newCommit: 'abc123' }),
+    });
+    expect(results[0].routedTo).toBe('mechanical-rebase');
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('a REAL (non-manifest) conflict on the unowned population falls through to the SAME bounce+fix-dispatch pipeline the parked population uses', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let rebaseCalls = 0;
+    const listPrs = () => [{
+      number: 1853, mergeable: 'CONFLICTING', headRefName: 'lane/1853-x', labels: [],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number, o.repo]),
+      computeConflictDisposition: () => 'real',
+      attemptMechanicalRebase: () => { rebaseCalls += 1; return { action: 'skip', reason: 'real conflict beyond .lane-manifest.json' }; },
+    });
+    expect(rebaseCalls).toBe(0); // 'real' never even attempts the mutating rebase
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(results[0].conflictDisposition).toBe('real');
+    expect(routed).toEqual([['finding', 1853, 'o/n']]);
+    expect(provider.calls).toEqual([
+      ['postComment', 'o/n', 1853],
+      ['ensureLabel', 'o/n', CONFLICT_LABEL],
+      ['setLabels', 'o/n', 1853, { add: CONFLICT_LABEL, remove: [] }],
+    ]);
+  });
+
+  it('a manifest-only disposition whose REAL attempt still comes back `skip` (main moved between probe and attempt) falls through to the bounce too, never silently drops the PR', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      computeConflictDisposition: () => 'manifest-only',
+      attemptMechanicalRebase: () => ({ action: 'skip', reason: 'real conflict beyond .lane-manifest.json' }),
+    });
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([['finding', 1854]]);
+  });
+
+  it('an unreadable disposition (no headRefName / a probe failure) never invents a mechanical success — falls through to the ordinary bounce, unchanged', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    let rebaseCalls = 0;
+    const listPrs = () => [{ number: 1855, mergeable: 'CONFLICTING', labels: [] }]; // no headRefName at all
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      computeConflictDisposition: () => null,
+      attemptMechanicalRebase: () => { rebaseCalls += 1; return { action: 'error', reason: 'should never be called' }; },
+    });
+    expect(rebaseCalls).toBe(0);
+    expect(results[0].conflictDisposition).toBeNull();
+    expect(results[0].routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([['finding', 1855]]);
+  });
+
+  it('a STACKED, otherwise-unowned PR (baseRefName isn\'t main, no review label) is left ENTIRELY untouched — reconcile-core.mjs#3383\'s own STACKED-BASE CONFLICT branch owns it unconditionally of labels, so this file makes no write and never attempts a mechanical rebase for it', () => {
+    const provider = fakeProvider();
+    let rebaseCalls = 0;
+    const listPrs = () => [{
+      number: 2578, mergeable: 'CONFLICTING', baseRefName: 'lane/3681-ratify-daemon-lifecycle', labels: [],
+    }];
+    const results = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      attemptMechanicalRebase: () => { rebaseCalls += 1; return { action: 'rebased' }; },
+    });
+    expect(rebaseCalls).toBe(0);
+    expect(results).toEqual([]);
+    expect(provider.calls).toEqual([]);
+  });
+
+  it('defaultAttemptUnownedConflictRebase calls rebaseDropManifest against this PR\'s own headRefName and origin/main — never the GitHub update-branch REST endpoint', () => {
+    const calls = [];
+    const run = (cmd, args, opts) => { calls.push({ cmd, args, cwd: opts?.cwd }); return { status: 0, stdout: 'deadbeef\n', stderr: '' }; };
+    defaultAttemptUnownedConflictRebase({ pr: { headRefName: 'lane/2709-fix' }, cwd: '/tmp/repo', run });
+    // `git fetch origin lane/2709-fix`, `git merge-tree --write-tree origin/main origin/lane/2709-fix`, ... — no
+    // `gh api … pulls/.../update-branch` call anywhere in this sequence.
+    expect(calls.some((c) => c.cmd === 'gh')).toBe(false);
+    expect(calls[0]).toEqual({ cmd: 'git', args: ['fetch', 'origin', 'lane/2709-fix'], cwd: '/tmp/repo' });
+    expect(calls.every((c) => c.cwd === '/tmp/repo')).toBe(true);
+  });
+
+  // SOAK — #2709's real, full lifecycle across three sweeps (multi-tick, in-process, no real git/gh anywhere):
+  // stacked and mergeable (nothing to do) → base merges, GitHub retargets it and it goes DIRTY with no review
+  // label (the UNOWNED population) → mechanically resolved on the SAME sweep that detects it → quiet forever
+  // after. This is the scenario the daemon's own log ("reconcile-refused owed-elsewhere … PR #2709 — the branch
+  // needs a rebase before it can merge", every tick, forever) is the symptom of; this soak proves the fix closes
+  // the loop rather than merely changing what gets refused.
+  it('SOAK — stacked PR whose base merges: not a target while stacked → unowned once retargeted → mechanically resolved on first sight → quiet forever after', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    // Mutable in-memory PR state, evolved by each sweep's own fakes — the same shape `gh pr list` reports at
+    // each of #2709's real transitions (see the epic's own incident log for the live timestamps).
+    const pr = {
+      number: 2709, mergeable: 'MERGEABLE', baseRefName: 'lane/2708-queue-cap-fast-lane',
+      headRefName: 'lane/2709-fix-4138', labels: L('checking'),
+    };
+    const sweep = (extra = {}) => watchParkedPrConflicts({
+      repo: 'o/n', listPrs: () => [{ ...pr }], provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      ...extra,
+    });
+
+    // Tick 1 — #2708 (its base) has not merged yet: still stacked, still mergeable. Nothing to do.
+    expect(sweep()).toEqual([]);
+    expect(provider.calls).toEqual([]);
+
+    // Tick 2 — #2708 merges at 02:13Z; GitHub retargets #2709's base to `main` (its branch is gone) and the PR
+    // now conflicts on the shared `.lane-manifest.json` (the classic #2198 shape) — no review label was ever
+    // applied, so nothing but this fix would ever have looked at it.
+    pr.baseRefName = 'main';
+    pr.mergeable = 'CONFLICTING';
+    let rebaseCalls = 0;
+    const results2 = sweep({
+      computeConflictDisposition: () => 'manifest-only',
+      attemptMechanicalRebase: () => {
+        rebaseCalls += 1;
+        pr.mergeable = 'MERGEABLE'; // the real push landed — the next `gh pr list` read reports it resolved
+        return { action: 'rebased', newCommit: 'deadbeef' };
+      },
+    });
+    expect(results2[0].routedTo).toBe('mechanical-rebase');
+    expect(rebaseCalls).toBe(1);
+    expect(provider.calls).toEqual([]); // no label, no bounce — resolved before either was ever needed
+    expect(routed).toEqual([]); // no fix agent ever dispatched; the daemon never logs `owed-elsewhere` again
+
+    // Tick 3 — GitHub now reports the rebuilt tip MERGEABLE. Quiet forever after.
+    expect(sweep()).toEqual([]);
+    expect(provider.calls).toEqual([]);
   });
 });
 
