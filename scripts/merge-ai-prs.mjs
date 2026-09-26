@@ -116,6 +116,8 @@ import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 
 import { fileURLToPath } from 'node:url';
 import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+// fix-couple-split — a couple lands WHOLE in one pass or not at all (hold + contiguous order + carrier pre-flight).
+import { planCoupleCascadeStep, carrierPreflight, openSiblingRefSet, candKey, isImplHalf, isCoupleCarrier } from './lib/couple-cascade.mjs';
 import { rebaseDropContent } from './lib/rebase-drop-content.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // Rebase resolution (2026-08-08): the UNION of four independent concerns on one import line — #2979's accept
@@ -1542,6 +1544,10 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
   v.hasManifest = m != null;      // #2183 — carries the transient manifest on its head → must be stripped before merge
   v.stackParents = m && Array.isArray(m.stackParents) ? m.stackParents.map(asItemId) : [];
   v.manifestRefs = m && Array.isArray(m.repos) ? m.repos.map((r) => r && r.ref).filter(Boolean) : [];
+  // fix-couple-split — the repo-AWARE sibling list. Couple halves usually share one lane ref name across repos, and
+  // `manifestRefs` (ref names only) cannot tell the impl's ref from the carrier's own; the cascade's couple gate
+  // (lib/couple-cascade.mjs) needs the (repo, ref) pair to see an open impl half.
+  v.manifestRepoRefs = m && Array.isArray(m.repos) ? m.repos.filter((r) => r && r.ref && r.repo).map((r) => ({ repo: String(r.repo), ref: String(r.ref) })) : [];
   v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
   v.manifestGraduatedTo = m && typeof m.graduatedTo === 'string' ? m.graduatedTo : null; // #2447 — resolution-basis source
   const local = typeof isLocalRepo === 'function' ? isLocalRepo(repo) : false;
@@ -4780,6 +4786,12 @@ async function runCli() {
   // left `skip` so it keeps blocking its dependents and is re-read fresh next pass.
   const revalidationAborted = [];
   const pendingRebased = []; // #2198 — PRs rebuilt onto main this pass; CI re-running, land on a later pass
+  // fix-couple-split — couple members HELD this pass because their partner half is not landing with them, and (the
+  // cross-repo residual) a carrier whose own merge failed AFTER its impl half landed.
+  const coupleHeld = [];
+  const coupleSplit = [];
+  const repoKeyOfVerdict = (v) => (isLocalRepo(v.repo) ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(v.repo));
+  const repoKeyOfSlug = (slug) => (isLocalRepo(slug) ? (repoKeyFromSlug(localSlug) || 'we') : repoKeyFromSlug(slug));
   let deferred = [];
   if (DRY_RUN) {
     // Report the planned first-pass order (blockedBy + #2393 stackParents-honoured) without merging. Nothing has
@@ -4787,7 +4799,11 @@ async function runCli() {
     const plan = preparedPass.plan;
     deferred = plan.deferred;
     if (!AS_JSON) {
-      process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
+      // fix-couple-split — show the order the live cascade would actually use (couples contiguous, split-risk held).
+      const step = planCoupleCascadeStep(plan.ready, { candidates: verdicts, mergedKeys: new Set(), openSiblingRefs: openSiblingRefSet(openPrContext.prsByRepo, new Set(), repoKeyOfSlug), repoKeyOf: repoKeyOfVerdict });
+      process.stderr.write(`  merge order: ${step.ordered.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
+      for (const h of step.held) process.stderr.write(`  ⛓ ${repoTag(h.repo)}${h.num} couple held (${h.role}): ${h.reason}\n`);
+      coupleHeld.push(...step.held);
       if (deferred.length) process.stderr.write(`  deferred (blockedBy unlanded): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
       if (plan.staleLandedOpenItems?.length) process.stderr.write(`  ⓘ stale-PR note (#999/xq985wu F2): ${nameStaleHolders(plan.staleLandedOpenItems)} — proven landed but still named by an open PR (edge cleared; the open PR is stale/abandoned/impl-half)\n`);
     }
@@ -4815,11 +4831,72 @@ async function runCli() {
       // incomplete (its impl is still in the pass-start snapshot) and every dependent would wrongly defer.
       const coupleIncomplete = deriveCoupleIncomplete({ verdicts, merged, prsByRepo: openPrContext.prsByRepo });
       const plan = replan(remaining, coupleIncomplete);
+      // fix-couple-split — the couple-atomicity gate. Hold every couple member whose partner half is not landing
+      // with it this pass, and order each couple contiguously (impl halves, then its carrier IMMEDIATELY) so no
+      // other merge can move `main` between the two halves. Live incident: pass 2026-09-26T20:32:20Z merged
+      // plateau-app#185 (impl), then web-everything#2746 (unrelated, moved WE main), and #2751 (#185's carrier)
+      // then read BEHIND and was refused — the impl landed alone.
+      const mergedKeysNow = new Set(merged.map((m) => candKey(m)));
+      const coupleStep = planCoupleCascadeStep(plan.ready, {
+        candidates: remaining,
+        mergedKeys: mergedKeysNow,
+        openSiblingRefs: openSiblingRefSet(openPrContext.prsByRepo, mergedKeysNow, repoKeyOfSlug),
+        repoKeyOf: repoKeyOfVerdict,
+      });
+      for (const h of coupleStep.held) {
+        const cc = remaining.find((x) => candKey(x) === h.key); if (cc) { cc.decision = 'skip'; cc.reason = h.reason; }
+        coupleHeld.push(h);
+        if (!AS_JSON) process.stderr.write(`  ⛓ ${repoTag(h.repo)}${h.num} couple held (${h.role}): ${h.reason}\n`);
+      }
+      const heldThisIteration = new Set();
+      const holdCouple = (v, role, reason) => {
+        const k = candKey(v);
+        if (heldThisIteration.has(k)) return;
+        heldThisIteration.add(k);
+        const cc = remaining.find((x) => candKey(x) === k); if (cc) { cc.decision = 'skip'; cc.reason = reason; }
+        coupleHeld.push({ num: v.num, repo: v.repo ?? null, key: k, role, reason });
+        if (!AS_JSON) process.stderr.write(`  ⛓ ${repoTag(v.repo)}${v.num} couple held (${role}): ${reason}\n`);
+      };
       deferred = plan.deferred;
       staleLandedOpenItems = plan.staleLandedOpenItems || [];
       if (!plan.ready.length) break;
       let progressed = false;
-      for (const c of plan.ready) {
+      for (const c of coupleStep.ordered) {
+        if (heldThisIteration.has(candKey(c))) continue;
+        // fix-couple-split — impl half: its carrier must still pass a FRESH pre-merge read right now, else hold both.
+        if (isImplHalf(c)) {
+          const ck = `${c.coupleCarrier.repo || 'cwd'}::${c.coupleCarrier.num}`;
+          const carrierMerged = merged.some((m) => candKey(m) === ck);
+          const carrier = coupleStep.ordered.find((x) => candKey(x) === ck) || null;
+          const fresh = carrierMerged || !carrier ? null : revalidateForMerge(fetchFreshPrForRevalidation(carrier.repo, carrier.num), {
+            requiredCheck: REQUIRED, allowPendingReview: (escalationRelief.prs || []).includes(Number(carrier.num)) || (!!escalationRelief.passWide && !!label),
+            defaultBranch: defaultBranchOf(carrier.repo), expectedHeadSha: carrier.listedHeadSha || carrier.headSha || null,
+          });
+          const pf = carrierPreflight({ carrierMergedThisPass: carrierMerged, freshCarrierVerdict: fresh });
+          if (!pf.ok) {
+            holdCouple(c, 'impl', pf.reason);
+            if (carrier) holdCouple(carrier, 'carrier', `its impl half ${repoTag(c.repo)}${c.num} was held (${pf.reason})`);
+            continue;
+          }
+        }
+        // fix-couple-split — carrier: every impl half ordered ahead of it in this group must have merged.
+        let carrierImplsLanded = null;
+        if (isCoupleCarrier(c)) {
+          const myImpls = coupleStep.ordered.filter((x) => isImplHalf(x) && `${x.coupleCarrier.repo || 'cwd'}::${x.coupleCarrier.num}` === candKey(c));
+          const missing = myImpls.filter((x) => !merged.some((m) => candKey(m) === candKey(x)));
+          if (missing.length) {
+            holdCouple(c, 'carrier', `impl half ${missing.map((x) => repoTag(x.repo) + x.num).join(', ')} did not land this pass — holding the WE carrier so the couple does not split`);
+            continue;
+          }
+          carrierImplsLanded = myImpls;
+        }
+        // fix-couple-split residual — the carrier did not land AFTER its impl half(s) did. Two repos cannot merge
+        // atomically, so this is reported loudly (JSON `coupleSplit` + stderr), never silently.
+        const noteSplit = (why) => {
+          if (!carrierImplsLanded || !carrierImplsLanded.length) return;
+          coupleSplit.push({ carrier: { num: c.num, repo: c.repo ?? null }, landedImpls: carrierImplsLanded.map((x) => ({ num: x.num, repo: x.repo ?? null })), reason: why });
+          if (!AS_JSON) process.stderr.write(`  ‼ COUPLE SPLIT: ${repoTag(c.repo)}${c.num} (WE carrier) did not land after its impl half ${carrierImplsLanded.map((x) => repoTag(x.repo) + x.num).join(', ')} — ${why}\n`);
+        };
         // xvzc4v4 advisory fix — declared OUTSIDE the `try` because the `catch` below calls it too: as a `const`
         // inside the `try` it was out of scope there, so the contended-write recovery path threw a ReferenceError
         // that killed the whole pass. Only ever CALLED on a confirmed merge (#xngv3vn), so it starts as a real
@@ -4869,6 +4946,7 @@ async function runCli() {
               continue;
             }
             const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; re-read live next pass
+            noteSplit(`fresh re-read refused it: ${revalidated.reason}`);
             // #2198 — a PR this pass just rebuilt has a new head and re-running CI, so it is EXPECTED to fail the
             // re-check; it keeps its "land on a later pass" bucket rather than reading as an aborted merge. Only
             // for THOSE two reasons — any other refusal (a hold added mid-pass, a conflict) is reported as such.
@@ -5042,6 +5120,7 @@ async function runCli() {
           // own JSON `failed` array (a non-zero exit when any fill), which is what a false-positive trace
           // comment used to silently paper over (confirmed live on chalbert/web-everything#2596, 2026-09-24).
           const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
+          noteSplit(`merge failed: ${detail}`);
           // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate
           // merge is EXPECTED to bounce on pending checks. That is not a hard failure — the watch re-sweeps and
           // lands it the next pass once green. Only a merge failure on a PR we did NOT just touch is a real fault.
@@ -5305,7 +5384,7 @@ async function runCli() {
   // goes to the formatter — it computes+appends the trailing `total=` itself; passing `timings` here would
   // print `total=` twice (once as an ordinary step, once as the formatter's own).
   process.stderr.write(`merge-ai-prs · pass timings: ${formatTimingsSummary(timingSteps, { total: passTotalMs, order: PASS_STEP_ORDER })} (considered ${verdicts.length}, merged ${merged.length})\n`);
-  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, ...(revalidationAborted.length ? { revalidationAborted } : {}), rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...((strandedSweep.autoResolvable.length || strandedSweep.applied.length || !strandedSweep.ok) ? { strandedSweep } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, heldCoupleMembers, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug, headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), merged, failed: failedMerges, ...(revalidationAborted.length ? { revalidationAborted } : {}), ...(coupleHeld.length ? { coupleHeld } : {}), ...(coupleSplit.length ? { coupleSplit } : {}), rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(numbered.warning ? { numberingWarning: numbered.warning } : {}), ...(resolveOnLandReport.resolved.length || resolveOnLandReport.deferred.length || resolveOnLandReport.failed.length || resolveOnLandReport.alreadyResolved.length ? { resolveOnLand: resolveOnLandReport } : {}), ...((strandedSweep.autoResolvable.length || strandedSweep.applied.length || !strandedSweep.ok) ? { strandedSweep } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}), headSha: v.headSha ?? null, ...(v.resolutionBasis ? { resolutionBasis: v.resolutionBasis } : {}) })), timings };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
