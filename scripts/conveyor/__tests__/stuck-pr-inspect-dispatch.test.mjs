@@ -13,6 +13,7 @@ import {
   planInspectDispatch, INSPECT_DISPATCH_DISALLOWED_TOOLS, inspectDispatchDisallowedToolsArgs, dispatchInspection,
   noInspectionStarted,
 } from '../stuck-pr-inspect-dispatch.mjs';
+import { dispatchSessionCwd } from '../../operations/dispatch-lane-io.mjs';
 
 describe('inspectSessionSlug', () => {
   it('mints inspect-<pr> for WE and inspect-<tag>-<pr> for a sibling repo', () => {
@@ -182,7 +183,8 @@ describe('dispatchInspection — plan → fill → mint → spawn, every IO poin
     expect(argv).toContain('-n');
     expect(argv).toContain('inspect-2505');
     expect(argv.some((a) => typeof a === 'string' && a.startsWith('--disallowedTools='))).toBe(true);
-    expect(opts).toEqual(expect.objectContaining({ cwd: '/repo' }));
+    // #4174 — cwd is a scratch directory outside `root`, never `root` itself.
+    expect(opts).toEqual(expect.objectContaining({ cwd: dispatchSessionCwd('uuid-1', { root: '/repo' }) }));
   });
 
   // #x8mpubm follow-up (live-caught 2026-09-24) — this dispatch never wired the gh-app-shim either, the same
@@ -195,7 +197,8 @@ describe('dispatchInspection — plan → fill → mint → spawn, every IO poin
       root: '/repo', readBrief: () => '{{PR}}{{REPO}}{{SESSION_SLUG}}{{STAGE}}{{MINUTES_SINCE}}{{THRESHOLD_MINUTES}}',
       mintSessionId: () => 'uuid-1', spawnAgent, resolveSettingsEnv,
     });
-    expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
+    // #4174 — the session's OWN cwd (a scratch dir, never `root` any more).
+    expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('uuid-1', { root: '/repo' }));
     const [argv] = spawnAgent.mock.calls[0];
     expect(argv).toContain('--settings');
     expect(argv[argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));

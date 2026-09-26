@@ -155,12 +155,19 @@ export const BRIEF_REQUIRED_BY_KIND = Object.freeze({
   // forks a lane and lands a result, so only that brief references the target branch. A `fix`/`ci-heal`
   // dispatch reconstitutes onto an EXISTING PR/ref whose base is already fixed, and neither prepare brief
   // lands anything at all.
-  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG', 'DELIVERY_BASE'],
-  prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
-  'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
-  // `investigate` (#3567) fills the SAME five names as the two prepare kinds — it targets an ITEM (not an
+  // WE_ROOT (#4174) is required on ALL SIX kinds now — every brief's one pre-lane command
+  // (`node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire …`) needs an absolute path to find it, because the
+  // dispatched session's cwd is no longer this checkout (`we:scripts/operations/dispatch-lane-io.mjs
+  // #dispatchSessionCwd`) — it is a scratch directory outside it, so a bare relative `scripts/lane-pool.mjs`
+  // would resolve nowhere. The four non-repair kinds need ONLY `WE_ROOT` out of the repo-aware quintet; they
+  // never reference `{{REPO}}`/`{{LANE_REPO}}`/`{{GATE_COMMAND}}`/`{{ATTRIBUTION}}`, so those are not required
+  // here even though `raw.repoTokens` (below) carries them too.
+  build: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'ATTEMPT_TAG', 'DELIVERY_BASE', 'WE_ROOT'],
+  prepare: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
+  'prepare-decision': ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
+  // `investigate` (#3567) fills the SAME names as the two prepare kinds — it targets an ITEM (not an
   // existing PR), same as `prepare`/`prepare-decision`, so it has no `PR_NUM`/`LANE_REF` to give either.
-  investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE'],
+  investigate: ['ITEM_NUM', 'ITEM_SPEC_PATH', 'LANE', 'SESSION_SLUG', 'SCOPE', 'WE_ROOT'],
   // #3960 — the five repo-aware tokens (see {@link BRIEF_PLACEHOLDERS}) are required on BOTH repair kinds:
   // every fix/ci-heal reconstitutes onto an EXISTING PR's ref, which under multi-repo dispatch (slice 5, not
   // yet turned on) can belong to any constellation repo, so the brief must never hardcode WE for either kind.
@@ -1056,6 +1063,12 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
       // #3637 — `main` unless the item declares a registered POC branch. Resolved here (the pure side) so the
       // run record freezes the branch this dispatch was actually aimed at, exactly as it freezes the brief.
       DELIVERY_BASE: deliveryBaseFor(item),
+      // #4174 — ONLY `WE_ROOT` out of `raw.repoTokens`, unlike the repair branch above: none of these four
+      // kinds' briefs reference `{{REPO}}`/`{{LANE_REPO}}`/`{{GATE_COMMAND}}`/`{{ATTRIBUTION}}`, and
+      // `BRIEF_REQUIRED_BY_KIND` above validates/substitutes only the name each kind actually lists. Same
+      // "`null`/missing is not papered over here" note as the repair branch: a missing `WE_ROOT` is caught by
+      // `fillBrief`'s own required-value refusal, not by this file.
+      WE_ROOT: raw.repoTokens && typeof raw.repoTokens === 'object' ? raw.repoTokens.WE_ROOT : undefined,
     };
   // FILLED HERE, not in the sink. The prompt is a pure function of the item and the core's assignment, so it
   // belongs on the pure side — and freezing it into the effect payload means the run record says exactly what

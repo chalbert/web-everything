@@ -129,6 +129,10 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, parseBackgroundedId, REPO_ROOT,
   resolveGhShimSettingsEnv,
+  // #4174 — the SAME "never spawn into `root` itself" fix `dispatch-lane-io.mjs#createDispatchSinks` applies;
+  // this function is its own independent spawn call site (see its own docblock), so it needs the same two
+  // seams wired in here.
+  dispatchSessionCwd, ensureDispatchSessionCwd,
 } from './dispatch-lane-io.mjs';
 // #xqa9ttq — the single source of truth for the `claude`/`codex` juror-provider enum, shared with
 // `we:scripts/operations/cli-adapter.mjs`'s own `--provider` flag so this dispatch's `--judge-provider`
@@ -176,7 +180,10 @@ export function reviewBriefPath(root = REPO_ROOT) {
  *  `JUDGE_PROVIDER` (#xqa9ttq) is ALWAYS filled, even when nobody asked for anything but the default: see
  *  `dispatchReview`'s own `judgeProvider = 'claude'` default — never blank, so `fillReviewBrief`'s
  *  every-declared-placeholder-must-have-a-value refusal never fires for the ordinary, opt-out case. */
-export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO']);
+// #4174 — WE_ROOT joined the set: the brief's one pre-lane command (`lane-pool.mjs acquire`) needs an absolute
+// path to find it now that the dispatched session's cwd is a scratch directory outside this checkout, never
+// `root` itself (see `dispatch-lane-io.mjs#dispatchSessionCwd`'s own header).
+export const REVIEW_BRIEF_PLACEHOLDERS = Object.freeze(['PR', 'REPO', 'SESSION_SLUG', 'JUDGE_PROVIDER', 'LANE_REPO', 'WE_ROOT']);
 
 /** #xqa9ttq (PR #2115 review, CONFIRMED) - judge providers that are TOOL-FREE ONLY (#3581) and so can never serve review-pr's judge steps, every one of which is tool-bearing (REVIEW_JUROR_TOOLS, by ratified design). */
 export const TOOL_FREE_ONLY_JUDGE_PROVIDERS = Object.freeze(['codex']);
@@ -380,6 +387,10 @@ export function dispatchReview({
   // this: the shim was simply never on `PATH`, at all, for any review dispatch, since before this fix
   // existed. NEVER throws — see `resolveGhShimSettingsEnv`'s own contract.
   resolveSettingsEnv = resolveGhShimSettingsEnv,
+  // #4174 — same two seams `createDispatchSinks` takes: WHERE this session's cwd is (a scratch directory,
+  // never `root` itself) and making that directory real.
+  sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
+  ensureSessionCwd = ensureDispatchSessionCwd,
 } = {}) {
   const planned = planReviewDispatch({ pr, repo, checkoutExists, home });
   assertNotALaneCheckout(root);
@@ -403,8 +414,13 @@ export function dispatchReview({
   }
   const { prompt, unknownTokens } = fillReviewBrief(readBrief(root), {
     PR: planned.pr, REPO: planned.repo, LANE_REPO: planned.laneRepo, SESSION_SLUG: planned.sessionSlug, JUDGE_PROVIDER: judgeProvider,
+    // #4174 — the checkout this dispatch is FROM, same as `root` always was; needed now that the session's
+    // cwd (below) is no longer `root` itself.
+    WE_ROOT: root,
   });
   const sessionId = String(mintSessionId());
+  // #4174 — THE FIX: this session's cwd is a scratch directory outside `root`, never `root` itself.
+  const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
   // #xw3k2v9 — REVIEW FINDING (PR #1756 r1): `extraArgs` was destructured and documented as "forwarded to
   // buildAgentArgv, exactly like dispatch-lane-io.mjs's own" but the call below never referenced it — every
   // caller-supplied flag (a `--permission-mode`, a `--model` override) was silently dropped. Fixed by actually
@@ -417,11 +433,10 @@ export function dispatchReview({
     payload: { prompt, sessionSlug: planned.sessionSlug },
     systemPromptFile: REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
     extraArgs: [...reviewDispatchDisallowedToolsArgs(), ...extraArgs],
-    // #x8mpubm follow-up — resolved once, here, for this FRESH dispatch, mirroring
-    // `reconcile-fix-dispatch.mjs`'s own call exactly. `root` is threaded through so the durable
-    // `.claude/settings.local.json` delivery (`gh-app-shim.mjs#ensureSettingsFileEnv`) writes into the SAME
-    // checkout this dispatched review session actually starts in.
-    settingsEnv: resolveSettingsEnv(root),
+    // #x8mpubm follow-up / #4174 — resolved once, here, for this FRESH dispatch, mirroring
+    // `reconcile-fix-dispatch.mjs`'s own call exactly. Written into `<sessionCwd>/.claude/settings.local.json`
+    // — the cwd this dispatched review session ACTUALLY starts in, never `root`'s any more.
+    settingsEnv: resolveSettingsEnv(sessionCwd),
   });
   // #3331 — THE HANDLE COMES BACK OFF STDOUT, it is not the uuid minted above. `claude --bg` DISCARDS
   // `--session-id` (it says so on stderr; measured 3/3 at CLI 2.1.246 by #3331's probe and 2/2 at 2.1.269 with
@@ -431,7 +446,7 @@ export function dispatchReview({
   // concluded no session had started — while the real session (findable by its `-n` slug) was running the
   // review to completion. `agentId` is the id that actually addresses it; `sessionId` is kept on the result
   // only so an existing caller reading that field still gets the old, documented shape.
-  const stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+  const stdout = String(spawnAgent(argv, { cwd: sessionCwd }) ?? '');
   const agentId = parseBackgroundedId(stdout);
   return {
     sessionId, agentId, sessionSlug: planned.sessionSlug, pr: planned.pr, repo: planned.repo, repoKey: planned.repoKey, prompt,

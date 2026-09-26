@@ -45,7 +45,7 @@
 // underneath it. Added by #3165, which grew the file from 792 to 826 code lines past the 800 line.
 
 import { execFile, execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -59,6 +59,22 @@ import { laneRefItemNum, laneRefAttemptTag, sessionSlugAttemptTag } from '../con
 import { parseSessionSlug } from '../conveyor/session-slug.mjs';
 import { classifyPr } from '../conveyor/pr-watch.mjs';
 import { deleteCompletion } from './completion-store.mjs';
+// #4174 — the WORKSPACE root (the shared parent of every primary checkout AND `.lanes/`), so a dispatched
+// session's cwd can be computed as a sibling of the checkout rather than a path inside it. Imported from the
+// guard rather than re-derived, for the SAME reason `explore-io.mjs#exploreScratchRoot` imports it: the region
+// a dispatched agent may legitimately write into and the region this file computes must be one definition.
+import { workspaceRootOf } from '../guard-lane.mjs';
+// #4174 live-caught (2026-09-25) — a scratch cwd is a BRAND NEW directory `claude` has never seen, and `--bg`
+// refuses to start there ("Workspace not trusted") exactly like an interactive session would. A LANE clone
+// never hits this because `bootstrap-session.mjs`'s own `trustStatus`/`withTrustedDirs` pre-trusts the whole
+// (bounded, reused) lane pool once at machine setup. A fresh per-session scratch dir cannot be pre-trusted the
+// same way — there is a new one every dispatch — so this file grants it DYNAMICALLY. Only the PURE pieces are
+// imported (`readJsonConfig`/`withTrustedDirs`/`TRUST_PATH`) — never `defaultIo()`'s real writer, which has no
+// override hook: {@link grantDispatchTrust} does its own tiny, env-relocatable write below (mirroring that
+// writer's own backup-first discipline) so a test/soak world can point it at a throwaway file instead of the
+// operator's real `~/.claude.json`, the same reason `dispatchSessionCwd` itself is relocatable via
+// {@link DISPATCH_CWD_ENV}.
+import { readJsonConfig, withTrustedDirs, TRUST_PATH } from '../bootstrap-session.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo } from '../lib/repo-profile.mjs';
@@ -330,14 +346,20 @@ export function readTick({
     : null;
 
   // #3960 (multi-repo slice 4) — the repo-aware brief quintet (`{{REPO}}`/`{{LANE_REPO}}`/`{{GATE_COMMAND}}`/
-  // `{{WE_ROOT}}`/`{{ATTRIBUTION}}`), lazy on the SAME `launchKind` gate as `laneRef` just above: only a
-  // fix/ci-heal fill ever references them. Hardcoded to the `we` profile — this tick-core-driven launch list
-  // only ever plans a fix/ci-heal for a WE item/PR today (`tick-core.mjs#planFixSpawns`/`#planCiHealSpawns`
-  // read only the WE backlog/PR pool); a REAL per-repo selection here is multi-repo slice 5's job, not this
+  // `{{WE_ROOT}}`/`{{ATTRIBUTION}}`). Hardcoded to the `we` profile — this tick-core-driven launch list only
+  // ever plans against the WE backlog/PR pool today (`tick-core.mjs#planFixSpawns`/`#planCiHealSpawns`/
+  // `#planTick`'s other five spawn lists); a REAL per-repo selection here is multi-repo slice 5's job, not this
   // one's — this file stays correct for `we` now and has exactly one line to change once that lands.
-  const repoTokens = (launchKind === 'fix' || launchKind === 'ci-heal')
-    ? briefTokensForRepo('we', { itemNum: key, prNum: launch?.pr ?? null })
-    : null;
+  //
+  // NO LONGER LAZY ON `launchKind` (#4174). Originally computed only for `fix`/`ci-heal`, because only THEIR
+  // briefs referenced `{{WE_ROOT}}` — every OTHER kind's brief ran its one pre-lane command (`lane-pool.mjs
+  // acquire`) with a RELATIVE path, which worked only because the sink spawned the session with `cwd: root`.
+  // #4174 stopped doing that (a dispatched session's cwd is now a scratch directory outside `root`, so a stray
+  // scratch file it writes before acquiring a lane can no longer dirty the dispatching checkout — see
+  // `dispatchSessionCwd`'s own header) — so EVERY kind's brief now needs `{{WE_ROOT}}` for that one line, and
+  // this read has to hand it to all six, not two. `briefTokensForRepo` is pure/fs-only (no subprocess), so
+  // computing it unconditionally costs nothing worth gating.
+  const repoTokens = briefTokensForRepo('we', { itemNum: key, prNum: launch?.pr ?? null });
 
   // #3457/#3460 — THE PRE-SPAWN GROUND-TRUTH CHECK, LAZY on the SAME reason `laneRef` above is: `launch` is
   // null on most reads (nothing cleared, or an in-flight guard already holds the item), and spending a `gh pr
@@ -374,10 +396,10 @@ export function readTick({
     notes: Array.isArray(decisions.notes) ? decisions.notes : [],
     // THE FIX/CI-HEAL LANE REF, or `null` for the three kinds that never need one — see above.
     laneRef,
-    // #3960 — the fix/ci-heal repo-aware brief quintet, or `null` for the four kinds that never need it, or
-    // when the `we` profile/gate could not be resolved (fail-closed: `shapeDispatchRead` then has no value for
-    // `{{REPO}}` et al. and `fillBrief`'s own required-value refusal stops the dispatch, exactly as a missing
-    // `laneRef` already does for `{{LANE_REF}}`).
+    // #3960 / #4174 — the repo-aware brief quintet for EVERY kind now (`{{WE_ROOT}}` alone for the four
+    // non-repair kinds; all five for fix/ci-heal) — or `null` when the `we` profile/gate could not be resolved
+    // (fail-closed: `shapeDispatchRead` then has no value for `{{WE_ROOT}}` et al. and `fillBrief`'s own
+    // required-value refusal stops the dispatch, exactly as a missing `laneRef` already does for `{{LANE_REF}}`).
     repoTokens,
     // #3457/#3460 — the ground-truth verdict, or the not-checked default when nothing was cleared for launch.
     alreadyDone,
@@ -969,8 +991,9 @@ export function isPreSpawnRefusal(error) {
  * is no longer only the resume-detection path's (`resumeSucceeded`); it is where a usable handle comes from.
  *
  * @param {object} [o]
- * @param {string} [o.root] - the cwd the agent starts in. The agent acquires its OWN lane clone (brief step 1),
- *   so this is the checkout it runs `lane-pool acquire` from, never the lane itself.
+ * @param {string} [o.root] - THIS DISPATCHER'S OWN checkout — never the agent's cwd any more (#4174). Still what
+ *   `assertNotALaneCheckout` checks and what the agent's brief is filled with an absolute path to (`{{WE_ROOT}}`),
+ *   so it can `lane-pool acquire` before it has a checkout of its own; see {@link dispatchSessionCwd}.
  * @param {Function} [o.spawnAgent] - injectable `(argv, opts) => stdout`; the default shells `claude`. Feeds
  *   the DEFAULT `provider` below; a caller supplying its own `provider` need not touch this at all.
  * @param {Function} [o.exec] - the `execFileSync`-shaped call the DEFAULT `spawnAgent` goes through. See
@@ -980,6 +1003,11 @@ export function isPreSpawnRefusal(error) {
  * @param {() => string} [o.mintSessionId] - injectable UUID minter.
  * @param {() => Date} [o.now] - injectable clock, for `expectedBy`.
  * @param {string[]} [o.extraArgs]
+ * @param {(sessionId: string) => string} [o.sessionCwdFor] - #4174 — computes the cwd THIS session actually
+ *   starts in. Defaults to {@link dispatchSessionCwd} closed over `root` — a workspace-level scratch directory,
+ *   NEVER `root` itself. Injectable so a test can pin it back to a fixed path without touching the filesystem.
+ * @param {(dir: string) => string} [o.ensureSessionCwd] - makes that directory exist. Defaults to
+ *   {@link ensureDispatchSessionCwd} (never throws). Injectable for the same reason as `sessionCwdFor`.
  * @returns {Record<string, Function>} effect type → `async (payload, ctx) => result`.
  */
 export function createDispatchSinks({
@@ -997,6 +1025,11 @@ export function createDispatchSinks({
   // `we:scripts/lib/gh-app-shim.mjs`'s own header.
   // #x36vidg — plus the Bash timeouts (`resolveDispatchSettingsEnv`), so every dispatch carries `--settings`.
   resolveSettingsEnv = resolveDispatchSettingsEnv,
+  // #4174 — see the two @param entries above. `sessionCwdFor` is the PURE path calculation, `ensureSessionCwd`
+  // the (never-throwing) side effect that makes it real; split the same way `resolveSettingsEnv` is its own
+  // seam rather than folded into the provider call.
+  sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
+  ensureSessionCwd = ensureDispatchSessionCwd,
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -1010,17 +1043,24 @@ export function createDispatchSinks({
         console.error(`dispatch-lane: ${payload.occupancyWarning}`);
       }
       const sessionId = String(mintSessionId());
+      // #4174 — THE FIX: the session's cwd is a scratch directory OUTSIDE this checkout, never `root` itself.
+      // See `dispatchSessionCwd`'s own header for why this location and not, say, an `os.tmpdir()` mkdtemp.
+      const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
       let handle;
       try {
         handle = await provider({
           sessionId,
-          cwd: root,
+          cwd: sessionCwd,
           prompt: payload?.prompt,
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-          settingsEnv: resolveSettingsEnv(root),
+          // #x8mpubm follow-up (#4174) — written into `<sessionCwd>/.claude/settings.local.json`, the cwd the
+          // session ACTUALLY starts in now, not `root`'s. Writing it to `root` would (a) no longer be where the
+          // session looks for it, and (b) be one more write into the dispatching checkout this whole card exists
+          // to stop.
+          settingsEnv: resolveSettingsEnv(sessionCwd),
         });
       } catch (e) {
         // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
@@ -1242,6 +1282,128 @@ export const DISPATCH_BASH_TIMEOUT_ENV = Object.freeze({ BASH_DEFAULT_TIMEOUT_MS
  *  #x36vidg Bash timeouts (always). Never throws. */
 export function resolveDispatchSettingsEnv(cwd) {
   return { ...(resolveGhShimSettingsEnv(cwd) || {}), ...DISPATCH_BASH_TIMEOUT_ENV };
+}
+
+/** Test/override hook for {@link dispatchSessionCwd} — mirrors `explore-io.mjs`'s `REPORT_DIR_ENV`. */
+export const DISPATCH_CWD_ENV = 'WE_DISPATCH_CWD_ROOT';
+
+/**
+ * #4174 — WHERE A DISPATCHED SESSION'S CWD LIVES: `<workspace>/.operations/dispatch/<sessionId>`, a sibling of
+ * `.lanes/` and of `explore-io.mjs#exploreScratchRoot`'s own scratch root — NEVER `root` itself (the checkout
+ * that is dispatching this session).
+ *
+ * THE BUG THIS CLOSES. `createDispatchSinks` used to spawn every session with `cwd: root` — "the cwd the agent
+ * starts in" before its brief's own first step acquires a lane clone of its own. A session that writes a
+ * scratch/log file by a RELATIVE path in that window (a real one did, live, 2026-09-25) leaves an untracked
+ * file in the DAEMON'S OWN clone. Self-sync then refuses the dirty clone, the clone falls behind `main`, and
+ * every dispatch after that refuses as stale-main — measured at 125 invariant violations over 50 soak ticks
+ * from ONE junk file (card #4174 / `we:backlog/xm5i1xm`, epic #4075).
+ *
+ * WHY A WORKSPACE-LEVEL DIRECTORY, not e.g. an ad-hoc `os.tmpdir()` mkdtemp per dispatch: `we:scripts/
+ * guard-lane.mjs` denies an `Edit`/`Write` whose real path is inside a primary checkout or a lane clone it does
+ * not occupy, and a report/scratch directory OUTSIDE every checkout is exactly the region clause 1 of
+ * [#state-lives-where-its-nature-dictates](../../docs/agent/platform-decisions.md#state-lives-where-its-nature-dictates)
+ * already puts session scratch in — the SAME region `explore-io.mjs` already uses for a panelist's report, for
+ * the identical reason (see that file's own header). Reusing `workspaceRootOf` rather than re-deriving it means
+ * "the region a dispatched agent may write to" and "the region this computes" stay one definition.
+ *
+ * PER-SESSION, not one shared directory: two sessions dispatched close together must never collide on the same
+ * filename before either has acquired its own lane.
+ *
+ * NEVER CLEANED UP HERE. Whatever a session drops before it moves into its lane is now harmless clutter
+ * (outside every checkout, never read by anything), not a live daemon hazard — reclaiming it is a housekeeping
+ * concern for whoever owns `.operations/` scratch generally (`wake.mjs` already reclaims `explore`'s), not a
+ * correctness requirement this card's proof depends on.
+ *
+ * @param {string} sessionId - the same id {@link createDispatchSinks} mints for this dispatch; the path segment.
+ * @param {object} [o]
+ * @param {string} [o.root] - this repo's checkout root (the dispatcher's own).
+ * @param {Record<string, string|undefined>} [o.env]
+ * @returns {string}
+ */
+export function dispatchSessionCwd(sessionId, { root = REPO_ROOT, env = process.env } = {}) {
+  const override = String(env[DISPATCH_CWD_ENV] ?? '').trim();
+  const base = override ? resolve(override) : join(workspaceRootOf(root), '.operations', 'dispatch');
+  return join(base, String(sessionId));
+}
+
+/** Test/override hook for {@link grantDispatchTrust}'s trust file — mirrors {@link DISPATCH_CWD_ENV}. A
+ *  soak/sim world points this at a throwaway file under its own root, so the REAL production mechanism runs
+ *  unstubbed without ever touching the operator's actual `~/.claude.json`. */
+export const DISPATCH_TRUST_PATH_ENV = 'WE_DISPATCH_TRUST_PATH';
+
+function resolveDispatchTrustPath(env = process.env) {
+  const override = String(env[DISPATCH_TRUST_PATH_ENV] ?? '').trim();
+  return override ? resolve(override) : TRUST_PATH;
+}
+
+/**
+ * #4174 live-caught — GRANT THE CLI'S OWN WORKSPACE TRUST for a freshly minted scratch cwd, in `~/.claude.json`
+ * (or {@link DISPATCH_TRUST_PATH_ENV}'s override). NEVER THROWS. Reuses `bootstrap-session.mjs`'s PURE trust
+ * logic (`readJsonConfig`, `withTrustedDirs`) rather than re-deriving it — but writes through its OWN small,
+ * relocatable writer rather than that file's `defaultIo().writeTrust`, which is hardcoded to the real
+ * `TRUST_PATH` with no override hook. The ONLY difference from `bootstrap-session.mjs`'s own use of the same
+ * pieces is WHEN this runs: a lane pool is a small, bounded, REUSED set of directories, so trusting it once at
+ * bootstrap covers every future dispatch into it forever. A dispatch scratch dir is a brand-new, never-reused
+ * directory EVERY time (its own session id is the path segment), so there is no "once" to trust ahead of
+ * time — this grants it at the one moment it is knowable: right before the spawn that needs it.
+ *
+ * LIVE EVIDENCE THIS IS NEEDED (2026-09-25): the very first real dispatch into a scratch cwd failed with
+ * `claude --bg`'s own refusal — *"Workspace not trusted. Run \`claude\` in <dir> once and accept the trust
+ * prompt, then retry."* — proving `--bg` enforces the SAME per-directory trust an interactive session does,
+ * for a directory nothing had ever trusted before. Without this, EVERY dispatch into a fresh scratch dir would
+ * fail this same way — the exact regression this whole card exists to prevent, reintroduced one layer up.
+ *
+ * FAIL-SOFT ON PURPOSE, same as `resolveGhShimSettingsEnv`: an unreadable/unparseable trust file writes
+ * nothing (never rebuilds an operator's whole per-project CLI state from `{}`), and any other failure (no
+ * permission, a concurrent writer) is swallowed — the spawn still gets attempted, and if trust genuinely could
+ * not be granted, the CLI's own refusal surfaces exactly as it did before this existed, visibly, rather than
+ * this function pretending to have fixed it.
+ * @param {string} dir
+ * @param {{trustPath?: string}} [o] - injectable ONLY so a test can point it at a throwaway file instead of
+ *   overriding process.env — the same seam `exec`/`spawnAgent` already are on this sink.
+ */
+export function grantDispatchTrust(dir, { trustPath = resolveDispatchTrustPath() } = {}) {
+  try {
+    const before = readJsonConfig(trustPath);
+    // `null` = present but unparseable (bootstrap-session.mjs's own `readJsonConfig` contract) — write
+    // nothing, exactly as bootstrap-session.mjs's own trust step refuses to in that case.
+    if (before === null) return;
+    const next = withTrustedDirs(before, [dir]);
+    // Backup-first, exactly matching bootstrap-session.mjs's own `writeTrust` discipline for this same file —
+    // it holds the operator's whole per-project CLI state, not just this one directory's trust flag.
+    if (existsSync(trustPath)) copyFileSync(trustPath, `${trustPath}.bak`);
+    writeFileSync(trustPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch { /* see docblock — never blocks a dispatch */ }
+}
+
+/**
+ * ENSURE the directory a dispatched session's cwd is about to become actually exists AND is trusted. NEVER
+ * THROWS — the same contract {@link resolveGhShimSettingsEnv} already holds itself to: a failure here (no
+ * permission, a read-only workspace root, a stale non-directory at that path) must not itself block a
+ * dispatch. A `cwd` that could not be created surfaces on its own, loudly, the moment the real spawn tries to
+ * start a process in it — which `isPreSpawnRefusal` already classifies correctly (ENOENT/EACCES) rather than
+ * this function papering over it one layer earlier.
+ *
+ * TRUST IS GRANTED ONLY WHEN `mkdir` ACTUALLY SUCCEEDED. Trusting a directory that was never created is
+ * meaningless (the spawn into it fails regardless), and — the reason this is stated rather than merely
+ * implied — it is what keeps this function inert against every FAKE root a unit test passes (`/primary/…`,
+ * `/repo`, …): `mkdirSync` genuinely fails there (no permission to create a directory under `/`), so no test
+ * that never overrides `mkdir` ever reaches the trust write at all, real filesystem or not.
+ * @param {string} dir
+ * @param {{mkdir?: (d: string) => void, grantTrust?: (d: string) => void}} [io] - injectable ONLY so a test can
+ *   assert it without touching the real filesystem/`~/.claude.json` — the same seam `exec`/`spawnAgent`
+ *   already are on this sink.
+ * @returns {string} `dir`, unconditionally — the caller always gets a path back, made or not.
+ */
+export function ensureDispatchSessionCwd(dir, {
+  mkdir = (d) => mkdirSync(d, { recursive: true }),
+  grantTrust = (d) => grantDispatchTrust(d),
+} = {}) {
+  let made = false;
+  try { mkdir(dir); made = true; } catch { /* see docblock — never blocks a dispatch */ }
+  if (made) grantTrust(dir);
+  return dir;
 }
 
 export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null }) {

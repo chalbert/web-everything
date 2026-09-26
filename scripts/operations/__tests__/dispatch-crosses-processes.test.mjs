@@ -54,6 +54,8 @@ async function dispatchAndPark({ startedAt = '2026-08-13T09:00:00.000Z' } = {}) 
       statusLine: 'conveyor · 1 building',
       notes: [],
       bookkeepingSource: 'file',
+      // #4174 — WE_ROOT joined BRIEF_REQUIRED_BY_KIND.build; a real `readTick` always carries `repoTokens`.
+      repoTokens: { WE_ROOT: PRIMARY },
     }),
   }));
 

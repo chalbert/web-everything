@@ -51,6 +51,10 @@ import { withFakeClaude } from './helpers/fake-claude.mjs';
 import { planTick } from '../../conveyor/tick-core.mjs';
 import {
   readTick, REPO_ROOT, createDispatchSinks, defaultListAgents,
+  // #4174 — relocates grantDispatchTrust's write off the operator's real ~/.claude.json for this ONE real
+  // spawn (happyRoot is a real, writable mkdtemp dir, so `ensureDispatchSessionCwd`'s mkdir genuinely
+  // succeeds and the trust grant would otherwise fire for real).
+  DISPATCH_TRUST_PATH_ENV,
   inFlightDispatchesFor, persistLastSeenLive,
 } from '../dispatch-lane-io.mjs';
 import { shapeDispatchRead, DISPATCH_EFFECT } from '../dispatch-lane.mjs';
@@ -260,7 +264,19 @@ describe('dispatch-lane fixture-root harness — REAL argv-building + guard logi
       // own reasoning: without this, a bug anywhere in `combinedEnv`'s merge silently reaches whatever `claude`
       // the host has, and for a `--bg` argv that is a real background agent on a machine with the real CLI installed.
       kase.fakeClaude.assertWins(kase.combinedEnv);
-      const result = await sinks[DISPATCH_EFFECT](payload);
+      // #4174 — `happyRoot` is a REAL, writable directory, so `ensureDispatchSessionCwd`'s mkdir genuinely
+      // succeeds and `grantDispatchTrust` would otherwise write for real into the operator's own
+      // `~/.claude.json`. Relocate it to a throwaway file under this case's own root for the one real spawn
+      // below, and restore the env unconditionally so it never leaks into a sibling test in this worker.
+      const priorTrustPathEnv = process.env[DISPATCH_TRUST_PATH_ENV];
+      process.env[DISPATCH_TRUST_PATH_ENV] = join(kase.caseRoot, 'claude-trust.json');
+      let result;
+      try {
+        result = await sinks[DISPATCH_EFFECT](payload);
+      } finally {
+        if (priorTrustPathEnv === undefined) delete process.env[DISPATCH_TRUST_PATH_ENV];
+        else process.env[DISPATCH_TRUST_PATH_ENV] = priorTrustPathEnv;
+      }
 
       expect(isInFlightResult(result)).toBe(true);
       expect(result.handle).toBeTruthy();

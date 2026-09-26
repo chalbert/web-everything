@@ -25,6 +25,7 @@
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
 | `{{JUDGE_PROVIDER}}` | the run's `JudgeProvider`. Always `claude` in practice — `codex` is refused at the command line, see step 2 (`#xu2pp2m`) |
+| `{{WE_ROOT}}` | **#4174** — the absolute WE checkout you are dispatched FROM. You start in a scratch directory outside it (never inside it — see step 1), so this is the only way step 1's `lane-pool.mjs` is findable before you have a lane of your own. |
 
 ---
 
@@ -77,6 +78,11 @@ node scripts/operations/completion-cli.mjs report --session={{SESSION_SLUG}} --k
 The tool-bearing juror `review-loop-cli.mjs` spawns REFUSES to run without a lane clone of its own — never the
 primary checkout, never a lane someone else is working in.
 
+> **You started in a scratch directory, not a checkout.** It holds nothing of `scripts/` — never write a file
+> there by a relative path, and never write ANYTHING into `{{WE_ROOT}}` itself (the checkout that dispatched
+> you): either one left dirty by a stray write is how a dispatcher's own clone gets stuck refusing every future
+> dispatch as stale (#4174). Everything you do belongs in `$LANE`, from the moment it exists.
+
 **Pass `--wait-ms` (#x3jmao3).** A pool reading "no free lane" is often a MOMENTARY capacity flicker under
 real concurrent load, not genuine exhaustion — live-caught 2026-09-04, when a dispatched review's own
 acquire read the pool as fully held/dirty and gave up instantly, even though it had freed up again within
@@ -93,7 +99,7 @@ gives real headroom against a slow scan without changing today's self-healing be
 (a scan/wait that finishes in seconds still returns immediately either way).
 
 ```bash
-LANE=$(node scripts/lane-pool.mjs acquire --repo={{LANE_REPO}} --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=180000 --adopt) && echo "$LANE"
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --purpose=review-loop --session={{SESSION_SLUG}} --wait-ms=180000 --adopt) && echo "$LANE"
 ```
 
 If this still fails after that bounded wait, the pool genuinely has no free lane — report the completion

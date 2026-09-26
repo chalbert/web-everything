@@ -3,9 +3,11 @@ bornAs: xm5i1xm
 kind: story
 size: 3
 parent: "4075"
-status: open
-scope: ["we:scripts/operations/dispatch-lane-io.mjs"]
+status: resolved
+scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/conveyor/stuck-pr-inspect-dispatch.mjs", "we:skills-src/conveyor", "we:skills-src/review", "we:scripts/conveyor/soak/breaks/session-junk-in-daemon-clone.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
@@ -15,4 +17,4 @@ Found by the daemon soak harness (card 4169, break session-junk-in-daemon-clone)
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run --config we:vitest.soak.config.ts we:scripts/conveyor/soak/breaks/session-junk-in-daemon-clone.soak.test.mjs` flips from EXPECTED-FAIL to a required, passing test (equivalently: `node we:scripts/conveyor/soak/red-green.mjs --break=session-junk-in-daemon-clone` reports RED on the pre-fix tree and GREEN on this one).

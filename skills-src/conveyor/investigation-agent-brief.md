@@ -27,6 +27,7 @@ hand for a bigger, multi-perspective exploration.
 | `{{ITEM_SPEC_PATH}}` | the item's backlog file — `backlog/{{ITEM_NUM}}-<slug>.md` |
 | `{{LANE}}` | the free lane id `planTick` assigned this investigation — e.g. `4` |
 | `{{SESSION_SLUG}}` | the per-item investigation session slug — `investigate-{{ITEM_NUM}}` (ties `acquire`↔`release`) |
+| `{{WE_ROOT}}` | **#4174** — the absolute WE checkout you are dispatched FROM. You start in a scratch directory outside it (never inside it — see step 1), so this is the only way step 1's `lane-pool.mjs` is findable before you have a lane of your own. |
 | `{{SCOPE}}` | `we:{{ITEM_SPEC_PATH}}` — the item's own backlog file, the ONLY file you are guaranteed to touch |
 
 > **Two kinds of placeholder.** `{{LIKE_THIS}}` are **conveyor-injected** — substituted before you are spawned
@@ -44,9 +45,14 @@ reason**) — then **EXIT WITHOUT MERGING**. You never build a fix yourself and 
 
 ### 1. Acquire a lane-pool clone (never edit the primary checkout)
 
+> **You started in a scratch directory, not a checkout.** It holds nothing of `scripts/` — never write a file
+> there by a relative path, and never write ANYTHING into `{{WE_ROOT}}` itself (the checkout that dispatched
+> you): either one left dirty by a stray write is how a dispatcher's own clone gets stuck refusing every future
+> dispatch as stale (#4174). Everything you do belongs in `$LANE`, from the moment it exists.
+
 ```bash
 export LANE_SESSION={{SESSION_SLUG}}
-LANE=$(node scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-investigate \
+LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --lane={{LANE}} --purpose=conveyor-investigate \
   --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --adopt) && cd "$LANE"
 ```
 

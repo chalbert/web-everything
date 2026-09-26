@@ -31,6 +31,9 @@ import { fileURLToPath } from 'node:url';
 import {
   agentArgsFromEnv, assertNotALaneCheckout, buildAgentArgv, defaultSpawnAgent, isPreSpawnRefusal, parseBackgroundedId,
   REPO_ROOT, resolveGhShimSettingsEnv,
+  // #4174 — the SAME "never spawn into `root` itself" fix `dispatch-lane-io.mjs#createDispatchSinks` applies;
+  // this is its own independent spawn call site (see this file's own header), so it needs the same two seams.
+  dispatchSessionCwd, ensureDispatchSessionCwd,
 } from '../operations/dispatch-lane-io.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
@@ -256,6 +259,10 @@ export function dispatchInspection({
   // #x8mpubm follow-up — this dispatch never wired the gh-app-shim either, the same gap fixed in
   // `review-dispatch.mjs#dispatchReview` and `reconcile-fix-dispatch.mjs#dispatchFix`.
   resolveSettingsEnv = resolveGhShimSettingsEnv,
+  // #4174 — same two seams `createDispatchSinks` takes: WHERE this session's cwd is (a scratch directory,
+  // never `root` itself) and making that directory real.
+  sessionCwdFor = (sessionId) => dispatchSessionCwd(sessionId, { root }),
+  ensureSessionCwd = ensureDispatchSessionCwd,
 } = {}) {
   // Everything before the spawn is pre-spawn: a throw here PROVES no agent exists (see noInspectionStarted).
   const prepare = () => {
@@ -270,21 +277,25 @@ export function dispatchInspection({
       THRESHOLD_MINUTES: thresholdMinutes,
     });
     const sessionId = String(mintSessionId());
+    // #4174 — THE FIX: this session's cwd is a scratch directory outside `root`, never `root` itself. This
+    // agent never acquires a lane at all (see this file's own header), so — unlike the other dispatch sites —
+    // there is no brief line to make absolute-path-qualified; only the cwd/settings wiring changes here.
+    const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
     const argv = buildAgentArgv({
       sessionId,
       payload: { prompt, sessionSlug: planned.sessionSlug },
       systemPromptFile: INSPECT_DISPATCH_SYSTEM_PROMPT_FILE,
       extraArgs: [...inspectDispatchDisallowedToolsArgs(), ...extraArgs],
-      settingsEnv: resolveSettingsEnv(root),
+      settingsEnv: resolveSettingsEnv(sessionCwd),
     });
-    return { planned, prompt, unknownTokens, sessionId, argv };
+    return { planned, prompt, unknownTokens, sessionId, argv, sessionCwd };
   };
   let prepared;
   try { prepared = prepare(); } catch (e) { throw markNoInspectionStarted(e); }
-  const { planned, prompt, unknownTokens, sessionId, argv } = prepared;
+  const { planned, prompt, unknownTokens, sessionId, argv, sessionCwd } = prepared;
   let stdout;
   try {
-    stdout = String(spawnAgent(argv, { cwd: root }) ?? '');
+    stdout = String(spawnAgent(argv, { cwd: sessionCwd }) ?? '');
   } catch (e) {
     // Only ENOENT/EACCES prove `claude` never ran. A timeout or non-zero exit may still have started a session.
     throw isPreSpawnRefusal(e) ? markNoInspectionStarted(e) : e;
