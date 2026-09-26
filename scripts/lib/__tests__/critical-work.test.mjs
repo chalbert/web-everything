@@ -26,10 +26,15 @@ import { deriveRisk, deriveComplexity } from '../dispatch-contracts.mjs';
 import { NEVER_SPOT_CHECK_PATH_PREFIXES } from '../dispatch-thresholds.mjs';
 
 describe('critical-work.mjs is pure (#4034)', () => {
-  it('imports only the three shared proxy sources and uses no impure primitive', () => {
+  it('imports only the four shared proxy/data sources and uses no impure primitive', () => {
     const source = readFileSync('scripts/lib/critical-work.mjs', 'utf8');
     for (const forbidden of ['node:fs', 'Date.now', 'new Date', 'process.env', 'Math.random']) expect(source).not.toContain(forbidden);
-    expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual(['./dispatch-contracts.mjs', './dispatch-thresholds.mjs', './gate-config.mjs']);
+    // #4200 — `constellation-repos.mjs` added: the plain, IO-free repo-key/dirs table (no fs/os/process import
+    // of its own — see that file's own header), read here so the irreversible-group fix (below) has ONE source
+    // for sibling-repo path aliases rather than a second, driftable copy of the list.
+    expect([...source.matchAll(/from '([^']+)'/g)].map((m) => m[1])).toEqual([
+      './dispatch-contracts.mjs', './dispatch-thresholds.mjs', './gate-config.mjs', './constellation-repos.mjs',
+    ]);
   });
 });
 
@@ -155,6 +160,53 @@ describe('criticalWorkVerdict — real-card fixtures prove the we: prefix normal
     const verdict = criticalWorkVerdict({ taskType: 'build-new-feature', filesTouched: [] });
     expect(verdict.critical).toBe(true);
     expect(verdict.reasons).toEqual([{ proxy: 'unknown-scope', detail: expect.any(String) }]);
+  });
+});
+
+// #4200 (epic #3383) — LIVE-CONFIRMED gap: the `irreversible` never-spot-check group (`.github/workflows/`, the
+// deploy/land mechanisms) only ever fired for a `we:`-scoped path. A `plateau:`/`plateau-app:`/`frontierui:`/
+// `fui:`-scoped file at the SAME relative path (e.g. that repo's own `.github/workflows/deploy.yml`) normalized
+// to `plateau/.github/workflows/deploy.yml` etc. — which does not start with `.github/workflows/` — so it read
+// as non-critical, opening it to a non-Claude worker with no human-required floor. This closes it for every
+// constellation repo locus, while leaving `statute`/`gateSelf` (WE's own governance/gate files, no sibling-repo
+// equivalent) deliberately unchanged.
+describe('criticalWorkVerdict — the irreversible group applies to every repo locus, not only we: (#4200)', () => {
+  it('a plateau-app-scoped .github/workflows/ file is critical via never-spot-check (irreversible)', () => {
+    const verdict = criticalWorkVerdict({
+      taskType: 'bugfix',
+      filesTouched: ['plateau-app:.github/workflows/deploy.yml'],
+    });
+    expect(verdict.critical).toBe(true);
+    const neverSpotCheck = verdict.reasons.find((r) => r.proxy === 'never-spot-check');
+    expect(neverSpotCheck).toBeTruthy();
+    expect(neverSpotCheck.detail).toContain('irreversible');
+  });
+
+  it('the same file under the short "plateau:" scope prefix is critical the same way', () => {
+    const verdict = criticalWorkVerdict({ taskType: 'bugfix', filesTouched: ['plateau:.github/workflows/deploy.yml'] });
+    expect(verdict.critical).toBe(true);
+    expect(verdict.reasons.find((r) => r.proxy === 'never-spot-check').detail).toContain('irreversible');
+  });
+
+  it('a frontierui-scoped .github/workflows/ file is critical the same way, including the short "fui:" alias', () => {
+    for (const scope of ['frontierui:.github/workflows/ci.yml', 'fui:.github/workflows/ci.yml']) {
+      const verdict = criticalWorkVerdict({ taskType: 'bugfix', filesTouched: [scope] });
+      expect(verdict.critical, scope).toBe(true);
+      expect(verdict.reasons.find((r) => r.proxy === 'never-spot-check').detail, scope).toContain('irreversible');
+    }
+  });
+
+  it('does NOT widen the WE-only statute/gateSelf groups to sibling repos (docs/agent/ has no plateau equivalent)', () => {
+    const verdict = criticalWorkVerdict({ taskType: 'doc-fix', filesTouched: ['plateau-app:docs/agent/some-rule.md'] });
+    expect(verdict).toEqual({ critical: false, reasons: [] });
+  });
+
+  it('a sibling-repo file that is NOT under an irreversible pattern stays non-critical', () => {
+    const verdict = criticalWorkVerdict({
+      taskType: 'build-new-feature',
+      filesTouched: ['plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts'],
+    });
+    expect(verdict).toEqual({ critical: false, reasons: [] });
   });
 });
 

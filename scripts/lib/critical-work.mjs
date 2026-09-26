@@ -37,6 +37,7 @@
 import { deriveRisk, deriveComplexity } from './dispatch-contracts.mjs';
 import { NEVER_SPOT_CHECK_PATH_PREFIXES, isNeverSpotCheckPath } from './dispatch-thresholds.mjs';
 import { isPrincipleSurface, isTrustChainPath } from './gate-config.mjs';
+import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 
 /** The conveyor trees — every resident daemon's entry point and the tick/reconcile machinery they run. */
 // @test-only-export-ok: the critical-work table (#4034), read by its own test and the dispatch dry-run
@@ -53,6 +54,42 @@ export const MISS_OUTCOMES = Object.freeze(['reworked', 'rejected']);
 /** `we:scripts/x.mjs` → `scripts/x.mjs`; `plateau-app:tools/x` → `plateau-app/tools/x` (as decideDispatchRoute does). */
 function normalizePath(p) {
   return String(p).trim().replace(/^we:/, '').replace(/^([A-Za-z0-9._-]+):/, '$1/').replace(/^\.\//, '');
+}
+
+/**
+ * #4200 (epic #3383) — EVERY ALIAS `normalizePath` can leave as a sibling repo's own leading path segment
+ * (`plateau-app/`, `plateau/`, `frontierui/`, `fui/`) — `we:`/`webeverything:` is already stripped bare by
+ * `normalizePath` itself, so it needs no entry here. Sourced from `constellation-repos.mjs#CONSTELLATION_REPOS`
+ * (the one table) plus the two short scope-prefix aliases `scripts/lib/repo-profile.mjs#SCOPE_PREFIXES`
+ * documents (`fui`, `plateau`) — not imported from that file to keep this module's import graph exactly as
+ * narrow as its own docblock already claims ("no fs, no process, no clock"; `repo-profile.mjs` reads `homedir()`
+ * and `existsSync` at call time for ITS OWN callers, a capability this module has no reason to acquire).
+ */
+const SIBLING_REPO_PATH_ALIASES = Object.freeze(
+  [...new Set([
+    ...Object.entries(CONSTELLATION_REPOS).filter(([key]) => key !== 'we').flatMap(([, meta]) => meta.dirs),
+    'fui', 'plateau',
+  ])],
+);
+
+/**
+ * #4200 — THE SAME FILE, RELATIVE TO ITS OWN REPO, given `normalizePath`'s already-normalized form. An
+ * irreversible-tier pattern like `.github/workflows/` recurs IDENTICALLY in every constellation repo's own
+ * layout — each has its own `.github/workflows/` at its own root — so testing only the WE-relative form (as
+ * every OTHER never-spot-check group correctly does; `docs/agent/`, `scripts/check-standards` etc. are WE's
+ * OWN governance/gate files with no sibling-repo equivalent) silently exempted a `plateau:`/`frontierui:`-scoped
+ * deploy-workflow edit from the SAME rule a `we:`-scoped one already gets. Returns `null` when `f` carries no
+ * recognized sibling-repo alias segment (already WE-relative, or an unrecognized prefix) — the caller always
+ * tests the ORIGINAL string too, so this only ever ADDS a candidate, never replaces one. PURE.
+ * @param {string} f - already run through {@link normalizePath}.
+ * @returns {string|null}
+ */
+function repoRelativeForm(f) {
+  for (const alias of SIBLING_REPO_PATH_ALIASES) {
+    const prefix = `${alias}/`;
+    if (f.startsWith(prefix)) return f.slice(prefix.length);
+  }
+  return null;
 }
 
 /**
@@ -80,7 +117,15 @@ export function criticalWorkVerdict(work = {}) {
   }
 
   const groups = Object.entries(NEVER_SPOT_CHECK_PATH_PREFIXES)
-    .filter(([, prefixes]) => files.some((f) => prefixes.some((prefix) => f.startsWith(prefix))))
+    .filter(([name, prefixes]) => files.some((f) => {
+      if (prefixes.some((prefix) => f.startsWith(prefix))) return true;
+      // #4200 — ONLY `irreversible` recurs identically per repo (`.github/workflows/`, the deploy/land
+      // mechanisms this rule exists to catch); `statute`/`gateSelf` name WE's OWN governance/gate files with
+      // no sibling-repo equivalent, so they deliberately stay WE-relative-only, unchanged.
+      if (name !== 'irreversible') return false;
+      const relative = repoRelativeForm(f);
+      return relative != null && prefixes.some((prefix) => relative.startsWith(prefix));
+    }))
     .map(([group]) => group);
   if (groups.length || files.some(isNeverSpotCheckPath)) {
     reasons.push({ proxy: 'never-spot-check', detail: groups.length ? groups.join(',') : 'statute-tier path' });
