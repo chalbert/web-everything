@@ -92,6 +92,17 @@ export const GH_ARGV = Object.freeze({
   // use at every N, so ensuring existence has to be part of applying it, not a one-time setup step.
   ensureLabel: (repo, name, { color = 'ededed', description = '' } = {}) =>
     ['label', 'create', name, '--repo', repo, '--color', color, '--description', description, '--force'],
+  // The PR's changed files, NET versus its base (#4034 follow-up, card 4034b) — read-only, used ONLY to stamp
+  // `changedFiles` on a delegation-trial row before it is written; never to gate or edit anything about the PR
+  // itself. `--method GET` IS LOAD-BEARING, not decoration: `gh api` silently switches to `POST` once an `-f`/
+  // `-F` parameter is present, and `pulls/{n}/files` has no `POST` handler — every call then 404s. Same shape,
+  // same gotcha, as `we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultListPrFiles` (confirmed live
+  // 2026-09-23 against real PR #2514) — duplicated here rather than imported, because that file is a heavy
+  // conveyor daemon module (`rebase-drop-manifest.mjs`, `queue-scope.mjs`, `stand-down.mjs`, …) this port's own
+  // caller (`review-set-label.mjs`) already goes out of its way NOT to pull in transitively (per that same
+  // file's documented reason for avoiding `reconcile-core.mjs#assessLiveness` — a heavy load-time import chain
+  // is exactly the hazard both sides are keeping out of each other's graph).
+  readPrFiles: (repo, pr) => ['api', '--paginate', '--method', 'GET', '-F', 'per_page=100', `repos/${repo}/pulls/${pr}/files`, '--jq', '.[].filename'],
 });
 
 /**
@@ -145,6 +156,13 @@ export function createGhProvider({
      *  adapter because it is the same `gh` arc, and it fires only when `--repo` was omitted. */
     currentRepo() {
       return exec(GH_ARGV.currentRepo(), { maxBuffer: 4 * 1024 * 1024 }).trim();
+    },
+
+    /** The PR's changed files, net versus its base — real pagination applied, no cap. Read-only; see
+     *  {@link GH_ARGV.readPrFiles} for why `--method GET` cannot be dropped. */
+    readPrFiles(repo, pr) {
+      const out = exec(GH_ARGV.readPrFiles(repo, pr), { maxBuffer: 64 * 1024 * 1024 });
+      return String(out || '').split('\n').map((s) => s.trim()).filter(Boolean);
     },
   };
 }

@@ -136,16 +136,36 @@
       "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:335",
       "wait": null,
       "retries": {
-        "what": "one rebase-drop attempt per sweep; 'skip'/'error' falls through to the ordinary bounce every subsequent sweep with no dedicated attempt cap of its own",
-        "cap": null,
-        "onCap": null,
-        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1510-1526"
+        "what": "unowned-rebase-attempt-count.mjs#countUnownedRebaseAttempts — a durable, PR-comment-backed count of this population's own retry-worthy ('skip'/'error', including a caught throw) rebase-drop attempts; a clean 'rebased'/'current' success posts no marker",
+        "cap": 3,
+        "onCap": "unowned-rebase-cap-exhausted",
+        "cite": "scripts/conveyor/unowned-rebase-attempt-count.mjs:41-70; scripts/conveyor/parked-pr-conflict-watch.mjs:1574-1636"
       },
       "escalation": null,
-      "notes": "Reuses the SAME proven, no-checkout rebase-drop plumbing the drain uses (:323-337). Runs on the SAME sweep that first detects the PR, before any label or bounce (:89 docblock) — gets NO grace period, unlike the queued population. On `action:'rebased'`/`'current'` it resolves silently: no label, no bounce, GitHub's own mergeable flips on the next read (:1519-1524). Once it falls through to the ordinary bounce (bounced-to-fix), it inherits THAT population's own CONFLICT_FIX_ROUND_CAP — this state has no separate cap of its own, so a repeatedly-non-mechanical (real content) conflict costs nothing extra here before landing in the capped population.",
-      "ack": {
-        "uncapped-retry": "xb4yerj"
-      }
+      "notes": "#xu38vlf (epic #4075/#3383) — FIXED. Reuses the SAME proven, no-checkout rebase-drop plumbing the drain uses (:323-337). Runs on the SAME sweep that first detects the PR, before any label or bounce (:89 docblock) — gets NO grace period, unlike the queued population. On `action:'rebased'`/`'current'` it resolves silently: no label, no bounce, GitHub's own mergeable flips on the next read. An `action:'skip'`/`'error'` result already fell through to the ordinary bounce within the SAME sweep (inheriting `bounced-to-fix`'s own CONFLICT_FIX_ROUND_CAP) — the gap was a THROW from the git-level attempt itself aborting the whole per-PR handler before any label ever applied, silently retrying forever with nothing durable recording it. The attempt is now wrapped so a throw becomes `{action:'error'}` instead of escaping (parked-pr-conflict-watch.mjs:1626-1627), and a durable marker (UNOWNED_REBASE_ATTEMPT_MARKER) is posted the moment the outcome is known to be `skip`/`error` (never on a clean success) so the count survives even a throw, before anything downstream of it (the comment/dispatch/label writes) gets a chance to fail too. At the cap, this state routes to `unowned-rebase-cap-exhausted` instead of attempting again.",
+      "ack": {}
+    },
+    {
+      "id": "unowned-rebase-cap-exhausted",
+      "label": "Unowned rebase-drop attempt cap (3) exhausted — refused AND surfaced",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1605-1620",
+      "wait": null,
+      "retries": {
+        "what": "unowned-rebase-attempt-count.mjs#countUnownedRebaseAttempts, same count as unowned-mechanical-rebase-attempt's own",
+        "cap": 3,
+        "onCap": "unowned-rebase-cap-exhausted",
+        "cite": "scripts/conveyor/unowned-rebase-attempt-count.mjs:41-70"
+      },
+      "escalation": {
+        "to": "operator",
+        "how": "round-cap-exhausted note (capKind: unowned-mechanical-rebase) → PR comment (#2725 reconcile-notes channel) + a health-watch-style desktop notify",
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1608-1618; scripts/conveyor/reconcile-note-comment.mjs:65-70,82-83"
+      },
+      "notes": "#xu38vlf (epic #4075/#3383) — FIXED. Mirrors review.flow.json's own `round-cap-exhausted` state exactly: reuses the SAME `kind:'round-cap-exhausted'` note shape (reconcile-note-comment.mjs), here with `capKind:'unowned-mechanical-rebase'` naming THIS population, and `notifyDesktopChecked` (branch-sync.mjs) for the immediate desktop-visible half, mirroring health-watch's own minimal notify path. Once surfaced, the PR falls through to the ordinary bounce (bounced-to-fix) below, exactly like a `skip`/`error` disposition already did — this state is the surfaced-cap-exhaustion landing point, not a dead end for the PR itself. `retries.onCap` self-loops (nothing retries FROM here; a human clears it, e.g. by resolving the underlying failure and letting the PR re-conflict fresh).",
+      "ack": {}
     },
     {
       "id": "bounced-to-fix",
@@ -200,16 +220,18 @@
       "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1633-1644",
       "wait": {
         "for": "the live fix session (role==='fix', name-based liveness) to finish",
-        "timeout": null,
-        "onTimeout": null,
-        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1640-1644"
+        "timeout": "90m (REARM_DEFERRED_BOUND_MS)",
+        "onTimeout": "rearm-deferred",
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1739-1780"
       },
       "retries": null,
-      "escalation": null,
-      "notes": "CONFLICT_LABEL is deliberately left ON so newlyResolved re-fires next sweep (:1640-1643) — a DIFFERENT, name-based liveness check from reconcile-core.mjs#assessLiveness (own import comment explains why). If this liveness read ever falsely, persistently reports 'still live' (e.g. a stale/misnamed agent-listing entry), nothing in this file bounds how long the rearm stays withheld — a distinct unbounded-wait gap from the fix flow's own permission-prompt gap, sharing only the same underlying symptom class (a liveness signal nobody re-verifies against a clock).",
-      "ack": {
-        "unbounded-wait": "xwo3j0l"
-      }
+      "escalation": {
+        "to": "operator",
+        "how": "liveness-wait-exhausted note → PR comment (#2725 reconcile-notes channel) + a health-watch-style desktop notify, once per episode",
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1766-1779; scripts/conveyor/reconcile-note-comment.mjs:71-73,83"
+      },
+      "notes": "#xu38vlf (epic #4075/#3383) — FIXED. CONFLICT_LABEL is deliberately left ON so newlyResolved re-fires next sweep (:1740-1743) — a DIFFERENT, name-based liveness check from reconcile-core.mjs#assessLiveness (own import comment explains why). A durable, episode-scoped marker (REARM_DEFERRED_MARKER) records the FIRST sweep this deferral was observed; past 90 minutes since then (mirrors reconcile-core.mjs's own LIVE_SESSION_OVERRUN_MS bound and reasoning — a name-based liveness read staying true this long is far more likely stale than a real 90-minute fix round), this file surfaces it via the SAME reconcile-notes channel + desktop notify every other cap-exhaustion state in this repo uses, rather than forcing a rearm (which would race the exact liveness gap #4118 (c) introduced this wait to avoid). `wait.onTimeout` self-loops: the PR keeps deferring (dedup'd — one note per episode) until a human clears the stale liveness read or the fixer genuinely finishes.",
+      "ack": {}
     },
     {
       "id": "rearm-review",
@@ -321,9 +343,23 @@
     {
       "from": "unowned-mechanical-rebase-attempt",
       "to": "bounced-to-fix",
-      "on": "rebase-drop reports 'skip' (a real conflict) or 'error' — falls through to the ordinary bounce",
+      "on": "rebase-drop reports 'skip' (a real conflict), 'error' (a plumbing failure, including a caught throw) — falls through to the ordinary bounce",
       "kind": "failure",
-      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1524-1526"
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1624-1636"
+    },
+    {
+      "from": "unowned-mechanical-rebase-attempt",
+      "to": "unowned-rebase-cap-exhausted",
+      "on": "the durable per-PR attempt count already >= 3 (UNOWNED_REBASE_ATTEMPT_CAP)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1604-1620"
+    },
+    {
+      "from": "unowned-rebase-cap-exhausted",
+      "to": "bounced-to-fix",
+      "on": "surfaced once, then falls through to the ordinary bounce the SAME sweep",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1620-1636"
     },
     {
       "from": "bounced-to-fix",

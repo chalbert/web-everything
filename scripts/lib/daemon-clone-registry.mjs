@@ -1,0 +1,123 @@
+/**
+ * @file scripts/lib/daemon-clone-registry.mjs
+ * @description #xpt9fvd — the shared "is this path a DAEMON clone?" test both `guard-lane.mjs` (PreToolUse
+ *   Edit/Write/NotebookEdit) and `guard-bash.mjs` (shell writes) need, so a resident daemon's OWN dedicated
+ *   checkout gets the SAME #2123/#2749 protection a constellation PRIMARY checkout already has.
+ *
+ * WHY A DAEMON CLONE IS A THIRD KIND OF CHECKOUT, NOT A LANE AND NOT A PRIMARY. It is not a PRIMARY_REPOS
+ * entry (`guard-lane.mjs`) — it lives at its own sibling path, never inside `webeverything/`. And it is not an
+ * ordinary POOL LANE either, even though one of them (the WE drain's own clone) happens to sit under
+ * `.lanes/` — `we:scripts/lib/daemon-rebuild.mjs` owns that clone exclusively (git resets/merges it every
+ * rebuild tick, outside any lane lease), so the existing "inside `.lanes/` ⇒ freely writable" shortcut must
+ * NOT swallow it. A hand-edit or hand-copy INSIDE a daemon clone goes over the daemon's own next rebuild
+ * invisibly (no PR, no review) and — worse — a dirty clone BLOCKS that rebuild entirely (the rebuild's own
+ * live-smoke gate refuses to run over an unexpected local diff) until a person notices and reverts it by
+ * hand. Caught + reverted three times on 2026-09-26 (canary files, a ci-heal completion edit, earlier work)
+ * before this guard existed.
+ *
+ * SEED + DERIVED, NOT SEED-ONLY. `DAEMON_CLONE_SEED` below names the daemon clones live TODAY (found from
+ * their actual `~/Library/LaunchAgents/com.we.*.plist` / `com.plateau.drain-daemon.plist`
+ * `WorkingDirectory`/`ProgramArguments`, not guessed) so the guard works from a fresh checkout with no state
+ * on disk yet. But a NEW daemon clone that starts using the sanctioned overlay CLI
+ * (`we:scripts/daemon-overlay.mjs add --clone=<path>`) is picked up AUTOMATICALLY, no code change required:
+ * every clone that has ever taken an overlay leaves its OWN resolved root in its own
+ * `~/.claude/daemon-overlays/<hash>.json`'s `clone` field (`we:scripts/lib/daemon-overlays.mjs#writeOverlays`
+ * — the exact registry this module reads), so the union of (seed ∪ every `.clone` on disk) is the live list.
+ * Both sources are plain path strings read via a couple of small, synchronous fs calls — no subprocess, same
+ * fail-OPEN shape every other read these two guards do on every Edit/Write/Bash call already has.
+ *
+ * DELIBERATELY NOT SCANNED: launchd's own plists. They ARE the ultimate source of truth (used BY HAND to
+ * derive the seed list below) but reading them needs a subprocess (`plutil`/binary-plist parsing) — exactly
+ * the slow, environment-dependent I/O a PreToolUse hook that runs on every tool call must avoid. A launchd job
+ * whose clone never registers an overlay is caught by the seed list until it does; see the card for the
+ * residual this leaves (a hand-added daemon that never calls the overlay CLI stays unprotected until either
+ * the seed list or the daemon's own first overlay catches up).
+ */
+
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
+import { homedir } from 'node:os';
+
+const SEP = path.sep;
+
+/**
+ * Daemon-clone directory names, siblings of the constellation workspace root (the same parent
+ * `guard-lane.mjs#workspaceRootOf` derives `PRIMARY_REPOS` against) — except the drain's own clone, which is
+ * nested under `.lanes/` (see this file's header). Discovered 2026-09-26 from the live launchd registration:
+ *   - `wev-review-daemon`    — com.we.review-daemon, fix-dispatch-daemon, lease-reaper,
+ *                              lane-pool-health-watch-{we,frontierui,plateau-app}, parked-pr-conflict-watch-*
+ *   - `wev-merge-daemon`     — com.we.conveyor-pass-daemon.merge-orphan-sweep
+ *   - `wev-health-watch`     — com.we.health-watch
+ *   - `wev-host-sampler`     — com.webeverything.host-sampler, com.webeverything.claude-otel-collector
+ *   - `plateau-drain-daemon` — com.plateau.drain-daemon
+ *   - `.lanes/we-drain-daemon/lane-1` — the WE drain's own dedicated clone (docs/agent/platform-decisions.md
+ *     #resident-daemon-reload-lifecycle) — NOT a pool lane: never leased/refreshed like one, rebuilt the same
+ *     way every other daemon clone is.
+ */
+export const DAEMON_CLONE_SEED = [
+  'wev-review-daemon',
+  'wev-merge-daemon',
+  'wev-health-watch',
+  'wev-host-sampler',
+  'plateau-drain-daemon',
+  `.lanes${SEP}we-drain-daemon${SEP}lane-1`,
+];
+
+function realpathOrResolve(p) {
+  try { return realpathSync(p); } catch { return path.resolve(p); }
+}
+
+/**
+ * Every `.clone` this machine's daemon-overlay state has ever recorded (`~/.claude/daemon-overlays/*.json`,
+ * written by `daemon-overlays.mjs#writeOverlays`), realpath'd. A missing dir, an unreadable file, or a
+ * corrupt/wrong-shaped JSON is skipped — this is ADDITIVE ONLY (the seed list stands on its own), so a
+ * partial or absent state directory can only under-protect relative to a fully-populated one, never wedge
+ * the guard. Mirrors `daemon-overlays.mjs#readOverlayState`'s own fail-closed-per-file, fail-open-overall
+ * shape without importing it (that module's read path throws on a corrupt LIST WRITE, which is the wrong
+ * failure mode for a read-only registry scan).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string[]}
+ */
+function overlayRegisteredClones(env = process.env) {
+  const dir = (typeof env?.WE_DAEMON_OVERLAY_DIR === 'string' && env.WE_DAEMON_OVERLAY_DIR.trim())
+    || path.join(homedir(), '.claude', 'daemon-overlays');
+  const out = [];
+  let entries;
+  try { entries = readdirSync(dir); } catch { return out; }
+  for (const name of entries) {
+    if (!name.endsWith('.json')) continue; // skips the sibling `.events.jsonl` audit trail too
+    try {
+      const parsed = JSON.parse(readFileSync(path.join(dir, name), 'utf8'));
+      if (parsed && typeof parsed.clone === 'string' && parsed.clone) out.push(parsed.clone);
+    } catch { /* corrupt/partial file — skip it, fail-open */ }
+  }
+  return out;
+}
+
+/**
+ * The full daemon-clone registry: seed roots (resolved against `workspace`) UNION every clone the overlay
+ * state directory has ever recorded, each realpath'd (or plain-resolved if not yet materialized) and deduped.
+ * Cheap and synchronous — a readdir plus a handful of small JSON reads, paid once per guard invocation.
+ * @param {string} workspace  the shared parent dir every constellation checkout + `.lanes/` sits under
+ * @param {{env?: NodeJS.ProcessEnv}} [o]
+ * @returns {string[]} deduped, realpath'd (or resolved) daemon clone roots
+ */
+export function daemonCloneRoots(workspace, { env = process.env } = {}) {
+  const seeded = DAEMON_CLONE_SEED.map((rel) => path.join(workspace, rel));
+  const discovered = overlayRegisteredClones(env);
+  const all = seeded.concat(discovered).map(realpathOrResolve);
+  return Array.from(new Set(all));
+}
+
+/**
+ * PURE: is `real` (an already-resolved real/absolute path) inside any daemon clone root? Mirrors
+ * `guard-lane.mjs`'s primary-prefix test (`(real + SEP).startsWith(root + SEP)`, or exact equality).
+ * @param {string} real
+ * @param {string[]} roots
+ * @returns {boolean}
+ */
+export function isDaemonCloneRealpath(real, roots) {
+  if (!real) return false;
+  const r = String(real);
+  return (roots || []).some((root) => root && (r === root || (r + SEP).startsWith(root.endsWith(SEP) ? root : root + SEP)));
+}

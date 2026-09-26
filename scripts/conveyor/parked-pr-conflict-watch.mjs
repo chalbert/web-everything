@@ -132,6 +132,15 @@ import {
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
 import { parseMergeTree, manifestConflictDisposition, rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
+// #xu38vlf (epic #4075/#3383) — the two gap fixes below (cap the unowned rebase-drop retry; bound the
+// rearm-deferred wait) both surface through the SAME two operator-visible channels every sibling cap-exhaustion
+// note in this repo already uses: the #2725 reconcile-notes durable PR comment, and the health-watch desktop
+// notify. Neither is heavy — `reconcile-note-comment.mjs` is itself a leaf-light `gh pr comment` IO shell
+// (mirrors `ci-heal-mark.mjs`), and `notifyDesktopChecked` is `branch-sync.mjs`'s own already-tested,
+// best-effort macOS notify (never throws; a delivery failure must never break the sweep).
+import { planNoteComment, postNoteComment } from './reconcile-note-comment.mjs';
+import { notifyDesktopChecked } from './branch-sync.mjs';
+import { UNOWNED_REBASE_ATTEMPT_MARKER, UNOWNED_REBASE_ATTEMPT_CAP, countUnownedRebaseAttempts } from './unowned-rebase-attempt-count.mjs';
 // #4118 (c) — the SAME name-based, gh-agents-truth liveness check `review-status-tag.mjs` already uses, and for
 // the identical reason its own docblock states: staying independent of `reconcile-core.mjs#assessLiveness`'s
 // much heavier transitive import graph (`rearm-review.mjs` → `review-set-label.mjs` → `merge-ai-prs.mjs`, which
@@ -446,6 +455,61 @@ export function latestConflictAlertCreatedAtMs(comments) {
     if (typeof body !== 'string' || !CONFLICT_ALERT_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
     const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
     if (Number.isFinite(ms) && (best === null || ms > best)) best = ms;
+  }
+  return best;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#REARM_DEFERRED_BOUND_MS — #xu38vlf (epic #4075/#3383): the
+ * bound on how long a rearm can sit withheld on the name-based `deriveReviewStatus` liveness check (see
+ * {@link watchParkedPrConflicts}'s `deferRearm` branch) before this file surfaces it to an operator rather than
+ * silently deferring forever. Mirrors `we:scripts/conveyor/reconcile-core.mjs#LIVE_SESSION_OVERRUN_MS`'s own
+ * value (90 minutes) and its exact reasoning — a name-based "is a fix session still live" read that stays true
+ * this long is far more likely a STALE/misnamed agent-listing entry than a real 90-minute-long fix round — but
+ * defined LOCALLY rather than imported: this file deliberately stays independent of `reconcile-core.mjs`'s own
+ * (much heavier) transitive import graph, the same reasoning `deriveReviewStatus`'s own import comment already
+ * gives for why THIS file's liveness check is a separate, name-based one to begin with.
+ *
+ * PAST THE BOUND, THIS FILE SURFACES — IT DOES NOT FORCE A REARM. Auto-rearming past the bound would race the
+ * exact case #4118 finding (c) introduced this wait to avoid (a fix agent genuinely still mid-push) — the risk
+ * this file's own comments already flag as unruled-out by a bare `mergeable` read. Surfacing an operator-visible
+ * note is the safe direction: a human can then confirm the liveness read is stale (and clear it, e.g. via
+ * `/finish`) or that the fixer really is still working — never a script guessing which.
+ */
+export const REARM_DEFERRED_BOUND_MS = 90 * 60 * 1000;
+
+/** The fixed lead-in {@link REARM_DEFERRED_MARKER} always renders first — matched, never re-rendered, by
+ *  {@link firstRearmDeferredCreatedAtMs}. */
+export const REARM_DEFERRED_MARKER_RE = /^⏳ conveyor — rearm withheld, fix session appears live \(#xu38vlf\)/;
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#REARM_DEFERRED_MARKER — #xu38vlf: the durable, one-time
+ * comment this file posts the FIRST sweep it observes `deferRearm` for the CURRENT conflict episode — its own
+ * `createdAt`, read back by {@link firstRearmDeferredCreatedAtMs}, is the "since" this wait is bounded against.
+ * Posted once per episode (like every other marker in this file); a later sweep that still finds `deferRearm`
+ * true reads this same comment back instead of posting another one.
+ */
+export const REARM_DEFERRED_MARKER = '⏳ conveyor — rearm withheld, fix session appears live (#xu38vlf)';
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#firstRearmDeferredCreatedAtMs — the EARLIEST
+ * {@link REARM_DEFERRED_MARKER} comment posted after `sinceMs` (the current conflict episode's own boundary —
+ * the most recent {@link CONFLICT_ALERT_MARKER_RE} comment's `createdAt`, via
+ * {@link latestConflictAlertCreatedAtMs}, so a FRESH conflict cycle always starts a fresh wait even if an old
+ * marker from a prior episode is still sitting on the thread). PURE. Requires {@link isTrustedMarkerAuthor} for
+ * the identical reason every other marker reader in this file does.
+ * @param {Array<{body?:string, createdAt?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string>|null|undefined} comments
+ * @param {number} sinceMs
+ * @returns {?number}
+ */
+export function firstRearmDeferredCreatedAtMs(comments, sinceMs = -Infinity) {
+  if (!Array.isArray(comments)) return null;
+  let best = null;
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !REARM_DEFERRED_MARKER_RE.test(body.trimStart()) || !isTrustedMarkerAuthor(c)) continue;
+    const ms = Date.parse((typeof c === 'string' ? null : c?.createdAt) ?? '');
+    if (Number.isFinite(ms) && ms > sinceMs && (best === null || ms < best)) best = ms;
   }
   return best;
 }
@@ -1500,34 +1564,10 @@ export function watchParkedPrConflicts({
           continue;
         }
 
-        // #xs81oxb — UNOWNED gets NO grace period (unlike `queued`, just below): nothing else will ever attempt
-        // this PR's rebase, so the mechanical fix runs on the SAME sweep that first detects it, before any label
-        // or bounce. `computeConflictDisposition` is the SAME read-only git-level check the queued-conflict grace
-        // path above already trusts; only on a genuinely mechanical shape (`clean`/`manifest-only`) is the REAL
-        // rebuild-and-push attempted. A `null` disposition (unreadable — no headRefName, an unresolvable ref, a
-        // git error) falls through to the ordinary bounce below unchanged, the safe direction: never invent a
-        // mechanical success from a probe that could not actually tell.
-        if (unowned) {
-          const disposition = computeConflictDisposition({ pr, repo: resolvedRepo });
-          entry.conflictDisposition = disposition;
-          if (disposition === 'clean' || disposition === 'manifest-only') {
-            const result = attemptMechanicalRebase({ pr, repo: resolvedRepo });
-            entry.mechanicalRebase = { action: result?.action, reason: result?.reason ?? null };
-            if (result?.action === 'rebased' || result?.action === 'current') {
-              // Resolved mechanically — no label, no bounce, no fix agent spent on a conflict a rebuild already
-              // cleared. GitHub's own `mergeable` flips on the next read of the PR once the push is seen.
-              entry.routedTo = 'mechanical-rebase';
-              results.push(entry);
-              continue;
-            }
-            // `action === 'skip'` (a REAL, non-manifest conflict the read-only probe missed — e.g. `main` moved
-            // between the probe and the attempt) or `'error'` (a plumbing failure) — fall through to the
-            // ordinary bounce below, exactly as an already-real-conflict disposition would.
-          }
-        }
-
         // #4118 — read the thread ONCE, up front, so both the alert-comment dedup and the dispatch/stand-down
-        // dedup below (and a resumed-after-crash retry on the NEXT sweep) work off the SAME snapshot.
+        // dedup below (and a resumed-after-crash retry on the NEXT sweep) work off the SAME snapshot. #xu38vlf
+        // moved this read earlier than #4118 originally placed it, so the unowned-population attempt cap just
+        // below can reuse the SAME snapshot — no extra `gh` cost on the common (non-retry) path.
         let existingComments = [];
         try { existingComments = listPrComments({ number: pr?.number, repo: resolvedRepo }); } catch { existingComments = []; }
         // The episode boundary every marker dedup below is scoped to (see the `CONFLICT_RETRY_WINDOW_MS`
@@ -1539,6 +1579,67 @@ export function watchParkedPrConflicts({
           sinceMs = Number.isFinite(removedAt) ? removedAt : Infinity;
         }
         const markerScope = { now, sinceMs };
+
+        // #xs81oxb — UNOWNED gets NO grace period (unlike `queued`, just below): nothing else will ever attempt
+        // this PR's rebase, so the mechanical fix runs on the SAME sweep that first detects it, before any label
+        // or bounce. `computeConflictDisposition` is the SAME read-only git-level check the queued-conflict grace
+        // path above already trusts; only on a genuinely mechanical shape (`clean`/`manifest-only`) is the REAL
+        // rebuild-and-push attempted. A `null` disposition (unreadable — no headRefName, an unresolvable ref, a
+        // git error) falls through to the ordinary bounce below unchanged, the safe direction: never invent a
+        // mechanical success from a probe that could not actually tell.
+        if (unowned) {
+          const disposition = computeConflictDisposition({ pr, repo: resolvedRepo });
+          entry.conflictDisposition = disposition;
+          if (disposition === 'clean' || disposition === 'manifest-only') {
+            // #xu38vlf (epic #4075/#3383) — CAP THE RETRY. Before this fix, an `action:'skip'`/`'error'` result
+            // fell through to the ordinary bounce below in the SAME sweep, which already exits this population
+            // (CONFLICT_LABEL applies before the sweep ends) — but a THROW from the git-level attempt itself (a
+            // stale lock, a corrupted ref, a protected-branch push denial) aborted the WHOLE per-PR handler
+            // before any label ever applied, so the PR stayed unowned and this same attempt retried again next
+            // sweep — unbounded, forever, with nothing durable recording it. `countUnownedRebaseAttempts` reads
+            // this population's OWN durable per-attempt marker (posted below, the MOMENT the outcome is known
+            // to be a retry-worthy one — `'skip'`/`'error'`, INCLUDING a caught throw — never on a clean
+            // `rebased`/`current` success, so the common healthy path stays exactly as quiet as before this
+            // fix) — once it reaches the cap, this file stops attempting the rebase and surfaces it once via
+            // the reconcile-notes channel + a desktop notify, then falls through to the ordinary bounce, exactly
+            // like a `skip`/`error` disposition already does.
+            const attemptsSoFar = countUnownedRebaseAttempts(existingComments);
+            if (attemptsSoFar >= UNOWNED_REBASE_ATTEMPT_CAP) {
+              entry.unownedRebaseAttempts = attemptsSoFar;
+              entry.unownedRebaseCapExhausted = true;
+              const note = {
+                kind: 'round-cap-exhausted', prNumber: pr?.number, attempts: attemptsSoFar, cap: UNOWNED_REBASE_ATTEMPT_CAP,
+                capKind: 'unowned-mechanical-rebase',
+                text: `PR #${pr?.number}: unowned-mechanical-rebase auto-repair rounds exhausted (${attemptsSoFar}/${UNOWNED_REBASE_ATTEMPT_CAP}) — a person must take it over`,
+              };
+              const notePlan = planNoteComment(note, existingComments);
+              if (!notePlan.alreadyPosted) {
+                postNoteComment({ repo: resolvedRepo, pr: pr?.number, body: notePlan.body });
+                try { notifyDesktopChecked({ title: 'Conveyor: unowned rebase cap exhausted', body: note.text }); } catch { /* best-effort — health-watch's own notify never blocks a tick either */ }
+              }
+              entry.roundCapNote = notePlan.alreadyPosted ? null : notePlan.key;
+              // Never keep silently retrying past the cap — fall through to the ordinary bounce below.
+            } else {
+              let result;
+              try { result = attemptMechanicalRebase({ pr, repo: resolvedRepo }); }
+              catch (eAttempt) { result = { action: 'error', reason: String((eAttempt && eAttempt.message) || eAttempt) }; }
+              entry.mechanicalRebase = { action: result?.action, reason: result?.reason ?? null };
+              if (result?.action === 'rebased' || result?.action === 'current') {
+                // Resolved mechanically — no label, no bounce, no fix agent spent on a conflict a rebuild already
+                // cleared. GitHub's own `mergeable` flips on the next read of the PR once the push is seen.
+                entry.routedTo = 'mechanical-rebase';
+                results.push(entry);
+                continue;
+              }
+              // `action === 'skip'` (a REAL, non-manifest conflict the read-only probe missed — e.g. `main`
+              // moved between the probe and the attempt), `'error'` (a plumbing failure), or the caught-throw
+              // above — durably record this attempt BEFORE falling through, so the count advances even if the
+              // fall-through below (the comment/dispatch/label writes) itself then throws.
+              try { provider.postComment(resolvedRepo, pr?.number, UNOWNED_REBASE_ATTEMPT_MARKER); }
+              catch { /* best-effort — worst case this ONE attempt goes uncounted, same exposure as before this fix */ }
+            }
+          }
+        }
 
         // Computed ONCE, ahead of both the alert comment and the routing decision below, so the two can never
         // disagree about what happens next — PR #1966's own review found exactly that drift (the alert still
@@ -1641,6 +1742,44 @@ export function watchParkedPrConflicts({
           // stop emitting `newlyResolved` on the NEXT sweep (the label's own absence would already say
           // "resolved"), permanently losing the rearm this fixer is still owed once it finishes — the same
           // "lost forever" shape #4118 (a) names, one effect over.
+          //
+          // #xu38vlf (epic #4075/#3383) — BOUND THE WAIT. Read the thread once, lazily (only this less-common
+          // branch pays for it — the ordinary rearm below never does), and read back this episode's OWN durable
+          // "since" marker: the first sweep this deferral was observed for the CURRENT conflict episode (scoped
+          // to it the same way every other marker here is — after the episode's own alert comment, so a fresh
+          // conflict cycle always starts a fresh wait). Past REARM_DEFERRED_BOUND_MS, this file does NOT force a
+          // rearm — that would race the exact liveness gap #4118 (c) introduced this wait to avoid — it
+          // SURFACES the stale wait via the reconcile-notes channel + a desktop notify, once per episode, and
+          // keeps deferring; a human decides whether the liveness read is stale or the fixer is genuinely still
+          // working.
+          let deferComments = [];
+          try { deferComments = listPrComments({ number: pr?.number, repo: resolvedRepo }); } catch { deferComments = []; }
+          const episodeSinceMs = latestConflictAlertCreatedAtMs(deferComments) ?? -Infinity;
+          const firstDeferredAt = firstRearmDeferredCreatedAtMs(deferComments, episodeSinceMs);
+          if (firstDeferredAt == null) {
+            try { provider.postComment(resolvedRepo, pr?.number, REARM_DEFERRED_MARKER); }
+            catch { /* best-effort — worst case the "since" clock restarts next sweep, the safe direction */ }
+            entry.rearmDeferredSince = now;
+          } else {
+            const waitedMs = now - firstDeferredAt;
+            entry.rearmDeferredSince = firstDeferredAt;
+            entry.rearmDeferredWaitedMs = waitedMs;
+            if (waitedMs >= REARM_DEFERRED_BOUND_MS) {
+              const note = {
+                kind: 'liveness-wait-exhausted', prNumber: pr?.number, since: new Date(firstDeferredAt).toISOString(),
+                text: `PR #${pr?.number}: the rearm has been withheld on a "fix session still live" liveness read for over `
+                  + `${Math.round(REARM_DEFERRED_BOUND_MS / 60000)} minutes — confirm the read is stale (and clear it, `
+                  + 'e.g. via /finish) or that the fixer is genuinely still working',
+              };
+              const notePlan = planNoteComment(note, deferComments);
+              if (!notePlan.alreadyPosted) {
+                postNoteComment({ repo: resolvedRepo, pr: pr?.number, body: notePlan.body });
+                try { notifyDesktopChecked({ title: 'Conveyor: rearm withheld past its bound', body: note.text }); }
+                catch { /* best-effort — health-watch's own notify never blocks a tick either */ }
+              }
+              entry.rearmDeferredNote = notePlan.alreadyPosted ? null : notePlan.key;
+            }
+          }
           entry.routedTo = 'rearm-deferred (fix agent still live)';
         } else {
           // #4118 round 2 — rearm FIRST, remove the label LAST. The label's presence is what makes

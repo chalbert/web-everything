@@ -110,6 +110,12 @@ import { tryReadDeliveryReport, resolveDeliveryReportsDir } from './delivery-rep
 import { isPolicyCorePath } from '../lib/gate-config.mjs';
 import { isStatutePath, scoreEscalation, producerReviewLabel } from '../lib/review-escalation.mjs';
 import { isAllowlistedLitterPath } from '../lib/lane-litter.mjs';
+// xftsbsg (epic #3383) — WHICH REPO's own primary checkout the Codex sandbox deny-map must seal off, given
+// nothing but the lane's own resolved path. See {@link primaryCheckoutForLanePath}'s own header: without this,
+// `defaultDeliveryDenyPaths()` defaults to ITS OWN module's checkout root, which is always WE (these scripts
+// live only in `we:scripts/operations/`), so a frontierui/plateau-app build denied the wrong repo's primary
+// checkout entirely — the one the deny-map exists to seal off was left wide open to the Codex sandbox.
+import { primaryCheckoutForLanePath } from '../lib/repo-profile.mjs';
 // #3383 mechanical-dispatcher fix (live #3565 trial) — the REAL locus-prefix detector, reused so
 // `sanitizeOwnLocusMentions` below prefixes every bare mention the `lint:locus` pre-commit hook would
 // itself flag, not just mentions of the delivery's own touched paths (see that function's own header).
@@ -877,7 +883,14 @@ const CODEX_PROVIDER = {
     // correctly refused (`EPERM`) rather than tolerating like Claude's soft, hook-based one did.
     const reportsDir = resolveReportsDir(lanePath);
     const deliveryEnv = buildDeliveryAgentEnv({ sessionSlug, item, lanePath, attemptTag, reportsDir });
-    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(), lanePath);
+    // xftsbsg — the deny-map must seal off THIS BUILD'S OWN repo's primary checkout, not always WE's (this
+    // module's own default `REPO_ROOT`). `primaryCheckoutForLanePath` reads it straight off the already-resolved
+    // `lanePath` (`.lanes/<repo-pool-dir>/lane-<N>`), so a frontierui/plateau-app build denies
+    // `$HOME/workspace/frontierui`/`plateau-app`'s real primary checkout instead of leaving it unguarded. `null`
+    // (an unrecognized pool-dir basename — e.g. a synthetic test path) falls back to `defaultDeliveryDenyPaths`'s
+    // own default, byte-identical to before this fix.
+    const denyRepoRoot = primaryCheckoutForLanePath(lanePath) ?? undefined;
+    const deny = assertDenyPathsUsable(denyPaths ?? defaultDeliveryDenyPaths(denyRepoRoot), lanePath);
     // Codex mints its OWN thread id and has no `--session-id`, so `resumeSessionId` (a CLAUDE-side UUID the
     // port hands every provider) is used as the SIGNAL that this is a resume, and the actual id is looked up
     // in this provider's own sidecar map. A resume with no recorded thread id is a hard error, never a silent

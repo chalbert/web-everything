@@ -1137,6 +1137,17 @@ export function runReviewLabelCli({
               ? `review:changes — ${bounceEvidence.findingCount} finding(s)${bounceEvidence.reason ? `: ${bounceEvidence.reason}` : ''}`
               : (bounceEvidence.reason || 'review:changes verdict (finding count unknown)'))
             : null;
+          // `changedFiles` (#4034 follow-up, card 4034b) — the PR's changed files, net versus its base, read
+          // ONLY so a `reworked` row carries the scope evidence `we:scripts/lib/critical-work.mjs` needs to
+          // judge criticality from the record instead of failing closed on "unknown scope". Best-effort and
+          // isolated in its OWN try: a `gh` hiccup fetching the file list must never cost the trial row itself,
+          // which is the durable fact this whole block exists to record.
+          let changedFiles = null;
+          try {
+            changedFiles = typeof provider.readPrFiles === 'function' ? provider.readPrFiles(repo, pr) : null;
+          } catch (e) {
+            process.stderr.write(`review-set-label: could not read PR #${pr}'s changed files (non-fatal, changedFiles stays null) — ${String(e?.message ?? e).split('\n')[0]}\n`);
+          }
           const logged = logTrialFn({
             provider: delegation.provider,
             model: delegation.model,
@@ -1147,6 +1158,7 @@ export function runReviewLabelCli({
             findings,
             ...(isMiss ? { informative: !knownZeroFindings } : {}),
             pr: Number(pr),
+            changedFiles,
           }, trialLogIo);
           // No commit+push step any more (#3690's publish, retired by #4155): the store is ONE shared file outside
           // every checkout, so the row is already where every other checkout and daemon reads it.

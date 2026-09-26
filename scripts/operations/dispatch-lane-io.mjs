@@ -82,7 +82,7 @@ import { readJsonConfig, withTrustedDirs, withoutTrustedDirs, TRUST_PATH } from 
 import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 // #3637 — the POC-branch registry, so an item's `deliveryTarget:` resolves against DECLARED branches only.
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
-import { briefTokensForRepo } from '../lib/repo-profile.mjs';
+import { briefTokensForRepo, repoKeyForScope } from '../lib/repo-profile.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions } from '../lib/gh-app-shim.mjs';
 // #xrv69j6 — the pool-dir basenames a lane lives under (`web-everything` / `webeverything`), so the ONE lane
 // a dispatch will use can be resolved to an absolute path the same way `bootstrap-session.mjs#poolRoots`
@@ -1724,18 +1724,22 @@ export function dispatchSessionCwd(sessionId, opts = {}) {
 }
 
 /**
- * EVERY POOL DIRECTORY this dispatcher's own lanes could live under — `<workspace>/.lanes/web-everything` AND
- * `<workspace>/.lanes/webeverything`, mirroring `bootstrap-session.mjs#poolRoots`'s own two-basename probe
- * (`CONSTELLATION_REPOS.we.dirs`) rather than re-deriving which basename this host actually uses. Hardcoded to
- * the `we` profile — same stated scope as {@link briefTokensForRepo}'s own call site above (#3960 multi-repo
- * slice 5's job, not this one's): every launch this file dispatches plans against the WE backlog/PR pool only.
+ * EVERY POOL DIRECTORY a given repo's lanes could live under — `<workspace>/.lanes/<one of that repo's own
+ * `dirs`>`, mirroring `bootstrap-session.mjs#poolRoots`'s own two-basename probe (`CONSTELLATION_REPOS.we.dirs`)
+ * rather than re-deriving which basename this host actually uses. `repoKey` DEFAULTS to `'we'` — byte-identical
+ * to every call site that predates xftsbsg and never passes one — but is no longer hardcoded: `we`/`frontierui`/
+ * `plateau-app` each number their own lanes from 1 (all three exist simultaneously on a real host), so a caller
+ * that KNOWS which repo a lane number belongs to (see {@link dispatchLaneGrant}) must say so, or this would
+ * resolve a `frontierui`/`plateau-app` lane number to WE's own unrelated same-numbered lane — the xftsbsg defect.
  * PURE.
  * @param {string} [root]
+ * @param {string} [repoKey]
  * @returns {string[]}
  */
-function laneWorkspacePoolDirs(root = REPO_ROOT) {
+function laneWorkspacePoolDirs(root = REPO_ROOT, repoKey = 'we') {
   const workspace = workspaceRootOf(root);
-  return CONSTELLATION_REPOS.we.dirs.map((d) => join(workspace, '.lanes', d));
+  const dirs = CONSTELLATION_REPOS[repoKey]?.dirs ?? CONSTELLATION_REPOS.we.dirs;
+  return dirs.map((d) => join(workspace, '.lanes', d));
 }
 
 /**
@@ -1753,12 +1757,15 @@ function laneWorkspacePoolDirs(root = REPO_ROOT) {
  * exists yet (a lane number the pool has not grown to) still returns a real, deterministic path — better than
  * refusing to grant anything, and harmless: granting a not-yet-existing directory changes nothing the CLI
  * would otherwise refuse differently.
+ *
+ * `repoKey` (xftsbsg, default `'we'`, unchanged for every pre-existing caller) selects WHICH repo's pool to
+ * probe — see {@link laneWorkspacePoolDirs}'s own header for why this can no longer be hardcoded.
  * @param {string|number} laneNum
- * @param {{root?:string, exists?:Function}} [o]
+ * @param {{root?:string, exists?:Function, repoKey?:string}} [o]
  * @returns {string}
  */
-export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync } = {}) {
-  const candidates = laneWorkspacePoolDirs(root).map((poolDir) => join(poolDir, `lane-${laneNum}`));
+export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync, repoKey = 'we' } = {}) {
+  const candidates = laneWorkspacePoolDirs(root, repoKey).map((poolDir) => join(poolDir, `lane-${laneNum}`));
   return candidates.find((p) => exists(p)) ?? candidates[0];
 }
 
@@ -1767,13 +1774,14 @@ export function laneDirFor(laneNum, { root = REPO_ROOT, exists = existsSync } = 
  * primary checkout. Reached only when a dispatch payload carries no lane number at all, which the
  * `assigned-lane` guard above means should not happen through the normal `dispatch-lane` CLI path; kept so a
  * caller that invokes {@link createDispatchSinks}'s sink directly, bypassing that guard, still grants SOME
- * scoped directory rather than nothing. PURE over `exists`.
+ * scoped directory rather than nothing. PURE over `exists`. `repoKey` — see {@link laneDirFor}'s own header.
  * @param {string} [root]
  * @param {Function} [exists]
+ * @param {string} [repoKey]
  * @returns {string[]}
  */
-export function laneRootsFor(root = REPO_ROOT, exists = existsSync) {
-  return laneWorkspacePoolDirs(root).filter((p) => exists(p));
+export function laneRootsFor(root = REPO_ROOT, exists = existsSync, repoKey = 'we') {
+  return laneWorkspacePoolDirs(root, repoKey).filter((p) => exists(p));
 }
 
 /**
@@ -1782,15 +1790,22 @@ export function laneRootsFor(root = REPO_ROOT, exists = existsSync) {
  * {@link laneDirFor}'s own header for why this is always available today); its absence falls back to every
  * existing lanes-pool root ({@link laneRootsFor}) rather than refusing to grant anything. NEVER a primary
  * checkout either way. PURE over `exists`.
- * @param {{lane?:string|number|null}} payload
+ *
+ * xftsbsg — WHICH REPO'S POOL to resolve the lane number against is read off `payload.scope` (the same
+ * repo-qualified scope {@link ../lib/repo-profile.mjs#repoKeyForScope} already knows how to read — every
+ * mechanical build/fix/ci-heal payload carries one; see `we:scripts/operations/dispatch-lane-io.mjs#findItem`).
+ * An empty/unrecognized scope falls back to `'we'` — byte-identical to this function's behavior before
+ * xftsbsg, which is exactly right for the pre-existing (WE-only) callers whose own scope already reads `we:`.
+ * @param {{lane?:string|number|null, scope?:string|string[]|null}} payload
  * @param {{root?:string, exists?:Function}} [o]
  * @returns {{additionalDirectories:string[], allow:string[]}}
  */
 export function dispatchLaneGrant(payload, { root = REPO_ROOT, exists = existsSync } = {}) {
   const lane = payload?.lane;
+  const repoKey = repoKeyForScope(payload?.scope) ?? 'we';
   const dirs = (lane != null && String(lane).trim() !== '')
-    ? [laneDirFor(lane, { root, exists })]
-    : laneRootsFor(root, exists);
+    ? [laneDirFor(lane, { root, exists, repoKey })]
+    : laneRootsFor(root, exists, repoKey);
   const rules = dirs.flatMap((d) => [`Edit(${d}/**)`, `Write(${d}/**)`]);
   return { additionalDirectories: dirs, allow: rules };
 }

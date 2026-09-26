@@ -1958,7 +1958,7 @@ describe('the write arc and its #2964 ordering', () => {
   };
 
   /** Records the ORDER of port calls. Reads answer from `labels`, so a test picks the branch by state. */
-  function stubProvider({ labels = [], body = '', title = '' } = {}) {
+  function stubProvider({ labels = [], body = '', title = '', readPrFiles } = {}) {
     const calls = [];
     return {
       calls,
@@ -1971,6 +1971,7 @@ describe('the write arc and its #2964 ordering', () => {
       readLabels: () => { calls.push('readLabels'); return labels.map((name) => ({ name })); },
       setLabels: (_r, _p, spec) => { calls.push('setLabels'); calls.push(spec); },
       postComment: () => { calls.push('postComment'); },
+      ...(readPrFiles ? { readPrFiles: (...args) => { calls.push('readPrFiles'); return readPrFiles(...args); } } : {}),
     };
   }
 
@@ -2058,6 +2059,34 @@ describe('the write arc and its #2964 ordering', () => {
         verifiedBy: 'independent-claude', outcome: 'landed', findings: null,
         taskDescription: 'Fix launch wrapper',
       });
+    });
+
+    it('#4034 follow-up (card 4034b): stamps changedFiles from the provider\'s PR-files lookup', () => {
+      const p = stubProvider({ labels: ['review:pending'], body, title: 'Fix launch wrapper', readPrFiles: () => ['scripts/a.mjs', 'scripts/b.mjs'] });
+      const io = memIo();
+      expect(run(p, argv, { trialLogIo: io }).exitCode).toBe(0);
+      expect(p.calls).toContain('readPrFiles');
+      expect(readStore(io).records[0].changedFiles).toEqual(['scripts/a.mjs', 'scripts/b.mjs']);
+    });
+
+    it('#4034 follow-up: a failed changed-files lookup still logs the trial, with changedFiles null (non-fatal)', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const p = stubProvider({
+        labels: ['review:pending'], body, title: 'Fix launch wrapper',
+        readPrFiles: () => { throw new Error('gh api rate limited'); },
+      });
+      const io = memIo();
+      expect(run(p, argv, { trialLogIo: io }).exitCode).toBe(0);
+      expect(readStore(io).records).toHaveLength(1);
+      expect(readStore(io).records[0].changedFiles).toBeNull();
+      expect(stderr.mock.calls.flat().join('')).toContain('could not read PR #1048\'s changed files');
+    });
+
+    it('#4034 follow-up: a provider with no readPrFiles method (an older stub) still logs the trial, changedFiles null', () => {
+      const p = stubProvider({ labels: ['review:pending'], body, title: 'Fix launch wrapper' });
+      const io = memIo();
+      expect(run(p, argv, { trialLogIo: io }).exitCode).toBe(0);
+      expect(readStore(io).records[0].changedFiles).toBeNull();
     });
 
     it('#3949 fix (a): STILL appends to an already-graduated triple — logging must never stop at graduation, '

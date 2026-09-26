@@ -118,6 +118,22 @@ describe('the gh adapter', () => {
     p.ensureLabel('o/n', 'review-round:3');
     expect(seenArgv).toEqual(GH_ARGV.ensureLabel('o/n', 'review-round:3'));
   });
+
+  it('readPrFiles shells --method GET (load-bearing: an -F param silently flips gh to POST, which pulls/files 404s on)', () => {
+    expect(GH_ARGV.readPrFiles('o/n', 2223)).toEqual([
+      'api', '--paginate', '--method', 'GET', '-F', 'per_page=100', 'repos/o/n/pulls/2223/files', '--jq', '.[].filename',
+    ]);
+  });
+
+  it('readPrFiles splits gh\'s newline-joined jq output into a trimmed array', () => {
+    const p = createGhProvider({ exec: () => 'scripts/a.mjs\nscripts/b.mjs\n' });
+    expect(p.readPrFiles('o/n', 2223)).toEqual(['scripts/a.mjs', 'scripts/b.mjs']);
+  });
+
+  it('readPrFiles returns an empty array, never throws, on blank output', () => {
+    const p = createGhProvider({ exec: () => '' });
+    expect(p.readPrFiles('o/n', 2223)).toEqual([]);
+  });
 });
 
 /**

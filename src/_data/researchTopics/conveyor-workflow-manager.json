@@ -1,0 +1,24 @@
+{
+  "id": "conveyor-workflow-manager",
+  "title": "Conveyor workflow manager — daemon flows as executable configuration",
+  "status": "open",
+  "summary": "Grounds decision x3vjug7 (epic #4075): the operator's target is to migrate ALL flow-like conveyor code (every daemon, pass and dispatch lifecycle) to declared, executable configuration, with only step logic (classifiers, gates, effects) left as code the configuration calls. Grounding: xr05jjl already describes nine flows as data (states with owner/wait/retry/escalation, steps with assumes/provides facts, every fact cited) and its checker finds 57 gaps (21 unbounded waits, 13 uncapped retries, 11 silent failures, 5 unowned states, 5 unprovided assumptions, 2 failures with no exit); replayed, it catches 6 of the 7 knock-on bugs of 2026-09-26 (cwd->permission, stripped smoke env, shared candidate folder / writer lock, retargeted stacked PR without CI, accepted-red with no owner, broken login) but not a wrong answer inside one check (App auth). The repo already has a pure, io-free operation engine (compute/judge/confirm/effect, suspend/resume, effects keyed by run+step) and the ratified #4120 job model (detached jobs, host:pid:procStart handles, relaunch from last applied step). Prior art: durable-execution servers (Temporal, Restate, Inngest single binary with SQLite, DBOS as a Postgres/SQLite library) solve timers and replay but are code-first and add a process or database to the critical path; configuration-first systems (AWS Step Functions ASL with first-class Retry/MaxAttempts/Catch/TimeoutSeconds, CNCF Serverless Workflow, W3C SCXML, XState's named guards) show the checkable format, and GitHub Actions / Serverless Workflow's jq show logic leaking into config through expression languages. WE's own Workflow Protocol (webworkflows, SCXML-style graph) is the vocabulary to align with but its scope is UX step-intents, so it is supporting context, not authority. Recommended (after a skeptic round and a two-confusion screen, which surfaced two hidden forks): Fork 1 (a) no always-running server on the critical path — an in-repo engine over the declared-operations engine and #4120 jobs, with restart-safe inspectable records and graphs drawn from the executing files; Fork 2 (a) flow state derived each tick from live observations (the record keeps only deadlines, job handles and a transition log; retry counts from their durable sources, as reconcile-core already does); Fork 3 (a) classifier guards with closed outcomes, ordered first-match transitions, otherwise only to escalation/failure, no expressions; Fork 4 (a) the engine as a library in the daemon that owns each state, hand-offs through live state, no central workflow daemon; Fork 5 (a) the daemon-rebuild flow stays code-driven in permanent shadow (bootstrap exception). Ratify lines: per-flow off|shadow|on switch with fallback (main writers fail closed), cross-repo hosts shell the WE engine, the checker as load-time admission test with no waivers for unbounded waits / uncapped retries / unowned states, no new step kinds (fact probes are compute steps). First slice: the review flow. Report: reports/2026-09-26-workflow-manager-flows-as-executable-config.md.",
+  "dateOpened": "2026-09-26",
+  "lastReviewed": "2026-09-26",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "conveyor",
+    "daemons",
+    "workflow",
+    "flows",
+    "statechart",
+    "durable-execution",
+    "temporal",
+    "xstate",
+    "scxml",
+    "self-driven-project",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
