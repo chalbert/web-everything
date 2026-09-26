@@ -92,6 +92,10 @@ import { isForeignOccupancy, laneWorkerSession, isLeaseStale, describeLease } fr
 // belongs to or what its lease says. Importing guard-bash does NOT run its CLI (that block is gated on
 // `process.argv[1]` being guard-bash itself).
 import { laneRootFromCwd, readLaneLease } from './guard-bash.mjs';
+// #xpt9fvd — the shared daemon-clone registry `guard-bash.mjs`'s Bash-side arm also reads, so the two guards
+// can never disagree about which paths are a resident daemon's OWN clone (same reuse discipline as the
+// lease pair above).
+import { daemonCloneRoots, isDaemonCloneRealpath } from './lib/daemon-clone-registry.mjs';
 
 const PRIMARY_REPOS = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'];
 const SEP = path.sep;
@@ -139,17 +143,40 @@ export function workspaceRootOf(weRoot) {
  * Kept separate from the stdin/exit-code wrapper so it is unit-testable (mirrors guard-git-push.mjs).
  * @param {string} real  the target's resolved real path (symlinks already followed by the caller)
  * @param {string} weRoot  this guard's repo root (`<workspace>/<repo>`); `<workspace>` is its parent
- * @param {{lease?: object|null, mySessionId?: string|null}} [ctx]  #2997 — the LIVE lease of the lane clone
- *   `real` sits in (null when the target is not in a lane, or the lane holds no live lease), plus this
- *   caller's durable session id. Liveness needs a clock and the lease needs an fs read, so BOTH are collected
- *   by the CLI wrapper and injected here — keeping this function pure and unit-testable, exactly as
- *   `guard-bash.mjs#reason` takes `foreignLiveLease` rather than reading the marker itself.
+ * @param {{lease?: object|null, mySessionId?: string|null, daemonCloneRoots?: string[]}} [ctx]  #2997 — the LIVE
+ *   lease of the lane clone `real` sits in (null when the target is not in a lane, or the lane holds no live
+ *   lease), plus this caller's durable session id. Liveness needs a clock and the lease needs an fs read, so
+ *   BOTH are collected by the CLI wrapper and injected here — keeping this function pure and unit-testable,
+ *   exactly as `guard-bash.mjs#reason` takes `foreignLiveLease` rather than reading the marker itself.
+ *   `daemonCloneRoots` (#xpt9fvd) is the same shape: `daemon-clone-registry.mjs#daemonCloneRoots`'s output,
+ *   collected once by the CLI wrapper (it does its own fs reads) and injected here as plain strings.
  * @returns {string|null}
  */
-export function laneGuardDecision(real, weRoot, { lease = null, mySessionId = null } = {}) {
+export function laneGuardDecision(real, weRoot, { lease = null, mySessionId = null, daemonCloneRoots: daemonRoots = [] } = {}) {
   if (!real) return null; // no path to judge (never block)
   const workspace = workspaceRootOf(weRoot);
   const primaries = PRIMARY_REPOS.map((r) => path.join(workspace, r) + SEP);
+
+  // #xpt9fvd — a DAEMON CLONE is checked FIRST and UNCONDITIONALLY, before the primary/lane split below. One
+  // of them (the WE drain's own clone) sits UNDER `.lanes/`, which the ordinary lane test just below would
+  // read as an ordinary pool lane and allow outright — exactly the hole this closes. No tool ever has a
+  // legitimate reason to Edit/Write/NotebookEdit a file INSIDE a daemon clone: the daemon itself rebuilds it
+  // as a launchd process, entirely outside Claude's hooks, and the one sanctioned way to land a fix there
+  // early is the overlay CLI run from a LANE (never a direct file write on the clone's own tree) — so unlike
+  // the primary-checkout arm below, there is no escape hatch here.
+  if (isDaemonCloneRealpath(real, daemonRoots)) {
+    return (
+      `edit BLOCKED — "${real}" is inside a DAEMON CLONE (a resident daemon's own dedicated checkout, ` +
+      `rebuilt by the daemon itself — never by hand, #xpt9fvd). A hand-edit here goes over the daemon's next ` +
+      `rebuild invisibly, and a dirty clone BLOCKS that rebuild (its own live-smoke gate refuses to run over ` +
+      `an unexpected local diff) until a person notices and reverts it — caught+reverted 3x on 2026-09-26 ` +
+      `before this guard existed. Land the change the sanctioned way instead: work it in a LANE, then push it ` +
+      `live early with the overlay CLI (never Edit/Write on the clone's own files — there is no escape hatch):\n` +
+      `  node scripts/daemon-overlay.mjs add --clone=<daemon-clone-path> --ref=<your lane branch> [--pr=<n>]\n` +
+      `Or use \`node scripts/lib/daemon-rebuild.mjs\` / \`node scripts/lib/daemon-load-overlay.mjs --clone=<path>\` ` +
+      `for the other sanctioned rebuild routes — both run from a lane, targeting the daemon clone by \`--clone=\`.`
+    );
+  }
 
   // A lane clone lives under `<workspace>/.lanes/…` — never under a primary root — so a primary-root prefix
   // test alone cleanly separates the two. Agent memory is NO LONGER exempt (2026-07-09): its realpath
@@ -223,7 +250,12 @@ if (process.argv[1] && realpathSyncSafe(process.argv[1]) === realpathSyncSafe(fi
         const laneRoot = laneRootFromCwd(real);
         const raw = laneRoot ? readLaneLease(laneRoot) : null;
         const lease = raw && !isLeaseStale(raw, Date.now()) ? raw : null; // stale ⇒ no live hold ⇒ allow
-        const msg = laneGuardDecision(real, weRoot, { lease, mySessionId });
+        // #xpt9fvd — the daemon-clone registry (seed ∪ every clone the overlay state dir has recorded).
+        // Computed from `weRoot`'s own parent, same as `primaries` above; a fault here fails open (empty
+        // list, `isDaemonCloneRealpath` then answers false for everything) rather than wedging the agent.
+        let daemonRoots = [];
+        try { daemonRoots = daemonCloneRoots(workspaceRootOf(weRoot)); } catch { /* fail-open */ }
+        const msg = laneGuardDecision(real, weRoot, { lease, mySessionId, daemonCloneRoots: daemonRoots });
         if (msg) { process.stderr.write('guard-lane: ' + msg + '\n'); process.exit(2); }
       }
     }
