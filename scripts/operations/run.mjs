@@ -108,6 +108,10 @@ import { createPrioritySyncReader, createPrioritySyncSinks } from './priority-sy
 import { landAdvanceOperation, LAND_ADVANCE_OP } from './land-advance.mjs';
 import { createLandAdvanceReader } from './land-advance-io.mjs';
 import { canonicalRoot as landAdvanceCanonicalRoot } from './land-advance-gate.mjs';
+// backlog #3932 (epic #3931, under #3383) — the card ↔ run join. Read-only, same no-sinks reasoning as
+// `runner-activity`/`pr-status`: every step is `compute`.
+import { agentActivityOperation, AGENT_ACTIVITY_OP } from './agent-activity.mjs';
+import { createAgentActivityReader } from './agent-activity-io.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
 /**
@@ -248,6 +252,10 @@ export const OPERATIONS = Object.freeze({
   }),
   [RUNNER_ACTIVITY_OP]: () => ({
     declaration: runnerActivityOperation({ readActivity: createRunnerActivityReader() }),
+    sinks: {},
+  }),
+  [AGENT_ACTIVITY_OP]: () => ({
+    declaration: agentActivityOperation({ readActivity: createAgentActivityReader() }),
     sinks: {},
   }),
   // #4067 (epic #4075, under #3383) — the live daemon status page. Read-only, same no-sinks reasoning as

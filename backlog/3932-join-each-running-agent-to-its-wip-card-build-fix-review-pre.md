@@ -3,8 +3,9 @@ bornAs: xa59gb9
 kind: story
 size: 3
 parent: "3931"
-status: open
+status: active
 dateOpened: "2026-09-22"
+dateStarted: "2026-09-26"
 tags: []
 ---
 
@@ -24,7 +25,7 @@ Ordered resolvers, first match wins; the winner is recorded as `joinVia`:
 6. Mention — first `#NNN` in an unjoined subagent's prompt; tagged `mention` (weak).
 
 No match → `unmatched[]`. The operator's own interactive session is listed only if resolver 4 or 5 ties it to a card.
-Lifecycle from `claude agents --json --all` (cached 10 s). Output: `runs[] {runId, runtime, role, name, parentRunId, card, joinVia, state, startedAt, lastEventAt}` + `unmatched[]`.
+Lifecycle from `claude agents --json` (cached 10 s; never `--all`, which also lists finished sessions — PR #2715 review). Output: `runs[] {runId, runtime, role, name, parentRunId, card, joinVia, state, startedAt, lastEventAt}` + `unmatched[]`.
 
 ## Done when
 
