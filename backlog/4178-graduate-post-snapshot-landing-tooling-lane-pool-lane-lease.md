@@ -3,10 +3,12 @@ bornAs: x0n0eiz
 kind: story
 size: 3
 parent: "3443"
-status: open
+status: resolved
 blockedBy: ["3915"]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/lib/lane-lease.mjs", "we:scripts/lib/__tests__/lane-lease.test.mjs", "we:scripts/lib/lane-verify.mjs", "we:scripts/verify-lane.mjs", "we:scripts/__tests__/verify-lane.test.mjs", "we:scripts/operations/poc-land.mjs", "we:scripts/operations/__tests__/poc-land.test.mjs", "we:scripts/operations/verify-io.mjs", "we:scripts/guard-bash.mjs", "we:scripts/__tests__/guard-bash.test.mjs", "we:scripts/__tests__/lane-pool-refresh-guard.test.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/check-standards.contract.json", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/__tests__/check-standards-rules-backlog-integrity.test.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 

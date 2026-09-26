@@ -41,20 +41,19 @@
  *     window) on its next tick, which runs the SAME `verify` mode below to completion. An agent that called
  *     `request` then polls `check` across its own turns — each `check` call is a fast marker read, never a
  *     suite run, so no single call can ever exceed the foreground window, no matter how long the gate itself
- *     takes. `request` reuses the exact START-write guard `verify` already applies (never clobbers a foreign
- *     terminal marker) — it is that guard's own first half, factored out, not a new decision.
+ *     takes. `request` reuses the exact START-write guard `verify` already applies (a foreign terminal marker is
+ *     archived, never clobbered) — it is that guard's own first half, factored out, not a new decision.
  *
  * Exit codes: 0 = green (marker recorded green) / `check` verdict ok / `reset` cleared or was a no-op / `request`
  * accepted; 2 = red (suites failed — marker recorded red) / `check` verdict not-ok; 3 = usage / git error (no
- * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378) /
- * `request` refused (would clobber a foreign terminal marker — same guard `verify` applies).
+ * marker written) / `reset` refused because a FOREIGN lease is live (own live lease no longer refuses, #3378).
  */
 import { execSync } from 'node:child_process';
 import { writeFileSync, renameSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { VERIFY_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
+import { VERIFY_FILENAME, VERIFY_PREVIOUS_FILENAME, verifyStartBody, verifyFinishBody, verifyGateDecision, readVerifyMarker, resolveVerifyOptions } from './lib/lane-verify.mjs';
 import { LEASE_FILENAME, isLeaseStale, isConfirmedOwnLease } from './lib/lane-lease.mjs';
 import { defaultPoolRoot } from './lib/lane-pool-paths.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
@@ -210,26 +209,20 @@ else {
 
 // 1. Stamp the `running` marker BEFORE the suites start, so a kill mid-run leaves a stranded (detectably
 //    unfinished) marker rather than nothing.
-//    #2833 finding 4: the same sha compare-and-set the FINISH write applies (below) must also guard the START
-//    write. Two overlapping runs share one clone's marker; without this, `verify-lane` for a NEW sha would
-//    overwrite an existing TERMINAL (`green`/`red`) record belonging to a DIFFERENT sha with a `running` marker
-//    — destroying a sibling run's recorded result before any CAS could protect it. Refuse to clobber a terminal
-//    record for a foreign sha (a `running`/absent/own-sha marker is fine to overwrite: re-verifying is legitimate).
-//    #3538: a terminal record already merged into origin/main is spent. Only a successful ancestry check
-//    permits replacing it; tryGit returns null for non-ancestors and errors (including a missing ref).
- // xpnhz4o — `run` mode never touches the marker: it is the plain "run my selected gate now" call (the fix /
+//    #2833 finding 4 protected a TERMINAL (`green`/`red`) record for a DIFFERENT sha from being destroyed by the
+//    start write. #3751 / #3383 keep that protection by ARCHIVING the record to `.lane-verify.previous` instead of
+//    refusing: refusing (including the #3538 merged-is-spent carve-out) made every second verify in a lane after a
+//    new commit, an amend or a rebase come back `superseded` until a hand `reset` (hit five times on 2026-09-23/24,
+//    and it broke `poc-land.mjs`'s own rebase-then-re-verify path outright). A record for a sha that is not HEAD
+//    can never bless a landing of this clone's HEAD, so archiving loses nothing — merged or not; the FINISH-write
+//    compare-and-set below still refuses to stamp a result over a record for another sha (finding 1, the
+//    false-green guard).
+// xpnhz4o — `run` mode never touches the marker: it is the plain "run my selected gate now" call (the fix /
 // ci-heal briefs' `{{GATE_COMMAND}}`), whose caller never lands through pr-land's finish-guard, so recording (or
-// being refused by) a marker would only couple it to whatever a previous occupant of this clone left behind.
+// archiving) a marker would only couple it to whatever a previous occupant of this clone left behind.
 const preStart = MODE === 'run' ? null : readMarker();
-if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha
-    && tryGit(['merge-base', '--is-ancestor', preStart.sha, 'origin/main']) === null) {
-  emit(
-    {
-      sha: headSha, status: 'superseded', reason: 'superseded', exitCode: null,
-      detail: `refusing to START verification for ${headSha.slice(0, 8)}: the on-disk marker holds a terminal ${preStart.status} record for ${String(preStart.sha).slice(0, 8)} (an overlapping verify-lane run) — overwriting it with a running marker would destroy that result; no marker written for this run.`,
-    },
-    3,
-  );
+if (preStart && !preStart.corrupt && (preStart.status === 'green' || preStart.status === 'red') && preStart.sha && preStart.sha !== headSha) {
+  writeFileSync(join(GIT_DIR, VERIFY_PREVIOUS_FILENAME), `${JSON.stringify(preStart, null, 2)}\n`);
 }
 if (MODE !== 'run') writeMarker(verifyStartBody({ sha: headSha, suites: GATE, startedAt: new Date().toISOString() }));
 

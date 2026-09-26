@@ -46,10 +46,26 @@ export const DEFAULT_LEASE_TTL_MINUTES = 240;
 export function isLeaseStale(lease, nowMs, ttlMs = DEFAULT_LEASE_TTL_MINUTES * 60_000) {
   if (!lease || typeof lease !== 'object') return true;
   if (lease.reserved) return false; // #2350 — permanent reserved lane: never expires, never reclaimed/reset
-  const at = Date.parse(lease.acquiredAt);
-  if (Number.isNaN(at)) return true;
+  const acquired = Date.parse(lease.acquiredAt);
+  if (Number.isNaN(acquired)) return true;
+  // #3383 — a holder that is still working RENEWS its lease ({@link renewedLease}); the TTL runs from the later of the two
+  const renewed = Date.parse(lease.renewedAt);
+  const at = Number.isNaN(renewed) ? acquired : Math.max(acquired, renewed);
   const ttl = Number.isFinite(lease.ttlMinutes) ? lease.ttlMinutes * 60_000 : ttlMs;
   return nowMs - at >= ttl;
+}
+
+/**
+ * #3383 — the lease a still-working holder writes back to keep its lane: the same lease with `renewedAt` set, which
+ * {@link isLeaseStale} counts the TTL from. Pure. A reserved lease has no TTL and is returned unchanged; anything
+ * that is not a lease is `null`. Found live 2026-09-23: a `poc-land.mjs` landing outlived its lane's 4-hour lease
+ * while its gate waited in the heavy-command queue, and the lane was reclaimed and reset under it.
+ * @param {object} lease @param {string} nowIso
+ */
+export function renewedLease(lease, nowIso) {
+  if (!lease || typeof lease !== 'object') return null;
+  if (lease.reserved) return lease;
+  return { ...lease, renewedAt: nowIso };
 }
 
 /** #2350 — is this a RESERVED (permanent) lease? A pure boolean read (older leases lack the field ⇒ falsy ⇒
