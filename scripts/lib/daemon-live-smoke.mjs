@@ -492,6 +492,14 @@ async function checkDispatchDryRun({ root, budgets, runChild, env }) {
  * reports pre-existing dirt DISTINCTLY from dirt newly introduced by this smoke's own checks — still fails on
  * either (a dirty tree is a real problem to the caller regardless of which ran first), but names which is
  * which so a human/daemon reading `detail` is not left guessing whether this smoke run itself is the cause.
+ *
+ * xa4qo7n (live 2026-09-26, `wev-review-daemon`): when `root` is a `daemon-rebuild.mjs#materializeCandidate`
+ * worktree, a "pre-existing" dirty path here most often means the candidate's own setup (its `node_modules`
+ * symlink) — never trust a repo's `.gitignore` to cover a symlink the same way it covers the real directory
+ * (a trailing-slash pattern like `node_modules/` matches ONLY directories, confirmed empirically it does NOT
+ * match a symlink of the same name). The fix belongs in candidate setup (a `node_modules`-shaped `info/exclude`
+ * entry — see that function's own docblock), never in weakening this check to ignore "pre-existing" dirt: a
+ * candidate that is dirty the INSTANT it is checked out is still exactly the anomaly this check exists to catch.
  */
 async function checkTreeStaysClean({ root, budgets, runChild, env, beforePorcelain }) {
   let out;
