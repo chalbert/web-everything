@@ -188,8 +188,11 @@ describe('graduation-progress-report-io: promotions and probation sources', () =
     });
   });
 
-  it('confirms the promotions registry does not exist on main yet (grounds the `absent` default)', () => {
-    expect(createPromotionsReader()().source).toBe('absent');
+  // #3906 ported `we:scripts/lib/dispatch-supervision-promotions.json` onto main, empty and in this reader's own
+  // `{version, entries}` shape (the dispatch router's `validatePromotions` accepts it too) — the live read now
+  // grounds `ok` with no rows instead of `absent`.
+  it('reports `ok` with no rows for the real, now-ported (empty) promotions registry on main', () => {
+    expect(createPromotionsReader()()).toEqual({ source: 'ok', entries: [] });
   });
 
   // #3893 ported `we:scripts/lib/model-probation.json` onto main (it previously read `absent`, per this

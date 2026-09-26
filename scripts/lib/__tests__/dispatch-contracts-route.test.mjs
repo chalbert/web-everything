@@ -220,9 +220,18 @@ describe('the supervision-promotion record (#3784, rule 6 of #3690)', () => {
 
   it('the checked-in promotions file exists, parses, and ships empty', () => {
     const raw = JSON.parse(readFileSync('scripts/lib/dispatch-supervision-promotions.json', 'utf8'));
-    expect(raw).toEqual({ promotions: [] });
+    // #3906 — main's shared registry shape (`{version, entries}`), the one graduation-progress-report reads too.
+    expect(raw).toEqual({ version: 1, entries: [] });
     expect(c.validatePromotions(raw)).toEqual({ ok: true, promotions: [] });
     expect(c.DEFAULT_PROMOTIONS).toEqual({ promotions: [] });
+  });
+
+  it('accepts an `entries` row with no `level` as a spot-check promotion, and it lifts the clamp', () => {
+    const { level, ...noLevel } = row();
+    expect(level).toBe('spot-check');
+    expect(c.validatePromotions({ version: 1, entries: [noLevel] })).toMatchObject({ ok: true, promotions: [{ level: 'spot-check' }] });
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), criticalWorkGate: gate, promotions: { version: 1, entries: [noLevel] } });
+    expect(out.supervision).toBe('spot-check');
   });
 });
 

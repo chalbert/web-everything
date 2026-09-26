@@ -910,14 +910,20 @@ export const DEFAULT_PROMOTIONS = Object.freeze({ promotions: Object.freeze([]) 
 export function validatePromotions(raw) {
   const errors = [];
   const p = object(raw) ? raw : Array.isArray(raw) ? { promotions: raw } : {};
-  const list = owns(p, 'promotions') ? p.promotions : undefined;
+  // #3906 — main's shared registry shape (`{version, entries: [...]}`, read by
+  // `we:scripts/operations/graduation-progress-report-io.mjs` from this SAME file) is accepted beside the
+  // prototype's `{promotions: [...]}`, so the one checked-in file has one shape both readers agree on. A row
+  // in that shape may omit `level`: a promotion is always TO `spot-check` (the only level above `full`).
+  const fromEntries = !owns(p, 'promotions') && owns(p, 'entries');
+  const list = fromEntries ? p.entries : owns(p, 'promotions') ? p.promotions : undefined;
   if (!Array.isArray(list)) {
     return { ok: false, errors: [`promotions must be an array, got ${JSON.stringify(list ?? raw)}`] };
   }
   const rows = [];
-  list.forEach((row, i) => {
+  list.forEach((rawRow, i) => {
     const e = [];
-    if (!object(row)) { errors.push(`promotions[${i}] must be an object`); return; }
+    if (!object(rawRow)) { errors.push(`promotions[${i}] must be an object`); return; }
+    const row = fromEntries && !owns(rawRow, 'level') ? { ...rawRow, level: SUPERVISION_LEVELS.SPOT_CHECK } : rawRow;
     check(e, PROVIDERS.includes(row.provider), 'provider is invalid');
     check(e, nonempty(row.model), 'model is required');
     check(e, isTaskType(row.taskType), 'taskType is invalid');
