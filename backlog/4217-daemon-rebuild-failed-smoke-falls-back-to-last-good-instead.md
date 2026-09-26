@@ -3,11 +3,12 @@ bornAs: x5wbsbc
 kind: story
 size: 8
 parent: "4075"
-status: active
+status: resolved
 scaffoldedBy: "xsmokefb"
 dateScaffolded: "2026-09-26"
 scope: ["we:scripts/lib/daemon-rebuild.mjs", "we:scripts/lib/daemon-live-smoke.mjs", "we:scripts/lib/main-staleness.mjs", "we:scripts/lib/daemon-last-good.mjs", "we:scripts/conveyor/health-smells/daemon-held-on-last-good.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/soak/breaks/"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
