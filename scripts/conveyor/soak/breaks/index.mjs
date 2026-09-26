@@ -34,6 +34,7 @@ import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
 import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
 import daemonOverlayLockWait from './daemon-overlay-lock-wait.mjs';
 import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
+import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
 import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
 import claudeAuthDispatchPause from './claude-auth-dispatch-pause.mjs';
 import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
@@ -60,6 +61,7 @@ export const BREAKS = Object.freeze([
   rebuildSmokeOffLock,
   daemonOverlayLockWait,
   badOverlayFallsBack,
+  pinnedOverlayConflictSkipped,
   brokenSmokeHarnessHoldsLastGood,
   claudeAuthDispatchPause,
   rebuildConcurrentCandidates,
