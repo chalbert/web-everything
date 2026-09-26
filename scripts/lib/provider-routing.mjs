@@ -898,3 +898,88 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
     mostRecentVetoed: mostRecentHasFinding,
   };
 }
+
+// ── REVIEW-SEAT ROUTING (#4194) — which non-Claude provider backs one ADDED review seat ─────────────────
+//
+// An added review seat (an ADVISORY lens, or the one extra juror seat) sits BESIDE Claude's mandatory seats and
+// can only ADD findings — its failure or silence never blocks or accepts a PR (`review-extra-seats.mjs`). So,
+// unlike `selectProvider`'s work cascade, a seat needs NO graduated track record before it may run: a miss is
+// still covered by Claude's mandatory seats. What the record DOES decide is WHICH provider backs each seat:
+//   1. a provider the caller reports unavailable (CLI missing, quota exhausted, daily cap) is never picked;
+//   2. a provider whose MOST RECENT seat row for this lens failed (error / timeout / unparseable / quota) is
+//      ranked after one whose last row was clean — the same "most recent trial must be clean" test
+//      `evaluateProviderFitness` applies (criterion 2), fail-closed on an unknown status;
+//   3. then the provider carrying less of THIS review's planned load (spread seats across providers);
+//   4. then the provider with FEWER recorded rows for this lens (explore evenly, so both earn a record);
+//   5. then a stable per-lens tie-break (never a clock, never random).
+// The rows read are the `review-seat` rows `review-extra-seats.mjs` appends to the shared scorecard store, keyed
+// by `taskType: reviewSeatTaskType(lens)` — a prefixed subject that can never collide with a work taskType, so a
+// review seat's history never counts toward a work triple's graduation streak (#3801 Fork 3).
+
+/** The non-Claude providers an added review seat can be routed to, in tie-break order. */
+export const REVIEW_SEAT_PROVIDERS = Object.freeze(['codex', 'gemini']);
+
+/** The `dispatchKind` every added-review-seat evidence row carries. */
+export const REVIEW_SEAT_DISPATCH_KIND = 'review-seat';
+
+/** The prefixed `taskType` subject of one lens's seat rows — never a work taskType. PURE. */
+export function reviewSeatTaskType(lens) {
+  return `review-lens:${String(lens ?? '').trim()}`;
+}
+
+function stableLensHash(text) {
+  let h = 0;
+  for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) % 1_000_003;
+  return h;
+}
+
+/**
+ * SELECT THE PROVIDER FOR ONE ADDED REVIEW SEAT (#4194). PURE and deterministic over its arguments.
+ * @param {object} o
+ * @param {string} o.lens - the seat's lens (an advisory lens, or the extra juror's lens).
+ * @param {string[]} [o.available] - providers the caller found usable right now (subset of REVIEW_SEAT_PROVIDERS).
+ * @param {Array<object>|{records:Array<object>}} [o.scorecards] - the shared store's rows (caller-loaded).
+ * @param {Record<string, number>} [o.plannedLoad] - seats already assigned per provider in THIS review.
+ * @returns {{provider: (string|null), auditTrail: Array<{criterion:string,result:string,reasoning:string}>, reasoning: string}}
+ */
+export function selectReviewSeatProvider({ lens, available = REVIEW_SEAT_PROVIDERS, scorecards = [], plannedLoad = {} } = {}) {
+  const records = Array.isArray(scorecards) ? scorecards : (Array.isArray(scorecards?.records) ? scorecards.records : []);
+  const taskType = reviewSeatTaskType(lens);
+  const auditTrail = [];
+  const candidates = REVIEW_SEAT_PROVIDERS.filter((p) => Array.isArray(available) && available.includes(p));
+  auditTrail.push({
+    criterion: 'available',
+    result: candidates.join(',') || 'none',
+    reasoning: candidates.length ? `usable now: ${candidates.join(', ')}` : 'no non-Claude provider is usable right now',
+  });
+  if (!candidates.length) {
+    return { provider: null, auditTrail, reasoning: `no provider for the "${lens}" seat: none available` };
+  }
+  const rowsFor = (p) => records
+    .filter((r) => r && r.dispatchKind === REVIEW_SEAT_DISPATCH_KIND && r.provider === p && r.taskType === taskType)
+    .sort((a, b) => String(b.scoredAt ?? '').localeCompare(String(a.scoredAt ?? '')));
+  const base = stableLensHash(taskType);
+  const ranked = candidates.map((p, i) => {
+    const rows = rowsFor(p);
+    return {
+      provider: p,
+      recentFailure: rows.length > 0 && rows[0].status !== 'ok' ? 1 : 0,
+      load: Number(plannedLoad?.[p]) || 0,
+      history: rows.length,
+      tie: (base + i) % candidates.length,
+    };
+  }).sort((a, b) => a.recentFailure - b.recentFailure || a.load - b.load || a.history - b.history || a.tie - b.tie);
+  for (const r of ranked) {
+    auditTrail.push({
+      criterion: `rank:${r.provider}`,
+      result: `recentFailure=${r.recentFailure} load=${r.load} history=${r.history} tie=${r.tie}`,
+      reasoning: r.recentFailure ? 'most recent seat row for this lens was not clean — ranked after a clean one' : 'last seat row clean (or none yet)',
+    });
+  }
+  const pick = ranked[0].provider;
+  return {
+    provider: pick,
+    auditTrail,
+    reasoning: `"${lens}" seat → ${pick} (recent-failure, then planned load, then fewest recorded ${taskType} rows, then a stable tie-break)`,
+  };
+}

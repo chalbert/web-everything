@@ -90,6 +90,13 @@ import { pathToFileURL } from 'node:url';
 export const AGY_CLI = 'agy';
 export const AGY_RESUME_PROMPT = 'Continue the task from where you left off and finish it. Do not restart from scratch or repeat already-completed work.';
 export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** #4194 — the suffix a `--review` task carries in place of the edit instruction (same contract as
+ *  `codex-direct-task.mjs#REVIEW_MODE_SUFFIX`). agy has NO read-only mode (see the header: nothing confines its
+ *  native file tools), so for a review this instruction plus a throwaway target directory is the whole guard. */
+export const REVIEW_MODE_SUFFIX = 'This is a READ-ONLY review. Do not edit, create or delete any file, do not run '
+  + '`git commit`/`git push`/`git add`, do not install dependencies, and do not open a pull request. Read what you '
+  + 'need, then put your whole answer in your final message.';
 const writingTools = ['write_to_file', 'replace_file_content', 'sed_file', 'multi_replace_file_content', 'notebook_edit'];
 
 function requireText(value, name) {
@@ -138,10 +145,16 @@ export function buildAgyDirectTaskArgv({ addDirs = [], model, effort, sandbox = 
   return [...argv, '--print', resumeConversationId === null ? '' : AGY_RESUME_PROMPT]; // Initial prompt rides stdin with the required empty value.
 }
 
-export function buildAgyPrompt(task, absoluteDir) {
+export function buildAgyPrompt(task, absoluteDir, { review = false } = {}) {
   requireText(task, 'task');
   requireText(absoluteDir, 'absoluteDir');
   if (!isAbsolute(absoluteDir)) throw new TypeError('gemini-direct-task: absoluteDir must be an absolute path');
+  if (review) {
+    return `${task.trim()}\n\n---\n\n`
+      + `The absolute directory to read is ${JSON.stringify(absoluteDir)}. Use only absolute paths; never trust your shell's own cwd. `
+      + 'Do not use the grep_search tool (it can silently report zero results); search with `rg` or `grep` via your shell.\n\n'
+      + REVIEW_MODE_SUFFIX;
+  }
   return `${task.trim()}\n\n---\n\n`
     + `The absolute target directory is ${JSON.stringify(absoluteDir)}. Stay inside this directory. `
     + "Use only absolute paths and never trust your shell's own cwd: it may be agy's internal scratch directory, "
@@ -379,14 +392,14 @@ export function runGate({ dir, mode, execFn = defaultExecFn }) {
  */
 export async function runAgyDirectExec({
   dir, task, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null,
+  logFile, stream = true, spawnFn = nodeSpawn, cli = AGY_CLI, resumeConversationId = null, review = false,
 } = {}) {
   let argv = [];
   let stdinLine;
   try {
     validateTimeout(timeoutMs);
     argv = buildAgyDirectTaskArgv({ model, effort, addDirs, sandbox, printTimeoutMs: timeoutMs, resumeConversationId });
-    if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir));
+    if (resumeConversationId === null) stdinLine = buildAgyStdinLine(buildAgyPrompt(task, dir, { review }));
     requireText(logFile, 'logFile');
     // A killed process can leave a partial final line. Separate attempts before appending new JSONL.
     if (resumeConversationId !== null) appendFileSync(logFile, '\n');
@@ -470,7 +483,7 @@ export async function runAgyDirectExec({
 /** Resolve target, record HEAD, run with at most one resume, capture diff, gate. NEVER commit/push/open a PR. */
 export async function geminiDirectTask({
   task, dir, repoRoot, model, effort, addDirs, sandbox = false, timeoutMs = DEFAULT_TIMEOUT_MS,
-  gate = 'none', logFile, stream = true, installDeps = true, wireOriginToRemote = false,
+  gate = 'none', logFile, stream = true, installDeps = true, wireOriginToRemote = false, review = false,
   execFn = defaultExecFn, spawnFn = nodeSpawn, mkTempDir = mkdtempSync, existsFn = existsSync,
 } = {}) {
   requireText(task, 'task');
@@ -498,7 +511,7 @@ export async function geminiDirectTask({
   mkdirSync(dirname(resolvedLogFile), { recursive: true });
   const runOptions = {
     dir: targetDir, task, model, effort, addDirs, sandbox, timeoutMs,
-    logFile: resolvedLogFile, stream, spawnFn,
+    logFile: resolvedLogFile, stream, spawnFn, review,
   };
   let run = await runAgyDirectExec(runOptions);
   let summary = summarizeAgyEvents(parseJsonlEvents(run.stdout));
@@ -542,7 +555,7 @@ export async function geminiDirectTask({
 export function parseFlags(argv) {
   const flags = {};
   const values = ['task', 'task-file', 'dir', 'repo-root', 'model', 'effort', 'add-dir', 'timeout-ms', 'gate', 'log'];
-  const booleans = ['sandbox', 'no-stream', 'no-install', 'wire-origin-to-remote', 'json', 'help'];
+  const booleans = ['sandbox', 'no-stream', 'no-install', 'wire-origin-to-remote', 'json', 'help', 'review'];
   for (const arg of argv) {
     const eq = arg.indexOf('=');
     const key = arg.slice(2, eq === -1 ? undefined : eq);
@@ -576,6 +589,9 @@ export const HELP = `usage: node scripts/gemini-direct-task.mjs --task=<text>|--
                              human can push straight from it. Default: origin stays at the local repoRoot
                              path (not push-capable); the real remote is only printed. No effect with --dir.
   --json                     Full report only on stdout (implies --no-stream).
+  --review                   #4194: a READ-ONLY review task — the prompt forbids edits and asks for the whole
+                             answer in the final message (events.finalResponse). Instruction only: agy has no
+                             read-only mode, so point --dir at a throwaway checkout.
 Timeout or nonzero/null exit without a terminal result: resume exactly once via --conversation <ID>,
 only with a captured init conversation ID. No ID means no retry. Each attempt gets a fresh timeout
 budget (up to twice --timeout-ms); the original prompt is not replayed. Both attempts stay in the log.
@@ -636,6 +652,7 @@ export async function main(argv = process.argv.slice(2), { taskFn = geminiDirect
     gate: flags.gate ?? 'none', logFile: flags.log ? resolve(flags.log) : undefined,
     stream: !flags['no-stream'] && !flags.json, installDeps: !flags['no-install'],
     wireOriginToRemote: Boolean(flags['wire-origin-to-remote']),
+    review: Boolean(flags.review),
     // npm install normally inherits stdout. Keep --json machine-readable during scratch setup too.
     execFn: flags.json ? (bin, args, opts = {}) => defaultExecFn(bin, args, {
       ...opts, ...(opts.stdio === 'inherit' ? { stdio: ['ignore', 2, 2] } : {}),
