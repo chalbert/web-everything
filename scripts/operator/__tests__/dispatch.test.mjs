@@ -289,6 +289,29 @@ describe('healCi (converge.py heal_ci, ported)', () => {
     expect(calls.some((a) => a.includes('--remove-label'))).toBe(true);
   });
 
+  // #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753 (chalbert/web-
+  // everything): `review-gate` (`we:.github/workflows/review-gate.yml`) is BY DESIGN red for as long as
+  // `review:pending` stands — not a code-health signal — but the ORIGINAL `state === 'FAILURE'` scan above had
+  // no exclusion for it, so `failing.length` was never 0 on a PR merely awaiting review and the stale-label
+  // clear never ran. Same declared list `we:scripts/progress-board.mjs#ciFailed` already uses.
+  it('clears a stale ci:failed label when the ONLY red check is review-gate (a by-design hold, never a real CI break)', async () => {
+    const calls = [];
+    const runAgentFn = () => { throw new Error('must not dispatch a fixer for a review-gate-only hold'); };
+    const exec = (cmd, argv) => {
+      calls.push(argv);
+      if (argv[0] === 'pr' && argv[1] === 'checks') {
+        return { stdout: JSON.stringify([
+          { name: 'review-gate', state: 'FAILURE', link: 'https://x/actions/runs/7/job/1' },
+          { name: 'test', state: 'SUCCESS' },
+        ]) };
+      }
+      return { stdout: '' };
+    };
+    const st = await healCi({ pr: 9, branch: 'lane/x', lane: 5, execFn: exec, runAgentFn });
+    expect(st).toBe('cleared stale ci:failed (every check passed)');
+    expect(calls.some((a) => a.includes('--remove-label'))).toBe(true);
+  });
+
   it('reruns transient failures without dispatching a fix agent', async () => {
     const runAgentFn = () => { throw new Error('must not dispatch a fixer for a transient failure'); };
     const rerunCalls = [];

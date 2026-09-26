@@ -1350,3 +1350,43 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
     });
   });
 });
+
+// #xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PR #2748 (chalbert/web-everything): the
+// #3729-residual escape hatch above (certifyLabel OR aiGenerated OR humanCleared) does not help a PR that is
+// mid-review — it carries neither `ready-to-merge` nor `review:accepted` yet (that is the whole point of
+// `review:pending`) — so an uncertified-but-genuinely-AI PR whose branch absorbed a drain bookkeeping commit
+// stayed excluded from the WHOLE reconcile branch, `ci:failed` included, for as long as the review sat open.
+// Six ci-heal sessions in a row found nothing to repair (the real check was green; only `review-gate` was red,
+// by design) and stood down, yet the stale label survived every one of those passes because NOTHING ever
+// reconsidered it. The fix: clearing an OWNED ci-lifecycle label the PR is provably no longer owed is safe
+// regardless of certification — only ADDING one still requires it.
+describe('the TOTAL ci-lifecycle reconcile clears a stale label even when UNCERTIFIED, once the required check reads green', () => {
+  it('source-contract: the uncertified branch clears on green with no certification gate at all', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+    const idx = src.indexOf('// ── The #2421 TOTAL branch:');
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 5300);
+    expect(block).toMatch(/\} else \{/);
+    expect(block).toMatch(/if \(isRequiredCheckGreen\(p, REQUIRED\)\)/);
+    expect(block).toMatch(/staleOwned/);
+  });
+
+  it('behavioral: an uncertified PR (drain-rebase noise commit, no ready-to-merge/review:accepted label) still has its stale ci:failed cleared once the required check is green', () => {
+    const drainRebaseCommit = {
+      messageHeadline: 'drain: rebase lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits ont…',
+      messageBody: '…o origin/main',
+      authors: [{ name: 'test', email: 'test@test.com' }],
+    };
+    const pr = { commits: [claudeCommit(), drainRebaseCommit], labels: [{ name: 'ci:failed' }, { name: 'review:pending' }] };
+    const certified = isAiGeneratedPr(pr) || hasLabel(pr, READY_TO_MERGE_LABEL) || hasLabel(pr, REVIEW_LABELS.accepted);
+    expect(certified).toBe(false); // the exact gap this fix closes — mid-review, neither escape hatch applies yet
+    const owned = [CI_LIFECYCLE_LABELS.checking, CI_LIFECYCLE_LABELS.failed, CI_LIFECYCLE_LABELS.blocked];
+    const staleOwned = owned.filter((name) => hasLabel(pr, name));
+    expect(staleOwned).toEqual(['ci:failed']); // present regardless of `certified` — the clear-only path never gates on it
+  });
+
+  it('behavioral: an uncertified PR whose required check is NOT yet green keeps its stale label untouched (never a blind clear)', () => {
+    const pr = { statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] };
+    expect(isRequiredCheckGreen(pr, 'test')).toBe(false);
+  });
+});
