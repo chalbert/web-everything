@@ -3,10 +3,10 @@ bornAs: xdr571y
 kind: story
 size: 8
 parent: "4163"
-status: open
-blockedBy: ["4164"]
+status: active
 scope: ["we:scripts/check-standards.mjs", "we:scripts/check-standards-rules.mjs", "we:scripts/readiness/claimScope.mjs", "we:src/_data/backlog.js"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
 tags: []
 ---
 

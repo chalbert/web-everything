@@ -281,3 +281,78 @@ export function partitionLocal(findings, { fileSet = null, local = false } = {})
   }
   return { blocking, demoted };
 }
+
+// ── #4166 — LINKED FILES (the epic's ratified direction: git grep per changed id, no maintained index) ──────
+//
+// `--local --files=<lane files>` (above) blocks a finding only when it is attributed to one of the LITERAL
+// changed files. That is unsound for a REFERENCE/RELATIONAL check (a `blockedBy` edge, a `formerSlugs` alias,
+// a citation): the lane can BREAK such an invariant on a file it never itself touched (deleting/renaming an
+// item other cards still point at), and today that breakage's finding is attributed to the OTHER item's own
+// file — outside `--files=` — so it is silently demoted to a note (a false green the merge gate's unscoped CI
+// run still catches, never a merged regression, but a real gap at the lane gate; `check-standards-scope-
+// replay.mjs`'s own header names this exact gap). `linkedFilesFor` closes it: given the changed files, it
+// finds the files that REFERENCE them (or that they reference), via `git grep` per a changed file's own id —
+// no maintained index, per the card's own ratified direction; a shared per-origin/main cached index is only
+// worth adding if `git grep` measures slow. A caller widens ITS classification fileSet to
+// `changedFiles ∪ linkedFilesFor(changedFiles, {gitGrep})` so a finding on either endpoint blocks.
+//
+// Moved here from `scripts/readiness/check-standards-scope-replay.mjs` (#4164), which built these as its own
+// proof-of-what-SHOULD-be-caught; #4166 makes `check-standards.mjs` itself consume the SAME primitives (single
+// source of truth — no risk of the real gate's notion of "linked" drifting from the replay harness's own
+// measure of it) — the replay module now re-exports them from here unchanged.
+
+/** Basenames too generic to `git grep` on (would return most of the repo). Mirrors `test-selection.mjs`'s own
+ *  `GENERIC_BASENAME` exclusion for the same reason. */
+export const GENERIC_STEM = /^(index|main|types|type|utils|util|constants|config|readme|changelog|package|cli|run|id)$/i;
+
+/**
+ * Candidate reference "id" tokens for a changed file — the needles {@link linkedFilesFor} greps the rest of
+ * the repo for. Two shapes, mirroring the repo's own id conventions:
+ *   - the bare filename STEM (extension stripped) when specific enough (not {@link GENERIC_STEM}, length ≥ 4)
+ *     — catches `docs/agent/foo.md` being named as `foo.md` or `foo` elsewhere;
+ *   - a leading `NNN-` backlog numeric id (`backlog/4164-....md` → `4164`, and `#4164`) — catches every
+ *     `#4164`/`4164` cross-reference this repo's citation convention uses.
+ * Pure.
+ * @param {string} path repo-relative path
+ * @returns {string[]}
+ */
+export function idsForPath(path) {
+  const p = String(path || '');
+  const base = p.split('/').pop() || '';
+  const stem = base.replace(/\.[^.]+$/, '');
+  const ids = new Set();
+  if (stem && stem.length >= 4 && !GENERIC_STEM.test(stem)) ids.add(stem);
+  const m = /^(\d{3,5})-/.exec(stem);
+  if (m) { ids.add(m[1]); ids.add(`#${m[1]}`); }
+  return Array.from(ids);
+}
+
+/** Above this many `git grep` hits for one id, the id is not a REFERENCE — it is a common infra word (measured
+ *  live: `lane-pool` alone hit 667 files in a 1-diff smoke test, #4164) and is dropped rather than treated as a
+ *  "link", mirroring `scopeBasenameMismatches`'s own "a wide top tier is silence" axis: a name so common it
+ *  matches almost everything carries no discriminating signal about what THIS diff actually touches. */
+export const MAX_LINKED_HITS_PER_ID = 40;
+
+/**
+ * The files LINKED to `changedFiles` — referencing or referenced by them — found via `git grep` per changed
+ * id (the epic's ratified direction: "no maintained index; a shared per-origin/main cached index only if git
+ * grep proves slow"). `gitGrep(needle) => string[]` is injectable (repo-relative file paths containing the
+ * literal needle, `[]` on no match). An id whose hit count exceeds {@link MAX_LINKED_HITS_PER_ID} is treated as
+ * too generic and contributes nothing (see its doc). Pure given `gitGrep`. Never includes a file already in
+ * `changedFiles`.
+ * @param {string[]} changedFiles
+ * @param {{gitGrep: (needle: string) => string[]}} args
+ * @returns {string[]} sorted, deduped, repo-relative paths
+ */
+export function linkedFilesFor(changedFiles, { gitGrep }) {
+  const changedSet = new Set(changedFiles);
+  const linked = new Set();
+  for (const f of changedFiles) {
+    for (const id of idsForPath(f)) {
+      const hits = gitGrep(id) || [];
+      if (hits.length > MAX_LINKED_HITS_PER_ID) continue; // too generic — no discriminating signal
+      for (const h of hits) if (h && !changedSet.has(h)) linked.add(h);
+    }
+  }
+  return Array.from(linked).sort();
+}

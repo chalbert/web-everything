@@ -1,24 +1,129 @@
 {
   "_doc": "check-standards scoped-mode replay proof (#4164, gates epic #4163). Regenerate: node scripts/readiness/check-standards-scope-replay.mjs --count=50 --out=scripts/readiness/check-standards-scope-replay-baseline.json",
-  "at": "2026-09-26T13:08:41.372Z",
+  "at": "2026-09-26T14:10:36.464Z",
   "base": "origin/main",
   "requestedCount": 50,
+  "overlayCurrent": true,
   "lockfileDrift": [],
   "summary": {
     "diffCount": 50,
     "okCount": 50,
     "erroredCount": 0,
+    "fullRealAvg": 13.566399999999998,
+    "scopedRealAvg": 7.792400000000002,
+    "realSavingsPct": 42.56103314070053,
+    "fullCpuAvg": 14.3816,
+    "scopedCpuAvg": 8.106399999999999,
+    "cpuSavingsPct": 43.633531734994726,
     "totalMissed": 0,
     "diffsWithMisses": 0,
-    "fullRealAvg": 12.481199999999996,
-    "scopedRealAvg": 12.549599999999998,
-    "fullCpuAvg": 13.437800000000005,
-    "scopedCpuAvg": 13.574399999999995,
-    "realSavingsPct": -0.5480242284395809,
-    "cpuSavingsPct": -1.01653544478999,
     "pass": true
   },
   "rows": [
+    {
+      "sha": "4258222a4b094ae4d5f8cddc00a35652e653486b",
+      "subject": "Merge pull request #2711 from chalbert/lane/batch-2026-09-25-waveC4-4178",
+      "head": "a058a2153f99d7e81249f60178d40bd0799c345d",
+      "changedCount": 10,
+      "linkedCount": 85,
+      "full": {
+        "realSec": 13,
+        "userSec": 10.95,
+        "sysSec": 3.29,
+        "maxRssBytes": 953417728,
+        "errors": 0,
+        "warnings": 2366
+      },
+      "scoped": {
+        "realSec": 6.65,
+        "userSec": 4.7,
+        "sysSec": 2.52,
+        "maxRssBytes": 477757440,
+        "errors": 0,
+        "warnings": 189
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "b4eba735dd1e5f5b9763a94211447779080590b9",
+      "subject": "Merge pull request #2718 from chalbert/lane/4167-check-standards-local-skip-work",
+      "head": "2b747a12f3a9aec5391d512d4b188678a71b58d5",
+      "changedCount": 4,
+      "linkedCount": 4,
+      "full": {
+        "realSec": 12.89,
+        "userSec": 11.01,
+        "sysSec": 3.15,
+        "maxRssBytes": 1062682624,
+        "errors": 0,
+        "warnings": 2365
+      },
+      "scoped": {
+        "realSec": 6.77,
+        "userSec": 4.67,
+        "sysSec": 2.65,
+        "maxRssBytes": 622608384,
+        "errors": 0,
+        "warnings": 181
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "6049237129bb970c71d95c579d7fb205c68b8cdb",
+      "subject": "Merge pull request #2720 from chalbert/lane/xgmqm8t-batch-skill-selected-gate",
+      "head": "158e68fd86ab72a95f706e5ad99f22a1f6dcfdd1",
+      "changedCount": 1,
+      "linkedCount": 0,
+      "full": {
+        "realSec": 12.49,
+        "userSec": 10.77,
+        "sysSec": 2.95,
+        "maxRssBytes": 1060913152,
+        "errors": 0,
+        "warnings": 2365
+      },
+      "scoped": {
+        "realSec": 6.58,
+        "userSec": 4.63,
+        "sysSec": 2.55,
+        "maxRssBytes": 456916992,
+        "errors": 0,
+        "warnings": 173
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
+    {
+      "sha": "4e9c9166fe9d3f453eebcea5d82d247799a7d633",
+      "subject": "Merge pull request #2719 from chalbert/lane/x81m8xx-reconcile-pass-repo-slug",
+      "head": "49199713bd0f8e24e04cab1cca15678027aa104c",
+      "changedCount": 3,
+      "linkedCount": 7,
+      "full": {
+        "realSec": 17.44,
+        "userSec": 11.12,
+        "sysSec": 3.32,
+        "maxRssBytes": 1057357824,
+        "errors": 0,
+        "warnings": 2365
+      },
+      "scoped": {
+        "realSec": 8.01,
+        "userSec": 4.76,
+        "sysSec": 3.14,
+        "maxRssBytes": 556204032,
+        "errors": 0,
+        "warnings": 172
+      },
+      "missedCount": 0,
+      "laneRelevantCount": 0,
+      "missed": []
+    },
     {
       "sha": "87bb032cef51f17d3c483b63993482af3b40aeab",
       "subject": "Merge pull request #2713 from chalbert/lane/xs81oxb-unowned-conflict-recovery",
@@ -26,20 +131,20 @@
       "changedCount": 3,
       "linkedCount": 13,
       "full": {
-        "realSec": 13.03,
-        "userSec": 10.98,
-        "sysSec": 3.35,
-        "maxRssBytes": 1063747584,
+        "realSec": 14.52,
+        "userSec": 11.17,
+        "sysSec": 3.58,
+        "maxRssBytes": 1060487168,
         "errors": 0,
         "warnings": 2359
       },
       "scoped": {
-        "realSec": 12.85,
-        "userSec": 11.04,
-        "sysSec": 3.14,
-        "maxRssBytes": 1052819456,
+        "realSec": 6.31,
+        "userSec": 4.66,
+        "sysSec": 2.09,
+        "maxRssBytes": 487735296,
         "errors": 0,
-        "warnings": 2359
+        "warnings": 173
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -50,22 +155,22 @@
       "subject": "Merge pull request #2709 from chalbert/lane/4138-pr-closed-reason-comment",
       "head": "1fcd210660527b545c358d8745a9e729a4996cd7",
       "changedCount": 5,
-      "linkedCount": 18,
+      "linkedCount": 21,
       "full": {
-        "realSec": 12.87,
-        "userSec": 10.96,
-        "sysSec": 3.14,
-        "maxRssBytes": 1056718848,
+        "realSec": 15.06,
+        "userSec": 11.57,
+        "sysSec": 3.64,
+        "maxRssBytes": 902430720,
         "errors": 0,
         "warnings": 2358
       },
       "scoped": {
-        "realSec": 13.91,
-        "userSec": 11.55,
-        "sysSec": 3.48,
-        "maxRssBytes": 1075183616,
+        "realSec": 6.71,
+        "userSec": 4.67,
+        "sysSec": 2.56,
+        "maxRssBytes": 494403584,
         "errors": 0,
-        "warnings": 2358
+        "warnings": 178
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -76,22 +181,22 @@
       "subject": "Merge pull request #2712 from chalbert/lane/x4axhga-stale-claim-health-smell",
       "head": "a48de7ca5146957f6669d38bb6b2401b85110214",
       "changedCount": 7,
-      "linkedCount": 15,
+      "linkedCount": 16,
       "full": {
-        "realSec": 14.14,
-        "userSec": 11.47,
-        "sysSec": 3.34,
-        "maxRssBytes": 1059389440,
+        "realSec": 13.89,
+        "userSec": 11.17,
+        "sysSec": 3.61,
+        "maxRssBytes": 1064304640,
         "errors": 0,
         "warnings": 2361
       },
       "scoped": {
-        "realSec": 13.66,
-        "userSec": 10.99,
-        "sysSec": 3.15,
-        "maxRssBytes": 1047412736,
+        "realSec": 6.57,
+        "userSec": 4.67,
+        "sysSec": 2.41,
+        "maxRssBytes": 559480832,
         "errors": 0,
-        "warnings": 2361
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -102,22 +207,22 @@
       "subject": "Merge pull request #2708 from chalbert/lane/3729-stale-ci-failed-mechanical-merge-commit",
       "head": "6923e70bf4d0223a92f7d719f93a488ff7eee588",
       "changedCount": 4,
-      "linkedCount": 8,
+      "linkedCount": 9,
       "full": {
-        "realSec": 13.43,
-        "userSec": 10.84,
-        "sysSec": 3.16,
-        "maxRssBytes": 1046937600,
+        "realSec": 13.59,
+        "userSec": 11.2,
+        "sysSec": 3.36,
+        "maxRssBytes": 1052409856,
         "errors": 0,
-        "warnings": 2353
+        "warnings": 2355
       },
       "scoped": {
-        "realSec": 12.26,
-        "userSec": 10.67,
-        "sysSec": 2.87,
-        "maxRssBytes": 1040990208,
+        "realSec": 6.78,
+        "userSec": 4.66,
+        "sysSec": 2.68,
+        "maxRssBytes": 491077632,
         "errors": 0,
-        "warnings": 2353
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -130,20 +235,20 @@
       "changedCount": 20,
       "linkedCount": 10,
       "full": {
-        "realSec": 12.53,
-        "userSec": 10.78,
-        "sysSec": 2.76,
-        "maxRssBytes": 1045479424,
+        "realSec": 12.81,
+        "userSec": 10.83,
+        "sysSec": 2.96,
+        "maxRssBytes": 1042890752,
         "errors": 0,
-        "warnings": 2355
+        "warnings": 2356
       },
       "scoped": {
-        "realSec": 13.11,
-        "userSec": 10.91,
-        "sysSec": 2.9,
-        "maxRssBytes": 1071628288,
+        "realSec": 5.67,
+        "userSec": 4.55,
+        "sysSec": 1.7,
+        "maxRssBytes": 512950272,
         "errors": 0,
-        "warnings": 2355
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -156,20 +261,20 @@
       "changedCount": 2,
       "linkedCount": 0,
       "full": {
-        "realSec": 11.69,
-        "userSec": 10.48,
-        "sysSec": 2.47,
-        "maxRssBytes": 1049362432,
+        "realSec": 12.05,
+        "userSec": 10.7,
+        "sysSec": 2.64,
+        "maxRssBytes": 1041416192,
         "errors": 0,
-        "warnings": 2355
+        "warnings": 2357
       },
       "scoped": {
-        "realSec": 11.56,
-        "userSec": 10.54,
-        "sysSec": 2.39,
-        "maxRssBytes": 1051590656,
+        "realSec": 5.93,
+        "userSec": 4.54,
+        "sysSec": 2,
+        "maxRssBytes": 473612288,
         "errors": 0,
-        "warnings": 2355
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -182,20 +287,20 @@
       "changedCount": 12,
       "linkedCount": 66,
       "full": {
-        "realSec": 11.67,
-        "userSec": 10.57,
-        "sysSec": 2.44,
-        "maxRssBytes": 1051607040,
+        "realSec": 12.11,
+        "userSec": 10.64,
+        "sysSec": 2.78,
+        "maxRssBytes": 1042186240,
         "errors": 0,
-        "warnings": 2335
+        "warnings": 2334
       },
       "scoped": {
-        "realSec": 11.97,
-        "userSec": 10.58,
-        "sysSec": 2.7,
-        "maxRssBytes": 1048395776,
+        "realSec": 6.99,
+        "userSec": 4.82,
+        "sysSec": 2.57,
+        "maxRssBytes": 475201536,
         "errors": 0,
-        "warnings": 2335
+        "warnings": 187
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -208,20 +313,20 @@
       "changedCount": 5,
       "linkedCount": 47,
       "full": {
-        "realSec": 12.35,
-        "userSec": 10.65,
-        "sysSec": 2.87,
-        "maxRssBytes": 1044938752,
+        "realSec": 12.07,
+        "userSec": 10.57,
+        "sysSec": 2.79,
+        "maxRssBytes": 1038729216,
         "errors": 0,
-        "warnings": 2338
+        "warnings": 2340
       },
       "scoped": {
-        "realSec": 12.37,
-        "userSec": 10.83,
-        "sysSec": 2.83,
-        "maxRssBytes": 1047347200,
+        "realSec": 6.31,
+        "userSec": 4.61,
+        "sysSec": 2.31,
+        "maxRssBytes": 477888512,
         "errors": 0,
-        "warnings": 2338
+        "warnings": 182
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -234,20 +339,20 @@
       "changedCount": 10,
       "linkedCount": 0,
       "full": {
-        "realSec": 12.69,
-        "userSec": 10.78,
-        "sysSec": 2.98,
-        "maxRssBytes": 1055604736,
+        "realSec": 12.23,
+        "userSec": 10.57,
+        "sysSec": 2.97,
+        "maxRssBytes": 1068875776,
         "errors": 0,
-        "warnings": 2342
+        "warnings": 2344
       },
       "scoped": {
-        "realSec": 12.95,
-        "userSec": 10.82,
-        "sysSec": 3.01,
-        "maxRssBytes": 1072644096,
+        "realSec": 8.7,
+        "userSec": 4.89,
+        "sysSec": 4.39,
+        "maxRssBytes": 465272832,
         "errors": 0,
-        "warnings": 2342
+        "warnings": 178
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -258,22 +363,22 @@
       "subject": "Merge pull request #2704 from chalbert/lane/4164-check-standards-scope-replay",
       "head": "ace00ba6eb99148d24271679c4cd9b0ca16d202c",
       "changedCount": 4,
-      "linkedCount": 6,
+      "linkedCount": 8,
       "full": {
-        "realSec": 12.39,
-        "userSec": 10.67,
-        "sysSec": 2.9,
-        "maxRssBytes": 1046167552,
+        "realSec": 12.32,
+        "userSec": 10.65,
+        "sysSec": 2.92,
+        "maxRssBytes": 1051656192,
         "errors": 0,
         "warnings": 2330
       },
       "scoped": {
-        "realSec": 12.32,
-        "userSec": 10.71,
-        "sysSec": 2.89,
-        "maxRssBytes": 1049919488,
+        "realSec": 6.12,
+        "userSec": 4.5,
+        "sysSec": 2.19,
+        "maxRssBytes": 493207552,
         "errors": 0,
-        "warnings": 2330
+        "warnings": 181
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -284,22 +389,22 @@
       "subject": "Merge pull request #2703 from chalbert/lane/xznd5za-ci-heal-cancelled-cap",
       "head": "cae4229579f7e19928bf88f806bcf379210f4ccd",
       "changedCount": 5,
-      "linkedCount": 46,
+      "linkedCount": 47,
       "full": {
-        "realSec": 12.97,
-        "userSec": 10.83,
-        "sysSec": 2.92,
-        "maxRssBytes": 1050918912,
+        "realSec": 12.38,
+        "userSec": 10.61,
+        "sysSec": 2.85,
+        "maxRssBytes": 1036042240,
         "errors": 0,
         "warnings": 2334
       },
       "scoped": {
-        "realSec": 13.16,
-        "userSec": 10.95,
-        "sysSec": 2.91,
-        "maxRssBytes": 1073840128,
+        "realSec": 5.65,
+        "userSec": 4.52,
+        "sysSec": 1.72,
+        "maxRssBytes": 526172160,
         "errors": 0,
-        "warnings": 2334
+        "warnings": 173
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -312,20 +417,20 @@
       "changedCount": 23,
       "linkedCount": 142,
       "full": {
-        "realSec": 11.89,
-        "userSec": 10.54,
-        "sysSec": 2.47,
-        "maxRssBytes": 1041678336,
+        "realSec": 12.57,
+        "userSec": 10.84,
+        "sysSec": 3.01,
+        "maxRssBytes": 1045643264,
         "errors": 0,
-        "warnings": 2325
+        "warnings": 2326
       },
       "scoped": {
-        "realSec": 12.02,
-        "userSec": 10.55,
-        "sysSec": 2.64,
-        "maxRssBytes": 1043054592,
+        "realSec": 6.64,
+        "userSec": 4.6,
+        "sysSec": 2.48,
+        "maxRssBytes": 622346240,
         "errors": 0,
-        "warnings": 2325
+        "warnings": 177
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -336,22 +441,22 @@
       "subject": "Merge pull request #2685 from chalbert/lane/xgqz204-dispatcher-reexec-worker-marker",
       "head": "dfdcf1c6d307ced453cb03d2e16940ab8885bd44",
       "changedCount": 19,
-      "linkedCount": 61,
+      "linkedCount": 62,
       "full": {
-        "realSec": 12.2,
-        "userSec": 10.58,
-        "sysSec": 2.55,
-        "maxRssBytes": 1071431680,
+        "realSec": 12.45,
+        "userSec": 10.85,
+        "sysSec": 2.87,
+        "maxRssBytes": 1044742144,
         "errors": 0,
-        "warnings": 2324
+        "warnings": 2326
       },
       "scoped": {
-        "realSec": 12.81,
-        "userSec": 10.89,
-        "sysSec": 2.72,
-        "maxRssBytes": 1049001984,
+        "realSec": 5.94,
+        "userSec": 4.61,
+        "sysSec": 1.94,
+        "maxRssBytes": 489766912,
         "errors": 0,
-        "warnings": 2324
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -362,22 +467,22 @@
       "subject": "Merge pull request #2700 from chalbert/lane/xvr2o8r-drain-stranded-sweep-wiring",
       "head": "ad7b43c9cadf8a517755bddb8c57dccba67f73b4",
       "changedCount": 4,
-      "linkedCount": 10,
+      "linkedCount": 12,
       "full": {
-        "realSec": 11.64,
-        "userSec": 10.56,
-        "sysSec": 2.35,
-        "maxRssBytes": 1054048256,
+        "realSec": 12.12,
+        "userSec": 10.66,
+        "sysSec": 2.72,
+        "maxRssBytes": 1034764288,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 11.5,
-        "userSec": 10.46,
-        "sysSec": 2.41,
-        "maxRssBytes": 1055047680,
+        "realSec": 5.55,
+        "userSec": 4.5,
+        "sysSec": 1.69,
+        "maxRssBytes": 563478528,
         "errors": 0,
-        "warnings": 2326
+        "warnings": 176
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -390,20 +495,20 @@
       "changedCount": 1,
       "linkedCount": 0,
       "full": {
-        "realSec": 12.38,
-        "userSec": 10.67,
-        "sysSec": 2.72,
-        "maxRssBytes": 1050853376,
+        "realSec": 13.08,
+        "userSec": 10.8,
+        "sysSec": 3.09,
+        "maxRssBytes": 1042907136,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 13.25,
-        "userSec": 10.91,
-        "sysSec": 2.87,
-        "maxRssBytes": 1052573696,
+        "realSec": 6.08,
+        "userSec": 4.67,
+        "sysSec": 1.93,
+        "maxRssBytes": 469598208,
         "errors": 0,
-        "warnings": 2326
+        "warnings": 178
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -416,20 +521,20 @@
       "changedCount": 16,
       "linkedCount": 112,
       "full": {
-        "realSec": 14.52,
-        "userSec": 10.96,
-        "sysSec": 3.15,
-        "maxRssBytes": 1048625152,
+        "realSec": 13.15,
+        "userSec": 10.85,
+        "sysSec": 3.07,
+        "maxRssBytes": 1039876096,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 12.1,
-        "userSec": 10.74,
-        "sysSec": 2.55,
-        "maxRssBytes": 1047183360,
+        "realSec": 6.53,
+        "userSec": 4.72,
+        "sysSec": 2.38,
+        "maxRssBytes": 516718592,
         "errors": 0,
-        "warnings": 2326
+        "warnings": 178
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -442,20 +547,20 @@
       "changedCount": 6,
       "linkedCount": 32,
       "full": {
-        "realSec": 12.83,
-        "userSec": 10.92,
-        "sysSec": 2.73,
-        "maxRssBytes": 1047986176,
-        "errors": 0,
-        "warnings": 2322
+        "realSec": 12.35,
+        "userSec": 10.95,
+        "sysSec": 2.72,
+        "maxRssBytes": 1137197056,
+        "errors": 1,
+        "warnings": 2323
       },
       "scoped": {
-        "realSec": 11.64,
-        "userSec": 10.54,
-        "sysSec": 2.37,
-        "maxRssBytes": 1036566528,
+        "realSec": 6.33,
+        "userSec": 4.99,
+        "sysSec": 2.02,
+        "maxRssBytes": 662159360,
         "errors": 0,
-        "warnings": 2322
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -468,20 +573,20 @@
       "changedCount": 4,
       "linkedCount": 4,
       "full": {
-        "realSec": 11.92,
-        "userSec": 10.67,
-        "sysSec": 2.6,
-        "maxRssBytes": 1052770304,
+        "realSec": 12.28,
+        "userSec": 10.55,
+        "sysSec": 3.02,
+        "maxRssBytes": 1042071552,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 12.1,
-        "userSec": 10.67,
-        "sysSec": 2.75,
-        "maxRssBytes": 1048772608,
+        "realSec": 5.83,
+        "userSec": 4.56,
+        "sysSec": 1.9,
+        "maxRssBytes": 490438656,
         "errors": 0,
-        "warnings": 2326
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -494,20 +599,20 @@
       "changedCount": 6,
       "linkedCount": 31,
       "full": {
-        "realSec": 12.01,
-        "userSec": 10.57,
-        "sysSec": 2.68,
-        "maxRssBytes": 1044480000,
+        "realSec": 12.57,
+        "userSec": 10.77,
+        "sysSec": 2.81,
+        "maxRssBytes": 1041416192,
         "errors": 0,
         "warnings": 2325
       },
       "scoped": {
-        "realSec": 12.27,
-        "userSec": 10.74,
-        "sysSec": 2.65,
-        "maxRssBytes": 1042382848,
+        "realSec": 5.64,
+        "userSec": 4.55,
+        "sysSec": 1.63,
+        "maxRssBytes": 522240000,
         "errors": 0,
-        "warnings": 2325
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -518,22 +623,22 @@
       "subject": "Merge pull request #2692 from chalbert/lane/xb0iuxq-heavy-queue-fairness",
       "head": "67e2989740ca3517fc1d565d2031c190b0eac036",
       "changedCount": 13,
-      "linkedCount": 11,
+      "linkedCount": 13,
       "full": {
-        "realSec": 12.86,
-        "userSec": 10.8,
-        "sysSec": 2.73,
-        "maxRssBytes": 1044037632,
-        "errors": 0,
-        "warnings": 2306
+        "realSec": 13.35,
+        "userSec": 11.25,
+        "sysSec": 2.97,
+        "maxRssBytes": 1121533952,
+        "errors": 1,
+        "warnings": 2307
       },
       "scoped": {
-        "realSec": 12.88,
-        "userSec": 10.77,
-        "sysSec": 2.87,
-        "maxRssBytes": 1039941632,
+        "realSec": 6.67,
+        "userSec": 5.08,
+        "sysSec": 2.02,
+        "maxRssBytes": 586547200,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -544,22 +649,22 @@
       "subject": "Merge pull request #2697 from chalbert/lane/xv3iegl-owed-ci-rerun-hung-cap-escalation",
       "head": "0251529113089d8ba0dd09af1eeadfed2147efa4",
       "changedCount": 9,
-      "linkedCount": 26,
+      "linkedCount": 28,
       "full": {
-        "realSec": 12.98,
-        "userSec": 10.75,
-        "sysSec": 2.83,
-        "maxRssBytes": 1040367616,
+        "realSec": 13.6,
+        "userSec": 10.92,
+        "sysSec": 3.13,
+        "maxRssBytes": 1036124160,
         "errors": 0,
         "warnings": 2326
       },
       "scoped": {
-        "realSec": 11.8,
-        "userSec": 10.88,
-        "sysSec": 2.52,
-        "maxRssBytes": 830390272,
+        "realSec": 5.83,
+        "userSec": 4.59,
+        "sysSec": 1.81,
+        "maxRssBytes": 508690432,
         "errors": 0,
-        "warnings": 2326
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -572,20 +677,20 @@
       "changedCount": 16,
       "linkedCount": 67,
       "full": {
-        "realSec": 11.39,
-        "userSec": 10.57,
-        "sysSec": 2.22,
-        "maxRssBytes": 1055260672,
+        "realSec": 12.59,
+        "userSec": 10.8,
+        "sysSec": 3.03,
+        "maxRssBytes": 1048870912,
         "errors": 0,
         "warnings": 2327
       },
       "scoped": {
-        "realSec": 11.6,
-        "userSec": 10.49,
-        "sysSec": 2.44,
-        "maxRssBytes": 1050968064,
+        "realSec": 25.31,
+        "userSec": 6.4,
+        "sysSec": 18.38,
+        "maxRssBytes": 489357312,
         "errors": 0,
-        "warnings": 2327
+        "warnings": 252
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -598,20 +703,20 @@
       "changedCount": 13,
       "linkedCount": 54,
       "full": {
-        "realSec": 11.34,
-        "userSec": 10.31,
-        "sysSec": 2.37,
-        "maxRssBytes": 1029259264,
-        "errors": 0,
-        "warnings": 2285
+        "realSec": 14.8,
+        "userSec": 11.28,
+        "sysSec": 3.57,
+        "maxRssBytes": 1059651584,
+        "errors": 1,
+        "warnings": 2288
       },
       "scoped": {
-        "realSec": 11.24,
-        "userSec": 10.3,
-        "sysSec": 2.27,
-        "maxRssBytes": 1026310144,
+        "realSec": 7.26,
+        "userSec": 4.94,
+        "sysSec": 2.56,
+        "maxRssBytes": 623362048,
         "errors": 0,
-        "warnings": 2285
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -624,20 +729,20 @@
       "changedCount": 5,
       "linkedCount": 33,
       "full": {
-        "realSec": 11.5,
-        "userSec": 10.36,
-        "sysSec": 2.49,
-        "maxRssBytes": 1043578880,
-        "errors": 0,
-        "warnings": 2319
+        "realSec": 16.44,
+        "userSec": 11.96,
+        "sysSec": 4.12,
+        "maxRssBytes": 1127776256,
+        "errors": 1,
+        "warnings": 2320
       },
       "scoped": {
-        "realSec": 11.53,
-        "userSec": 10.61,
-        "sysSec": 2.42,
-        "maxRssBytes": 835846144,
+        "realSec": 6.81,
+        "userSec": 5.09,
+        "sysSec": 2.19,
+        "maxRssBytes": 582942720,
         "errors": 0,
-        "warnings": 2319
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -648,22 +753,22 @@
       "subject": "Merge pull request #2693 from chalbert/lane/xd1sfms-hung-followup-stderr-repeat-escalate",
       "head": "96c43f211bec194fb9038d00d44f54a784055a36",
       "changedCount": 6,
-      "linkedCount": 12,
+      "linkedCount": 14,
       "full": {
-        "realSec": 11.42,
-        "userSec": 10.44,
-        "sysSec": 2.36,
-        "maxRssBytes": 1049608192,
-        "errors": 0,
-        "warnings": 2321
+        "realSec": 14.25,
+        "userSec": 11.63,
+        "sysSec": 3.68,
+        "maxRssBytes": 1131970560,
+        "errors": 1,
+        "warnings": 2322
       },
       "scoped": {
-        "realSec": 12.37,
-        "userSec": 10.66,
-        "sysSec": 2.66,
-        "maxRssBytes": 1040875520,
+        "realSec": 7.03,
+        "userSec": 5.15,
+        "sysSec": 2.22,
+        "maxRssBytes": 649347072,
         "errors": 0,
-        "warnings": 2321
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -674,22 +779,22 @@
       "subject": "Merge pull request #2668 from chalbert/lane/xn6n5gp-numbering-linear-lock-safety",
       "head": "6ef2854e9f2c0566c99913180e60c543422e5aec",
       "changedCount": 10,
-      "linkedCount": 27,
+      "linkedCount": 28,
       "full": {
-        "realSec": 13.28,
-        "userSec": 10.74,
-        "sysSec": 2.74,
-        "maxRssBytes": 1025998848,
-        "errors": 0,
-        "warnings": 2280
+        "realSec": 14.82,
+        "userSec": 11.85,
+        "sysSec": 3.79,
+        "maxRssBytes": 936689664,
+        "errors": 1,
+        "warnings": 2284
       },
       "scoped": {
-        "realSec": 13.2,
-        "userSec": 10.8,
-        "sysSec": 2.79,
-        "maxRssBytes": 1034502144,
+        "realSec": 10.17,
+        "userSec": 5.43,
+        "sysSec": 5.05,
+        "maxRssBytes": 541179904,
         "errors": 0,
-        "warnings": 2280
+        "warnings": 181
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -702,20 +807,20 @@
       "changedCount": 2,
       "linkedCount": 17,
       "full": {
-        "realSec": 12.38,
-        "userSec": 10.74,
-        "sysSec": 2.68,
-        "maxRssBytes": 1043496960,
-        "errors": 0,
-        "warnings": 2310
+        "realSec": 15.85,
+        "userSec": 11.92,
+        "sysSec": 3.99,
+        "maxRssBytes": 1127825408,
+        "errors": 1,
+        "warnings": 2311
       },
       "scoped": {
-        "realSec": 12.69,
-        "userSec": 10.79,
-        "sysSec": 2.76,
-        "maxRssBytes": 1035534336,
+        "realSec": 9.44,
+        "userSec": 5.49,
+        "sysSec": 2.38,
+        "maxRssBytes": 583483392,
         "errors": 0,
-        "warnings": 2310
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -726,22 +831,22 @@
       "subject": "Merge pull request #2672 from chalbert/lane/4077-health-daemon-slice-1",
       "head": "335c427c1ad1cfaf9e0a95a2b2414f967214adab",
       "changedCount": 26,
-      "linkedCount": 57,
+      "linkedCount": 58,
       "full": {
-        "realSec": 12.49,
-        "userSec": 10.58,
-        "sysSec": 2.65,
-        "maxRssBytes": 1058930688,
-        "errors": 0,
-        "warnings": 2306
+        "realSec": 18.89,
+        "userSec": 12.12,
+        "sysSec": 4.25,
+        "maxRssBytes": 1132445696,
+        "errors": 1,
+        "warnings": 2307
       },
       "scoped": {
-        "realSec": 13.4,
-        "userSec": 10.8,
-        "sysSec": 3.05,
-        "maxRssBytes": 1036992512,
+        "realSec": 9.68,
+        "userSec": 5.48,
+        "sysSec": 3.18,
+        "maxRssBytes": 551403520,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 178
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -754,20 +859,20 @@
       "changedCount": 2,
       "linkedCount": 10,
       "full": {
-        "realSec": 13.03,
-        "userSec": 10.85,
-        "sysSec": 2.72,
-        "maxRssBytes": 1038254080,
-        "errors": 0,
-        "warnings": 2319
+        "realSec": 14.29,
+        "userSec": 11.46,
+        "sysSec": 3.31,
+        "maxRssBytes": 1127841792,
+        "errors": 1,
+        "warnings": 2320
       },
       "scoped": {
-        "realSec": 12.83,
-        "userSec": 10.82,
-        "sysSec": 2.61,
-        "maxRssBytes": 1045938176,
+        "realSec": 7.3,
+        "userSec": 5.15,
+        "sysSec": 2.82,
+        "maxRssBytes": 655032320,
         "errors": 0,
-        "warnings": 2319
+        "warnings": 176
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -778,22 +883,22 @@
       "subject": "Merge pull request #2689 from chalbert/lane/x0zg44l-daemon-soak-harness",
       "head": "66015714afb22dfc200362051178a6350b8ba24c",
       "changedCount": 45,
-      "linkedCount": 68,
+      "linkedCount": 69,
       "full": {
-        "realSec": 13.53,
-        "userSec": 10.8,
-        "sysSec": 2.86,
-        "maxRssBytes": 1054015488,
-        "errors": 0,
-        "warnings": 2314
+        "realSec": 12.84,
+        "userSec": 11.17,
+        "sysSec": 3,
+        "maxRssBytes": 1131577344,
+        "errors": 1,
+        "warnings": 2315
       },
       "scoped": {
-        "realSec": 14.2,
-        "userSec": 11,
-        "sysSec": 3.2,
-        "maxRssBytes": 1040678912,
+        "realSec": 9.45,
+        "userSec": 5.38,
+        "sysSec": 3.81,
+        "maxRssBytes": 662061056,
         "errors": 0,
-        "warnings": 2314
+        "warnings": 181
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -804,22 +909,22 @@
       "subject": "Merge pull request #2686 from chalbert/lane/xd1sfms-ci-hung-run-recovery",
       "head": "3f6556451f7ceea449137641274f8a039ee47d61",
       "changedCount": 8,
-      "linkedCount": 10,
+      "linkedCount": 12,
       "full": {
-        "realSec": 13.32,
-        "userSec": 10.8,
-        "sysSec": 2.96,
-        "maxRssBytes": 1030832128,
-        "errors": 0,
-        "warnings": 2307
+        "realSec": 13.63,
+        "userSec": 11.36,
+        "sysSec": 3.25,
+        "maxRssBytes": 1123352576,
+        "errors": 1,
+        "warnings": 2308
       },
       "scoped": {
-        "realSec": 13.56,
-        "userSec": 10.99,
-        "sysSec": 3.01,
-        "maxRssBytes": 1044447232,
+        "realSec": 6.66,
+        "userSec": 5.07,
+        "sysSec": 1.95,
+        "maxRssBytes": 586104832,
         "errors": 0,
-        "warnings": 2307
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -830,22 +935,22 @@
       "subject": "Merge pull request #2679 from chalbert/lane/4122-free-lane-list-acquire-fast-path",
       "head": "8c6da9eb1b45fc97ce762efa0b7855096e602be7",
       "changedCount": 9,
-      "linkedCount": 57,
+      "linkedCount": 59,
       "full": {
-        "realSec": 13.36,
-        "userSec": 10.81,
-        "sysSec": 2.86,
-        "maxRssBytes": 1029799936,
-        "errors": 0,
+        "realSec": 12.86,
+        "userSec": 11.23,
+        "sysSec": 3.03,
+        "maxRssBytes": 1136754688,
+        "errors": 1,
         "warnings": 2291
       },
       "scoped": {
-        "realSec": 12.67,
-        "userSec": 10.67,
-        "sysSec": 2.95,
-        "maxRssBytes": 1047298048,
+        "realSec": 7.62,
+        "userSec": 5.21,
+        "sysSec": 2.82,
+        "maxRssBytes": 584056832,
         "errors": 0,
-        "warnings": 2291
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -858,20 +963,20 @@
       "changedCount": 9,
       "linkedCount": 0,
       "full": {
-        "realSec": 11.8,
-        "userSec": 10.36,
-        "sysSec": 2.71,
-        "maxRssBytes": 1061912576,
-        "errors": 0,
-        "warnings": 2310
+        "realSec": 14.95,
+        "userSec": 11.8,
+        "sysSec": 3.57,
+        "maxRssBytes": 1025163264,
+        "errors": 1,
+        "warnings": 2311
       },
       "scoped": {
-        "realSec": 12.53,
-        "userSec": 10.48,
-        "sysSec": 3.37,
-        "maxRssBytes": 1040826368,
+        "realSec": 9.73,
+        "userSec": 5.54,
+        "sysSec": 4.58,
+        "maxRssBytes": 585711616,
         "errors": 0,
-        "warnings": 2310
+        "warnings": 182
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -882,22 +987,22 @@
       "subject": "Merge pull request #2688 from chalbert/lane/4091-resolve-item",
       "head": "a9cddebcd5892a3c0cce46ec1d1d79979124b44a",
       "changedCount": 1,
-      "linkedCount": 3,
+      "linkedCount": 4,
       "full": {
-        "realSec": 11.66,
-        "userSec": 10.26,
-        "sysSec": 2.67,
-        "maxRssBytes": 1035698176,
-        "errors": 0,
-        "warnings": 2306
+        "realSec": 14.41,
+        "userSec": 11.69,
+        "sysSec": 3.45,
+        "maxRssBytes": 1027784704,
+        "errors": 1,
+        "warnings": 2307
       },
       "scoped": {
-        "realSec": 11.91,
-        "userSec": 10.33,
-        "sysSec": 2.89,
-        "maxRssBytes": 1035124736,
+        "realSec": 7.37,
+        "userSec": 5.2,
+        "sysSec": 2.71,
+        "maxRssBytes": 695418880,
         "errors": 0,
-        "warnings": 2306
+        "warnings": 176
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -908,22 +1013,22 @@
       "subject": "Merge pull request #2681 from chalbert/lane/4133-review-daemon-shared-reads",
       "head": "55eb937418c6b8a7794090a4e07c55e6e95ca198",
       "changedCount": 11,
-      "linkedCount": 44,
+      "linkedCount": 45,
       "full": {
-        "realSec": 11.86,
-        "userSec": 10.38,
-        "sysSec": 2.82,
-        "maxRssBytes": 1030635520,
-        "errors": 0,
-        "warnings": 2303
+        "realSec": 14.72,
+        "userSec": 11.77,
+        "sysSec": 3.76,
+        "maxRssBytes": 1070120960,
+        "errors": 1,
+        "warnings": 2304
       },
       "scoped": {
-        "realSec": 12.53,
-        "userSec": 10.58,
-        "sysSec": 3.25,
-        "maxRssBytes": 1043218432,
+        "realSec": 8.99,
+        "userSec": 5.35,
+        "sysSec": 4.17,
+        "maxRssBytes": 550125568,
         "errors": 0,
-        "warnings": 2303
+        "warnings": 176
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -934,22 +1039,22 @@
       "subject": "Merge pull request #2671 from chalbert/lane/x87prxg-graduation-import-check-non-import-deps",
       "head": "6ccb6b7b490bf94f4201b8bbd4ad0e5964288c6f",
       "changedCount": 15,
-      "linkedCount": 57,
+      "linkedCount": 58,
       "full": {
-        "realSec": 11.91,
-        "userSec": 10.25,
-        "sysSec": 2.92,
-        "maxRssBytes": 1022394368,
-        "errors": 0,
+        "realSec": 13.61,
+        "userSec": 11.34,
+        "sysSec": 3.49,
+        "maxRssBytes": 1128169472,
+        "errors": 1,
         "warnings": 2290
       },
       "scoped": {
-        "realSec": 13.03,
-        "userSec": 10.78,
-        "sysSec": 3.03,
-        "maxRssBytes": 1037910016,
+        "realSec": 22.06,
+        "userSec": 6.46,
+        "sysSec": 15.79,
+        "maxRssBytes": 725860352,
         "errors": 0,
-        "warnings": 2290
+        "warnings": 237
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -962,20 +1067,20 @@
       "changedCount": 1,
       "linkedCount": 1,
       "full": {
-        "realSec": 13.41,
-        "userSec": 10.76,
-        "sysSec": 3.26,
-        "maxRssBytes": 1064665088,
-        "errors": 0,
+        "realSec": 14.03,
+        "userSec": 11.54,
+        "sysSec": 3.48,
+        "maxRssBytes": 1103822848,
+        "errors": 1,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 14.2,
-        "userSec": 10.76,
-        "sysSec": 3.69,
-        "maxRssBytes": 1039417344,
+        "realSec": 6.49,
+        "userSec": 5,
+        "sysSec": 1.92,
+        "maxRssBytes": 533610496,
         "errors": 0,
-        "warnings": 2295
+        "warnings": 174
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -988,20 +1093,20 @@
       "changedCount": 3,
       "linkedCount": 13,
       "full": {
-        "realSec": 12.74,
-        "userSec": 10.41,
-        "sysSec": 3.11,
-        "maxRssBytes": 1032470528,
-        "errors": 0,
-        "warnings": 2291
+        "realSec": 12.86,
+        "userSec": 11.2,
+        "sysSec": 3.04,
+        "maxRssBytes": 1146273792,
+        "errors": 1,
+        "warnings": 2278
       },
       "scoped": {
-        "realSec": 12.5,
-        "userSec": 10.36,
-        "sysSec": 3.24,
-        "maxRssBytes": 1015005184,
+        "realSec": 7.05,
+        "userSec": 5.06,
+        "sysSec": 2.58,
+        "maxRssBytes": 692125696,
         "errors": 0,
-        "warnings": 2291
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1014,20 +1119,20 @@
       "changedCount": 1,
       "linkedCount": 0,
       "full": {
-        "realSec": 12.24,
-        "userSec": 10.45,
-        "sysSec": 2.93,
-        "maxRssBytes": 1041104896,
-        "errors": 0,
-        "warnings": 2299
+        "realSec": 13.49,
+        "userSec": 11.36,
+        "sysSec": 3.22,
+        "maxRssBytes": 1128955904,
+        "errors": 1,
+        "warnings": 2300
       },
       "scoped": {
-        "realSec": 11.77,
-        "userSec": 10.23,
-        "sysSec": 2.82,
-        "maxRssBytes": 1031110656,
+        "realSec": 6.73,
+        "userSec": 5.08,
+        "sysSec": 2.13,
+        "maxRssBytes": 581271552,
         "errors": 0,
-        "warnings": 2299
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1038,22 +1143,22 @@
       "subject": "Merge pull request #2680 from chalbert/lane/xpnhz4o-local-gate-selected-tests",
       "head": "13216e1a40ba48aa58e6e38407eabbdc94a9152a",
       "changedCount": 21,
-      "linkedCount": 128,
+      "linkedCount": 132,
       "full": {
-        "realSec": 11.89,
-        "userSec": 10.32,
-        "sysSec": 2.79,
-        "maxRssBytes": 1052049408,
-        "errors": 0,
+        "realSec": 13.41,
+        "userSec": 11.36,
+        "sysSec": 3.12,
+        "maxRssBytes": 1128333312,
+        "errors": 1,
         "warnings": 2295
       },
       "scoped": {
-        "realSec": 12.05,
-        "userSec": 10.5,
-        "sysSec": 2.87,
-        "maxRssBytes": 1040580608,
+        "realSec": 11.04,
+        "userSec": 5.05,
+        "sysSec": 2.46,
+        "maxRssBytes": 695877632,
         "errors": 0,
-        "warnings": 2295
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1064,22 +1169,22 @@
       "subject": "Merge pull request #2625 from chalbert/lane/4044-daemon-rebuild-and-clone-lock",
       "head": "fc62d02a16010107a8813da99a9a8af15457e8dc",
       "changedCount": 31,
-      "linkedCount": 91,
+      "linkedCount": 98,
       "full": {
-        "realSec": 12.11,
-        "userSec": 10.4,
-        "sysSec": 2.98,
-        "maxRssBytes": 1031667712,
-        "errors": 0,
+        "realSec": 14.42,
+        "userSec": 11.45,
+        "sysSec": 3.57,
+        "maxRssBytes": 1134624768,
+        "errors": 1,
         "warnings": 2297
       },
       "scoped": {
-        "realSec": 12.33,
-        "userSec": 10.52,
-        "sysSec": 3.12,
-        "maxRssBytes": 1035878400,
+        "realSec": 7.98,
+        "userSec": 5.25,
+        "sysSec": 3.25,
+        "maxRssBytes": 659226624,
         "errors": 0,
-        "warnings": 2297
+        "warnings": 184
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1092,20 +1197,20 @@
       "changedCount": 14,
       "linkedCount": 36,
       "full": {
-        "realSec": 12.36,
-        "userSec": 10.45,
-        "sysSec": 3.07,
-        "maxRssBytes": 1032224768,
-        "errors": 0,
-        "warnings": 2292
+        "realSec": 13,
+        "userSec": 11.31,
+        "sysSec": 2.92,
+        "maxRssBytes": 1126121472,
+        "errors": 1,
+        "warnings": 2293
       },
       "scoped": {
-        "realSec": 12.51,
-        "userSec": 10.71,
-        "sysSec": 3.09,
-        "maxRssBytes": 971718656,
+        "realSec": 7.46,
+        "userSec": 5.32,
+        "sysSec": 2.74,
+        "maxRssBytes": 710393856,
         "errors": 0,
-        "warnings": 2292
+        "warnings": 179
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1118,20 +1223,20 @@
       "changedCount": 5,
       "linkedCount": 28,
       "full": {
-        "realSec": 12.53,
-        "userSec": 10.4,
-        "sysSec": 3.08,
-        "maxRssBytes": 1019658240,
-        "errors": 0,
-        "warnings": 2303
+        "realSec": 12.92,
+        "userSec": 11.2,
+        "sysSec": 2.95,
+        "maxRssBytes": 1135329280,
+        "errors": 1,
+        "warnings": 2284
       },
       "scoped": {
-        "realSec": 12.44,
-        "userSec": 10.47,
-        "sysSec": 3.17,
-        "maxRssBytes": 1034436608,
+        "realSec": 6.21,
+        "userSec": 4.99,
+        "sysSec": 1.81,
+        "maxRssBytes": 583843840,
         "errors": 0,
-        "warnings": 2303
+        "warnings": 177
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1144,20 +1249,20 @@
       "changedCount": 6,
       "linkedCount": 26,
       "full": {
-        "realSec": 13.7,
-        "userSec": 10.79,
-        "sysSec": 3.36,
-        "maxRssBytes": 1034190848,
-        "errors": 0,
+        "realSec": 12.53,
+        "userSec": 11.18,
+        "sysSec": 2.78,
+        "maxRssBytes": 1134673920,
+        "errors": 1,
         "warnings": 2292
       },
       "scoped": {
-        "realSec": 13.65,
-        "userSec": 10.94,
-        "sysSec": 3.43,
-        "maxRssBytes": 1038893056,
+        "realSec": 7.3,
+        "userSec": 5.12,
+        "sysSec": 2.83,
+        "maxRssBytes": 583483392,
         "errors": 0,
-        "warnings": 2292
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1168,22 +1273,22 @@
       "subject": "Merge pull request #2673 from chalbert/lane/x36vidg-guard-wait-polling",
       "head": "975d41ef11fcf44590215478b5b799978df7a1d4",
       "changedCount": 14,
-      "linkedCount": 67,
+      "linkedCount": 69,
       "full": {
-        "realSec": 11.92,
-        "userSec": 10.31,
-        "sysSec": 2.77,
-        "maxRssBytes": 1021657088,
-        "errors": 0,
+        "realSec": 12.69,
+        "userSec": 11.22,
+        "sysSec": 2.89,
+        "maxRssBytes": 1134182400,
+        "errors": 1,
         "warnings": 2293
       },
       "scoped": {
-        "realSec": 11.81,
-        "userSec": 10.47,
-        "sysSec": 2.77,
-        "maxRssBytes": 943587328,
+        "realSec": 6.54,
+        "userSec": 5.16,
+        "sysSec": 1.93,
+        "maxRssBytes": 579092480,
         "errors": 0,
-        "warnings": 2293
+        "warnings": 175
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
@@ -1196,124 +1301,20 @@
       "changedCount": 3,
       "linkedCount": 12,
       "full": {
-        "realSec": 11.68,
-        "userSec": 10.22,
-        "sysSec": 2.72,
-        "maxRssBytes": 1022672896,
-        "errors": 0,
-        "warnings": 2280
+        "realSec": 13.65,
+        "userSec": 11.38,
+        "sysSec": 3.05,
+        "maxRssBytes": 1134444544,
+        "errors": 1,
+        "warnings": 2284
       },
       "scoped": {
-        "realSec": 11.84,
-        "userSec": 10.26,
-        "sysSec": 2.85,
-        "maxRssBytes": 1021722624,
+        "realSec": 7.15,
+        "userSec": 5.14,
+        "sysSec": 2.55,
+        "maxRssBytes": 673677312,
         "errors": 0,
-        "warnings": 2280
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "f60aa8bcd545b8a577a8c4361ae11c5da98bfa06",
-      "subject": "Merge pull request #2635 from chalbert/lane/xdzl6mb-seed-priority-order-skeleton-progress-note",
-      "head": "bc8ffd5124d7bbb397b98760f0105d3b742b5501",
-      "changedCount": 3,
-      "linkedCount": 7,
-      "full": {
-        "realSec": 11.85,
-        "userSec": 10.25,
-        "sysSec": 2.91,
-        "maxRssBytes": 1032077312,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "scoped": {
-        "realSec": 12.13,
-        "userSec": 10.43,
-        "sysSec": 2.99,
-        "maxRssBytes": 1038041088,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "ab0facf3f6462de0bc597f57b617766c396ad205",
-      "subject": "Merge pull request #2677 from chalbert/lane/close-3717",
-      "head": "34ff7645b3573cf176af2ac56d6e9de583232aa9",
-      "changedCount": 1,
-      "linkedCount": 34,
-      "full": {
-        "realSec": 12.18,
-        "userSec": 10.41,
-        "sysSec": 2.95,
-        "maxRssBytes": 1028456448,
-        "errors": 0,
-        "warnings": 2290
-      },
-      "scoped": {
-        "realSec": 12.11,
-        "userSec": 10.55,
-        "sysSec": 2.76,
-        "maxRssBytes": 1031290880,
-        "errors": 0,
-        "warnings": 2290
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "4c88a0a16250922c8693e2f083d2f8928274a130",
-      "subject": "Merge pull request #2670 from chalbert/lane/4139-operator-queue-lane-reclaim-one-click",
-      "head": "dce4029d56f3d7ae37809e54be69c457ac5f6533",
-      "changedCount": 13,
-      "linkedCount": 23,
-      "full": {
-        "realSec": 12.93,
-        "userSec": 10.63,
-        "sysSec": 2.96,
-        "maxRssBytes": 1029652480,
-        "errors": 0,
-        "warnings": 2280
-      },
-      "scoped": {
-        "realSec": 12.83,
-        "userSec": 10.58,
-        "sysSec": 3.03,
-        "maxRssBytes": 1023475712,
-        "errors": 0,
-        "warnings": 2280
-      },
-      "missedCount": 0,
-      "laneRelevantCount": 0,
-      "missed": []
-    },
-    {
-      "sha": "c7abdc102ebdf3fed4ca3036c4222841b75f4a18",
-      "subject": "Merge pull request #2675 from chalbert/lane/xb3q26f-blocked-on-infra-and-stopped-liveness-fix",
-      "head": "2fe47f2cf839604ab29544259b6b749d4ea64037",
-      "changedCount": 9,
-      "linkedCount": 39,
-      "full": {
-        "realSec": 13.26,
-        "userSec": 10.57,
-        "sysSec": 3.18,
-        "maxRssBytes": 1042710528,
-        "errors": 0,
-        "warnings": 2289
-      },
-      "scoped": {
-        "realSec": 13.53,
-        "userSec": 10.72,
-        "sysSec": 3.23,
-        "maxRssBytes": 1032142848,
-        "errors": 0,
-        "warnings": 2289
+        "warnings": 177
       },
       "missedCount": 0,
       "laneRelevantCount": 0,
