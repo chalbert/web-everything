@@ -2,10 +2,11 @@
 bornAs: xgqz204
 kind: story
 size: 5
-status: active
+status: resolved
 scope: ["we:scripts/lib/main-staleness.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/explore-io.mjs", "we:scripts/guard-bash.mjs", "we:scripts/operations/review-dispatch.mjs", "we:scripts/operations/review-job.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
