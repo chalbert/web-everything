@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
+  probePrs, probeStaleState, probeMergedPrs,
 } from '../health-watch.mjs';
 
 let dir;
@@ -239,6 +240,39 @@ describe('probeDaemonStatus', () => {
     expect(rows[0]).toMatchObject({ pid: 42, pidAlive: true, heartbeatAt: Date.parse('2026-09-25T15:00:00.000Z') });
     expect(rows[1].lastActivityAt).toBe(Date.parse('2026-09-25T15:37:21.553Z'));
     expect(rows[1].heartbeatAt).toBeNull();
+  });
+});
+
+// ── stale-claim's probes (x4axhga) ───────────────────────────────────────────────────────────────────────────
+
+describe('probePrs — carries headRefName (stale-claim\'s open-PR exclusion needs it)', () => {
+  it('threads headRefName through from the gh read', () => {
+    const exec = () => JSON.stringify([{ number: 7, title: 'x', headRefName: 'lane/4169-soak-harness', labels: [], statusCheckRollup: [], updatedAt: 't' }]);
+    const out = probePrs({ exec });
+    expect(out[0]).toMatchObject({ number: 7, headRefName: 'lane/4169-soak-harness' });
+  });
+});
+
+describe('probeStaleState', () => {
+  it('shells the declared stale-state read and returns its verdict (records/gaps), not the whole run envelope', () => {
+    const exec = () => JSON.stringify({ runId: 'x', verdict: { observedAt: 'now', records: [{ kind: 'claim', id: '4169' }], gaps: ['g'] } });
+    const out = probeStaleState({ exec });
+    expect(out).toEqual({ observedAt: 'now', records: [{ kind: 'claim', id: '4169' }], gaps: ['g'] });
+  });
+});
+
+describe('probeMergedPrs', () => {
+  it('pairs the merged-PR list (one gh call) with the real backlog/ cards read (reused from backlog-stranded-sweep.mjs, never a second scan)', () => {
+    const calls = [];
+    const exec = (cmd, args) => { calls.push(args); return JSON.stringify([{ number: 2689, title: 'x0zg44l: soak', headRefName: 'lane/x0zg44l-soak', body: '' }]); };
+    const out = probeMergedPrs({ exec });
+    // The backlog cards are WE's, so the merged-PR list must be WE's too — never whatever repo the cwd resolves to.
+    expect(calls[0]).toEqual(expect.arrayContaining(['--repo', 'chalbert/web-everything']));
+    expect(out.prs).toEqual([{ number: 2689, title: 'x0zg44l: soak', headRefName: 'lane/x0zg44l-soak', body: '' }]);
+    // The real repo's backlog/ dir has hundreds of cards — proves this reads the real reader, not a stub.
+    expect(out.cards.length).toBeGreaterThan(50);
+    expect(out.cards[0]).toHaveProperty('stem');
+    expect(out.cards[0]).toHaveProperty('body');
   });
 });
 

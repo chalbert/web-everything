@@ -52,6 +52,7 @@ import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
 import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
 import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
 import { assessDaemonStatus } from '../operations/daemon-status.mjs';
+import { readBacklogCards } from '../backlog-stranded-sweep.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
@@ -251,10 +252,10 @@ function run(cmd, args, { timeoutMs = CHILD_TIMEOUT_MS, cwd = REPO_ROOT } = {}) 
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
-    const raw = exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup,updatedAt']);
+    const raw = exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']);
     for (const pr of JSON.parse(raw)) {
       out.push({
-        repo: slug, number: pr.number, title: pr.title, updatedAt: pr.updatedAt,
+        repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
         statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, completedAt: c.completedAt })),
       });
@@ -293,6 +294,31 @@ export function probeAuthExpiredSessions(agents, { readInfo = readClaudeAuthExpi
     out.push({ name: a.name ?? null, startedAt: Number.isFinite(startedAt) ? startedAt : null });
   }
   return out;
+}
+
+/**
+ * The `stale-claim` smell's class-A input: every `status: active`/`preparing` backlog claim's liveness, via the
+ * declared `stale-state` read (#911) — shelled exactly like `lane-starvation`'s own `diagnose` already does, so
+ * this probe and that diagnose never drift onto two different readers. Read-only; a hard timeout, like every
+ * other child call in this file.
+ * @returns {{observedAt:string, records:Array<object>, gaps:string[]}}
+ */
+export function probeStaleState({ exec = run, timeoutMs = 90_000 } = {}) {
+  const out = exec(process.execPath, [join(REPO_ROOT, 'scripts/operations/run.mjs'), 'stale-state', '--json'], { timeoutMs });
+  return JSON.parse(out).verdict;
+}
+
+/**
+ * The `stale-claim` smell's class-B input: every backlog card (`{stem, body}`, reused from
+ * `../backlog-stranded-sweep.mjs`'s own reader — never a second `backlog/` scan) plus the merged-PR list its
+ * pure `sweepStrandings` matches against. ONE `gh pr list --state merged` read serves both the smell's `matched`
+ * tier (via `sweepStrandings`) and its lower-confidence `mentioned` tier (a body scan over this same list) —
+ * never a duplicate merged-PR fetch.
+ * @returns {{cards:Array<{stem:string, body:string}>, prs:Array<object>}}
+ */
+export function probeMergedPrs({ exec = run, limit = 800, timeoutMs = 60_000 } = {}) {
+  const prs = JSON.parse(exec('gh', ['pr', 'list', '--repo', CONSTELLATION_REPOS.we.slug, '--state', 'merged', '--limit', String(limit), '--json', 'number,title,headRefName,body'], { timeoutMs }));
+  return { cards: readBacklogCards(REPO_ROOT), prs };
 }
 
 // ── the tick ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -344,12 +370,22 @@ export async function tick(flags = {}) {
   if (ghDue) {
     const prs = attempt('prs', () => probePrs());
     const agents = attempt('agents', () => probeAgents());
-    if (prs && agents) {
-      probes.prs = prs; probes.agents = agents; ghCache.at = now;
-      // Same cadence as `agents` itself (the sign's own probe needs the exact same listing) — a fresh read
-      // every `agents` sample, never a stale one carried over from a prior tick.
-      probes.authExpired = attempt('authExpired', () => probeAuthExpiredSessions(agents));
-    }
+    // Each probe is set independently of the other succeeding: red-pr-unattended still only evaluates once BOTH
+    // are present (its own `probes: ['prs', 'agents']` declaration already gates that), but stale-claim needs
+    // only `prs` and must not sit blocked on a failing `agents` read too. `ghCache.at` still needs both, so a
+    // partial gh hiccup keeps `ghDue` true and retries sooner rather than waiting the full cadence.
+    if (prs) probes.prs = prs;
+    if (agents) probes.agents = agents;
+    if (prs && agents) ghCache.at = now;
+    // claude-auth-expired's own probe needs only `agents` (the exact same listing, same cadence) — independent
+    // of whether `prs` also succeeded this tick, same reasoning as stale-claim's two probes just below.
+    if (agents) probes.authExpired = attempt('authExpired', () => probeAuthExpiredSessions(agents));
+    // stale-claim's two probes ride the same 'gh' cadence (both are gh/git-heavy reads); independent of the
+    // prs/agents pairing above — one failing never blocks the other.
+    const staleState = attempt('staleState', () => probeStaleState());
+    if (staleState) probes.staleState = staleState;
+    const mergedPrs = attempt('mergedPrs', () => probeMergedPrs());
+    if (mergedPrs) probes.mergedPrs = mergedPrs;
   }
 
   // A tick the watchdog killed last time is the overrun smell's input.
