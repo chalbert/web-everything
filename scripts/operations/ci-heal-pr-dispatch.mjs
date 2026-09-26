@@ -46,7 +46,7 @@ import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit } from '../conveyor/pr-work-unit.mjs';
-import { freeLaneNumbers, fetchPrDiffPaths } from '../conveyor/reconcile-fix-dispatch.mjs';
+import { freeLaneNumbers, fetchPrDiffPaths, queueBudgetFrom, queueCapWhy } from '../conveyor/reconcile-fix-dispatch.mjs'; // queueBudgetFrom/queueCapWhy: card xkyw1x4
 import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readUnsupported, recordUnsupported } from '../conveyor/unsupported-repo.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
@@ -194,6 +194,10 @@ export async function runReconcileCiHealDispatch({
   fetchDiffPaths = null,
   checkStaleness,
   prsFile, unsupportedPath,
+  // Card xkyw1x4 — the heavy-test queue baseline (or a function returning it). Same contract as
+  // `reconcile-fix-dispatch.mjs#runReconcileFixDispatch`'s own `queueAdmission`: a CI-heal costs like a fix, and is
+  // refused `queue-cap` while the projected queue wait would pass the max. `null` = no gate.
+  queueAdmission = null,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`ci-heal-pr-dispatch: --repo ${repo} is not a constellation repo`);
@@ -221,9 +225,15 @@ export async function runReconcileCiHealDispatch({
 
   const resolveDiffPaths = fetchDiffPaths ?? ((pr) => fetchPrDiffPaths(pr, { root, repo: repoKey }));
   const lanes = [...(typeof pickFreeLanes === 'function' ? pickFreeLanes() : freeLaneNumbers({ root, lanePoolRepo: profile.lanePoolRepo }))];
+  const queueBudget = queueBudgetFrom(queueAdmission, { root, repo: repoKey });
   const dispatched = [];
   const refusals = [];
   for (const entry of ciHealEntries) {
+    const q = queueBudget.tryAdmit('ci-heal', { id: entry.prNumber });
+    if (!q.admit) {
+      refusals.push({ pr: entry.prNumber, kind: 'queue-cap', why: queueCapWhy(q) });
+      continue;
+    }
     let unit = null;
     try {
       unit = resolveWorkUnit({
@@ -280,7 +290,11 @@ if (IS_CLI) {
     if (eq === -1) flags[a.slice(2)] = true;
     else flags[a.slice(2, eq)] = a.slice(eq + 1);
   }
-  runReconcileCiHealDispatch({ repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'] })
+  import('../readiness/heavy-admission.mjs')
+    .then(({ resolveLiveQueueBaseline }) => runReconcileCiHealDispatch({
+      repo: typeof flags.repo === 'string' ? flags.repo : null, prsFile: flags['prs-file'],
+      queueAdmission: ({ root }) => resolveLiveQueueBaseline({ checkoutRoot: root }),
+    }))
     .then((result) => {
       if (flags.json) {
         process.stdout.write(JSON.stringify(result) + '\n');

@@ -116,19 +116,42 @@
  * down ({@link loadAdmissionDecision}, {@link readLatestLoad}, {@link resolveLoadAdmission}, the `load-status`
  * CLI mode) for the full reasoning — it is orthogonal to both this module's own heavy-command semaphore above
  * and `lane-concurrency.mjs`'s fixed lane-count ceiling, and `tick-core.mjs#planTick` is its one consumer.
+ *
+ * ADMISSION BY PROJECTED QUEUE TIME + A FAST LANE (card xkyw1x4, epic #4075) — a THIRD axis, looking ahead rather
+ * than at the present. The pure formulas live in `./heavy-queue-projection.mjs` (re-exported here); this module
+ * adds the reads they need:
+ *   • every slot release records its HOLD DURATION by kind ({@link recordHoldDuration}, `durations.jsonl` beside
+ *     the slots), and {@link readStandardMinutes} turns the log into a rolling typical time per kind;
+ *   • {@link resolveQueueBaseline} (CLI: `queue-status`) sums the queue backlog — remaining time on held slots,
+ *     the standard time of every live waiter, and the expected demand of sessions dispatched in the last few
+ *     minutes that have not reached the slots yet (read from their lane leases) — which `tick-core.mjs#planTick`
+ *     and the fix / ci-heal daemons feed to `createQueueBudget` to admit or hold (`queue-cap`) new dispatches;
+ *   • THE FAST LANE: a caller now passes its command KIND to {@link acquireSlotBlocking}. The short kinds
+ *     (selected / files / standards) rank first-come-first-served only among themselves — never behind a
+ *     full-suite waiter — and get `WE_HEAVY_ADMISSION_FAST_SLOTS` (default 1) EXTRA slots ADDED ON TOP of the
+ *     cap (operator decision on PR #2707): `WE_HEAVY_ADMISSION_CAP` stays the number of HEAVY slots (slot-0 …
+ *     slot-<cap-1>), the fast slots follow them (slot-<cap> …). A short job may also take a free heavy slot; a
+ *     full suite never takes a fast slot. Default 2 heavy + 1 fast.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { hostname } from 'node:os';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { LEASE_FILENAME, isLeaseStale } from '../lib/lane-lease.mjs';
 import { reserve, releaseLockDir, readLockEntry } from './file-locks.mjs';
-import { defaultPoolRoot } from '../lib/lane-pool-paths.mjs';
+import { defaultPoolRoot, guardedPoolRoot } from '../lib/lane-pool-paths.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 import { execContainerized, containerCliAvailable, containerImageAvailable, resolveContainerImage, resolveNodeModulesVolume, nodeModulesVolumeAvailable } from '../lib/container-exec.mjs'; // #3621 sequencing note (tracked on #3383) — the heavy-command-pool container POC; see that module's own header for proven scope (check:standards + test:unit)
 import { resolveHostRoot, readHostToday, extractSamplesByName, utcDayKey } from '../operations/telemetry-summary-io.mjs'; // #4076 — REUSE the host-sampler's own root-resolution + tail-read + metric-extraction primitives (never reimplemented — see loadAdmissionDecision's section header below)
 import { latestValue } from '../lib/telemetry-machine.mjs'; // #4076 — the SAME "latest sample wins" reducer telemetry-machine.mjs#computeMachineNow already uses for host.cpu.busy_pct etc.
+import {
+  classifyCommandKind, normalizeKind, queueLaneOf, typicalMinutes, classifyDispatchKind, dispatchDemandMinutes,
+  queueBacklog, laneProjection, resolveFastSlots, slotOrderFor, DEFAULT_QUEUE_MAX_WAIT_MINUTES, QUEUE_MAX_WAIT_ENV,
+  QUEUE_ADMISSION_SWITCH_ENV, DEFAULT_ARRIVAL_WINDOW_MINUTES,
+} from './heavy-queue-projection.mjs'; // card xkyw1x4 — the pure projection + fast-lane rules
+export * from './heavy-queue-projection.mjs';
 
 /** Conservative default — below measured host capacity, not near-full-utilization (#3456 explicit ruling).
  *  Overridable per machine via `WE_HEAVY_ADMISSION_CAP`. */
@@ -370,10 +393,14 @@ export function probeSlotHolderLiveness(pid, selfPid) {
  * omitted argument the way `verify-lane.mjs`'s call site originally did.
  * @returns {{ ok:boolean, slot:number|null, cap:number, heldBy:Array<{slot:number,owner:string}> }}
  */
-export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null, leaseMinutes = ADMISSION_LEASE_MINUTES, meta = null }) {
+export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null, leaseMinutes = ADMISSION_LEASE_MINUTES, meta = null, slots = null }) {
   const heldBy = [];
   const selfPid = Number.isInteger(pid) ? pid : process.pid;
-  for (let i = 0; i < cap; i++) {
+  // Card xkyw1x4 — `slots` is the ORDERED list of slot indices this caller may take (`slotOrderFor`: a full
+  // suite only the heavy slots `0…cap-1`; a short job the fast slots after them first, then the heavy ones).
+  // Default: the `cap` heavy slots, in order (every pre-xkyw1x4 caller, and gh-throttle's own pool).
+  const order = Array.isArray(slots) ? slots.filter((i) => Number.isInteger(i) && i >= 0) : Array.from({ length: cap }, (_, i) => i);
+  for (const i of order) {
     const current = readLockEntry(lockRoot, slotPath(i));
     // Probe liveness whenever a slot is currently held — including a same-owner-string holder (the #3383
     // case); `probeSlotHolderLiveness` itself no-ops to 'unknown' when `current.pid === selfPid` (our own
@@ -400,13 +427,16 @@ export function tryAcquireSlot({ lockRoot, cap, owner, nowMs, nowIso, pid = null
  * where an operator's fresh invocation is by definition a different process than whichever one is stuck.
  * @param {number|null} [pid]  defaults to `process.pid`; pass `null` for an owner-only manual release.
  */
-export function releaseOwnedSlot({ lockRoot, cap, owner, pid = process.pid }) {
+export function releaseOwnedSlot({ lockRoot, cap, owner, pid = process.pid, fastSlots = resolveFastSlots(process.env) }) {
   const selfPid = Number.isInteger(pid) ? pid : null;
   let ownerOnlyFallback = null;
-  for (let i = 0; i < cap; i++) {
+  // Card xkyw1x4 — also scan the fast-lane slots after the heavy ones (a short job may hold one). Scanning an
+  // index nobody uses (another pool, e.g. gh-throttle's) finds nothing and releases nothing.
+  for (let i = 0; i < cap + fastSlots; i++) {
     const entry = readLockEntry(lockRoot, slotPath(i));
     if (!entry || entry.owner !== owner) continue;
     if (selfPid !== null && Number.isInteger(entry.pid) && entry.pid === selfPid) {
+      recordReleasedHold(lockRoot, entry);
       releaseLockDir(lockRoot, slotPath(i));
       return { released: true, slot: i };
     }
@@ -420,6 +450,7 @@ export function releaseOwnedSlot({ lockRoot, cap, owner, pid = process.pid }) {
     if (safeFallback && ownerOnlyFallback === null) ownerOnlyFallback = i;
   }
   if (ownerOnlyFallback !== null) {
+    recordReleasedHold(lockRoot, readLockEntry(lockRoot, slotPath(ownerOnlyFallback)));
     releaseLockDir(lockRoot, slotPath(ownerOnlyFallback));
     return { released: true, slot: ownerOnlyFallback };
   }
@@ -427,9 +458,10 @@ export function releaseOwnedSlot({ lockRoot, cap, owner, pid = process.pid }) {
 }
 
 /** Read-only snapshot of every slot's holder, for `status` / observability. */
-export function heldSlots({ lockRoot, cap }) {
+export function heldSlots({ lockRoot, cap, fastSlots = 0 }) {
   const held = [];
-  for (let i = 0; i < cap; i++) {
+  // `fastSlots` (card xkyw1x4): the heavy-admission pool's extra fast-lane slots, scanned after the heavy ones.
+  for (let i = 0; i < cap + fastSlots; i++) {
     const entry = readLockEntry(lockRoot, slotPath(i));
     if (entry) held.push({ slot: i, owner: entry.owner, pid: entry.pid, heartbeatAt: entry.heartbeatAt, meta: entry.meta || null });
   }
@@ -458,16 +490,22 @@ function waitingFile(lockRoot, owner) {
 // number legible (the owner strings this module receives are short: a lane path's basename or an explicit
 // `--owner=`) while still stripping path separators.
 function lockIdSafe(owner) {
-  return String(owner).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 128) || 'unknown';
+  const flat = String(owner).replace(/[^a-zA-Z0-9._-]/g, '_');
+  // Card xkyw1x4 — a plain `.slice(0, 128)` made two long owners that share a 128-char prefix (two lanes under a
+  // deep pool root, e.g. a temp dir) write ONE marker file: the second waiter overwrote the first, and whichever
+  // finished first deleted the other's marker. Keep short ids unchanged; give a long one a hash of the full owner.
+  if (flat.length <= 128) return flat || 'unknown';
+  return `${flat.slice(0, 100)}-${createHash('sha1').update(String(owner)).digest('hex').slice(0, 16)}`;
 }
 
 /** Mark `owner` as waiting for a slot. Best-effort — a write failure never blocks the caller's retry loop. */
-export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso, pid = null, repo = null }) {
+export function markWaiting({ lockRoot, owner, lane = null, num = null, nowIso, pid = null, repo = null, kind = null }) {
   try {
     mkdirSync(waitingDir(lockRoot), { recursive: true });
     // `pid` + `host` + `repo` (xaipsbs) are what the stale-waiter reap reads to prove the owner is gone.
     // Markers written before they existed carry none of them; the reap falls back to the lane lease for those.
-    const body = { owner: String(owner), lane, num, requestedAt: nowIso, pid: Number.isInteger(pid) ? pid : null, host: hostname(), repo };
+    // `kind` (card xkyw1x4) — which queue lane this waiter ranks in, and what `queue-status` costs it at.
+    const body = { owner: String(owner), lane, num, requestedAt: nowIso, pid: Number.isInteger(pid) ? pid : null, host: hostname(), repo, ...(kind ? { kind } : {}) };
     writeFileSync(waitingFile(lockRoot, owner), JSON.stringify(body, null, 2) + '\n', 'utf8');
   } catch { /* best-effort — the wait itself must never fail on a marker write */ }
 }
@@ -640,8 +678,14 @@ export function isRankableWaiter(marker, {
  * @param {{lockRoot:string, owner:string, nowMs:number, ttlMs?:number, pidLiveness?:(pid:number)=>('dead'|'alive'|'unknown'), host?:string}} o
  * @returns {boolean}
  */
-export function isOldestLiveWaiter({ lockRoot, owner, nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000, ...seams }) {
-  const live = listWaiting(lockRoot).filter((m) => isRankableWaiter(m, { nowMs, ttlMs, ...seams }));
+export function isOldestLiveWaiter({ lockRoot, owner, nowMs, ttlMs = WAITING_TTL_MINUTES * 60_000, kind = undefined, ...seams }) {
+  // Card xkyw1x4 — THE FAST LANE. With a `kind`, rank only against waiters in the SAME queue lane: a short job is
+  // never behind a full-suite waiter, and first-come-first-served (#2692) still holds inside each lane. A marker
+  // with no `kind` (written by older code) ranks in the slow lane. Without a `kind`: one global queue, as before.
+  const lane = kind === undefined ? null : queueLaneOf(normalizeKind(kind));
+  const live = listWaiting(lockRoot)
+    .filter((m) => isRankableWaiter(m, { nowMs, ttlMs, ...seams }))
+    .filter((m) => lane === null || queueLaneOf(normalizeKind(m.kind)) === lane);
   if (live.length === 0) return true;
   const oldest = [...live].sort((a, b) => {
     const at = Date.parse(a.requestedAt), bt = Date.parse(b.requestedAt);
@@ -680,7 +724,7 @@ export function isOldestLiveWaiter({ lockRoot, owner, nowMs, ttlMs = WAITING_TTL
  * @returns {Promise<{ ok:boolean, slot:number|null, timedOut:boolean, waitedMs:number, disabled?:boolean, ceilingHit?:boolean }>}
  */
 export async function acquireSlotBlocking({
-  lockRoot, cap, owner, lane = null, num = null, repo = null,
+  lockRoot, cap, owner, lane = null, num = null, repo = null, kind = null,
   pollMs = DEFAULT_POLL_MS, ceilingMs = DEFAULT_ADMISSION_CEILING_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
   stillWaitingLogMs = STILL_WAITING_LOG_MS,
   pid = process.pid, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -689,6 +733,10 @@ export async function acquireSlotBlocking({
   if (isAdmissionOff(env)) return { ok: false, slot: null, timedOut: false, disabled: true, waitedMs: 0 };
 
   const startedAt = now();
+  // Card xkyw1x4 — the command KIND decides the queue lane and which slots may be taken (fast lane).
+  const jobKind = normalizeKind(kind);
+  const fastSlots = resolveFastSlots(env);
+  const slotOrder = slotOrderFor(jobKind, cap, fastSlots);
   // xaipsbs — every admission attempt first clears stale waiters, so debris never outlives the next caller.
   reapStaleWaiters({ lockRoot, nowMs: startedAt, apply: true });
   // MECHANICAL FAIRNESS (#3383 card xb0iuxq) — mark BEFORE the first attempt, not only after it fails, so
@@ -697,7 +745,7 @@ export async function acquireSlotBlocking({
   // `tryAcquireSlot` itself would have won a slot for it. A caller with no contention (the common case) still
   // succeeds with zero wait below — `isOldestLiveWaiter` reports it "oldest" (nothing else live to rank
   // against) on its very first check.
-  markWaiting({ lockRoot, owner, lane, num, pid, repo, nowIso: new Date(startedAt).toISOString() });
+  markWaiting({ lockRoot, owner, lane, num, pid, repo, kind: jobKind, nowIso: new Date(startedAt).toISOString() });
   let lastLoggedAt = startedAt;
   try {
     for (;;) {
@@ -706,8 +754,11 @@ export async function acquireSlotBlocking({
         log(`⚠⚠ heavy-command admission: HARD CEILING of ${Math.round(ceilingMs / 60_000)}m exceeded waiting for capacity (cap=${cap}) — a slot holder may be wedged; proceeding unslotted. Escape hatch: WE_HEAVY_ADMISSION=off.\n`);
         return { ok: false, slot: null, timedOut: true, ceilingHit: true, waitedMs: attempt - startedAt };
       }
-      if (isOldestLiveWaiter({ lockRoot, owner, nowMs: attempt })) {
-        const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso: new Date(attempt).toISOString(), pid, leaseMinutes });
+      if (isOldestLiveWaiter({ lockRoot, owner, nowMs: attempt, kind: jobKind })) {
+        const nowIso = new Date(attempt).toISOString();
+        // `meta` carries the kind + acquire time so the release can record the hold duration by kind.
+        const meta = { kind: jobKind, acquiredAt: nowIso, lane: lane ?? null };
+        const r = tryAcquireSlot({ lockRoot, cap, owner, nowMs: attempt, nowIso, pid, leaseMinutes, meta, slots: slotOrder });
         if (r.ok) return { ok: true, slot: r.slot, timedOut: false, waitedMs: attempt - startedAt };
       }
       if (attempt - lastLoggedAt >= stillWaitingLogMs) {
@@ -721,14 +772,202 @@ export async function acquireSlotBlocking({
   }
 }
 
+// ── hold durations + the queue baseline (card xkyw1x4) ──────────────────────────────────────────────────
+// Every release of a slot whose entry carries `meta.kind` (written by {@link acquireSlotBlocking}) appends ONE
+// line to `durations.jsonl` beside the slots: `{kind, ms, lane, repo, at}`. {@link readStandardMinutes} turns the
+// tail of that log into the rolling typical time per kind. Best-effort on both sides: a write failure never
+// fails a release, and an unreadable log reads as "no samples" (the seeds apply).
+
+const DURATIONS_LOG = 'durations.jsonl';
+/** Keep the log bounded: once it passes this many lines, the next append rewrites it to the newest half. */
+export const DURATIONS_LOG_MAX_LINES = 2000;
+
+/** Append one hold-duration record. Never throws. */
+export function recordHoldDuration({ lockRoot, kind, ms, lane = null, repo = null, at = new Date().toISOString() }) {
+  if (!Number.isFinite(ms) || ms < 0) return false;
+  const file = join(lockRoot, DURATIONS_LOG);
+  try {
+    mkdirSync(lockRoot, { recursive: true });
+    appendFileSync(file, JSON.stringify({ kind: normalizeKind(kind), ms: Math.round(ms), lane, repo, at }) + '\n', 'utf8');
+    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    if (lines.length > DURATIONS_LOG_MAX_LINES) writeFileSync(file, lines.slice(-Math.floor(DURATIONS_LOG_MAX_LINES / 2)).join('\n') + '\n', 'utf8');
+    return true;
+  } catch { return false; }
+}
+
+/** The hold that is being released, recorded by kind. Only entries this card's code wrote (with `meta.kind`)
+ *  are recorded — an older holder's kind is unknown, and a guess would poison the typical value. */
+function recordReleasedHold(lockRoot, entry, nowMs = Date.now()) {
+  const kind = entry?.meta?.kind;
+  if (!kind) return;
+  const started = Date.parse(entry.meta.acquiredAt || entry.heartbeatAt);
+  if (Number.isNaN(started)) return;
+  recordHoldDuration({ lockRoot, kind, ms: nowMs - started, lane: entry.meta.lane ?? null, repo: repoOfOwner(entry.owner), at: new Date(nowMs).toISOString() });
+}
+
+/** Parsed duration records, oldest first. Corrupt lines are skipped. */
+export function readHoldDurations(lockRoot) {
+  let raw = '';
+  try { raw = readFileSync(join(lockRoot, DURATIONS_LOG), 'utf8'); } catch { return []; }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    try { const r = JSON.parse(line); if (r && Number.isFinite(r.ms)) out.push(r); } catch { /* corrupt line */ }
+  }
+  return out;
+}
+
+/** The rolling typical minutes per kind (+ where each came from: `rolling` n samples, or the `seed`). */
+export function readStandardMinutes(lockRoot) {
+  return typicalMinutes(readHoldDurations(lockRoot));
+}
+
+/** A slot owner is `<repo>` (verify-lane) or `<repo>#<pid>` (the `run` wrapper) — the repo part. */
+function repoOfOwner(owner) {
+  return String(owner || '').replace(/#\d+$/, '') || null;
+}
+
+/** Resolve the max projected wait (minutes) from env, clamped to > 0. */
+export function resolveQueueMaxWaitMinutes(env = process.env) {
+  const n = Number(env?.[QUEUE_MAX_WAIT_ENV]);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_QUEUE_MAX_WAIT_MINUTES;
+}
+
+/** True when the queue-time gate is switched off (`WE_QUEUE_ADMISSION=off|0|false|no`). */
+export function isQueueAdmissionOff(env = process.env) {
+  return /^(?:off|0|false|no)$/i.test(String(env?.[QUEUE_ADMISSION_SWITCH_ENV] || ''));
+}
+
+/**
+ * Every lane lease under the pool root (`<pool>/<repo-pool>/lane-N/.git/.lane-lease`), as `{repo, lease}`.
+ * The heavy-admission root is host-wide (`<pool>/.admission/heavy`), so every repo pool's lanes feed it.
+ */
+export function readPoolLeases(poolRoot) {
+  const out = [];
+  let pools = [];
+  try { pools = readdirSync(poolRoot, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name); } catch { return out; }
+  for (const pool of pools) {
+    let lanes = [];
+    try { lanes = readdirSync(join(poolRoot, pool)).filter((n) => /^lane-\d+$/.test(n)); } catch { continue; }
+    for (const lane of lanes) {
+      const repo = join(poolRoot, pool, lane);
+      const lease = readLaneLease(repo);
+      if (lease) out.push({ repo, lease });
+    }
+  }
+  return out;
+}
+
+/**
+ * THE QUEUE BASELINE — everything already on its way to the heavy slots, in slot-minutes, plus what a caller
+ * needs to cost new dispatches against it (`createQueueBudget` in `./heavy-queue-projection.mjs`). Split by
+ * queue lane (PR #2707 operator decision): heavy demand over the `cap` heavy slots, short demand (short holders /
+ * waiters + every pending dispatch) over the fast slots + the heavy slots no heavy job holds or waits for.
+ * `projectedWaitMinutes` is the SHORT-lane wait — what a new dispatch's checks would see; `heavyWaitMinutes` is
+ * what a new full suite would see.
+ *   • held:    each held slot's kind (its `meta.kind`; `other` for a holder written by older code) and elapsed time;
+ *   • waiting: each LIVE waiter ({@link isRankableWaiter} — the same rule the FCFS ranking uses) and its kind;
+ *   • pending: each lane leased by a recognised dispatched session (`classifyDispatchKind`) within the last
+ *     `arrivalWindowMinutes`, that is not holding or waiting yet and has not already finished a hold since its
+ *     lease began — costed at its dispatch kind's expected demand.
+ * Read-only: never reaps, never writes. `WE_QUEUE_ADMISSION=off` → `{bypassed:'off'}` and
+ * `CI` → `{bypassed:'ci'}`, both of which every consumer treats as "admit everything".
+ * @param {{lockRoot:string, cap:number, nowMs?:number, env?:object, arrivalWindowMinutes?:number,
+ *   readLeases?:(poolRoot:string)=>Array<{repo:string, lease:object}>, isLiveWaiter?:Function}} o
+ */
+export function resolveQueueBaseline({
+  lockRoot, cap, nowMs = Date.now(), env = process.env, arrivalWindowMinutes = DEFAULT_ARRIVAL_WINDOW_MINUTES,
+  readLeases = readPoolLeases, isLiveWaiter = isRankableWaiter,
+}) {
+  const maxWaitMinutes = resolveQueueMaxWaitMinutes(env);
+  const fastSlots = resolveFastSlots(env);
+  const base = { slots: cap + fastSlots, heavySlots: cap, fastSlots, maxWaitMinutes, arrivalWindowMinutes, observedAt: new Date(nowMs).toISOString() };
+  if (isQueueAdmissionOff(env)) return { ...base, bypassed: 'off' };
+  if (/^(?:true|1)$/i.test(String(env?.CI || ''))) return { ...base, bypassed: 'ci' };
+
+  const { minutes: standardMinutes, source: standardSource } = readStandardMinutes(lockRoot);
+  const durations = readHoldDurations(lockRoot);
+  const held = heldSlots({ lockRoot, cap, fastSlots }).map((h) => {
+    const startedIso = h.meta?.acquiredAt || h.heartbeatAt;
+    const started = Date.parse(startedIso);
+    return {
+      slot: h.slot, kind: normalizeKind(h.meta?.kind), repo: repoOfOwner(h.owner), lane: h.meta?.lane ?? null,
+      elapsedMinutes: Number.isNaN(started) ? 0 : Math.round(((nowMs - started) / 60_000) * 100) / 100,
+    };
+  });
+  const waiting = listWaiting(lockRoot)
+    .filter((m) => isLiveWaiter(m, { nowMs }))
+    .map((m) => ({ kind: normalizeKind(m.kind), repo: waiterRepo(m), lane: m.lane ?? null, requestedAt: m.requestedAt }));
+
+  const busyRepos = new Set([...held.map((h) => h.repo), ...waiting.map((w) => w.repo)].filter(Boolean));
+  const windowMs = arrivalWindowMinutes * 60_000;
+  const pending = [];
+  let leases = [];
+  try { leases = readLeases(poolRootOf(lockRoot)) || []; } catch { leases = []; }
+  for (const { repo, lease } of leases) {
+    const acquired = Date.parse(lease?.acquiredAt);
+    if (Number.isNaN(acquired) || nowMs - acquired > windowMs || nowMs < acquired) continue;
+    if (isLeaseStale(lease, nowMs)) continue;
+    if (busyRepos.has(repo)) continue; // already counted as held / waiting
+    // Already ran (and finished) a heavy command since this lease began → it has arrived; not pending.
+    if (durations.some((d) => d.repo === repo && Date.parse(d.at) >= acquired)) continue;
+    const dispatchKind = classifyDispatchKind(lease);
+    if (!dispatchKind) continue;
+    const demandMinutes = dispatchDemandMinutes(dispatchKind, { standardMinutes });
+    if (demandMinutes <= 0) continue;
+    pending.push({
+      repo, lane: (/lane-(\d+)$/.exec(repo) || [])[1] ?? null, dispatchKind, purpose: lease.purpose ?? null,
+      session: lease.session ?? null, ageMinutes: Math.round(((nowMs - acquired) / 60_000) * 10) / 10, demandMinutes,
+    });
+  }
+
+  const backlog = queueBacklog({ held, waiting, pending, standardMinutes });
+  const lanes = laneProjection({
+    heavySlots: cap, fastSlots, heavyBacklogMinutes: backlog.heavyBacklogMinutes, shortBacklogMinutes: backlog.shortBacklogMinutes,
+    heldHeavyCount: backlog.heldHeavyCount, waitingHeavyCount: backlog.waitingHeavyCount,
+  });
+  return {
+    ...base, standardMinutes, standardSource,
+    heldRemainingMinutes: backlog.heldRemainingMinutes, waitingMinutes: backlog.waitingMinutes, pendingMinutes: backlog.pendingMinutes,
+    backlogMinutes: backlog.backlogMinutes,
+    heavyBacklogMinutes: backlog.heavyBacklogMinutes, shortBacklogMinutes: backlog.shortBacklogMinutes,
+    heldHeavyCount: backlog.heldHeavyCount, waitingHeavyCount: backlog.waitingHeavyCount,
+    freeHeavySlots: lanes.freeHeavySlots, shortCapacity: lanes.shortCapacity,
+    heavyWaitMinutes: lanes.heavyWaitMinutes,
+    projectedWaitMinutes: lanes.shortWaitMinutes,
+    held: backlog.held, waiting: backlog.waiting, pending,
+  };
+}
+
+/**
+ * The one-call live baseline for a checkout (the fix / ci-heal daemons and the tick IO shell use this): lock root
+ * + cap from env, then {@link resolveQueueBaseline}. FAILS OPEN — any read error returns `{bypassed:'error'}`.
+ * The pool root is `guardedPoolRoot`'s: inside a vitest worker with no `LANE_POOL_ROOT` override it throws, so a
+ * test that forgot to inject a baseline admits everything instead of reading the real host queue.
+ */
+export function resolveLiveQueueBaseline({ checkoutRoot = process.cwd(), env = process.env, nowMs = Date.now() } = {}) {
+  try {
+    return resolveQueueBaseline({ lockRoot: join(guardedPoolRoot(checkoutRoot, env), SUBDIR), cap: resolveCap(env), nowMs, env });
+  } catch (e) {
+    return { bypassed: 'error', error: String((e && e.message) || e).split('\n')[0] };
+  }
+}
+
 // ── status — what `tick-core.mjs` reads for the `waiting-for-capacity` note ────────────────────────────
 
-export function admissionStatus({ lockRoot, cap, nowMs = Date.now(), ...reapSeams }) {
-  const held = heldSlots({ lockRoot, cap });
+export function admissionStatus({ lockRoot, cap, nowMs = Date.now(), fastSlots = 0, ...reapSeams }) {
+  // `fastSlots` (card xkyw1x4): the heavy-admission CLI passes its fast-lane slots so they show as held / free;
+  // other pools on these primitives (gh-throttle) have none.
+  const held = heldSlots({ lockRoot, cap, fastSlots });
   const waiting = listWaiting(lockRoot);
   // xaipsbs — `reaped` is what the reap has removed so far; `staleWaiting` is what it WOULD remove right now.
   const staleWaiting = reapStaleWaiters({ lockRoot, nowMs, apply: false, ...reapSeams }).reaped.length;
-  return { cap, heldCount: held.length, freeCount: Math.max(0, cap - held.length), held, waiting, staleWaiting, reaped: reapHistory(lockRoot) };
+  const heavyHeld = held.filter((h) => h.slot < cap).length;
+  return {
+    cap, fastSlots, heldCount: held.length, freeCount: Math.max(0, cap + fastSlots - held.length),
+    heavyFreeCount: Math.max(0, cap - heavyHeld), fastFreeCount: Math.max(0, fastSlots - (held.length - heavyHeld)),
+    held, waiting, staleWaiting, reaped: reapHistory(lockRoot),
+  };
 }
 
 /**
@@ -791,7 +1030,7 @@ export function poolRootOf(lockRoot) {
  */
 export async function runUnderAdmission({
   lockRoot, cap, owner, lane = null, num = null, repo = null, ceilingMs = DEFAULT_ADMISSION_CEILING_MS, leaseMinutes = ADMISSION_LEASE_MINUTES,
-  command, cwd = process.cwd(), exec = (cmd, o) => execSync(cmd, o), log = (m) => process.stderr.write(m),
+  kind = null, command, cwd = process.cwd(), exec = (cmd, o) => execSync(cmd, o), log = (m) => process.stderr.write(m),
   now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   bypass = null, env = process.env,
 }) {
@@ -806,7 +1045,8 @@ export async function runUnderAdmission({
   mkdirSync(lockRoot, { recursive: true });
   // xhlriy2: `log`/`env` threaded through so acquireSlotBlocking's still-waiting/ceiling warnings and its own
   // `WE_HEAVY_ADMISSION=off` check apply to the `run` wrapper's wait too, not just this function's own messages.
-  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, repo, ceilingMs, leaseMinutes, now, sleep, log, env });
+  // Card xkyw1x4 — the kind is read off the wrapped command itself unless the caller names it.
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, repo, kind: kind ?? classifyCommandKind(command), ceilingMs, leaseMinutes, now, sleep, log, env });
   if (admission.timedOut) {
     log(`⚠ heavy-command admission: timed out after ${admission.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted.\n`);
   } else if (admission.waitedMs > 0) {
@@ -818,7 +1058,7 @@ export async function runUnderAdmission({
   } catch (e) {
     exitCode = Number.isFinite(e && e.status) ? e.status : 1;
   } finally {
-    if (admission.ok) releaseOwnedSlot({ lockRoot, cap, owner });
+    if (admission.ok) releaseOwnedSlot({ lockRoot, cap, owner, fastSlots: resolveFastSlots(env) });
   }
   return { exitCode, admission };
 }
@@ -882,8 +1122,9 @@ async function main(argv) {
   const mode = positionals[0] || 'status';
 
   if (mode === 'status') {
-    if (!existsSync(lockRoot)) { emit({ cap, heldCount: 0, freeCount: cap, held: [], waiting: [], staleWaiting: 0, reaped: { count: 0, last: null } }); return; }
-    emit(admissionStatus({ lockRoot, cap }));
+    const fastSlots = resolveFastSlots(process.env);
+    if (!existsSync(lockRoot)) { emit({ cap, fastSlots, heldCount: 0, freeCount: cap + fastSlots, heavyFreeCount: cap, fastFreeCount: fastSlots, held: [], waiting: [], staleWaiting: 0, reaped: { count: 0, last: null } }); return; }
+    emit(admissionStatus({ lockRoot, cap, fastSlots }));
     return;
   }
   if (mode === 'load-status') {
@@ -901,6 +1142,17 @@ async function main(argv) {
       ? `load1 ${decision.load1.toFixed(2)} / ${decision.cores} cores = ${decision.perCore.toFixed(2)} (max ${decision.maxPerCore})`
       : `no sample${decision.bypassed ? ` (${decision.bypassed})` : ''}`;
     process.stdout.write(`${decision.held ? 'HELD' : 'admitted'} — ${reading}\n`);
+    return;
+  }
+  if (mode === 'queue-status') {
+    // Card xkyw1x4 — the queue baseline (backlog in slot-minutes, standard times per kind, pending dispatched
+    // sessions) that `tick-core.mjs`'s IO shell feeds to planTick's `queue-cap` gate. Read-only.
+    const b = resolveQueueBaseline({ lockRoot, cap });
+    if (asJson) { emit(b); return; }
+    if (b.bypassed) { process.stdout.write(`queue admission bypassed (${b.bypassed})\n`); return; }
+    process.stdout.write(`projected wait if you start now: ~${b.projectedWaitMinutes}m for a dispatch's short checks (max ${b.maxWaitMinutes}m), ~${b.heavyWaitMinutes}m for a full suite — `
+      + `short ${b.shortBacklogMinutes} slot-min over ${b.shortCapacity} slot(s) (${b.fastSlots} fast + ${b.freeHeavySlots} free heavy), `
+      + `heavy ${b.heavyBacklogMinutes} slot-min over ${b.heavySlots} heavy slot(s)\n`);
     return;
   }
   if (mode === 'reap') {
@@ -930,14 +1182,14 @@ async function main(argv) {
     const ceilingMs = flags['ceiling-ms'] != null ? Number(flags['ceiling-ms'])
       : flags['timeout-ms'] != null ? Number(flags['timeout-ms'])
       : resolveCeilingMs(process.env);
-    const r = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, ceilingMs });
+    const r = await acquireSlotBlocking({ lockRoot, cap, owner, lane, num, ceilingMs, kind: typeof flags.kind === 'string' ? flags.kind : null });
     if (asJson) emit(r);
     else process.stderr.write(r.ok ? `acquired slot-${r.slot} (waited ${r.waitedMs}ms)\n` : `timed out after ${r.waitedMs}ms waiting for capacity (cap=${cap}) — proceeding unslotted\n`);
     process.exit(0); // fail-open: a queuing timeout is not a usage error, the caller proceeds regardless
   }
   if (mode === 'run') {
     if (dashDashIdx === -1 || dashDashIdx === argv.length - 1) {
-      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--ceiling-ms=] [--container] [--container-node-modules] -- <command…>\n`);
+      process.stderr.write(`usage: heavy-admission.mjs run [--repo=] [--cap=] [--owner=] [--lane=] [--num=] [--kind=] [--ceiling-ms=] [--container] [--container-node-modules] -- <command…>\n`);
       process.exit(3);
     }
     const command = argv.slice(dashDashIdx + 1).map(shellQuoteWord).join(' ');
@@ -980,12 +1232,12 @@ async function main(argv) {
       process.exit(1);
     }
     const bypass = admissionBypassReason({ env: process.env, poolExists: existsSync(poolRootOf(lockRoot)) });
-    const runOpts = { lockRoot, cap, owner, lane: lane ?? (/lane-(\d+)/.exec(repo) || [])[1] ?? null, num, repo, ceilingMs, command, cwd: repo, bypass };
+    const runOpts = { lockRoot, cap, owner, lane: lane ?? (/lane-(\d+)/.exec(repo) || [])[1] ?? null, num, repo, ceilingMs, command, cwd: repo, bypass, kind: typeof flags.kind === 'string' ? flags.kind : null };
     if (useContainer) runOpts.exec = (cmd, o) => execContainerized(cmd, { ...o, nodeModulesVolume: useNodeModulesVolume });
     const { exitCode } = await runUnderAdmission(runOpts);
     process.exit(exitCode);
   }
-  process.stderr.write(`usage: heavy-admission.mjs <status|load-status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--max-per-core=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
+  process.stderr.write(`usage: heavy-admission.mjs <status|load-status|queue-status|acquire|release|run|reap> [--apply] [--ttl-minutes=] [--repo=] [--cap=] [--max-per-core=] [--owner=] [--lane=] [--num=] [--json] [--ceiling-ms=] [-- <command…>]\n`);
   process.exit(3);
 }
 

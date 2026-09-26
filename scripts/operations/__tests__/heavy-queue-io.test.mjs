@@ -27,6 +27,7 @@ describe('collectHeavyQueue — the real admissionStatus() export, everything el
     const ancestryCalls = [];
 
     const read = collectHeavyQueue({
+      readBaseline: null, // card xkyw1x4 — no host queue read in a unit test
       repo: '/whatever', env: {}, now: () => T0 + 120_000,
       readAdmission: ({ cap }) => ({
         cap, heldCount: 1, freeCount: cap - 1, staleWaiting: 0,
@@ -54,6 +55,7 @@ describe('collectHeavyQueue — the real admissionStatus() export, everything el
 
   it('a gone pid / unreadable command degrades to null rather than throwing', () => {
     const read = collectHeavyQueue({
+      readBaseline: null, // card xkyw1x4 — no host queue read in a unit test
       repo: '/whatever', env: {}, now: () => Date.now(),
       readAdmission: () => ({
         cap: 1, heldCount: 1, freeCount: 0, staleWaiting: 0,
@@ -70,6 +72,7 @@ describe('collectHeavyQueue — the real admissionStatus() export, everything el
   it('tags each waiting row live/not-live with the ranking rule, and the envelope skips dead ones', () => {
     const T0 = Date.parse('2026-09-25T12:00:00.000Z');
     const read = collectHeavyQueue({
+      readBaseline: null, // card xkyw1x4 — no host queue read in a unit test
       repo: '/whatever', env: {}, now: () => T0,
       readAdmission: () => ({
         cap: 1, heldCount: 1, freeCount: 0, staleWaiting: 0,
@@ -85,8 +88,9 @@ describe('collectHeavyQueue — the real admissionStatus() export, everything el
     });
     expect(read.waiting.map((w) => w.live)).toEqual([true, false]);
     const env = assessHeavyQueue(read);
-    // 1m left on the holder + ONE live standards waiter (8m); the crashed "other" (20m) is not counted.
-    expect(env.projectedWaitMinutesForNewJob).toBe(1 + 8);
+    // Seeds (card xkyw1x4): the standards holder is past its 0.25m standard (0 left) + ONE live standards waiter
+    // (0.25m, shown rounded to 0.3); the crashed "other" (5m) is not counted.
+    expect(env.projectedWaitMinutesForNewJob).toBe(0.3);
   });
 });
 
@@ -99,6 +103,7 @@ describe('collectHeavyQueue — against a REAL (temp) admission lock root, real 
       markWaiting({ lockRoot, owner: '/lanes/lane-13', repo: '/lanes/lane-13', pid: 222, lane: '13', nowIso: new Date(T0 + 60_000).toISOString() });
 
       const read = collectHeavyQueue({
+      readBaseline: null, // card xkyw1x4 — no host queue read in a unit test
         repo: '/anything', env: { WE_HEAVY_ADMISSION_CAP: '2' }, now: () => T0 + 120_000,
         // The lock-root resolution seam isn't exposed on `collectHeavyQueue` directly, so bind the REAL
         // `admissionStatus` export to this temp root via closure — proving the real function's shape flows
