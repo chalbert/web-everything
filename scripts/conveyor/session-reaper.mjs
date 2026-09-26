@@ -494,6 +494,11 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap) return base;
+  // Live-caught 2026-09-26 (review-daemon log): `classifySessionReap` checks `cwd` BEFORE `state`, so a session
+  // already `stopped` in a per-session scratch cwd came back `wrong-cwd`, and the #4149 upgrade axes below then
+  // re-reaped it — `claude stop` on the same ~240 stopped sessions, every tick, forever. A stopped session has
+  // nothing left to stop, whichever cwd it ran in.
+  if (ALREADY_STOPPED_STATES.has(session?.state)) return { reap: false, reason: 'already-stopped' };
   if (base.reason !== 'not-terminal' && base.reason !== 'wrong-cwd') return base;
   // #4149 (epic #3383/#4075) — `wrong-cwd` and `not-terminal` are the only two base reasons axes -1/0 below may
   // still upgrade. LIVE, live-caught 2026-09-25: `fix-2003`/`fix-2115`/`fix-2267` were dispatched with `cwd`
@@ -1829,6 +1834,45 @@ function parseFlags(argv) {
   return flags;
 }
 
+/** `~/.claude/we-session-reaper/reaped.json` — machine-wide like the chat-spawn stores above (every daemon
+ *  clone reaps the same `claude agents` listing). `OPERATION_REAPED_LEDGER_FILE` overrides it. */
+export function resolveReapedLedgerFile(env = process.env) {
+  const override = env.OPERATION_REAPED_LEDGER_FILE;
+  return override && override.trim() ? override.trim() : join(homedir(), '.claude', 'we-session-reaper', 'reaped.json');
+}
+
+/**
+ * The reaper's memory of which session ids it already `claude stop`-ed (live-caught 2026-09-26: see the
+ * `reapedLedger` filter in {@link runSessionReaperPass}). A plain id set on disk, pruned each pass to the ids the
+ * listing still shows, so it stays the size of the listing. An unreadable/corrupt file reads as empty — the
+ * worst case is one pass of redundant stops, exactly the pre-ledger behavior. `readFile`/`writeFile` are
+ * injectable for tests.
+ * @returns {{has:(id:string)=>boolean, add:(id:string)=>void, retainOnly:(ids:string[])=>void, save:()=>void, ids:()=>string[]}}
+ */
+export function makeReapedLedger({
+  file = resolveReapedLedgerFile(),
+  readFile = (f) => readFileSync(f, 'utf8'),
+  writeFile = (f, text) => {
+    mkdirSync(dirname(f), { recursive: true });
+    const tmp = `${f}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, text);
+    renameSync(tmp, f);
+  },
+} = {}) {
+  let set = new Set();
+  try {
+    const parsed = JSON.parse(readFile(file));
+    if (Array.isArray(parsed?.ids)) set = new Set(parsed.ids.filter((x) => typeof x === 'string'));
+  } catch { /* missing or corrupt — start empty */ }
+  return {
+    has: (id) => set.has(id),
+    add: (id) => { if (typeof id === 'string' && id) set.add(id); },
+    retainOnly: (ids) => { const keep = new Set(ids); set = new Set([...set].filter((id) => keep.has(id))); },
+    save: () => writeFile(file, JSON.stringify({ v: 1, ids: [...set] }) + '\n'),
+    ids: () => [...set],
+  };
+}
+
 /**
  * THE REUSABLE IO-SHELL PASS (epic #3383 daemon split) — everything `main()` used to do BETWEEN reading argv
  * and printing/exiting, pulled out so a resident daemon (e.g. `we:skills-src/conveyor/review-daemon.mjs`) can
@@ -1900,6 +1944,8 @@ export function runSessionReaperPass({
   // doc. Default ON, same convention as every other axis this epic ships; `null` is the rollback escape hatch
   // (byte-identical to this file's pre-existing backstop behavior — always `UNREPORTED_EXIT_OUTCOME`).
   blockedOnInfraFor = transcriptShowsIntendedBlockedOnInfra,
+  // See {@link makeReapedLedger}. `null` (the default) is byte-identical to the pre-ledger behavior.
+  reapedLedger = null,
 } = {}) {
   let sessions;
   try {
@@ -1926,7 +1972,23 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
+  const plan = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
+  const { keep } = plan;
+  let reap = plan.reap;
+  let previouslyReaped = 0;
+  if (reapedLedger) {
+    // A `done`/`failed` session never changes state after `claude stop` — the listing keeps it `done` forever —
+    // so without a memory of what was already stopped, every tick re-stopped every finished session (1,228 of
+    // the 1,501 "stopped" per tick, live 2026-09-26, ~0.7s each: a 2-minute tick took ~20). Terminal-state rows
+    // only: a `working`/`blocked` row that is still listed after a stop is worth another try.
+    reapedLedger.retainOnly(sessions.map((s) => normalizeHandle(s?.id)).filter(Boolean));
+    reap = reap.filter(({ session }) => {
+      const id = normalizeHandle(session?.id);
+      const skip = Boolean(id) && TERMINAL_REAP_STATES.has(session?.state) && reapedLedger.has(id);
+      if (skip) previouslyReaped++;
+      return !skip;
+    });
+  }
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -2001,6 +2063,7 @@ export function runSessionReaperPass({
       else stopped++;
       logFn(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
+      if (reapedLedger) reapedLedger.add(handle);
     } catch (e) {
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
@@ -2011,6 +2074,9 @@ export function runSessionReaperPass({
     }
   }
 
+  if (reapedLedger && !dryRun) {
+    try { reapedLedger.save(); } catch (e) { logFn(`  ⚠ reaped-ledger save failed (non-fatal — next tick re-stops): ${String(e?.message || e).split('\n')[0]}`); }
+  }
   return {
     scanned: sessions.length,
     stopped: dryRun ? 0 : stopped,
@@ -2024,6 +2090,7 @@ export function runSessionReaperPass({
       : undefined,
     collected: dryRun ? undefined : done,
     kept: keep.length,
+    ...(reapedLedger ? { previouslyReaped } : {}),
   };
 }
 
