@@ -684,7 +684,9 @@ export function createExtraSeatsIo({ env = process.env, root = REPO_ROOT, storeP
 // `needs-human` when the pass did not run cleanly. In v1 that value is evidence for graduation, nothing more.
 //
 // KILL SWITCHES: {@link RED_TEAM_ENV}`=0` turns only this seat off; {@link EXTRA_SEATS_ENV}`=0` turns every added
-// seat off, this one included. It never runs twice for the same `(pr, head)` once a clean row exists.
+// seat off, this one included. The MODEL never runs twice for the same `(pr, head)` once a clean row exists; a later
+// run instead finishes any effect (miss row, delegation trial, comment) that failed after that row was written.
+// The `red-team-replay` CLI never writes the store at all.
 
 export const RED_TEAM_ENV = 'WE_REVIEW_RED_TEAM';
 export const RED_TEAM_SEAT = Object.freeze({ seat: 'red-team', lens: 'red-team', key: 'red-team' });
@@ -730,9 +732,25 @@ export function redTeamCommentPosted(comments, pr, rev) {
   });
 }
 
-/** Has this `(pr, head)` already had a red-team pass that ran cleanly? PURE. */
+/** The latest red-team seat row that ran cleanly for this `(pr, head)`, or null. PURE. */
+export function priorRedTeamRow(records, pr, rev) {
+  return seatRows(records).filter((r) => r.seat === RED_TEAM_SEAT.seat && r.pr === Number(pr) && r.rev === rev && r.status === 'ok').at(-1) ?? null;
+}
+
+/**
+ * Has this `(pr, head)` already had a red-team pass that ran cleanly? PURE. A clean row only stops the MODEL from
+ * running again — the effects after it (miss rows, delegation trial, comment) are re-checked and finished by
+ * {@link runRedTeam} on the next run, so a failure between the row and those effects never strands them.
+ */
 export function redTeamAlreadyRan(records, pr, rev) {
-  return seatRows(records).some((r) => r.seat === RED_TEAM_SEAT.seat && r.pr === Number(pr) && r.rev === rev && r.status === 'ok');
+  return priorRedTeamRow(records, pr, rev) !== null;
+}
+
+/** Is this exact miss row (same pass, same role, same seat) already in the store? PURE. */
+function missRowRecorded(records, row) {
+  return (Array.isArray(records) ? records : []).some((r) => r?.dispatchKind === RED_TEAM_MISS_DISPATCH_KIND
+    && r.pr === row.pr && r.rev === row.rev && r.redTeamCallId === row.redTeamCallId
+    && r.missRole === row.missRole && (r.claudeSeat ?? null) === (row.claudeSeat ?? null));
 }
 
 /**
@@ -906,12 +924,105 @@ export function renderRedTeamComment({ pr, rev, provider, model, findings, reche
 }
 
 /**
+ * The effects that follow a pass: the evidence rows, the builder's delegation trial, the ONE comment. Each is
+ * idempotent against what is already there (a row in `records`, a `reworked` trial for the PR, a trusted marker
+ * comment), so the same call both does them the first time and finishes whichever failed on a later run.
+ * `record: false` (the replay) writes no row and logs no trial. Never throws.
+ */
+async function finishRedTeamEffects({
+  pr, repo, rev, title, callId, provider, model, findings, recheckStatus, foldedVerdict, builder, records, seatRow, post, record,
+}, io) {
+  const confirmed = findings.filter((f) => f.confirmedByRecheck);
+  let rowsWritten = 0;
+  let rowErrors = 0;
+  if (record) {
+    const missRows = buildMissRows({ pr, repo, rev, runCallId: callId, redTeamProvider: provider, redTeamModel: model, builder, confirmed });
+    for (const r of [...(seatRow ? [seatRow] : []), ...missRows.filter((m) => !missRowRecorded(records, m))]) {
+      try { io.append(r); rowsWritten += 1; } catch (e) { rowErrors += 1; io.log(`red team: evidence row (${r.missRole ?? r.seat}) NOT written — ${e.message}`); }
+    }
+  }
+
+  // The builder's DELEGATION trial gains the miss — the row graduation actually reads.
+  let delegationTrial = 'not-delegated';
+  if (confirmed.length && builder.delegated) {
+    if (FORBIDDEN_TRIAL_TASK_TYPES.includes(builder.taskType)) {
+      delegationTrial = `refused: taskType ${builder.taskType} is never logged (#3801 Fork 2)`;
+    } else if (!record) {
+      delegationTrial = 'not recorded (replay)';
+    } else if (records.some((r) => r?.dispatchKind === 'session-delegation' && r.pr === Number(pr) && r.outcome === 'reworked')) {
+      delegationTrial = 'already-logged';
+    } else {
+      try {
+        const logged = io.logTrial({
+          provider: builder.provider, model: builder.model, taskType: builder.taskType,
+          taskDescription: title || `PR #${pr}`, outcome: 'reworked', verifiedBy: 'independent-claude', informative: true,
+          findings: `post-accept red team (${provider}/${model}) — ${confirmed.length} break(s) confirmed by Claude's re-check: ${confirmed.map((f) => f.summary).join(' | ')}`.slice(0, 1500),
+          pr: Number(pr),
+        });
+        delegationTrial = logged ? 'logged' : 'store-write-failed';
+      } catch (e) {
+        delegationTrial = `error: ${String(e?.message ?? e).slice(0, 200)}`;
+      }
+    }
+  }
+
+  // ONE advisory comment per head.
+  let comment;
+  const body = renderRedTeamComment({ pr, rev, provider, model, findings, recheckStatus, foldedVerdict });
+  if (scrubPublish(body).length) {
+    comment = { status: 'withheld', reason: 'the comment failed the secret scrub' };
+  } else if (!post) {
+    comment = { status: 'not-posted', reason: 'replay: comments are never posted', body };
+  } else {
+    try {
+      if (redTeamCommentPosted(io.listComments({ pr, repo }), pr, rev)) comment = { status: 'deduped', body };
+      else { io.postComment({ pr, repo, body }); comment = { status: 'posted', body }; }
+    } catch (e) {
+      comment = { status: 'error', reason: String(e?.message ?? e).slice(0, 300), body };
+    }
+  }
+  const failed = rowErrors > 0 || /^(error|store-write-failed)/.test(delegationTrial) || comment.status === 'error';
+  const didWork = rowsWritten > 0 || delegationTrial === 'logged' || comment.status === 'posted';
+  return { rowsWritten, delegationTrial, comment, failed, didWork };
+}
+
+/**
+ * A clean row for this head already exists: rebuild the pass from it and finish any effect that did not land
+ * (PR #2735 review). The model never runs again and no call is spent. Rows written before `failure_scenario` and
+ * `builder` were recorded still resume; they just render without the scenario / count the builder as unknown.
+ */
+async function resumeRedTeam({ pr, repo, rev, title, prior, records, post, record }, io) {
+  const findings = (Array.isArray(prior.findings) ? prior.findings : []).map((f) => ({
+    summary: f.summary, category: f.category ?? null, file: f.file ?? null, line: f.line ?? null, impactIfUnfixed: f.impactIfUnfixed ?? null,
+    failure_scenario: f.failure_scenario ?? null, confirmedByRecheck: f.confirmedByRecheck === true, recheckReason: f.recheckReason ?? null,
+  }));
+  const b = prior.builder ?? {};
+  const builder = {
+    provider: b.provider ?? 'unknown', model: b.model ?? 'unknown', taskType: b.taskType ?? null,
+    source: b.source ?? 'none', delegated: b.source === 'delegation-marker',
+  };
+  const done = await finishRedTeamEffects({
+    pr, repo, rev, title, callId: prior.callId, provider: prior.provider, model: prior.model, findings,
+    recheckStatus: prior.recheckStatus ?? 'ok', foldedVerdict: prior.foldedVerdict ?? null, builder, records, seatRow: null, post, record,
+  }, io);
+  if (!done.didWork && !done.failed) return { status: 'already-ran', reason: `a clean red-team row already exists for #${pr} at ${rev.slice(0, 12)}` };
+  return {
+    status: 'resumed', rev, callId: prior.callId, provider: prior.provider, model: prior.model,
+    reason: `${done.failed ? 'retried (still failing)' : 'finished'} what the clean pass for #${pr} at ${rev.slice(0, 12)} left undone — ${done.rowsWritten} row(s) written, delegation trial ${done.delegationTrial}, comment ${done.comment.status}`,
+    rowsWritten: done.rowsWritten, delegationTrial: done.delegationTrial, comment: done.comment,
+  };
+}
+
+/**
  * RUN THE RED TEAM for one ACCEPTED PR. Never throws: every failure is a status in the result.
- * @param {{pr:number, repo:string, lanePath:string, loopPayload:object, env?:object, post?:boolean}} o
- *   `post: false` (the replay) renders the comment and returns it without posting.
+ * @param {{pr:number, repo:string, lanePath:string, loopPayload:object, env?:object, post?:boolean, record?:boolean}} o
+ *   `post: false` renders the comment and returns it without posting. `record: false` (the replay) also writes
+ *   nothing to the scorecard store — no evidence row, no miss row, no delegation trial; a payload marked
+ *   `replay: true` is never recorded whatever `record` says. The daily-cap reservation is still taken: the call
+ *   is real and is paid for.
  * @param {ReturnType<typeof createRedTeamIo>} io
  */
-export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = process.env, post = true } = {}, io = createRedTeamIo({ env })) {
+export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = process.env, post = true, record = true } = {}, io = createRedTeamIo({ env })) {
   try {
     if (!redTeamEnabled(env)) return { status: 'disabled', reason: `${RED_TEAM_ENV}=${env?.[RED_TEAM_ENV] ?? ''} ${EXTRA_SEATS_ENV}=${env?.[EXTRA_SEATS_ENV] ?? ''}`.trim() };
     const verdict = loopPayload?.verdict?.verdict ?? null;
@@ -923,7 +1034,9 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
     const now = io.now();
     let records = [];
     try { records = io.readRecords(); } catch (e) { io.log(`red team: could not read the scorecard store (${e.message}) — treating it as empty`); }
-    if (redTeamAlreadyRan(records, pr, rev)) return { status: 'already-ran', reason: `a clean red-team row already exists for #${pr} at ${rev.slice(0, 12)}` };
+    const recording = record !== false && loopPayload?.replay !== true;
+    const prior = priorRedTeamRow(records, pr, rev);
+    if (prior) return await resumeRedTeam({ pr, repo, rev, title: read.title, prior, records, post, record: recording }, io);
     const available = [];
     const unavailable = [];
     for (const p of REVIEW_SEAT_PROVIDERS) {
@@ -1010,53 +1123,20 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
       foldedVerdict,
       builder: { provider: builder.provider, model: builder.model, taskType: builder.taskType, source: builder.source },
       findings: seatRow.findings.map((f, i) => ({
-        ...f, category: findings[i]?.category ?? null, confirmedByRecheck: findings[i]?.confirmedByRecheck ?? false, recheckReason: publishable(findings[i]?.recheckReason),
+        ...f, category: findings[i]?.category ?? null, failure_scenario: publishable(findings[i]?.failure_scenario),
+        confirmedByRecheck: findings[i]?.confirmedByRecheck ?? false, recheckReason: publishable(findings[i]?.recheckReason),
       })),
     };
-    const rows = [row, ...buildMissRows({ pr, repo, rev, runCallId: callId, redTeamProvider: provider, redTeamModel: model, builder, confirmed })];
     let rowsWritten = 0;
-    for (const r of rows) {
-      try { io.append(r); rowsWritten += 1; } catch (e) { io.log(`red team: evidence row (${r.missRole ?? r.seat}) NOT written — ${e.message}`); }
-    }
-
-    // The builder's DELEGATION trial gains the miss — the row graduation actually reads.
     let delegationTrial = 'not-delegated';
-    if (confirmed.length && builder.delegated) {
-      if (FORBIDDEN_TRIAL_TASK_TYPES.includes(builder.taskType)) {
-        delegationTrial = `refused: taskType ${builder.taskType} is never logged (#3801 Fork 2)`;
-      } else if (records.some((r) => r?.dispatchKind === 'session-delegation' && r.pr === Number(pr) && r.outcome === 'reworked')) {
-        delegationTrial = 'already-logged';
-      } else {
-        try {
-          const logged = io.logTrial({
-            provider: builder.provider, model: builder.model, taskType: builder.taskType,
-            taskDescription: read.title || `PR #${pr}`, outcome: 'reworked', verifiedBy: 'independent-claude', informative: true,
-            findings: `post-accept red team (${provider}/${model}) — ${confirmed.length} break(s) confirmed by Claude's re-check: ${confirmed.map((f) => f.summary).join(' | ')}`.slice(0, 1500),
-            pr: Number(pr),
-          });
-          delegationTrial = logged ? 'logged' : 'store-write-failed';
-        } catch (e) {
-          delegationTrial = `error: ${String(e?.message ?? e).slice(0, 200)}`;
-        }
-      }
-    }
-
-    // ONE advisory comment per head — only for a pass that actually ran.
     let comment = { status: 'not-posted', reason: 'the red team did not run cleanly' };
     if (ran) {
-      const body = renderRedTeamComment({ pr, rev, provider, model, findings, recheckStatus, foldedVerdict });
-      if (scrubPublish(body).length) {
-        comment = { status: 'withheld', reason: 'the comment failed the secret scrub' };
-      } else if (!post) {
-        comment = { status: 'not-posted', reason: 'replay: comments are never posted', body };
-      } else {
-        try {
-          if (redTeamCommentPosted(io.listComments({ pr, repo }), pr, rev)) comment = { status: 'deduped', body };
-          else { io.postComment({ pr, repo, body }); comment = { status: 'posted', body }; }
-        } catch (e) {
-          comment = { status: 'error', reason: String(e?.message ?? e).slice(0, 300), body };
-        }
-      }
+      ({ rowsWritten, delegationTrial, comment } = await finishRedTeamEffects({
+        pr, repo, rev, title: read.title, callId, provider, model, findings, recheckStatus, foldedVerdict, builder, records, seatRow: row, post, record: recording,
+      }, io));
+    } else if (recording) {
+      // A pass that did not run cleanly leaves only its seat row — the quota hold and the daily cap read it.
+      try { io.append(row); rowsWritten = 1; } catch (e) { io.log(`red team: evidence row (${row.seat}) NOT written — ${e.message}`); }
     }
 
     return {
@@ -1147,8 +1227,9 @@ if (IS_CLI) {
     runRedTeam({ pr: Number(flag('pr')), repo: flag('repo'), lanePath: flag('lane'), loopPayload: readPayload(), post: !rest.includes('--no-post') })
       .then((result) => emit(result, renderRedTeamSummary));
   } else if (sub === 'red-team-replay' && flag('pr') && flag('repo') && flag('lane')) {
-    // READ-ONLY replay against an already-accepted PR: never posts, fetches the pinned head from `--lane` (any local
-    // clone that has the commit). Point CONVEYOR_STATE_ROOT at a temp dir to keep its evidence out of the shared store.
+    // READ-ONLY replay against an already-accepted PR: never posts and never writes the scorecard store
+    // (`record: false` — no evidence row, no miss row, no delegation trial), fetches the pinned head from `--lane`
+    // (any local clone that has the commit). The call still counts against the daily cap: it is a real, paid call.
     const ghRead = (args) => {
       const r = spawnSync('gh', args, { encoding: 'utf8', timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
       if (r.status !== 0) throw new Error(`gh ${args.slice(0, 2).join(' ')}: ${String(r.stderr).trim().slice(0, 300)}`);
@@ -1157,7 +1238,7 @@ if (IS_CLI) {
     const pr = Number(flag('pr'));
     const view = JSON.parse(ghRead(['pr', 'view', String(pr), `--repo=${flag('repo')}`, '--json', 'title,body,headRefOid,files']));
     const diffText = ghRead(['pr', 'diff', String(pr), `--repo=${flag('repo')}`]);
-    runRedTeam({ pr, repo: flag('repo'), lanePath: flag('lane'), loopPayload: replayPayload({ view, diffText }), post: false })
+    runRedTeam({ pr, repo: flag('repo'), lanePath: flag('lane'), loopPayload: replayPayload({ view, diffText }), post: false, record: false })
       .then((result) => emit(result, renderRedTeamSummary));
   } else {
     process.stderr.write('usage: review-extra-seats.mjs run|red-team --pr=<n> --repo=<owner/repo> --lane=<path> --loop-json=<file> [--no-post]\n'

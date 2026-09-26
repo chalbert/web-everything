@@ -116,9 +116,10 @@ describe('x00g3tt — the red team fires on ACCEPT only', () => {
     const prior = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, seat: 'red-team', pr: 5, rev: REV, status: 'ok' }];
     expect(redTeamAlreadyRan(prior, 5, REV)).toBe(true);
     expect(redTeamAlreadyRan(prior, 5, 'c'.repeat(40))).toBe(false);
-    const { io, calls } = fakeIo({ readRecords: () => prior });
+    // The pass finished (its comment is up), so nothing is owed. When the comment is missing, see the resume tests.
+    const { io, calls } = fakeIo({ readRecords: () => prior, listComments: () => [{ body: redTeamMarker(5, REV), author: { login: 'web-everything' } }] });
     expect((await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {} }, io)).status).toBe('already-ran');
-    expect(calls.some((c) => c[0] === 'seat')).toBe(false);
+    expect(calls.some((c) => c[0] === 'seat' || c[0] === 'post')).toBe(false);
   });
 
   it('skips a provider under a quota hold and a missing CLI, and says why when none is left', async () => {
@@ -254,6 +255,95 @@ describe('x00g3tt — the ONE advisory comment, deduped by a trusted marker', ()
   it('a clean pass says so', () => {
     const text = renderRedTeamComment({ pr: 5, rev: REV, provider: 'codex', model: 'm', findings: [], recheckStatus: 'not-needed', foldedVerdict: 'accept' });
     expect(text).toMatch(/no break found/);
+  });
+});
+
+describe('x00g3tt — a clean seat row never strands an unfinished effect (PR #2735 review)', () => {
+  const DELEGATED = `Claims: adds a guard.\n\n${buildDelegationMarker({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix' })}`;
+  const run = (io, over = {}) => runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {}, ...over }, io);
+  const trustedMarker = () => [{ body: `${redTeamMarker(5, REV)}\nold`, author: { login: 'web-everything' } }];
+
+  it('a failed comment post is retried on the next run, without re-running the model or spending a call', async () => {
+    const first = fakeIo({ postComment: () => { throw new Error('gh: network unreachable'); } });
+    expect((await run(first.io)).comment.status).toBe('error');
+    const posted = [];
+    const again = fakeIo({ readRecords: () => first.rows, postComment: (o) => posted.push(o) });
+    const r = await run(again.io);
+    expect(r.status).toBe('resumed');
+    expect(r.comment.status).toBe('posted');
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body.startsWith(redTeamMarker(5, REV))).toBe(true);
+    expect(posted[0].body).toMatch(/\[\*\*confirmed\*\*\]/);
+    expect(posted[0].body).toMatch(/Scenario: f\(0\)/);
+    expect(again.calls.some((c) => c[0] === 'seat' || c[0] === 'reserve' || c[0] === 'recheck')).toBe(false);
+    expect(again.rows).toEqual([]);
+  });
+
+  it('a miss row that failed to append is written on the next run — only the missing one', async () => {
+    const first = fakeIo();
+    const append = first.io.append;
+    first.io.append = (row) => { if (row.missRole === 'builder') throw new Error('store: EIO'); append(row); };
+    const r1 = await run(first.io);
+    expect(r1.rowsWritten).toBe(2);
+    const again = fakeIo({ readRecords: () => first.rows, listComments: trustedMarker });
+    const r = await run(again.io);
+    expect(r.status).toBe('resumed');
+    expect(again.rows).toHaveLength(1);
+    expect(again.rows[0]).toMatchObject({ dispatchKind: RED_TEAM_MISS_DISPATCH_KIND, missRole: 'builder', provider: 'claude', model: 'claude-opus-5.5', rev: REV, redTeamCallId: r1.callId });
+    expect(again.calls.some((c) => c[0] === 'seat' || c[0] === 'post')).toBe(false);
+  });
+
+  it('a delegation trial that failed to log is logged on the next run', async () => {
+    const first = fakeIo({ logTrial: () => { throw new Error('store: EIO'); } });
+    expect((await run(first.io, { loopPayload: payload('accept', DELEGATED) })).delegationTrial).toMatch(/^error/);
+    const again = fakeIo({ readRecords: () => first.rows, listComments: trustedMarker });
+    const r = await run(again.io, { loopPayload: payload('accept', DELEGATED) });
+    expect(r.delegationTrial).toBe('logged');
+    expect(again.trials[0]).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix', outcome: 'reworked', pr: 5 });
+    expect(again.rows).toEqual([]);
+  });
+
+  it('once every effect is done a later run is already-ran and writes nothing', async () => {
+    const first = fakeIo();
+    await run(first.io, { loopPayload: payload('accept', DELEGATED) });
+    const records = [...first.rows, { dispatchKind: 'session-delegation', pr: 5, outcome: 'reworked' }];
+    const again = fakeIo({ readRecords: () => records, listComments: trustedMarker });
+    expect((await run(again.io, { loopPayload: payload('accept', DELEGATED) })).status).toBe('already-ran');
+    expect(again.rows).toEqual([]);
+    expect(again.trials).toEqual([]);
+    expect(again.calls.some((c) => c[0] === 'post' || c[0] === 'seat')).toBe(false);
+  });
+});
+
+describe('x00g3tt — the replay never writes the shared store (PR #2735 review)', () => {
+  const DELEGATED = `Claims.\n\n${buildDelegationMarker({ provider: 'codex', model: 'gpt-6-astra', taskType: 'bugfix' })}`;
+
+  it('record:false writes no evidence row and logs no delegation trial, even on a confirmed break', async () => {
+    const { io, rows, trials } = fakeIo();
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept', DELEGATED), env: {}, post: false, record: false }, io);
+    expect(r.confirmedMissCount).toBe(1);
+    expect(rows).toEqual([]);
+    expect(trials).toEqual([]);
+    expect(r.rowsWritten).toBe(0);
+    expect(r.delegationTrial).toMatch(/not recorded/);
+  });
+
+  it('a replay payload is never recorded, whatever the caller passed', async () => {
+    const { io, rows, trials } = fakeIo();
+    const p = replayPayload({ view: { title: 't', body: DELEGATED, headRefOid: REV, files: [] }, diffText: 'diff --git a/x b/x\n+x\n' });
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: p, env: {}, post: false }, io);
+    expect(r.status).toBe('ran');
+    expect(rows).toEqual([]);
+    expect(trials).toEqual([]);
+  });
+
+  it('a replay does not mark the head as already-ran for the real post-accept run', async () => {
+    const replay = fakeIo();
+    await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {}, post: false, record: false }, replay.io);
+    const real = fakeIo({ readRecords: () => replay.rows });
+    const r = await runRedTeam({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: payload('accept'), env: {} }, real.io);
+    expect(r.status).toBe('ran');
+    expect(real.calls.some((c) => c[0] === 'post')).toBe(true);
   });
 });
 
