@@ -31,6 +31,16 @@
  *      and test, and its only failure direction is SAFE — a false "stale" reading (e.g. a fresh git clone
  *      touching file mtimes) costs an extra JS fallback run, never a missed detection, since editing a file
  *      always moves its mtime forward relative to whenever the binary was last built.
+ *
+ * ── #4168 — `opts.scoped` ───────────────────────────────────────────────────────────────────────────────
+ *   The binary always does its OWN full-corpus file walk (no `--files` flag it understands) — it has no
+ *   scoped mode to fall INTO, unlike the JS implementations each caller passes as its fallback. A caller
+ *   running under `--local --files=<lane files>` (check-standards.mjs's `SCOPE_TO_FILES`) passes
+ *   `opts.scoped: true` to say so; this bridge then skips invoking the binary entirely and returns `null`
+ *   straight away, exactly like the missing/stale/erroring cases, so the caller's own (now file-scoped) JS
+ *   fallback runs instead — never the binary silently re-doing the whole-corpus walk the caller scoped
+ *   down specifically to avoid, and never a wrong/ignored `--files`-shaped flag invented for a binary that
+ *   doesn't parse one. One choke point for this instead of every call site re-deciding it.
  */
 import { existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -49,7 +59,7 @@ function mtimeMs(path) {
  * exercise the missing/stale/malformed/erroring fallback paths without needing a real `cargo build` (see
  * scripts/lib/__tests__/rust-scan-bridge.test.mjs). `runWeScan` below is just this bound to the real path.
  * @param {string} binPath
- * @returns {(subcommand: string, args: string[], opts?: {referenceFiles?: string[]}) => unknown|null}
+ * @returns {(subcommand: string, args: string[], opts?: {referenceFiles?: string[], scoped?: boolean}) => unknown|null}
  */
 export function createWeScanRunner(binPath) {
   // One notice per RUNNER, not per call — check-standards.mjs calls this from more than one section, and a
@@ -62,7 +72,13 @@ export function createWeScanRunner(binPath) {
   };
 
   return function runWeScan(subcommand, args, opts = {}) {
-    const { referenceFiles = [] } = opts;
+    const { referenceFiles = [], scoped = false } = opts;
+
+    if (scoped) {
+      note('scoped', `note: we-scan ${subcommand} has no file-scoped mode (#4168) — using the caller's own ` +
+        'file-scoped JS fallback instead of the whole-corpus binary walk\n');
+      return null;
+    }
 
     if (!existsSync(binPath)) {
       note('missing', `note: ${binPath} not built — falling back to the JS scan(s) it would otherwise ` +
@@ -113,8 +129,10 @@ export function createWeScanRunner(binPath) {
  * the whole contract: "fall back to the JS scan", never a thrown error a caller has to handle.
  * @param {string} subcommand e.g. 'stdout-flush', 'secret-scrub'
  * @param {string[]} args e.g. [`--root=${ROOT}`]
- * @param {{referenceFiles?: string[]}} [opts] `referenceFiles` — absolute paths to the JS source(s) this
- *   subcommand's Rust output must match; if any is newer than the binary, it's treated as stale.
+ * @param {{referenceFiles?: string[], scoped?: boolean}} [opts] `referenceFiles` — absolute paths to the JS
+ *   source(s) this subcommand's Rust output must match; if any is newer than the binary, it's treated as
+ *   stale. `scoped` (#4168) — the caller is running under `--local --files=…` and has its own file-scoped
+ *   JS fallback ready; skip the (always whole-corpus) binary and return `null` immediately.
  * @returns {unknown[]|null}
  */
 export const runWeScan = createWeScanRunner(DEFAULT_BIN);

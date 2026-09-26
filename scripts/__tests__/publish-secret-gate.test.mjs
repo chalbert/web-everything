@@ -224,8 +224,11 @@ describe('gate 4 — the `check:standards` corpus sweep (the bypass backstop)', 
     // `.md` walks (e.g. the id-hygiene and reports scans above), so a bare global regex on `.endsWith('.md')`
     // would be just as blind. Pin the filter IN CONTEXT, scoped to this walk block specifically, so the
     // mutation this test names is the one it actually catches.
+    // #4168 — the walk now lists through `scopedReaddir(dirRel, exts)` (so `--local --files=…` scopes it),
+    // which makes the `.md` filter its `['.md']` extension argument instead of an inline `.endsWith('.md')`.
+    // Pin THAT argument in context: the same `.md` → `.mdx` mutation is still what this assertion catches.
     expect(src).toMatch(
-      /for \(const label of \['backlog', 'agent-memory-src'\]\)[\s\S]{0,400}?\.endsWith\('\.md'\)/,
+      /for \(const label of \['backlog', 'agent-memory-src'\]\)[\s\S]{0,400}?scopedReaddir\(`\$\{label\}\/`, \['\.md'\]\)/,
     );
     const docs = [];
     for (const label of ['backlog', 'agent-memory-src']) {
