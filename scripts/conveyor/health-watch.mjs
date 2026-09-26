@@ -288,7 +288,7 @@ export function probeStaleState({ exec = run, timeoutMs = 90_000 } = {}) {
  * @returns {{cards:Array<{stem:string, body:string}>, prs:Array<object>}}
  */
 export function probeMergedPrs({ exec = run, limit = 800, timeoutMs = 60_000 } = {}) {
-  const prs = JSON.parse(exec('gh', ['pr', 'list', '--state', 'merged', '--limit', String(limit), '--json', 'number,title,headRefName,body'], { timeoutMs }));
+  const prs = JSON.parse(exec('gh', ['pr', 'list', '--repo', CONSTELLATION_REPOS.we.slug, '--state', 'merged', '--limit', String(limit), '--json', 'number,title,headRefName,body'], { timeoutMs }));
   return { cards: readBacklogCards(REPO_ROOT), prs };
 }
 

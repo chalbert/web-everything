@@ -226,8 +226,11 @@ describe('probeStaleState', () => {
 
 describe('probeMergedPrs', () => {
   it('pairs the merged-PR list (one gh call) with the real backlog/ cards read (reused from backlog-stranded-sweep.mjs, never a second scan)', () => {
-    const exec = () => JSON.stringify([{ number: 2689, title: 'x0zg44l: soak', headRefName: 'lane/x0zg44l-soak', body: '' }]);
+    const calls = [];
+    const exec = (cmd, args) => { calls.push(args); return JSON.stringify([{ number: 2689, title: 'x0zg44l: soak', headRefName: 'lane/x0zg44l-soak', body: '' }]); };
     const out = probeMergedPrs({ exec });
+    // The backlog cards are WE's, so the merged-PR list must be WE's too — never whatever repo the cwd resolves to.
+    expect(calls[0]).toEqual(expect.arrayContaining(['--repo', 'chalbert/web-everything']));
     expect(out.prs).toEqual([{ number: 2689, title: 'x0zg44l: soak', headRefName: 'lane/x0zg44l-soak', body: '' }]);
     // The real repo's backlog/ dir has hundreds of cards — proves this reads the real reader, not a stub.
     expect(out.cards.length).toBeGreaterThan(50);
