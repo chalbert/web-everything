@@ -1,9 +1,10 @@
 ---
+bornAs: x00g3tt
 kind: story
 size: 3
 parent: "4075"
 status: open
-blockedBy: ["3949", "xmk6p7w"]
+blockedBy: ["3949", "4194"]
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-25"
 tags: []
@@ -11,7 +12,7 @@ tags: []
 
 # Post-accept red team: after a build/fix PR's review accepts, a non-Claude pass tries to break it
 
-After a build or fix PR's review reaches an accept verdict, dispatch a non-Claude red-team pass (via we:scripts/codex-direct-task.mjs / we:scripts/gemini-direct-task.mjs) that tries to break the finished work, following the jury's own post-accept red-team PATTERN already ratified for the in-loop jury skill (we:scripts/lib/jury-core.mjs#redTeamRequired / #foldRedTeamVerdict, #2707) — this card applies that SAME fail-closed pattern as a dedicated step after a PR's review accepts, routed to a different (non-Claude) model, not the jury skill's own internal step. Findings write to the evidence record (depends on #3949). Depends on #3949 and on the ADVISORY-lens routing card (this session's card 1, xmk6p7w) for the same codex/gemini dispatch plumbing.
+After a build or fix PR's review reaches an accept verdict, dispatch a non-Claude red-team pass (via we:scripts/codex-direct-task.mjs / we:scripts/gemini-direct-task.mjs) that tries to break the finished work, following the jury's own post-accept red-team PATTERN already ratified for the in-loop jury skill (we:scripts/lib/jury-core.mjs#redTeamRequired / #foldRedTeamVerdict, #2707) — this card applies that SAME fail-closed pattern as a dedicated step after a PR's review accepts, routed to a different (non-Claude) model, not the jury skill's own internal step. Findings write to the evidence record (depends on #3949). Depends on #3949 and on the ADVISORY-lens routing card (this session's card 1, 4194) for the same codex/gemini dispatch plumbing.
 
 ## Done when
 
