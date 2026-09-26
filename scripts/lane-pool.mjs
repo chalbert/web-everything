@@ -1205,12 +1205,18 @@ function laneAcquirableInfo(repo, n, remoteShasBox = null, nowMs = Date.now(), t
   // would silently fetch/push against the wrong target. Reported as `dirtyOrAhead.dirty` (the SAME shape
   // `isLaneAcquirable` already disqualifies on) plus an explicit `originDrift` flag so a caller can tell WHY,
   // rather than inventing a second disqualification channel `isLaneAcquirable` would need to learn about too.
-  const drift = laneOriginDrift(repo, dir);
-  if (drift.drifted) {
-    return { lane: n, exists: true, lease, dirtyOrAhead: { dirty: true, uncommitted: 0, ahead: 0 }, originDrift: true };
-  }
+  // Probed LAZILY, only for a lane that isn't already disqualified as dirty: one extra `git` call per lane on
+  // every scan measurably stretched a saturated pool's `acquire --wait-ms` past its bound (the
+  // `lane-acquire-under-load` soak break). It still runs BEFORE the shared remote-SHA probe below, so a drifted
+  // lane never seeds `remoteShasBox` with the wrong remote's refs.
+  let drifted = null;
+  const isDrifted = () => {
+    if (drifted === null) drifted = laneOriginDrift(repo, dir).drifted;
+    return drifted;
+  };
+  const driftResult = () => ({ lane: n, exists: true, lease, dirtyOrAhead: { dirty: true, uncommitted: 0, ahead: 0 }, originDrift: true });
   const getRemoteShas = () => {
-    if (!remoteShasBox) return new Set();
+    if (!remoteShasBox || isDrifted()) return new Set();
     if (remoteShasBox.value === null) {
       // #4025 — record an outright probe FAILURE on the box itself (never on the returned Set, which stays
       // "no SHAs" either way) so a caller deciding whether to GROW the pool (`cmdProvision`'s `--acquirable`
@@ -1221,12 +1227,9 @@ function laneAcquirableInfo(repo, n, remoteShasBox = null, nowMs = Date.now(), t
     }
     return remoteShasBox.value;
   };
-  return {
-    lane: n,
-    exists: true,
-    lease,
-    dirtyOrAhead: effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas),
-  };
+  const dirtyOrAhead = effectiveDirtyOrAhead(dir, repo.branch, getRemoteShas);
+  if (!dirtyOrAhead.dirty && isDrifted()) return driftResult();
+  return { lane: n, exists: true, lease, dirtyOrAhead };
 }
 
 // ── output ──────────────────────────────────────────────────────────────────────────────────────────
