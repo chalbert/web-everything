@@ -46,6 +46,50 @@ export function loadFlows(dir = FLOWS_DIR) {
     });
 }
 
+/** A provisional (pre-numbered) backlog id: `x` + 6-7 base36 chars — mirrors `CARD_RE`'s hash half. */
+const HASH_ID_RE = /^x[0-9a-z]{6,7}$/;
+
+/**
+ * Resolve a `backlog/<id>-<slug>.md` cite target whose `<id>` is a hash the drain's JIT numbering (#2288)
+ * later renamed away, to the file's CURRENT path — via the landed file's own `bornAs: <hash>` frontmatter,
+ * never by re-deriving a guessed filename. This is what keeps a flow's own citations from turning main's CI
+ * red the moment the card they cite gets its real number: `numberPendingHashes` (we:scripts/lane-drain.mjs)
+ * rewrites a flow file's OWN citations at land time (so the common case never needs this), but a citation
+ * written before that rewrite scope existed — or hand-typed after the fact — still resolves correctly here
+ * (found live: we:backlog/4220-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md, bornAs
+ * `xr05jjl`, cited by we:scripts/conveyor/flows/build-dispatch.flow.json under its old hash name).
+ *
+ * A numeric id (`backlog/4220-…`), or a path that already exists exactly as cited, is returned unchanged —
+ * nothing to resolve. A hash with no matching `bornAs` anywhere is ALSO returned unchanged — a genuinely
+ * dangling cite must still fail as such, not be silently swallowed.
+ *
+ * I/O-free by construction (matches this module's own convention, see the file header): every filesystem
+ * fact is injected, so the resolution logic is exercisable with synthetic fixtures with no real backlog/ dir
+ * (see scripts/conveyor/flows/__tests__/flow-model-bornas.test.mjs).
+ *
+ * @param relPath repo-relative cite target, e.g. "backlog/xHASHID-some-slug.md" (illustrative — not itself a
+ *        hash-path citation, so this docstring doesn't trip the check:standards gate it's guarding against).
+ * @param opts.exists (relPath:string) => boolean — does this exact repo-relative path exist?
+ * @param opts.listBacklogFiles () => string[] — every filename (not path) currently in backlog/.
+ * @param opts.readBacklogFile (filename:string) => string — a backlog file's raw text, for its frontmatter.
+ * @returns the repo-relative path to check next: the resolved current file if a `bornAs` record matches,
+ *          else `relPath` unchanged.
+ */
+export function resolveBornAsCite(relPath, { exists, listBacklogFiles, readBacklogFile }) {
+  const m = typeof relPath === 'string' && relPath.match(/^backlog\/(x[0-9a-z]{6,7}|\d+)-/);
+  if (!m || exists(relPath)) return relPath;
+  const id = m[1];
+  if (!HASH_ID_RE.test(id)) return relPath; // numeric id — no rename possible; a real dangling cite
+  const bornAsRe = new RegExp(`^bornAs:\\s*${id}\\b`, 'm');
+  for (const f of listBacklogFiles()) {
+    if (!f.endsWith('.md')) continue;
+    let content;
+    try { content = readBacklogFile(f); } catch { continue; }
+    if (bornAsRe.test(content)) return `backlog/${f}`;
+  }
+  return relPath; // no bornAs record anywhere — genuinely dangling
+}
+
 function isHandoff(to) {
   return typeof to === 'string' && to.startsWith('@');
 }

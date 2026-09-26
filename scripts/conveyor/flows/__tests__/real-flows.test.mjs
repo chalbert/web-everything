@@ -2,12 +2,19 @@
 // named lifecycle, cite real code, and carry NO unacknowledged gap. A new gap is either fixed in the code
 // (and the flow updated) or filed as a card and acknowledged with `ack: { <rule>: <card> }`.
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { loadFlows, checkFlows, FLOWS_DIR } from '../flow-model.mjs';
+import { loadFlows, checkFlows, FLOWS_DIR, resolveBornAsCite } from '../flow-model.mjs';
 
 const REPO = resolve(FLOWS_DIR, '../../..');
+const BACKLOG_DIR = join(REPO, 'backlog');
 const flows = loadFlows();
+
+// Injected FS facts for resolveBornAsCite (#4075 — a JIT-renamed card's stale hash-name cite must still
+// resolve via bornAs, not just fail as a dangling reference; see xmd4pfa).
+const citeExists = (relPath) => existsSync(join(REPO, relPath));
+const listBacklogFiles = () => readdirSync(BACKLOG_DIR);
+const readBacklogFile = (name) => readFileSync(join(BACKLOG_DIR, name), 'utf8');
 
 const EXPECTED = [
   'build-dispatch', 'ci-heal', 'conflict', 'daemon-rebuild', 'drain-land', 'fix', 'lane-lifecycle', 'review', 'session-cleanup',
@@ -41,7 +48,11 @@ describe('real conveyor flows', () => {
     for (const f of flows) {
       for (const c of cites(f)) {
         for (const m of c.matchAll(/(?:^|[\s,;(])((?:scripts|skills-src|docs|backlog)\/[\w./-]+?):(\d+)/g)) {
-          const [, path, line] = m;
+          let [, path, line] = m;
+          // A backlog/ cite may name a card by a hash the drain's JIT numbering has since renamed away
+          // (#4075/xmd4pfa) — resolve it through the target's own `bornAs` frontmatter before declaring it
+          // dangling, the same way a human would look the card up by its birth hash.
+          path = resolveBornAsCite(path, { exists: citeExists, listBacklogFiles, readBacklogFile });
           const abs = join(REPO, path);
           if (!existsSync(abs)) { bad.push(`${f.id}: ${path} does not exist`); continue; }
           const n = readFileSync(abs, 'utf8').split('\n').length;

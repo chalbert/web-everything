@@ -41,6 +41,8 @@ import {
   parseIdentifierSpan,
   codeSpans,
   PROVENANCE_ESCAPE_MARKERS,
+  findHashPathCiteOutsideBacklog,
+  HASH_PATH_CITE_SOURCE,
 } from '../lib/citation-check.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -321,6 +323,51 @@ describe('findOutOfScopeHashSlugs — gate 3 (hash-slug outside the at-land rewr
   it('still reports TWO findings for two genuinely DIFFERENT slugs in the same file', () => {
     const hits = findOutOfScopeHashSlugs('cites #xntcdet twice: #xntcdet, and also #x9kptqv once', 'reports/two.md');
     expect(hits.map((h) => h.slug).sort()).toEqual(['x9kptqv', 'xntcdet']);
+  });
+});
+
+describe('findHashPathCiteOutsideBacklog — #4075 follow-up (xmd4pfa): a hash-named FILE PATH cited outside backlog/', () => {
+  // RED: reproduces the exact live incident before the fix — build-dispatch.flow.json cited a card's
+  // backlog file by its pre-numbering hash path, and that path 404'd the moment the drain renamed it.
+  it('FIRES on a hash-named backlog file path cited from a flow (or any non-backlog) file', () => {
+    const hits = findHashPathCiteOutsideBacklog(
+      'its own live-caught cost is recorded in backlog/xr05jjl-describe-every-conveyor-flow.md:15',
+      'scripts/conveyor/flows/build-dispatch.flow.json',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toEqual({ path: 'backlog/xr05jjl-describe-every-conveyor-flow.md', hash: 'xr05jjl' });
+  });
+
+  // GREEN: citing the SAME card by its stable id (bare hash-ref, no file path) never fires — that shape
+  // survives the rename fine (it resolves against `bornAs`, and is the form this rule tells authors to use).
+  it('PASSES (empty) for a bare `#hash` cross-ref — not a file path, so nothing to dangle', () => {
+    expect(findHashPathCiteOutsideBacklog('build carried by #xr05jjl', 'scripts/conveyor/flows/build-dispatch.flow.json')).toHaveLength(0);
+  });
+
+  it('PASSES (empty) for the SAME hash-named path cited from INSIDE backlog/ itself — the ledger\'s own target, always exempt', () => {
+    expect(findHashPathCiteOutsideBacklog('see backlog/xr05jjl-describe-every-conveyor-flow.md', 'backlog/2200-other.md')).toHaveLength(0);
+  });
+
+  it('PASSES (empty) for a numeric backlog path — JIT numbering never renames an already-landed #NNN', () => {
+    expect(findHashPathCiteOutsideBacklog('see backlog/4220-describe-every-conveyor-flow.md', 'docs/agent/rule.md')).toHaveLength(0);
+  });
+
+  it('dedupes the SAME hash-named path cited twice in one file to one finding', () => {
+    const text = 'first: backlog/xr05jjl-a.md, again: backlog/xr05jjl-a.md';
+    expect(findHashPathCiteOutsideBacklog(text, 'reports/note.md')).toHaveLength(1);
+  });
+
+  it('reports two findings for two genuinely different hash-named paths in the same file', () => {
+    const text = 'backlog/xr05jjl-a.md and backlog/x9kptqv-b.md';
+    const hits = findHashPathCiteOutsideBacklog(text, 'reports/note.md');
+    expect(hits.map((h) => h.hash).sort()).toEqual(['x9kptqv', 'xr05jjl']);
+  });
+
+  it('HASH_PATH_CITE_SOURCE is a valid POSIX ERE (git grep -E) and ECMA regex — one pattern, both engines', () => {
+    // The drain's own pre-push check (scripts/lane-drain.mjs#numberPendingHashes) feeds this exact string to
+    // `git grep -E`; this only proves the ECMA half compiles and matches the same shape.
+    expect(new RegExp(HASH_PATH_CITE_SOURCE).test('backlog/xr05jjl-a.md')).toBe(true);
+    expect(new RegExp(HASH_PATH_CITE_SOURCE).test('backlog/4220-a.md')).toBe(false);
   });
 });
 
