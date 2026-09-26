@@ -33,7 +33,35 @@
  * below at all, because refusal 1 (the actor check) declines it first, same as always — that tier's own
  * human-only ceremony (`--to=clear-human`) is exactly what `#3434` confirmed should stay in place.
  *
- * WHY THE QUEUE REUSES `learnings-drop.mjs` AS-IS RATHER THAN EXTENDING ITS SCHEMA. `#3421` (the general
+ * #3442's SECOND RULING (below) IS NOW REVERSED AND REPLACED (2026-09-26, live incident
+ * chalbert/web-everything#2749). That ruling had this policy answer `accept` unattended for a
+ * `prevention-outstanding` verdict, on the theory that every actual finding was already resolved and only a
+ * documentation debt remained. Live evidence says that reasoning does not hold: PR #2749 (and others merged the
+ * same day) reduced to `prevention-outstanding` with BOTH mandatory lenses (correctness, security) reporting
+ * real, confirmed, unfixed defects (a daemon-clone guard bypassable via `LANE_GUARD_OFF=1`, a chained `git -C`
+ * guard hole, a non-realpathed symlink write hole) — `blocksAcceptance` only routes a mandatory lens's own
+ * verdict to `prevention-outstanding` when EVERY finding it raised is "resolved" in the narrow #2823 sense of
+ * "names a prevention guard", not in the sense of "the defect is fixed". The rendered PR comment for that exact
+ * run says, in the SAME breath as `Decision: accept`, "**Verdict:** 🚩 prevention outstanding — file the guard
+ * before accept" — an unattended accept over that verdict directly contradicts its own rendered text, and
+ * `jury-core.mjs`'s own `VERDICTS` doc ("It never silently lands") already said this branch should not exist.
+ *
+ * FILING THE GUARD IS NOT A DECISION FOR AN OPERATOR (2026-09-26 scope ruling) — so this is NOT the
+ * `review:human`-shaped "park and queue for a human" fix it might look like at first. `reviewLoopAutoConfirm`
+ * below still DECLINES a `prevention-outstanding` verdict (it must: filing a card is impure I/O, and this
+ * function stays PURE) — but the DECLINE is momentary, not a park. The IMPURE caller
+ * (`we:scripts/operations/review-loop-cli.mjs`) sees the decline, mechanically FILES the owed guard(s) as ONE
+ * real backlog card through the declared `file-item` operation (never a learnings-pool notice — that would be
+ * surfacing a decision to a human, which this ruling explicitly forbids), cleared to the conveyor, and only
+ * THEN resumes the SAME run with the `accept` the policy itself would not answer — the debt is now TRACKED, so
+ * the #2823 "prevention-outstanding … blocks a clean accept … until … filed" gate is satisfied by construction,
+ * with no human anywhere in the loop. Filing failure is the one case that still stops the accept: the run stays
+ * parked and the failure is reported loudly (never swallowed) — see `review-loop-cli.mjs` for the mechanism.
+ * {@link buildPreventionFilingInput} (below) is the PURE half of that: it derives the `file-item` operation's
+ * own input (title/digest/scope/size) from the run's outstanding findings; {@link isPreventionOutstandingParked}
+ * is the PURE predicate `review-loop-cli.mjs` uses to recognize the moment to do it.
+ *
+ * WHY THE (UNCHANGED) QUEUE BELOW REUSES `learnings-drop.mjs` AS-IS RATHER THAN EXTENDING ITS SCHEMA. `#3421` (the general
  * "approval-pending flag on a learnings-pool entry" mechanism) is NOT YET BUILT — it is still an open story
  * with its own scope. This file does not pre-build it: `learnings-drop.mjs`'s schema is a deliberate, narrow
  * ALLOW-LIST (`kind` / `summary` / `area` / `suggestion`, see that file's own header on why — "if the schema
@@ -51,6 +79,11 @@
 import { CONFIRM_ACTORS, CONFIRM_OPTIONS } from '../operations/review-pr.mjs';
 import { VERDICTS, hasUncapturedPrevention } from './jury-core.mjs';
 import { FIELD_CAPS, KINDS } from '../conveyor/learnings-drop.mjs';
+// #883 — every code-path reference filed into a backlog card's `scope` or BODY prose must carry its `<repo>:`
+// locus prefix (the write-time `lint-locus-prefix.mjs` hook enforces this on every scaffold/file-item write,
+// no exceptions) — `buildPreventionFilingInput` reuses the SAME token `citation-check.mjs` already exports
+// rather than re-typing the literal `'we:'` a second place could drift from.
+import { IN_REPO_LOCUS } from './citation-check.mjs';
 
 /**
  * THE ANSWER THIS POLICY MAY GIVE UNATTENDED, other than declining. `abstain` is deliberately NOT this policy's
@@ -81,16 +114,14 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  *      2026-08-31 ruling that declined here unconditionally, found live-fire against two real PRs (`#1764`,
  *      `#1765`) both queued for no reason other than this line.
  *
- *   3. `run.verdict.verdict === VERDICTS.PREVENTION_OUTSTANDING` → answer `accept` (#3442, `#3434`'s SECOND
- *      ratified item, finished here — the first item's own docblock used to call this DEFERRED). Every actual
- *      finding is already resolved by definition of this verdict (`deriveVerdict`/`derivePanelVerdict` only
- *      reach it once no finding still blocks) — the sole remaining debt is a named prevention guard nobody
- *      filed. Nothing about the CODE is wrong, so re-entering the bounce/retry loop over documentation debt the
- *      code itself doesn't have would spend a round fixing nothing (the exact thing `#1765`/`#1764` did,
- *      repeatedly, the night this decision was made). This function stays PURE — it does not file the guard(s)
- *      itself; the impure caller does that off the SAME `run.verdict.findings` this branch answered from, one
- *      {@link buildPreventionQueueEntry} per outstanding guard, once {@link isPreventionOutstandingClear} says
- *      so, mirroring {@link buildAcceptQueueEntry}'s file-then-notify shape exactly as `#3434` asked.
+ *   3. `run.verdict.verdict === VERDICTS.PREVENTION_OUTSTANDING` → DECLINE (`#3442`'s auto-accept REVERSED,
+ *      2026-09-26, live incident chalbert/web-everything#2749 — see the file header for the full account). This
+ *      function stays PURE, so it cannot itself file the owed guard(s) — that is impure I/O, and filing it is
+ *      NOT a decision for a human either (see the file header's 2026-09-26 scope ruling). The DECLINE here is
+ *      momentary: `review-loop-cli.mjs` reads it via {@link isPreventionOutstandingParked}, mechanically files
+ *      the card through `file-item`, and resumes THIS SAME run with `accept` itself — no human anywhere in the
+ *      loop, and no re-entry into the round loop either (`changes` would be wrong too: no editor round can file
+ *      a guard, matching `deriveNegotiationOutcome`/`derivePlanOutcome`'s own posture for this verdict).
  *
  * EVERYTHING ELSE (`changes`, `needs-human` reaching here at all, any future verdict this fails open on)
  * answers `changes` — safe and reversible by construction, since `record`'s own reasonless-bounce guard only
@@ -102,8 +133,9 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
  * to the SAME `UNATTENDED_ANSWER` branch above (undeclared-verdict fail-safe included) rather than earning
  * their own `=== VERDICTS.X` line — `needs-human` cannot reach this function's body at all in practice (refusal
  * 1 always declines a HUMAN-addressed confirm first), so writing a branch for it would assert a case this
- * policy structurally never sees. Only `accept` and `prevention-outstanding` are the REVIEWED, RATIFIED
- * branches this file's own canary test (`review-loop-policy.test.mjs`) pins to exactly these two.
+ * policy structurally never sees. Only `accept` is the one REVIEWED, RATIFIED mechanical-answer branch this
+ * file's own canary test (`review-loop-policy.test.mjs`) pins to; `prevention-outstanding` is a REVIEWED,
+ * RATIFIED DECLINE (see the file header — #3442's mechanical-accept for this verdict is reversed).
  *
  * @param {{of?: string}|null} pending - the run's `pending` record at an `awaiting-confirm` stop.
  * @param {{verdict?: {verdict?: string}}} run - the run so far; `run.verdict` is `reduce`'s full finding.
@@ -112,7 +144,11 @@ const UNATTENDED_ANSWER = CONFIRM_OPTIONS.includes('changes') ? 'changes' : (() 
 export function reviewLoopAutoConfirm(pending, run) {
   if (!pending || pending.of !== CONFIRM_ACTORS.AGENT) return null;
   if (run?.verdict?.verdict === VERDICTS.ACCEPT) return { value: 'accept' };
-  if (run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING) return { value: 'accept' };
+  // #2749 FIX — `prevention-outstanding` NEVER auto-answers `accept` (nor `changes`: no editor round can file a
+  // guard). DECLINE, same as a human-addressed confirm, so the run stays parked for an operator to file the
+  // named guard(s) and clear it themselves via `--answer=accept` — never a mechanical accept over a verdict
+  // whose own rendered text says "file the guard before accept".
+  if (run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING) return null;
   return { value: UNATTENDED_ANSWER };
 }
 
@@ -183,6 +219,11 @@ export function buildAcceptQueueEntry({ repo, pr, runId } = {}) {
  * produced this stop); this reads the SAME two facts the policy decided on, off the record the policy left
  * behind, so the two can never drift into disagreeing about why the run parked.
  *
+ * `VERDICTS.ACCEPT` ONLY. `prevention-outstanding` does NOT reach this predicate (see {@link
+ * isPreventionOutstandingParked} instead) — the 2026-09-26 scope ruling (file header) is explicit that filing
+ * the owed guard is not a decision for an operator, so that verdict's park is never queued for a HUMAN at all;
+ * it is handled mechanically, entirely inside `review-loop-cli.mjs`, before this predicate is ever consulted.
+ *
  * @param {{stopped?: string, run?: {pending?: {of?: string}, verdict?: {verdict?: string}}}} outcome -
  *   a `driveRun` outcome.
  * @returns {boolean}
@@ -191,6 +232,99 @@ export function isQueuedAcceptStop(outcome) {
   return outcome?.stopped === 'confirm'
     && outcome?.run?.pending?.of === CONFIRM_ACTORS.AGENT
     && outcome?.run?.verdict?.verdict === VERDICTS.ACCEPT;
+}
+
+/**
+ * IS THIS THE MOMENT TO MECHANICALLY FILE THE OWED PREVENTION CARD? PURE — the one fact `review-loop-cli.mjs`
+ * needs to decide whether to file {@link buildPreventionFilingInput}'s card through `file-item` and then resume
+ * this same run with `accept`, versus rendering a `driveRun` outcome exactly as the ordinary CLI does (a
+ * `review:human` PR carrying this same verdict, where `pending.of` is `'human'`, is NOT this case — its own
+ * `--to=clear-human` ceremony is untouched, per INVARIANT 2).
+ *
+ * DELIBERATELY NOT a re-invocation of {@link reviewLoopAutoConfirm} — the policy already ran (it is what
+ * produced this stop); this reads the SAME two facts the policy decided on, off the record the policy left
+ * behind, so the two can never drift into disagreeing about why the run parked.
+ *
+ * @param {{stopped?: string, run?: {pending?: {of?: string}, verdict?: {verdict?: string}}}} outcome -
+ *   a `driveRun` outcome.
+ * @returns {boolean}
+ */
+export function isPreventionOutstandingParked(outcome) {
+  return outcome?.stopped === 'confirm'
+    && outcome?.run?.pending?.of === CONFIRM_ACTORS.AGENT
+    && outcome?.run?.verdict?.verdict === VERDICTS.PREVENTION_OUTSTANDING;
+}
+
+/**
+ * BUILD the `file-item` operation's own input for ONE mechanically-filed backlog card covering EVERY
+ * outstanding (uncaptured) prevention guard in a `prevention-outstanding` verdict (#2749 scope ruling: filing
+ * this is not a human decision — the loop does it itself, through the declared `file-item` operation). PURE —
+ * returns the input object; {@link module:review-loop-cli} is the only impure caller, via `file-item`'s own
+ * declaration.
+ *
+ * ONE CARD PER RUN, not one per guard: several findings in the SAME run usually name guards for the same
+ * handful of files (see #2749 itself: five findings, two files), so `scope` is the UNION of every uncaptured
+ * finding's own `file` plus, heuristically, that file's own test sibling (`<dir>/__tests__/<stem>.test.mjs`) —
+ * a single card whose scope spans the whole area a fix-lane would touch is more useful to a builder than N
+ * one-line cards that all touch the same two files and fight over lane ownership. `digest` renders one
+ * numbered line per guard, each carrying the file (and line, when the finding named one) and the prevention
+ * text itself verbatim, so a reader of the filed card sees exactly what a fixer needs without re-opening the
+ * original PR.
+ *
+ * @param {{repo: string, pr: number|string, findings?: Array<object>, parent?: string, queue?: string}} o -
+ *   `parent` is the epic/story this card should nest under, when the caller knows one (optional — `file-item`
+ *   itself treats an absent parent as top-level). `queue` mirrors `file-item`'s own `--queue` input
+ *   (`'true'`/`'false'`); defaults to `'true'` ("cleared to the conveyor", the 2026-09-26 ruling's own words) —
+ *   a caller filing this OUTSIDE the conveyor's own sanctioned checkout (a one-off proof run, never the
+ *   production loop) passes `'false'` to avoid mutating the live runner's queue store.
+ * @returns {{title: string, kind: string, size: string, digest: string, scope: string, parent: string, queue: string}}
+ */
+export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '', queue = 'true' } = {}) {
+  const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention);
+  const files = [...new Set(owed.map((f) => f.file).filter(Boolean))];
+  const testSiblingOf = (f) => {
+    const slash = f.lastIndexOf('/');
+    const dir = slash === -1 ? '.' : f.slice(0, slash);
+    const base = slash === -1 ? f : f.slice(slash + 1);
+    const stem = base.replace(/\.mjs$/, '');
+    return `${dir}/__tests__/${stem}.test.mjs`;
+  };
+  // #883 — EVERY entry, in `scope` AND in the digest's backticked paths, carries the `we:` locus prefix: a
+  // bare path is refused at write time (`lint-locus-prefix.mjs`) for BOTH surfaces (`check-standards.mjs`'s
+  // own scope-entry rule cites the identical card, #883, as the scope-lease engine's reason a bare entry is
+  // unsafe: unqualified, it reads as repo `null` and never matches an observed `we:`-qualified file).
+  const scope = [...new Set([...files, ...files.map(testSiblingOf)])].map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
+  const digestLines = owed.map((f, i) => {
+    const where = f.file
+      ? `${IN_REPO_LOCUS}${f.file}${typeof f.line === 'number' ? `:${f.line}` : ''}`
+      : '(no file cited)';
+    return `${i + 1}. \`${where}\` — ${f.prevention ?? '(no guard text recorded)'}`;
+  });
+  const digestRaw = `Filed mechanically by the unattended review loop (#2749) — every finding below reduced `
+    + `${repo}#${pr}'s review to prevention-outstanding by naming a guard neither captured nor filed:\n\n`
+    + digestLines.join('\n');
+  // #883 SAFETY NET — a juror's own `prevention` PROSE can casually re-mention a file this card already cites
+  // by its bare basename with no locus prefix at all (live example: PR #2749's actual finding 3 text says
+  // "…mirroring how guard-lane.mjs already receives a pre-realpath'd real from its caller" — no backticks, no
+  // prefix). The explicit `file:line` anchor built above is prefixed already; this closes the OTHER surface —
+  // free prose — for exactly the files THIS card's own `scope` already names (never a blind scan of arbitrary
+  // text for anything extension-shaped, which would risk over-matching unrelated words). A mention already
+  // carrying a locus prefix, or already part of a longer `dir/basename` path, is left alone (the negative
+  // lookbehind on `we:`/`fui:`/`plateau:`/`/`).
+  const digest = files.reduce((text, f) => {
+    const base = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
+    const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return text.replace(new RegExp(`(?<!we:|fui:|plateau:|/)\\b${escaped}\\b`, 'g'), `${IN_REPO_LOCUS}${f}`);
+  }, digestRaw);
+  return {
+    title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
+    kind: 'story',
+    size: '3',
+    digest,
+    scope,
+    parent: parent || '',
+    queue: queue === 'false' || queue === false ? 'false' : 'true',
+  };
 }
 
 /** Where a filed-prevention entry is filed from, for a reader of the pool who has never heard of this operation. */
