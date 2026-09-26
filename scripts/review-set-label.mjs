@@ -93,9 +93,14 @@ import { buildVerdictRecord, appendVerdict, verdictForLabelTarget } from './lib/
 // way `we:scripts/fetch-parked.mjs` already does — it is the single home of the #2450 net-diff basis.
 import { computeNetDiffText } from './merge-ai-prs.mjs';
 import { parseDelegationMarker } from './lib/delegation-marker.mjs';
-import { isDelegationTripleGraduated } from './conveyor/delegation-trial-gate.mjs';
 import { readStore } from './conveyor/run-scorecard-store.mjs';
 import { logDelegationTrial } from './conveyor/log-delegation-trial.mjs';
+// #3949 / #3801 Fork 2 — "No dispatch path produces `self-fix` or a default `other`... a mechanical route
+// never runs on trust earned on unlabelled work." A PR's delegation marker can still name either taskType (the
+// marker's own closed vocabulary, `we:scripts/lib/delegation-marker.mjs`, is unchanged by this card — out of
+// its declared file scope), so the automatic session-delegation trial write below REFUSES to log one rather
+// than silently producing the row Fork 2 forbids.
+const FORBIDDEN_DELEGATION_TASK_TYPES = Object.freeze(['self-fix', 'other']);
 import { createGhProvider, writeOrder } from './lib/review-label-provider.mjs';
 // #x01u7az — the advisory:* label pair `clear-human` must strip: an advisory only means something on a
 // `review:human` PR (its own header), so a gate-self clearance that drops `review:human` must drop whichever
@@ -1075,33 +1080,78 @@ export function runReviewLabelCli({
   const steps = { comment: postComment, swap: applySwap };
   for (const step of writeOrder({ acceptanceAlreadyLive })) { steps[step](); }
 
-  // #3690 v1 deliberately records outcome:'landed'/findings:null for a CLEAN accept here.
-  // A prior changes round must already have been fixed to reach this accept. Distinguishing clean on
-  // round 1 from reworked then landed needs this PR's verdict-ledger.mjs history: separate follow-up,
-  // out of scope here. Both real acceptance writes have completed before any trial is recorded.
-  if (to === 'accepted' && normalizeChannel(channelArg) === REVIEW_PR_CHANNEL) {
+  // #3949 — fixes three defects the #3867 prep skeptic found in the #3690 v1 cut this replaces:
+  //
+  //   (a) THE OLD `!isDelegationTripleGraduated(...)` GATE STOPPED EVERY WRITE ONCE A TRIPLE GRADUATED. A
+  //       triple's trial history must keep accumulating past graduation or rule 6's computed demotion
+  //       (platform-decisions.md#delegation-trial-record-graduation) can never fire — there would be no rows
+  //       to compute it from. Dropped: logging no longer asks whether the triple is graduated at all.
+  //
+  //   (b) EVERY WRITE HARD-CODED `outcome:'landed', findings:null`, so a `review:changes` verdict — the
+  //       independent review ACTUALLY finding a problem — was never written (the write only ever fired on
+  //       `to === 'accepted'`). Fixed by ALSO firing on `to === 'changes'` on this channel, deriving
+  //       `outcome`/`findings`/`informative` from the SAME `bounceEvidence` (#3334) the label decision itself
+  //       was already made from — never a second, parallel read of the write-up. A `changes` round is logged
+  //       `outcome: 'reworked'` (a confirmed miss — `we:scripts/lib/provider-routing.mjs#isCleanRecord` reads
+  //       only `outcome`, so this alone is what makes demotion computable) with `informative: true` unless the
+  //       write-up asserts a KNOWN zero finding count with no defect described. A clean `accepted` keeps the v1
+  //       `outcome:'landed'/findings:null` shape — distinguishing a first-round clean accept from a
+  //       reworked-then-landed one needs this PR's verdict-ledger.mjs history, still a separate follow-up.
+  //
+  //   (c) #3801 FORK 2: `self-fix`/`other` ARE NEVER PRODUCED BY ANY DISPATCH PATH. A PR's delegation marker
+  //       can still carry either taskType (the marker's own vocabulary is unchanged here — out of this card's
+  //       file scope), so this write path REFUSES to log a trial for one rather than silently producing the
+  //       row Fork 2 forbids.
+  //
+  // THE DEDUP KEY IS NOW `(pr, outcome)`, NOT BARE `pr`. A single PR can legitimately carry MORE than one
+  // session-delegation row — a `changes` round (outcome `reworked`), then a later `accepted` round on the
+  // fixed head (outcome `landed`) — and each is a real, distinct trial that must be recorded; keying on `pr`
+  // alone silently dropped every round after the first one ever written for that PR. Re-running the SAME
+  // verdict for the SAME PR (a retry) still writes at most once, because it maps to the SAME outcome.
+  if ((to === 'accepted' || to === 'changes') && normalizeChannel(channelArg) === REVIEW_PR_CHANNEL) {
     try {
       const delegation = parseDelegationMarker(prBody);
-      const trialStore = delegation ? readTrialStore(trialLogIo) : null;
-      const alreadyLogged = (trialStore?.records ?? []).some((row) =>
-        row.dispatchKind === 'session-delegation' && row.pr === Number(pr));
-      if (delegation && !alreadyLogged && !isDelegationTripleGraduated(delegation, trialStore)) {
-        const logged = logTrialFn({
-          provider: delegation.provider,
-          model: delegation.model,
-          taskType: delegation.taskType,
-          taskDescription: prTitle || `PR #${pr}`,
-          outcome: 'landed',
-          verifiedBy: 'independent-claude',
-          findings: null,
-          pr: Number(pr),
-        }, trialLogIo);
-        // No commit+push step any more (#3690's publish, retired by #4155): the store is ONE shared file outside
-        // every checkout, so the row is already where every other checkout and daemon reads it.
-        if (logged === null) throw new Error('could not write trial to the scorecard store');
+      if (delegation && FORBIDDEN_DELEGATION_TASK_TYPES.includes(delegation.taskType)) {
+        process.stderr.write(
+          `review-set-label: delegation trial NOT logged (#3801 Fork 2) — taskType '${delegation.taskType}' `
+          + 'is never produced by any dispatch path\n',
+        );
+      } else if (delegation) {
+        const isMiss = to === 'changes';
+        const outcome = isMiss ? 'reworked' : 'landed';
+        const trialStore = readTrialStore(trialLogIo);
+        const alreadyLogged = (trialStore?.records ?? []).some((row) =>
+          row.dispatchKind === 'session-delegation' && row.pr === Number(pr) && row.outcome === outcome);
+        if (!alreadyLogged) {
+          // `findingCount` is tri-state (#3334): `null` means the write-up carried no rendered heading (a
+          // hand-written body), which is never treated as a KNOWN zero — the miss is still informative. Only
+          // an explicit, known zero (the juror found nothing; the bounce, if any, rests on a stated procedural
+          // reason rather than a discovered defect) is not counted as the positive control — a reason alongside
+          // a known zero explains why the PR is parked, it does not turn an absence of findings into one.
+          const knownZeroFindings = isMiss && bounceEvidence.findingCount === 0;
+          const findings = isMiss
+            ? (bounceEvidence.findingCount !== null
+              ? `review:changes — ${bounceEvidence.findingCount} finding(s)${bounceEvidence.reason ? `: ${bounceEvidence.reason}` : ''}`
+              : (bounceEvidence.reason || 'review:changes verdict (finding count unknown)'))
+            : null;
+          const logged = logTrialFn({
+            provider: delegation.provider,
+            model: delegation.model,
+            taskType: delegation.taskType,
+            taskDescription: prTitle || `PR #${pr}`,
+            outcome,
+            verifiedBy: 'independent-claude',
+            findings,
+            ...(isMiss ? { informative: !knownZeroFindings } : {}),
+            pr: Number(pr),
+          }, trialLogIo);
+          // No commit+push step any more (#3690's publish, retired by #4155): the store is ONE shared file outside
+          // every checkout, so the row is already where every other checkout and daemon reads it.
+          if (logged === null) throw new Error('could not write trial to the scorecard store');
+        }
       }
     } catch (e) {
-      process.stderr.write(`review-set-label: delegation trial append failed (#3690, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);
+      process.stderr.write(`review-set-label: delegation trial append failed (#3690/#3949, non-fatal) — ${String((e && e.message) || e).split('\n')[0]}\n`);
     }
   }
 
