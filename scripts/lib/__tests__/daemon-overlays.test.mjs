@@ -3,8 +3,9 @@
  * @description Module B — the per-clone overlay list (`../daemon-overlays.mjs`) and its CLI
  *   (`../../daemon-overlay.mjs`). Every test points `WE_DAEMON_OVERLAY_DIR` at a fresh mkdtemp dir — never
  *   `~/.claude/*` — per the design's top rule that no state/lock dir may be written outside an injected temp
- *   path during tests. The CLI is exercised via `spawnSync` with `--no-lock` so these tests never import or
- *   depend on `daemon-clone-lock.mjs` (Module A), which is being authored concurrently by another worker.
+ *   path during tests. Most CLI tests still pass `--no-lock` (a harmless no-op — see `#4229/#2760 follow-up`
+ *   below and `daemon-overlay.mjs`'s own file header): the CLI never imports `daemon-clone-lock.mjs` (Module A)
+ *   at all any more, with or without that flag.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
@@ -215,6 +216,44 @@ describe('CLI (spawnSync, --no-lock — never imports daemon-clone-lock.mjs)', (
   it('unknown command exits 2', () => {
     const r = run(['bogus', `--clone=${cloneRoot}`]);
     expect(r.status).toBe(2);
+  });
+});
+
+// ── #4229/#2760 follow-up (live 2026-09-26): `add` used to take the clone's WRITE lock and was refused
+// (`concurrent-mover`) whenever the daemon's own rebuild already held it — live 4 times in a row on PR #2760.
+// register-only `add`/`remove` must never even LOOK at the clone's reader/writer lock, so it must succeed at
+// once regardless of what (if anything) holds it.
+describe('register-only: never contends for the clone write lock (#4229/#2760 follow-up)', () => {
+  it('add succeeds near-instantly and registers the ref while a REAL writer lock is held on the clone', async () => {
+    const { acquireWrite, releaseWrite } = await import('../daemon-clone-lock.mjs');
+    const lockRoot = mkdtempSync(join(tmpdir(), 'we-daemon-clone-lock-'));
+    try {
+      const acquired = await acquireWrite(cloneRoot, { lockRoot, owner: 'test-rebuild:1' });
+      expect(acquired.ok).toBe(true);
+      try {
+        const startedAt = Date.now();
+        const r = spawnSync(process.execPath, [
+          CLI_PATH, 'add', `--clone=${cloneRoot}`, '--ref=lane/4229-pr-2760', '--pr=2760', '--json',
+        ], {
+          encoding: 'utf8',
+          env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir, WE_DAEMON_CLONE_LOCK_ROOT: lockRoot },
+          timeout: 20_000,
+        });
+        const elapsed = Date.now() - startedAt;
+        expect(r.status, r.stderr).toBe(0);
+        expect(elapsed).toBeLessThan(5_000);
+        expect(JSON.parse(r.stdout).list.map((o) => o.ref)).toEqual(['lane/4229-pr-2760']);
+      } finally {
+        releaseWrite(cloneRoot, { lockRoot, owner: 'test-rebuild:1' });
+      }
+    } finally {
+      rmSync(lockRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('never imports daemon-clone-lock.mjs at all any more (docs may still mention it by name)', () => {
+    const src = readFileSync(CLI_PATH, 'utf8');
+    expect(src).not.toMatch(/import\(.*daemon-clone-lock|from\s+['"].*daemon-clone-lock/);
   });
 });
 
