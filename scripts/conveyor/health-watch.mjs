@@ -49,6 +49,8 @@ import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath } from '../lib/gh-throttle.mjs';
 import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
+import { stuckOnPermissionPrompt } from './health-smells/dispatch-permission-stall.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
 import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
@@ -376,6 +378,35 @@ export function probeAuthExpiredSessions(agents, { readInfo = readClaudeAuthExpi
 }
 
 /**
+ * #x9fbg1x, live incident `fix-2748`/`fix-2770` (2026-09-26) — reads each session `stuckOnPermissionPrompt`
+ * (`we:scripts/conveyor/health-smells/dispatch-permission-stall.mjs`) already names as stuck on an unanswerable
+ * permission prompt, and asks the SAME shared detector `reconcile-core.mjs#markBgIsolationStalls` uses
+ * (`we:scripts/conveyor/bg-isolation-stall.mjs#readBgIsolationStallInfo`) whether its OWN transcript shows
+ * Claude Code's own background-session worktree-isolation guard refusal ("Call EnterWorktree first…")
+ * specifically, rather than some other permission gate (e.g. the lane-grant one `dispatch-permission-stall`
+ * already covers generically). Returns only the ones it confirms — modeled directly on
+ * {@link probeAuthExpiredSessions} just above, same shape, same "read a transcript only for a candidate the
+ * cheap listing check already narrowed to" cost discipline.
+ * @param {Array<{name?:string, kind?:string, state?:string, waitingFor?:string, cwd?:string, sessionId?:string, startedAt?:string|number}>} agents
+ * @param {{readInfo?:Function}} [io]
+ * @returns {Array<{name:string, sessionId:string|null, cwd:string|null, startedAt:number|null, evidence:string|null}>}
+ */
+export function probeBgIsolationStalls(agents, { readInfo = readBgIsolationStallInfo } = {}) {
+  const out = [];
+  for (const a of stuckOnPermissionPrompt(agents)) {
+    let info = null;
+    try { info = readInfo(a); } catch { info = null; }
+    if (info?.stall !== true) continue;
+    const startedAt = typeof a.startedAt === 'number' ? a.startedAt : Date.parse(a.startedAt ?? '');
+    out.push({
+      name: a.name ?? null, sessionId: a.sessionId ?? null, cwd: a.cwd ?? null,
+      startedAt: Number.isFinite(startedAt) ? startedAt : null, evidence: info.evidence ?? null,
+    });
+  }
+  return out;
+}
+
+/**
  * The `stale-claim` smell's class-A input: every `status: active`/`preparing` backlog claim's liveness, via the
  * declared `stale-state` read (#911) — shelled exactly like `lane-starvation`'s own `diagnose` already does, so
  * this probe and that diagnose never drift onto two different readers. Read-only; a hard timeout, like every
@@ -472,6 +503,9 @@ export async function tick(flags = {}) {
     // claude-auth-expired's own probe needs only `agents` (the exact same listing, same cadence) — independent
     // of whether `prs` also succeeded this tick, same reasoning as stale-claim's two probes just below.
     if (agents) probes.authExpired = attempt('authExpired', () => probeAuthExpiredSessions(agents));
+    // #x9fbg1x — same cadence/gating reasoning as `authExpired` just above: needs only the same `agents`
+    // listing, independent of whether `prs` also succeeded this tick.
+    if (agents) probes.bgIsolationStalls = attempt('bgIsolationStalls', () => probeBgIsolationStalls(agents));
     // stale-claim's two probes ride the same 'gh' cadence (both are gh/git-heavy reads); independent of the
     // prs/agents pairing above — one failing never blocks the other.
     const staleState = attempt('staleState', () => probeStaleState());
