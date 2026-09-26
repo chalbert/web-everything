@@ -3,9 +3,10 @@ bornAs: x5kagse
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/claude-auth-health.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:skills-src/conveyor/review-daemon.mjs", "we:scripts/operations/__tests__/helpers/fake-claude-shim.mjs", "we:scripts/conveyor/soak/breaks/claude-auth-dispatch-pause.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
