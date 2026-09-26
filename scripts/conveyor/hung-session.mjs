@@ -278,48 +278,62 @@ export function classifyNoOutcomeStall({ startedAtMs, lastOutcomeAtMs = null, no
 // timer alone would have left it sitting `blocked`/`idle` (a live pid, nothing working it) for up to 30+ minutes
 // per session, all night, exactly what happened before this axis existed.
 //
-// `summarizeEntry` (this file's own shared reader) does not carry the top-level `error`/`isApiErrorMessage`
-// fields through — only `kind` (`o.type`) and `blocks` derived from `message.content` — so this axis matches on
-// the SAME text content the exact live failure carries, the same way `session-reaper.mjs
-// #transcriptShowsIntendedBlockedOnInfra` already matches its own phrase over the identical reader shape (WIDEN,
-// never grow a private second parser).
+// PROVENANCE, NOT PROSE (PR #2717 review). This axis reaps instantly, with no staleness window, so free text
+// alone is far too weak a signal: a healthy agent working this repo's own GitHub-auth code routinely writes
+// "got a 401 Unauthorized", "authentication_failed", or quotes this very incident's phrase. The only turn that
+// may fire is the CLI's OWN synthetic API-error turn — `isApiErrorMessage: true` — which a model can never
+// author. `summarizeEntry` (the shared reader) drops those top-level fields, so the IO shell below carries
+// them through alongside its summary (see `summarizeWithApiError`).
 
-/** The Claude CLI's own auth-failure phrasing, plus a generic 401/"Unauthorized" fallback for any future wording
- *  change — case-insensitive, tolerant of the literal `/login` slash-command spelling. */
-export const CLAUDE_AUTH_EXPIRED_TEXT_RE = /login expired|please run\s*\/login|authentication_failed|\b401\b[^\n]{0,40}\bunauthoriz|unauthoriz[^\n]{0,40}\b401\b/i;
+/** The Claude CLI's own login-failure phrasing — case-insensitive, tolerant of the `/login` spelling. Consulted
+ *  ONLY on an `isApiErrorMessage` turn; the generic 401/"Unauthorized" fallback was dropped as too broad. */
+export const CLAUDE_AUTH_EXPIRED_TEXT_RE = /login expired|please run\s*\/login|authentication_error/i;
+/** The structured `error` code the CLI stamps on that synthetic turn. */
+export const CLAUDE_AUTH_EXPIRED_ERROR = 'authentication_failed';
 
-// Bounded read — the failure is the newest (often only) real turn, so a short tail suffices; mirrors this
-// file's own `READ_TAIL_LINES`/`READ_MAX_BYTES`/`READ_FIELD_MAX` above.
-const AUTH_EXPIRED_TAIL_LINES = 15;
+// Bounded read — mirrors this file's own `READ_TAIL_LINES`/`READ_MAX_BYTES`/`READ_FIELD_MAX` above. The window
+// counts RAW lines, and the CLI appends metadata lines (system, custom-title, mode, cost-state, …) after the
+// failure — 9 in the live incident, ~7 more per re-attach — so it is sized well past that, never "a short tail".
+const AUTH_EXPIRED_TAIL_LINES = 200;
 const AUTH_EXPIRED_MAX_BYTES = 400_000;
 const AUTH_EXPIRED_FIELD_MAX = 500;
 
 /**
- * we:scripts/conveyor/hung-session.mjs#classifyClaudeAuthExpired — PURE. Scans already-summarized transcript
- * entries (`summarizeEntry`'s own shape — see {@link readClaudeAuthExpiredInfo} for the IO shell that builds
- * them), NEWEST first, for an assistant `text`/`thinking` block matching {@link CLAUDE_AUTH_EXPIRED_TEXT_RE}.
- * The first (newest) match wins — there is no need to scan past it. `entry.kind === 'assistant'` guards the
- * match for the identical reason `transcriptShowsIntendedBlockedOnInfra` guards its own phrase: an injected
- * agent BRIEF (a `user`-role entry) could otherwise echo unrelated text that happens to contain "401", though
- * in practice this phrase is never part of any brief's own prose.
- * @param {Array<{kind?:string, blocks?:Array<{kind?:string, text?:string}>}>} entries
+ * we:scripts/conveyor/hung-session.mjs#classifyClaudeAuthExpired — PURE. Decides off the NEWEST assistant
+ * entry ALONE (see {@link readClaudeAuthExpiredInfo} for the IO shell that builds the entries). It fires only
+ * when that turn is the CLI's own synthetic API-error turn (`isApiErrorMessage: true`) AND carries either the
+ * structured `authentication_failed` code or the CLI's login phrasing ({@link CLAUDE_AUTH_EXPIRED_TEXT_RE}).
+ * Ordinary assistant text/thinking never fires, whatever it says. Any newer assistant turn — including a bare
+ * `tool_use` one — means the session moved on, so an older failure is never flagged. A newer `user` TEXT entry
+ * (the operator re-driving the session after `/login`) clears it too: the model may think for a while before
+ * its first assistant line lands. A `user` entry never signals, and a tool_result-only one neither signals nor
+ * clears.
+ * @param {Array<{kind?:string, isApiErrorMessage?:boolean, apiError?:string,
+ *   blocks?:Array<{kind?:string, text?:string}>}>} entries
  * @returns {{authExpired:boolean, reason:string}}
  */
 export function classifyClaudeAuthExpired(entries) {
   for (let i = (entries?.length ?? 0) - 1; i >= 0; i--) {
     const entry = entries[i];
-    if (entry?.kind !== 'assistant') continue; // never a `user`-role entry — see doc above
-    const textBlocks = (entry.blocks ?? []).filter((b) => b.kind === 'text' || b.kind === 'thinking');
-    if (!textBlocks.length) continue; // no text/thinking content in this turn (e.g. a bare tool_use) — keep
-    //                                    walking back for the newest turn that actually has some.
-    // This IS the newest assistant turn carrying real text content — decide off it ALONE and stop. An OLDER
-    // turn's auth failure must never outlive real work that came after it (a session that hit this failure,
-    // then recovered and kept going, is not auth-expired anymore) — mirrors `detectBlockedOnChild`'s own
-    // "inspect only the newest on-topic entry" discipline, never a whole-tail OR-scan.
-    const matched = textBlocks.some((b) => CLAUDE_AUTH_EXPIRED_TEXT_RE.test(b.text ?? ''));
+    if (entry?.kind === 'user' && (entry.blocks ?? []).some((b) => b.kind === 'text')) break; // re-driven
+    if (entry?.kind !== 'assistant') continue; // never signals — see doc above
+    const matched = entry.isApiErrorMessage === true && (
+      entry.apiError === CLAUDE_AUTH_EXPIRED_ERROR
+      || (entry.blocks ?? []).some((b) => b.kind === 'text' && CLAUDE_AUTH_EXPIRED_TEXT_RE.test(b.text ?? '')));
     return { authExpired: matched, reason: matched ? 'claude-auth' : 'no-signal' };
   }
   return { authExpired: false, reason: 'no-signal' };
+}
+
+/** `summarizeEntry` plus the two top-level fields it drops — the provenance {@link classifyClaudeAuthExpired}
+ *  requires. Never throws: an unparseable line keeps `summarizeEntry`'s own answer. */
+function summarizeWithApiError(summarize, line, fieldMax) {
+  const summary = summarize(line, fieldMax);
+  try {
+    const o = JSON.parse(line);
+    if (o?.isApiErrorMessage === true) return { ...summary, isApiErrorMessage: true, apiError: o.error ?? null };
+  } catch { /* summarize already reported it unparseable */ }
+  return summary;
 }
 
 /**
@@ -348,7 +362,7 @@ export function readClaudeAuthExpiredInfo(agent, {
   let entries;
   try {
     const { lines } = tailLinesFn(file, AUTH_EXPIRED_TAIL_LINES, AUTH_EXPIRED_MAX_BYTES);
-    entries = lines.map((l) => summarizeEntryFn(l, AUTH_EXPIRED_FIELD_MAX));
+    entries = lines.map((l) => summarizeWithApiError(summarizeEntryFn, l, AUTH_EXPIRED_FIELD_MAX));
   } catch {
     return { authExpired: false, reason: 'no-signal' }; // unreadable transcript — never guess
   }

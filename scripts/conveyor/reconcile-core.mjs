@@ -558,8 +558,8 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#markAuthExpiredSessions — mark each listed session whose OWN
- * transcript shows the Claude CLI's auth-failure signature (`Login expired · Please run /login`, an
- * `authentication_failed` error, or a generic 401/"Unauthorized") as `authExpired: true`. Pure (the
+ * transcript ends on the Claude CLI's own synthetic auth-failure turn (`isApiErrorMessage` with an
+ * `authentication_failed` error or `Login expired · Please run /login`) as `authExpired: true`. Pure (the
  * classification is injected via `authExpiredInfoFor`); modeled directly on {@link markHungSessions} just
  * above — a SEPARATE pre-pass over AGENT rows, run before {@link assessLiveness}, never a change to that
  * pinned function itself.

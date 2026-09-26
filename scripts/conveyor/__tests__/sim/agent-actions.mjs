@@ -313,9 +313,9 @@ export function authExpiredFail() {
       const path = transcriptPath({ home, cwd: session.cwd, sessionId: session.sessionId });
       mkdirSync(dirname(path), { recursive: true });
       // No timestamp dependency on the sim clock: the shared detector (`hung-session.mjs
-      // #classifyClaudeAuthExpired`) matches on the newest assistant turn's TEXT CONTENT alone, never on when
-      // it was written — an instant, unconditional signal, unlike the hung-transcript axis's own staleness
-      // window.
+      // #classifyClaudeAuthExpired`) matches on the newest assistant turn's API-error provenance
+      // (`isApiErrorMessage` + `error`/text), never on when it was written — an instant, unconditional signal,
+      // unlike the hung-transcript axis's own staleness window.
       const line = JSON.stringify({
         type: 'assistant',
         timestamp: new Date().toISOString(),
@@ -325,6 +325,32 @@ export function authExpiredFail() {
       });
       appendFileSync(path, `${line}\n`);
       // Deliberately NO ctx.claude.setState / killPid call — see the doc above.
+    },
+  };
+}
+
+/**
+ * The false-positive twin of {@link authExpiredFail} (PR #2717 review): a HEALTHY session working a GitHub-auth
+ * bug writes an ordinary assistant turn naming every auth signature the detector once matched on free text —
+ * but it is the model's own prose, never the CLI's synthetic `isApiErrorMessage` turn. `we:scripts/conveyor/
+ * soak/breaks/claude-auth-false-positive.mjs` proves the daemon keeps reading such a session as live.
+ */
+export function authDiscussionTurn() {
+  return {
+    kind: 'authDiscussionTurn',
+    run(ctx, session) {
+      const home = ctx.env?.FAKE_CLAUDE_HOME;
+      if (!home || !session?.cwd || !session?.sessionId) return;
+      const path = transcriptPath({ home, cwd: session.cwd, sessionId: session.sessionId });
+      mkdirSync(dirname(path), { recursive: true });
+      const text = 'Fixed the bug: a 401 Unauthorized from the GitHub API (authentication_failed) was misread; '
+        + 'the old incident transcript said "Login expired · Please run /login".';
+      const line = JSON.stringify({
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        message: { role: 'assistant', content: [{ type: 'text', text }] },
+      });
+      appendFileSync(path, `${line}\n`);
     },
   };
 }
