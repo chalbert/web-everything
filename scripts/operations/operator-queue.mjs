@@ -215,6 +215,50 @@ export function backpressureRows(counts) {
     .map((c) => ({ repo: c.repoKey, count: c.count, limit: c.limit, prNumbers: Array.isArray(c.prNumbers) ? c.prNumbers : [] }));
 }
 
+/**
+ * we:xg460kw (#4191, epic #4075/#3383) — RECONCILE NOTES: `we:scripts/conveyor/reconcile-core.mjs#planReconcile`
+ * already emits `notes` (`ci-heal-exhausted` — a PR out of CI-fix attempts; `awaiting-permission` — a bound
+ * session blocked on a prompt with nobody there to answer it), but nothing ever surfaced either one to the
+ * operator's OWN read-only queue — an exhausted PR looked identical to any other quiet PR here, and the operator
+ * only reviews a PR once it is "clean … AND its advisory has run" (this file's own header), so an exhausted PR
+ * with no advisory at all was never on the list at all.
+ *
+ * SHELLS `node scripts/conveyor/reconcile-pass.mjs --repo=<slug> --json` — mirrors {@link laneReclaimQueue}'s and
+ * {@link prLimitCounts}'s own subprocess pattern just above, and for the SAME reason this file's own header
+ * already states for `stuck-pr-dispatch-marker.mjs` vs `stuck-pr-watch-core.mjs`: a static import of
+ * `reconcile-pass.mjs` (or `reconcile-core.mjs`) pulls in a MUCH heavier transitive graph
+ * (`rearm-review.mjs` → `review-set-label.mjs` → `merge-ai-prs.mjs`, plus `dispatch-lane.mjs`/`jury-core.mjs`/…)
+ * than this file's own mocked `node:child_process` test setup (and its staged-copy CLI-entry test) stage —
+ * exactly the breakage that file's own comment already documents. Shelling the EXISTING CLI (`reconcile-pass.mjs`
+ * already prints `{dispatch, refusals, notes, prs, agents}` as JSON via `--json`) reuses the SAME `planReconcile`
+ * plan a reconcile tick runs, without adding a single new static import to this file's own module graph.
+ * @param {string[]} repos - repo slugs to read (`gh --repo <slug>` shape, mirrors every other section's loop).
+ * @param {{exec?:Function, scriptDir?:string}} [io] - `exec` is injectable (defaults to the real
+ *   `execFileSync`), mirrors {@link laneReclaimQueue}'s own IO shape.
+ * @returns {Array<object>} every note this read saw, repo-tagged (`{...note, repo}`); a repo whose read fails
+ *   (or returns unparsable output) contributes one synthetic `notes-read-failed` row rather than failing the
+ *   whole report.
+ */
+export function reconcileNotesFor(repos, { exec = execFileSync, scriptDir = dirname(fileURLToPath(import.meta.url)) } = {}) {
+  const notes = [];
+  for (const repo of repos) {
+    try {
+      const script = join(scriptDir, '..', 'conveyor', 'reconcile-pass.mjs');
+      const out = exec('node', [script, `--repo=${repo}`, '--json'], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000,
+      });
+      const parsed = JSON.parse(out);
+      for (const n of (parsed?.notes ?? [])) notes.push({ ...n, repo });
+    } catch (e) {
+      notes.push({
+        repo, kind: 'notes-read-failed', prNumber: null,
+        text: String(e?.stderr || e?.message || e).trim().split('\n')[0],
+      });
+    }
+  }
+  return notes;
+}
+
 /** Blocking sleep — `main` is synchronous, and this only runs on the rare UNKNOWN-mergeability path. */
 const blockingSleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -262,8 +306,15 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
   // store (`we:scripts/conveyor/health-watch-section.mjs`, no child process). When on, it is the FIRST thing
   // printed, and its first line is the health watch's last-tick-completed age.
   const health = args.includes('--with-health') ? healthSectionLines() : null;
-  const report = { ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions, backpressure, ...(health ? { health } : {}) };
-  for (const repo of requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug)) {
+  // #4191 (epic #4075/#3383) — RECONCILE NOTES is opt-in via `--with-reconcile-notes`, mirroring every section
+  // above and for the SAME reason (a real extra `node reconcile-pass.mjs` subprocess per repo — see
+  // `reconcileNotesFor`'s own docblock — which a bare `main()` call must stay side-effect-free over).
+  const repoSlugs = requested.length ? requested : Object.values(CONSTELLATION_REPOS).map(({ slug }) => slug);
+  const reconcileNotes = args.includes('--with-reconcile-notes') ? reconcileNotesFor(repoSlugs) : [];
+  const report = {
+    ready: [], pending: [], notReady: [], stoodDown: [], stuck: [], errors: [], unsupported, laneDecisions, backpressure, reconcileNotes, ...(health ? { health } : {}),
+  };
+  for (const repo of repoSlugs) {
     try {
       const prs = JSON.parse(execFileSync('gh', [
         'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json',
@@ -343,6 +394,16 @@ export function main(args = process.argv.slice(2), { sleep, pollAttempts, pollDe
     if (args.includes('--with-backpressure')) {
       console.log('BACKPRESSURE — open-PR limit reached (we:xniq7xs; land/review the existing PRs, or override `node scripts/operations/pr-limit.mjs allow|off`):');
       console.log(report.backpressure.map((b) => `${b.repo}  ${b.count}/${b.limit} open agent PR(s) not yet review:accepted  (#${b.prNumbers.join(', #')})`).join('\n') || '(none)');
+    }
+    if (args.includes('--with-reconcile-notes')) {
+      // #4191 (epic #4075/#3383) — ESCALATIONS: a PR whose auto-heal is exhausted, or whose bound session is
+      // stuck on a permission prompt with nobody there to answer it. Printed as this file's own header's rule
+      // demands: "an exhausted PR should read as 'needs your decision: fix attempts exhausted', with the last
+      // failure reason" — never a bare count. `n.text` (`reconcile-core.mjs#planReconcile`'s own note) already
+      // carries the last failure reason inline for `ci-heal-exhausted` — never re-appended here, or it reads
+      // twice.
+      console.log('ESCALATIONS — needs your decision (ci-heal exhausted / a session is blocked on a permission prompt):');
+      console.log(report.reconcileNotes.map((n) => `${n.repo}#${n.prNumber ?? '?'}  [${n.kind}]  ${n.text}`).join('\n') || '(none)');
     }
   }
 }
