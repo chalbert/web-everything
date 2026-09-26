@@ -43,11 +43,21 @@
  * disposable worktree so the two never collide).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync, lstatSync, cpSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { findingFiles } from './claimScope.mjs';
+import {
+  findingFiles,
+  GENERIC_STEM, idsForPath, MAX_LINKED_HITS_PER_ID, linkedFilesFor,
+} from './claimScope.mjs';
+
+// #4166 — `idsForPath`/`linkedFilesFor`/`MAX_LINKED_HITS_PER_ID`/`GENERIC_STEM` moved to claimScope.mjs so
+// `check-standards.mjs` itself can consume the SAME primitives this harness always used to measure "what
+// SHOULD be caught" — single source of truth, no risk of the real gate's notion of "linked" drifting from
+// this harness's own. Re-exported here UNCHANGED so every existing import of this module (including this
+// file's own unit tests) keeps working without modification.
+export { GENERIC_STEM, idsForPath, MAX_LINKED_HITS_PER_ID, linkedFilesFor };
 
 // ── the LANE-MERGE recognizer (property: select off real merged lane diffs) ─────────────────────────────────
 
@@ -133,62 +143,8 @@ export function selectLaneDiffs({ rows, runGit, count, offset = 0 }) {
 }
 
 // ── LINKED FILES (the epic's ratified direction: git grep per changed id, no maintained index) ──────────────
-
-/** Basenames too generic to `git grep` on (would return most of the repo). Mirrors `test-selection.mjs`'s own
- *  `GENERIC_BASENAME` exclusion for the same reason. */
-const GENERIC_STEM = /^(index|main|types|type|utils|util|constants|config|readme|changelog|package|cli|run|id)$/i;
-
-/**
- * Candidate reference "id" tokens for a changed file — the needles {@link linkedFilesFor} greps the rest of the
- * repo for. Two shapes, mirroring the repo's own id conventions:
- *   - the bare filename STEM (extension stripped) when specific enough (not {@link GENERIC_STEM}, length ≥ 4) —
- *     catches `docs/agent/foo.md` being named as `foo.md` or `foo` elsewhere;
- *   - a leading `NNN-` backlog numeric id (`backlog/4164-....md` → `4164`, and `#4164`) — catches every
- *     `#4164`/`4164` cross-reference this repo's citation convention uses.
- * Pure.
- * @param {string} path repo-relative path
- * @returns {string[]}
- */
-export function idsForPath(path) {
-  const p = String(path || '');
-  const base = p.split('/').pop() || '';
-  const stem = base.replace(/\.[^.]+$/, '');
-  const ids = new Set();
-  if (stem && stem.length >= 4 && !GENERIC_STEM.test(stem)) ids.add(stem);
-  const m = /^(\d{3,5})-/.exec(stem);
-  if (m) { ids.add(m[1]); ids.add(`#${m[1]}`); }
-  return Array.from(ids);
-}
-
-/** Above this many `git grep` hits for one id, the id is not a REFERENCE — it is a common infra word (measured
- *  live: `lane-pool` alone hit 667 files in a 1-diff smoke test, #4164) and is dropped rather than treated as a
- *  "link", mirroring `scopeBasenameMismatches`'s own "a wide top tier is silence" axis: a name so common it
- *  matches almost everything carries no discriminating signal about what THIS diff actually touches. */
-export const MAX_LINKED_HITS_PER_ID = 40;
-
-/**
- * The files LINKED to `changedFiles` — referencing or referenced by them — found via `git grep` per changed
- * id (the epic's ratified direction: "no maintained index; a shared per-origin/main cached index only if git
- * grep proves slow"). `gitGrep(needle) => string[]` is injectable (repo-relative file paths containing the
- * literal needle, `[]` on no match). An id whose hit count exceeds {@link MAX_LINKED_HITS_PER_ID} is treated as
- * too generic and contributes nothing (see its doc). Pure given `gitGrep`. Never includes a file already in
- * `changedFiles`.
- * @param {string[]} changedFiles
- * @param {{gitGrep: (needle: string) => string[]}} args
- * @returns {string[]} sorted, deduped, repo-relative paths
- */
-export function linkedFilesFor(changedFiles, { gitGrep }) {
-  const changedSet = new Set(changedFiles);
-  const linked = new Set();
-  for (const f of changedFiles) {
-    for (const id of idsForPath(f)) {
-      const hits = gitGrep(id) || [];
-      if (hits.length > MAX_LINKED_HITS_PER_ID) continue; // too generic — no discriminating signal
-      for (const h of hits) if (h && !changedSet.has(h)) linked.add(h);
-    }
-  }
-  return Array.from(linked).sort();
-}
+// #4166 — `GENERIC_STEM`/`idsForPath`/`MAX_LINKED_HITS_PER_ID`/`linkedFilesFor` now live in claimScope.mjs
+// (imported + re-exported above); this harness and the real gate share one implementation.
 
 // ── THE COMPARE — full vs scoped, restricted to the lane's own footprint ────────────────────────────────────
 
@@ -327,9 +283,11 @@ function realGit(args, cwd = ROOT) {
 }
 
 function gitGrepIn(cwd) {
+  // `--threads=1` (#4166): see check-standards.mjs's own gitGrep — the default multi-threaded search pays a
+  // fixed multi-second SYS-time tax per invocation on this repo for no measurable real-time win here.
   return (needle) => {
     try {
-      const out = execFileSync('git', ['grep', '-l', '-F', '-e', needle, '--', '.', ':!node_modules'], {
+      const out = execFileSync('git', ['grep', '--threads=1', '-l', '-F', '-e', needle, '--', '.', ':!node_modules'], {
         cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024,
       });
       return out.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -398,6 +356,21 @@ function checkoutInWorktree(path, sha) {
   realGit(['clean', '-fd', '-e', 'node_modules'], path);
 }
 
+// #4166 — `--overlay-current` (opt-in; default preserves every existing behavior/test byte-for-byte). The
+// plain replay above tests each historical commit's OWN frozen `check-standards.mjs` against its own diff —
+// exactly right for auditing already-merged history, but useless for proving a NOT-YET-MERGED slice (#4165/
+// #4166/#4167/#4168's own candidate code) doesn't regress before it lands: that code exists only in the
+// working tree of whichever lane is building it, never in a `git log --merges` row yet. This overlays the
+// CURRENT checkout's `scripts/` tree + `src/_data/backlog.js` onto the worktree AFTER each historical
+// checkout — so the DATA being validated (backlog/*.md, src/_data/*.json, the rest of the repo) is that
+// commit's own real historical content, but the VALIDATOR running over it is the candidate code being proved.
+// Copies the whole `scripts/` directory (not just the touched files) because `check-standards.mjs` imports
+// many sibling modules under it — a partial overlay risks an inconsistent mix of old/new shapes.
+function overlayCurrentScripts(worktreePath, fromRoot) {
+  cpSync(join(fromRoot, 'scripts'), join(worktreePath, 'scripts'), { recursive: true });
+  cpSync(join(fromRoot, 'src', '_data', 'backlog.js'), join(worktreePath, 'src', '_data', 'backlog.js'));
+}
+
 function parseFlags(argv) {
   const flags = {};
   for (const a of argv) {
@@ -418,6 +391,9 @@ function runCli(argv) {
   const worktreePath = typeof flags.worktree === 'string' ? resolve(flags.worktree) : join(tmpdir(), 'we-check-standards-scope-replay-wt');
   const keep = Boolean(flags.keep);
   const maxCandidates = Number(flags['max-candidates'] ?? (count + offset) * 20);
+  // #4166 — see `overlayCurrentScripts`'s own doc: proves a not-yet-merged candidate `scripts/` tree (this
+  // checkout's working copy) against real historical diffs, instead of replaying each commit's own frozen code.
+  const overlayCurrent = Boolean(flags['overlay-current']);
 
   const log = realGit(['log', base, '--merges', `--format=${MERGE_LOG_FORMAT}`, `-n${maxCandidates}`]);
   const rows = parseMergeLog(log);
@@ -443,6 +419,7 @@ function runCli(argv) {
     try {
       if (!worktreeReady) { ensureWorktree(worktreePath, diff.head); worktreeReady = true; }
       else checkoutInWorktree(worktreePath, diff.head);
+      if (overlayCurrent) overlayCurrentScripts(worktreePath, ROOT);
 
       const full = runCheckStandards(worktreePath, []);
       const linked = linkedFilesFor(diff.changedFiles, { gitGrep: gitGrepIn(worktreePath) });
@@ -476,6 +453,7 @@ function runCli(argv) {
     at: new Date().toISOString(),
     base,
     requestedCount: count,
+    overlayCurrent,
     lockfileDrift: drift,
     summary,
     rows: results,

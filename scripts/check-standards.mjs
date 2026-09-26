@@ -28,7 +28,7 @@ import { dirname, join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { isLaneLocus, resolveReal } from './guard-lane.mjs';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
-import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLocal } from './readiness/claimScope.mjs';
+import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLocal, linkedFilesFor } from './readiness/claimScope.mjs';
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
@@ -110,6 +110,9 @@ import { scanDiffBranchCoverage } from './lib/diff-branch-coverage.mjs';
 import { isHash } from './backlog/id.mjs';
 
 const require = createRequire(import.meta.url);
+// #4166 — cheap outgoing-edge resolution for the scoped backlog load below (a changed item's OWN
+// blockedBy/parent targets); reads frontmatter only, never the heavy markdown-render path.
+const matter = require('gray-matter');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
@@ -177,8 +180,77 @@ const scopedReaddir = (dirRel, exts) => {
   const abs = join(ROOT, dirRel);
   if (!existsSync(abs)) return [];
   const names = readdirSync(abs).filter((n) => exts.some((e) => n.endsWith(e)));
-  return SCOPE_TO_FILES ? names.filter((n) => LOCAL_FILES.has(`${dirRel}${n}`)) : names;
+  return SCOPE_TO_FILES ? names.filter((n) => EFFECTIVE_FILES.has(`${dirRel}${n}`)) : names;
 };
+
+// #4166 — LINKED FILES: the literal `--files=` list only names what the lane EDITED, but a reference/
+// relational check (blockedBy, formerSlugs, citations) can be broken by that edit on a file the lane never
+// itself touched (deleting/renaming an item another card still points at) — and today that finding is
+// attributed to the OTHER file, outside `--files=`, so it is silently demoted to a note (a false green the
+// unscoped merge-gate CI run still catches, never a merged regression, but a real gap at the lane gate).
+// `linkedFilesFor` (moved to claimScope.mjs from the #4164 replay harness so both share ONE definition of
+// "linked") finds files that REFERENCE a changed file's id via `git grep` — no maintained index, per the
+// epic's own ratified direction; a shared per-origin/main cached index is only worth adding if `git grep`
+// measures slow. It only reliably finds INCOMING references, though (a target doesn't necessarily mention
+// the id that points AT it) — `outgoingBacklogTargets` closes that other direction for the one edge shape
+// #4166 cares most about: a changed backlog item's own `blockedBy`/`parent` targets, resolved directly by
+// filename convention (`<id>-<slug>.md`), no full frontmatter parse of the target needed. Computed only when
+// `--files=` was passed at all; the site build, a bare `--local`, and the default no-flag run never touch
+// git or backlog/ here.
+// `--threads=1` (measured, #4166): git grep's default multi-threaded search pays a fixed ~2-2.5s SYS-time
+// tax per invocation on this repo (thread spawn/teardown) for a real-time win of only a few tens of ms on a
+// corpus this size — forcing single-threaded cuts a single call's sys time by ~10x with no real-time cost.
+// A diff with several changed files issues several calls (one per id), so this is the difference between a
+// barely-measurable overhead and one that dominates the whole scoped run (measured live: ~3.8s of a ~9.6s
+// total on a 10-changed-file diff before this flag).
+const gitGrep = (needle) => {
+  try {
+    return execFileSync('git', ['grep', '--threads=1', '-l', '-F', '-e', needle, '--', '.', ':!node_modules'], {
+      cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024,
+    }).split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return []; // git grep exits 1 on no match, or git is unavailable — never a gate failure
+  }
+};
+const outgoingBacklogTargets = (changedFiles) => {
+  const backlogDirAbs = join(ROOT, 'backlog');
+  const backlogDirNames = existsSync(backlogDirAbs) ? readdirSync(backlogDirAbs) : [];
+  const findFileForId = (id) => backlogDirNames.find((n) => n.startsWith(`${id}-`) || n === `${id}.md`);
+  const targets = new Set();
+  for (const relFile of changedFiles) {
+    if (!relFile.startsWith('backlog/') || !relFile.endsWith('.md')) continue;
+    const abs = join(ROOT, relFile);
+    if (!existsSync(abs)) continue; // deleted/renamed — no own frontmatter left to resolve outgoing edges from
+    let data;
+    try { ({ data } = matter(readFileSync(abs, 'utf8'))); } catch { continue; }
+    const ids = [];
+    if (Array.isArray(data.blockedBy)) ids.push(...data.blockedBy.map(String));
+    if (data.parent !== undefined && data.parent !== null) ids.push(String(data.parent));
+    for (const id of ids) {
+      const name = findFileForId(id);
+      if (name) targets.add(`backlog/${name}`);
+    }
+  }
+  return targets;
+};
+// #4166 — `git grep` measurably costs wall time per changed-file id (~0.3-1.3s each on this repo even at
+// `--threads=1`; see `gitGrep`'s own doc). The false-green this linking closes is specifically a BACKLOG
+// reference edge breaking on a file the lane didn't itself edit (blockedBy/formerSlugs/parent) — #4168
+// already proved (0/50 missed) that the OTHER per-file content scanners are safe to scope to the literal
+// `--files=` list alone, with NO linking at all. So only pay the git-grep cost when the diff actually
+// touches a backlog/*.md file; a diff that touches none gets the full backlog-load saving with ZERO added
+// overhead (`LINKED_FILES` stays `null`, `EFFECTIVE_FILES` falls back to plain `LOCAL_FILES` below).
+const CHANGED_BACKLOG_FILES = LOCAL_FILES_LIST
+  ? LOCAL_FILES_LIST.filter((f) => f.startsWith('backlog/') && f.endsWith('.md'))
+  : [];
+const LINKED_FILES = CHANGED_BACKLOG_FILES.length
+  ? new Set([...linkedFilesFor(CHANGED_BACKLOG_FILES, { gitGrep }), ...outgoingBacklogTargets(CHANGED_BACKLOG_FILES)])
+  : null;
+// The widened scope every "is this file mine" test below should read instead of the literal `--files=` list
+// (`scopedReaddir` above, the bottom-of-file classification) — monotonic (can only ADD files, never remove
+// one), so it only ever promotes a demoted finding to blocking, never the reverse. Equal to `LOCAL_FILES`
+// whenever no `--files=` was given at all (LINKED_FILES is then `null` too).
+const EFFECTIVE_FILES = LOCAL_FILES ? new Set([...LOCAL_FILES, ...(LINKED_FILES || [])]) : null;
 
 // Each entry is { message, descriptor? }. The optional descriptor is the structured,
 // agent-targetable form of the failure — populated for every class a fixer (deterministic
@@ -251,7 +323,25 @@ const demos = arr(loadDemos()); // per-demo specs src/_data/demos/<id>.json, ass
 const capabilityMatrix = readJson('capabilityMatrix.json') || {};
 // Backlog feeds off backlog/*.md via the shared data-file loader (single source).
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
-const backlog = arr(typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog);
+// #4166 — under `--local --files=`, load only the backlog cards this lane's diff can affect: its own
+// changed backlog/*.md files, plus every file `EFFECTIVE_FILES` already resolved as linked (incoming
+// references via git grep + a changed item's own outgoing blockedBy/parent targets). This is the "Load
+// specs (backlog load)" cost this card targets — for the common diff that touches NO backlog file at all
+// (and links to none), `backlogScopedFiles` is empty and the ~2.7s full parse of ~4.1k cards never runs.
+// Every OTHER backlog-consuming section below (6d, ctaless, the dup/collapse aggregates, …) reads this SAME
+// (possibly scoped) array — sound because their findings are either file-attributed (already demoted under
+// `--local` whenever that file sits outside `EFFECTIVE_FILES`, exactly as before this change) or path-less/
+// aggregate (already unconditionally demoted under `--local`, per `partitionLocal`'s own "path-less global
+// → note iff --local"). Full soundness argument: src/_data/backlog.js's `loadBacklogScoped` docblock. The
+// default no-flag run and a bare `--local` (no `--files=`) are untouched — `SCOPE_TO_FILES` is false.
+const backlogScopedFiles = SCOPE_TO_FILES
+  ? [...EFFECTIVE_FILES].filter((f) => f.startsWith('backlog/') && f.endsWith('.md')).map((f) => f.slice('backlog/'.length))
+  : null;
+const backlog = arr(
+  SCOPE_TO_FILES
+    ? loadBacklog.loadBacklogScoped(backlogScopedFiles)
+    : (typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog),
+);
 
 mark("Load specs");
 // ── 1. Spec ↔ description coverage ────────────────────────────────────────────
@@ -1039,6 +1129,14 @@ for (const item of backlog) {
   }
 }
 
+// #4166 — a finer-grained profiling boundary (additive to the section mark below, never a behavior change:
+// `mark()` only ever affects CHECK_STANDARDS_PROFILE stderr output). Everything ABOVE this point in "6d-ter"
+// is driven by the (now scoped-under-`--local --files=`) `backlog` array; everything BELOW — the utc-day-
+// slice / invisible-source-tree / stdout-flush whole-`scripts/`-tree scans, the epic↔child coherence loop,
+// program-title / undecided-reason / unsplittableReason / date-status / shortTitle loops — is either
+// unrelated to backlog data entirely (the three tree scans) or backlog-driven but out of THIS card's named
+// scope. Isolating the two lets the epic's own profiling prove which half #4166 actually moved.
+mark("6d-ter (backlog-array-driven: blockedBy edges + cycle walk + parent-deadlock + childrenOf)");
 // Workflow-intent invariants (#2084) — the cross-item / clock-needing rules the per-item schema validator
 // cannot see: sliced-epic sizing (the double-count guard, formerly inline here) + born-active settlement
 // TTL (formerly only a check:health O1 candidate). Single tested source in scripts/lib/workflow-invariants
@@ -1188,7 +1286,7 @@ for (const item of backlog) {
     warn(`Backlog item "${item.id}" shortTitle is ${item.shortTitle.length} chars (> ${SHORT_TITLE_MAX}) — tighten it to a glanceable 3–5 words, or drop it to fall back to the title.`);
 }
 
-mark("6d-ter. blockedBy dependency edges (#248)");
+mark("6d-ter (rest: utc-day-slice/invisible-source/stdout-flush tree scans + epic-coherence + per-item lints — #248)");
 // ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──
 // A renamed item lists prior URL segments in `formerSlugs:`; src/backlog-slug-redirects.njk turns
 // each into a redirect page at /backlog/<former>/ → /backlog/<id>/. Guard the field so a former slug
@@ -1230,7 +1328,7 @@ const reportFiles = existsSync(REPORTS) ? readdirSync(REPORTS).filter((f) => f.e
 // above needs the FULL `reportFiles` list regardless of scope (a hidden report is a hidden report whether
 // or not this lane touched it — that invariant is relational/global, out of #4168's scope by the epic's
 // own split), so it must never subset the shared variable those scanners also read.
-const scopedReportFiles = SCOPE_TO_FILES ? reportFiles.filter((f) => LOCAL_FILES.has(`reports/${f}`)) : reportFiles;
+const scopedReportFiles = SCOPE_TO_FILES ? reportFiles.filter((f) => EFFECTIVE_FILES.has(`reports/${f}`)) : reportFiles;
 const researchIds = new Set(research.map((r) => r.id).filter(Boolean));
 const backlogReportRefs = new Set(
   backlog.map((b) => b.relatedReport).filter(Boolean).map((p) => p.replace(/^reports\//, '')),
@@ -2767,16 +2865,21 @@ mark("Scope attribution (#952, ratified #949 Fork 3-A)");
 // #4168 — `filesArg`/`list` reuse the SAME parse `LOCAL_FILES_LIST` hoisted to the top of the file
 // (right after `mark`'s definition), rather than re-deriving it here, so the two can never drift on what
 // `--files=` means.
+// #4166 — the fileSet used to classify blocking-vs-demoted is `EFFECTIVE_FILES` (changed ∪ linked), not the
+// literal `--files=` list: a finding on a file the lane's edit affects via a reference but never itself
+// touched must still block (see `EFFECTIVE_FILES`'s own docblock, above). `list` (the literal argument)
+// stays what the summary/note TEXT reports, so the printed `--files=` echoes exactly what was passed.
 const filesArg = filesArgEarly;
 let localNote = null;
 let list = null;
 if (filesArg || LOCAL_MODE) {
   list = LOCAL_FILES_LIST;
-  const fileSet = list ? new Set(list) : null;
+  const fileSet = EFFECTIVE_FILES ?? (list ? new Set(list) : null);
   const { blocking, demoted } = partitionLocal(errors, { fileSet, local: LOCAL_MODE });
   externalErrors = [...externalErrors, ...demoted]; // demoted globals/other-file reds print as notes
   errors.length = 0; errors.push(...blocking);
-  const scopeDesc = fileSet ? `${fileSet.size} file(s)` : 'file-attributable findings only';
+  const linkedCount = LINKED_FILES ? LINKED_FILES.size : 0;
+  const scopeDesc = fileSet ? `${fileSet.size} file(s)${linkedCount ? ` (${list.length} changed + ${linkedCount} linked)` : ''}` : 'file-attributable findings only';
   localNote = `${LOCAL_MODE ? '--local ' : ''}${filesArg ? `--files=${list.join(',')} ` : ''}— scoped to ${scopeDesc}; ${demoted.length} finding(s) demoted to notes.`;
 }
 
