@@ -1,0 +1,453 @@
+{
+  "id": "conflict",
+  "title": "Conflict detection, parking, and mechanical resolution",
+  "summary": "A PR whose merge state goes CONFLICTING is picked up on the parked-pr-conflict-watch's 120s sweep across THREE populations — parked (already under a review hold), queued (approved, drain gets first try), and unowned (no review-workflow label at all) — labelled, then routed to a mechanical rebase, a fix-agent bounce, or a human stand-down. A stacked PR (base isn't main) is deferred entirely to reconcile-core.mjs's own stacked-rebase branch instead. Separately, when a PR's base merges, the DRAIN (not this watch) proactively retargets any PR stacked on it before the base branch is deleted, or the stacked PR is closed by GitHub with no automatic recovery.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/conveyor/conflict-label.mjs",
+    "scripts/conveyor/parked-pr-conflict-watch.mjs",
+    "scripts/conveyor/conflict-fix-mark.mjs",
+    "scripts/conveyor/conflict-fix-round-count.mjs",
+    "scripts/conveyor/branch-sync.mjs",
+    "scripts/conveyor/branch-drift.mjs",
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/progress-board.mjs",
+    "scripts/lib/pr-merge-gate.mjs",
+    "scripts/merge-ai-prs.mjs",
+    "scripts/conveyor/rearm-review.mjs",
+    "scripts/conveyor/stand-down.mjs",
+    "skills-src/conveyor/daemon-manifest.mjs",
+    "skills-src/conveyor/pass-daemon.mjs",
+    "launchd:com.we.parked-pr-conflict-watch-we.plist"
+  ],
+  "entry": {
+    "state": "pr-becomes-conflicting",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist",
+        "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/wev-review-daemon"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist"
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist",
+        "note": "resolved off the plist PATH; not independently verified installed at that PATH"
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_ID",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist",
+        "note": "WE_GITHUB_APP_ID/WE_GITHUB_APP_INSTALLATION_ID are set in the plist's own env, same pair the fix-dispatch daemon's withGithubAppAuth wrapper consumes (scripts/lib/github-app-auth-env.mjs:354) — could NOT confirm from this file set whether skills-src/conveyor/pass-daemon.mjs itself wraps its passes with withGithubAppAuth the same explicit way reconcile-fix-dispatch-daemon.mjs does; only a comment reference to it was found in pass-daemon.mjs, not a call."
+      }
+    ]
+  },
+  "extraEntries": [
+    {
+      "state": "stacked-pr-orphan-risk",
+      "on": "a SECOND independent trigger, not this watch's own sweep: the DRAIN (scripts/merge-ai-prs.mjs, via scripts/lib/pr-merge-gate.mjs#retargetStackedPrs) is about to merge a PR --delete-branch and discovers open PRs stacked on its base — it retargets each one onto the default branch before the deleting merge runs",
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "launchd:com.plateau.drain-daemon.plist",
+          "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/plateau-drain-daemon (confirmed live via plutil -p, 2026-09-26); the child pass itself runs in DRAIN_DAEMON_WE_CLONE, same wiring as drain-land.flow.json's own entry"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "launchd:com.plateau.drain-daemon.plist"
+        },
+        {
+          "kind": "path-tool",
+          "name": "git",
+          "cite": "launchd:com.plateau.drain-daemon.plist"
+        },
+        {
+          "kind": "path-tool",
+          "name": "gh",
+          "cite": "launchd:com.plateau.drain-daemon.plist"
+        },
+        {
+          "kind": "env",
+          "name": "WE_GITHUB_APP_ID",
+          "cite": "launchd:com.plateau.drain-daemon.plist"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token",
+          "cite": "launchd:com.plateau.drain-daemon.plist"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "id": "pr-becomes-conflicting",
+      "label": "PR's merge state reads CONFLICTING (DIRTY/BEHIND)",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs sweep — classifies every OPEN PR (no label filter) into parked / queued / unowned",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1169,1290-1297",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "defaultListParkedPrs (parked-pr-conflict-watch.mjs:1169-1180) runs `gh pr list --state open` with NO label filter — every open PR is classified fresh each ~120s sweep (DEFAULT_PASS_INTERVAL_MS, skills-src/conveyor/daemon-manifest.mjs:29, wired per-repo at :162). Three populations, in priority order: parked (isParkedConflictTarget, :181-190 — an uncleared review:human/pending/changes hold), queued (isQueuedConflictTarget, :202-210 — review:accepted/ready-to-merge, no hold), unowned (isUnownedConflictTarget, :220-226 — neither of the above, base equal to main/unknown). Before commit 93b2d603a (an ancestor of this repo's current main), the unowned population did not exist and a conflicting PR with no review-workflow label sat 'owed-elsewhere' forever (reconcile-core.mjs:1122) with nothing else picking it up — the file's own header (:69-114) names the live incident, chalbert/web-everything#2709. That gap is closed for a main-base PR as of this commit; reconcile-core.mjs itself STILL never dispatches a mechanical fix for a bare `conflicted` phase (reconcile-core.mjs:1122, OWED_ELSEWHERE.conflicted refusal) — it relies entirely on this watch to be 'elsewhere'."
+    },
+    {
+      "id": "queued-conflict-grace",
+      "label": "Approved + queued PR conflicting — drain gets first try",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs (graceDue branch)",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1368",
+      "wait": {
+        "for": "the drain to auto-heal a shared-manifest-only conflict, or the grace window to expire",
+        "timeout": "30m",
+        "onTimeout": "bounced-to-fix",
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:191,1399"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "QUEUED_CONFLICT_GRACE_MS=30min (:191) only applies when computeConflictDisposition reads the conflict as manifest-only/clean (:1392-1399) — a REAL non-manifest conflict skips the wait entirely and routes immediately (:1400-1403, 'never worth waiting out the drain's turn on'). A stacked-base PR reaching this branch is deferred straight to reconcile-core's stacked-rebase branch instead, with no grace semantics at all (:1408-1418) — see stacked-base-deferred-to-fix. A persistently unreadable age source used to wait past grace forever; #4118(b) falls back to this watch's own alert-comment timestamp before giving up (:1408-1414)."
+    },
+    {
+      "id": "unowned-mechanical-rebase-attempt",
+      "label": "No review-workflow label — mechanical rebase-drop attempted at once, no grace",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs#defaultAttemptUnownedConflictRebase",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:335",
+      "wait": null,
+      "retries": {
+        "what": "one rebase-drop attempt per sweep; 'skip'/'error' falls through to the ordinary bounce every subsequent sweep with no dedicated attempt cap of its own",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1510-1526"
+      },
+      "escalation": null,
+      "notes": "Reuses the SAME proven, no-checkout rebase-drop plumbing the drain uses (:323-337). Runs on the SAME sweep that first detects the PR, before any label or bounce (:89 docblock) — gets NO grace period, unlike the queued population. On `action:'rebased'`/`'current'` it resolves silently: no label, no bounce, GitHub's own mergeable flips on the next read (:1519-1524). Once it falls through to the ordinary bounce (bounced-to-fix), it inherits THAT population's own CONFLICT_FIX_ROUND_CAP — this state has no separate cap of its own, so a repeatedly-non-mechanical (real content) conflict costs nothing extra here before landing in the capped population.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "bounced-to-fix",
+      "label": "Labelled + bounced to review:changes — mechanical conflict-fix owed",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictFinding, then scripts/conveyor/reconcile-core.mjs's isConflictBounce dispatch (the fix flow)",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1190",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "postFinding posts a comment + CONFLICT_LABEL and strips review:accepted/ready-to-merge (fresh path :1608-1619,1655-1658; after-grace path :1463-1467). Once phase reads 'bounced' + CONFLICT_LABEL, reconcile-core.mjs's isConflictBounce branch (reconcile-core.mjs:1211-1234) dispatches a real fix agent under kind:'fix' — this is the SAME 'pr-flagged-for-fix' state the fix.flow.json flow owns from here, including its own CONFLICT_FIX_ROUND_CAP=3 cap-exhaustion handling (reconcile-core.mjs:1215-1219). This watch keeps re-sweeping the PR every tick regardless (idempotent: already-labelled means no new finding is posted) until mergeable flips back to MERGEABLE."
+    },
+    {
+      "id": "stood-down",
+      "label": "Statute-tier judgment call — handed to a human",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs#defaultPostConflictStandDown",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1215",
+      "wait": {
+        "for": "a human to clear the stand-down (or take the PR over via /finish)",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/stand-down.mjs:17-19"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "durable PR comment (STAND_DOWN_MARKER), idempotent — never re-posted while it stands",
+        "cite": "scripts/conveyor/stand-down.mjs:48"
+      },
+      "notes": "Shells stand-down.mjs --reason=conflict (parked-pr-conflict-watch.mjs:1207-1214); reconcile-core.mjs's countUnresolvedStandDowns gate (reconcile-core.mjs:472-485,822-847) refuses any further dispatch for this PR while it stands. NOT permanently frozen, though: a PARKED review:human PR that is ALREADY labelled+stood-down is RE-CHECKED every sweep (the #xu2krte 'recheckCandidate' fork, parked-pr-conflict-watch.mjs:1300-1365) — if it now classifies as append-only-statute or review-human-fixable, the earlier stand-down is explicitly SUPERSEDED and routed to a fix agent instead (SUPERSEDE_STAND_DOWN_MARKER, stand-down.mjs:138; parked-pr-conflict-watch.mjs:1350-1362).",
+      "ack": {
+        "unbounded-wait": "#4066"
+      }
+    },
+    {
+      "id": "resolved-mergeable-again",
+      "label": "GitHub reports MERGEABLE again",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs#planConflictLabelChange (newlyResolved)",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:352",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Read fresh every sweep off the SAME classification, so this fires regardless of which upstream state the PR was in (bounced-to-fix, stacked-base-deferred-to-fix, stood-down, or unowned-mechanical-rebase-attempt via GitHub's own recompute). Branches at :1621-1662 on whether a re-arm is even owed (needsRearm = the PR still carries review:changes — false for a stacked/never-bounced PR, which just gets its label removed directly with review:accepted untouched, :1646-1651)."
+    },
+    {
+      "id": "rearm-deferred",
+      "label": "Resolved, but a fix agent is still live on this PR — rearm withheld",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs (deriveReviewStatus liveness check)",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1633-1644",
+      "wait": {
+        "for": "the live fix session (role==='fix', name-based liveness) to finish",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1640-1644"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "CONFLICT_LABEL is deliberately left ON so newlyResolved re-fires next sweep (:1640-1643) — a DIFFERENT, name-based liveness check from reconcile-core.mjs#assessLiveness (own import comment explains why). If this liveness read ever falsely, persistently reports 'still live' (e.g. a stale/misnamed agent-listing entry), nothing in this file bounds how long the rearm stays withheld — a distinct unbounded-wait gap from the fix flow's own permission-prompt gap, sharing only the same underlying symptom class (a liveness signal nobody re-verifies against a clock).",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "rearm-review",
+      "terminal": true,
+      "outcome": "success",
+      "label": "Re-armed for re-review — conflict watch's job on this PR is done",
+      "escalation": null,
+      "notes": "postRearm (parked-pr-conflict-watch.mjs:1654-1655) shells rearm-review.mjs, which swaps review:changes->review:pending and posts REARM_COMMENT_MARKER (scripts/conveyor/rearm-review.mjs:40,73-78) — 'the SAME sanctioned hand-back an ordinary repaired bounce uses.' For a stacked/never-bounced PR (needsRearm false) this state is reached with only the label removed, no rearm comment posted — the PR's prior review:accepted/whatever rides through untouched."
+    },
+    {
+      "id": "stacked-pr-orphan-risk",
+      "label": "A PR's base is about to be deleted by another PR merging",
+      "terminal": false,
+      "owner": "scripts/lib/pr-merge-gate.mjs#retargetStackedPrs, called from the DRAIN (scripts/merge-ai-prs.mjs) — NOT owned by this flow's own watch/reconcile daemons",
+      "ownerCite": "scripts/lib/pr-merge-gate.mjs:218",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "mergePr always merges --delete-branch (scripts/lib/pr-merge-gate.mjs:187-193); GitHub's behaviour on a deleted base is to CLOSE any PR still based on it, never retarget it (confirmed live recovering chalbert/web-everything#2578). retargetStackedPrs (pr-merge-gate.mjs:218-239) runs a `gh pr edit --base <default>` per open stacked PR BEFORE the merge that deletes the base (called scripts/merge-ai-prs.mjs:4897-4905), proactively — this is NOT a passive wait on GitHub's own auto-retarget (GitHub does not reliably do that here). Best-effort by design (pr-merge-gate.mjs:210-215): a `gh` miss here must never block the base PR's own merge."
+    },
+    {
+      "id": "stacked-pr-closed-by-github",
+      "terminal": true,
+      "outcome": "failure",
+      "label": "Retarget failed — GitHub closes the stacked PR",
+      "escalation": {
+        "to": "operator",
+        "how": "durable PR comment posted BEFORE the close (buildStackedBaseCloseReason), naming the recovery: re-target onto the default branch on a fresh PR, or run the #3383 recovery path",
+        "cite": "scripts/merge-ai-prs.mjs:2317,4906"
+      },
+      "notes": "On a failed retarget (scripts/lib/pr-merge-gate.mjs:236-239 `failed[]`), scripts/merge-ai-prs.mjs:4906 posts a durable comment naming the closure and recovery BEFORE the base-deleting merge runs (:2300-2320) — GitHub permits neither a retarget nor a reopen once the PR has actually closed (verified live recovering chalbert/web-everything#2578), so 'after' would be too late. Recovery from here is explicitly a HUMAN action (re-target a fresh PR, or an operator running the #3383 recovery path) — nothing in this file set retries or auto-recovers a closed PR."
+    },
+    {
+      "id": "stacked-base-deferred-to-fix",
+      "label": "Stacked-base conflict — deferred entirely to the fix flow's stacked-rebase branch",
+      "terminal": false,
+      "owner": "scripts/conveyor/parked-pr-conflict-watch.mjs (labels only), then scripts/conveyor/reconcile-core.mjs's STACKED-BASE CONFLICT branch (the fix flow)",
+      "ownerCite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1494-1498",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "A PR whose baseRefName isn't main/unknown is never landed by the drain regardless of label (#poc-branch-declared-delivery-mode clause 5), so the ordinary grace/bounce machinery does not apply — this watch only applies CONFLICT_LABEL immediately (both from queued-grace at :1408-1418 and from fresh detection at :1494-1498) and reports the deferral; it posts NO comment and touches NO other label for this population. reconcile-core.mjs's STACKED-BASE CONFLICT branch (reconcile-core.mjs:1062-1119) then dispatches the actual mechanical rebase under kind:'fix', mode:'stacked-rebase', reading baseRefName LIVE off the PR at repair time so a since-retargeted PR (see stacked-pr-orphan-risk) is read correctly even if this row was planned a tick earlier against the old base (reconcile-core.mjs:1082-1094). Shares the SAME CONFLICT_FIX_ROUND_CAP=3 as the ordinary bounce (reconcile-core.mjs:1097-1107) — documented in fix.flow.json's own round-cap-hit state, not duplicated here."
+    }
+  ],
+  "transitions": [
+    {
+      "from": "pr-becomes-conflicting",
+      "to": "queued-conflict-grace",
+      "on": "queued (approved, no uncleared hold) — give the drain first try",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1291-1298"
+    },
+    {
+      "from": "pr-becomes-conflicting",
+      "to": "unowned-mechanical-rebase-attempt",
+      "on": "unowned (no review-workflow label at all)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1296,1510"
+    },
+    {
+      "from": "pr-becomes-conflicting",
+      "to": "bounced-to-fix",
+      "on": "parked (already under an uncleared review hold), real (non-mechanical) content conflict — labelled and bounced at once",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1494,1608-1619"
+    },
+    {
+      "from": "pr-becomes-conflicting",
+      "to": "stood-down",
+      "on": "fresh detection already classifies as statute-tier and not mechanically resolvable",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1579,1605-1606"
+    },
+    {
+      "from": "pr-becomes-conflicting",
+      "to": "stacked-base-deferred-to-fix",
+      "on": "PR's own base isn't main — deferred whole-cloth to the fix flow's stacked-rebase branch",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1494-1498"
+    },
+    {
+      "from": "queued-conflict-grace",
+      "to": "bounced-to-fix",
+      "on": "30-minute grace expires (manifest-only case), or a real conflict skips the wait outright",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1399-1467"
+    },
+    {
+      "from": "queued-conflict-grace",
+      "to": "stood-down",
+      "on": "post-grace re-classification is statute-tier and not mechanically resolvable",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1432-1463"
+    },
+    {
+      "from": "queued-conflict-grace",
+      "to": "stacked-base-deferred-to-fix",
+      "on": "PR's own base isn't main, discovered once grace-checked",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1408-1418"
+    },
+    {
+      "from": "unowned-mechanical-rebase-attempt",
+      "to": "resolved-mergeable-again",
+      "on": "rebase-drop succeeds (action:'rebased'/'current') — GitHub recomputes mergeable clean, no label ever applied",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1519-1524"
+    },
+    {
+      "from": "unowned-mechanical-rebase-attempt",
+      "to": "bounced-to-fix",
+      "on": "rebase-drop reports 'skip' (a real conflict) or 'error' — falls through to the ordinary bounce",
+      "kind": "failure",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1524-1526"
+    },
+    {
+      "from": "bounced-to-fix",
+      "to": "@fix",
+      "on": "a fix agent is dispatched to resolve the mechanical conflict",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:1211-1234"
+    },
+    {
+      "from": "bounced-to-fix",
+      "to": "resolved-mergeable-again",
+      "on": "mergeable flips back to MERGEABLE on a later sweep",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:352,1621"
+    },
+    {
+      "from": "stacked-base-deferred-to-fix",
+      "to": "@fix",
+      "on": "reconcile-core.mjs dispatches the mechanical stacked-rebase",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:1097-1119"
+    },
+    {
+      "from": "stacked-base-deferred-to-fix",
+      "to": "resolved-mergeable-again",
+      "on": "mergeable flips back to MERGEABLE on a later sweep",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:352,1621"
+    },
+    {
+      "from": "stood-down",
+      "to": "bounced-to-fix",
+      "on": "re-check finds it now append-only-statute or review-human-fixable — the earlier stand-down is explicitly superseded",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1350-1362"
+    },
+    {
+      "from": "stood-down",
+      "to": "resolved-mergeable-again",
+      "on": "a human resolves the conflict by hand while it stood down",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:352,1621"
+    },
+    {
+      "from": "resolved-mergeable-again",
+      "to": "rearm-deferred",
+      "on": "review:changes still carried AND a fix agent's role still reads live on this PR",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1633-1644"
+    },
+    {
+      "from": "resolved-mergeable-again",
+      "to": "rearm-review",
+      "on": "no live fix agent (or nothing needed rearming in the first place) — rearm/label-removal proceeds now",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1646-1655"
+    },
+    {
+      "from": "rearm-deferred",
+      "to": "rearm-review",
+      "on": "the live fix session finishes and liveness reads clear on a later sweep",
+      "kind": "normal",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1621-1662"
+    },
+    {
+      "from": "stacked-pr-orphan-risk",
+      "to": "pr-becomes-conflicting",
+      "on": "retarget succeeds — the PR's baseRefName is now main; a fresh conflict against main (if any) is picked up by the ordinary populations",
+      "kind": "normal",
+      "cite": "scripts/lib/pr-merge-gate.mjs:231-233"
+    },
+    {
+      "from": "stacked-pr-orphan-risk",
+      "to": "stacked-pr-closed-by-github",
+      "on": "retarget fails and the base branch is deleted by the merge",
+      "kind": "failure",
+      "cite": "scripts/lib/pr-merge-gate.mjs:236-239"
+    }
+  ],
+  "steps": [
+    {
+      "id": "list-every-open-pr",
+      "state": "pr-becomes-conflicting",
+      "actor": "parked-pr-conflict-watch.mjs sweep",
+      "does": "lists every OPEN PR with no label filter, then classifies each as parked / queued / unowned / none",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1169-1180,1290-1298",
+      "canFail": true,
+      "onFailure": "pr-becomes-conflicting",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "gh",
+          "cite": "launchd:com.we.parked-pr-conflict-watch-we.plist"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "open",
+          "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1169-1180"
+        }
+      ]
+    },
+    {
+      "id": "apply-conflict-label",
+      "state": "bounced-to-fix",
+      "actor": "parked-pr-conflict-watch.mjs",
+      "does": "ensures + applies CONFLICT_LABEL and posts the bounce finding (review:changes)",
+      "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1608-1620",
+      "canFail": true,
+      "onFailure": "pr-becomes-conflicting",
+      "assumes": [
+        {
+          "kind": "pr",
+          "name": "open"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "conflicting",
+          "cite": "scripts/conveyor/parked-pr-conflict-watch.mjs:1608-1620"
+        }
+      ]
+    }
+  ]
+}

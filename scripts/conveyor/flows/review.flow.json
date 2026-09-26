@@ -1,0 +1,821 @@
+{
+  "id": "review",
+  "title": "Review (job model)",
+  "summary": "The review daemon ticks every 120s, discovers PRs owed an independent review (or re-armed after a fix), and dispatches each as a detached, deterministic job (not a Claude wrapper session): claim a job slot, acquire a lane, run one review-loop-cli.mjs round under a hard 45-minute timeout, classify the outcome, swap the PR's review:* label, release the lane, and — only after that arc fully finishes — run advisory non-Claude extra seats. Round-cap exhaustion, a review:human park, an infra timeout, and a hard-killed job are real states with weak or missing ownership; see the notes on round-cap-exhausted, human-hold, blocked-on-infra and job-died-silently.",
+  "derivedFrom": {
+    "commit": "00413a56c",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "launchd:com.we.review-daemon.plist",
+    "skills-src/conveyor/review-daemon.mjs",
+    "scripts/conveyor/reconcile-pass.mjs",
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/operations/review-dispatch.mjs",
+    "scripts/operations/review-job.mjs",
+    "scripts/operations/review-job-store.mjs",
+    "scripts/operations/review-loop-cli.mjs",
+    "scripts/operations/review-pr.mjs",
+    "scripts/lib/review-loop-policy.mjs",
+    "scripts/lib/review-policy.mjs",
+    "scripts/lib/review-policy.contract.json",
+    "scripts/lib/review-core.mjs",
+    "scripts/lib/review-escalation.mjs",
+    "scripts/lib/review-label-provider.mjs",
+    "scripts/lib/jury-core.mjs",
+    "scripts/lib/judge-spawn.mjs",
+    "scripts/lib/main-staleness.mjs",
+    "scripts/review-set-label.mjs",
+    "scripts/conveyor/rearm-review.mjs",
+    "scripts/conveyor/review-hold-reconcile.mjs",
+    "scripts/conveyor/review-round-tag.mjs",
+    "scripts/conveyor/review-status-tag.mjs",
+    "scripts/conveyor/claude-auth-health.mjs",
+    "scripts/conveyor/hung-session.mjs",
+    "scripts/review-runner.mjs",
+    "scripts/lib/review-runner-core.mjs",
+    "scripts/conveyor/health-smells/daemon-owed-no-dispatch.mjs",
+    "scripts/conveyor/health-smells/red-pr-unattended.mjs",
+    "scripts/progress-board.mjs",
+    "scripts/lib/daemon-self-sync.mjs",
+    "scripts/operations/review-extra-seats.mjs",
+    "scripts/lib/provider-routing.mjs",
+    "scripts/conveyor/run-scorecard-store.mjs",
+    "scripts/conveyor/log-delegation-trial.mjs",
+    "scripts/lib/marker-authorship.mjs",
+    "scripts/lib/delegation-marker.mjs"
+  ],
+  "entry": {
+    "state": "review-owed",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/wev-review-daemon"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "ProgramArguments[0] is an absolute nvm node path"
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "PATH env includes /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "same PATH string as git"
+      },
+      {
+        "kind": "path-tool",
+        "name": "claude",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "same PATH string; also required by claude-auth-health.mjs's probeClaudeLoggedIn"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "WE_GITHUB_APP_ID/WE_GITHUB_APP_INSTALLATION_ID/WE_GITHUB_APP_PRIVATE_KEY_PATH env, consumed by scripts/lib/github-app-auth-env.mjs#withGithubAppAuth, wired at skills-src/conveyor/review-daemon.mjs:101,540"
+      },
+      {
+        "kind": "lock",
+        "name": "daemon-clone-reader",
+        "cite": "scripts/lib/daemon-self-sync.mjs:73-88",
+        "note": "withSelfSync takes the clone's own READ lock (daemon-clone-lock.mjs) for the duration of one tick; a concurrent rebuild holds the WRITE lock instead — not in the shared vocabulary, added here since neither existing lock name fits a reader hold"
+      },
+      {
+        "kind": "state-root",
+        "name": "<state-root>",
+        "cite": "scripts/operations/review-job-store.mjs:28-34",
+        "note": "reviewJobsDir() resolves .operations/review-jobs by SCRIPT LOCATION under the daemon's own clone, pinned by WE_DAEMON_MANAGED_CLONE semantics"
+      },
+      {
+        "kind": "writable",
+        "name": "<state-root>",
+        "cite": "scripts/operations/review-job-store.mjs:28-34",
+        "note": ".operations/review-jobs lives inside the daemon's own writable clone (cwd:<daemon-clone> above), so it is writable wherever that cwd holds"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "review-owed",
+      "label": "PR discovered as owed a review",
+      "terminal": false,
+      "owner": "review-daemon",
+      "ownerCite": "skills-src/conveyor/review-daemon.mjs:161-306",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Not a wait state — every 120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/review-daemon.mjs:114) re-runs reconcile-pass.mjs's runReconcilePass (scripts/conveyor/reconcile-pass.mjs:368-386) through reconcile-core.mjs's planReconcile (scripts/conveyor/reconcile-core.mjs:781-1271), which re-derives the whole plan fresh from PR labels + live sessions/jobs each time. A PR can sit here indefinitely if lanes are starved (deferredForLanes) or Claude auth is broken (deferredForAuth) — both are 'stays owed, retried next tick', never a distinct backlog."
+    },
+    {
+      "id": "claude-auth-paused",
+      "label": "Dispatch paused — operator's Claude login is broken",
+      "terminal": false,
+      "owner": "review-daemon",
+      "ownerCite": "scripts/conveyor/claude-auth-health.mjs:193-201",
+      "wait": {
+        "for": "the cheap `claude auth status --json` probe to report loggedIn:true again",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/claude-auth-health.mjs:35-54,156-163"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "daemon log line, exact wording pinned",
+        "cite": "skills-src/conveyor/review-daemon.mjs:488"
+      },
+      "notes": "No timeout at all: the gate stays closed until either the health-watch episode closes or the direct transcript scan of the most recently dispatched session stops seeing the auth-failure text (scripts/conveyor/claude-auth-health.mjs:82-125). Every review this tick is deferred, not lost (deferredForAuth, skills-src/conveyor/review-daemon.mjs:261-268,303).",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "stale-clone-refused",
+      "label": "Dispatch refused — the daemon's own clone is stale (behind origin/main in code files)",
+      "terminal": false,
+      "owner": "review-daemon",
+      "ownerCite": "scripts/lib/main-staleness.mjs:183-249",
+      "wait": {
+        "for": "the daemon's own gated rebuild (a separate process/flow, @daemon-rebuild) to fast-forward or rebuild the clone",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/lib/main-staleness.mjs:236-248"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "the clone's own clone-held-stale alert log named in the thrown message",
+        "cite": "scripts/lib/main-staleness.mjs:240-246"
+      },
+      "notes": "assertMainNotStale (scripts/operations/review-job.mjs:449, called from dispatchReviewJob) throws STALE_MAIN_REFUSAL_MARKER when this checkout is behind origin/main and either DIVERGED, DIRTY, off-base, or a managed clone (WE_DAEMON_MANAGED_CLONE=1 — always true for this daemon's dedicated clone, scripts/lib/main-staleness.mjs:195). A managed clone NEVER auto-fast-forwards here on purpose (scripts/lib/main-staleness.mjs:189-195) — only its own gated rebuild may move it, which is a different flow (@daemon-rebuild) this file does not model further. Non-code-only diffs are NOT stale (scripts/lib/main-staleness.mjs:200-211, #4044).",
+      "ack": {
+        "unbounded-wait": "#4068"
+      }
+    },
+    {
+      "id": "dispatching",
+      "label": "Job slot claimed, acquiring a lane",
+      "terminal": false,
+      "owner": "review-job",
+      "ownerCite": "scripts/operations/review-job.mjs:325-380",
+      "wait": {
+        "for": "a free lane in the shared lane pool (lane-pool.mjs acquire --wait-ms)",
+        "timeout": "60000ms (REVIEW_JOB_LANE_WAIT_MS)",
+        "onTimeout": "review-owed",
+        "cite": "scripts/operations/review-job.mjs:108,220-228,364-374"
+      },
+      "retries": {
+        "what": "consecutive no-lane deferrals for this PR, counted off its own completion record's `lane-deferrals:N` label",
+        "cap": 5,
+        "onCap": "blocked-on-infra",
+        "cite": "scripts/operations/review-job.mjs:111,180-186,370-374"
+      },
+      "escalation": null,
+      "notes": "There is no review-specific concurrency cap: how many review jobs can run at once is bounded only by the SHARED lane pool's acquirable count (defaultAcquirableLaneCount, skills-src/conveyor/review-daemon.mjs:418-420), which fix and ci-heal dispatches draw from too. Nothing here escalates a starved pool to an operator; it is left to the (separate) lane-starvation health smell."
+    },
+    {
+      "id": "reviewing",
+      "label": "review-loop-cli.mjs running one read→judge→reduce→confirm round",
+      "terminal": false,
+      "owner": "review-job",
+      "ownerCite": "scripts/operations/review-job.mjs:229-238,380-384; scripts/operations/review-loop-cli.mjs:125-190",
+      "wait": {
+        "for": "the review-loop-cli.mjs child process to exit",
+        "timeout": "2700000ms default (DEFAULT_LOOP_TIMEOUT_MS), overridable via WE_REVIEW_JOB_TIMEOUT_MS",
+        "onTimeout": "blocked-on-infra",
+        "cite": "scripts/operations/review-job.mjs:117-126,229-238,386-387"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "SIGKILL on timeout (scripts/operations/review-job.mjs:204-206, killSignal:'SIGKILL' on the spawnSync timeout option) — a hung juror or a hung git operation inside the lane is hard-killed, not merely abandoned. No retry within this one round; a fresh round only happens if the PR is re-dispatched from review-owed on a later tick."
+    },
+    {
+      "id": "accepted",
+      "label": "review:accepted — auto-cleared or human-cleared",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "review-job",
+      "ownerCite": "scripts/lib/review-loop-policy.mjs:112-116; scripts/review-set-label.mjs:376-384",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the x00g3tt post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
+    },
+    {
+      "id": "changes-requested",
+      "label": "review:changes — bounced to the author lane",
+      "terminal": false,
+      "owner": "review-job",
+      "ownerCite": "scripts/lib/review-loop-policy.mjs:63-65,112-116; scripts/review-set-label.mjs:411-429",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Hands off to @fix (the conveyor's fix-dispatch path); rearm-review.mjs is what eventually swaps review:changes back to review:pending (or leaves review:human alone, scripts/conveyor/rearm-review.mjs:82-84,265-304) once a repair lands, re-entering review-owed on a later tick. review:human is never removed here (scripts/review-set-label.mjs:413-414)."
+    },
+    {
+      "id": "human-hold",
+      "label": "review:human — parked, awaiting a human's /review",
+      "terminal": false,
+      "owner": "none",
+      "ownerCite": "scripts/lib/review-loop-policy.mjs:74-78,112-113",
+      "wait": {
+        "for": "a human to run /review, or scripts/review-set-label.mjs --to=clear-human",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/lib/review-loop-policy.mjs:74-78; scripts/review-set-label.mjs:180-181,225-234"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "label only (review:human) + the review-pr `advise` step's advisory-panel comment; no active paging",
+        "cite": "scripts/lib/review-escalation.mjs:50-66; scripts/conveyor/health-smells/index.mjs (no smell targets review:human age)"
+      },
+      "notes": "reviewLoopAutoConfirm's refusal 1 declines UNCONDITIONALLY whenever pending.of !== CONFIRM_ACTORS.AGENT (scripts/lib/review-loop-policy.mjs:74-78,113) — there is no code path that ever auto-clears review:human. Genuinely unbounded wait: reconcile-core.mjs's own permission-block precedent (awaiting-permission, scripts/conveyor/reconcile-core.mjs:706-714) shows a session CAN sit blocked for 211+ hours with only a log note; review:human has no equivalent surfaced note at all — scripts/progress-board.mjs:509 shows it as 'awaiting your clear' (rank 0, crit) on the dashboard, which IS the one human-visible signal, but nothing pages anyone or ages it into a stronger escalation.",
+      "ack": {
+        "no-owner": "#4066",
+        "unbounded-wait": "#4066"
+      }
+    },
+    {
+      "id": "round-cap-exhausted",
+      "label": "Negotiation round cap (5) exhausted — silently refused",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:1257-1263",
+      "wait": null,
+      "retries": {
+        "what": "rearm/advisory-comment-counted negotiation rounds (countRearmComments + countAdvisoryComments, whichever is higher)",
+        "cap": 5,
+        "onCap": null,
+        "cite": "scripts/lib/jury-core.mjs:1034; scripts/conveyor/reconcile-core.mjs:1161-1165,1257-1263"
+      },
+      "escalation": null,
+      "notes": "GAP (uncapped-retry's mirror-image: capped, but no exit). Unlike the ci-red branch's OWN cap, which pushes an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:932-957), the GENERIC review/fix round-cap exhaustion at line 1257-1263 pushes NO note — only a `cap-exhausted` refusal line in that tick's report (scripts/conveyor/reconcile-pass.mjs:339-360) and the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). scripts/progress-board.mjs:495 still classifies this PR as ordinary 'needs-review' (info severity, 'parked for an independent review pass') — the dashboard cannot distinguish a normally-in-flight review from one stuck at cap-exhausted forever. No label flip to review:human, no notification, no owner. This is the single clearest 'review loops cap' finding the brief asked to record.",
+      "ack": {
+        "silent-failure": "xwuof33",
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "blocked-on-infra",
+      "label": "Job reported blocked-on-infra (no lane after 5 tries, loop timeout, unparseable output, or a crash)",
+      "terminal": false,
+      "owner": "review-daemon",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:490,522-539",
+      "wait": {
+        "for": "the 15-minute infra cool-off before this PR is treated as retryable again",
+        "timeout": "900000ms (INFRA_RETRY_COOLOFF_MS)",
+        "onTimeout": "review-owed",
+        "cite": "scripts/conveyor/reconcile-core.mjs:487-490,522-539"
+      },
+      "retries": {
+        "what": "how many times a PR may cycle back through blocked-on-infra over its lifetime",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:487-539"
+      },
+      "escalation": null,
+      "notes": "GAP (uncapped-retry). The 15-minute cool-off bounds ONE cycle, but nothing counts how many times a PR has cycled through blocked-on-infra — a persistently-unhealthy PR (a lane pool that never recovers, a review-loop-cli.mjs bug that always times out) retries forever, every 15 minutes, with no escalation. The only mechanical backstop that could notice is the daemon-owed-no-dispatch health smell (scripts/conveyor/health-smells/daemon-owed-no-dispatch.mjs:1-8,29-36), which fires on the DAEMON'S overall dispatch productivity (30-minute streak or a 60% bad-tick ratio over 30 minutes), not on one PR's own retry count.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "job-died-silently",
+      "label": "Job's OS process was hard-killed — no completion record written",
+      "terminal": false,
+      "owner": "none",
+      "ownerCite": "scripts/operations/review-job-store.mjs:108-120",
+      "wait": {
+        "for": "the next reconcile-pass read to probe this job's pid and find it dead",
+        "timeout": null,
+        "onTimeout": "review-owed",
+        "cite": "scripts/operations/review-job-store.mjs:108-120; skills-src/conveyor/review-daemon.mjs:114"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "A SIGKILL (host reboot, OOM kill, `kill -9`) never runs review-job.mjs's own `finally` block (scripts/operations/review-job.mjs:410-423), so no `done` completion record is written and the lane lease is never released by THIS code. The stale job-record.json is pruned automatically the next time listReviewJobAgents reads it and finds the pid dead (scripts/operations/review-job-store.mjs:115-117), which frees the PR to be redispatched — but the leaked lane lease itself is reclaimed only by a SEPARATE component, the lane pool's own ghost-lease reaper, named but not implemented in this file (scripts/operations/review-job.mjs:362, '#2748'). No owner inside this flow for that leak; it is a hand-off this file only narrates.",
+      "ack": {
+        "no-owner": "#4125",
+        "unbounded-wait": "#4125"
+      }
+    },
+    {
+      "id": "extra-seats-advisory",
+      "label": "Added non-Claude review seats (Codex extra-juror + 2 advisory lenses) run, post-verdict",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "review-job",
+      "ownerCite": "scripts/operations/review-job.mjs:242-261,304-321",
+      "wait": {
+        "for": "review-extra-seats.mjs to finish",
+        "timeout": "resolveSeatTimeoutMs(env) + 300000ms wall clock",
+        "onTimeout": "extra-seats-advisory",
+        "cite": "scripts/operations/review-job.mjs:249-250"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Deliberately decoupled: this step runs strictly AFTER the arc's outcome is already reported `done` and the label already swapped (scripts/operations/review-job.mjs:296-297,307-321) — a crash, a thrown kill switch, or a timeout here is captured only as a `status` field in the logged summary (scripts/operations/review-job.mjs:311-321) and can never change the verdict, never retries, and is never surfaced to an operator. This is intentional per the file's own header, not an oversight, but it is still a no-owner/no-escalation terminus for whatever the added seats found."
+    },
+    {
+      "id": "red-team-advisory",
+      "label": "x00g3tt post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "review-job",
+      "ownerCite": "scripts/operations/review-job.mjs:362-374",
+      "wait": {
+        "for": "review-extra-seats.mjs's `red-team` subcommand to finish (one non-Claude attack call, then a Claude re-check of anything it reports)",
+        "timeout": "resolveSeatTimeoutMs(env) + 20*60*1000ms wall clock on the child process itself (SIGKILL on expiry, same spawnSync mechanism as the review loop and the added seats)",
+        "onTimeout": "red-team-advisory",
+        "cite": "scripts/operations/review-job.mjs:265-273,201-207; scripts/operations/review-extra-seats.mjs:80,108-111,643-653"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Gated on redTeamRequired(verdict) (scripts/lib/jury-core.mjs:1116-1118) — only an ACCEPT verdict ever reaches this state; a bounced or parked review never does. Deliberately decoupled exactly like extra-seats-advisory: this runs strictly AFTER the review's own outcome is already reported and labelled (scripts/operations/review-job.mjs:362-364), so a crash, a thrown kill switch (WE_REVIEW_RED_TEAM=0, or WE_REVIEW_EXTRA_SEATS=0 which disables this too), or a timeout here is captured only as a `status` field on the logged summary (scripts/operations/review-job.mjs:365-373) — never retried, never escalated, never able to change the verdict or the review:* label. `foldedVerdict` (accept/changes/needs-human, jury-core.mjs#foldRedTeamVerdict) is RECORDED as evidence only — the module's own header states it is 'recorded, not enforced' in v1 (scripts/operations/review-extra-seats.mjs:37-40,682-684). A confirmed break DOES leave a durable trace beyond the log line: a `red-team-miss` evidence row for the accepting Claude seat and for the builder's model/provider (buildMissRows, scripts/operations/review-extra-seats.mjs:879-903), a 'reworked' delegation-trial row when the PR carries a delegation marker (finishRedTeamEffects, scripts/operations/review-extra-seats.mjs:945-967), and ONE advisory PR comment deduped by a trusted-author-checked marker (scripts/operations/review-extra-seats.mjs:726-733,906-924,969-983). The model never runs twice for the same (pr, head): a prior clean seat row makes a later run a `resumeRedTeam` replay that only finishes whichever effect (row / delegation trial / comment) failed last time, spending no new call (scripts/operations/review-extra-seats.mjs:735-747,989-1014,1038-1039). It shares its daily call cap and reservation ledger with the ordinary added seats (DAILY_CAP_ENV, default 40/day, scripts/operations/review-extra-seats.mjs:76-77) — if extra-seats-advisory's own calls already spent the day's budget, the red team is simply skipped for cap reasons (scripts/operations/review-extra-seats.mjs:1050-1057), which this file records as a real, not-owned/not-escalated shared-resource coupling rather than a distinct failure. This is intentional per the module's own header, not an oversight — the same shape as extra-seats-advisory's own no-owner/no-escalation terminus, so it carries no new card."
+    },
+    {
+      "id": "shadow-observation",
+      "label": "Scheduled SHADOW runner independently observes review:pending PRs — mutates nothing",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "none",
+      "ownerCite": "scripts/review-runner.mjs:1-51,222-225",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "scripts/review-runner.mjs is a SEPARATE, singleton-leased pass over the SAME review:pending population, reading a DIFFERENT durable ledger (the #2639 editor↔reviewer convergence loop's jury-ledger, via readJuryLog, scripts/review-runner.mjs:145-149) than the one review-job.mjs/review-pr.mjs write. `--enforce` is hard-refused (scripts/review-runner.mjs:222-225) — it can only ever log what it WOULD do. Checked live on this host: `~/Library/LaunchAgents/` contains com.we.review-daemon.plist but NO com.we.review-runner.plist and no cron entry either — despite being built as 'the scheduled process' (file header, scripts/review-runner.mjs:3-15), nothing currently schedules it; it only runs on a manual invocation. Owner is genuinely 'none' in production today."
+    }
+  ],
+  "transitions": [
+    {
+      "from": "review-owed",
+      "to": "claude-auth-paused",
+      "on": "readClaudeAuthHealth reports broken and the cheap probe reports NOT logged in",
+      "kind": "normal",
+      "cite": "scripts/conveyor/claude-auth-health.mjs:179-183,193-201"
+    },
+    {
+      "from": "claude-auth-paused",
+      "to": "review-owed",
+      "on": "the probe reports logged in again (lifted for exactly the next tick's real dispatch, which is itself the confirming test)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/claude-auth-health.mjs:171-183"
+    },
+    {
+      "from": "review-owed",
+      "to": "stale-clone-refused",
+      "on": "the daemon's own clone is behind origin/main in a code file",
+      "kind": "failure",
+      "cite": "scripts/lib/main-staleness.mjs:196-249; scripts/operations/review-job.mjs:448-449"
+    },
+    {
+      "from": "stale-clone-refused",
+      "to": "review-owed",
+      "on": "a later gated rebuild (@daemon-rebuild) brings the clone current",
+      "kind": "normal",
+      "cite": "scripts/lib/main-staleness.mjs:189-195"
+    },
+    {
+      "from": "review-owed",
+      "to": "round-cap-exhausted",
+      "on": "the PR's own durable attempt count (rearm + advisory comments) is already >= 5",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:1161-1165,1257-1263"
+    },
+    {
+      "from": "review-owed",
+      "to": "dispatching",
+      "on": "reconcile plans a review dispatch, a lane is acquirable, auth is not paused, and the clone is not stale",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-pass.mjs:368-386; skills-src/conveyor/review-daemon.mjs:265-290"
+    },
+    {
+      "from": "review-owed",
+      "to": "shadow-observation",
+      "on": "review-runner.mjs is invoked (manually — no schedule found on this host) against the same review:pending population",
+      "kind": "normal",
+      "cite": "scripts/review-runner.mjs:97-114,251-269"
+    },
+    {
+      "from": "dispatching",
+      "to": "review-owed",
+      "on": "no lane acquired within the 60s wait, deferral count still under 5",
+      "kind": "timeout",
+      "cite": "scripts/operations/review-job.mjs:369-374"
+    },
+    {
+      "from": "dispatching",
+      "to": "blocked-on-infra",
+      "on": "no lane acquired and this PR's consecutive-deferral count reaches 5",
+      "kind": "timeout",
+      "cite": "scripts/operations/review-job.mjs:180-186,370-374"
+    },
+    {
+      "from": "dispatching",
+      "to": "review-owed",
+      "on": "a live job already holds this PR's slot — refused, not fatal",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:338-342"
+    },
+    {
+      "from": "dispatching",
+      "to": "reviewing",
+      "on": "a lane path is returned",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:376-384"
+    },
+    {
+      "from": "reviewing",
+      "to": "accepted",
+      "on": "loop classified auto-cleared (agent-tier accept, or prevention-outstanding auto-cleared)",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:143-156,391-392; scripts/lib/review-loop-policy.mjs:112-116"
+    },
+    {
+      "from": "reviewing",
+      "to": "changes-requested",
+      "on": "loop classified bounced",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:150-153; scripts/lib/review-loop-policy.mjs:63-65,116"
+    },
+    {
+      "from": "reviewing",
+      "to": "human-hold",
+      "on": "loop stopped at confirm on a human-addressed (review:human) PR — classified `parked`",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:154; scripts/lib/review-loop-policy.mjs:74-78,112-113"
+    },
+    {
+      "from": "reviewing",
+      "to": "blocked-on-infra",
+      "on": "the loop times out (45min), its stdout does not parse, or the arc throws",
+      "kind": "timeout",
+      "cite": "scripts/operations/review-job.mjs:118-126,229-238,386-397,406-409"
+    },
+    {
+      "from": "reviewing",
+      "to": "job-died-silently",
+      "on": "the OS process itself is killed (SIGKILL/OOM/reboot) before its own finally block runs",
+      "kind": "failure",
+      "cite": "scripts/operations/review-job.mjs:410-423"
+    },
+    {
+      "from": "job-died-silently",
+      "to": "review-owed",
+      "on": "the next reconcile-pass tick's listReviewJobAgents read probes the dead pid and prunes the record",
+      "kind": "timeout",
+      "cite": "scripts/operations/review-job-store.mjs:108-120"
+    },
+    {
+      "from": "blocked-on-infra",
+      "to": "review-owed",
+      "on": "the 15-minute cool-off elapses",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/reconcile-core.mjs:487-490,522-539"
+    },
+    {
+      "from": "changes-requested",
+      "to": "@fix",
+      "on": "the bounced PR is handed to the conveyor's fix-dispatch path",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:156,239"
+    },
+    {
+      "from": "human-hold",
+      "to": "accepted",
+      "on": "a human runs /review and answers accept, or runs review-set-label.mjs --to=clear-human",
+      "kind": "escalation",
+      "cite": "scripts/review-set-label.mjs:225-262"
+    },
+    {
+      "from": "human-hold",
+      "to": "changes-requested",
+      "on": "a human runs /review and answers changes",
+      "kind": "escalation",
+      "cite": "scripts/operations/review-pr.mjs:815"
+    },
+    {
+      "from": "accepted",
+      "to": "@drain-land",
+      "on": "the PR now carries review:accepted; the drain reconciles and may merge it",
+      "kind": "normal",
+      "cite": "scripts/lib/review-escalation.mjs:2308-2328"
+    },
+    {
+      "from": "accepted",
+      "to": "extra-seats-advisory",
+      "on": "the loop's stdout parsed and did not time out",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:404"
+    },
+    {
+      "from": "changes-requested",
+      "to": "extra-seats-advisory",
+      "on": "the loop's stdout parsed and did not time out",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:404"
+    },
+    {
+      "from": "human-hold",
+      "to": "extra-seats-advisory",
+      "on": "the loop's stdout parsed and did not time out",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:404"
+    },
+    {
+      "from": "accepted",
+      "to": "red-team-advisory",
+      "on": "the loop's stdout parsed and did not time out, and the loop's own verdict was exactly `accept` (redTeamRequired)",
+      "kind": "normal",
+      "cite": "scripts/operations/review-job.mjs:362-364,457; scripts/lib/jury-core.mjs:1116-1118"
+    }
+  ],
+  "steps": [
+    {
+      "id": "discover-owed-prs",
+      "state": "review-owed",
+      "actor": "review-daemon",
+      "does": "gh pr list (open PRs, labels/headRefOid/statusCheckRollup/comments) + claude agents --json + live review-job records, reduced by planReconcile to a dispatch/refusal/notes plan",
+      "cite": "scripts/conveyor/reconcile-pass.mjs:103-113,136-154,368-386; scripts/conveyor/reconcile-core.mjs:781-1271",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "gh",
+          "cite": "launchd:com.we.review-daemon.plist"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token",
+          "cite": "launchd:com.we.review-daemon.plist"
+        },
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "skills-src/conveyor/review-daemon.mjs:513"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "open",
+          "cite": "scripts/conveyor/reconcile-pass.mjs:91"
+        }
+      ]
+    },
+    {
+      "id": "auth-health-gate",
+      "state": "review-owed",
+      "actor": "review-daemon",
+      "does": "compute (once per tick, host-global) whether the operator's Claude login is broken, via a health-episode read plus a cheap `claude auth status --json` probe",
+      "cite": "skills-src/conveyor/review-daemon.mjs:339-340; scripts/conveyor/claude-auth-health.mjs:134-201",
+      "canFail": false,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude",
+          "cite": "launchd:com.we.review-daemon.plist"
+        }
+      ],
+      "provides": []
+    },
+    {
+      "id": "hold-reconcile-sweep",
+      "state": "review-owed",
+      "actor": "review-daemon",
+      "does": "strip a stray review:pending sitting beside review:human, and a stale advisory:* label once review:human is gone — runs independently of, and before, the discover step",
+      "cite": "scripts/conveyor/review-hold-reconcile.mjs:65-114; skills-src/conveyor/review-daemon.mjs:167,197-203",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "gh",
+          "cite": "launchd:com.we.review-daemon.plist"
+        }
+      ],
+      "provides": []
+    },
+    {
+      "id": "spawn-review-job",
+      "state": "dispatching",
+      "actor": "review-daemon",
+      "does": "detached-spawn `node review-job.mjs run --pr --repo`, unref'd, stdout/stderr appended to the job's own log file; the DAEMON's own OS process cwd stays its dedicated clone — the job never chdirs into a lane",
+      "cite": "scripts/operations/review-job.mjs:438-477,481-489",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "scripts/operations/review-job.mjs:468-469"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "launchd:com.we.review-daemon.plist"
+        },
+        {
+          "kind": "writable",
+          "name": "<state-root>",
+          "cite": "scripts/operations/review-job-store.mjs:31-34,55-62"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "scripts/operations/review-job.mjs:200-206",
+          "note": "the job's OWN OS process cwd; it is a plain node process with no Claude session and no Claude permission model at all"
+        },
+        {
+          "kind": "git",
+          "name": "origin/main fetched",
+          "cite": "scripts/lib/main-staleness.mjs:67-77,196-199",
+          "note": "produced by THIS step's own call to assertMainNotStale, which fetches before it checks — not a pre-condition of this step"
+        }
+      ]
+    },
+    {
+      "id": "claim-job-slot",
+      "state": "dispatching",
+      "actor": "review-job",
+      "does": "decideJobClaim against the on-disk job record for this PR's slug — refuses if a live pid already holds it",
+      "cite": "scripts/operations/review-job.mjs:338-342; scripts/operations/review-job-store.mjs:76-81",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "writable",
+          "name": "<state-root>",
+          "cite": "scripts/operations/review-job-store.mjs:54-62"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "fix-claim:<pr>",
+          "cite": "scripts/operations/review-job-store.mjs:76-81",
+          "note": "not a real lock-file lease — a job-record.json whose live pid IS the claim; named against the closest shared vocabulary entry"
+        }
+      ]
+    },
+    {
+      "id": "acquire-lane",
+      "state": "dispatching",
+      "actor": "review-job",
+      "does": "`node lane-pool.mjs acquire --repo --purpose=review-loop --session=<slug> --wait-ms=60000 --adopt`",
+      "cite": "scripts/operations/review-job.mjs:220-228,364-374",
+      "canFail": true,
+      "onFailure": "blocked-on-infra",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "scripts/operations/review-job.mjs:200-206"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "launchd:com.we.review-daemon.plist"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<lane>",
+          "cite": "scripts/operations/review-job.mjs:377-378",
+          "note": "a logical path string only — handed forward as a --cwd=<lanePath> ARGUMENT to review-loop-cli.mjs, never as this job's own process.chdir"
+        },
+        {
+          "kind": "lock",
+          "name": "lane-lease:<lane>",
+          "cite": "scripts/operations/review-job.mjs:220-224"
+        }
+      ]
+    },
+    {
+      "id": "run-review-loop",
+      "state": "reviewing",
+      "actor": "review-job",
+      "does": "`node review-loop-cli.mjs --pr --repo --cwd=<lanePath> --provider=claude --json` under a fresh per-round actor id and a hard timeout",
+      "cite": "scripts/operations/review-job.mjs:229-238,380-384",
+      "canFail": true,
+      "onFailure": "blocked-on-infra",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<lane>",
+          "cite": "scripts/operations/review-job.mjs:230-233",
+          "note": "passed as an argv flag, not the child's OS cwd (which stays <daemon-clone> per createReviewJobIo's own `node()` helper, scripts/operations/review-job.mjs:200-206) — review-loop-cli.mjs's own internal io resolves file/git reads against the FLAG value"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "reads",
+          "name": "<lane>",
+          "cite": "scripts/operations/review-loop-cli.mjs:325-329"
+        }
+      ]
+    },
+    {
+      "id": "spawn-mandatory-jurors",
+      "state": "reviewing",
+      "actor": "review-pr",
+      "does": "spawn the correctness and security jurors as independent `claude -p` processes with Bash/Read/Grep/Glob tool access, one per mandatory lens",
+      "cite": "scripts/operations/review-pr.mjs:791-794,2050-2061; scripts/lib/judge-spawn.mjs:762-804",
+      "canFail": true,
+      "onFailure": "human-hold",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<lane>",
+          "cite": "scripts/lib/judge-spawn.mjs:305-334",
+          "note": "assertLaneCwd THROWS (fail-closed) unless this juror's own process cwd resolves to a real lane clone, and refuses if it is the driving session's own lane"
+        }
+      ],
+      "provides": []
+    },
+    {
+      "id": "classify-and-record-verdict",
+      "state": "reviewing",
+      "actor": "review-job",
+      "does": "reviewLoopAutoConfirm answers the agent-addressed confirm step (accept / changes), review-pr's record step swaps the review:* label and stamps the reviewed-sha marker via review-set-label.mjs",
+      "cite": "scripts/lib/review-loop-policy.mjs:112-116; scripts/review-set-label.mjs:1230-1264",
+      "canFail": false,
+      "onFailure": null,
+      "assumes": [],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "reviewed",
+          "cite": "scripts/review-set-label.mjs:829,1245"
+        }
+      ]
+    },
+    {
+      "id": "run-extra-seats",
+      "state": "extra-seats-advisory",
+      "actor": "review-job",
+      "does": "spawn review-extra-seats.mjs (an extra Codex correctness juror + up to 2 advisory-lens seats on Codex/Gemini), strictly after the arc's own outcome is already reported and labelled — deliberately advisory-only: a failure here is captured as a status string and never propagates (see the extra-seats-advisory state's own notes)",
+      "cite": "scripts/operations/review-job.mjs:242-261,304-321",
+      "canFail": true,
+      "onFailure": "extra-seats-advisory",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<lane>",
+          "cite": "scripts/operations/review-job.mjs:248-249"
+        }
+      ],
+      "provides": []
+    },
+    {
+      "id": "run-red-team-seat",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "spawn `review-extra-seats.mjs red-team` as its own process; inside, redTeamEnabled() checks both kill switches first, then a prior clean seat row for this exact (pr, head commit) short-circuits into a `resumeRedTeam` replay (no new call spent) — otherwise selectReviewSeatProvider picks Codex or Gemini for the `red-team` lens (skipping a provider whose CLI is missing or sitting out a quota hold), reserves ONE call against the shared daily cap under the reservation-ledger lock, builds a throwaway scratch clone fetching ONLY the PINNED head commit (refuses an unpinned rev — the lane is already released by this point), and runs the attack call at the higher 'high' effort each provider offers",
+      "cite": "scripts/operations/review-job.mjs:265-273; scripts/operations/review-extra-seats.mjs:716-719,1025-1096",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
+      "provides": []
+    },
+    {
+      "id": "claude-recheck-confirmed-breaks",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "for every break the seat call reported, spawn a fresh tool-free Claude juror (sonnet, high effort, $1 budget, 10-minute timeout) that judges ONLY the diff to decide whether the claimed break is real; a claim it does not confirm, and a re-check that itself errors or times out, is marked `confirmedByRecheck:false` — a miss is only ever inferred from a positive confirmation, never from silence",
+      "cite": "scripts/operations/review-extra-seats.mjs:700-703,1100-1114,1174-1181",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
+      "provides": []
+    },
+    {
+      "id": "record-red-team-outcome",
+      "state": "red-team-advisory",
+      "actor": "review-job",
+      "does": "write the red-team's own scorecard evidence row, plus one `red-team-miss` row for the accepting Claude seat and one for the builder's model per confirmed break; log a 'reworked' delegation-trial row when the PR carries a delegation marker; and post ONE deduped advisory PR comment (a trusted-author-checked marker stops a repeat post) — none of this ever swaps the review:* label, changes the merge outcome, or re-opens the round loop",
+      "cite": "scripts/operations/review-extra-seats.mjs:879-903,932-987,1130-1146",
+      "canFail": true,
+      "onFailure": "red-team-advisory",
+      "assumes": [],
+      "provides": []
+    }
+  ]
+}

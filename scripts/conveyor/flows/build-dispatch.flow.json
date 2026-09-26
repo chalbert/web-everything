@@ -1,0 +1,687 @@
+{
+  "id": "build-dispatch",
+  "title": "Build dispatch — cleared queue row to landed/parked PR",
+  "summary": "A cleared conveyor-queue item is admitted past capacity/load/queue-time gates by tick-core.mjs#planTick, then must be picked up by an OPERATOR-ATTENDED /conveyor session (the ratified #2701 'judgment layer') to actually spawn a headless `claude --bg` builder session. That session's cwd is a scratch directory outside every checkout (#4174) with no --add-dir and no baked-in permission flags, so it must acquire its own lane and then edit inside it on a permission grant nothing in the dispatch path actually provides — the live, measured #2701/#4174 gap (three real 'conveyor' sessions stuck on a permission prompt for 211.4h, backlog #3296; the detector for it, backlog #3149, is still open). If it gets through, it runs verify-lane and scripts/pr-land.mjs, which opens a PR labelled either ready-to-merge (hands off to @drain-land) or review:human/review:pending (hands off to @review).",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/conveyor/queue-store.mjs",
+    "scripts/conveyor/tick-core.mjs",
+    "scripts/readiness/dispatch-plan.mjs",
+    "scripts/readiness/heavy-admission.mjs",
+    "scripts/conveyor/claude-auth-health.mjs",
+    "scripts/conveyor/driver-mode.mjs",
+    "skills-src/conveyor/runner.mjs",
+    "skills-src/conveyor/supervisor.mjs",
+    "skills-src/conveyor/SKILL.md",
+    "scripts/operations/dispatch-lane-io.mjs",
+    "scripts/lib/spawn-to-completion.mjs",
+    "scripts/lib/dispatch-contracts.mjs",
+    "skills-src/conveyor/delivery-agent-brief.md",
+    "scripts/conveyor/hung-session.mjs",
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/conveyor/session-reaper.mjs",
+    "scripts/pr-land.mjs",
+    "scripts/lib/review-escalation.mjs",
+    "docs/agent/platform-decisions.md",
+    "backlog/3149-surface-stuck-background-agent-permission-prompts-to-the-orc.md",
+    "backlog/3296-nothing-reconciles-an-open-pr-against-a-live-process-so-ever.md",
+    "backlog/xr05jjl-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md"
+  ],
+  "entry": {
+    "state": "cleared-in-queue",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<primary>",
+        "cite": "skills-src/conveyor/SKILL.md:25",
+        "note": "build-dispatch has NO launchd plist (contrast com.we.review-daemon.plist, com.we.fix-dispatch-daemon.plist, com.we.lease-reaper.plist, all confirmed present via plutil -p) — the runner only runs while an operator has started it from a live main session per the /conveyor skill."
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "skills-src/conveyor/runner.mjs:657"
+      },
+      {
+        "kind": "path-tool",
+        "name": "claude",
+        "cite": "scripts/operations/dispatch-lane-io.mjs:1458"
+      },
+      {
+        "kind": "state-root",
+        "name": "<state-root>",
+        "cite": "scripts/conveyor/queue-store.mjs:132-154",
+        "note": "CONVEYOR_STATE_ROOT (#4052) pins every daemon clone's .conveyor/queue.json to one physical file; unset defaults to script-location root."
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.review-daemon.plist",
+        "note": "operator shell PATH; same /opt/homebrew/bin:/usr/bin PATH the daemons get"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "cleared-in-queue",
+      "label": "Operator cleared item for build (.conveyor/queue.json)",
+      "terminal": false,
+      "owner": "conveyor runner — tick-core.mjs#planTick, read each tick",
+      "ownerCite": "scripts/readiness/conveyor-state.mjs:888",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Not a card mutation — a gitignored session-local sidecar entry {num, addedAt} (scripts/conveyor/queue-store.mjs:26-30), read fresh every runner tick via conveyor-state.mjs's clearedNums."
+    },
+    {
+      "id": "admission-check",
+      "label": "planTick evaluates admission holds",
+      "terminal": false,
+      "owner": "conveyor runner — tick-core.mjs#planTick",
+      "ownerCite": "scripts/conveyor/tick-core.mjs:1123",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Bundles: (1) fixed concurrency ceiling 'capacity-cap' (cfg.maxConcurrentLanes, tick-core.mjs:1255,1317-1320); (2) load-admission gate #4076 'load-cap' (tick-core.mjs:1256-1260, heavy-admission.mjs:241-356, ratio DEFAULT_LOAD_ADMISSION_MAX_PER_CORE=1.5 at heavy-admission.mjs:271, fails open on a missing sample at heavy-admission.mjs:306-315); (3) queue-time gate card xkyw1x4 'queue-cap' (tick-core.mjs:1261-1273); (4) manual/emergency dispatch-pause #3609 (scripts/readiness/dispatch-plan.mjs:397-402, HELD_REASONS list at :170). EXPLICITLY NOT GATED HERE, confirmed by grep against tick-core.mjs and skills-src/conveyor/runner.mjs: the claude-auth pause (card x5kagse, scripts/conveyor/claude-auth-health.mjs) is wired ONLY into skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:472-486 and skills-src/conveyor/review-daemon.mjs:261-268 — a broken Claude login does not pause new BUILD dispatch. driver-mode.mjs is not an admission gate at all: it is a two-field marker consumed only by driver-watchdog.mjs (scripts/conveyor/driver-mode.mjs:52-145 vs. its only reader driver-watchdog.mjs:70,358-370) to tell a clean bounded exit from a crash, and writeDriverMode has NO production caller anywhere in the repo (grep-confirmed) — it is unwired at the writer end too."
+    },
+    {
+      "id": "held-admission",
+      "label": "Held this tick (capacity-cap / load-cap / queue-cap / dispatch-paused)",
+      "terminal": false,
+      "owner": "none",
+      "ownerCite": "scripts/conveyor/tick-core.mjs:1276-1281,1327-1330",
+      "wait": {
+        "for": "capacity/load/queue admission to free up, or an operator to lift a manual dispatch-pause",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/tick-core.mjs:1256-1272"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "No bound and no escalation: unlike 'unshaped-no-scope'/'needs-slice'/'needs-decision' holds, which get an operator-facing gloss (scripts/readiness/dispatch-plan.mjs:174-241), a capacity-cap/load-cap/queue-cap hold is silently retried every runner tick (120s default, skills-src/conveyor/runner.mjs:60) with nothing surfacing it. A manual dispatch-pause being unbounded until an operator acts is intentional; the mechanical caps sharing the identical no-escalation path do not read as intentional.",
+      "ack": {
+        "no-owner": "xwo3j0l",
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "awaiting-dispatch-invocation",
+      "label": "Tick decided to spawn — awaiting the judgment layer to invoke it",
+      "terminal": false,
+      "owner": "none — requires an operator-attended /conveyor session (the ratified 'judgment layer') to read decisions.spawnBuilds and invoke the dispatch-lane operation for this item",
+      "ownerCite": "skills-src/conveyor/runner.mjs:88-91,170-172",
+      "wait": {
+        "for": "an operator's live /conveyor session to invoke scripts/operations/dispatch-lane.mjs for this num",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "skills-src/conveyor/SKILL.md:25,928; docs/agent/platform-decisions.md:3347"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Confirmed by grep: neither skills-src/conveyor/runner.mjs nor skills-src/conveyor/supervisor.mjs ever calls scripts/operations/dispatch-lane.mjs or references spawnBuilds. Ratified decision #2701 (docs/agent/platform-decisions.md:3347, codified 'conveyor-orchestration-mechanics-not-per-lane-agent') deliberately keeps per-lane conducting OUT of the runner — the runner 'spends no model context... hands the core's already-filtered decisions to the judgment layer to execute' (runner.mjs:88-91). Net effect: if no operator is running /conveyor live, a cleared, admitted, lane-assigned build simply never gets built — the biggest owner gap in this path.",
+      "steps": [
+        "surface-spawn-decision"
+      ],
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "session-spawned",
+      "label": "claude --bg builder session started in a scratch cwd",
+      "terminal": false,
+      "owner": "scripts/operations/dispatch-lane-io.mjs's DISPATCH_EFFECT sink (createDispatchSinks), invoked by the dispatch-lane operation",
+      "ownerCite": "scripts/operations/dispatch-lane-io.mjs:1227",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "THE #2701/#4174 PERMISSION FACT, STATED PLAINLY: the session's cwd is a fresh scratch directory <workspace>/.operations/dispatch/<sessionId>, a sibling of every checkout, never the lane (dispatch-lane-io.mjs:1238-1240,1602-1651). Card #4174 introduced this to stop a stray file dispatched INTO the dispatcher's own clone (measured 125 invariant violations over 50 soak ticks before the fix); its own live-caught cost is recorded in backlog/xr05jjl-...md:15 — 'cwd moved to scratch broke lane edit permission after #2701'. buildAgentArgv's argv has NO --add-dir flag anywhere (grep-confirmed against dispatch-lane-io.mjs), and the file's own doc says so: 'NO PERMISSION FLAGS ARE BAKED IN... a dispatcher that hard-coded --dangerously-skip-permissions would silently widen every agent it ever launches' (dispatch-lane-io.mjs:1137-1141) — extraArgs defaults to [] unless an operator sets WE_DISPATCH_AGENT_ARGS.",
+      "steps": [
+        "mint-scratch-cwd",
+        "write-scratch-settings",
+        "spawn-claude-bg"
+      ]
+    },
+    {
+      "id": "session-spawn-failed",
+      "label": "claude --bg failed to start (or its outcome is unknown)",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "dispatch-lane-io.mjs sink",
+      "ownerCite": "scripts/operations/dispatch-lane-io.mjs:1105-1111,1278-1286",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "ENOENT/EACCES (PRE_SPAWN_REFUSALS, :1105) proves nothing started and is thrown as notApplied. Any OTHER spawn error is deliberately classified INDETERMINATE — 'claude --bg failed and whether an agent started is UNKNOWN' (dispatch-lane-io.mjs:1284-1286) — and nothing pages an operator; the error only surfaces in whatever invoked the dispatch-lane operation (the live /conveyor session's own output), with no durable alert. Silent-failure per the checker's own rule.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    },
+    {
+      "id": "session-acquiring-lane",
+      "label": "Session runs `lane-pool acquire` as its own first instruction",
+      "terminal": false,
+      "owner": "the spawned builder session itself (its own brief, not mechanical dispatch code)",
+      "ownerCite": "skills-src/conveyor/delivery-agent-brief.md:51-52",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Brief literally runs: node <WE_ROOT>/scripts/lane-pool.mjs acquire --lane={{LANE}} --purpose=conveyor-delivery --session={{SESSION_SLUG}} --scope={{SCOPE}} --item={{ITEM_NUM}} --base={{DELIVERY_BASE}} --adopt (delivery-agent-brief.md:51-52). {{LANE}} is only the PLANNED lane from dispatch-plan.mjs:590 — a sibling could have claimed it since; the brief says the agent 'reports/exits' on a lost race (:63), but that is PROSE the session's own judgment follows, not a mechanical transition, so the failure-no-exit case below is real, not an oversight I am papering over.",
+      "steps": [
+        "run-lane-pool-acquire"
+      ]
+    },
+    {
+      "id": "session-editing-lane",
+      "label": "Session edits files inside the acquired lane",
+      "terminal": false,
+      "owner": "the spawned builder session itself",
+      "ownerCite": "skills-src/conveyor/delivery-agent-brief.md",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "THE FLAGSHIP unprovided-assumption of this whole flow.",
+      "steps": [
+        "first-edit-in-lane"
+      ]
+    },
+    {
+      "id": "session-permission-stall",
+      "label": "Session blocked on an unanswered Edit/Write permission prompt",
+      "terminal": false,
+      "owner": "none — a `claude --bg` session has nobody attached to answer a permission prompt",
+      "ownerCite": "backlog/3149-surface-stuck-background-agent-permission-prompts-to-the-orc.md:14-16",
+      "wait": {
+        "for": "a permission approval nobody is present to give",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:444-447"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "LIVE, MEASURED INCIDENT: three real kind:'conveyor' (build) sessions sat status:waiting/waitingFor:'permission prompt' for 211.4 hours (backlog/3296-nothing-reconciles-an-open-pr-against-a-live-process-so-ever.md:19). The detector that exists, reconcile-core.mjs#isAwaitingPermission (:444-447), only fires for a session already bound to an open PR — a fresh build session before its PR exists has NO such binding, so nothing detects THIS phase's stall at all; backlog #3149 (status: open) is the still-unresolved ask for exactly that detection ('Nothing in the conveyor/gate-health path currently reads that state', :14-16). The only backstop that eventually reacts is the blunt no-outcome-stall axis (see next state), which detects lack of commit progress, not the permission prompt itself.",
+      "ack": {
+        "unbounded-wait": "#3149"
+      }
+    },
+    {
+      "id": "session-reaped-no-outcome",
+      "label": "No-outcome-stall ceiling fires; session-reaper stops the session",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "scripts/conveyor/session-reaper.mjs (one of skills-src/conveyor/runner.mjs's own mechanical passes, ~120s tick cadence)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:920; skills-src/conveyor/runner.mjs:287,328",
+      "wait": {
+        "for": "45m no-outcome window OR the 240m (4h) ceiling for kind:'conveyor', whichever fires first — the ceiling is hard-clamped to the lane-lease TTL",
+        "timeout": "240m",
+        "onTimeout": "session-reaped-no-outcome",
+        "cite": "scripts/conveyor/hung-session.mjs:189,195-201,219-228,256-266"
+      },
+      "retries": {
+        "what": "claude stop <id> (stopSessionWithRetry)",
+        "cap": 3,
+        "onCap": null,
+        "cite": "scripts/conveyor/session-reaper.mjs:1744,1749,1762,1959-1961"
+      },
+      "escalation": null,
+      "notes": "On the 3rd stop failure the code logs '⚠ ... left for the next tick' (session-reaper.mjs:1961) and moves on — no operator alert, just a retry on the NEXT pass, uncapped across passes. This state is a genuine silent-failure per the checker's rule: outcome:failure with no escalation. It is also where the retry LOOP closes: the same build item becomes eligible again once its build guard's lane is confirmed no longer leased (retireBuildGuards, tick-core.mjs:508-527), with no equivalent of planFixSpawns' fixRetryCap for build — so a permission-prompt failure can repeat indefinitely, every ~4h+ cycle, with nothing ever telling the operator.",
+      "ack": {
+        "silent-failure": "xwuof33",
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "session-verifying",
+      "label": "Session runs verify-lane under the heavy-admission semaphore",
+      "terminal": false,
+      "owner": "the spawned builder session itself",
+      "ownerCite": "skills-src/conveyor/delivery-agent-brief.md",
+      "wait": {
+        "for": "a free heavy-admission slot (check:standards/test:unit/verify-lane concurrency cap, DEFAULT_ADMISSION_CAP=2)",
+        "timeout": "120m",
+        "onTimeout": "session-committing-and-landing",
+        "cite": "scripts/readiness/heavy-admission.mjs:158,176,726-773"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Included for CONTRAST with the rest of this flow: this is a genuinely bounded wait with a real onTimeout (fails open rather than hanging). On timeout it proceeds unslotted with a loud '⚠⚠ HARD CEILING' warning (scripts/readiness/heavy-admission.mjs:158,176,726-773) — fails open, not blocked — landing in the same session-committing-and-landing state the ordinary slotted path reaches (see the existing session-verifying→session-committing-and-landing transition, whose own 'on' already covers both cases)."
+    },
+    {
+      "id": "session-committing-and-landing",
+      "label": "Session commits, then runs scripts/pr-land.mjs",
+      "terminal": false,
+      "owner": "the spawned builder session itself, via scripts/pr-land.mjs#runCli",
+      "ownerCite": "scripts/pr-land.mjs:592",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Exit codes documented at pr-land.mjs:71-77: 0 = merged/opened/labelled-on-green/dry-run OK; 2 = required check RED, nothing merged; 3 = unmergeable/gh error/push failed/empty description; 4 = BLOCKED-ON-INFRA (#2659, ref pushed but gh pr create failed on an outside dependency).",
+      "steps": [
+        "gh-pr-create",
+        "apply-landing-label"
+      ]
+    },
+    {
+      "id": "pr-land-failed",
+      "label": "pr-land refused to land (exit 2/3) or is infra-blocked (exit 4)",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "the spawned builder session's own judgment for exit 2/3 (retry a fix itself, per its brief) — scripts/conveyor/infra-blocked.mjs 'retry' pass (120s cadence) for exit 4",
+      "ownerCite": "scripts/pr-land.mjs:71-77; skills-src/conveyor/daemon-manifest.mjs:133",
+      "wait": {
+        "for": "exit 4 only: infra recovery, auto-retried with backoff by the infra-blocked pass",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/infra-blocked.mjs; skills-src/conveyor/daemon-manifest.mjs:133"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Exit 2 (CI red) / exit 3 (unmergeable/gh error/empty body) leave 'main' untouched (pr-land.mjs:77) with no code-guaranteed next step — recovery is the session's own judgment (rebase and re-run, or fix the body) per pr-land.mjs's own doc, not a mechanical transition; recorded honestly as a failure-no-exit rather than invented. Exit 4 is the one genuinely recoverable case: recorded in the conveyor infra-blocked state and auto-retried, never stranding main.",
+      "ack": {
+        "silent-failure": "xwuof33",
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "pr-opened-ready-to-merge",
+      "label": "PR open, labelled ready-to-merge (default path)",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "none further in this flow — collected by the drain",
+      "ownerCite": "scripts/pr-land.mjs:62-69",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Hands off to @drain-land, NOT @review — ready-to-merge is 'the universal signal the label lander (/drain, scripts/merge-ai-prs.mjs --label=ready-to-merge) collects' (pr-land.mjs:67-68). This is the common case; @review is only the escalation/park path below."
+    },
+    {
+      "id": "pr-opened-parked-for-review",
+      "label": "PR open, held on review:human or review:pending",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "none further in this flow — hands off to the review flow",
+      "ownerCite": "scripts/pr-land.mjs:281-282,313",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "@review",
+        "how": "label",
+        "cite": "scripts/pr-land.mjs:281-282,313; skills-src/conveyor/review-daemon.mjs:249,265-267"
+      },
+      "notes": "This is the literal 'hand-off @review' the brief names — reached only via --park or a forced #2307 escalation, not the default landing path."
+    }
+  ],
+  "transitions": [
+    {
+      "from": "cleared-in-queue",
+      "to": "admission-check",
+      "on": "next runner tick reads the queue",
+      "kind": "normal",
+      "cite": "scripts/conveyor/tick-core.mjs:1123"
+    },
+    {
+      "from": "admission-check",
+      "to": "awaiting-dispatch-invocation",
+      "on": "capacity-cap AND load-cap AND queue-cap AND dispatch-paused all clear",
+      "kind": "normal",
+      "cite": "scripts/conveyor/tick-core.mjs:1274-1284"
+    },
+    {
+      "from": "admission-check",
+      "to": "held-admission",
+      "on": "any admission hold fires",
+      "kind": "normal",
+      "cite": "scripts/conveyor/tick-core.mjs:1276-1281"
+    },
+    {
+      "from": "held-admission",
+      "to": "admission-check",
+      "on": "next runner tick (120s)",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/runner.mjs:60,169"
+    },
+    {
+      "from": "awaiting-dispatch-invocation",
+      "to": "session-spawned",
+      "on": "an operator's /conveyor session invokes dispatch-lane for this num",
+      "kind": "normal",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1227"
+    },
+    {
+      "from": "session-spawned",
+      "to": "session-acquiring-lane",
+      "on": "claude --bg returns a handle",
+      "kind": "normal",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1792-1845"
+    },
+    {
+      "from": "session-spawned",
+      "to": "session-spawn-failed",
+      "on": "spawn error (ENOENT/EACCES, or any other classified INDETERMINATE)",
+      "kind": "failure",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1274-1286"
+    },
+    {
+      "from": "session-acquiring-lane",
+      "to": "session-editing-lane",
+      "on": "lane-pool acquire succeeds",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/delivery-agent-brief.md:51-52"
+    },
+    {
+      "from": "session-editing-lane",
+      "to": "session-verifying",
+      "on": "the session's Edit/Write tool calls in the lane are not blocked (permission already implicitly covered)",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/delivery-agent-brief.md"
+    },
+    {
+      "from": "session-editing-lane",
+      "to": "session-permission-stall",
+      "on": "an Edit/Write call in the lane triggers an unanswered permission prompt",
+      "kind": "failure",
+      "cite": "backlog/3296-nothing-reconciles-an-open-pr-against-a-live-process-so-ever.md:19"
+    },
+    {
+      "from": "session-permission-stall",
+      "to": "session-reaped-no-outcome",
+      "on": "45m-window/240m-ceiling no-outcome-stall fires",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/hung-session.mjs:256-266"
+    },
+    {
+      "from": "session-reaped-no-outcome",
+      "to": "cleared-in-queue",
+      "on": "build guard retires once the lane is confirmed no longer leased — the SAME item is eligible again, uncapped",
+      "kind": "normal",
+      "cite": "scripts/conveyor/tick-core.mjs:508-527,1191-1210"
+    },
+    {
+      "from": "session-verifying",
+      "to": "session-committing-and-landing",
+      "on": "verify-lane completes (slotted, or fails-open past the 120m ceiling)",
+      "kind": "normal",
+      "cite": "scripts/readiness/heavy-admission.mjs:726-773"
+    },
+    {
+      "from": "session-committing-and-landing",
+      "to": "pr-opened-ready-to-merge",
+      "on": "gh pr create succeeds, required check goes green, no escalation rubric fires",
+      "kind": "normal",
+      "cite": "scripts/pr-land.mjs:62-69"
+    },
+    {
+      "from": "session-committing-and-landing",
+      "to": "pr-opened-parked-for-review",
+      "on": "--park=review:human|review:pending, or scoreEscalation forces a review hold",
+      "kind": "escalation",
+      "cite": "scripts/pr-land.mjs:999-1011"
+    },
+    {
+      "from": "session-committing-and-landing",
+      "to": "pr-land-failed",
+      "on": "gh pr create fails, or the required check goes red, or the PR is unmergeable/empty-body",
+      "kind": "failure",
+      "cite": "scripts/pr-land.mjs:71-77"
+    },
+    {
+      "from": "pr-land-failed",
+      "to": "@fix",
+      "on": "an open PR with a red required check or review:changes is later picked up by the fix-dispatch daemon's own reconcile scan (a DIFFERENT flow)",
+      "kind": "escalation",
+      "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs"
+    }
+  ],
+  "steps": [
+    {
+      "id": "surface-spawn-decision",
+      "state": "awaiting-dispatch-invocation",
+      "actor": "tick-core.mjs#planTick",
+      "does": "emits {num, lane} into decisions.spawnBuilds for the judgment layer to execute",
+      "cite": "scripts/conveyor/tick-core.mjs:1274-1284; scripts/readiness/dispatch-plan.mjs:590",
+      "canFail": false,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "skills-src/conveyor/runner.mjs:657"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "<lane> predicted (not yet leased)",
+          "cite": "scripts/readiness/dispatch-plan.mjs:590"
+        }
+      ]
+    },
+    {
+      "id": "mint-scratch-cwd",
+      "state": "session-spawned",
+      "actor": "dispatch-lane-io.mjs sink",
+      "does": "mints a sessionId, computes+mkdirs a scratch cwd outside every checkout",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1237-1240,1637-1651",
+      "canFail": true,
+      "onFailure": "session-spawn-failed",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<primary>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1268",
+          "note": "the dispatcher root (the operator primary checkout for build dispatch); the session cwd is computed as a sibling scratch dir of it"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1637-1651"
+        },
+        {
+          "kind": "writable",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1782-1790"
+        }
+      ]
+    },
+    {
+      "id": "write-scratch-settings",
+      "state": "session-spawned",
+      "actor": "dispatch-lane-io.mjs sink",
+      "does": "writes <scratch>/.claude/settings.local.json with ONLY gh-shim env + Bash-tool timeout env",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1268-1272,1594-1596",
+      "canFail": false,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1240"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "auth",
+          "name": "github-app-token",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1571",
+          "note": "gh-app-shim PATH override written into <scratch>/.claude/settings.local.json, loaded at session start"
+        }
+      ],
+      "notes": "Deliberately does NOT provide permission:edit:<lane> — the written settings carry only resolveGhShimSettingsEnv + DISPATCH_BASH_TIMEOUT_ENV, no additionalDirectories/allow rule for the lane path at all."
+    },
+    {
+      "id": "spawn-claude-bg",
+      "state": "session-spawned",
+      "actor": "dispatch-lane-io.mjs sink",
+      "does": "execFileSync('claude', ['--bg','-n',slug,'--settings',...,...extraArgs,prompt], {cwd:<scratch>})",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1792-1845,1457-1458",
+      "canFail": true,
+      "onFailure": "session-spawn-failed",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1458"
+        },
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1251"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "permission",
+          "name": "edit:<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1251",
+          "note": "Claude Code's own cwd grant — implicit, not an explicit settings rule."
+        }
+      ]
+    },
+    {
+      "id": "run-lane-pool-acquire",
+      "state": "session-acquiring-lane",
+      "actor": "the spawned builder session (Bash tool)",
+      "does": "claims a lease on the planned (or an auto-picked) free lane via lane-pool.mjs acquire --adopt",
+      "cite": "skills-src/conveyor/delivery-agent-brief.md:51-52",
+      "canFail": true,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1251"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "skills-src/conveyor/delivery-agent-brief.md:51"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "<lane> acquired",
+          "cite": "scripts/lane-pool.mjs:1634-2101"
+        },
+        {
+          "kind": "writable",
+          "name": "<lane>",
+          "cite": "scripts/lane-pool.mjs:1634-2101",
+          "note": "a git-level write grant (the worktree itself), NOT a Claude Code Edit/Write tool permission grant."
+        }
+      ],
+      "ack": {
+        "failure-no-exit": "x56qzx8"
+      },
+      "notes": "canFail:true with onFailure:null is an HONEST failure-no-exit finding: a lost lane race is handled only by the agent's own judgment (delivery-agent-brief.md:63 prose 'report/exit'), with no mechanical state this flow can cite as the guaranteed next step."
+    },
+    {
+      "id": "first-edit-in-lane",
+      "state": "session-editing-lane",
+      "actor": "the spawned builder session (Edit/Write tool)",
+      "does": "edits a file under the lane path — a path OUTSIDE the cwd (<scratch>) the session was actually granted at spawn",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1137-1141 (no --add-dir/permission flags baked in); backlog/xr05jjl-describe-every-conveyor-flow-as-data-generate-graphs-check-f.md:15 ('cwd moved to scratch broke lane edit permission after #2701')",
+      "canFail": true,
+      "onFailure": "session-permission-stall",
+      "assumes": [
+        {
+          "kind": "permission",
+          "name": "edit:<lane>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1268-1272,1594-1596",
+          "note": "NEVER PROVIDED on any path to this step: session-spawned's write-scratch-settings step provides no lane rule at all, and session-acquiring-lane's run-lane-pool-acquire step provides only writable:<lane> (a git grant), never permission:edit:<lane> (a Claude Code tool-permission grant). This is the exact unprovided-assumption the checker's must-analysis rule exists to catch."
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "<lane> edited",
+          "cite": "skills-src/conveyor/delivery-agent-brief.md"
+        }
+      ],
+      "ack": {
+        "unprovided-assumption": "xrv69j6"
+      }
+    },
+    {
+      "id": "commit-in-lane",
+      "state": "session-committing-and-landing",
+      "actor": "builder session",
+      "does": "verify-lane then git commit in the lane; pr-land publishes the commit to lane/<card>-… on origin",
+      "cite": "scripts/pr-land.mjs:800",
+      "canFail": true,
+      "onFailure": "pr-land-failed",
+      "assumes": [
+        {
+          "kind": "lane",
+          "name": "<lane> edited"
+        },
+        {
+          "kind": "path-tool",
+          "name": "git"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "git",
+          "name": "lane at PR head",
+          "cite": "scripts/pr-land.mjs:800"
+        }
+      ]
+    },
+    {
+      "id": "gh-pr-create",
+      "state": "session-committing-and-landing",
+      "actor": "scripts/pr-land.mjs (forge-land-provider)",
+      "does": "pushes the lane branch and opens the PR (forge.create)",
+      "cite": "scripts/pr-land.mjs:842",
+      "canFail": true,
+      "onFailure": "pr-land-failed",
+      "assumes": [
+        {
+          "kind": "git",
+          "name": "lane at PR head",
+          "cite": "scripts/pr-land.mjs:592"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token",
+          "cite": "scripts/lib/github-app-auth-env.mjs"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "open",
+          "cite": "scripts/pr-land.mjs:842"
+        }
+      ]
+    },
+    {
+      "id": "apply-landing-label",
+      "state": "session-committing-and-landing",
+      "actor": "scripts/pr-land.mjs",
+      "does": "applies ready-to-merge once the required check is green (default), OR review:human/review:pending at open (--park, or forced by scoreEscalation's #2307 rubric)",
+      "cite": "scripts/pr-land.mjs:62-69,254,281-282,313,999-1011; scripts/lib/review-escalation.mjs",
+      "canFail": false,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "pr",
+          "name": "open"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "labelled ready-to-merge OR review:human/review:pending",
+          "cite": "scripts/pr-land.mjs:254,281-282,313"
+        }
+      ],
+      "notes": "Label apply is best-effort and never fails the land (pr-land.mjs:69). Park mode labels at open with no CI wait (scripts/pr-land.mjs:1043); auto-land mode waits on mergeStateStatus + required checks with a 15-min default deadline (scripts/pr-land.mjs:1066)."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "id": "toy",
+  "title": "Toy fix flow with every gap closed",
+  "summary": "Test fixture: gappy/toy.flow.json with each gap fixed.",
+  "entry": { "state": "queued", "provides": [ { "kind": "env", "name": "PATH", "cite": "fixture" } ] },
+  "states": [
+    { "id": "queued", "owner": "toy-daemon" },
+    { "id": "spawned", "owner": "toy-daemon" },
+    { "id": "retargeted", "owner": "toy-daemon" },
+    { "id": "awaiting-ci", "owner": "toy-daemon", "wait": { "for": "CI", "timeout": "60m", "onTimeout": "retrying" } },
+    { "id": "retrying", "owner": "toy-daemon", "retries": { "what": "push", "cap": 3, "onCap": "failed" } },
+    { "id": "merged", "terminal": true, "outcome": "success" },
+    { "id": "failed", "terminal": true, "outcome": "failure", "escalation": { "to": "operator", "how": "notify" } }
+  ],
+  "transitions": [
+    { "from": "queued", "to": "spawned", "on": "dispatch" },
+    { "from": "queued", "to": "retargeted", "on": "base merged" },
+    { "from": "spawned", "to": "awaiting-ci", "on": "pushed" },
+    { "from": "spawned", "to": "failed", "on": "spawn failed", "kind": "failure" },
+    { "from": "retargeted", "to": "awaiting-ci", "on": "base retargeted to main" },
+    { "from": "awaiting-ci", "to": "merged", "on": "green" },
+    { "from": "awaiting-ci", "to": "retrying", "on": "red", "kind": "failure" },
+    { "from": "awaiting-ci", "to": "retrying", "on": "no CI after 60m", "kind": "timeout" },
+    { "from": "retrying", "to": "awaiting-ci", "on": "re-pushed" },
+    { "from": "retrying", "to": "failed", "on": "cap reached", "kind": "escalation" }
+  ],
+  "steps": [
+    { "id": "spawn", "state": "spawned", "actor": "toy-daemon", "canFail": true, "onFailure": "failed",
+      "assumes": [ { "kind": "env", "name": "PATH" } ],
+      "provides": [ { "kind": "cwd", "name": "<scratch>" }, { "kind": "permission", "name": "edit:<lane>", "note": "--add-dir <lane>" } ] },
+    { "id": "edit", "state": "spawned", "actor": "session",
+      "assumes": [ { "kind": "permission", "name": "edit:<lane>" } ],
+      "provides": [ { "kind": "ci", "name": "required checks ran on head" } ] },
+    { "id": "trigger-ci", "state": "retargeted", "actor": "toy-daemon",
+      "provides": [ { "kind": "ci", "name": "required checks ran on head" } ] },
+    { "id": "await", "state": "awaiting-ci", "actor": "toy-daemon",
+      "assumes": [ { "kind": "ci", "name": "required checks ran on head" } ] }
+  ]
+}
