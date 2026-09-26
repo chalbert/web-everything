@@ -2039,14 +2039,21 @@ describe('the write arc and its #2964 ordering', () => {
       });
     });
 
-    it('does not append to an already-graduated triple', () => {
+    it('#3949 fix (a): STILL appends to an already-graduated triple — logging must never stop at graduation, '
+      + 'or a later confirmed miss on a graduated triple could never be recorded and rule 6\'s computed '
+      + 'demotion would be unreachable', () => {
       const records = seeded();
       const io = memIo(records);
       const logTrialFn = vi.fn(logDelegationTrial);
       expect(run(stubProvider({ body }), argv, { trialLogIo: io, logTrialFn }).exitCode).toBe(0);
-      expect(readStore(io).records).toEqual(records);
-      expect(readStore(io).records).toHaveLength(6);
-      expect(logTrialFn).not.toHaveBeenCalled();
+      expect(logTrialFn).toHaveBeenCalledTimes(1);
+      const stored = readStore(io).records;
+      expect(stored).toHaveLength(7);
+      expect(stored.slice(0, 6)).toEqual(records);
+      expect(stored[6]).toMatchObject({
+        ...triple, dispatchKind: 'session-delegation', pr: 1048,
+        verifiedBy: 'independent-claude', outcome: 'landed', findings: null,
+      });
     });
 
     it('does not append a second session-delegation trial when the same PR is re-accepted', () => {
@@ -2070,7 +2077,11 @@ describe('the write arc and its #2964 ordering', () => {
     it.each([
       { pr: 1049, dispatchKind: 'session-delegation' },
       { pr: 1048, dispatchKind: 'conflict-resolution' },
-    ])('still logs with a prior trial for $pr / $dispatchKind', (prior) => {
+      // #3949 fix (b)/dedup — a PRIOR `changes` round (outcome `reworked`) on this SAME pr must not block a
+      // later `accepted` round (outcome `landed`): the dedup key is `(pr, outcome)`, not bare `pr`, precisely
+      // so a confirmed miss and its later clean landing are BOTH recorded.
+      { pr: 1048, dispatchKind: 'session-delegation', outcome: 'reworked', findings: 'round 1 finding', informative: true },
+    ])('still logs with a prior trial for $pr / $dispatchKind / $outcome', (prior) => {
       const records = [{ ...seeded()[0], ...prior }];
       const io = memIo(records);
       const readTrialStore = vi.fn(readStore);
@@ -2117,13 +2128,71 @@ describe('the write arc and its #2964 ordering', () => {
       expect(readStore(io).records).toEqual([]);
     });
 
-    it.each(['changes', 'clear-human', 'rearm', 'restamp'])('does not log target %s even on the review-pr channel', (to) => {
+    it.each(['clear-human', 'rearm', 'restamp'])('does not log target %s even on the review-pr channel', (to) => {
       const io = memIo();
       const labels = to === 'clear-human' ? ['review:human'] : to === 'restamp' ? ['review:accepted'] : ['review:changes'];
       const args = ['1048', '--repo=o/n', `--channel=${REVIEW_PR_CHANNEL}`, '--actor=operator', '--reason=Repair needed'];
       const config = { fixedTo: to, allowClearHuman: true, verdictBody: 'Repair needed', trialLogIo: io };
       expect(run(stubProvider({ labels, body }), args, config).exitCode).toBe(0);
       expect(readStore(io).records).toEqual([]);
+    });
+
+    describe('#3949 fix (b): a `changes` verdict on the review-pr channel IS logged — the confirmed-miss hook', () => {
+      it('logs outcome `reworked` with a findings summary carrying the count, and `informative: true`, when '
+        + 'the write-up renders a non-zero Findings heading', () => {
+        const io = memIo();
+        const verdictBody = '### Findings (2)\n- one\n- two\n';
+        const args = ['1048', '--repo=o/n', '--to=changes', `--channel=${REVIEW_PR_CHANNEL}`];
+        expect(run(stubProvider({ labels: ['review:pending'], body }), args, { trialLogIo: io, verdictBody }).exitCode).toBe(0);
+        const records = readStore(io).records;
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({
+          ...triple, dispatchKind: 'session-delegation', pr: 1048,
+          verifiedBy: 'independent-claude', outcome: 'reworked', informative: true,
+        });
+        expect(records[0].findings).toContain('2 finding');
+      });
+
+      it('logs `informative: true` with a generic findings note when the write-up carries no rendered heading '
+        + '(a hand-written body) — unknown finding count is never treated as a known zero', () => {
+        const io = memIo();
+        const args = ['1048', '--repo=o/n', '--to=changes', `--channel=${REVIEW_PR_CHANNEL}`];
+        const verdictBody = 'Please rework the error handling before this can land.';
+        expect(run(stubProvider({ labels: ['review:pending'], body }), args, { trialLogIo: io, verdictBody }).exitCode).toBe(0);
+        const records = readStore(io).records;
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({ outcome: 'reworked', informative: true });
+      });
+
+      it('logs `informative: false` only when the write-up asserts a KNOWN zero finding count and states a '
+        + 'reason (never a defect) — a `> ` quoted reason with the rendered `Findings (0)` heading', () => {
+        const io = memIo();
+        const verdictBody = '### Findings (0)\n_No findings._\n\n> please rebase onto latest main\n';
+        const args = ['1048', '--repo=o/n', '--to=changes', `--channel=${REVIEW_PR_CHANNEL}`];
+        expect(run(stubProvider({ labels: ['review:pending'], body }), args, { trialLogIo: io, verdictBody }).exitCode).toBe(0);
+        const records = readStore(io).records;
+        expect(records).toHaveLength(1);
+        expect(records[0]).toMatchObject({ outcome: 'reworked', informative: false });
+      });
+
+      it('a graduated triple STILL logs its confirmed miss — this is the row that makes demotion computable', () => {
+        const records = seeded();
+        const io = memIo(records);
+        const args = ['1048', '--repo=o/n', '--to=changes', `--channel=${REVIEW_PR_CHANNEL}`];
+        expect(run(stubProvider({ labels: ['review:pending'], body }), args, { trialLogIo: io, verdictBody: '### Findings (1)\n- x\n' }).exitCode).toBe(0);
+        const stored = readStore(io).records;
+        expect(stored).toHaveLength(7);
+        expect(stored[6]).toMatchObject({ ...triple, pr: 1048, outcome: 'reworked', informative: true });
+      });
+
+      it('never logs a forbidden taskType (self-fix/other, #3801 Fork 2) on a `changes` verdict either', () => {
+        const forbiddenBody = `${author}\n${buildDelegationMarker({ ...triple, taskType: 'self-fix' })}`;
+        const io = memIo();
+        const args = ['1048', '--repo=o/n', '--to=changes', `--channel=${REVIEW_PR_CHANNEL}`];
+        expect(run(stubProvider({ labels: ['review:pending'], body: forbiddenBody }), args,
+          { trialLogIo: io, verdictBody: '### Findings (1)\n- x\n' }).exitCode).toBe(0);
+        expect(readStore(io).records).toEqual([]);
+      });
     });
 
     it('uses the PR number when the title is missing', () => {
@@ -2145,7 +2214,7 @@ describe('the write arc and its #2964 ordering', () => {
       expect(p.calls).toContain('postComment');
       expect(p.calls).toContain('setLabels');
       expect(readStore(io).records).toEqual([]);
-      expect(stderr.mock.calls.flat().join('')).toContain('delegation trial append failed (#3690, non-fatal)');
+      expect(stderr.mock.calls.flat().join('')).toContain('delegation trial append failed (#3690/#3949, non-fatal)');
     });
 
     it.each(['postComment', 'setLabels'])('does not log when acceptance write %s fails', (method) => {

@@ -3,9 +3,11 @@ bornAs: xh3e97s
 kind: story
 size: 3
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/review-set-label.mjs", "we:scripts/conveyor/delegation-trial-gate.mjs", "we:scripts/lib/provider-routing.mjs"]
 dateOpened: "2026-09-23"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
