@@ -25,6 +25,11 @@
  *      `lane-pool.mjs`'s internal (unexported) `laneStatus`/`existingLanes` functions directly.
  *   7. `os.loadavg()` / `os.cpus().length` — no existing operation owns this reading, so it is the one new
  *      primitive this file adds.
+ *   8. Card x20lkf6's RUNNING section — `createAgentActivityReader` (`./agent-activity-io.mjs`) for the raw
+ *      rows, `enrichRows` (`./live-work-io.mjs`) to stamp last-activity/pid-liveness onto them, reusing the
+ *      SAME already-assessed `heavyQueue` this file collects for its own `testQueue` section (never a second
+ *      heavy-admission read) — `./live-state.mjs`'s `assessLiveState` runs `./live-work.mjs#assessLiveWork`
+ *      over the result.
  */
 import { execFileSync } from 'node:child_process';
 import { loadavg, cpus, homedir } from 'node:os';
@@ -39,6 +44,8 @@ import { openHealthEpisodesData } from '../conveyor/health-watch-section.mjs';
 import { readJsonlTail } from './land-advance-io.mjs';
 import { readGithubAppStatus, defaultStatusPath } from '../lib/github-app-auth-env.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
+import { createAgentActivityReader } from './agent-activity-io.mjs';
+import { enrichRows } from './live-work-io.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -117,7 +124,8 @@ export function readMachineLoad({ readLoadavg = loadavg, readCpus = cpus } = {})
  * sub-read is independently injectable (mirrors `collectHeavyQueue`'s own shape) so a test can fake any single
  * source without touching the others.
  * @param {{now?:() => number, collectDaemons?:Function, collectQueue?:Function, readHealth?:Function,
- *   readLanes?:Function, readDrain?:Function, readGithub?:Function, readLoad?:Function}} [o]
+ *   readLanes?:Function, readDrain?:Function, readGithub?:Function, readLoad?:Function,
+ *   readActivity?:(input:object) => {rows:object[]}}} [o]
  */
 export function collectLiveState({
   now = () => Date.now(),
@@ -128,15 +136,22 @@ export function collectLiveState({
   readDrain = readDrainLastPass,
   readGithub = readGithubAuth,
   readLoad = readMachineLoad,
+  readActivity = createAgentActivityReader(),
 } = {}) {
+  const daemonStatus = assessDaemonStatus(collectDaemons());
+  const heavyQueue = assessHeavyQueue(collectQueue());
   return {
     observedAt: new Date(now()).toISOString(),
-    daemonStatus: assessDaemonStatus(collectDaemons()),
-    heavyQueue: assessHeavyQueue(collectQueue()),
+    daemonStatus,
+    heavyQueue,
     health: readHealth(),
     lanePools: readLanes(),
     drain: readDrain(),
     githubAuth: readGithub(),
     machineLoad: readLoad(),
+    // Card x20lkf6's RUNNING section input — raw agent-activity rows, enriched with last-activity/pid-liveness.
+    // `./live-state.mjs#assessLiveState` reuses THIS SAME already-assessed `heavyQueue` (above) when it calls
+    // `./live-work.mjs#assessLiveWork` over these rows — never a second heavy-admission read.
+    runningRows: enrichRows(readActivity({ all: true }).rows),
   };
 }

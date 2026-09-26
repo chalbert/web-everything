@@ -34,7 +34,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { REPO_ROOT, defaultListAgents } from './dispatch-lane-io.mjs';
-import { listAgentsWithReviewJobs, REVIEW_JOB_KIND } from './review-job-store.mjs';
+import { listAgentsWithReviewJobs, REVIEW_JOB_KIND, jobLogPath } from './review-job-store.mjs';
 import { CODEX_THREAD_DIR_NAME } from './codex-delivery-provider.mjs';
 import { BACKLOG_VERB_RE } from '../dev/active-progress-watch.mjs';
 
@@ -169,7 +169,7 @@ export function subagentRowsFor(parentSessionId, cwd, projectsDir = claudeProjec
           rows.push({
             id: `${parentSessionId}:wf:${runId}:${f}`, sessionId: null, runtime: 'claude', kind: 'subagent',
             cwd, parentSessionId, workflowLane: true, firstMessageText: firstMessageText(join(runDir, f)),
-            state: null, startedAt: null, lastEventAt: null,
+            state: null, startedAt: null, lastEventAt: null, transcriptPath: join(runDir, f),
           });
         }
       }
@@ -179,7 +179,7 @@ export function subagentRowsFor(parentSessionId, cwd, projectsDir = claudeProjec
       rows.push({
         id: `${parentSessionId}:${entry}`, sessionId: null, runtime: 'claude', kind: 'subagent',
         cwd, parentSessionId, workflowLane: false, firstMessageText: firstMessageText(join(dir, entry)),
-        state: null, startedAt: null, lastEventAt: null,
+        state: null, startedAt: null, lastEventAt: null, transcriptPath: join(dir, entry),
       });
     }
   }
@@ -227,7 +227,7 @@ export function interactiveRows(knownSessionIds, projectsDir = claudeProjectsDir
       if ((now - mtimeMs) > RECENT_MS) continue;
       rows.push({
         id: m[1], sessionId: m[1], runtime: 'claude', kind: 'interactive', name: null, cwd: null,
-        state: null, startedAt: null, lastEventAt: new Date(mtimeMs).toISOString(),
+        state: null, startedAt: null, lastEventAt: new Date(mtimeMs).toISOString(), transcriptPath: path,
         firstMessageText: firstMessageText(path), claimedNums: claimedNumsFromTranscript(path),
       });
     }
@@ -267,10 +267,21 @@ export function createAgentActivityReader({
       if (sessionId) known.add(sessionId);
       const kind = a.kind === REVIEW_JOB_KIND ? REVIEW_JOB_KIND : 'background';
       const lease = sessionId ? leaseIndex.get(sessionId) ?? null : null;
-      const transcriptPath = sessionId && a.cwd ? join(projectsDir, projectSlugFor(a.cwd), `${sessionId}.jsonl`) : null;
+      // A review job has no `claude` session transcript at all — its OWN log (`review-job-store.mjs#jobLogPath`,
+      // the same file `review-job.mjs` writes to) is its transcript for every purpose a caller here has
+      // (last-activity mtime, a link to read what it did). A `claude` session's transcript is the usual
+      // `<projects>/<cwd-slug>/<sessionId>.jsonl` path.
+      const transcriptPath = kind === REVIEW_JOB_KIND
+        ? jobLogPath(a.name)
+        : (sessionId && a.cwd ? join(projectsDir, projectSlugFor(a.cwd), `${sessionId}.jsonl`) : null);
       rows.push({
         id: a.id ?? sessionId ?? a.name, sessionId, name: a.name ?? null, runtime: 'claude', kind,
         cwd: a.cwd ?? null, state: a.state ?? null, startedAt: a.startedAt ?? null, lastEventAt: null,
+        // `pid`/`status`/`waitingFor` ride straight off the `claude agents --json` row (or the job record's own
+        // `pid`, `./review-job-store.mjs#jobRecordToAgentRow`) — the SAME three fields `session-verdicts.mjs`'s
+        // `isPermissionWait` and this repo's other liveness readers already key off, never re-derived here.
+        pid: Number.isInteger(a.pid) ? a.pid : null, status: a.status ?? null, waitingFor: a.waitingFor ?? null,
+        transcriptPath,
         lease, claimedNums: transcriptPath ? claimedNumsFromTranscript(transcriptPath) : [],
       });
       if (sessionId && a.cwd) rows.push(...subagentRowsFor(sessionId, a.cwd, projectsDir));

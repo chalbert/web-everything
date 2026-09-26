@@ -136,12 +136,16 @@ describe('collectLiveState — joins every sub-read into one snapshot, each seam
       readDrain: () => { calls.push('drain'); return { lastPass: null }; },
       readGithub: () => { calls.push('github'); return null; },
       readLoad: () => { calls.push('load'); return { loadavg: [0], cores: 1 }; },
+      readActivity: () => { calls.push('activity'); return { rows: [] }; },
     });
-    expect(calls).toEqual(['daemons', 'queue', 'health', 'lanes', 'drain', 'github', 'load']);
+    expect(calls).toEqual(['daemons', 'queue', 'health', 'lanes', 'drain', 'github', 'load', 'activity']);
     expect(out.observedAt).toBe('2026-09-26T12:00:00.000Z');
     // daemonStatus/heavyQueue are the ASSESSED shapes (assessDaemonStatus/assessHeavyQueue applied here), not
     // the raw collector output — this is the "reuse the existing assessment" contract the header promises.
     expect(out.daemonStatus).toHaveProperty('anyRefusing');
     expect(out.heavyQueue).toHaveProperty('headline');
+    // Card x20lkf6 — `runningRows` carries the RUNNING section's raw input, already enriched (empty here since
+    // the injected `readActivity` returns no rows).
+    expect(out.runningRows).toEqual([]);
   });
 });
