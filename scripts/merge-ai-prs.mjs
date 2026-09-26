@@ -140,7 +140,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { deliveredItemNumsFromPr, deliveredHashFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
+import { deliveredItemNumsFromPr, deliveredHashFromPr, declaredResolvedIdsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path; #xqpqyr2 — declaredResolvedIdsFromPr adds the ride-along-card signals
 // #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
@@ -1552,8 +1552,8 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
 
 /**
  * #3473 — fetches the two extra signals `deliveredItemNumsFromPr`'s guards 6/7 need (a PR's own body, and its
- * changed-file list) via ONE `gh pr view --json body,files` call. Not called unconditionally — see
- * `landedIdsForCandidate` below for the lazy-fetch-on-non-empty-base rationale. Fail-soft, matching every other
+ * changed-file list) via ONE `gh pr view --json body,files` call — once per CONFIRMED-merged local candidate
+ * (`landedIdsForCandidate` below; #xqpqyr2 dropped #3473's lazy-fetch-on-non-empty-base gate). Fail-soft, matching every other
  * `gh` read in this file: any failure (auth, rate-limit, network, unparseable JSON) degrades to `{body: '',
  * changedFiles: null}` — both guards then no-op, so a `gh` hiccup degrades to the PRE-#3473 behaviour rather
  * than blocking or crashing a land.
@@ -1568,6 +1568,38 @@ export function defaultFetchLandGuardSignals(c) {
     return { body: data.body || '', changedFiles: Array.isArray(data.files) ? data.files.map((f) => f?.path).filter(Boolean) : null };
   } catch {
     return { body: '', changedFiles: null };
+  }
+}
+
+/**
+ * #xqpqyr2 — the ONE `landedNumberFor` call `landedIdsForCandidate` needs: a unary hash→NNN lookup, reusing
+ * lane-drain's own durable `bornAs:<hash>`-on-`origin/main` reader (imported at the top of this file) rather
+ * than re-deriving it. Fail-soft like every other read in this file: any git failure inside `landedNumberFor`
+ * already degrades to `null` (see its own `quietGit`), so a hiccup here just falls back to the pre-existing
+ * changed-file heuristic in `deliveredHashFromPr`/`declaredResolvedIdsFromPr`.
+ * @param {string} hash
+ * @returns {string|null}
+ */
+export function defaultResolveHashNumber(hash) {
+  try { return landedNumberFor(hash, process.cwd()); } catch { return null; }
+}
+
+/**
+ * #xqpqyr2 — fetches a candidate's own unified diff (`gh pr diff`), the evidence every `declaredResolvedIdsFromPr`
+ * signal needs (a card's frontmatter status move) beyond `defaultFetchLandGuardSignals`'s body/changed-files.
+ * A SEPARATE call (`gh pr diff` has no `--json` counterpart to fold into the existing `gh pr view` read) — kept
+ * off the hot path by `landedIdsForCandidate`'s own gate (only fetched when `changedFiles` already names a
+ * backlog card file, numbered or hash-named — the only thing a status move can be read from). Fail-soft: any
+ * failure degrades to `''`, under which no ride-along is credited.
+ * @param {{num?:(number|string), repo?:(string|null)}} c
+ * @returns {string}
+ */
+export function defaultFetchDiff(c) {
+  try {
+    const args = ['pr', 'diff', String(c?.num), ...(c?.repo ? ['--repo', c.repo] : [])];
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    return '';
   }
 }
 
@@ -1588,17 +1620,30 @@ export function defaultFetchLandGuardSignals(c) {
  * not the looser `itemNumsFromPr`, is the right tool for an AUTO-COMMITTED resolve. Pure.
  *
  * #3473 — TWO-PASS: first compute the ref/title-only `base` (identical to pre-#3473 behaviour, zero extra
- * `gh` calls). Only when `base` is non-empty — i.e. this candidate would otherwise auto-resolve something —
- * lazily fetch the candidate's body/changed-files (`fetchGuardSignals`, one `gh pr view` call) and re-run
+ * `gh` calls). [Superseded by #xqpqyr2 below: the fetch now runs for every merged local candidate.] Only
+ * when `base` is non-empty — i.e. this candidate would otherwise auto-resolve something — lazily fetch the candidate's body/changed-files (`fetchGuardSignals`, one `gh pr view` call) and re-run
  * `deliveredItemNumsFromPr` WITH those signals, so guards 6/7 (the "does not resolve #NNN" disclaimer and the
  * all-.md-diff housekeeping exclusion) can strip a false credit before it reaches `landedThisPass`. This keeps
  * the extra `gh` round-trip off the overwhelming majority of candidates, which match nothing and must never
  * pay for it — only a candidate already about to auto-resolve something pays the one extra call.
+ *
+ * #xqpqyr2 — TWO more effects, additive to the above (found via #2712's stale-claim health sign: real merged
+ * PRs #2668/#2689/#2691 all left their card(s) `active` forever):
+ *   1. `deliveredHashFromPr` now ALSO tries `resolveHashNumber` (→ `landedNumberFor`) before its changed-file
+ *      scaffold-refile check — a hash already numbered on `origin/main` by an EARLIER pass/session resolves
+ *      directly, with no dependence on this PR's own diff re-filing the (already-renamed) scaffold.
+ *   2. A candidate now ALSO returns any RIDE-ALONG ids `declaredResolvedIdsFromPr` finds (coordinated cards a
+ *      multi-card PR declares/resolves besides its own single ref-led id). This relaxes #3473's lazy fetch:
+ *      EVERY merged local candidate now pays the one body/changed-files call, because a ride-along can be
+ *      declared only in the body of a PR with no id of its own (PR #2724 review — a TITLE-only pre-check
+ *      missed exactly that). Both call sites run only on a confirmed merge, so the cost is one call per
+ *      merge. The diff fetch (every ride-along signal's evidence) stays gated on `changedFiles` already naming
+ *      a backlog card file, numbered or hash-named.
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
- * @param {{isLocalRepo?:function, fetchGuardSignals?:function}} [o]
- * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved (usually 0 or 1)
+ * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
+ * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
  */
-export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals } = {}) {
+export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
@@ -1607,13 +1652,25 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
   // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
   // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
   const hashLed = !base.length && deliveredHashFromPr(c.headRef, c.title) != null;
-  if (!base.length && !hashLed) return [];
+  // #xqpqyr2 — no title-only pre-check gates the body fetch (PR #2724 review): a ride-along declared only in
+  // the BODY of a PR with no id of its own was silently missed. Both call sites run only on a CONFIRMED merge,
+  // so the one extra `gh` call per merged PR is cheap next to a card left `active` forever.
   const { body, changedFiles } = fetchGuardSignals(c) || {};
+  const ids = new Set();
   if (hashLed) {
-    const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles });
-    return hash ? [hash] : [];
+    const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles, landedNumberFor: resolveHashNumber });
+    if (hash) ids.add(asItemId(hash));
+  } else if (base.length) {
+    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles })) ids.add(asItemId(n));
   }
-  return deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles }).map(asItemId);
+  // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Every
+  // ride-along signal needs the diff (a card's frontmatter status move is the evidence), so its fetch is gated
+  // on `changedFiles` naming some backlog card file (numbered or hash-named) — the only possible match.
+  const hasBacklogCardFile = Array.isArray(changedFiles)
+    && changedFiles.some((f) => /(?:^|\/)backlog\/(?:\d{2,5}|x[0-9a-z]{6})-[^/]+\.md$/i.test(String(f?.path ?? f)));
+  const diff = hasBacklogCardFile ? (fetchDiff(c) || '') : '';
+  for (const n of declaredResolvedIdsFromPr(c.headRef, c.title, { body, changedFiles, diff, landedNumberFor: resolveHashNumber })) ids.add(asItemId(n));
+  return [...ids];
 }
 
 /**
