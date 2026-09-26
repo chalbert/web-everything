@@ -1603,6 +1603,17 @@ async function smokeAndAdopt({
   if (a.smokeResult.verdict === 'pass') return finalize(plan);
 
   const failedA = failedRows(a.smokeResult);
+  if (a.smokeResult.verdict === 'auth-broken') {
+    // GitHub rejected the smoke env's credential even after a forced re-mint (daemon-live-smoke.mjs): an
+    // ENVIRONMENT fault, never evidence against the candidate — no reject record, no fallback/control smokes.
+    alert('github-auth-broken', {
+      failed: failedA.map((r) => r.name).join(','),
+      ...(a.smokeResult.auth || {}),
+      message: 'GitHub rejects the daemon\'s token even after a re-mint — fix the App credentials; the clone stays on its last-good build meanwhile',
+    });
+    await hold('github-auth-broken', failedA);
+    return { moved: false, reason: 'github-auth-broken', plan, alerts: [...prepAlerts, ...alertsList] };
+  }
   if (a.smokeResult.verdict !== 'code') {
     // 'transient' — never poison the reject-cache; hold on last-good (still dispatching), retry next tick.
     alert('smoke-transient');
