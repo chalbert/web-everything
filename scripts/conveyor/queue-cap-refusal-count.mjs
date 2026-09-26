@@ -46,14 +46,28 @@ export const QUEUE_CAP_REFUSAL_MARKER = '⏳ conveyor — fix dispatch refused, 
 export const QUEUE_CAP_REFUSAL_CAP = 3;
 
 /**
- * we:scripts/conveyor/queue-cap-refusal-count.mjs#buildQueueCapRefusalComment — the durable per-refusal comment
- * body: {@link QUEUE_CAP_REFUSAL_MARKER} as the FIRST line (so {@link countQueueCapRefusals} matches it), the
- * human-readable reason below. Pure.
- * @param {string} [why] - `we:scripts/conveyor/reconcile-fix-dispatch.mjs#queueCapWhy`'s own text.
+ * we:scripts/conveyor/queue-cap-refusal-count.mjs#queueCapHeadLine — the machine-read line recording WHICH PR head
+ * a refusal marker was posted against. One exhaustion EPISODE = one head (PR #2760 review): a new head pushed after
+ * an episode was surfaced starts a fresh count, so a second saturation is surfaced again instead of being
+ * deduplicated against the first episode's note. Pure.
+ * @param {string} headSha
  * @returns {string}
  */
-export function buildQueueCapRefusalComment(why) {
-  return `${QUEUE_CAP_REFUSAL_MARKER}\n\n${why || 'fix dispatch refused this pass (queue-cap)'}`;
+export function queueCapHeadLine(headSha) {
+  return `<!-- queue-cap-head: ${headSha} -->`;
+}
+
+/**
+ * we:scripts/conveyor/queue-cap-refusal-count.mjs#buildQueueCapRefusalComment — the durable per-refusal comment
+ * body: {@link QUEUE_CAP_REFUSAL_MARKER} as the FIRST line (so {@link countQueueCapRefusals} matches it), the
+ * {@link queueCapHeadLine} when the head is known, the human-readable reason below. Pure.
+ * @param {string} [why] - `we:scripts/conveyor/reconcile-fix-dispatch.mjs#queueCapWhy`'s own text.
+ * @param {string|null} [headSha] - the PR's `headRefOid` at refusal time.
+ * @returns {string}
+ */
+export function buildQueueCapRefusalComment(why, headSha = null) {
+  const head = headSha ? `\n${queueCapHeadLine(headSha)}` : '';
+  return `${QUEUE_CAP_REFUSAL_MARKER}${head}\n\n${why || 'fix dispatch refused this pass (queue-cap)'}`;
 }
 
 /**
@@ -64,15 +78,22 @@ export function buildQueueCapRefusalComment(why) {
  * (`trimStart().startsWith`, the same narrowing every sibling counter in this repo uses) AND its author passes
  * {@link isTrustedMarkerAuthor} — a forged marker from an untrusted login must never inflate this population's
  * cap.
+ *
+ * With `headSha`, only markers carrying that head's {@link queueCapHeadLine} are counted (the current episode);
+ * without it, every marker on the PR is counted.
  * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @param {{headSha?:(string|null)}} [o]
  * @returns {number} the number of durable queue-cap-refusal comments on the PR (0 for a non-array / empty input)
  */
-export function countQueueCapRefusals(comments) {
+export function countQueueCapRefusals(comments, { headSha = null } = {}) {
   if (!Array.isArray(comments)) return 0;
+  const headLine = headSha ? queueCapHeadLine(headSha) : null;
   let n = 0;
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(QUEUE_CAP_REFUSAL_MARKER) && isTrustedMarkerAuthor(c)) n += 1;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(QUEUE_CAP_REFUSAL_MARKER) || !isTrustedMarkerAuthor(c)) continue;
+    if (headLine && !body.includes(headLine)) continue;
+    n += 1;
   }
   return n;
 }

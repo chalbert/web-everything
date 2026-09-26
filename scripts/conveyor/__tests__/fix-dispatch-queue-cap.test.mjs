@@ -199,18 +199,43 @@ describe('#4229 — recordQueueCapRefusal (IO shell over injected fakes — no r
     expect(notified).toHaveLength(0);
   });
 
-  it('a throwing `readPrComments` fails open (treated as no prior history) rather than crashing the pass', () => {
+  // PR #2760 review (codex-correctness + antigravity) — the history read GATES the write, so a read failure must
+  // fail CLOSED (write nothing), never fail open to an empty history: otherwise persistently failing reads with
+  // working writes post a fresh marker every single pass, bypassing the cap forever.
+  it('a throwing `readPrComments` fails CLOSED — no marker, no note, no notify, and the pass does not crash', () => {
     const posted = [];
+    const notified = [];
     const result = recordQueueCapRefusal({
       pr: 9,
       repo: 'o/n',
       why: 'saturated',
       readPrComments: () => { throw new Error('gh: network error'); },
       postComment: (o) => posted.push(o),
-      notify: () => {},
+      notify: (o) => notified.push(o),
     });
-    expect(result).toEqual({ attempts: 1, capExhausted: false });
-    expect(posted).toHaveLength(1);
+    expect(result).toEqual({ attempts: null, capExhausted: false, historyUnknown: true });
+    expect(posted).toHaveLength(0);
+    expect(notified).toHaveLength(0);
+  });
+
+  it('repeated read failures with working writes post NOTHING, before and after exhaustion — then resume counting once reads recover', () => {
+    const ALWAYS_REFUSE = { tryAdmit: () => ({ admit: false, projectedMinutes: 45, maxWaitMinutes: 30, demandMinutes: 8 }) };
+    let thread = [];
+    let readsFail = false;
+    const posted = [];
+    const pass = () => runFix([1854], ALWAYS_REFUSE, {
+      readPrComments: () => { if (readsFail) throw new Error('gh: timeout'); return thread; },
+      postQueueCapComment: (o) => { posted.push(o); thread = [...thread, { body: o.body, author: AUTOMATION }]; },
+    }).result.refusals[0];
+    readsFail = true;
+    for (let i = 0; i < 5; i += 1) expect(pass()).toMatchObject({ attempts: null, capExhausted: false });
+    expect(posted).toHaveLength(0); // below the cap: nothing written while history is unknown
+    readsFail = false;
+    for (let i = 0; i < 4; i += 1) pass(); // 3 markers + the note
+    expect(posted).toHaveLength(4);
+    readsFail = true;
+    for (let i = 0; i < 5; i += 1) pass();
+    expect(posted).toHaveLength(4); // past exhaustion: still nothing written while history is unknown
   });
 
   it('a throwing `postComment`/`notify` is swallowed — never masks the (already-decided) refusal', () => {
@@ -255,6 +280,51 @@ describe('#4229 — runReconcileFixDispatch: the durable count survives across p
     expect(posted.filter((p) => p.body.includes(QUEUE_CAP_REFUSAL_MARKER))).toHaveLength(3);
     expect(posted.filter((p) => p.body.includes(NOTE_COMMENT_MARKER))).toHaveLength(1);
     expect(notified).toHaveLength(1); // surfaced to the operator's desktop exactly once
+  });
+
+  // PR #2760 review (correctness) — the call site must hand the gh `OWNER/REPO` slug to the comment seams, never
+  // the internal repo KEY ('we'): `gh pr view <n> --repo we` fails, the read was swallowed, and the whole
+  // count/cap/escalation feature was silently inert. This drives the REAL `defaultReadPrComments` /
+  // `postNoteComment` argv builders (only the process exec itself is faked) so the wiring is checked end to end.
+  it('WIRING — the real default gh seams receive the OWNER/REPO slug (never the internal repo key), for the default repo and an explicit slug or key', async () => {
+    const { defaultReadPrComments } = await import('../ci-red-recovery-watch.mjs');
+    const { postNoteComment } = await import('../reconcile-note-comment.mjs');
+    const ALWAYS_REFUSE = { tryAdmit: () => ({ admit: false, projectedMinutes: 45, maxWaitMinutes: 30, demandMinutes: 8 }) };
+    for (const [repo, slug] of [[undefined, 'chalbert/web-everything'], ['we', 'chalbert/web-everything'], ['chalbert/web-everything', 'chalbert/web-everything']]) {
+      const argvs = [];
+      const exec = (_cmd, argv) => { argvs.push(argv); return JSON.stringify({ comments: [] }); };
+      runFix([1854], ALWAYS_REFUSE, {
+        ...(repo === undefined ? {} : { repo }),
+        readPrComments: (pr, o) => defaultReadPrComments(pr, { ...o, exec }),
+        postQueueCapComment: (o) => postNoteComment({ ...o, exec }),
+      });
+      expect(argvs).toHaveLength(2); // one read + one marker post
+      for (const argv of argvs) expect(argv.slice(argv.indexOf('--repo'), argv.indexOf('--repo') + 2)).toEqual(['--repo', slug]);
+    }
+  });
+
+  // PR #2760 review (antigravity) — a SECOND exhaustion episode on the same PR (a new head pushed after the first
+  // episode) must be surfaced again, not deduplicated against the first episode's `(3, 3)` note key.
+  it('a second exhaustion episode on a NEW head re-counts from zero and surfaces a fresh note (episode key advances)', () => {
+    const ALWAYS_REFUSE = { tryAdmit: () => ({ admit: false, projectedMinutes: 45, maxWaitMinutes: 30, demandMinutes: 8 }) };
+    let thread = [];
+    const posted = [];
+    const notified = [];
+    const pass = (headRefOid) => runFix([1854], ALWAYS_REFUSE, {
+      reconcile: reconcileStub(fixEntries([1854]).map((e) => ({ ...e, headRefOid }))),
+      readPrComments: () => thread,
+      postQueueCapComment: (o) => { posted.push(o); thread = [...thread, { body: o.body, author: AUTOMATION }]; },
+      notifyQueueCapOperator: (o) => notified.push(o),
+    }).result.refusals[0];
+    const first = [1, 2, 3, 4, 5].map(() => pass('aaa111'));
+    expect(first.map((r) => r.attempts)).toEqual([1, 2, 3, 3, 3]);
+    expect(notified).toHaveLength(1);
+    const second = [1, 2, 3, 4, 5].map(() => pass('bbb222'));
+    expect(second.map((r) => r.attempts)).toEqual([1, 2, 3, 3, 3]);
+    expect(second.map((r) => r.capExhausted)).toEqual([false, false, false, true, true]);
+    expect(posted.filter((p) => p.body.includes(QUEUE_CAP_REFUSAL_MARKER))).toHaveLength(6);
+    expect(posted.filter((p) => p.body.includes(NOTE_COMMENT_MARKER))).toHaveLength(2); // one per episode, never more
+    expect(notified).toHaveLength(2);
   });
 
   // #4229 — REPLAY PROOF, grounded in real PR chalbert/web-everything#2756's own real identity (`gh pr view 2756

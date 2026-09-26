@@ -66,7 +66,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
-import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
@@ -1013,7 +1013,10 @@ export function runReconcileFixDispatch({
       const why = queueCapWhy(q);
       const capResult = recordQueueCapRefusal({
         pr: entry.pr,
-        repo: repoKey,
+        // PR #2760 review — the gh `OWNER/REPO` slug, never `repoKey` (`gh --repo we` fails, and the swallowed
+        // read left the whole count/cap/escalation silently inert).
+        repo: CONSTELLATION_REPOS[repoKey].slug,
+        headSha: entry.headRefOid ?? null,
         why,
         cap: queueCapRefusalCap,
         readPrComments,
@@ -1116,23 +1119,31 @@ export function queueCapWhy(d) {
  * UNLIKE the unowned-rebase-drop cap, dispatch is NEVER stopped here either way — see
  * `we:scripts/conveyor/queue-cap-refusal-count.mjs`'s own header for why retrying stays correct once the queue
  * clears; only the operator-visible trace changes.
- * @param {{pr:number, comments?:Array<object>|null, cap?:number}} o
+ *
+ * ONE EPISODE PER HEAD (PR #2760 review). With `headSha`, the cap counts only this head's markers, so a new head
+ * pushed after an episode was surfaced starts a fresh count. The note's `attempts` is the PR's TOTAL marker count
+ * (every head), which only ever grows by {@link QUEUE_CAP_REFUSAL_CAP} per episode — so each episode gets its own
+ * `noteEpisodeKey` and a second exhaustion is surfaced again rather than deduplicated against the first.
+ * @param {{pr:number, comments?:Array<object>|null, cap?:number, headSha?:(string|null)}} o
  * @returns {{attempts:number, capExhausted:boolean, postMarker:boolean, note:object|null}}
  */
-export function planQueueCapRefusal({ pr, comments, cap = QUEUE_CAP_REFUSAL_CAP }) {
-  const priorAttempts = countQueueCapRefusals(comments);
+export function planQueueCapRefusal({
+  pr, comments, cap = QUEUE_CAP_REFUSAL_CAP, headSha = null,
+}) {
+  const priorAttempts = countQueueCapRefusals(comments, { headSha });
   if (priorAttempts < cap) {
     return {
       attempts: priorAttempts + 1, capExhausted: false, postMarker: true, note: null,
     };
   }
+  const onHead = headSha ? ` on head \`${String(headSha).slice(0, 9)}\`` : '';
   const note = {
     kind: 'round-cap-exhausted',
     prNumber: pr,
-    attempts: priorAttempts,
+    attempts: countQueueCapRefusals(comments),
     cap,
     capKind: 'queue-cap',
-    text: `PR #${pr}'s fix dispatch has now been refused \`queue-cap\` ${priorAttempts} times (cap ${cap}) — the `
+    text: `PR #${pr}'s fix dispatch has now been refused \`queue-cap\` ${priorAttempts} times${onHead} (cap ${cap}) — the `
       + 'projected heavy-test queue wait keeps exceeding budget every reconcile pass. Dispatch keeps retrying '
       + 'automatically (the queue is expected to clear on its own); this note exists only so a human is not the '
       + 'last to know if it does not.',
@@ -1154,22 +1165,28 @@ export function planQueueCapRefusal({ pr, comments, cap = QUEUE_CAP_REFUSAL_CAP 
  * NEVER THROWS: every write here is best-effort observability, not a gate on the refusal itself — the refusal
  * is ALREADY decided by `queueBudget.tryAdmit` at the call site; this only decides what to durably record about
  * it, and a comment/notify failure must never mask that real decision.
- * @param {{pr:number, repo:string, why?:string, cap?:number, readPrComments?:Function, postComment?:Function,
- *   notify?:Function}} o
- * @returns {{attempts:number, capExhausted:boolean}}
+ *
+ * FAILS CLOSED ON AN UNREADABLE HISTORY (PR #2760 review): the read GATES every write here (the cap and the note
+ * dedup both come from it), so a failed read writes NOTHING and returns `historyUnknown: true`. Failing open to
+ * an empty history would post a fresh marker every pass while reads keep failing — bypassing the cap forever.
+ *
+ * `repo` must be the gh `OWNER/REPO` slug, never the internal repo key — it goes straight to `gh --repo`.
+ * @param {{pr:number, repo:string, why?:string, cap?:number, headSha?:(string|null), readPrComments?:Function,
+ *   postComment?:Function, notify?:Function}} o
+ * @returns {{attempts:(number|null), capExhausted:boolean, historyUnknown?:true}}
  */
 export function recordQueueCapRefusal({
-  pr, repo, why, cap = QUEUE_CAP_REFUSAL_CAP,
+  pr, repo, why, cap = QUEUE_CAP_REFUSAL_CAP, headSha = null,
   readPrComments = defaultReadPrComments, postComment = postNoteComment, notify = notifyDesktopChecked,
 } = {}) {
   let comments;
-  try { comments = readPrComments(pr, { repo }); } catch { comments = []; }
+  try { comments = readPrComments(pr, { repo }); } catch { return { attempts: null, capExhausted: false, historyUnknown: true }; }
   const plan = planQueueCapRefusal({
-    pr, comments, cap,
+    pr, comments, cap, headSha,
   });
   try {
     if (plan.postMarker) {
-      postComment({ repo, pr, body: buildQueueCapRefusalComment(why) });
+      postComment({ repo, pr, body: buildQueueCapRefusalComment(why, headSha) });
     } else if (plan.note) {
       const notePlan = planNoteComment(plan.note, comments);
       if (!notePlan.alreadyPosted) {
