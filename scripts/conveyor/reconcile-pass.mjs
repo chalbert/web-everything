@@ -452,7 +452,8 @@ export function defaultFindMatchingMainCommit(file, targetBlob, {
  */
 export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, repo = null } = {}) {
   try {
-    const out = exec('gh', ['api', `repos/${repo || '{owner}/{repo}'}/commits/${sha}/pulls`, '--jq', '.[].number'], {
+    const endpoint = `repos/${repo || '{owner}/{repo}'}/commits/${sha}/pulls`;
+    const out = exec('gh', ['api', endpoint, '--jq', '.[].number'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
     return String(out || '').split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
