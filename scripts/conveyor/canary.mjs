@@ -47,6 +47,7 @@ import {
 } from '../operations/dispatch-lane-io.mjs';
 import { DISPATCH_EFFECT, fillBrief, REPO_AWARE_VALUE_PATTERNS, DISPATCH_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
 import { gateFor } from '../lib/repo-profile.mjs';
+import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
 import { evaluateCanaryStages, CANARY_STAGES } from './canary-stages.mjs';
@@ -66,7 +67,7 @@ const TRANSCRIPT_MAX_BYTES = 800_000;
 const TRANSCRIPT_FIELD_MAX = 300;
 
 function parseArgs(argv) {
-  const out = { repo: 'chalbert/web-everything', timeoutMs: DEFAULT_TIMEOUT_MS, pollMs: DEFAULT_POLL_MS };
+  const out = { repo: CONSTELLATION_REPOS.we.slug, timeoutMs: DEFAULT_TIMEOUT_MS, pollMs: DEFAULT_POLL_MS };
   for (const arg of argv) {
     const m = /^--([a-zA-Z-]+)=(.*)$/.exec(arg);
     if (!m) continue;
