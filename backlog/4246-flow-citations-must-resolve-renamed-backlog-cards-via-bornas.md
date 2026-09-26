@@ -3,9 +3,10 @@ bornAs: xmd4pfa
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/flows/flow-model.mjs", "we:scripts/conveyor/flows/__tests__/real-flows.test.mjs", "we:scripts/conveyor/flows/build-dispatch.flow.json", "we:scripts/lane-drain.mjs", "we:scripts/lib/citation-check.mjs", "we:scripts/__tests__/lane-drain-numbering.test.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
