@@ -54,10 +54,17 @@ export const NOTE_COMMENT_MARKER = '🔔 conveyor — needs your decision';
  *     the SAME exhaustion, and a new one (after a reset/retry) is a different key.
  *   - `awaiting-permission`: keyed on the session that is actually stuck (`sessionId`, falling back to `pid`) —
  *     the session identity IS the episode; a different session hitting the same wall later is a new episode.
+ *   - `round-cap-exhausted` (#xu38vlf, epic #4075/#3383): keyed on the population (`capKind`) AND the
+ *     attempt/cap pair, same reasoning as `ci-heal-exhausted` — that pair only advances forward (a durable,
+ *     comment-backed count), so the SAME pair means the SAME exhaustion, and a later one (after a human lets it
+ *     retry and it burns through the cap again) is a genuinely new episode.
+ *   - `liveness-wait-exhausted` (#xu38vlf): keyed on the PR and the wait's own first-observed timestamp
+ *     (`since`) — the wait can keep growing past its bound (a liveness signal that never clears) without
+ *     minting a new episode; only a FRESH wait (a new `since`, meaning the old one was resolved first) is new.
  *   - anything else: keyed on the note's own `text`, the only stable field a shape this module does not know
  *     about is guaranteed to carry — never silently drops an unrecognised note kind.
- * @param {{kind?:string, prNumber?:(number|null), attempts?:number, cap?:number, sessionId?:string, pid?:number,
- *   startedAt?:string, text?:string}} note
+ * @param {{kind?:string, prNumber?:(number|null), attempts?:number, cap?:number, capKind?:string,
+ *   sessionId?:string, pid?:number, since?:string, startedAt?:string, text?:string}} note
  * @returns {string}
  */
 export function noteEpisodeKey(note) {
@@ -65,6 +72,12 @@ export function noteEpisodeKey(note) {
   if (note?.kind === 'ci-heal-exhausted') return `ci-heal-exhausted:${pr}:${note.attempts}/${note.cap}`;
   if (note?.kind === 'awaiting-permission') {
     return `awaiting-permission:${pr}:${note.sessionId ?? note.pid ?? 'unknown-session'}`;
+  }
+  if (note?.kind === 'round-cap-exhausted') {
+    return `round-cap-exhausted:${pr}:${note.capKind ?? 'unknown-population'}:${note.attempts}/${note.cap}`;
+  }
+  if (note?.kind === 'liveness-wait-exhausted') {
+    return `liveness-wait-exhausted:${pr}:${note.since ?? 'unknown-since'}`;
   }
   return `${note?.kind ?? 'note'}:${pr}:${note?.text ?? ''}`;
 }
@@ -79,6 +92,8 @@ export function noteEpisodeKey(note) {
 export function noteHeadline(note) {
   if (note?.kind === 'ci-heal-exhausted') return 'needs your decision: fix attempts exhausted';
   if (note?.kind === 'awaiting-permission') return 'needs your decision: a session is blocked on a permission prompt';
+  if (note?.kind === 'round-cap-exhausted') return 'needs your decision: auto-repair rounds exhausted';
+  if (note?.kind === 'liveness-wait-exhausted') return 'needs your decision: a liveness wait ran past its bound';
   return `needs your decision: ${note?.kind ?? 'an unrecognised escalation'}`;
 }
 

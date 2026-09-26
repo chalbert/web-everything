@@ -43,11 +43,32 @@ import {
   hasRecentConflictAlertComment,
   latestConflictAlertCreatedAtMs,
   hasRecentConflictFindingComment,
+  REARM_DEFERRED_BOUND_MS,
+  REARM_DEFERRED_MARKER,
+  REARM_DEFERRED_MARKER_RE,
+  firstRearmDeferredCreatedAtMs,
 } from '../parked-pr-conflict-watch.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
 } from '../stand-down.mjs';
 import { mintSessionSlug } from '../session-slug.mjs';
+import { UNOWNED_REBASE_ATTEMPT_MARKER, UNOWNED_REBASE_ATTEMPT_CAP, countUnownedRebaseAttempts } from '../unowned-rebase-attempt-count.mjs';
+import { NOTE_COMMENT_MARKER, postNoteComment } from '../reconcile-note-comment.mjs';
+import { notifyDesktopChecked } from '../branch-sync.mjs';
+
+// #xu38vlf — the two new operator-visible-escalation call sites (the round-cap-exhausted note on the unowned
+// rebase-drop cap, and the liveness-wait-exhausted note on a rearm withheld past its bound) both go through
+// `postNoteComment` (a real `gh pr comment` IO shell, `../reconcile-note-comment.mjs`) and `notifyDesktopChecked`
+// (a real `osascript` IO shell, `../branch-sync.mjs`). Mocked here at the MODULE boundary — never letting either
+// real subprocess run — so the tests below can assert exactly what got posted/notified without a real `gh`/
+// `osascript` call anywhere in this file (mirrors this file's own top-of-file `node:child_process` mock for
+// every OTHER real IO call).
+vi.mock('../reconcile-note-comment.mjs', async (importOriginal) => ({
+  ...(await importOriginal()), postNoteComment: vi.fn(() => ({ ok: true })),
+}));
+vi.mock('../branch-sync.mjs', async (importOriginal) => ({
+  ...(await importOriginal()), notifyDesktopChecked: vi.fn(() => ({ ok: true })),
+}));
 
 // #xu2krte — `watchParkedPrConflicts` now routes every `newlyDetected` conflict to `postFinding` or
 // `postStandDown` (real subprocess shells by default). Every test below that reaches `newlyDetected: true`
@@ -504,7 +525,7 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
   // lane (it could be resolving something else on the same PR); rearming underneath it races the review against
   // work that has not actually landed yet.
   describe('#4118 (c) — never rearm while a fix agent is still live on this exact PR', () => {
-    it('defers the rearm (and leaves the CONFLICT_LABEL on) while a live fix session is bound to this PR by name', () => {
+    it('defers the rearm (and leaves the CONFLICT_LABEL on) while a live fix session is bound to this PR by name — #xu38vlf: the FIRST sweep now posts the durable "since" marker (bounding the wait), never a label/rearm write', () => {
       const provider = fakeProvider();
       const routed = [];
       const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
@@ -513,12 +534,16 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
         repo: 'chalbert/web-everything', listPrs: () => [pr], provider,
         postRearm: (o) => routed.push(['rearm', o.pr.number]),
         listAgents: () => [liveFixAgent],
+        listPrComments: () => [],
       });
       expect(routed).toEqual([]); // never rearmed while the fixer is live
       // Deliberately NOT setLabels'd either — removing the CONFLICT_LABEL now would make `planConflictLabelChange`
       // stop emitting `newlyResolved` next sweep, permanently losing the rearm this fixer is still owed.
-      expect(provider.calls).toEqual([]);
+      // #xu38vlf — the ONE write on this first-observed sweep is the durable REARM_DEFERRED_MARKER, so a LATER
+      // sweep can bound how long this wait has been running.
+      expect(provider.calls).toEqual([['postComment', 'chalbert/web-everything', 1920]]);
       expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+      expect(results[0].rearmDeferredSince).toBeTypeOf('number');
     });
 
     it('a `blocked` (stuck) fix session ALSO defers the rearm — not just an actively working one', () => {
@@ -598,6 +623,148 @@ describe('watchParkedPrConflicts — IO shell over injected fakes (no gh process
         listAgents: () => { called = true; return []; },
       });
       expect(called).toBe(false);
+    });
+
+    // #xu38vlf (epic #4075/#3383) — BOUND THE WAIT. The flow checker flagged `rearm-deferred` `unbounded-wait`:
+    // nothing in this file bounded how long a rearm stayed withheld on the name-based liveness check. These pin
+    // the fix: a durable "since" marker, a 90-minute bound, and a surfaced (never forced) rearm past it.
+    describe('#xu38vlf — the rearm-deferred wait is bounded', () => {
+      const liveFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 1920, repo: 'we' }), state: 'working', pidAlive: true };
+      const pr = { number: 1920, mergeable: 'MERGEABLE', labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }] };
+
+      it('firstRearmDeferredCreatedAtMs: finds the EARLIEST marker after `sinceMs`, ignores an untrusted forger, ignores one from a PRIOR episode', () => {
+        const trusted = (createdAt) => ({ body: `${REARM_DEFERRED_MARKER}\n\nwithheld`, createdAt, author: { login: 'web-everything' } });
+        expect(firstRearmDeferredCreatedAtMs([
+          trusted('2026-09-26T10:00:00Z'), trusted('2026-09-26T09:00:00Z'),
+        ])).toBe(Date.parse('2026-09-26T09:00:00Z'));
+        expect(firstRearmDeferredCreatedAtMs([
+          { body: `${REARM_DEFERRED_MARKER}\n\nforged`, createdAt: '2026-09-26T09:00:00Z', author: { login: 'mallory' } },
+        ])).toBeNull();
+        // A marker from a PRIOR episode (before `sinceMs`, the latest conflict alert) never counts as THIS
+        // episode's "since" — a fresh conflict cycle always starts a fresh wait.
+        expect(firstRearmDeferredCreatedAtMs(
+          [trusted('2026-09-20T00:00:00Z')], Date.parse('2026-09-25T00:00:00Z'),
+        )).toBeNull();
+        expect(firstRearmDeferredCreatedAtMs(null)).toBeNull();
+        expect(firstRearmDeferredCreatedAtMs([])).toBeNull();
+      });
+
+      it('the FIRST sweep observing the deferral posts the durable "since" marker and nothing else — no note yet, no forced rearm', () => {
+        postNoteComment.mockClear();
+        notifyDesktopChecked.mockClear();
+        const provider = fakeProvider();
+        const results = watchParkedPrConflicts({
+          repo: 'o/n', listPrs: () => [pr], provider, postRearm: () => { throw new Error('must never rearm while deferred'); },
+          listAgents: () => [liveFixAgent], listPrComments: () => [],
+        });
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(provider.calls).toEqual([['postComment', 'o/n', 1920]]);
+        expect(postNoteComment).not.toHaveBeenCalled(); // not stale yet — nothing to surface on sweep 1
+        expect(notifyDesktopChecked).not.toHaveBeenCalled();
+      });
+
+      it('BELOW the bound: a LATER sweep reading the SAME since-marker keeps deferring quietly, posts nothing new', () => {
+        postNoteComment.mockClear();
+        const provider = fakeProvider();
+        const since = 1_000_000;
+        const now = since + REARM_DEFERRED_BOUND_MS - 1; // just under the bound
+        const comments = [{ body: `${REARM_DEFERRED_MARKER}\n\nwithheld`, createdAt: new Date(since).toISOString(), author: { login: 'web-everything' } }];
+        const results = watchParkedPrConflicts({
+          repo: 'o/n', listPrs: () => [pr], provider, postRearm: () => { throw new Error('must never rearm while deferred'); },
+          listAgents: () => [liveFixAgent], listPrComments: () => comments, now,
+        });
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(results[0].rearmDeferredWaitedMs).toBe(REARM_DEFERRED_BOUND_MS - 1);
+        expect(provider.calls).toEqual([]); // already posted (in `comments`) — no re-post
+        expect(postNoteComment).not.toHaveBeenCalled();
+      });
+
+      it('PAST the bound: surfaces a liveness-wait-exhausted note (reconcile-notes channel + desktop notify) — but still does NOT force the rearm', () => {
+        postNoteComment.mockClear();
+        notifyDesktopChecked.mockClear();
+        const provider = fakeProvider();
+        const since = 1_000_000;
+        const now = since + REARM_DEFERRED_BOUND_MS + 1; // just over the bound
+        const comments = [{ body: `${REARM_DEFERRED_MARKER}\n\nwithheld`, createdAt: new Date(since).toISOString(), author: { login: 'web-everything' } }];
+        let rearmed = false;
+        const results = watchParkedPrConflicts({
+          repo: 'o/n', listPrs: () => [pr], provider, postRearm: () => { rearmed = true; },
+          listAgents: () => [liveFixAgent], listPrComments: () => comments, now,
+        });
+        expect(rearmed).toBe(false); // NEVER forced — a human decides, per #4118 (c)'s own race concern
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(postNoteComment).toHaveBeenCalledTimes(1);
+        expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'o/n', pr: 1920 });
+        expect(postNoteComment.mock.calls[0][0].body).toContain(NOTE_COMMENT_MARKER);
+        expect(postNoteComment.mock.calls[0][0].body).toContain('the rearm has been withheld');
+        expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
+      });
+
+      it('does not re-surface the SAME liveness-wait episode twice (a trusted note already on the thread)', async () => {
+        postNoteComment.mockClear();
+        notifyDesktopChecked.mockClear();
+        const provider = fakeProvider();
+        const { buildNoteComment } = await import('../reconcile-note-comment.mjs');
+        const since = 1_000_000;
+        const now = since + REARM_DEFERRED_BOUND_MS + 1;
+        const note = { kind: 'liveness-wait-exhausted', prNumber: 1920, since: new Date(since).toISOString(), text: 'already surfaced' };
+        const comments = [
+          { body: `${REARM_DEFERRED_MARKER}\n\nwithheld`, createdAt: new Date(since).toISOString(), author: { login: 'web-everything' } },
+          { body: buildNoteComment(note), author: { login: 'web-everything' } },
+        ];
+        const results = watchParkedPrConflicts({
+          repo: 'o/n', listPrs: () => [pr], provider, postRearm: () => {},
+          listAgents: () => [liveFixAgent], listPrComments: () => comments, now,
+        });
+        expect(results[0].rearmDeferredNote).toBeNull();
+        expect(postNoteComment).not.toHaveBeenCalled();
+        expect(notifyDesktopChecked).not.toHaveBeenCalled();
+      });
+
+      // #xu38vlf — REPLAY PROOF, grounded in real PR chalbert/web-everything#2741's own real head ref and real
+      // comment timestamps (`gh pr view 2741 --json headRefName,comments`, captured 2026-09-26): the conflict
+      // alert landed at 18:36:30Z, and this PR's REAL mechanical fix resolved + re-armed for real at 18:47:45Z
+      // (11m15s later — nowhere near any bound, so the real PR never hit this gap). SYNTHESIZED: at that same
+      // real resolution moment, `deriveReviewStatus`'s name-based liveness read instead stays stuck reporting
+      // the fixer as still live (a stale/misnamed agent-listing entry) — the exact rare edge case #4118 (c)
+      // already flagged as unruled-out and this card exists to bound.
+      it('REPLAY — real PR #2741 shape: a stuck liveness read at the real resolution timestamp defers quietly, then surfaces past the 90-minute bound, never forcing the rearm', () => {
+        postNoteComment.mockClear();
+        notifyDesktopChecked.mockClear();
+        const provider = fakeProvider();
+        const pr2741 = {
+          number: 2741, mergeable: 'MERGEABLE', headRefName: 'lane/xrv69j6-dispatch-permission-prompt-grant',
+          labels: [{ name: CONFLICT_LABEL }, { name: 'review:changes' }],
+        };
+        const staleFixAgent = { name: mintSessionSlug({ kind: 'fix', id: 2741, repo: 'we' }), state: 'working', pidAlive: true };
+        const REAL_RESOLVED_AT = Date.parse('2026-09-26T18:47:45Z'); // real: GitHub's own MERGEABLE-again read
+        let rearmed = false;
+        const sweep = (now, comments) => watchParkedPrConflicts({
+          repo: 'chalbert/web-everything', listPrs: () => [pr2741], provider,
+          postRearm: () => { rearmed = true; }, listAgents: () => [staleFixAgent], listPrComments: () => comments, now,
+        });
+
+        // Sweep 1, AT the real resolution timestamp — first sweep observing the (synthesized) stuck liveness.
+        let thread = [];
+        let results = sweep(REAL_RESOLVED_AT, thread);
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(rearmed).toBe(false);
+        thread = [{ body: `${REARM_DEFERRED_MARKER}\n\nwithheld`, createdAt: new Date(REAL_RESOLVED_AT).toISOString(), author: { login: 'web-everything' } }];
+
+        // Sweep 2, 89 real minutes later — still under the bound, still quiet.
+        results = sweep(REAL_RESOLVED_AT + 89 * 60 * 1000, thread);
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(postNoteComment).not.toHaveBeenCalled();
+        expect(rearmed).toBe(false);
+
+        // Sweep 3, 91 real minutes later — past the bound: surfaced once, rearm still never forced.
+        results = sweep(REAL_RESOLVED_AT + 91 * 60 * 1000, thread);
+        expect(results[0].routedTo).toBe('rearm-deferred (fix agent still live)');
+        expect(rearmed).toBe(false);
+        expect(postNoteComment).toHaveBeenCalledTimes(1);
+        expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'chalbert/web-everything', pr: 2741 });
+        expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -2416,6 +2583,187 @@ describe('unowned PRs that conflict with no review-workflow label at all (#xs81o
     // Tick 3 — GitHub now reports the rebuilt tip MERGEABLE. Quiet forever after.
     expect(sweep()).toEqual([]);
     expect(provider.calls).toEqual([]);
+  });
+
+  // #xu38vlf (epic #4075/#3383) — CAP THE RETRY. The flow checker flagged this state `uncapped-retry`: a
+  // persistently failing mechanical rebase-drop attempt retried every sweep forever with nothing durable
+  // recording it. These pin the fix: a durable, PR-comment-backed attempt count, capped, that surfaces once via
+  // the reconcile-notes channel + a desktop notify instead of retrying past the cap.
+  describe('#xu38vlf — the unowned rebase-drop retry is capped', () => {
+    it('posts NO attempt marker on a clean success — the common healthy path stays exactly as quiet as before this fix', () => {
+      const provider = fakeProvider();
+      const listPrs = () => [{ number: 2709, mergeable: 'CONFLICTING', headRefName: 'lane/2709-fix', labels: L('checking') }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        computeConflictDisposition: () => 'clean',
+        attemptMechanicalRebase: () => ({ action: 'rebased', newCommit: 'deadbeef' }),
+        listPrComments: () => [],
+      });
+      expect(results[0].routedTo).toBe('mechanical-rebase');
+      expect(provider.calls).toEqual([]); // no UNOWNED_REBASE_ATTEMPT_MARKER, no label — unchanged from before
+    });
+
+    it('a `skip`/`error` outcome posts the durable attempt marker BEFORE falling through to the ordinary bounce', () => {
+      const provider = fakeProvider();
+      const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: () => {},
+        computeConflictDisposition: () => 'manifest-only',
+        attemptMechanicalRebase: () => ({ action: 'skip', reason: 'real conflict beyond .lane-manifest.json' }),
+        listPrComments: () => [],
+      });
+      expect(results[0].routedTo).toBe('reconcile-finding');
+      // First call is the durable attempt marker, posted before the alert/finding comment + label writes below it.
+      expect(provider.calls[0]).toEqual(['postComment', 'o/n', 1854]);
+    });
+
+    it('a THROW from attemptMechanicalRebase (a stale lock, a corrupted ref) is caught and treated as `action:\'error\'` — no longer escapes the whole per-PR handler', () => {
+      const provider = fakeProvider();
+      const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: () => {},
+        computeConflictDisposition: () => 'clean',
+        attemptMechanicalRebase: () => { throw new Error('fatal: Unable to create .git/index.lock: File exists'); },
+        listPrComments: () => [],
+      });
+      expect(results[0].mechanicalRebase.action).toBe('error');
+      expect(results[0].mechanicalRebase.reason).toMatch(/index\.lock/);
+      // Still durably recorded (the attempt marker) and still bounced — nothing silently aborted.
+      expect(results[0].routedTo).toBe('reconcile-finding');
+      expect(provider.calls[0]).toEqual(['postComment', 'o/n', 1854]);
+    });
+
+    it('below the cap: attempts as usual and does NOT surface a note', () => {
+      const provider = fakeProvider();
+      const priorAttempts = Array.from({ length: UNOWNED_REBASE_ATTEMPT_CAP - 1 }, () => ({
+        body: `${UNOWNED_REBASE_ATTEMPT_MARKER}\n\nattempted`, author: { login: 'web-everything' },
+      }));
+      const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+      let rebaseCalls = 0;
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: () => {},
+        computeConflictDisposition: () => 'clean',
+        attemptMechanicalRebase: () => { rebaseCalls += 1; return { action: 'error', reason: 'still stuck' }; },
+        listPrComments: () => priorAttempts,
+      });
+      expect(rebaseCalls).toBe(1); // still under the cap — one more real attempt is made
+      expect(results[0].unownedRebaseCapExhausted).toBeUndefined();
+      expect(provider.calls.some((c) => c[0] === 'postComment')).toBe(true); // the (cap-1)th attempt marker
+    });
+
+    it('AT the cap: stops attempting, surfaces a round-cap-exhausted note (reconcile-notes channel + desktop notify), then still falls through to the ordinary bounce', () => {
+      postNoteComment.mockClear();
+      notifyDesktopChecked.mockClear();
+      const provider = fakeProvider();
+      const atCapComments = Array.from({ length: UNOWNED_REBASE_ATTEMPT_CAP }, () => ({
+        body: `${UNOWNED_REBASE_ATTEMPT_MARKER}\n\nattempted`, author: { login: 'web-everything' },
+      }));
+      const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+      const routed = [];
+      let rebaseCalls = 0;
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: (o) => routed.push(['finding', o.pr.number]),
+        computeConflictDisposition: () => 'clean',
+        attemptMechanicalRebase: () => { rebaseCalls += 1; return { action: 'error', reason: 'should never be called' }; },
+        listPrComments: () => atCapComments,
+      });
+      expect(rebaseCalls).toBe(0); // no further attempt past the cap
+      expect(results[0].unownedRebaseCapExhausted).toBe(true);
+      expect(results[0].unownedRebaseAttempts).toBe(UNOWNED_REBASE_ATTEMPT_CAP);
+      // Falls through to the ordinary bounce, exactly like a `skip`/`error` disposition already did.
+      expect(results[0].routedTo).toBe('reconcile-finding');
+      expect(routed).toEqual([['finding', 1854]]);
+      // Surfaced via BOTH the #2725 reconcile-notes channel (a durable PR comment) AND the health-watch-style
+      // desktop notify — mocked at the module boundary (see the top-of-file `vi.mock`s), never a real `gh`/
+      // `osascript` process.
+      expect(postNoteComment).toHaveBeenCalledTimes(1);
+      expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'o/n', pr: 1854 });
+      expect(postNoteComment.mock.calls[0][0].body).toContain(NOTE_COMMENT_MARKER);
+      expect(postNoteComment.mock.calls[0][0].body).toContain('unowned-mechanical-rebase auto-repair rounds exhausted (3/3)');
+      expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not re-surface the SAME cap-exhaustion episode twice (a trusted round-cap-exhausted note already on the thread)', async () => {
+      postNoteComment.mockClear();
+      notifyDesktopChecked.mockClear();
+      const provider = fakeProvider();
+      const { buildNoteComment } = await import('../reconcile-note-comment.mjs');
+      const note = {
+        kind: 'round-cap-exhausted', prNumber: 1854, attempts: UNOWNED_REBASE_ATTEMPT_CAP, cap: UNOWNED_REBASE_ATTEMPT_CAP,
+        capKind: 'unowned-mechanical-rebase', text: 'already exhausted',
+      };
+      const atCapComments = [
+        ...Array.from({ length: UNOWNED_REBASE_ATTEMPT_CAP }, () => ({
+          body: `${UNOWNED_REBASE_ATTEMPT_MARKER}\n\nattempted`, author: { login: 'web-everything' },
+        })),
+        { body: buildNoteComment(note), author: { login: 'web-everything' } },
+      ];
+      const listPrs = () => [{ number: 1854, mergeable: 'CONFLICTING', headRefName: 'lane/1854-x', labels: [] }];
+      const results = watchParkedPrConflicts({
+        repo: 'o/n', listPrs, provider,
+        postFinding: () => {},
+        computeConflictDisposition: () => 'clean',
+        attemptMechanicalRebase: () => ({ action: 'error', reason: 'should never be called' }),
+        listPrComments: () => atCapComments,
+      });
+      expect(results[0].roundCapNote).toBeNull(); // already posted — nothing new to report
+      expect(postNoteComment).not.toHaveBeenCalled();
+      expect(notifyDesktopChecked).not.toHaveBeenCalled();
+    });
+
+    // #xu38vlf — REPLAY PROOF, grounded in real PR chalbert/web-everything#2709's own real head ref (`gh pr view
+    // 2709 --json headRefName,baseRefName`, captured 2026-09-26: `lane/4138-pr-closed-reason-comment` off
+    // `main`) — the SAME PR this file's own header names as the original UNOWNED-population incident. This PR's
+    // REAL mechanical rebase-drop succeeded on its first attempt (a single real 🔧 conveyor-fix comment,
+    // 2026-09-26T11:37Z) — the shape the SOAK test above already replays tick-by-tick. SYNTHESIZED here: a run
+    // where that same rebase-drop instead throws every sweep (a stale `.git/index.lock`, exactly the kind of
+    // persistent local failure this card's own text names) — the exact case that used to retry silently forever
+    // with zero cap and zero operator-visible trace before this fix.
+    it('REPLAY — real PR #2709 shape: a persistently throwing mechanical rebase is capped at 3 attempts and surfaced exactly once', () => {
+      postNoteComment.mockClear();
+      notifyDesktopChecked.mockClear();
+      const provider = fakeProvider();
+      const pr2709 = {
+        number: 2709, mergeable: 'CONFLICTING', headRefName: 'lane/4138-pr-closed-reason-comment', baseRefName: 'main', labels: [],
+      };
+      // A fixed PR shape across every sweep — isolates the retry-cap dimension on its own, standing in for a
+      // real compounding outage (the SAME infra flake that keeps failing the rebase-drop also keeps the
+      // follow-up label/dispatch writes from ever sticking, so the PR never actually leaves the unowned
+      // population between sweeps — the exact scenario a single-sweep bounce cannot reach).
+      let thread = [];
+      const routed = [];
+      const outcomes = [];
+      for (let sweep = 1; sweep <= 4; sweep += 1) {
+        const attemptsBeforeThisSweep = countUnownedRebaseAttempts(thread);
+        const results = watchParkedPrConflicts({
+          repo: 'chalbert/web-everything', listPrs: () => [pr2709], provider,
+          postFinding: (o) => routed.push(o.pr.number),
+          computeConflictDisposition: () => 'manifest-only', // real shape: the shared .lane-manifest.json collision
+          attemptMechanicalRebase: () => { throw new Error('fatal: Unable to create \'.git/index.lock\': File exists.'); },
+          listPrComments: () => thread,
+        });
+        const entry = results[0];
+        outcomes.push({ sweep, attemptsBeforeThisSweep, routedTo: entry.routedTo, capExhausted: !!entry.unownedRebaseCapExhausted });
+        if (!entry.unownedRebaseCapExhausted) {
+          // Mirrors the durable marker the real `provider.postComment` write would leave for the NEXT sweep to read.
+          thread = [...thread, { body: `${UNOWNED_REBASE_ATTEMPT_MARKER}\n\nattempted`, author: { login: 'web-everything' } }];
+        }
+      }
+      // Sweeps 1–3: the durable count climbs 0→1→2 BEFORE each attempt, never yet at the cap — a real attempt
+      // is made every time (the mechanical rebase is retried, exactly as intended below the cap).
+      expect(outcomes.slice(0, 3).map((o) => o.attemptsBeforeThisSweep)).toEqual([0, 1, 2]);
+      expect(outcomes.slice(0, 3).every((o) => o.capExhausted === false)).toBe(true);
+      // Sweep 4: the durable count already reads 3 (the cap) — no further attempt is made; surfaced once.
+      expect(outcomes[3]).toMatchObject({ attemptsBeforeThisSweep: UNOWNED_REBASE_ATTEMPT_CAP, capExhausted: true, routedTo: 'reconcile-finding' });
+      expect(routed).toEqual([2709, 2709, 2709, 2709]); // every sweep still bounces — the PR is never silently dropped
+      expect(postNoteComment).toHaveBeenCalledTimes(1); // surfaced EXACTLY ONCE across all 4 sweeps, not every sweep
+      expect(postNoteComment.mock.calls[0][0]).toMatchObject({ repo: 'chalbert/web-everything', pr: 2709 });
+      expect(notifyDesktopChecked).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

@@ -28,6 +28,31 @@ describe('noteEpisodeKey', () => {
     expect(noteEpisodeKey({ kind: 'something-new', prNumber: 5, text: 'a fresh escalation' }))
       .toBe('something-new:5:a fresh escalation');
   });
+
+  // #xu38vlf (epic #4075/#3383) — round-cap-exhausted (a NEW population, unowned-mechanical-rebase) and
+  // liveness-wait-exhausted (a brand-new note kind) both reuse this shared episode-key machinery.
+  it('round-cap-exhausted: keyed on the population (capKind) AND the attempt/cap pair', () => {
+    expect(noteEpisodeKey({
+      kind: 'round-cap-exhausted', prNumber: 1854, attempts: 3, cap: 3, capKind: 'unowned-mechanical-rebase',
+    })).toBe('round-cap-exhausted:1854:unowned-mechanical-rebase:3/3');
+  });
+
+  it('round-cap-exhausted: a DIFFERENT population (capKind) at the SAME attempt/cap pair gets a DIFFERENT key', () => {
+    const a = noteEpisodeKey({ kind: 'round-cap-exhausted', prNumber: 1, attempts: 3, cap: 3, capKind: 'unowned-mechanical-rebase' });
+    const b = noteEpisodeKey({ kind: 'round-cap-exhausted', prNumber: 1, attempts: 3, cap: 3, capKind: 'conflict-fix' });
+    expect(a).not.toBe(b);
+  });
+
+  it('liveness-wait-exhausted: keyed on the PR and the wait\'s own first-observed timestamp (since)', () => {
+    expect(noteEpisodeKey({ kind: 'liveness-wait-exhausted', prNumber: 1920, since: '2026-09-26T10:00:00.000Z' }))
+      .toBe('liveness-wait-exhausted:1920:2026-09-26T10:00:00.000Z');
+  });
+
+  it('liveness-wait-exhausted: a FRESH wait (a new since) is a genuinely new episode', () => {
+    const first = noteEpisodeKey({ kind: 'liveness-wait-exhausted', prNumber: 1920, since: '2026-09-26T10:00:00.000Z' });
+    const second = noteEpisodeKey({ kind: 'liveness-wait-exhausted', prNumber: 1920, since: '2026-09-27T10:00:00.000Z' });
+    expect(first).not.toBe(second);
+  });
 });
 
 describe('noteHeadline — the operator\'s own rule', () => {
@@ -39,6 +64,14 @@ describe('noteHeadline — the operator\'s own rule', () => {
   });
   it('an unknown kind still gets a needs-your-decision headline, never blank', () => {
     expect(noteHeadline({ kind: 'mystery' })).toContain('needs your decision');
+  });
+
+  it('round-cap-exhausted reads "needs your decision: auto-repair rounds exhausted"', () => {
+    expect(noteHeadline({ kind: 'round-cap-exhausted' })).toBe('needs your decision: auto-repair rounds exhausted');
+  });
+
+  it('liveness-wait-exhausted reads its own headline', () => {
+    expect(noteHeadline({ kind: 'liveness-wait-exhausted' })).toBe('needs your decision: a liveness wait ran past its bound');
   });
 });
 
