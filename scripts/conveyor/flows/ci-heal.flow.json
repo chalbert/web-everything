@@ -208,16 +208,29 @@
       "ownerCite": "skills-src/conveyor/fix-agent-ci-brief.md:47",
       "wait": {
         "for": "the session to exit and post the durable CI-heal marker comment",
-        "timeout": null,
-        "onTimeout": null,
-        "cite": "scripts/conveyor/reconcile-core.mjs:851"
+        "timeout": "90m",
+        "onTimeout": "ci-heal-session-overrun",
+        "cite": "scripts/conveyor/reconcile-core.mjs:521,933-984"
       },
       "retries": null,
       "escalation": null,
-      "notes": "GENUINE GAP: assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:849-870) have no intrinsic time bound — a live pid simply refuses re-dispatch every tick forever, and an 'awaiting-permission' block is only ever promoted to a surfaced NOTE (reconcile-core.mjs:859-868), never an automatic timeout or kill. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all, so a hung or silently-exited ci-heal session is invisible to that mechanism too. The brief (skills-src/conveyor/fix-agent-ci-brief.md:74-75) tells the AGENT to stop and report if its own lane ref is gone, but nothing external ever forces that check.",
-      "ack": {
-        "unbounded-wait": "xwo3j0l"
-      }
+      "notes": "xilx617 (epic #4075/#3383) — FIXED. assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:933-984) still have no INTRINSIC time bound in the sense of ever killing the session — this NEVER kills or reaps it — but a 'live-process' verdict past LIVE_SESSION_OVERRUN_MS (90 minutes, default; overridable via planReconcile's own `liveSessionOverrunMs` option, no env read) now ALSO gets a surfaced `kind:'session-overrun'` note (reconcile-core.mjs:978-984), mirroring 'awaiting-permission''s own long-standing 'refuse AND surface' treatment. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) still tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all — so this note is, for now, the only mechanical signal a hung or silently-exited ci-heal session produces.",
+      "ack": {}
+    },
+    {
+      "id": "ci-heal-session-overrun",
+      "label": "Live session has run past its 90-minute bound — noted, monitoring continues",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-core.mjs#planReconcile",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:978-984",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "session-overrun note → PR comment + operator-queue",
+        "cite": "scripts/conveyor/reconcile-core.mjs:978-984; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
+      },
+      "notes": "xilx617 (epic #4075/#3383) — STILL REFUSES, never kills: the underlying wait for the session to exit is the SAME ongoing one `ci-heal-session-running` already describes. This state is the one-tick note event, then monitoring resumes as before. The note's text states the BOUND (90 minutes), never the elapsed time, and its episode key is `kind + sessionId` (falling back to `pid`), so the SAME overrunning session posts exactly once."
     },
     {
       "id": "ci-heal-completed",
@@ -368,7 +381,21 @@
       "to": "pr-check-state-read",
       "on": "the session's process is no longer live (crashed / stood down / lane ref gone) with no marker posted — the next tick simply stops seeing it as live and re-plans fresh",
       "kind": "failure",
-      "cite": "scripts/conveyor/reconcile-core.mjs:851-870"
+      "cite": "scripts/conveyor/reconcile-core.mjs:955-984"
+    },
+    {
+      "from": "ci-heal-session-running",
+      "to": "ci-heal-session-overrun",
+      "on": "the live session has run past the 90-minute bound (LIVE_SESSION_OVERRUN_MS)",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/reconcile-core.mjs:521,978-984"
+    },
+    {
+      "from": "ci-heal-session-overrun",
+      "to": "ci-heal-session-running",
+      "on": "session-overrun note pushed; ordinary monitoring resumes (still refuses, never killed)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:978-984"
     }
   ],
   "steps": [

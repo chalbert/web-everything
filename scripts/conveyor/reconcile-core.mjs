@@ -490,6 +490,37 @@ export function countUnresolvedStandDowns(comments) {
 export const INFRA_RETRY_COOLOFF_MS = 15 * 60 * 1000;
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#INFRA_RETRY_CAP — xilx617 (epic #4075/#3383): the durable per-SESSION
+ * `blocked-on-infra` STREAK cap. Today a session that self-reports `blocked-on-infra` cools off
+ * {@link INFRA_RETRY_COOLOFF_MS} and is re-dispatched, forever — no cap, no escalation
+ * (`we:scripts/conveyor/flows/fix.flow.json#fixer-blocked-infra`/`review.flow.json#blocked-on-infra`,
+ * `uncapped-retry`, xb4yerj). The streak itself is persisted by the completion STORE's own write path
+ * ({@link ../operations/completion-store.mjs#writeCompletion}), never derived here — this file only reads
+ * `infraStreak` back off the record {@link markSelfReportedDone} is handed. At the cap the PR is not blocked
+ * further — infra may still recover — but its cool-off grows to {@link INFRA_RETRY_CAPPED_COOLOFF_MS} and
+ * {@link planReconcile} pushes a `kind:'infra-retry-exhausted'` note, mirroring the `ci-heal-exhausted`/
+ * `round-cap-exhausted` "refuse AND surface" treatment above.
+ */
+export const INFRA_RETRY_CAP = 4;
+
+/** we:scripts/conveyor/reconcile-core.mjs#INFRA_RETRY_CAPPED_COOLOFF_MS — the lengthened cool-off (60 minutes)
+ *  once a session's `blocked-on-infra` streak reaches {@link INFRA_RETRY_CAP}. The retry loop is never stopped
+ *  outright (a persistent-but-eventually-recovering outage is real), only slowed and surfaced to a person. */
+export const INFRA_RETRY_CAPPED_COOLOFF_MS = 60 * 60 * 1000;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#LIVE_SESSION_OVERRUN_MS — xilx617 (epic #4075/#3383): the default bound
+ * past which a `live-process` refusal (a bound session with a probed-live pid — see {@link assessLiveness}) also
+ * gets a surfaced `kind:'session-overrun'` note, so a session that has been "just working" for hours does not
+ * stay invisible the way the `ci-heal-session-running` flow state did before this cap
+ * (`we:scripts/conveyor/flows/ci-heal.flow.json#ci-heal-session-running`, `unbounded-wait`, xwo3j0l). NEVER
+ * kills or reaps the session — this pass only ever refuses and, past the bound, ALSO notes; the fix stays
+ * "still refuse" exactly like `awaiting-permission` above. Overridable via {@link planReconcile}'s own
+ * `liveSessionOverrunMs` option (tests set it directly) — no env read in this pure core.
+ */
+export const LIVE_SESSION_OVERRUN_MS = 90 * 60 * 1000;
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone — mark each listed session that has REPORTED its
  * own completion. Pure (the record lookup is injected).
  *
@@ -529,10 +560,26 @@ export function markSelfReportedDone(agents, completionFor, nowMs) {
     const updatedMs = Date.parse(rec.updatedAt ?? '');
     const startedMs = startedAtMs(a?.startedAt);
     if (!Number.isFinite(updatedMs) || !Number.isFinite(startedMs) || updatedMs < startedMs) return a;
-    if (rec.outcome === 'blocked-on-infra' && !(nowMs - updatedMs >= INFRA_RETRY_COOLOFF_MS)) {
-      // #4149 — the process may already be `stopped` (or on its way there) this very tick; the cool-off must
-      // outrank that, since it is keyed off the RECORD, never off whether a process happens to still be listed.
-      return { ...a, awaitingInfraCooloff: true };
+    if (rec.outcome === 'blocked-on-infra') {
+      // xilx617 (epic #4075/#3383) — the durable per-session streak the completion STORE's own write path
+      // maintains (`we:scripts/operations/completion-store.mjs#writeCompletion`); read back here, never
+      // recomputed. A streak at or above `INFRA_RETRY_CAP` gets the LONGER cool-off — the retry continues,
+      // slower, because infra may still recover — and is carried on the row so {@link planReconcile} can push
+      // its own `infra-retry-exhausted` note for the PR this session is bound to.
+      const infraStreak = Number.isInteger(rec.infraStreak) && rec.infraStreak > 0 ? rec.infraStreak : 1;
+      const infraStreakSince = rec.infraStreakSince ?? rec.updatedAt ?? null;
+      const infraStreakCapped = infraStreak >= INFRA_RETRY_CAP;
+      const cooloffMs = infraStreakCapped ? INFRA_RETRY_CAPPED_COOLOFF_MS : INFRA_RETRY_COOLOFF_MS;
+      if (!(nowMs - updatedMs >= cooloffMs)) {
+        // #4149 — the process may already be `stopped` (or on its way there) this very tick; the cool-off must
+        // outrank that, since it is keyed off the RECORD, never off whether a process happens to still be listed.
+        return {
+          ...a, awaitingInfraCooloff: true, infraStreak, infraStreakSince, infraStreakCapped,
+        };
+      }
+      return {
+        ...a, selfReportedDone: true, selfReportedOutcome: rec.outcome ?? null, infraStreak, infraStreakSince, infraStreakCapped,
+      };
     }
     return { ...a, selfReportedDone: true, selfReportedOutcome: rec.outcome ?? null };
   });
@@ -700,6 +747,11 @@ export function assessLiveness(bound) {
     cwd: b.cwd,
     sha: b.sha,
     sessionId: b.agent?.sessionId ?? null,
+    // xilx617 (epic #4075/#3383) — carried on EVERY verdict (not just `awaiting-permission`, which already set
+    // its own copy below): `session-overrun` needs it for a `live-process` verdict too, and there is no reason
+    // for the other two kinds not to carry it as well — it is EVIDENCE, the same "travels with the row" reason
+    // `sha`/`cwd` already do.
+    startedAt: b.agent?.startedAt ?? null,
     why,
   });
 
@@ -776,12 +828,33 @@ export function assessLiveness(bound) {
  *   the IO shell from `gh run list --branch <defaultBranch>` ONLY when at least one PR is `ci-red` (never paid
  *   for otherwise). Defaults to `[]` — a caller that never reads `main`'s own history sees byte-identical
  *   behaviour to before this param existed (every `ci-red` PR falls straight through to the `ci-heal` path).
+ * @param {number} [o.liveSessionOverrunMs] - see {@link LIVE_SESSION_OVERRUN_MS}'s own docblock; defaults to it.
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#roundCapExhaustedNoteText — xilx617 (epic #4075/#3383): the STABLE text
+ * for a `round-cap-exhausted` note. No clock-derived number (unlike `ci-heal-exhausted`'s `heldHours`, which is
+ * explicitly EVIDENCE for a still-open block, not an identity) — `attempts`/`cap`/`capKind` are the only inputs,
+ * all durable, so the SAME episode reads identically on every tick until the durable count itself advances.
+ * @param {number} prNumber
+ * @param {number} attempts
+ * @param {number} cap
+ * @param {string} capKind
+ * @returns {string}
+ */
+function roundCapExhaustedNoteText(prNumber, attempts, cap, capKind) {
+  return `PR #${prNumber}: ${capKind} auto-repair rounds exhausted (${attempts}/${cap}) — a person must take it over`;
+}
+
 export function planReconcile({
   repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
   conflictFixCap = CONFLICT_FIX_ROUND_CAP, advisoryFixCap = ADVISORY_FIX_ROUND_CAP, defaultBranch = 'main',
   mainRedWindows = [],
+  // xilx617 (epic #4075/#3383) — the bound a `live-process` refusal must overrun before it also gets a
+  // surfaced `session-overrun` note (see {@link LIVE_SESSION_OVERRUN_MS}'s own docblock). A `planReconcile`
+  // OPTION, never an env read — this file stays pure; a test sets it directly to exercise both sides of the
+  // bound with no clock mocking.
+  liveSessionOverrunMs = LIVE_SESSION_OVERRUN_MS,
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -818,6 +891,17 @@ export function planReconcile({
       aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
+    // xilx617 (epic #4075/#3383) — EVERY `cap-exhausted` refusal EXCEPT the `ci-red` one above (which already
+    // pushes its own `ci-heal-exhausted` note) also pushes a `round-cap-exhausted` note, mirroring that note's
+    // own "refuse AND surface" treatment. `capKind` names the population; see {@link roundCapExhaustedNoteText}
+    // for why the text carries no clock-derived number.
+    const refuseCapExhausted = (extra) => {
+      refuse('cap-exhausted', extra);
+      notes.push({
+        kind: 'round-cap-exhausted', prNumber, attempts: extra.attempts, cap: extra.cap, capKind: extra.capKind,
+        text: roundCapExhaustedNoteText(prNumber, extra.attempts, extra.cap, extra.capKind),
+      });
+    };
 
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
@@ -848,7 +932,27 @@ export function planReconcile({
 
     // ── REFUSAL 4 — liveness, from a live process. The binding is derived and its evidence travels with the
     // refusal, because the derivation itself has been observed to be wrong (#3283).
-    const live = assessLiveness(bindAgents(pr, agents, repo));
+    const bound = bindAgents(pr, agents, repo);
+
+    // xilx617 (epic #4075/#3383) — the durable per-session infra-retry streak, surfaced independently of
+    // whatever `assessLiveness` below returns (a capped session may already read `selfReportedDone` — finished,
+    // free to redispatch — by the time the cool-off elapses, which would otherwise never reach this note at
+    // all). Checked on the RAW `bound` list, not the post-`isFinished`-filter one `assessLiveness` uses
+    // internally, for exactly that reason. Episode key is `kind + prNumber + since` (see
+    // `reconcile-note-comment.mjs#noteEpisodeKey`) — deliberately NOT `streak`, so a streak that keeps growing
+    // past the cap (infra never recovers) still posts as ONE episode, not a fresh comment every tick.
+    const infraCapped = bound.find((b) => b.agent?.infraStreakCapped === true);
+    if (infraCapped) {
+      const streak = Number.isInteger(infraCapped.agent.infraStreak) ? infraCapped.agent.infraStreak : INFRA_RETRY_CAP;
+      const since = infraCapped.agent.infraStreakSince ?? null;
+      notes.push({
+        kind: 'infra-retry-exhausted', prNumber, streak, cap: INFRA_RETRY_CAP, since,
+        text: `PR #${prNumber}: blocked-on-infra retry streak reached the cap (${INFRA_RETRY_CAP}) — auto-retry`
+          + ' continues with a longer cool-off, but a person should check whether the infra issue is real',
+      });
+    }
+
+    const live = assessLiveness(bound);
     if (live) {
       refuse(live.kind, {
         pid: live.pid, cwd: live.cwd, sha: live.sha, sessionId: live.sessionId, why: live.why,
@@ -865,6 +969,22 @@ export function planReconcile({
           text: `PR #${prNumber}: a session in ${live.cwd} is blocked on "${live.waitingFor}"`
             + `${heldHours == null ? '' : ` for ${heldHours}h`} and nobody is there to answer it — nothing here will advance until a person clears it`,
         });
+      }
+      // xilx617 (epic #4075/#3383) — a LIVE session (never `awaiting-permission`, which already notes above)
+      // still working a PR past `liveSessionOverrunMs` also gets a surfaced note. STILL REFUSES — this never
+      // kills or reaps the session, mirroring `awaiting-permission`'s own "refuse AND surface" shape. The bound
+      // is stated in the text, never the elapsed time, so the SAME episode (keyed on `sessionId`/`pid`, see
+      // `noteEpisodeKey`) reads identically on every later tick.
+      if (live.kind === 'live-process') {
+        const startedMs = startedAtMs(live.startedAt);
+        if (Number.isFinite(startedMs) && now && (now - startedMs) >= liveSessionOverrunMs) {
+          const boundMin = Math.round(liveSessionOverrunMs / 60_000);
+          notes.push({
+            kind: 'session-overrun', prNumber, sessionId: live.sessionId, pid: live.pid, startedAt: live.startedAt, boundMin,
+            text: `PR #${prNumber}: a session (${live.sessionId ?? live.pid ?? 'unknown'}) has been live past the`
+              + ` ${boundMin}-minute bound — still refusing to dispatch a second agent, but a person should check whether it is stuck`,
+          });
+        }
       }
       continue;
     }
@@ -1004,7 +1124,7 @@ export function planReconcile({
           continue;
         }
         if (advisoryFixes >= advisoryFixCap) {
-          refuse('cap-exhausted', {
+          refuseCapExhausted({
             ...withPhase, attempts: advisoryFixes, cap: advisoryFixCap, capKind: 'advisory-fix',
             why: `this PR's own durable advisory-fix count is ${advisoryFixes} against a cap of ${advisoryFixCap}` +
               ' — auto-repair of the advisory finding is exhausted here and a person must take it',
@@ -1100,8 +1220,8 @@ export function planReconcile({
       if (isStackedBase) {
         const conflictAttempts = countConflictFixComments(pr?.comments);
         if (conflictAttempts >= conflictFixCap) {
-          refuse('cap-exhausted', {
-            ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'conflict-fix',
+          refuseCapExhausted({
+            ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'stacked-rebase',
             why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
               ` — mechanical rebase against its base \`${baseRefName}\` is exhausted here and a person must take it`,
           });
@@ -1183,8 +1303,8 @@ export function planReconcile({
         // population hits `cap-exhausted` exactly like every other one once it is genuinely stuck, instead of
         // looping forever.
         if (attempts >= roundCap) {
-          refuse('cap-exhausted', {
-            ...withPhase, attempts, cap: roundCap, findings: 0,
+          refuseCapExhausted({
+            ...withPhase, attempts, cap: roundCap, findings: 0, capKind: 'review',
             why: `no reviewer finding has ever landed on this PR, but its own durable attempt count is ${attempts}` +
               ` against a cap of ${roundCap} — a review keeps being dispatched with nothing to show for it, and a` +
               ' person must take it',
@@ -1212,7 +1332,7 @@ export function planReconcile({
     if (isConflictBounce) {
       const conflictAttempts = countConflictFixComments(pr?.comments);
       if (conflictAttempts >= conflictFixCap) {
-        refuse('cap-exhausted', {
+        refuseCapExhausted({
           ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'conflict-fix',
           why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
             ' — mechanical conflict-resolution is exhausted here and a person must take it',
@@ -1255,8 +1375,8 @@ export function planReconcile({
     // value, not a second derivation, so the zero-findings review branch and this one can never disagree about
     // how many attempts a PR has spent.
     if (attempts >= roundCap) {
-      refuse('cap-exhausted', {
-        ...withPhase, attempts, cap: roundCap,
+      refuseCapExhausted({
+        ...withPhase, attempts, cap: roundCap, capKind: OWED[phase],
         why: `the PR's own durable attempt count is ${attempts} against a cap of ${roundCap} — auto-repair is exhausted here and a person must take it`,
       });
       continue;

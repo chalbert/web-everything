@@ -213,19 +213,36 @@
         "for": "INFRA_RETRY_COOLOFF_MS to elapse since the completion record's updatedAt",
         "timeout": "15m",
         "onTimeout": "pr-flagged-for-fix",
-        "cite": "scripts/conveyor/reconcile-core.mjs:490,532"
+        "cite": "scripts/conveyor/reconcile-core.mjs:490,553-584"
       },
       "retries": {
-        "what": "blocked-on-infra self-report / cooloff / redispatch cycle",
-        "cap": null,
-        "onCap": null,
-        "cite": "scripts/conveyor/reconcile-core.mjs:486-539"
+        "what": "blocked-on-infra self-report / cooloff / redispatch cycle, counted as a durable per-SESSION streak (`infraStreak`) the completion STORE's own write path maintains",
+        "cap": 4,
+        "onCap": "infra-retry-escalated",
+        "cite": "scripts/conveyor/reconcile-core.mjs:504,553-584; scripts/operations/completion-store.mjs#writeCompletion"
       },
       "escalation": null,
-      "notes": "session-reaper.mjs's completion resolver stops the OS process immediately once the record says done, regardless of outcome (reconcile-core.mjs:504-508 docblock) — only the RECORD's cool-off (awaitingInfraCooloff:true) keeps the PR from being redispatched during the 15-minute window (reconcile-core.mjs:522-539). Bounded per-cycle (15m), but there is NO CAP on how many times a PR can cycle through self-reported-infra -> cooloff -> fresh dispatch -> self-reported-infra again — a persistent but intermittent outage could loop this PR forever with no escalation to a human.",
-      "ack": {
-        "uncapped-retry": "xb4yerj"
-      }
+      "notes": "xilx617 (epic #4075/#3383) — FIXED. session-reaper.mjs's completion resolver stops the OS process immediately once the record says done, regardless of outcome (reconcile-core.mjs:504-508 docblock) — only the RECORD's cool-off (awaitingInfraCooloff:true) keeps the PR from being redispatched during the 15-minute window (reconcile-core.mjs:553-584). The completion STORE's write path (scripts/operations/completion-store.mjs#writeCompletion) now persists a durable per-SESSION `infraStreak`/`infraStreakSince` across dispatch generations; at INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — the cool-off grows and a person is notified, without ever stopping the retry outright."
+    },
+    {
+      "id": "infra-retry-escalated",
+      "label": "blocked-on-infra streak capped — escalated, cool-off lengthened",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-core.mjs#planReconcile",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:944-951",
+      "wait": {
+        "for": "the LENGTHENED 60-minute capped infra cool-off (INFRA_RETRY_CAPPED_COOLOFF_MS) before retrying again",
+        "timeout": "60m",
+        "onTimeout": "pr-flagged-for-fix",
+        "cite": "scripts/conveyor/reconcile-core.mjs:509,572"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "infra-retry-exhausted note → PR comment + operator-queue",
+        "cite": "scripts/conveyor/reconcile-core.mjs:944-951; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
+      },
+      "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },
     {
       "id": "fixer-stood-down",
@@ -263,11 +280,12 @@
       "terminal": true,
       "outcome": "failure",
       "label": "Fix population's round cap reached",
-      "escalation": null,
-      "notes": "refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1257-1263, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1006-1013, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1211-1219, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1097-1107, same cap). This is ONLY a refusal entry, logged by the daemon's own formatRefusalLine (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538) to its own stderr/log file — no PR comment, no notification. Contrast the sibling ci-heal-exhausted path (reconcile-core.mjs:938-957, a DIFFERENT flow/kind), which DOES post a PR comment; no equivalent notes.push exists for any of this flow's four cap populations. A person must be watching the daemon log to ever learn a PR hit its cap.",
-      "ack": {
-        "silent-failure": "xwuof33"
-      }
+      "escalation": {
+        "to": "operator",
+        "how": "round-cap-exhausted note → PR comment + operator-queue",
+        "cite": "scripts/conveyor/reconcile-core.mjs:895-903,1126-1131,1222-1227,1334-1339,1377-1381"
+      },
+      "notes": "xilx617 (epic #4075/#3383) — FIXED. refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1377-1381, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1126-1131, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1334-1339, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1222-1227, same cap, capKind `stacked-rebase`). Every ONE of these now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903) — the SAME 'refuse AND surface' shape the sibling ci-heal-exhausted path (reconcile-core.mjs:938-957) already used, now shared by every non-ci-heal cap population, each carrying `capKind` so the note names which population is exhausted (`fix`/`review`/`advisory-fix`/`conflict-fix`/`stacked-rebase`). Formerly a refusal-only entry (logged by the daemon's own formatRefusalLine, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538, to its own stderr/log file) — now also a durable PR comment via reconcile-note-comment.mjs and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes`."
     }
   ],
   "transitions": [
@@ -407,9 +425,23 @@
     {
       "from": "fixer-blocked-infra",
       "to": "pr-flagged-for-fix",
-      "on": "15-minute cooloff elapses",
+      "on": "15-minute cooloff elapses (streak below INFRA_RETRY_CAP)",
       "kind": "timeout",
-      "cite": "scripts/conveyor/reconcile-core.mjs:490,532"
+      "cite": "scripts/conveyor/reconcile-core.mjs:490,553-584"
+    },
+    {
+      "from": "fixer-blocked-infra",
+      "to": "infra-retry-escalated",
+      "on": "the durable per-session blocked-on-infra streak reaches INFRA_RETRY_CAP (4)",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-core.mjs:504,571-572"
+    },
+    {
+      "from": "infra-retry-escalated",
+      "to": "pr-flagged-for-fix",
+      "on": "60-minute capped cooloff elapses",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/reconcile-core.mjs:509,572"
     },
     {
       "from": "pushed",
