@@ -65,6 +65,7 @@ import { PR_RECONCILE_OP } from '../pr-reconcile.mjs';
 import { RUNNER_ACTIVITY_OP } from '../runner-activity.mjs';
 import { DAEMON_STATUS_OP } from '../daemon-status.mjs';
 import { HEAVY_QUEUE_OP } from '../heavy-queue.mjs';
+import { LIVE_STATE_OP } from '../live-state.mjs';
 import { ROUTE_PR_OUTCOME_OP } from '../route-pr-outcome.mjs';
 import { STALE_STATE_OP } from '../stale-state.mjs';
 import { AGENT_ACTIVITY_OP } from '../agent-activity.mjs';
@@ -363,6 +364,12 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     // declaring module imports only `registry.mjs` and `step-kinds.mjs`, and every `admissionStatus`/`ps`/
     // `git`/lane-lease read lives in `heavy-queue-io.mjs` behind the injected `collect` reader.
     [HEAVY_QUEUE_OP]: 'heavy-queue.mjs',
+    // Card xvz55jf (epic #3931) — READ-ONLY and genuinely so: both steps are `compute`, the declaring module's
+    // whole transitive graph (`registry.mjs`, `step-kinds.mjs`, `../conveyor/health-watch-core.mjs` for the
+    // `DEFAULT_HEALTH_CONFIG` threshold constant, `../lib/secret-scrub.mjs`) has zero external imports, and
+    // every daemon/queue/health/lane/drain/auth/load read lives in `live-state-io.mjs` behind the injected
+    // `collect` reader.
+    [LIVE_STATE_OP]: 'live-state.mjs',
     // #xrpo1 — READ-ONLY and genuinely so: both steps are `compute`, the declaring module imports only
     // `registry.mjs` and `step-kinds.mjs`, and the `deriveReviewDisposition`/`parseEscalationReason` calls
     // live in `route-pr-outcome-io.mjs` behind the injected reader — see that file's header for why the call
@@ -435,7 +442,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
   it('every operation registered as read-only declares in a module that reaches nothing that can act', () => {
     const readOnly = Object.keys(OPERATIONS).filter((name) => isReadOnlyOperation(resolveOperation(name).declaration));
     // Pinned, not derived: adding a read-only operation must be a deliberate edit here.
-    expect(readOnly.sort()).toEqual([AGENT_ACTIVITY_OP, DAEMON_STATUS_OP, DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, HEAVY_QUEUE_OP, LAND_ADVANCE_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, TELEMETRY_SUMMARY_OP, VERIFY_OP].sort());
+    expect(readOnly.sort()).toEqual([AGENT_ACTIVITY_OP, DAEMON_STATUS_OP, DISPATCH_ELIGIBILITY_OP, GATE_HEALTH_OP, GRADUATION_PROGRESS_REPORT_OP, HEAVY_QUEUE_OP, LAND_ADVANCE_OP, LIVE_STATE_OP, PR_STATUS_OP, PR_RECONCILE_OP, ROUTE_PR_OUTCOME_OP, RUNNER_ACTIVITY_OP, STALE_STATE_OP, SUGGEST_NEXT_OP, TELEMETRY_SUMMARY_OP, VERIFY_OP].sort());
     for (const name of readOnly) {
       const { external } = importGraph(resolvePath(OPS_DIR, DECLARING_MODULE[name]));
       expect(external, `\`${name}\` declares in ${DECLARING_MODULE[name]}, which must import nothing that can act`)
