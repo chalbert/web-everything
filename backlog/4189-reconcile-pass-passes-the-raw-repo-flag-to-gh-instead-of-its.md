@@ -3,9 +3,10 @@ bornAs: x81m8xx
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/conveyor/reconcile-pass.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
 tags: []
 ---
 

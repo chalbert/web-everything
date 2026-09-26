@@ -21,6 +21,21 @@ prFileContract({
 });
 
 
+// we:backlog/x81m8xx-*.md (#4189) — a caller passing the internal repo KEY (`--repo=we`, exactly as
+// `constellation-repos.mjs` names it) must not reach `gh` as the bare key: `gh pr list --repo we` fails
+// (`gh` only understands `owner/name`). Both readers must see the NORMALISED slug.
+it('normalises a bare repo KEY (e.g. --repo=we) to its gh owner/name slug before any IO', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const readPrs = vi.fn(() => []);
+  const enrichMainRed = vi.fn((prs) => ({ prs, mainRedWindows: [] }));
+  runReconcilePass({
+    repo: 'we', readPrs, enrichMainRed,
+    readAgents: () => [], enrich: (agents) => agents,
+  });
+  expect(readPrs).toHaveBeenCalledWith({ repo: 'chalbert/web-everything' });
+  expect(enrichMainRed).toHaveBeenCalledWith([], { repo: 'chalbert/web-everything', defaultBranch: 'main' });
+});
+
 it('maps repo slugs before binding and refuses unknown repos before IO', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
   const options = {

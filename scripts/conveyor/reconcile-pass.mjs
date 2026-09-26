@@ -48,7 +48,7 @@
  * cannot corrupt anything, and a lease taken inside a one-shot read is a lease nothing releases when the process
  * is killed.
  */
-import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
@@ -361,11 +361,16 @@ export function runReconcilePass({
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
-  const rawPrs = readPrs({ repo });
+  // #x81m8xx — `repo` may be either vocabulary (the gh SLUG or the internal KEY, e.g. `--repo=we`); `gh` only
+  // understands the slug, so once `repoKey` is resolved every downstream IO call gets the NORMALISED
+  // `owner/name` slug, never the raw input. `repo == null` stays `null` (gh infers the repo from cwd, same as
+  // before) — only a caller-supplied value is normalised.
+  const resolvedRepo = repo == null ? null : CONSTELLATION_REPOS[repoKey].slug;
+  const rawPrs = readPrs({ repo: resolvedRepo });
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo, defaultBranch });
+  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
   const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows });
   return { ...plan, prs: prs.length, agents: agents.length };
