@@ -92,6 +92,39 @@ import { markWorkerEnv, workerMarkerSettingsEnv } from './session-role.mjs';
 // #3902 — the blocking-spawn primitive `spawnAgentToCompletion` (below) is built on, for the same reason
 // `codex-delivery-provider.mjs#spawnCodexToCompletion` is (see that file's own header).
 import { spawnToCompletion } from '../lib/spawn-to-completion.mjs';
+// #3717/#3906 — the ROUTING DECISION's inputs are read HERE (io) and handed to the pure router as data: the
+// scorecards (the shared store, #4155), the checked-in size policy (#3843), the checked-in promotion record
+// (#3784) and the supervision-enforcement switch (OFF by default; turning it on is #4180). The decision itself
+// is `dispatch-contracts.mjs#decideDispatchRoute`; `dispatch-lane.mjs`'s pure `shapeDispatchRead` owns its
+// consequences (refuse on no route, hold on a supervision hold).
+import { decideDispatchRoute, supervisionEnforcementFrom, CLAUDE_NATIVE_MODEL_BY_TIER } from '../lib/dispatch-contracts.mjs';
+import { readStore as readScorecardStore, resolveScorecardStorePath } from '../conveyor/run-scorecard-store.mjs';
+// #3840 — the ONE per-item provider override: the card's own `deliveryAgent:` marker and its required reason.
+import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
+// #3645/#3906 — WHICH LAUNCH KINDS HAVE A MECHANICAL PROVIDER. Every row lands OFF on main (`agent`), see the
+// registry's own header; {@link routeDispatchProvider} below is its only reader here.
+import { DISPATCH_PROVIDER_REGISTRY, dispatchModesFromEnv, dispatchProviderEntry } from './dispatch-provider-registry.mjs';
+import { DETACHED_HANDLE_PREFIX } from './detached-dispatch.mjs';
+
+/**
+ * The three native Claude model ids {@link ../lib/dispatch-contracts.mjs#CLAUDE_NATIVE_MODEL_BY_TIER} maps to
+ * — the only values #3857's `table` wiring below ever trusts as a `--model` for a `claude --bg` spawn. A
+ * `decideDispatchRoute` record's `model` names a GEMINI or CODEX model id when the router recommended an
+ * external provider — `executed` still runs Claude for any dispatch with no honoured `deliveryAgent:` override,
+ * so that id would be the WRONG flag for THIS spawn. Filtering on membership, rather than trusting
+ * `routed`/`executed`, excludes it with no separate branch.
+ */
+const CLAUDE_NATIVE_MODEL_IDS = new Set(Object.values(CLAUDE_NATIVE_MODEL_BY_TIER));
+
+/**
+ * THE `--model` A CLAUDE WORKER IS SPAWNED WITH, per tier (#3906, operator 2026-09-26): the CLI's own ALIASES,
+ * never a pinned id. A pinned id silently DOWNGRADES a worker the day a newer model ships (the routing record's
+ * `claude-opus-5` would run an older Opus than the operator's own `opus` default, Opus 5.5 today). An alias
+ * always resolves to the current model of that tier. `CLAUDE_NATIVE_MODEL_BY_TIER` keeps naming the routing
+ * record's `model` (the trust key trials are measured under); only the spawn flag is an alias. Fable is never a
+ * tier here, and {@link resolveWorkerModel} still refuses it as a hand-set override.
+ */
+export const CLAUDE_SPAWN_MODEL_BY_TIER = Object.freeze({ haiku: 'haiku', sonnet: 'sonnet', opus: 'opus' });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
@@ -211,6 +244,25 @@ export function readTick({
   recordLiveness = (stamped) => { persistLastSeenLive(stamped, { now }); return stamped; },
   laneRefForPr = (pr) => defaultLaneRefForPr(pr, { exec }),
   checkAlreadyDone = (n) => defaultCheckAlreadyDone(n, { exec }),
+  // #3717 — THE ROUTER'S EVIDENCE. `selectProvider`/`selectSupervisionLevel` are pure and read their trial
+  // history from their caller, so the scorecards are loaded at this io edge and handed across as data. A
+  // missing or unreadable store reads as NO trials, which is the fail-closed direction: with no clean trials
+  // the cascade can never find a non-Claude provider fit and resolves to Claude.
+  readScorecards = () => defaultReadScorecards(),
+  // #3843 (#3801 Fork 4 (b)) — the checked-in unsized-card size policy, read at this same io edge.
+  readSizePolicy = () => defaultReadSizePolicy({ root, readText }),
+  // #3784 (rule 6 of #3690) — the checked-in supervision-promotion record, read at this same io edge.
+  readPromotions = () => defaultReadPromotions({ root, readText }),
+  // #3717 step 3 — supervision is RECORDED, not enforced, unless `WE_DISPATCH_SUPERVISION_ENFORCE` says so.
+  // Off by default on main; turning it on by default is #4180's own card.
+  enforceSupervision = supervisionEnforcementFrom(process.env),
+  // #3840 (Fork 5 of #3801) — THE ONE PROVIDER OVERRIDE: the item's own `deliveryAgent:` frontmatter marker and
+  // its REQUIRED `deliveryAgentReason:`, read from the item's file. See `overrideHonoured` below for when it is
+  // handed to the router.
+  readDeliveryAgentOverride = (n) => readItemDeliveryAgentOverride(n, { root }),
+  // #3906 — every registered kind's dispatch mode (`agent` unless its `modeEnv` says `mechanical`). Read here
+  // only to decide whether a `deliveryAgent:` override CAN be honoured — see `overrideHonoured` below.
+  dispatchModes = () => dispatchModesFromEnv(),
   now = () => new Date(),
   all = false,
   verbose,
@@ -258,6 +310,13 @@ export function readTick({
     ].map((row) => normNum(row.num)).filter(Boolean))];
     const items = loadItems();
     const observedAt = now();
+    // #3906 — the routing inputs are read ONCE for the whole report, like the tick and the item corpus: every
+    // row is routed against the same evidence.
+    const once = (read) => { let done = false; let value; return () => { if (!done) { value = read(); done = true; } return value; }; };
+    const scorecardsOnce = once(readScorecards);
+    const sizePolicyOnce = once(readSizePolicy);
+    const promotionsOnce = once(readPromotions);
+    const modesOnce = once(dispatchModes);
     const tickJson = JSON.stringify(tick);
     const texts = new Map();
     if (String(bookkeepingFile || '').trim()) texts.set(bookkeepingFile, readText(bookkeepingFile));
@@ -282,6 +341,8 @@ export function readTick({
       num: id, root, exec, bookkeepingFile,
       runNode: () => tickJson, readText: cachedText, loadItems: () => items,
       listInFlightDispatches, listAgents: cachedAgents, recordLiveness, laneRefForPr, checkAlreadyDone,
+      readScorecards: scorecardsOnce, readSizePolicy: sizePolicyOnce, readPromotions: promotionsOnce,
+      enforceSupervision, readDeliveryAgentOverride, dispatchModes: modesOnce,
       now: () => observedAt,
     }));
   }
@@ -377,6 +438,44 @@ export function readTick({
   // check, not build/fix/ci-heal only.
   const alreadyDone = launch ? checkAlreadyDone(key) : { done: false, pr: null, checked: false };
 
+  // #3717/#3906 — THE ROUTING DECISION, computed only when something was cleared for launch (a read that will
+  // not dispatch has nothing to route). Computed HERE rather than in the pure declaration: `decideDispatchRoute`
+  // IS pure, but its import graph reaches `provider-routing.mjs` → `model-capability-ratings.mjs` → `node:fs`,
+  // and `dispatch-lane.mjs` is asserted to reach nothing that can act. So the verdict crosses as DATA and the
+  // pure half owns the consequence (`shapeDispatchRead` refuses a refused route and holds a supervision hold).
+  //
+  // THE `deliveryAgent:` OVERRIDE IS HONOURED ONLY WHERE IT CAN RUN (#3906 adaptation). The marker names a
+  // non-Claude vendor (today every marker in the backlog says `codex`). Only a kind's MECHANICAL provider can
+  // run that vendor (it passes `--provider=<marker>` to its wrapper); the `claude --bg` agent path cannot. Every
+  // registry row lands in `agent` mode on main, so here the override is read and REPORTED
+  // (`deliveryAgentOverride` below) but not handed to the router: routing it would record `executed: codex` for
+  // a session Claude actually runs, and refuse the many markers that carry no reason, both of which would
+  // change today's dispatch. Once a kind's row is `mechanical`, its markers route exactly as on the prototype.
+  let routing = null;
+  let deliveryAgentOverride = null;
+  if (launch) {
+    const override = readDeliveryAgentOverride(key);
+    const overrideHonoured = Boolean(override) && dispatchModes()?.[launchKind] === 'mechanical';
+    deliveryAgentOverride = override ? { ...override, honoured: overrideHonoured } : null;
+    routing = decideDispatchRoute({
+      kind: launchKind,
+      // The tick has no CAUSE axis — `we:scripts/conveyor/reconcile-fix-dispatch.mjs` is the one dispatch path
+      // that knows a bounce was conflict-caused, and it carries its own cause (#3717's table).
+      cause: null,
+      scopePaths: Array.isArray(item?.scope) ? item.scope : [],
+      size: item?.size ?? null,
+      // #3857 — a `security` tag raises the worker to Opus; carried through `findItem` for this read.
+      tags: Array.isArray(item?.tags) ? item.tags : [],
+      taskKey: { storyRef: key, round: 1, taskId: launchKind },
+      ...(overrideHonoured ? override : {}),
+    }, {
+      scorecards: readScorecards(),
+      enforceSupervision: enforceSupervision === true,
+      sizePolicy: readSizePolicy(),
+      promotions: readPromotions(),
+    });
+  }
+
   return {
     resolvedNum: key,
     admission: tick.decisions?.admission ? {
@@ -408,6 +507,14 @@ export function readTick({
     repoTokens,
     // #3457/#3460 — the ground-truth verdict, or the not-checked default when nothing was cleared for launch.
     alreadyDone,
+    // #3717/#3906 — the routing record (`decideDispatchRoute`'s answer), or `null` when nothing was cleared.
+    routing,
+    // #3840/#3906 — the item's `deliveryAgent:` override as read, with whether it was handed to the router.
+    deliveryAgentOverride,
+    // #3857/#3906 — the worker model the tier table plans for this dispatch (`{tier, model, reason}`), or
+    // `null` when no `--model` would be injected. The sink applies the same table; a reasoned hand-set
+    // `--model` in `WE_DISPATCH_AGENT_ARGS` can still replace it there (and is recorded as `source: override`).
+    plannedWorkerModel: workerModelTable(routing),
     bookkeepingSource,
     droppedBookkeepingKeys: droppedKeys,
     // THIS OPERATION'S OWN in-flight dispatches for the item — see {@link inFlightDispatchesFor} — each row
@@ -435,6 +542,66 @@ export function defaultRunNode(argv, opts = {}, { exec = execFileSync } = {}) {
   return exec(process.execPath, argv, {
     encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: TICK_TIMEOUT_MS, killSignal: 'SIGKILL', ...opts,
   });
+}
+
+/**
+ * #3717 — THE SCORECARDS READ, as its own named export for the same reason {@link defaultRunNode} is: the
+ * SOURCE it reads and the fail-closed shape of a bad read are the whole point.
+ *
+ * #3906 adaptation: the prototype read the tracked `scripts/conveyor/run-scorecards.json`; main moved the trial
+ * history to ONE shared store outside every git tree (#4155), so this reads through that store's own reader
+ * (`run-scorecard-store.mjs#readStore`, which never throws). Anything unusable yields `[]` — NO trials — which
+ * is fail-closed here: with no clean verified trials the cascade can never find a non-Claude provider fit.
+ *
+ * READ-ONLY BY CONSTRUCTION: the store path is passed EXPLICITLY, which is what makes `readStore` skip its
+ * one-time legacy migration (a WRITE). A dispatch read must never write the shared trial history.
+ *
+ * @param {{readStore?: () => {records?: unknown}}} [io]
+ * @returns {Array<object>} the records, or `[]`.
+ */
+export function defaultReadScorecards({ readStore = () => readScorecardStore({ path: resolveScorecardStorePath() }) } = {}) {
+  try {
+    const records = readStore()?.records;
+    return Array.isArray(records) ? records.filter((r) => r && typeof r === 'object') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * #3843 (#3801 Fork 4 (b)) — THE CHECKED-IN SIZE POLICY, `we:scripts/lib/dispatch-size-policy.json`, read at
+ * this io edge and handed across as data. A missing or unreadable file returns `null`, which
+ * `decideDispatchRoute`'s `validateSizePolicy` resolves field by field to `DEFAULT_SIZE_POLICY` — so a broken
+ * read is byte-identical to the defaults rather than a refused route.
+ *
+ * @param {{root?: string, readText?: (p: string) => string}} [io]
+ * @returns {object|null} the parsed setting, or `null`.
+ */
+export function defaultReadSizePolicy({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const parsed = JSON.parse(String(readText(join(root, 'scripts', 'lib', 'dispatch-size-policy.json'))));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #3784 (rule 6 of #3690) — THE CHECKED-IN PROMOTION RECORD, `we:scripts/lib/dispatch-supervision-promotions.json`,
+ * read the same way {@link defaultReadSizePolicy} reads its own file. A missing or unreadable file returns
+ * `null`, which `validatePromotions` treats as invalid and fails CLOSED to NO promotions (every computed
+ * `spot-check` is recorded as `full`) rather than refusing the route.
+ *
+ * @param {{root?: string, readText?: (p: string) => string}} [io]
+ * @returns {object|null} the parsed record, or `null`.
+ */
+export function defaultReadPromotions({ root = REPO_ROOT, readText = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const parsed = JSON.parse(String(readText(join(root, 'scripts', 'lib', 'dispatch-supervision-promotions.json'))));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -749,6 +916,13 @@ export function findItem(key, loadItems, pocRegistry = null) {
     scope: Array.isArray(it.scope) ? it.scope.map(String) : [],
     // The still-open `blockedBy` targets (#3462), or `[]` when every edge resolved or the item names none.
     openBlockers: Array.isArray(it.openBlockers) ? it.openBlockers.map(String) : [],
+    // #3717 — the card's own `size:` frontmatter, narrowed through for the SAME reason `openBlockers` is: the
+    // routing decision (`dispatch-contracts.mjs#decideDispatchRoute`) turns it into the estimated LOC the
+    // router's proven envelopes are measured in. SPREAD, not a `null` key: "this card declares no `size:`" is
+    // the ABSENCE of the field, and it keeps the resolved-item shape byte-identical for every unsized card.
+    ...(it.size == null || it.size === '' ? {} : { size: it.size }),
+    // #3857/#3906 — the card's `tags:`, for the tier table's `security` row. Spread for the same reason.
+    ...(Array.isArray(it.tags) && it.tags.length ? { tags: it.tags.map(String) } : {}),
     // #3637 — WHICH BRANCH this item delivers to. Absent ⇒ `main` ⇒ today's behaviour, byte-identical. The
     // loader spreads unknown frontmatter through (`...data`), so this arrives with no loader change; it is
     // narrowed here for the same reason `openBlockers` is — a field that is computed but never carried through
@@ -1019,7 +1193,20 @@ export function createDispatchSinks({
   root = REPO_ROOT,
   exec = execFileSync,
   spawnAgent = (argv, opts) => defaultSpawnAgent(argv, opts, { exec }),
-  provider = (request) => defaultClaudeProvider(request, { spawnAgent }),
+  // #3645/#3906 — EVERY REGISTERED KIND'S MODE, read from the environment ONCE, here, at sink-construction
+  // time rather than per dispatch, so one tick cannot straddle two modes. Every row defaults to `agent` on main
+  // (see `dispatch-provider-registry.mjs`), so an unset environment keeps every kind on `claude --bg`.
+  modes = dispatchModesFromEnv(),
+  // #3645 — the provider table itself, injectable so the default path can be exercised without a process.
+  registry = DISPATCH_PROVIDER_REGISTRY,
+  // #3906 — does a mechanical row's `runScript` exist in this checkout? See {@link routeDispatchProvider}.
+  scriptExists = (path) => existsSync(path),
+  // #3645/#3906 — THE DEFAULT PROVIDER IS THE ROUTER: a kind whose registry row is `mechanical` runs that row's
+  // provider; every other kind takes the unchanged `claude --bg` path. A caller supplying its own `provider`
+  // bypasses the routing entirely, exactly as before.
+  provider = (request) => routeDispatchProvider(request, {
+    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
+  }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
   extraArgs = [],
@@ -1051,6 +1238,12 @@ export function createDispatchSinks({
       // #4174 — THE FIX: the session's cwd is a scratch directory OUTSIDE this checkout, never `root` itself.
       // See `dispatchSessionCwd`'s own header for why this location and not, say, an `os.tmpdir()` mkdtemp.
       const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
+      // #3857 — the model-tier table's answer for this dispatch, read straight off `payload.routing`
+      // (`decideDispatchRoute`'s record, computed upstream by the read step — never recomputed here). `null`
+      // when the read carried no routing record (a hand-built fixture), which keeps `buildAgentArgv` on its
+      // pre-#3857 pass-through behaviour. See {@link workerModelTable}.
+      const table = workerModelTable(payload?.routing);
+      const modelReason = payload?.modelReason ?? null;
       let handle;
       try {
         handle = await provider({
@@ -1059,8 +1252,19 @@ export function createDispatchSinks({
           prompt: payload?.prompt,
           sessionSlug: payload?.sessionSlug,
           num: payload?.num,
+          // #3645/#3640 — WHICH KIND, WHICH LANE UNDER WHAT SCOPE, and (repairs) WHICH PR AND WHY. Already on
+          // the effect payload; part of the port's request because a MECHANICAL provider (a wrapper, not an
+          // agent reading a brief) needs them as data. The `claude --bg` path ignores all five.
+          launchKind: payload?.launchKind,
+          lane: payload?.lane,
+          scope: payload?.scope,
+          pr: payload?.pr,
+          reason: payload?.reason,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+          // #3857 — see `table` above; `modelReason` is `dispatch-lane.mjs`'s own input, riding the payload.
+          table,
+          modelReason,
           // #x8mpubm follow-up (#4174) — written into `<sessionCwd>/.claude/settings.local.json`, the cwd the
           // session ACTUALLY starts in now, not `root`'s. Writing it to `root` would (a) no longer be where the
           // session looks for it, and (b) be one more write into the dispatching checkout this whole card exists
@@ -1084,12 +1288,110 @@ export function createDispatchSinks({
       const minutes = Number(payload.expectedWithinMinutes) > 0
         ? Number(payload.expectedWithinMinutes)
         : DEFAULT_EXPECTED_WITHIN_MINUTES;
+      const handleText = handle != null ? String(handle) : sessionId;
+      const route = handleText.startsWith(DETACHED_HANDLE_PREFIX) ? 'detached' : 'claude-bg';
+      // #3857 — the model the spawn ACTUALLY got: the same `resolveWorkerModel` decision `buildAgentArgv`
+      // applied (it already refused a bad combination before any process, so a refusal cannot reach here).
+      // `null` for a `detached` route (a wrapper never passes through `buildAgentArgv`) or with no `table`.
+      const modelDecision = table && route === 'claude-bg'
+        ? resolveWorkerModel({ extraArgs, table, modelReason })
+        : null;
       return inFlight({
-        handle: handle != null ? String(handle) : sessionId,
+        handle: handleText,
         expectedBy: new Date(now().getTime() + minutes * 60 * 1000).toISOString(),
+        // #3717/#3848/#3857 — THE ROUTE ON THE DURABLE RECORD: what the criteria chose (`routedProvider`),
+        // what actually ran it (`executedProvider`, the routing record's own `executed`, never re-derived),
+        // and the worker model the tier table decided (`workerModel`) — so a trial can be measured against it.
+        dispatch: {
+          launchKind: payload?.launchKind ?? 'build',
+          route,
+          supervisorModel: modelDecision?.model ?? extractModelFlag(extraArgs.map(String)).value,
+          workerModel: modelDecision && !modelDecision.refusal
+            ? { name: modelDecision.model, tier: modelDecision.tier, source: modelDecision.source, tableTier: modelDecision.tableTier, reason: modelDecision.reason }
+            : null,
+          routedProvider: payload?.routing?.routed ?? null,
+          executedProvider: payload?.routing?.executed ?? null,
+          routedTaskType: payload?.routing?.taskType ?? null,
+          supervisionLevel: payload?.routing?.supervision ?? null,
+          supervisionEnforced: payload?.routing?.supervisionEnforced === true,
+          providerOverride: payload?.routing?.override ?? null,
+        },
       });
     },
   };
+}
+
+/**
+ * #3857/#3906 — THE MODEL-TIER TABLE'S ANSWER for one dispatch, as the `table` {@link buildAgentArgv} takes:
+ * `{tier, model, reason}`, or `null` (no `--model` injected — the pre-#3857 pass-through).
+ *
+ *   - A ROUTED record whose `model` is a native Claude id → its tier's spawn ALIAS (`sonnet`/`opus`). The
+ *     prototype passed the pinned id; #3906 passes the alias so a worker is never an older model.
+ *   - A ROLE record (`prepare`, `prepare-decision`, `investigate`) with a `tier` → that tier's alias.
+ *     ADAPTED from the prototype, which injected no model for a role dispatch (its record's `model` is always
+ *     `null`). #3857's table rates `prepare-decision` Opus and the other roles Sonnet, and `dispatch-task`
+ *     already applies that table to the same kinds, so `dispatch-lane` does too rather than leaving role
+ *     dispatches on whatever the operator's own default model is.
+ *   - Anything else (a refused record, an external route whose `model` is a Codex/Gemini id) → `null`.
+ *
+ * @param {object|null|undefined} routing
+ * @returns {{tier: string|null, model: string, reason: string|null}|null}
+ */
+export function workerModelTable(routing) {
+  if (!routing || typeof routing !== 'object') return null;
+  const tier = routing.tier ?? null;
+  const claudeRoute = CLAUDE_NATIVE_MODEL_IDS.has(routing.model) || routing.outcome === 'role';
+  if (!claudeRoute || !tier || !Object.hasOwn(CLAUDE_SPAWN_MODEL_BY_TIER, tier)) return null;
+  // The spawn flag is the tier's ALIAS (see CLAUDE_SPAWN_MODEL_BY_TIER), so a worker always gets the current model.
+  return { tier, model: CLAUDE_SPAWN_MODEL_BY_TIER[tier], reason: routingTierReason(routing) };
+}
+
+/**
+ * BEST-EFFORT reasoning text for a `decideDispatchRoute` record's tier, read off its own `auditTrail` (#3857):
+ * `claude-tier` for a routed task-type dispatch, `story-kind-tier`/`build-supervisor-tier` for a story-stage
+ * one, or `role-path` for a role dispatch. `null` when no matching entry exists.
+ * @param {object} routing
+ * @returns {string|null}
+ */
+function routingTierReason(routing) {
+  const entry = (Array.isArray(routing?.auditTrail) ? routing.auditTrail : [])
+    .find((a) => ['claude-tier', 'story-kind-tier', 'build-supervisor-tier', 'role-path'].includes(a?.criterion));
+  return entry ? String(entry.reasoning ?? '') || null : null;
+}
+
+/**
+ * THE ROUTER (#3645, landed off by #3906) — the default `provider` {@link createDispatchSinks} installs. It has
+ * NO per-kind knowledge: it asks {@link ./dispatch-provider-registry.mjs#dispatchProviderEntry} whether this
+ * launch kind has a mechanical provider and dispatches to it only when `modes` says `mechanical` for that kind.
+ * Every other case — an unregistered kind, or a registered one in `agent` mode (every row's default on main) —
+ * takes `agent`, the unchanged `claude --bg` spawn.
+ *
+ * #3906 adaptation: a `mechanical` row whose `runScript` is NOT in this checkout is REFUSED (`notApplied`,
+ * before any process exists) rather than started. Each wrapper script graduates with its own card, and a
+ * detached `node` pointed at a missing file would exit at once while the run record said a dispatch was in
+ * flight.
+ *
+ * @param {object} request - the #3579 port request.
+ * @param {{modes?: Record<string, string>, registry?: Record<string, object>, agent: Function, scriptExists?: (p: string) => boolean}} io
+ */
+export function routeDispatchProvider(request, {
+  modes = {},
+  registry = DISPATCH_PROVIDER_REGISTRY,
+  agent,
+  scriptExists = (path) => existsSync(path),
+} = {}) {
+  const kind = String(request?.launchKind || 'build');
+  const entry = dispatchProviderEntry(kind, registry);
+  if (entry && modes?.[kind] === 'mechanical') {
+    if (entry.runScript && !scriptExists(entry.runScript)) {
+      throw notApplied(
+        `dispatch-lane: ${entry.modeEnv ?? 'the registry'} selects the mechanical ${kind} provider, but its wrapper `
+        + `script ${entry.runScript} is not in this checkout — refusing before any process starts`,
+      );
+    }
+    return entry.provider(request);
+  }
+  return agent(request);
 }
 
 /**
@@ -1133,6 +1435,10 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     // for `process.env`/real fs on its own (`request.settingsEnv` defaults to nothing, i.e. `null`), so every
     // existing caller/test of this port that never mentions it sees byte-identical behaviour.
     settingsEnv: request.settingsEnv ?? null,
+    // #3857 — the model-tier table's decision and the required override reason, when the caller has one
+    // (`request.table` null keeps this call byte-identical for any caller that computes no routing decision).
+    table: request.table ?? null,
+    modelReason: request.modelReason ?? null,
   });
   const stdout = String(spawnAgent(argv, { cwd: request.cwd }) ?? '');
   return parseBackgroundedId(stdout) || request.sessionId;
@@ -1483,7 +1789,15 @@ export function ensureDispatchSessionCwd(dir, {
   return dir;
 }
 
-export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null }) {
+export function buildAgentArgv({
+  sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null,
+  // #3857 — `table` is the checked-in model-tier table's answer for THIS dispatch ({tier, model, reason} — see
+  // `../lib/provider-routing.mjs#workerTierFor` and {@link workerModelTable}); `null` (every caller that computes
+  // no routing decision: review and reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical —
+  // extraArgs pass through untouched, no --model is ever injected or refused. Passing `table` is what OPTS a
+  // caller into the enforcement, once, at the one argv builder every Claude dispatch shares.
+  table = null, modelReason = null,
+}) {
   const prompt = String(payload?.prompt || '');
   if (!prompt.trim()) throw notApplied('dispatch-lane: refusing to start an agent with an empty prompt');
   if (prompt.trimStart().startsWith('-')) {
@@ -1502,6 +1816,16 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
   // env, so `markWorkerEnv` on the spawn call never reaches the session, and the #x36vidg wait-poll guard read
   // every dispatched session as the operator's own. See `workerMarkerSettingsEnv`.
   const sessionEnv = workerMarkerSettingsEnv(settingsEnv);
+  // #3857 — the decided model goes FIRST as exactly one `--model <id>`; a hand-set one in `extraArgs` is
+  // honoured only with a reason (see {@link resolveWorkerModel}), and never left riding alongside.
+  let args = extraArgs.map(String);
+  const modelArgs = [];
+  if (table) {
+    const decision = resolveWorkerModel({ extraArgs: args, table, modelReason });
+    if (decision.refusal) throw notApplied(`dispatch-lane: ${decision.refusal}`);
+    args = decision.cleanArgs;
+    if (decision.model) modelArgs.push('--model', String(decision.model));
+  }
   return [
     '--bg',
     '-n', String(payload.sessionSlug || `conveyor-${payload.num}`),
@@ -1514,9 +1838,73 @@ export function buildAgentArgv({ sessionId, payload, extraArgs = [], systemPromp
     // xgqz204: never omitted any more — it always carries at least the worker marker (see above).
     '--settings', JSON.stringify({ env: sessionEnv }),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
-    ...extraArgs.map(String),
+    ...modelArgs,
+    ...args,
     prompt,
   ];
+}
+
+/**
+ * Extract a hand-set `--model`/`-m`/`--model=` flag from an argv-shaped list. PURE. Returns the flag's value
+ * (the LAST occurrence wins, matching the CLI's own repeated-flag rule) and the list with every occurrence
+ * removed, so a caller never has to re-scan for what it just found.
+ *
+ * @param {string[]} args
+ * @returns {{found: boolean, value: string|null, rest: string[]}}
+ */
+function extractModelFlag(args) {
+  let value = null;
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const a = String(args[i]);
+    if (a === '--model' || a === '-m') { value = args[i + 1] != null ? String(args[i + 1]) : ''; i += 1; continue; }
+    if (a.startsWith('--model=')) { value = a.slice(8); continue; }
+    rest.push(a);
+  }
+  return { found: value !== null, value, rest };
+}
+
+/** A model name that names Fable — never a worker model, even with a recorded reason (operator rule, #3857). */
+function namesFable(model) {
+  return /fable/i.test(String(model ?? ''));
+}
+
+/**
+ * THE MODEL DECISION for one dispatch's spawn (#3857) — resolves the worker's Claude model from the checked-in
+ * model-tier table ({@link ../lib/provider-routing.mjs#workerTierFor}, reached through
+ * {@link ../lib/dispatch-contracts.mjs#decideDispatchRoute}) UNLESS the caller hand-set one in `extraArgs`
+ * ({@link AGENT_ARGS_ENV}) WITH a recorded `modelReason` — the one sanctioned per-dispatch OVERRIDE (mirrors
+ * #3840's `deliveryAgent:`/`deliveryAgentReason:` shape for the provider axis).
+ *
+ * PURE and NEVER THROWS: a disallowed combination comes back as a named `refusal` for the caller to refuse
+ * BEFORE any process exists. `cleanArgs` is `extraArgs` with every `--model`/`-m`/`--model=` token removed, so
+ * a caller that injects the DECIDED model can never also leave the hand-set one riding alongside it.
+ *
+ * @param {{extraArgs?: string[], table: {tier: string, model: string, reason?: string|null}, modelReason?: string|null}} o
+ * @returns {{model: string|null, tier: string|null, source: 'table'|'override', tableTier: string|null, reason: string|null, cleanArgs: string[], refusal: string|null}}
+ */
+export function resolveWorkerModel({ extraArgs = [], table, modelReason = null } = {}) {
+  const handSet = extractModelFlag(extraArgs.map(String));
+  const reason = modelReason == null ? '' : String(modelReason).trim();
+  const tableTier = table?.tier ?? null;
+  const asTable = { model: table?.model ?? null, tier: tableTier, source: 'table', tableTier, reason: table?.reason ?? null, cleanArgs: handSet.rest };
+  if (handSet.found && !reason) {
+    return {
+      ...asTable,
+      refusal: `a hand-set --model in ${AGENT_ARGS_ENV} with no --modelReason is refused — #3857's model-tier `
+        + 'table decides the worker\'s tier; give --modelReason=<text> naming why this dispatch departs from it',
+    };
+  }
+  if (!handSet.found && reason) {
+    return { ...asTable, refusal: '--modelReason was given but no --model was set in extraArgs to explain — refusing a reason for nothing' };
+  }
+  if (handSet.found && reason) {
+    if (namesFable(handSet.value)) {
+      return { ...asTable, refusal: `refusing model ${JSON.stringify(handSet.value)} — Fable is never a worker model, even with a reason` };
+    }
+    return { model: handSet.value, tier: tableTier, source: 'override', tableTier, reason, cleanArgs: handSet.rest, refusal: null };
+  }
+  return { ...asTable, refusal: null };
 }
 
 /**

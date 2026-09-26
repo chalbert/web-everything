@@ -121,16 +121,117 @@ describe('the deliveryAgent marker override', () => {
     expect(c.decideDispatchRoute(dispatch({ deliveryAgent: 'codex' })).refusal).toContain('deliveryAgentReason');
     expect(c.decideDispatchRoute(dispatch({ deliveryAgentReason: 'x' })).refusal).toContain('deliveryAgent:');
   });
+  // #3906 — a `build` routes to Codex only once #4034 lifts the critical-work gate, and a computed spot-check
+  // survives only when the promotion record names its triple (#3784 rule 6). This block tests the override
+  // mechanics in that post-#4034, promoted world, so both are stated explicitly.
+  const opened = (extra = {}) => {
+    const deps = { scorecards: trials(), criticalWorkGate: { kinds: [], reason: 'post-#4034 (test)' }, ...extra };
+    const plain = c.decideDispatchRoute(dispatch(), deps);
+    return { ...deps, promotions: { promotions: [{ provider: plain.routed, model: plain.model, taskType: 'build-new-feature', level: 'spot-check', ratifiedOn: '2026-09-26', ratifiedBy: '#3784', anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation' }] } };
+  };
   it('leaves routed as the criteria chose it and records the override beside it', () => {
-    const plain = c.decideDispatchRoute(dispatch(), { scorecards: trials() });
-    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials() });
+    const plain = c.decideDispatchRoute(dispatch(), opened());
+    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), opened());
     expect(plain).toMatchObject({ routed: 'codex', supervision: 'spot-check' });
     expect(over).toMatchObject({ routed: 'codex', model: plain.model, override: { requestedVendor: 'claude-restricted', executedVendor: 'claude-restricted', reason: 'pin' } });
   });
+  it('with the critical-work gate in force (today), the same build routes to Claude despite the Codex trials', () => {
+    expect(c.decideDispatchRoute(dispatch(), { scorecards: trials() })).toMatchObject({ routed: 'claude', executed: 'claude', tier: 'sonnet' });
+  });
   it('gives an override the supervision of its own triple: no trials means full, the routed spot-check is not inherited', () => {
-    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), { scorecards: trials() });
+    const over = c.decideDispatchRoute(dispatch({ deliveryAgent: 'claude-restricted', deliveryAgentReason: 'pin' }), opened());
     expect(over.supervision).toBe('full');
     expect(over.spotCheck).toBeNull();
+  });
+});
+
+// #3784 — RULE 6 of #3690 (`#delegation-trial-record-graduation`): the promotion record. A computed
+// `spot-check` survives only when its own `{provider, model, taskType}` triple is named at that level in a
+// VALID promotion row; a computed `full` is never lifted; an invalid/missing/unparseable candidate fails
+// CLOSED to no promotions — unlike the size-policy precedent (fails open), and it NEVER refuses the route.
+// #3906 landed the critical-work gate, which by default holds `build` off Codex entirely — these tests pass
+// `criticalWorkGate: { kinds: [] }` (see the `deliveryAgent` marker describe block above, which does the
+// same) to reach a computed, pre-clamp Codex spot-check on a `build` dispatch.
+describe('the supervision-promotion record (#3784, rule 6 of #3690)', () => {
+  const gate = { kinds: [] };
+  const dispatch = (extra = {}) => ({ kind: 'build', scopePaths: ['we:scripts/operations/example.mjs'], size: 3, taskKey: { storyRef: '3784', round: 1, taskId: 'build' }, ...extra });
+  const trials = () => history().map((r) => ({ ...r, taskType: 'build-new-feature' }));
+  const row = (extra = {}) => ({
+    provider: 'codex', model: 'gpt-5', taskType: 'build-new-feature', level: 'spot-check',
+    ratifiedOn: '2026-09-22', ratifiedBy: '#3690',
+    anchor: 'we:docs/agent/platform-decisions.md#delegation-trial-record-graduation',
+    ...extra,
+  });
+
+  it('validatePromotions accepts a well-formed row, and an empty record is ok', () => {
+    expect(c.validatePromotions({ promotions: [row()] })).toEqual({ ok: true, promotions: [row()] });
+    expect(c.validatePromotions({ promotions: [] })).toEqual({ ok: true, promotions: [] });
+    expect(c.validatePromotions({})).toEqual({ ok: false, errors: expect.any(Array) });
+  });
+
+  it('validatePromotions refuses each missing/invalid field, by name', () => {
+    const cases = [
+      { extra: { provider: 'openai' }, name: 'provider' },
+      { extra: { model: '' }, name: 'model' },
+      { extra: { taskType: 'not-a-real-task-type' }, name: 'taskType' },
+      { extra: { level: 'sometimes' }, name: 'level' },
+      { extra: { ratifiedOn: '9/22/2026' }, name: 'ratifiedOn' },
+      { extra: { ratifiedBy: '3690' }, name: 'ratifiedBy' },
+      { extra: { ratifiedBy: undefined }, name: 'ratifiedBy' },
+      { extra: { anchor: 'docs/agent/platform-decisions.md#x' }, name: 'anchor' },
+      { extra: { anchor: undefined }, name: 'anchor' },
+    ];
+    for (const { extra, name } of cases) {
+      const result = c.validatePromotions({ promotions: [row(extra)] });
+      expect(result.ok).toBe(false);
+      expect(result.errors.join(' ')).toContain(name);
+    }
+  });
+
+  it('a missing, unparseable or invalid promotions candidate fails CLOSED to no promotions, never refusing the route', () => {
+    for (const bad of [undefined, null, {}, { promotions: 'nope' }, { promotions: [{ provider: 'codex' }] }, 'not an object']) {
+      const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), criticalWorkGate: gate, promotions: bad });
+      expect(out.outcome).toBe('routed');
+      expect(out.supervision).toBe('full');
+      expect(out.spotCheck).toBeNull();
+    }
+  });
+
+  it('a computed spot-check for a triple named at spot-check in a valid row records spot-check', () => {
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), criticalWorkGate: gate, promotions: { promotions: [row()] } });
+    expect(out.supervision).toBe('spot-check');
+    expect(out.spotCheck).not.toBeNull();
+  });
+
+  it('the same computed spot-check for a triple NOT named is clamped to full, with a reason naming the missing act', () => {
+    // A row for a DIFFERENT taskType does not name this triple.
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), criticalWorkGate: gate, promotions: { promotions: [row({ taskType: 'doc-fix' })] } });
+    expect(out.supervision).toBe('full');
+    expect(out.spotCheck).toBeNull();
+    const entry = out.auditTrail.find((a) => a.criterion === 'promotion-required');
+    expect(entry).toBeTruthy();
+    expect(entry.reasoning).toContain('no ratified promotion act');
+  });
+
+  it('a computed full for a triple that IS named still records full — a promotion never lifts a demotion', () => {
+    const out = c.decideDispatchRoute(dispatch({ risk: 'high' }), { scorecards: trials(), criticalWorkGate: gate, promotions: { promotions: [row()] } });
+    expect(out.supervision).toBe('full');
+  });
+
+  it('the checked-in promotions file exists, parses, and ships empty', () => {
+    const raw = JSON.parse(readFileSync('scripts/lib/dispatch-supervision-promotions.json', 'utf8'));
+    // #3906 — main's shared registry shape (`{version, entries}`), the one graduation-progress-report reads too.
+    expect(raw).toEqual({ version: 1, entries: [] });
+    expect(c.validatePromotions(raw)).toEqual({ ok: true, promotions: [] });
+    expect(c.DEFAULT_PROMOTIONS).toEqual({ promotions: [] });
+  });
+
+  it('accepts an `entries` row with no `level` as a spot-check promotion, and it lifts the clamp', () => {
+    const { level, ...noLevel } = row();
+    expect(level).toBe('spot-check');
+    expect(c.validatePromotions({ version: 1, entries: [noLevel] })).toMatchObject({ ok: true, promotions: [{ level: 'spot-check' }] });
+    const out = c.decideDispatchRoute(dispatch(), { scorecards: trials(), criticalWorkGate: gate, promotions: { version: 1, entries: [noLevel] } });
+    expect(out.supervision).toBe('spot-check');
   });
 });
 
