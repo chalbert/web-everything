@@ -719,7 +719,7 @@ describe('the declared effect is a dispatch', () => {
     // path (gh-app-shim.mjs#ensureSettingsFileEnv) knows which checkout to write into.
     expect(resolveSettingsEnv).toHaveBeenCalledWith(PRIMARY);
     expect(seenArgv).toContain('--settings');
-    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
   });
 
   it('#x8mpubm — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', async () => {
@@ -733,7 +733,7 @@ describe('the declared effect is a dispatch', () => {
       resolveSettingsEnv: () => null,
     });
     await applyPendingEffects(run, { sinks, store });
-    expect(seenArgv).not.toContain('--settings');
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } })); // xgqz204 — worker marker only
   });
 
   it('#x8mpubm follow-up — defaultSpawnAgent strips GH_TOKEN/GITHUB_TOKEN from the exec env, never lets them leak into the claude front-end invocation', () => {
@@ -782,7 +782,7 @@ describe('what the sink actually runs', () => {
     // real dispatch argv. Passing it bought nothing and encoded a false premise the rest of the file read as
     // fact; the handle now comes from the id the CLI prints (`parseBackgroundedId`).
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
-    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '# build #3037']);
+    expect(argv).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), '# build #3037']);
     expect(argv).not.toContain('--session-id');
     expect(argv).not.toContain('sess-c3');
   });
@@ -792,20 +792,20 @@ describe('what the sink actually runs', () => {
     const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'] });
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-3037',
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
       '--append-system-prompt-file', '/path/to/identity.md',
       '--model', 'sonnet', '# build #3037',
     ]);
   });
 
   it('#x8mpubm — settingsEnv folds into --settings \'{"env":...}\', ahead of systemPromptFile/extraArgs', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload })).not.toContain('--settings');
     const argv = buildAgentArgv({
       sessionId: 'sess-c3', payload, settingsEnv: { PATH: '/shim:/usr/bin' },
       systemPromptFile: '/path/to/identity.md', extraArgs: ['--model', 'sonnet'],
     });
     expect(argv).toEqual([
       '--bg', '-n', 'conveyor-3037',
-      '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }),
+      '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }),
       '--append-system-prompt-file', '/path/to/identity.md',
       '--model', 'sonnet', '# build #3037',
     ]);
@@ -816,9 +816,20 @@ describe('what the sink actually runs', () => {
     expect(env).toMatchObject({ BASH_DEFAULT_TIMEOUT_MS: '600000', BASH_MAX_TIMEOUT_MS: '600000' });
   });
 
-  it('#x8mpubm — an empty settingsEnv object emits no --settings at all, same as null/omitted', () => {
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: {} })).not.toContain('--settings');
-    expect(buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: null })).not.toContain('--settings');
+  it('xgqz204 — --settings is never omitted: empty/null/absent settingsEnv still carries the worker marker', () => {
+    // `claude --bg` drops the spawner's ambient env (measured live 2026-09-25), so the marker set by
+    // `markWorkerEnv` on the spawn call never reaches the session; `--settings` env is what arrives.
+    for (const settingsEnv of [{}, null, undefined]) {
+      const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv });
+      expect(argv.slice(0, 5)).toEqual(['--bg', '-n', 'conveyor-3037', '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } })]);
+    }
+    // ...and it never overrides or drops a caller's own settings env.
+    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload, settingsEnv: { PATH: '/p', WE_CONVEYOR_WORKER: '0' } });
+    expect(JSON.parse(argv[argv.indexOf('--settings') + 1]).env).toEqual({ PATH: '/p', WE_CONVEYOR_WORKER: '1' });
+  });
+
+  it('xgqz204 — a resume stays a BARE `--bg --resume` (the resumed process already carries the marker)', () => {
+    expect(buildAgentArgv({ payload, resumeSessionId: 'abc' })).toEqual(['--bg', '--resume', 'abc', '# build #3037']);
   });
 
   it('#xu2krte — resumeSessionId emits a BARE `--bg --resume <id> <prompt>`, no -n/systemPromptFile/extraArgs', () => {

@@ -198,7 +198,7 @@ describe('dispatchInspection — plan → fill → mint → spawn, every IO poin
     expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
     const [argv] = spawnAgent.mock.calls[0];
     expect(argv).toContain('--settings');
-    expect(argv[argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+    expect(argv[argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
   });
 
   it('refuses to run from a lane checkout (assertNotALaneCheckout)', () => {

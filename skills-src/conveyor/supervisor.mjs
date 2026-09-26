@@ -386,7 +386,9 @@ export function makeRealSpawnChild({ runnerPath, extraArgs, onChild, onTickLine 
         else if (parsed.event === 'stood-down') stoppedReason = 'stand-down';
       } catch { /* not a tick/stopped line (or malformed) — mirrored above; never fatal */ }
     });
-    child.on('exit', (code, signal) => { onChild(null); resolveSpawn({ code, signal, ranMs: Date.now() - startedAt, stoppedReason }); });
+    // `close`, not `exit`: `exit` can fire before the piped stdout is drained, dropping the final
+    // `{event:'stopped'|'stood-down'}` line and leaving `stoppedReason` null (a CI flake, PR #2685).
+    child.on('close', (code, signal) => { onChild(null); resolveSpawn({ code, signal, ranMs: Date.now() - startedAt, stoppedReason }); });
     child.on('error', (e) => { onChild(null); resolveSpawn({ code: null, signal: null, ranMs: Date.now() - startedAt, stoppedReason, spawnError: String((e && e.message) || e) }); });
   });
 }

@@ -134,6 +134,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
       '-n', 'review-1234',
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
@@ -168,7 +169,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     expect(resolveSettingsEnv).toHaveBeenCalledTimes(1);
     expect(resolveSettingsEnv).toHaveBeenCalledWith('/repo');
     expect(calls[0].argv).toContain('--settings');
-    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin' } }));
+    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
   });
 
   it('#x8mpubm follow-up — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', () => {
@@ -183,7 +184,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       checkStaleness: FRESH,
       resolveSettingsEnv: () => null,
     });
-    expect(calls[0].argv).not.toContain('--settings');
+    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } })); // xgqz204
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
@@ -225,6 +226,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
       '-n', 'review-1234',
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',
@@ -453,7 +455,7 @@ describe('assertMainNotStale', () => {
 
       const st = assertMainNotStale(checkout);
 
-      expect(st).toEqual({ synced: true, behind: 2 });
+      expect(st).toMatchObject({ synced: true, behind: 2, to: originHead });
       expect(git(checkout, 'rev-parse', 'HEAD')).toBe(originHead);
       expect(git(checkout, 'status', '--porcelain')).toBe('');
       expect(note).toHaveBeenCalledWith(expect.stringMatching(/fast-forwarded .* 2 commit\(s\) to origin\/main/));

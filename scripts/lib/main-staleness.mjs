@@ -17,6 +17,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { realpathSync, writeSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Default git runner — spawnSync (returns non-zero without throwing). */
 export function gitRun(args, opts = {}) {
@@ -82,7 +85,9 @@ export function checkMainStaleness({ base = 'main', autoFf = true, cleanOnly = f
   const cls = classifyStaleness({ behind, ahead, dirty, autoFf, base, cleanOnly, onBase });
   if (cls.action === 'auto-ff') {
     const synced = cleanOnly ? run(['merge', '--ff-only', `origin/${base}`]) : run(['pull', '--ff-only', '--autostash']);
-    if (synced.status === 0) return { synced: true, behind };
+    // `from`/`to` (xgqz204): the SHAs the fast-forward moved between, so a caller can tell which files changed
+    // under its own feet (see `selfFastForwardAction`).
+    if (synced.status === 0) return { synced: true, behind, from: local, to: origin };
     return {
       action: 'warn', reason: 'ff-failed', behind, ahead, dirty,
       warning: `local ${base} is ${behind} behind origin/${base} and the auto fast-forward failed — sync by hand.`,
@@ -175,7 +180,12 @@ export function behindFiles(root, base = 'main', run = gitRun) {
  *   (default `main`); `label` prefixes the thrown/logged message so each caller reads as itself (default
  *   `review-dispatch`, this function's original and still most common caller).
  */
-export function assertMainNotStale(root, checkStaleness, { base = 'main', label = 'review-dispatch' } = {}) {
+export function assertMainNotStale(root, checkStaleness, {
+  base = 'main', label = 'review-dispatch',
+  // xgqz204 — the self-fast-forward seams (see `selfFastForwardAction`). All default to the real process.
+  codeRoot = THIS_CODE_ROOT, armed = selfSyncState.armed, reexeced = selfSyncState.reexeced,
+  reexec = reexecSelf, changedFiles = (r, from, to) => changedFilesBetween(r, from, to),
+} = {}) {
   // #4044 Module E — a MANAGED clone (`process.env.WE_DAEMON_MANAGED_CLONE === '1'`, set by
   // `daemon-self-sync.mjs#withSelfSync` at wrapper construction) is rebuilt fresh from `origin/main` (+ its
   // overlay list) by `daemon-rebuild.mjs`, gated behind a live smoke check, every tick — a dispatch chokepoint
@@ -201,6 +211,27 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main', label 
   }
   if (st && st.synced) {
     process.stderr.write(`${label}: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base} (#3474) before dispatching.\n`);
+    // xgqz204 — the fast-forward just rewrote the files THIS process may already have loaded. Proceeding would
+    // run the pre-fast-forward code in memory (live 2026-09-25: a 47-commit FF brought in #2674's job-mode
+    // default, and the already-loaded review-dispatch still started a `claude --bg` session).
+    const sameCheckout = isSameCheckout(root, codeRoot);
+    const files = sameCheckout ? changedFiles(root, st.from, st.to) : [];
+    const codeChanged = Array.isArray(files) ? files.some(isCodePath) : null;
+    const action = selfFastForwardAction({ sameCheckout, codeChanged, armed, reexeced });
+    if (action === 'reexec') {
+      reexec({ label, st });
+      return { ...st, reexeced: true }; // only reached when `reexec` is injected (the real one exits)
+    }
+    if (action === 'refuse') {
+      throw new Error(
+        `${label}: fast-forwarded the dispatching checkout ${st.behind} commit(s) to origin/${base}, but this process `
+        + `had already loaded the pre-fast-forward code, so it would run ${STALE_MAIN_REFUSAL_MARKER}'s own import path `
+        + '(the old copy in memory) — refusing to dispatch (xgqz204). '
+        + (reexeced
+          ? 'It already re-executed itself once and the checkout moved again underneath it; re-run it.'
+          : 'This caller cannot re-execute itself (it did not call armSelfReexecOnFastForward); re-run it — the checkout is now current.'),
+      );
+    }
   }
   if (st && st.action === 'warn') {
     throw new Error(
@@ -216,4 +247,94 @@ export function assertMainNotStale(root, checkStaleness, { base = 'main', label 
     );
   }
   return st;
+}
+
+// ── xgqz204 — A DISPATCHER THAT FAST-FORWARDS ITS OWN CHECKOUT MUST NOT KEEP RUNNING ITS OLD CODE ─────────────
+// `assertMainNotStale` fast-forwards the checkout the dispatch runs from (#3474). When that checkout is the one
+// this very process loaded its modules from, the FF changes the files on disk but not the code in memory: node
+// has already imported the old version. Live 2026-09-25 (review-dispatch --pr=2678): a 47-commit FF brought in
+// PR #2674's job-mode default, and the already-loaded pre-#2674 CLI still started a `claude --bg` SESSION.
+//
+// The fix: a one-shot CLI calls `armSelfReexecOnFastForward()` at the top of its CLI block. After an FF that
+// changed a code file in its own checkout, the chokepoint RE-EXECUTES the same command (same node flags, argv,
+// cwd, env) with `WE_SELF_SYNC_REEXECED=1` set, waits for it, and exits with its status — so the fresh process
+// loads the new code from the start. The re-exec happens before any dispatch side effect: every caller runs
+// `assertMainNotStale` as its first effectful step. The env guard stops a loop: a re-executed process that
+// sees the checkout move AGAIN refuses instead of re-executing a second time. A caller that is NOT armed (a
+// long-running daemon calling a dispatcher in-process — re-running it would start a second daemon) refuses
+// with a clear message instead of proceeding. An FF that touched only non-code files, or that moved a checkout
+// other than the one this code was loaded from, leaves the in-memory code current, so it proceeds as before.
+
+/** The env var a re-executed process carries (see {@link armSelfReexecOnFastForward}). */
+export const SELF_SYNC_REEXEC_ENV = 'WE_SELF_SYNC_REEXECED';
+
+/** The checkout this module (and so every script importing it from the same tree) was loaded from. */
+export const THIS_CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+const selfSyncState = { armed: false, reexeced: false };
+
+/**
+ * Called ONCE at the top of a one-shot dispatcher CLI's entry block: allows {@link assertMainNotStale} to
+ * re-execute this process after a self-fast-forward. Reads and REMOVES the loop-guard env var, so a process this
+ * one later spawns does not inherit "already re-executed". Never call it from a long-running daemon.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{armed: true, reexeced: boolean}}
+ */
+export function armSelfReexecOnFastForward(env = process.env) {
+  selfSyncState.armed = true;
+  selfSyncState.reexeced = env?.[SELF_SYNC_REEXEC_ENV] === '1';
+  if (env) delete env[SELF_SYNC_REEXEC_ENV];
+  return { armed: true, reexeced: selfSyncState.reexeced };
+}
+
+/** Do two paths name the same checkout (symlinks resolved)? Never throws. */
+export function isSameCheckout(a, b) {
+  const real = (p) => { try { return realpathSync(String(p)); } catch { return resolve(String(p)); } };
+  if (!a || !b) return false;
+  return real(a) === real(b);
+}
+
+/**
+ * PURE — what to do after a SUCCESSFUL fast-forward of `root`.
+ *   'proceed' — the FF did not touch the code this process runs: another checkout, or only non-code files.
+ *   'reexec'  — it did, and this is an armed CLI that has not re-executed yet.
+ *   'refuse'  — it did, and re-executing is not possible (unarmed caller) or already happened once.
+ * `codeChanged: null` (the diff could not be read) counts as changed — fail closed.
+ * @param {{sameCheckout: boolean, codeChanged: boolean|null, armed: boolean, reexeced: boolean}} o
+ * @returns {'proceed'|'reexec'|'refuse'}
+ */
+export function selfFastForwardAction({ sameCheckout, codeChanged, armed, reexeced }) {
+  if (!sameCheckout || codeChanged === false) return 'proceed';
+  return armed && !reexeced ? 'reexec' : 'refuse';
+}
+
+/** Files that differ between two commits, or `null` when unknown (a missing SHA, or git failed). */
+export function changedFilesBetween(root, from, to, run = gitRun) {
+  if (!from || !to) return null;
+  const r = run(['diff', '--name-only', String(from), String(to)], { cwd: root, timeout: 60_000, killSignal: 'SIGKILL' });
+  if (r.status !== 0) return null;
+  return String(r.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * Re-run the current command (same node flags, script, argv, cwd, env + the loop guard) in a fresh process,
+ * wait for it, and exit with its status. Its stdio is inherited, so the caller's stdout/stderr read as if the
+ * first process had run the new code itself. Throws (never proceeds) when the child cannot be started.
+ */
+export function reexecSelf({
+  label = 'dispatch', st = {}, spawn = spawnSync, exit = (code) => process.exit(code),
+  argv = process.argv, execArgv = process.execArgv, env = process.env, cwd = process.cwd(),
+  write = (s) => { try { writeSync(2, s); } catch { /* stderr closed — nothing to report to */ } },
+} = {}) {
+  const span = st.from && st.to ? ` ${String(st.from).slice(0, 9)}..${String(st.to).slice(0, 9)}` : '';
+  write(`${label}: re-executing so the fast-forwarded code runs (${st.behind ?? '?'} commit(s)${span}), `
+    + `not the pre-fast-forward copy already in memory (xgqz204).\n`);
+  const r = spawn(process.execPath, [...execArgv, ...argv.slice(1)], {
+    stdio: 'inherit', cwd, env: { ...env, [SELF_SYNC_REEXEC_ENV]: '1' },
+  });
+  if (r?.error) {
+    throw new Error(`${label}: fast-forwarded its own checkout but could not re-execute itself (${r.error.message}) — `
+      + `refusing to dispatch on the pre-fast-forward code in memory (xgqz204); re-run it.`);
+  }
+  exit(Number.isInteger(r?.status) ? r.status : 1);
 }

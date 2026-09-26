@@ -166,6 +166,7 @@ import { resolve, dirname, join } from 'node:path';
 import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedLaneSlug, requiredAssertionSlug } from './lib/lane-lease.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { usageReportSecretDir, USAGE_REPORT_KEYCHAIN_SERVICE } from './lib/usage-report-secret-paths.mjs';
+import { classifySession } from './operations/session-role.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -3572,7 +3573,12 @@ if (IS_CLI) {
     // #x36vidg — an AGENT session: a subagent (the documented `agent_id` field Claude Code puts on a hook
     // payload only when the tool call originates inside a subagent) or a dispatched worker. Gates the
     // wait-poll deny; the interactive main session (neither) gets the WARN twin instead.
-    agentSession = (typeof ev.agent_id === 'string' && ev.agent_id !== '') || !!dispatchKind;
+    // xgqz204 — OR the worker marker (`WE_CONVEYOR_WORKER=1`), which every `claude --bg` dispatch now carries in
+    // `--settings` env (the only channel measured to reach a `--bg` session's hook env). Deliberately NOT keyed
+    // on stamping `WE_DISPATCH_KIND` onto those sessions: that would also arm the #3105 verification deny, which
+    // blocks the `verify-lane.mjs run` gate the fix/ci-heal briefs tell the agent to run.
+    agentSession = (typeof ev.agent_id === 'string' && ev.agent_id !== '') || !!dispatchKind
+      || classifySession(process.env).role === 'worker';
     // #2367 — the DURABLE session identity. Key on `CLAUDE_CODE_SESSION_ID` (env) FIRST — the SAME source
     // `lane-pool.mjs acquire` stamps into the lease's `ownerSession`, so my own lease can never read as foreign
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
