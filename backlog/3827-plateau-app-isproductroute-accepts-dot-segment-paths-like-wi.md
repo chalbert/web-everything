@@ -2,10 +2,13 @@
 bornAs: x8i1gsp
 kind: story
 size: 1
+tier: pinned
 status: open
-scope: ["plateau:src/return-to.ts", "plateau:src/return-to.test.ts", "plateau:src/main.ts"]
+scope: ["plateau:src/return-to.ts", "plateau:src/return-to.test.ts"]
 dateOpened: "2026-09-21"
 tags: []
+deliveryAgent: codex
+deliveryAgentReason: "astra graduation trial (epic #3383/#4034/#3906): non-critical per the #4034/#2752 critical-work rule — a tiny (size 1) plateau:src/return-to.ts bugfix with a fully specified Done-when, no daemon/conveyor/gate/statute path; scope narrowed to the two files the card's own Done-when actually touches now that PR #158 (which created plateau:src/return-to.ts) is merged, dropping the abandoned-PR fallback path (plateau:src/main.ts); operator-directed, 2026-09-26"
 ---
 
 # plateau-app isProductRoute accepts dot-segment paths like /wip/../x, so the sign-in return target can leave the product routes

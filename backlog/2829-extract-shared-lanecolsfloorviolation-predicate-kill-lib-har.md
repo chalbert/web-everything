@@ -2,6 +2,7 @@
 bornAs: xph9va4
 kind: story
 size: 2
+tier: pinned
 parent: "2804"
 status: open
 dateOpened: "2026-08-02"
@@ -10,6 +11,8 @@ scope:
   - plateau-app:scripts/dev/fidelity-render.mjs
   - plateau-app:tests/visual/geometry-theme.ts
 tags: [plateau-loop, conveyor, ui-fidelity, plateau-app, slice-uifg, tech-debt]
+deliveryAgent: codex
+deliveryAgentReason: "astra graduation trial (epic #3383/#4034/#3906): non-critical per the #4034/#2752 critical-work rule — a pure, behavior-preserving DRY refactor in plateau-app test/harness code with an exact prescribed diff and complete Done-when; the 'conveyor'/'slice-uifg' tags name plateau's own UI-fidelity-gate feature area, not the WE conveyor/gate machinery the critical-work rule targets, and no scope path matches it; operator-directed, 2026-09-26"
 ---
 
 # Extract shared laneColsFloorViolation predicate — kill lib/harness grid-collapsed floor drift
