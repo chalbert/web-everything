@@ -3,10 +3,11 @@ bornAs: xmgv6bx
 kind: story
 size: 3
 parent: "3718"
-status: open
+status: active
 relatedTo: ["2421", "3720"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs"]
 dateOpened: "2026-09-19"
+dateStarted: "2026-09-25"
 tags: []
 ---
 
@@ -41,3 +42,17 @@ A stale stand-down comment whose blocker is gone. The stand-down marker is termi
 
 1. **Executable** — a fixture-driven case in `we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs` reproduces the confirmed cause (a review-parked, not-`ready-to-merge` PR carrying `ci:failed` with a green latest required check) and fails before the fix, passes after.
 2. **Probed live** — the same query over the real open PRs lists zero PRs with `ci:failed` and a green latest required check after one pass, and the cause found is written into this item's body.
+
+## Cause found (live-confirmed 2026-09-25)
+
+None of the three original hypotheses: the TOTAL-branch reconcile is already label/`--only`-blind (`collectOpenPrContext` lists every open PR across the constellation, not the `--label`-scoped candidate set — ruling out #1), and it is not a silent write failure (#3).
+
+The real cause is a variant of #2 — `isAiGeneratedPr` really was `false`, but not because the PR's top-level GitHub author is human. `isAiGeneratedPr` never reads the PR author field at all; it reads `pr.commits`. The drain lands PRs with `gh pr merge --merge` (`we:scripts/lib/pr-merge-gate.mjs`'s `mergeMethodFlag` default), which leaves a GitHub-native `Merge pull request #NNN from owner/branch` commit on `main` for every landed PR, authored solely by `web-everything[bot]`. A long-lived lane that later merges `origin/main` into itself (a routine rebase-refresh — the OTHER, already-recognized-as-mechanical `Merge remote-tracking branch 'origin/main' into lane/…` shape) inherits every one of those bot-authored merge commits into its OWN open PR's `commits` list, because the PR's recorded base predates them.
+
+Confirmed live against `chalbert/web-everything#2685` (`gh pr view 2685 --json commits`): its commit list carries `"Merge pull request #2688 from chalbert/lane/4091-resolve-item"`, sole author `web-everything[bot]`, body `"backlog: resolve #4091 -- merged to main via PR #2678"` (never empty — GitHub always fills a merge-commit's body with the merged PR's own title). The pre-fix `isMechanicalMergeCommit` only recognized `Merge branch`/`Merge remote-tracking branch` headlines AND required an empty body, so this commit counted as "substantive" and non-AI — which alone flipped `isAiGeneratedPr` to `false` for #2685 (otherwise 100% Claude-authored), disqualifying it from the #2421 TOTAL reconcile and leaving `ci:failed` on the PR straight through to merge. Live query at fix time: `gh pr list --repo chalbert/web-everything --state open --label ci:failed` returned `[]` (no currently-open PR carries the stale label — #2685/#2653 both already merged/cleared by hand before this session), so the "zero open PRs with `ci:failed` + green check" probe is satisfied vacuously; the fixture case is what proves the mechanism.
+
+**Fix (part 1)**: `we:scripts/lib/ai-pr-authorship.mjs`'s `isMechanicalMergeCommit` now also recognizes the `Merge pull request #NNN from owner/branch` headline (GitHub's own merge-commit boilerplate) as mechanical regardless of body — it merges two trees and adds no authored content of its own, exactly like the empty-body local-merge shape it already excluded. Not a "widen who the reconcile covers" change and not a human-authored-PR policy question: the PR in question genuinely is AI work, misclassified by an authorship heuristic gap.
+
+**Residual (found re-testing against #2685's REAL live commit list after part 1)**: `isAiGeneratedPr` still returned `false` for #2685. Its inherited history also carries the drain's OWN direct-to-main bookkeeping commits (`drain: rebase lane/xgqz204-… onto …, drop transient we:.lane-manifest.json`, `drain: JIT-number … at land`, `drain: resolve #NNN on land`) — genuinely NOT `Merge …` commits (so `isMechanicalMergeCommit` correctly leaves them alone: a script rewriting a real file is not content-free the way a merge commit is), authored solely by the drain's own git identity, with no Claude/human trailer. **This is not a new bug — it is an already-RATIFIED, named gap**: `classifyPr`'s own #2196/#2326 comment names it verbatim ("the drain's OWN rebase … commit stranded it"), and its ratified remedy was never to loosen `isAiGeneratedPr` (deliberately kept strict) but to certify via `certifyLabel || aiGenerated || humanCleared` instead (`ready-to-merge` is exclusively producer-applied, #2196; `review:accepted` is a human's own certification). The #2421 TOTAL ci-lifecycle reconcile had no such OR-path at all — a straight asymmetry with `classifyPr`.
+
+**Fix (part 2)**: the TOTAL branch now certifies via the SAME condition `classifyPr` already uses (`isAiGeneratedPr(withCommits) || hasLabel(withCommits, READY_TO_MERGE_LABEL) || hasLabel(withCommits, REVIEW_LABELS.accepted)`), reusing #2196/#2326's ratified certification rather than inventing a second one or re-opening the deliberately-strict `isAiGeneratedPr` definition. Re-verified against #2685's real live data (commits + labels): `isAiGeneratedPr` is `false`, but it carries `ready-to-merge` (and `review:accepted`), so it now certifies and its ci-lifecycle labels reconcile correctly.
