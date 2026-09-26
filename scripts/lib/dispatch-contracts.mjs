@@ -14,6 +14,9 @@ import { scrubPublish } from './secret-scrub.mjs';
 import { thresholdsForRisk, neverSpotCheck, spotCheckSample } from './dispatch-thresholds.mjs';
 import { CODEX_MODEL } from './codex-model-routing.mjs';
 import { taskTypeFor } from './dispatch-task-type.mjs';
+// #4034 — the critical-work verdict and the critical-miss veto list the provider cascade's CRITICAL_WORK_GATE reads.
+// A safe import cycle: critical-work.mjs reads deriveRisk/deriveComplexity from here, never at module top level.
+import { criticalWorkVerdict, criticalMissesFor } from './critical-work.mjs';
 
 /** Closed task vocabulary, sourced from the router's proven envelopes. */
 // @test-only-export-ok: contract for the G2 dispatcher wiring (no runtime caller in slice G1)
@@ -468,7 +471,11 @@ export function routeDispatch(profile, options = {}) {
       ownAudit.push(audit(kind === 'build' ? 'build-supervisor-tier' : 'story-kind-tier', out.tier, `kind=${kind}, risk=${profile.risk}, statute=${profile.filesTouched.some(isStatuteTierPath)}`, high ? 'Story rung is raise-only for high-risk or statute work.' : tableTier.reason));
     } else {
       const task = { taskType: profile.taskType };
-      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
+      // #4034 — critical is derived from the existing proxies over the task's own profile; the miss vetoes come from
+      // the RAW scorecards, because `routingRecords` projects away the scope evidence a miss row may carry.
+      const criticalWork = criticalWorkVerdict({ taskType: profile.taskType, filesTouched: profile.filesTouched, estimatedLoc: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, risk: profile.risk });
+      const criticalMisses = criticalMissesFor(scorecards, profile.taskType);
+      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
       const selected = selectProvider(task, context);
       routerAudit.push(...selected.auditTrail);
       out.provider = selected.recommendation;
@@ -1092,9 +1099,10 @@ function executedVendorFor(override) {
  *     {@link DEFAULT_PROMOTIONS} and is validated by {@link validatePromotions}; UNLIKE `sizePolicy`, an
  *     invalid/missing candidate fails CLOSED to no promotions (every computed `spot-check` gates to `full`)
  *     rather than refusing the route.
- *   - `criticalWorkGate` (#3906) — which kinds may not route to a non-Claude worker. Omitted means
- *     `provider-routing.mjs#CRITICAL_WORK_GATE` (build, fix and ci-heal until #4034); a caller passes its own
- *     only to state a different gate explicitly (a test of the post-#4034 cascade).
+ *   - `criticalWorkGate` (#3906/#4034) — which kinds are gated and which taskTypes are opened for non-critical
+ *     work. Omitted means `provider-routing.mjs#CRITICAL_WORK_GATE` (build, fix and ci-heal gated; every
+ *     `openForNonCritical` row off); a caller passes its own only to state a different gate explicitly (a test,
+ *     or the read-only dry-run of an opened row).
  *   - `dispatch.measuredDiffLoc` (#3844) — the changed-line count of the PR being repaired, read at the io edge
  *     (e.g. `reconcile-fix-dispatch.mjs`'s own `gh` read) and handed in as data; consulted only for a
  *     {@link REPAIR_KINDS} dispatch, and only when `card-size` (the dispatch's own `size`/`estimatedLoc`)
