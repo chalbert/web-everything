@@ -3,10 +3,11 @@ bornAs: x71zmu7
 kind: story
 size: 5
 parent: "3906"
-status: active
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/dispatch-lane.mjs", "we:scripts/operations/dispatch-provider-registry.mjs", "we:scripts/operations/dispatch-providers/build.mjs", "we:scripts/operations/dispatch-providers/fix.mjs", "we:scripts/operations/dispatch-providers/ci-heal.mjs", "we:scripts/operations/dispatch-providers/prepare.mjs", "we:scripts/operations/dispatch-providers/prepare-decision.mjs", "we:scripts/operations/delivery-agent-marker.mjs", "we:scripts/operations/effect-executor.mjs", "we:scripts/operations/dispatch-eligibility.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-supervision-promotions.json", "we:scripts/lib/__tests__/daemon-self-sync.test.mjs"]
 dateOpened: "2026-09-26"
 dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
