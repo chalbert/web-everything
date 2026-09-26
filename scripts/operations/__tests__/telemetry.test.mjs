@@ -557,7 +557,12 @@ describe('the file store', () => {
   });
 
   it('an unwritable directory never throws', () => {
-    const store = createFileTelemetryStore({ dir: '/proc/definitely/not/writable/anywhere' });
+    // Unwritable because its parent is a regular FILE (ENOTDIR on every platform). NOT a `/proc/...` path: on
+    // Linux, `mkdirSync(<under /proc>, { recursive: true })` spins forever (procfs answers ENOENT, the parent
+    // exists, Node's mkdirp retries) — which hung CI `test-shard (1)` for hours on PR #2636, three runs in a row.
+    const parentFile = join(mkdtempSync(join(tmpdir(), 'tel-unwritable-')), 'a-file');
+    writeFileSync(parentFile, '');
+    const store = createFileTelemetryStore({ dir: join(parentFile, 'not', 'writable') });
     expect(store.append('{"v":1}\n', '2026-09-12').ok).toBe(false);
     expect(store.days()).toEqual([]);
   });
