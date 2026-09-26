@@ -3,9 +3,10 @@ bornAs: xkyw1x4
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/heavy-admission.mjs", "we:scripts/readiness/heavy-queue-projection.mjs", "we:scripts/conveyor/tick-core.mjs", "we:scripts/operations/heavy-queue.mjs", "we:scripts/operations/heavy-queue-io.mjs", "we:scripts/conveyor/reconcile-fix-dispatch.mjs", "we:scripts/operations/ci-heal-pr-dispatch.mjs", "we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs", "we:scripts/verify-lane.mjs", "we:scripts/readiness/__tests__", "we:scripts/conveyor/__tests__", "we:scripts/operations/__tests__", "we:scripts/conveyor/soak", "we:skills-src/queue/SKILL.md"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
