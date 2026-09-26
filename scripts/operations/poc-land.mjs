@@ -52,13 +52,16 @@
  * Everything above the "IO SHELL" banner is pure and unit-tested in `__tests__/poc-land.test.mjs`.
  */
 
-import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { gitRun } from '../lib/git-run.mjs';
 import { readRegistry, findPocBranch, normalizeBranchRef } from '../lib/poc-branches.mjs';
 import { withPocLandLock, localRepoSlug } from '../readiness/drain-lock.mjs';
 import { createChecksRunner } from './verify-io.mjs';
+import { LEASE_FILENAME, renewedLease } from '../lib/lane-lease.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The bound the ruling names: three attempts, then STOP and surface. Not a forever loop, and never a
@@ -199,6 +202,35 @@ function gitIn(cwd, run) {
   };
 }
 
+/**
+ * The default lease renewal (#3383): rewrite this lane's `.lane-lease` with `renewedAt = now`
+ * (`we:scripts/lib/lane-lease.mjs#renewedLease`), so a landing whose gate waits in the heavy-command queue for
+ * hours is not reclaimed and reset under it. A checkout that is not a lane (no lease file) is left alone.
+ * Best-effort: a renewal failure never fails the landing. Returns whether a lease was renewed. `fs` is injected
+ * only so a test can kill the write midway.
+ */
+export function defaultRenewLease({ cwd, run = gitRun, now = () => new Date(), fs = { writeFileSync, renameSync, rmSync } } = {}) {
+  try {
+    const gd = run('git', ['rev-parse', '--absolute-git-dir'], { cwd });
+    if (gd.status !== 0) return false;
+    const file = join(String(gd.stdout).trim(), LEASE_FILENAME);
+    if (!existsSync(file)) return false;
+    const next = renewedLease(JSON.parse(readFileSync(file, 'utf8')), now().toISOString());
+    if (!next) return false;
+    // Atomic temp+rename, the same shape as `we:scripts/lane-pool.mjs#writeLeaseAtomic`: a plain overwrite killed
+    // between its truncate and its write leaves a torn lease, which every reader treats as NO lease — making this
+    // lane reclaimable mid-landing, the very incident this renewal exists to prevent.
+    const tmp = `${file}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+    try {
+      fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' });
+      fs.renameSync(tmp, file);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
+    return true;
+  } catch { return false; }
+}
+
 /** The default gate: the item's own tests/build via the SINGLE home, reached through the runner
  *  `we:scripts/operations/verify.mjs` is itself injected with. Returns `{ok, detail}`. */
 export function defaultVerify({ cwd, gate = '' } = {}) {
@@ -247,6 +279,7 @@ export function landOnPocBranch({
   run = gitRun,
   verify = defaultVerify,
   withLock = withPocLandLock,
+  renewLease = defaultRenewLease,
   repoKey,
 } = {}) {
   const name = normalizeBranchRef(branch);
@@ -275,8 +308,11 @@ export function landOnPocBranch({
 
   // 1. THE ONLY GATE, run once outside the lock. No judge panel, no converge pass, no escalation label — the
   //    ruling removed all of those for a landing INSIDE a POC branch. This is what is left.
+  // The gate can wait hours in the heavy-command queue: renew the lane's lease before it and after it (#3383).
   if (!skipVerify) {
+    renewLease({ cwd });
     const v = verify({ cwd, gate });
+    renewLease({ cwd });
     if (!v?.ok) return { status: 'verify-failed', branch: name, attempts: 0, verified: false, rebased: false, error: v?.detail ?? 'verify reported no verdict' };
   }
 
@@ -316,7 +352,9 @@ export function landOnPocBranch({
       }
       rebased = true;
       if (!skipVerify) {
+        renewLease({ cwd });
         const v = verify({ cwd, gate });
+        renewLease({ cwd });
         if (!v?.ok) return { status: 'verify-failed', attempts: attempt, error: `after rebasing onto the fresh tip of ${name}: ${v?.detail ?? 'verify reported no verdict'}` };
       }
       // Fall through to the next attempt, which fast-forwards from the tip we just rebased onto.

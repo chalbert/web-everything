@@ -36,6 +36,8 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveCeilingMs } from '../readiness/heavy-admission.mjs';
+
 /** The single home. Resolved from THIS file, never from cwd — the operation may verify another checkout, and
  *  the script that runs must be this repo's, not the verified tree's. */
 export const VERIFY_LANE_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'verify-lane.mjs');
@@ -46,6 +48,20 @@ export const VERIFY_LANE_EXITS = Object.freeze({ GREEN: 0, RED: 2, USAGE: 3 });
 /** How long the suites may run before the spawn is abandoned. The home runs them in the foreground on purpose
  *  (#2833); this bound only stops a wedged child from wedging the operation, and a kill lands as `unrun`. */
 export const VERIFY_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Slack on top of the two phases, for the home's own git reads and marker writes. */
+export const VERIFY_SPAWN_SLACK_MS = 5 * 60 * 1000;
+
+/**
+ * The spawn's whole bound: the heavy-admission queue wait (the home waits up to the admission ceiling before it
+ * fails open) PLUS the suites' own {@link VERIFY_TIMEOUT_MS} plus slack. PURE. #3383, found live 2026-09-23: with a
+ * 30-minute bound covering BOTH, a gate queued behind 7 or more heavy commands was killed before its suites ever
+ * started and came back `unrun`, so `poc-land.mjs` could not land anything while the host was busy.
+ * @param {object} [env]
+ */
+export function verifySpawnTimeoutMs(env = process.env) {
+  return resolveCeilingMs(env) + VERIFY_TIMEOUT_MS + VERIFY_SPAWN_SLACK_MS;
+}
 
 /** The argv for one invocation. PURE, and exported so a test can assert the exact command with no subprocess —
  *  the same discipline `we:scripts/collect-review-requests.mjs` applies to its git argv. */
@@ -114,13 +130,13 @@ export function classifyVerifyResult({ status, signal, stdout = '', stderr = '',
  * The runner the declaration is injected with. ONE spawn of the single home; `spawn` is injected so every
  * branch above is reachable with no suites, no git and no clock.
  */
-export function createChecksRunner({ spawn = spawnSync } = {}) {
+export function createChecksRunner({ spawn = spawnSync, env = process.env } = {}) {
   return ({ cwd, mode, gate = '' }) => {
     const argv = verifyArgv({ checkout: cwd, mode, gate });
     const startedAt = Date.now();
     let r;
     try {
-      r = spawn(process.execPath, argv, { encoding: 'utf8', timeout: VERIFY_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
+      r = spawn(process.execPath, argv, { encoding: 'utf8', timeout: verifySpawnTimeoutMs(env), maxBuffer: 64 * 1024 * 1024 });
     } catch (e) {
       r = { error: e };
     }

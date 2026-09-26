@@ -8,6 +8,7 @@ import {
   DEFAULT_LEASE_TTL_MINUTES,
   WORKFLOW_LANE_PURPOSE,
   isLeaseStale,
+  renewedLease,
   isLaneAcquirable,
   leaseDisqualifiesAcquire,
   chooseFreeLane,
@@ -607,5 +608,27 @@ describe('ownLaneNumber', () => {
 
   it('tolerates a trailing separator on the pool path', () => {
     expect(ownLaneNumber('/w/.lanes/repoA/lane-3', '/w/.lanes/repoA/')).toBe(3);
+  });
+});
+
+describe('renewedLease — a still-working holder keeps its lane (#3383)', () => {
+  const T = Date.parse('2026-09-24T08:00:00.000Z');
+  const lease = { session: 's', acquiredAt: new Date(T).toISOString(), ttlMinutes: 240 };
+  it('the TTL runs from renewedAt once set', () => {
+    const at5h = T + 5 * 3_600_000;
+    expect(isLeaseStale(lease, at5h)).toBe(true);
+    const renewed = renewedLease(lease, new Date(T + 3 * 3_600_000).toISOString());
+    expect(renewed).toEqual({ ...lease, renewedAt: '2026-09-24T11:00:00.000Z' });
+    expect(isLeaseStale(renewed, at5h)).toBe(false);
+    expect(isLeaseStale(renewed, T + 7.5 * 3_600_000)).toBe(true);
+  });
+  it('a renewedAt older than acquiredAt, or unparseable, never shortens the lease', () => {
+    expect(isLeaseStale({ ...lease, renewedAt: '2026-09-23T00:00:00.000Z' }, T + 3 * 3_600_000)).toBe(false);
+    expect(isLeaseStale({ ...lease, renewedAt: 'garbage' }, T + 3 * 3_600_000)).toBe(false);
+  });
+  it('a reserved lease is returned unchanged; a non-lease is null', () => {
+    const reserved = { ...lease, reserved: true };
+    expect(renewedLease(reserved, 'x')).toBe(reserved);
+    expect(renewedLease(null, 'x')).toBeNull();
   });
 });
