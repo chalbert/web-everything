@@ -135,4 +135,29 @@ describe('createWeScanRunner — the fallback contract (#3417)', () => {
     const run = createWeScanRunner(bin);
     expect(() => run('stdout-flush', ['--root=.'], { referenceFiles: [ref] })).not.toThrow();
   });
+
+  // ── #4168 — `opts.scoped` bypasses the binary even when it exists/is fresh/would succeed ────────────────
+  // The binary has no file-scoped mode; a caller running `--local --files=…` says so via `scoped: true` and
+  // gets `null` straight away, so its OWN file-scoped JS fallback runs instead of the (always whole-corpus)
+  // binary silently re-doing the full walk the caller specifically scoped down to avoid.
+  describe('opts.scoped (#4168)', () => {
+    it('returns null immediately when scoped, even though the binary exists and would succeed', () => {
+      const bin = fixtureScript('echo \'[{"file":"a.mjs"}]\'');
+      const run = createWeScanRunner(bin);
+      expect(run('citation-check', ['--root=.'], { scoped: true })).toBeNull();
+    });
+
+    it('scoped:false (or omitted) behaves exactly as before — the binary still runs', () => {
+      const bin = fixtureScript('echo \'[{"file":"a.mjs"}]\'');
+      const run = createWeScanRunner(bin);
+      expect(run('citation-check', ['--root=.'], { scoped: false })).toEqual([{ file: 'a.mjs' }]);
+      expect(run('citation-check', ['--root=.'])).toEqual([{ file: 'a.mjs' }]);
+    });
+
+    it('never throws when scoped', () => {
+      const bin = fixtureScript('echo \'[{"file":"a.mjs"}]\'');
+      const run = createWeScanRunner(bin);
+      expect(() => run('secret-scrub', ['--root=.'], { scoped: true })).not.toThrow();
+    });
+  });
 });
