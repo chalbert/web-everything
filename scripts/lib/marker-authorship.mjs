@@ -33,16 +33,24 @@
  * however sympathetic-looking the text: {@link isTrustedMarkerAuthor} is the single gate every counter above now
  * runs its comments through before matching a marker line.
  *
+ * #4140 UPDATE: every coverage-deciding marker reader in `we:scripts/lib/review-escalation.mjs` —
+ * `#parseReviewedSha`, `#parseReviewedDiff`, `#parseReviewedContribution` and `#parseLatestHumanClearedSha` —
+ * now runs every comment through {@link isTrustedMarkerAuthor} before matching its marker, exactly mirroring
+ * this file's own pattern. All four are needed together: `acceptanceCoversHead` ORs THREE independent coverage
+ * branches (SHA, diff fingerprint, contribution fingerprint), and `review-set-label.mjs`'s restamp path
+ * (`decideRestampHumanClearance`) reaches all of them plus `cleared-human` — gating only some left the others
+ * as a forge path (review round 1 on PR #2716). That restamp path also names the carried actor from TRUSTED
+ * comments only. `parseOperatorClearance` itself stays ungated, and ONE caller still reads it over every
+ * comment: `we:scripts/merge-ai-prs.mjs` feeds it to `decideReviewGate`, where (since #3184) a clearance
+ * record also withholds re-applying `review:human` on a pass whose live diff read failed. That never lands
+ * anything — the gate still parks — but a forged `cleared-human` comment can delay the hold's re-imposition.
+ * Open follow-up, outside this item's file scope: filter that read through {@link isTrustedMarkerAuthor} too.
+ *
  * NOT IN SCOPE HERE (documented residuals, unchanged by this file, each with its own existing acknowledgment):
- *   - `we:scripts/lib/review-escalation.mjs#parseReviewedSha` / `#parseReviewedDiff` read the LATEST matching
- *     marker from ANY author — that file's own docblock already states this in as many words ("RESIDUAL (be
- *     honest — this is a trust signal) ... Not defended here") as a conscious, previously-ratified tradeoff, not
- *     an oversight this review surfaced. Narrowing it needs review-set-label.mjs's own accept/re-stamp contract
- *     touched, which is a separate, more invasive change than widening a read-only count function.
  *   - `we:scripts/conveyor/stuck-pr-dispatch-marker.mjs` gates an inspection DISPATCH (diagnosis only — no
  *     label/code/branch change), not a round cap or a terminal refusal; forging it wastes at most one inspection
  *     agent, not a fixer's remaining rounds or a permanent stand-down.
- *   Both are flagged in this item's PR body as follow-up candidates rather than folded in silently.
+ *   Flagged in this item's PR body as a follow-up candidate rather than folded in silently.
  *
  * PURE. No fs, no clock, no network. Reads `process.env` once per call (env overrides), same discipline
  * `we:scripts/conveyor/stand-down.mjs#AUTOMATION_LOGINS` already uses.
