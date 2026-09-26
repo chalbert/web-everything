@@ -3,9 +3,10 @@ bornAs: xznd5za
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/progress-board.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/__tests__/progress-board.test.mjs", "we:scripts/conveyor/__tests__/reconcile-core.test.mjs"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
