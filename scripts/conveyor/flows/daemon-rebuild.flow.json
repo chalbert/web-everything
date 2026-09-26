@@ -1,0 +1,744 @@
+{
+  "id": "daemon-rebuild",
+  "title": "Daemon clone rebuild (Modules A–E, #4041/#4044)",
+  "summary": "A resident daemon (review-daemon, reconcile-fix-dispatch-daemon) runs from its own dedicated clone. Every tick, before doing its real dispatch work, it rebuilds that clone FRESH from origin/main plus its registered overlay list, in the object database, under the clone's own reader/writer lock, gated by a live smoke that runs while still holding the write lock. Pass -> reset --hard onto the new tree, then a restart-throttle decides whether to actually restart the process (launchd relaunches it) or keep ticking on the already-updated-on-disk tree. Fail -> roll back to the pre-move HEAD and the SAME tick continues on the old, still-in-memory code. A clone the rebuild cannot move stays behind main; a dispatch chokepoint elsewhere (main-staleness.mjs#assertMainNotStale) then refuses every dispatch from it as STALE. An operator (or a one-shot CLI) can also register an overlay ref by hand at any time, independent of the tick loop.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/lib/daemon-rebuild.mjs",
+    "scripts/lib/daemon-self-sync.mjs",
+    "scripts/lib/daemon-overlays.mjs",
+    "scripts/daemon-overlay.mjs",
+    "scripts/lib/daemon-load-overlay.mjs",
+    "scripts/lib/daemon-live-smoke.mjs",
+    "scripts/lib/daemon-clone-lock.mjs",
+    "scripts/lib/main-staleness.mjs",
+    "scripts/conveyor/main-ref-sync.mjs",
+    "scripts/conveyor/resolve-runner-checkout.mjs",
+    "scripts/lib/lane-pool-paths.mjs",
+    "skills-src/conveyor/review-daemon.mjs",
+    "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs",
+    "launchd:com.we.review-daemon.plist",
+    "launchd:com.we.fix-dispatch-daemon.plist"
+  ],
+  "entry": {
+    "state": "tick-start",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.review-daemon.plist:WorkingDirectory",
+        "note": "launchd sets WorkingDirectory=/Users/nicolasgilbert/workspace/wev-review-daemon; the fix-dispatch-daemon plist carries the identical WorkingDirectory (both daemons share ONE clone)."
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables.PATH",
+        "note": "PATH includes /usr/bin (git present there on this host)."
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables.PATH",
+        "note": "PATH includes /opt/homebrew/bin (gh present there on this host). Neither plist sets a GH_TOKEN — auth instead comes from the GitHub App env vars below, refreshed by withGithubAppAuth."
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.review-daemon.plist:ProgramArguments"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables",
+        "note": "WE_GITHUB_APP_ID/WE_GITHUB_APP_INSTALLATION_ID/WE_GITHUB_APP_PRIVATE_KEY_PATH are set by launchd; skills-src/conveyor/review-daemon.mjs:101 wraps the daemon's effects in withGithubAppAuth to keep the derived GH_TOKEN fresh across ticks."
+      },
+      {
+        "kind": "state-root",
+        "name": "<daemon-state-dir>",
+        "cite": "scripts/lib/daemon-rebuild.mjs:557-559",
+        "note": "WE_DAEMON_STATE_DIR override, else ~/.claude/daemon-self-sync-state — confirmed present on this host with real <cloneKey>.rebuild.json/.alerts.jsonl files for two clone keys."
+      },
+      {
+        "kind": "writable",
+        "name": "<state-root>",
+        "cite": "scripts/lib/daemon-rebuild.mjs:602-609"
+      },
+      {
+        "kind": "env",
+        "name": "WE_DAEMON_MANAGED_CLONE",
+        "cite": "scripts/lib/daemon-self-sync.mjs:473",
+        "note": "Set to '1' on process.env at withSelfSync construction, before the first tick — every child this daemon spawns inherits it."
+      },
+      {
+        "kind": "env",
+        "name": "GIT_OPTIONAL_LOCKS",
+        "cite": "scripts/lib/daemon-self-sync.mjs:474"
+      },
+      {
+        "kind": "lane",
+        "name": "pool root = <workspace>/.lanes",
+        "cite": "scripts/lib/lane-pool-paths.mjs:65",
+        "note": "no LANE_POOL_ROOT in the daemon plists; the pool root is derived from the checkout path (workspaceFor(checkoutRoot)), which is right only when cwd is the real clone under ~/workspace"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "tick-start",
+      "label": "Daemon tick begins (withSelfSync wrapper)",
+      "terminal": false,
+      "owner": "review-daemon | reconcile-fix-dispatch-daemon (whichever process ticks; identical wiring)",
+      "ownerCite": "scripts/lib/daemon-self-sync.mjs:511; skills-src/conveyor/review-daemon.mjs:539-542; skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:678-679",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Tick cadence is 120s (DEFAULT_INTERVAL_MS) for both daemons; runDaemonLoop's own try/catch (review-daemon.mjs:129-134) means ANY exception anywhere in this whole flow that reaches back up to tickOnce is caught, logged via onTickError (stderr only, into the plist's StandardErrorPath log file — no notify/label/card), and the loop just sleeps to the next tick. That is the ultimate 'escalation' for every otherwise-unhandled failure below."
+    },
+    {
+      "id": "acquire-write-lock",
+      "label": "rebuildClone takes the clone's write lock",
+      "terminal": false,
+      "owner": "rebuildClone (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:683-716",
+      "wait": {
+        "for": "the writer key (refused outright if a live foreign writer holds it) + every already-live reader on this clone to drain or lapse",
+        "timeout": "60000ms default (WE_DAEMON_REBUILD_LOCK_WAIT_MS), overridable",
+        "onTimeout": "tick-proceeds-unrebuilt",
+        "cite": "scripts/lib/daemon-rebuild.mjs:688-716; scripts/lib/daemon-clone-lock.mjs:232-283"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "#4044: this wait used to be silently up to daemon-clone-lock.mjs's own 600s default (WE_DAEMON_CLONE_LOCK_WAIT_MS) with NO log line at all; rebuildClone now supplies its own shorter 60s bound plus an onBlocked callback that logs once ('waiting up to Ns for live reader(s) ... #4044') before it starts waiting (daemon-rebuild.mjs:696-703). A concurrent-mover (another writer already holds the key) is refused immediately, no wait at all (daemon-clone-lock.mjs:250-253)."
+    },
+    {
+      "id": "tick-proceeds-unrebuilt",
+      "label": "Rebuild skipped this tick — tick runs on the current (unmoved) tree",
+      "terminal": false,
+      "owner": "review-daemon | reconcile-fix-dispatch-daemon",
+      "ownerCite": "scripts/lib/daemon-self-sync.mjs:546-556",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Unlike every other 'not moved' outcome below, this one does NOT wait for the next 120s tick: the SAME tick immediately falls through to acquiring the read lock and running the real dispatch body on whatever tree is currently on disk. That dispatch body is a different flow's territory (review dispatch / fix dispatch), handed off below."
+    },
+    {
+      "id": "rebuild-safety-recovery",
+      "label": "Step 0-1: crash recovery + local-tree safety check",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:727-848",
+      "wait": null,
+      "retries": {
+        "what": "a stale .git/index.lock is auto-recovered once it is older than a threshold",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/lib/daemon-rebuild.mjs:761-771"
+      },
+      "escalation": null,
+      "notes": "index-lock recovery threshold defaults to 120000ms (WE_DAEMON_INDEX_LOCK_STALE_MS); interrupted-rebuild recovery threshold defaults to 30 min (WE_DAEMON_REBUILD_STALE_MS). A dirty tree caused ONLY by a known tracked daemon-state file (scripts/conveyor/run-scorecards.json) is migrated out of the tree automatically (migrateDaemonStateFiles, lines 828-833) before the safety check is re-run; any other dirt still refuses.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "stuck-needs-hand-fix",
+      "label": "Clone stuck — needs a hand git reset --hard / manual file fix",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:14-20 (file header: 'git clean is NEVER called... wiping it is not this module's business'); :773-815 (rebuild-interrupted-unrecoverable, quarantine)",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "FOLDS FOUR distinct no-automatic-recovery conditions the code itself treats identically (every tick just re-hits the same check and re-refuses): (a) rebuild-interrupted-unrecoverable — a crashed rebuild whose on-disk HEAD matches neither its recorded target nor a clean prevHead (daemon-rebuild.mjs:792-796); (b) quarantine — a failed post-smoke rollback or reset itself failed (:799-815, :944, :986, :1024-1028); (c) a persistently unsafe tree (dirty/local-commits/merge-in-progress/status-failed) that migrateDaemonStateFiles could not clear (:834-837); (d) overlay-state-corrupt, a hand-edited or half-written overlay list file (:854-857, scripts/lib/daemon-overlays.mjs:18-24). NONE of these four has an owner or a timeout: nothing here ever alerts an operator beyond the alerts.jsonl line + a stderr log line (daemon-rebuild.mjs's own `alert()`, lines 734-742) — this IS the silent-failure gap. The module's own docs say a human `git reset --hard`/file-fix is required; nothing pages anyone to do it.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    },
+    {
+      "id": "fetch-and-plan-overlays",
+      "label": "Step 2-4: fetch origin/main + overlays, planRebuild, apply list edits, short-circuit if nothing to do",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild + planRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:850-912",
+      "wait": null,
+      "retries": {
+        "what": "a batched fetch failure retries main alone, then each overlay ref individually",
+        "cap": 1,
+        "onCap": "tick-start",
+        "cite": "scripts/lib/daemon-rebuild.mjs:524-550"
+      },
+      "escalation": null,
+      "notes": "planRebuild (lines 173-294) walks the overlay list in order, auto-removing anything main/PR state already made moot and conflict-dropping anything that doesn't merge cleanly THIS pass (never destructively, decisions are only applied back to the list afterward). still-rejected (line 904-912) gets a growing backoff ONLY when every prior failure was external-only (gh/network); a genuine code-shaped rejection has NO backoff/cap at all — it stays rejected until the inputsKey itself changes (main or the overlay moves). See the `smoke-code-reject-rollback` state for the same uncapped-retry gap stated precisely.",
+      "ack": {}
+    },
+    {
+      "id": "held-pinned-refusal",
+      "label": "A pinned overlay conflicts with main (or is gone) — whole rebuild refused",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:140-155,192-201",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "GAP distinct from clone-held-stale: a pinned-overlay refusal returns `finish({moved:false, reason: plan.reason, ...})` WITHOUT a `plan` field (daemon-rebuild.mjs:870-874), so it never satisfies finish()'s own condition for the loud 'clone-held-stale' alert (`result.plan?.ok && !result.plan.upToDate`, lines 743-753) that every OTHER stuck-and-behind outcome gets. The only signal is the original alert(plan.reason, plan.detail) call carrying PINNED_OVERLAY_MESSAGE/PINNED_OVERLAY_GONE_MESSAGE (lines 136-138, 872-874) — a human must already know to grep the alerts log for THIS specific reason string rather than the more discoverable clone-held-stale one. This is arguably the MOST likely to need a human (rebase the pinned branch, or unpin/re-register it) yet gets the WEAKEST signal of the stuck states.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    },
+    {
+      "id": "reset-move-tree",
+      "label": "Step 5: git reset --hard onto the planned build (the ONLY tree-moving call in this module)",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:928-951",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "smokeOnly path (a prior rebuild crashed after its own reset landed but before its smoke ran) skips this reset entirely — the tree is already at the target — and goes straight to live smoke, rolling back to the ORIGINAL pre-interrupt head (not just prevHead) on a later failure (lines 890, 930).",
+      "ack": {}
+    },
+    {
+      "id": "live-smoke-under-lock",
+      "label": "Step 6: live smoke runs — STILL holding the clone's write lock",
+      "terminal": false,
+      "owner": "runLiveSmokeWithRetry (daemon-live-smoke.mjs), invoked by rebuildClone",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:953-963; scripts/lib/daemon-live-smoke.mjs:573-612,703-721",
+      "wait": null,
+      "retries": {
+        "what": "a 'transient' verdict (env/infra noise only — gh 401s, rate limits, a momentarily-exhausted lane pool) retries the WHOLE smoke",
+        "cap": 2,
+        "onCap": "smoke-transient-rollback",
+        "cite": "scripts/lib/daemon-live-smoke.mjs:679-721 (SMOKE_TRANSIENT_RETRIES_ENV default 2, 15s backoff via SMOKE_RETRY_BACKOFF_MS_ENV)"
+      },
+      "escalation": null,
+      "notes": "THE CENTRAL FINDING #2731 exists to fix, confirmed on MAIN as-is: this whole smoke (lane-pool acquire/release with up to a 180s internal wait, 3x gh calls, a reconcile-pass dry-run per constellation repo, a dispatch-dry-run) runs with `cwd: root` == the SAME clone every other daemon on this host reads from, INSIDE the SAME withWriteLock hold that rebuildClone took to do its `reset --hard` (daemon-rebuild.mjs:706-708,935-963) — every daemon sharing this clone is refused 'writer-active' at its own acquireRead for the smoke's ENTIRE duration (measured live at up to 209s, daemon-rebuild.mjs:528-536's own comment). A slow smoke (>=60000ms, SLOW_SMOKE_ALERT_MS) is alerted (daemon-rebuild.mjs:656-657,966-971) but the write lock is never released early. THE CANDIDATE ENV ON MAIN, AS-IS: cwd is literally `root` (no isolation — the reset in the prior state already moved `root` onto the candidate sha, so there is no separate 'candidate' tree at all on main today) and `env` is whatever was passed into rebuildClone (defaults to `process.env` — the SAME ticking daemon's launchd-provided env when a tick calls it, or an operator's own shell env when scripts/lib/daemon-load-overlay.mjs is run by hand). Because cwd IS root, path-derived env like the lane-pool root (scripts/lib/lane-pool-paths.mjs:40-44,65-68 `workspaceFor(checkoutRoot)`, since LANE_POOL_ROOT itself is never explicitly set anywhere here) resolves to the SAME pool root the live (post-adopt) daemon uses, purely because they share the same cwd. See this report's prose for why the OPEN #2731 branch's candidate-worktree redesign reintroduces exactly this class of mismatch.",
+      "ack": {}
+    },
+    {
+      "id": "smoke-pass-adopt",
+      "label": "Smoke verdict pass — build adopted",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:972-982",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "state.adopted + state.rejected=null written under the state-root before the write lock is released (writeRebuildState, line 978).",
+      "ack": {}
+    },
+    {
+      "id": "restart-gate",
+      "label": "decideRestart — did the move touch a file this daemon actually imports, and has it run long enough?",
+      "terminal": false,
+      "owner": "review-daemon | reconcile-fix-dispatch-daemon (via withSelfSync's restartGate)",
+      "ownerCite": "scripts/lib/daemon-self-sync.mjs:388-399,490-504,542-548",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "minIntervalMs defaults to 10 min (DEFAULT_RESTART_MIN_INTERVAL_MS, WE_DAEMON_RESTART_MIN_INTERVAL_MS). Deliberately NOT modeled as a retries cap: this is a THROTTLE, not a failure retry — it always eventually restarts once uptime clears the window (or never, if genuinely no imported file changed — 'no-imported-change' is a correct, permanent no-restart, not a stuck retry).",
+      "ack": {}
+    },
+    {
+      "id": "daemon-restarts-relaunch",
+      "label": "Daemon releases its lease and exits 0 — launchd relaunches it onto the new code",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "launchd (KeepAlive + RunAtLoad)",
+      "ownerCite": "launchd:com.we.review-daemon.plist:KeepAlive,RunAtLoad; scripts/lib/daemon-self-sync.mjs:544,581,598; skills-src/conveyor/review-daemon.mjs:534-538",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "This is a genuine process exit — the NEXT process instance re-enters this same flow at tick-start from scratch, with a fresh boot-time HEAD snapshot (daemon-self-sync.mjs:481-482)."
+    },
+    {
+      "id": "smoke-code-reject-rollback",
+      "label": "Smoke verdict 'code' — genuine failure, rolled back and cached as rejected",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:993-1013",
+      "wait": null,
+      "retries": {
+        "what": "re-smoke of the SAME inputsKey",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/lib/daemon-rebuild.mjs:904-912,996-1003"
+      },
+      "escalation": null,
+      "notes": "UNCAPPED, confirmed: state.rejected is written with no retryAt UNLESS every failed check is external-only (isExternalOnlyFailure, line 998); in that one sub-case a backoff is added (base 5min, doubling, capped at 60min via WE_DAEMON_REJECT_RETRY_MAX_MS, lines 660-664). A genuine code-shaped failure has NO backoff and NO cap at all — it stays rejected forever until the inputsKey changes (main moves, or the overlay list changes), by design (the file header calls this correct: 'the SAME broken build is never re-smoked every tick'), but nothing ever tells an operator it is sitting there rejected beyond the alerts log + the clone-held-stale line below.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "smoke-transient-rollback",
+      "label": "Smoke verdict 'transient' even after retries — rolled back, NOT cached (env noise, not code)",
+      "terminal": false,
+      "owner": "rebuildClone / doRebuild (daemon-rebuild.mjs)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:1015-1019",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Deliberately never poisons the reject-cache (file header rationale) — every subsequent tick retries the full smoke again from scratch, so this self-heals once the environment recovers, at the cost of repeating the whole (potentially 60s+) smoke, under the write lock, every 120s tick until it does.",
+      "ack": {}
+    },
+    {
+      "id": "clone-held-stale",
+      "label": "ALERT: rebuild is holding this clone off origin/main",
+      "terminal": false,
+      "owner": "none (log-only alert; no automated actor)",
+      "ownerCite": "scripts/lib/daemon-rebuild.mjs:743-755",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "alerts.jsonl line (kind:'clone-held-stale') + a stderr log line naming the reason and, if the clone was previously rejected under the same inputsKey, the recorded retryAt — no notify/label/card is filed automatically",
+        "cite": "scripts/lib/daemon-rebuild.mjs:743-755"
+      },
+      "notes": "Fires whenever a tick ends with plan.ok===true, the plan is NOT up-to-date, and the tree was not moved/adopted (still-rejected, untracked-collision, reset-failed-but-rolled-back, smoke-rejected, smoke-transient). Notably does NOT fire for held-pinned-refusal (see that state's own notes) or for the stuck-needs-hand-fix conditions (plan never even reaches this check there).",
+      "ack": {}
+    },
+    {
+      "id": "dispatch-refused-stale",
+      "label": "A review/fix dispatch on this clone refuses — STALE code from this checkout",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none (assertMainNotStale only refuses; nothing un-sticks the clone from here)",
+      "ownerCite": "scripts/lib/main-staleness.mjs:183-250",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "the thrown error text (STALE_MAIN_REFUSAL_MARKER = 'STALE code from this checkout') tells the operator this is a DAEMON-MANAGED clone and points at '~/.claude/daemon-self-sync-state/<cloneKey>.alerts.jsonl' for the clone-held-stale reason — but this is a thrown exception inside ONE per-repo dispatch call, caught by the SAME generic per-repo try/catch every other tick failure uses (skills-src/conveyor/review-daemon.mjs:195-238's per-repo isolation), so it reads in the log as an ordinary 'repo tick failed unexpectedly' line unless a human already knows to grep for the marker text",
+        "cite": "scripts/lib/main-staleness.mjs:140-147,236-248"
+      },
+      "notes": "A managed clone NEVER auto-fast-forwards here by design (main-staleness.mjs:189-198) — only this flow's own gated rebuild may move it. A commit range that touches ONLY non-code files (e.g. backlog/*.md) is explicitly NOT stale for dispatch (#4044 guard, lines 200-211) — this state is reached only when the behind range includes at least one real code file, or the diff itself could not be read (fails closed to 'stale')."
+    },
+    {
+      "id": "operator-registers-overlay",
+      "label": "Operator registers/removes an overlay ref out-of-band (daemon-overlay.mjs / daemon-load-overlay.mjs)",
+      "terminal": false,
+      "owner": "operator (or an automated caller running the same CLI)",
+      "ownerCite": "scripts/daemon-overlay.mjs:48-133; scripts/lib/daemon-load-overlay.mjs:143-168",
+      "wait": {
+        "for": "the overlay list's own mkdir mutex (daemon-overlays.mjs's withListLock), THEN (unless --no-lock) the clone's write lock",
+        "timeout": "list mutex: 20000ms fixed (LIST_LOCK_WAIT_MS); write lock: 600000ms default (WE_DAEMON_CLONE_LOCK_WAIT_MS) since scripts/daemon-overlay.mjs:84 calls withWriteLock with NO waitMs override at all, unlike rebuildClone's own 60s bound",
+        "onTimeout": "cli-overlay-op-failed",
+        "cite": "scripts/lib/daemon-overlays.mjs:139-169; scripts/daemon-overlay.mjs:79-121,135-141"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "GAP: this CLI's write-lock wait is 10x longer than rebuildClone's own tick-start wait (600s vs 60s) with no onBlocked logging at all (scripts/daemon-overlay.mjs:84 passes `{}`), so an operator running this by hand while a slow live-smoke is in progress can sit silently for up to 10 minutes before seeing 'write lock refused'. `daemon-load-overlay.mjs` additionally calls rebuildClone() right after registering (its OWN write-lock acquire, the 60s-bounded one) — so a real early-load goes through BOTH lock waits in sequence. Either wait's timeout lands on cli-overlay-op-failed below — a list-mutex timeout THROWS (uncaught inside addOverlay/removeOverlay, caught only by the CLI's top-level `.catch`); a write-lock timeout returns `{ok:false, reason}` and the CLI prints 'write lock refused' — both end in the same exit-1-and-stop outcome, neither retries automatically.",
+      "ack": {}
+    },
+    {
+      "id": "cli-overlay-op-failed",
+      "label": "The overlay CLI exits non-zero (lock wait exhausted) — no automatic retry",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none",
+      "ownerCite": "scripts/daemon-overlay.mjs:106-121,135-141; scripts/lib/daemon-overlays.mjs:157",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "The operator (or whatever automated caller ran this CLI) sees a non-zero exit and a one-line stderr message; nothing here schedules a follow-up attempt.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "tick-start",
+      "to": "acquire-write-lock",
+      "on": "withSelfSync's wrapped tickOnce calls rebuild()",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-self-sync.mjs:540"
+    },
+    {
+      "from": "tick-start",
+      "to": "operator-registers-overlay",
+      "on": "out-of-band: an operator (or automated caller) runs daemon-overlay.mjs add/remove or daemon-load-overlay.mjs at any time, independent of the tick loop",
+      "kind": "normal",
+      "cite": "scripts/daemon-overlay.mjs:48-133"
+    },
+    {
+      "from": "acquire-write-lock",
+      "to": "rebuild-safety-recovery",
+      "on": "write lock acquired",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-clone-lock.mjs:271; scripts/lib/daemon-rebuild.mjs:706-708"
+    },
+    {
+      "from": "acquire-write-lock",
+      "to": "tick-proceeds-unrebuilt",
+      "on": "waitMs elapsed with a live reader still holding a read slot ('tick-in-progress')",
+      "kind": "timeout",
+      "cite": "scripts/lib/daemon-rebuild.mjs:710-716"
+    },
+    {
+      "from": "tick-proceeds-unrebuilt",
+      "to": "@review",
+      "on": "falls through to acquireRead + the ordinary dispatch tick body (review-daemon uses @review; fix-dispatch-daemon uses @fix identically)",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-self-sync.mjs:550-586"
+    },
+    {
+      "from": "operator-registers-overlay",
+      "to": "tick-start",
+      "on": "daemon-overlay.mjs add/remove only mutates the list — no immediate rebuild; the NEXT regular tick's own acquire-write-lock picks the change up",
+      "kind": "normal",
+      "cite": "scripts/daemon-overlay.mjs:96-124"
+    },
+    {
+      "from": "operator-registers-overlay",
+      "to": "acquire-write-lock",
+      "on": "daemon-load-overlay.mjs (--ref) registers the overlay AND calls rebuildClone() immediately, the same gated path a tick uses",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-load-overlay.mjs:158-163"
+    },
+    {
+      "from": "rebuild-safety-recovery",
+      "to": "stuck-needs-hand-fix",
+      "on": "unrecoverable interrupted rebuild, quarantine, or an unsafe tree migrateDaemonStateFiles could not clear",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:773-797,799-815,825-837"
+    },
+    {
+      "from": "rebuild-safety-recovery",
+      "to": "fetch-and-plan-overlays",
+      "on": "on main, tree verified safe, prevHead resolved",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:817-848"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "stuck-needs-hand-fix",
+      "on": "overlay-state-corrupt and not a main-only rebuild",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:852-857"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "held-pinned-refusal",
+      "on": "planRebuild refuses: a pinned overlay conflicts with main this pass, or its ref/PR is gone without main having it",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:192-201,866-874"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "tick-start",
+      "on": "plan.upToDate — HEAD already equals the planned build, nothing to move",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:895-903"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "clone-held-stale",
+      "on": "still-rejected: same inputsKey already rejected and its retry backoff (if any) has not elapsed",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:904-912"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "clone-held-stale",
+      "on": "untracked-collision: a kept untracked file collides with real content in the target tree",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:914-926"
+    },
+    {
+      "from": "fetch-and-plan-overlays",
+      "to": "reset-move-tree",
+      "on": "plan.ok, not up-to-date, not (still-)rejected, no untracked collision",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:928-937"
+    },
+    {
+      "from": "reset-move-tree",
+      "to": "stuck-needs-hand-fix",
+      "on": "reset --hard failed AND the rollback to prevHead also failed",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:939-950"
+    },
+    {
+      "from": "reset-move-tree",
+      "to": "clone-held-stale",
+      "on": "reset --hard failed but the rollback to prevHead succeeded — tree unchanged, still behind",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:939-951"
+    },
+    {
+      "from": "reset-move-tree",
+      "to": "live-smoke-under-lock",
+      "on": "reset landed (or smokeOnly: HEAD already at the planned build)",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:953-963"
+    },
+    {
+      "from": "live-smoke-under-lock",
+      "to": "smoke-pass-adopt",
+      "on": "verdict === 'pass'",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:972-982"
+    },
+    {
+      "from": "live-smoke-under-lock",
+      "to": "smoke-code-reject-rollback",
+      "on": "verdict === 'code' (a genuinely non-transient check failure)",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:993-1013"
+    },
+    {
+      "from": "live-smoke-under-lock",
+      "to": "smoke-transient-rollback",
+      "on": "verdict === 'transient' even after the retry cap",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:1015-1019"
+    },
+    {
+      "from": "live-smoke-under-lock",
+      "to": "stuck-needs-hand-fix",
+      "on": "the post-smoke rollback itself failed, or the whole rebuild threw and ITS rollback also failed",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:984-990,1020-1034"
+    },
+    {
+      "from": "smoke-pass-adopt",
+      "to": "restart-gate",
+      "on": "state.adopted written",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:972-982"
+    },
+    {
+      "from": "restart-gate",
+      "to": "tick-start",
+      "on": "no imported file changed, or the min-restart-interval has not elapsed yet — keep ticking on the already-updated-on-disk tree",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-self-sync.mjs:388-399,542-548"
+    },
+    {
+      "from": "restart-gate",
+      "to": "daemon-restarts-relaunch",
+      "on": "an imported file changed and the min-interval has elapsed",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-self-sync.mjs:542-544"
+    },
+    {
+      "from": "smoke-code-reject-rollback",
+      "to": "tick-start",
+      "on": "tick continues on the rolled-back (old) code",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:1012-1013"
+    },
+    {
+      "from": "smoke-code-reject-rollback",
+      "to": "clone-held-stale",
+      "on": "plan.ok and not up-to-date and not moved",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:1007-1013,743-755"
+    },
+    {
+      "from": "smoke-transient-rollback",
+      "to": "tick-start",
+      "on": "tick continues on the rolled-back (old) code",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-rebuild.mjs:1016-1019"
+    },
+    {
+      "from": "smoke-transient-rollback",
+      "to": "clone-held-stale",
+      "on": "plan.ok and not up-to-date and not moved",
+      "kind": "failure",
+      "cite": "scripts/lib/daemon-rebuild.mjs:1015-1019,743-755"
+    },
+    {
+      "from": "clone-held-stale",
+      "to": "tick-start",
+      "on": "next scheduled tick (120s later) tries the rebuild again",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/review-daemon.mjs:114,138"
+    },
+    {
+      "from": "clone-held-stale",
+      "to": "dispatch-refused-stale",
+      "on": "a review/fix dispatch on this managed clone calls assertMainNotStale and it is still behind in code files",
+      "kind": "escalation",
+      "cite": "scripts/lib/main-staleness.mjs:189-249"
+    },
+    {
+      "from": "stuck-needs-hand-fix",
+      "to": "dispatch-refused-stale",
+      "on": "same real-world consequence while stuck: dispatch on this clone also refuses as stale",
+      "kind": "escalation",
+      "cite": "scripts/lib/main-staleness.mjs:189-249"
+    },
+    {
+      "from": "held-pinned-refusal",
+      "to": "dispatch-refused-stale",
+      "on": "same real-world consequence — reached WITHOUT ever passing through the clone-held-stale alert (see held-pinned-refusal's own notes)",
+      "kind": "escalation",
+      "cite": "scripts/lib/main-staleness.mjs:189-249"
+    },
+    {
+      "from": "operator-registers-overlay",
+      "to": "cli-overlay-op-failed",
+      "on": "the list mutex (20s) or the write lock (600s default) times out",
+      "kind": "timeout",
+      "cite": "scripts/lib/daemon-overlays.mjs:139-169; scripts/daemon-overlay.mjs:106-121"
+    }
+  ],
+  "steps": [
+    {
+      "id": "take-write-lock",
+      "state": "acquire-write-lock",
+      "actor": "rebuildClone (daemon-rebuild.mjs)",
+      "does": "withWriteLock(root, doRebuild, {waitMs, onBlocked})",
+      "cite": "scripts/lib/daemon-rebuild.mjs:683-716",
+      "canFail": true,
+      "onFailure": "tick-proceeds-unrebuilt",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "launchd:com.we.review-daemon.plist:WorkingDirectory"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "daemon-clone-writer",
+          "cite": "scripts/lib/daemon-clone-lock.mjs:338-357"
+        }
+      ]
+    },
+    {
+      "id": "mutate-overlay-list",
+      "state": "fetch-and-plan-overlays",
+      "actor": "rebuildClone / doRebuild, still holding lock:daemon-clone-writer",
+      "does": "for each planRebuild decision (remove/drop), removeOverlay() + appendOverlayEvent() against the per-clone overlay list file",
+      "cite": "scripts/lib/daemon-rebuild.mjs:875-884",
+      "canFail": true,
+      "onFailure": null,
+      "assumes": [
+        {
+          "kind": "lock",
+          "name": "daemon-clone-writer",
+          "cite": "scripts/lib/daemon-rebuild.mjs:706-708"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "writes",
+          "name": "<overlay-state-file>",
+          "cite": "scripts/lib/daemon-overlays.mjs:189-197"
+        }
+      ],
+      "notes": "THE FINDING: removeOverlay/appendOverlayEvent go through daemon-overlays.mjs's own withListLock mutex (20s bound, THROWS on timeout — daemon-overlays.mjs:139-169). This call site sits BEFORE doRebuild's own try/catch (which only starts at daemon-rebuild.mjs:935), so a thrown timeout here is NOT caught locally. It propagates out of withWriteLock (which still releases the write lock via its own finally, daemon-clone-lock.mjs:350-357) and out of `rebuild()` itself (daemon-self-sync.mjs:540, no try/catch there either) all the way up to runDaemonLoop's generic per-tick try/catch (skills-src/conveyor/review-daemon.mjs:129-134) — logged as an indistinguishable 'tick failed (non-fatal)' line, with the ENTIRE tick's real dispatch work skipped for that cycle, not just the rebuild. onFailure is genuinely null: no state in this flow specifically routes this failure anywhere.",
+      "ack": {
+        "failure-no-exit": "x56qzx8"
+      }
+    },
+    {
+      "id": "run-live-smoke-checks",
+      "state": "live-smoke-under-lock",
+      "actor": "runLiveSmokeWithRetry -> runLiveSmoke (daemon-live-smoke.mjs), invoked by doRebuild while still holding lock:daemon-clone-writer",
+      "does": "spawn each SMOKE_CHECKS row (lane-pool list/acquire/release, gh api, gh pr list, reconcile-pass --dry-run per constellation repo, a dispatch-dry-run child, and a final git-status-clean check), cwd: root, env: whatever was passed into rebuildClone",
+      "cite": "scripts/lib/daemon-rebuild.mjs:953-963; scripts/lib/daemon-live-smoke.mjs:537-547,573-612",
+      "canFail": true,
+      "onFailure": "smoke-code-reject-rollback",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "scripts/lib/daemon-rebuild.mjs:937,963",
+          "note": "root was already reset --hard onto the candidate sha by the previous step, so cwd here IS the real clone, not an isolated copy."
+        },
+        {
+          "kind": "path-tool",
+          "name": "git",
+          "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables.PATH"
+        },
+        {
+          "kind": "path-tool",
+          "name": "gh",
+          "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables.PATH"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "launchd:com.we.review-daemon.plist:ProgramArguments"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token",
+          "cite": "scripts/lib/daemon-live-smoke.mjs:212-241"
+        },
+        {
+          "kind": "lane",
+          "name": "pool root = <workspace>/.lanes",
+          "cite": "scripts/lib/daemon-live-smoke.mjs:164",
+          "note": "the smoke acquires + releases a real lane with cwd = the root it smokes"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "smoke lane acquired+released",
+          "cite": "scripts/lib/daemon-live-smoke.mjs:174-210",
+          "note": "a real lane-pool.mjs acquire+release proving the pool machinery works, not just that it parses; leaks a lease (never auto-cleaned) if the release call itself fails (daemon-live-smoke.mjs:205-209)."
+        }
+      ],
+      "notes": "Because cwd is literally the same root the live daemon is running from (no candidate worktree on main today), path-derived config like the lane pool root (LANE_POOL_ROOT unset anywhere in this whole flow; scripts/lib/lane-pool-paths.mjs:40-44,65-68 derives it from cwd) resolves to the SAME value the live post-adopt daemon will use, purely by cwd coincidence. See this task's report for why an off-lock redesign that smokes a SEPARATE worktree path must pin this explicitly or it silently mismatches.",
+      "ack": {}
+    },
+    {
+      "id": "cli-take-list-mutex",
+      "state": "operator-registers-overlay",
+      "actor": "addOverlay/removeOverlay (daemon-overlays.mjs), called from daemon-overlay.mjs or daemon-load-overlay.mjs",
+      "does": "withListLock: mkdir a `.lock` dir beside the overlay state file; poll/retry until acquired or LIST_LOCK_WAIT_MS elapses",
+      "cite": "scripts/lib/daemon-overlays.mjs:139-169",
+      "canFail": true,
+      "onFailure": "cli-overlay-op-failed",
+      "assumes": [],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "daemon-overlay-list",
+          "cite": "scripts/lib/daemon-overlays.mjs:144-160"
+        }
+      ],
+      "notes": "A stuck mutex (another process's mkdir never removed, e.g. it died before its own finally) is reclaimed only once it is older than LIST_LOCK_STALE_MS (30000ms); until then this THROWS after 20000ms with no retry of its own — caught only by the CLI's own top-level .catch (cli-overlay-op-failed).",
+      "ack": {}
+    },
+    {
+      "id": "cli-take-write-lock",
+      "state": "operator-registers-overlay",
+      "actor": "daemon-overlay.mjs add/remove (unless --no-lock)",
+      "does": "withWriteLock(root, () => fn(), {}) — NO waitMs override, so acquireWrite's own 600000ms default applies",
+      "cite": "scripts/daemon-overlay.mjs:79-121; scripts/lib/daemon-clone-lock.mjs:232-283",
+      "canFail": true,
+      "onFailure": "cli-overlay-op-failed",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "scripts/daemon-overlay.mjs:56-58",
+          "note": "resolved from the operator's own --clone= flag, not from a launchd-provided cwd."
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "daemon-clone-writer",
+          "cite": "scripts/lib/daemon-clone-lock.mjs:338-357"
+        }
+      ],
+      "notes": "A refusal (concurrent-mover, or a 10-minute timeout) prints 'write lock refused (<reason>)' and exits 1 — no retry, no escalation beyond the CLI's own exit code. Ten minutes is a LONG silent wait for an interactive operator compared to rebuildClone's own 60s bound for the same lock.",
+      "ack": {}
+    }
+  ]
+}

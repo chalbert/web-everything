@@ -1,0 +1,596 @@
+{
+  "id": "fix",
+  "title": "Fix dispatch (bounce / advisory / conflict / stacked-rebase)",
+  "summary": "A PR owed a fix (review:changes bounce, an advisory finding on a needs-human PR, a mechanical conflict-fix bounce, or a stacked-base rebase) is picked up by the fix-dispatch daemon's 120s tick, gated on the daemon's own clone being fresh and Claude login being healthy, claimed per (repo,PR,head-sha), and either resumed or freshly spawned as a Claude session. The spawned session starts in a scratch cwd that is NOT its lane; it only reaches its lane later, itself, mid-session, with no permission grant from the dispatcher — the #2701 gap. It exits by posting a marker comment and handing back to ordinary review/CI.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs",
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/conveyor/reconcile-fix-dispatch.mjs",
+    "scripts/conveyor/reconcile-pass.mjs",
+    "scripts/conveyor/fix-dispatch-claim.mjs",
+    "scripts/conveyor/advisory-fix-mark.mjs",
+    "scripts/conveyor/advisory-round-count.mjs",
+    "scripts/conveyor/claude-auth-health.mjs",
+    "scripts/conveyor/stand-down.mjs",
+    "scripts/conveyor/rearm-review.mjs",
+    "scripts/conveyor/conflict-fix-mark.mjs",
+    "scripts/lib/main-staleness.mjs",
+    "scripts/lib/daemon-self-sync.mjs",
+    "scripts/operations/dispatch-lane-io.mjs",
+    "scripts/operations/coordination-root.mjs",
+    "scripts/readiness/heavy-queue-projection.mjs",
+    "scripts/conveyor/hung-session.mjs",
+    "skills-src/inspect-agent-health/agent-health.mjs",
+    "skills-src/conveyor/fix-agent-brief.md",
+    "scripts/operations/clear-stuck-session.mjs",
+    "launchd:com.we.fix-dispatch-daemon.plist"
+  ],
+  "entry": {
+    "state": "pr-flagged-for-fix",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/wev-review-daemon"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "resolved off the plist PATH; not independently verified installed at that PATH"
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "same PATH; gh calls are pervasive through this flow"
+      },
+      {
+        "kind": "path-tool",
+        "name": "claude",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_ID",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:66,678",
+        "note": "withGithubAppAuth wraps buildCliDaemonEffects; mints a token at runtime from the WE_GITHUB_APP_ID/INSTALLATION_ID env pair"
+      },
+      {
+        "kind": "state-root",
+        "name": "<state-root>",
+        "cite": "scripts/operations/coordination-root.mjs:5",
+        "note": "resolveCoordinationRoot(), WE_COORDINATION_ROOT-overridable; fix-dispatch-claim.mjs pins claims under it"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "pr-flagged-for-fix",
+      "label": "PR owed a fix (bounce / advisory / conflict / stacked-rebase)",
+      "terminal": false,
+      "owner": "reconcile-core.mjs#planReconcile",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:239",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Five populations funnel here on every ~120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:76): ordinary review:changes bounce (OWED.bounced='fix', reconcile-core.mjs:239, capped by NEGOTIATION_ROUND_CAP=5 at reconcile-core.mjs:1257-1263), advisory-fix on a needs-human PR (reconcile-core.mjs:990-1059, ADVISORY_FIX_ROUND_CAP=3 at :276), mechanical conflict-fix bounce (reconcile-core.mjs:1211-1234, CONFLICT_FIX_ROUND_CAP=3 at :264), and stacked-base mechanical rebase (reconcile-core.mjs:1062-1119, same conflict-fix cap). Red CI is dispatched by a DIFFERENT operation (ci-heal-pr-dispatch.mjs) under kind:'ci-heal', not part of this flow. A 'no free lane' refusal (reconcile-fix-dispatch.mjs:1016) just leaves the PR here for the next tick, at no cost."
+    },
+    {
+      "id": "stale-refused",
+      "label": "Daemon's own clone refused as stale",
+      "terminal": false,
+      "owner": "scripts/lib/main-staleness.mjs#assertMainNotStale",
+      "ownerCite": "scripts/lib/main-staleness.mjs:183",
+      "wait": {
+        "for": "the daemon's own managed clone to resync onto origin/main",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/lib/daemon-self-sync.mjs:594-595,523-531"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "assertMainNotStale (called from scripts/conveyor/reconcile-fix-dispatch.mjs:939,1093) THROWS with STALE_MAIN_REFUSAL_MARKER (scripts/lib/main-staleness.mjs:140) for a diverged/dirty/off-base/behind managed clone rather than dispatch on possibly-stale code. withSelfSync's hasStaleRefusal hook (wired at skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:678-680, matched via hasStaleMainRefusal at :336) triggers an immediate rebuild (scripts/lib/daemon-self-sync.mjs:594-595); on success onRestart calls process.exit(0) (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:672-675) and launchd KeepAlive (launchd:com.we.fix-dispatch-daemon.plist, KeepAlive=true) relaunches it onto the fresh clone. A rebuild that keeps failing just logs 'retrying next tick' (scripts/lib/daemon-self-sync.mjs:525-531) with NO cap on how many ticks this can repeat and no escalation to a human if the clone stays stale indefinitely.",
+      "ack": {
+        "unbounded-wait": "#4068"
+      }
+    },
+    {
+      "id": "login-broken-paused",
+      "label": "Claude login broken — fix dispatch paused for the tick",
+      "terminal": false,
+      "owner": "scripts/conveyor/claude-auth-health.mjs#decideClaudeAuthDispatchGate",
+      "ownerCite": "scripts/conveyor/claude-auth-health.mjs:179",
+      "wait": {
+        "for": "`claude auth status --json` to report logged-in again",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/claude-auth-health.mjs:156-163,179-183"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Computed once per daemon tick (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:477) from readClaudeAuthHealth (scripts/conveyor/claude-auth-health.mjs:134) OR'd with a cheap probeClaudeLoggedIn (:156). While paused, fix AND ci-heal are both skipped outright with no round-cap comment spent (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:488-491). Self-clears purely via next tick's cheap probe; nothing pages a human beyond the daemon's own stderr log line (AUTH_PAUSE_LOG_MESSAGE, scripts/conveyor/claude-auth-health.mjs:67).",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "queue-cap-hit",
+      "label": "Heavy-test queue projected wait exceeds budget",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-fix-dispatch.mjs (queue admission check)",
+      "ownerCite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983",
+      "wait": null,
+      "retries": {
+        "what": "queue-cap refusal, recomputed fresh every reconcile pass",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985"
+      },
+      "escalation": null,
+      "notes": "createQueueBudget (scripts/readiness/heavy-queue-projection.mjs:271, imported reconcile-fix-dispatch.mjs:79) costs each fix at its projected heavy-slot demand; tryAdmit refuses 'queue-cap' with no count cap and no escalation. A persistently saturated heavy queue can refuse the same PR indefinitely with nothing surfaced to a human.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "resume-attempted",
+      "label": "Resume-or-nothing attempted for a conflict-caused entry",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-fix-dispatch.mjs#tryResumeFix",
+      "ownerCite": "scripts/conveyor/reconcile-fix-dispatch.mjs:544",
+      "wait": {
+        "for": "a `claude agents --json --all` listing to confirm the resumed session took",
+        "timeout": "900ms",
+        "onTimeout": "fixer-spawned",
+        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:656-659,112-121"
+      },
+      "retries": {
+        "what": "resume-confirm listing re-read (RESUME_CONFIRM_MAX_ATTEMPTS)",
+        "cap": 3,
+        "onCap": "fixer-spawned",
+        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:118,656-659"
+      },
+      "escalation": null,
+      "notes": "Only eligible for a conflict-caused bounce (entry.isConflict); every other kind returns resumed:false at no lane/claim cost (reconcile-fix-dispatch.mjs:474-524 docblock). Internally acquires its own (repo,pr,headSha) claim via acquireFixDispatchClaim (same TTL=10m / no-PID-fast-reclaim caveats as the claim step under fixer-spawned, scripts/conveyor/fix-dispatch-claim.mjs:56). Isolated in its own try/catch (reconcile-fix-dispatch.mjs:999-1006) so its own documented flakiness (a real listing race, #3331) never aborts the whole tick's other dispatches."
+    },
+    {
+      "id": "fixer-spawned",
+      "label": "Fixer Claude session spawned (fresh dispatch or confirmed resume)",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-fix-dispatch.mjs#dispatchFix",
+      "ownerCite": "scripts/conveyor/reconcile-fix-dispatch.mjs:735",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "See this state's own steps for the #2701 permission-prompt bug: the session's real cwd (a scratch dir) and the lane it must later edit are two different places, and nothing in the dispatch path grants edit permission on the lane before or during spawn."
+    },
+    {
+      "id": "fixer-blocked-permission",
+      "label": "Fixer blocked on an unanswered Claude Code permission prompt",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-core.mjs#isAwaitingPermission / assessLiveness (detects and refuses re-dispatch; does not resolve it)",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:444",
+      "wait": {
+        "for": "a human to answer the pending Claude Code permission prompt",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:706-713,857-868"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "a surfaced note + PR comment naming the stuck cwd, waitingFor reason, and held-hours",
+        "cite": "scripts/conveyor/reconcile-core.mjs:857-868"
+      },
+      "notes": "isAwaitingPermission (reconcile-core.mjs:444-447) flags agent.status==='waiting' with waitingFor matching /permission/i; assessLiveness ranks it FIRST (reconcile-core.mjs:706-713) so a fresh dispatch is refused while detected, and planReconcile surfaces a note + PR comment with held-hours (reconcile-core.mjs:857-868) — the code's own comment there says 'Three sessions have held one for 211.4 hours; a refusal buried in a list is how that stayed invisible.' But NOTHING kills, restarts, times out, or auto-clears the stuck process itself (zero waitingFor-specific handling in scripts/conveyor/session-reaper.mjs, confirmed by grep). Detection itself can SILENTLY LAPSE: the generic hung-transcript detector gives a pending-tool-use session a 3x grace (PENDING_CALL_GRACE_MULTIPLIER, scripts/conveyor/hung-session.mjs:79) over the 30-minute base threshold (:69) before marking it hung:true; once hung, assessLiveness's isFinished() filters it out BEFORE the awaiting-permission check is ever reached (reconcile-core.mjs:690-696) — so a permission-block surviving past ~90 minutes stops being surfaced at all and instead reads as 'nothing live', letting the reconciler dispatch a FRESH fixer into the same lane while the original session is still sitting there blocked. This is the #2701 shape precisely (a fixer sat 36 minutes on a prompt — still well inside the ~90-minute grace, so it WOULD have been surfaced, but nothing bounds even a correctly-surfaced block). The only actual remedy is a human running scripts/operations/clear-stuck-session.mjs by hand (documented at reconcile-core.mjs:174-178 as the intended, non-automatic path).",
+      "ack": {
+        "unbounded-wait": "#3149"
+      }
+    },
+    {
+      "id": "fixer-blocked-infra",
+      "label": "Fixer self-reported blocked-on-infra (rate limit / outage)",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-core.mjs#markSelfReportedDone",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:522",
+      "wait": {
+        "for": "INFRA_RETRY_COOLOFF_MS to elapse since the completion record's updatedAt",
+        "timeout": "15m",
+        "onTimeout": "pr-flagged-for-fix",
+        "cite": "scripts/conveyor/reconcile-core.mjs:490,532"
+      },
+      "retries": {
+        "what": "blocked-on-infra self-report / cooloff / redispatch cycle",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:486-539"
+      },
+      "escalation": null,
+      "notes": "session-reaper.mjs's completion resolver stops the OS process immediately once the record says done, regardless of outcome (reconcile-core.mjs:504-508 docblock) — only the RECORD's cool-off (awaitingInfraCooloff:true) keeps the PR from being redispatched during the 15-minute window (reconcile-core.mjs:522-539). Bounded per-cycle (15m), but there is NO CAP on how many times a PR can cycle through self-reported-infra -> cooloff -> fresh dispatch -> self-reported-infra again — a persistent but intermittent outage could loop this PR forever with no escalation to a human.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "fixer-stood-down",
+      "terminal": true,
+      "outcome": "failure",
+      "label": "Fixer stood down — human judgment needed",
+      "escalation": {
+        "to": "operator",
+        "how": "durable PR comment (STAND_DOWN_MARKER); cleared or taken over via /finish",
+        "cite": "scripts/conveyor/stand-down.mjs:48"
+      },
+      "notes": "Posted when the fixer can't safely judge (ambiguous finding, unresolved gate-red, a real conflict) — STAND_DOWN_MARKER (scripts/conveyor/stand-down.mjs:48). Terminal for the reconciler with no decay: countUnresolvedStandDowns (reconcile-core.mjs:472-485) is checked FIRST in planReconcile (reconcile-core.mjs:822-847), so this PR is refused every subsequent tick until a human clears it. 'The intended exit is a HUMAN — who reads the escalation, makes the judgment, and clears the marker (or takes the PR over via /finish)' (scripts/conveyor/stand-down.mjs:17-19). The comment is durable and visible on the PR but nothing proactively pages/notifies anyone — a human must be reading the PR thread."
+    },
+    {
+      "id": "pushed",
+      "label": "Fixer posted its mode's marker comment and exited",
+      "terminal": false,
+      "owner": "the fixer session itself (brief steps 6-9)",
+      "ownerCite": "skills-src/conveyor/fix-agent-brief.md:343",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Exactly one of three markers gets posted depending on mode: ordinary bounce runs rearm-review.mjs, swapping review:changes->review:pending + REARM_COMMENT_MARKER (scripts/conveyor/rearm-review.mjs:40,73-78); advisory-fix mode posts ADVISORY_FIX_COMMENT_MARKER with NO label swap (scripts/conveyor/advisory-fix-mark.mjs:48,77-87); conflict-fix/stacked-rebase mode posts CONFLICT_FIX_COMMENT_MARKER via conflict-fix-mark.mjs, also no label touched (scripts/conveyor/conflict-fix-mark.mjs:45-58). The fixer then EXITS without merging, without releasing the lane, without touching CI directly (skills-src/conveyor/fix-agent-brief.md:427-439) — its process exit IS the completion signal."
+    },
+    {
+      "id": "awaiting-review-recheck",
+      "terminal": true,
+      "outcome": "success",
+      "label": "Handed back to ordinary review / CI",
+      "escalation": null,
+      "notes": "No wait/timeout is enforced by this flow's own code on the recheck step: runReconcileFixDispatch ends with a plain return and no polling loop after dispatch (scripts/conveyor/reconcile-fix-dispatch.mjs:1020-1037). It is bounded only by the ordinary ~120s daemon tick cadence re-reading PR state fresh (DEFAULT_INTERVAL_MS, skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:76) and by the SEPARATE review-dispatch daemon picking up the now-review:pending (or still-needs-human) PR — out of this flow's own file set."
+    },
+    {
+      "id": "round-cap-hit",
+      "terminal": true,
+      "outcome": "failure",
+      "label": "Fix population's round cap reached",
+      "escalation": null,
+      "notes": "refuse('cap-exhausted', ...) fires for whichever population is stuck: ordinary bounce (reconcile-core.mjs:1257-1263, NEGOTIATION_ROUND_CAP=5), advisory-fix (reconcile-core.mjs:1006-1013, ADVISORY_FIX_ROUND_CAP=3), conflict-fix bounce (reconcile-core.mjs:1211-1219, CONFLICT_FIX_ROUND_CAP=3), or stacked-rebase (reconcile-core.mjs:1097-1107, same cap). This is ONLY a refusal entry, logged by the daemon's own formatRefusalLine (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:520-538) to its own stderr/log file — no PR comment, no notification. Contrast the sibling ci-heal-exhausted path (reconcile-core.mjs:938-957, a DIFFERENT flow/kind), which DOES post a PR comment; no equivalent notes.push exists for any of this flow's four cap populations. A person must be watching the daemon log to ever learn a PR hit its cap.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "stale-refused",
+      "on": "daemon's own clone is behind/diverged from origin/main",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:939"
+    },
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "login-broken-paused",
+      "on": "Claude login broken this tick",
+      "kind": "failure",
+      "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:477-491"
+    },
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "round-cap-hit",
+      "on": "the PR's own durable attempt count is at/above its population's cap",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-core.mjs:1257-1263"
+    },
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "queue-cap-hit",
+      "on": "heavy-test queue projected wait exceeds budget",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985"
+    },
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "resume-attempted",
+      "on": "entry.isConflict — try a resume before ever popping a lane",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1000-1003"
+    },
+    {
+      "from": "pr-flagged-for-fix",
+      "to": "fixer-spawned",
+      "on": "non-conflict entry, or resume not attempted — pop a free lane and dispatch fresh",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1013-1021"
+    },
+    {
+      "from": "stale-refused",
+      "to": "pr-flagged-for-fix",
+      "on": "clone rebuilt/resynced and the daemon restarts onto new code (launchd KeepAlive relaunches it)",
+      "kind": "normal",
+      "cite": "scripts/lib/daemon-self-sync.mjs:594-595"
+    },
+    {
+      "from": "login-broken-paused",
+      "to": "pr-flagged-for-fix",
+      "on": "next tick's cheap claude auth status probe reports logged-in",
+      "kind": "normal",
+      "cite": "scripts/conveyor/claude-auth-health.mjs:156-163"
+    },
+    {
+      "from": "queue-cap-hit",
+      "to": "pr-flagged-for-fix",
+      "on": "next pass recomputes the queue budget fresh",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985"
+    },
+    {
+      "from": "resume-attempted",
+      "to": "fixer-spawned",
+      "on": "resume confirmed live",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1008-1010"
+    },
+    {
+      "from": "resume-attempted",
+      "to": "fixer-spawned",
+      "on": "resume not confirmed after 3 listing re-reads — falls through to a fresh dispatch",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:656-659"
+    },
+    {
+      "from": "resume-attempted",
+      "to": "pr-flagged-for-fix",
+      "on": "claim held elsewhere / resume spawn threw",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:999-1006"
+    },
+    {
+      "from": "fixer-spawned",
+      "to": "pr-flagged-for-fix",
+      "on": "claim held elsewhere, or cwd-resolve/spawn threw — claim released, retried next tick",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:834-838"
+    },
+    {
+      "from": "fixer-spawned",
+      "to": "fixer-blocked-permission",
+      "on": "fixer's Bash/Edit inside its own lane is denied by Claude Code's own permission classifier, with nobody watching this session to answer it",
+      "kind": "failure",
+      "cite": "skills-src/conveyor/fix-agent-brief.md:187-195"
+    },
+    {
+      "from": "fixer-spawned",
+      "to": "fixer-blocked-infra",
+      "on": "fixer self-reports blocked-on-infra instead of finishing",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-core.mjs:522-539"
+    },
+    {
+      "from": "fixer-spawned",
+      "to": "fixer-stood-down",
+      "on": "fixer posts STAND_DOWN_MARKER",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/stand-down.mjs:48"
+    },
+    {
+      "from": "fixer-spawned",
+      "to": "pushed",
+      "on": "fixer completes: posts its marker and exits",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/fix-agent-brief.md:343-408"
+    },
+    {
+      "from": "fixer-blocked-permission",
+      "to": "pr-flagged-for-fix",
+      "on": "~90 minutes pass and the hung-transcript detector silently reclassifies the session as not-live, even though it may still be sitting on the prompt (a double-dispatch risk, not a real fix)",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/hung-session.mjs:69-105"
+    },
+    {
+      "from": "fixer-blocked-permission",
+      "to": "pushed",
+      "on": "a human manually answers the prompt, or runs clear-stuck-session.mjs and the session resumes and finishes",
+      "kind": "escalation",
+      "cite": "scripts/operations/clear-stuck-session.mjs:2-27"
+    },
+    {
+      "from": "fixer-blocked-infra",
+      "to": "pr-flagged-for-fix",
+      "on": "15-minute cooloff elapses",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/reconcile-core.mjs:490,532"
+    },
+    {
+      "from": "pushed",
+      "to": "awaiting-review-recheck",
+      "on": "session exits",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/fix-agent-brief.md:427-439"
+    },
+    {
+      "from": "awaiting-review-recheck",
+      "to": "@review",
+      "on": "PR re-enters ordinary review/CI",
+      "kind": "normal",
+      "cite": "skills-src/conveyor/fix-agent-brief.md:427-439"
+    }
+  ],
+  "steps": [
+    {
+      "id": "resume-acquire-claim",
+      "state": "resume-attempted",
+      "actor": "reconcile-fix-dispatch daemon (tryResumeFix)",
+      "does": "claims (repo,pr,headSha) before attempting a resume",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:555-556",
+      "canFail": true,
+      "onFailure": "pr-flagged-for-fix",
+      "assumes": [
+        {
+          "kind": "state-root",
+          "name": "<state-root>",
+          "cite": "scripts/operations/coordination-root.mjs:5"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "fix-claim:<pr>",
+          "cite": "scripts/conveyor/fix-dispatch-claim.mjs:94-106"
+        }
+      ]
+    },
+    {
+      "id": "resume-spawn",
+      "state": "resume-attempted",
+      "actor": "tryResumeFix",
+      "does": "spawns `claude --resume` in the same per-session scratch cwd pattern as a fresh dispatch",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:646-648,561-562",
+      "canFail": true,
+      "onFailure": "pr-flagged-for-fix",
+      "assumes": [],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:646"
+        }
+      ]
+    },
+    {
+      "id": "acquire-claim",
+      "state": "fixer-spawned",
+      "actor": "dispatchFix",
+      "does": "claims (repo,pr,headSha) BEFORE building anything; on 'held' returns without spawning and the lane is returned to the pool",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:774-782",
+      "canFail": true,
+      "onFailure": "pr-flagged-for-fix",
+      "assumes": [
+        {
+          "kind": "state-root",
+          "name": "<state-root>",
+          "cite": "scripts/operations/coordination-root.mjs:5"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "fix-claim:<pr>",
+          "cite": "scripts/conveyor/fix-dispatch-claim.mjs:94-106"
+        }
+      ]
+    },
+    {
+      "id": "resolve-scratch-cwd",
+      "state": "fixer-spawned",
+      "actor": "dispatchFix",
+      "does": "resolves the session's cwd to a per-session SCRATCH directory (.operations/dispatch/<sessionId>), a sibling of .lanes/ — never the lane clone, never the daemon's own checkout",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1637,1649",
+      "canFail": true,
+      "onFailure": "pr-flagged-for-fix",
+      "assumes": [],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1649"
+        }
+      ]
+    },
+    {
+      "id": "grant-scratch-trust",
+      "state": "fixer-spawned",
+      "actor": "ensureDispatchSessionCwd / grantDispatchTrust",
+      "does": "writes a workspace-TRUST entry into ~/.claude.json for the scratch cwd only, so `claude --bg` doesn't refuse 'Workspace not trusted' — a trust entry, NOT a Claude settings permission rule, and scoped to the scratch dir only",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1697",
+      "canFail": false,
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "permission",
+          "name": "bash:<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1697",
+          "note": "workspace trust only, scoped to <scratch>; NOT edit:<lane> or bash:<lane>"
+        }
+      ]
+    },
+    {
+      "id": "spawn-claude-bg",
+      "state": "fixer-spawned",
+      "actor": "dispatchFix",
+      "does": "spawns `claude --bg` with --settings carrying ONLY an env key (gh-shim PATH override + bash timeouts) — no --add-dir, no permission-mode flag, no settings.local write scoped to the lane; the code's own docblock says this is deliberate ('a dispatcher that hard-coded --dangerously-skip-permissions would silently widen...')",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1792-1845,1137-1138",
+      "canFail": true,
+      "onFailure": "pr-flagged-for-fix",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>"
+        },
+        {
+          "kind": "permission",
+          "name": "bash:<scratch>"
+        },
+        {
+          "kind": "path-tool",
+          "name": "claude",
+          "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:807,826"
+        }
+      ]
+    },
+    {
+      "id": "fixer-acquires-own-lane",
+      "state": "fixer-spawned",
+      "actor": "the fixer session itself, inside its own Bash tool (NOT the dispatcher)",
+      "does": "runs `lane-pool.mjs acquire ... && cd \"$LANE\"` per the brief's own step 1 — the ONLY place the fixer ever reaches its lane; the dispatcher never cd's it there and never scopes any permission to it first",
+      "cite": "skills-src/conveyor/fix-agent-brief.md:90-94",
+      "canFail": true,
+      "onFailure": "fixer-blocked-permission",
+      "assumes": [
+        {
+          "kind": "permission",
+          "name": "edit:<lane>",
+          "cite": "skills-src/conveyor/fix-agent-brief.md:90-94",
+          "note": "ASSUMED by the brief's own step 1 (cd \"$LANE\" then edit) but never granted by anything upstream in this flow: lane-pool.mjs acquire writes no trust/settings.local entry for the lane (grep confirmed zero grantTrust/withTrustedDirs/settings.local hits in scripts/lane-pool.mjs), and the session's cwd at spawn time is the scratch dir, outside every constellation checkout's own .claude/settings.json ancestry. THIS IS THE #2701 GAP: nothing upstream of this step provides permission:edit:<lane>."
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<lane>",
+          "cite": "skills-src/conveyor/fix-agent-brief.md:90-94"
+        },
+        {
+          "kind": "lane",
+          "name": "<lane> acquired",
+          "cite": "skills-src/conveyor/fix-agent-brief.md:90-94"
+        }
+      ],
+      "ack": {
+        "unprovided-assumption": "xrv69j6"
+      }
+    }
+  ]
+}

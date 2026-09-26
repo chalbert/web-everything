@@ -1,0 +1,539 @@
+{
+  "id": "ci-heal",
+  "title": "CI-heal (rebase-onto-main, hung-run recovery, and the fix-agent repair)",
+  "summary": "What happens once a conveyor-landed PR's required check stops being simply green: a real code regression (ci-heal dispatch), main having been red at the moment the check failed (mechanical rebase-onto-main), a CI run stuck IN_PROGRESS/QUEUED (hung-run cancel+rerun), or a stacked PR whose base GitHub silently retargeted onto main with no fresh check run. All four are read off the SAME PR listing (scripts/conveyor/reconcile-pass.mjs) and reasoned about by scripts/conveyor/reconcile-core.mjs / scripts/conveyor/main-red-recovery.mjs, but only two of the four (rebase-onto-main and hung-run recovery) currently ride a resident, launchd-installed process; the pass-daemon.mjs entries daemon-manifest.mjs registers for them are wired to no launchd job at all today (confirmed live 2026-09-26: `ls ~/Library/LaunchAgents/com.we.*.plist` lists no ci-red-recovery-watch-*, ci-queue-watch-*, or stuck-pr-watch-* entry). Both live mechanisms actually ride skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs, installed as com.we.fix-dispatch-daemon.plist.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/conveyor/reconcile-pass.mjs",
+    "scripts/conveyor/main-red-recovery.mjs",
+    "scripts/conveyor/ci-red-recovery-watch.mjs",
+    "scripts/conveyor/ci-heal-mark.mjs",
+    "scripts/conveyor/ci-queue-watch.mjs",
+    "scripts/conveyor/stuck-pr-watch-core.mjs",
+    "scripts/conveyor/stuck-pr-inspect-dispatch.mjs",
+    "scripts/operations/ci-heal-pr-dispatch.mjs",
+    "scripts/lib/pr-merge-gate.mjs",
+    "scripts/progress-board.mjs",
+    "scripts/operations/pr-status.mjs",
+    "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs",
+    "skills-src/conveyor/daemon-manifest.mjs",
+    "skills-src/conveyor/runner.mjs",
+    "skills-src/conveyor/fix-agent-ci-brief.md"
+  ],
+  "entry": {
+    "state": "pr-check-state-read",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/wev-review-daemon (confirmed live via plutil -p, 2026-09-26)"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "PATH includes /opt/homebrew/bin (confirmed via plutil -p, 2026-09-26)"
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_ID",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_INSTALLATION_ID",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_PRIVATE_KEY_PATH",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "scripts/lib/github-app-auth-env.mjs",
+        "note": "derived from the three WE_GITHUB_APP_* vars at the top of every tick (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:678 withGithubAppAuth)"
+      },
+      {
+        "kind": "lock",
+        "name": "daemon-clone-writer",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "KeepAlive+ThrottleInterval=60; the runner-lease (RECONCILE_FIX_DISPATCH_LEASE_KEY) is the real single-writer guard, acquired at skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:652"
+      },
+      {
+        "kind": "path-tool",
+        "name": "claude",
+        "cite": "launchd:com.we.fix-dispatch-daemon.plist",
+        "note": "PATH includes /opt/homebrew/bin and ~/.nvm/.../bin"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "pr-check-state-read",
+      "label": "PR labels + check rollup fetched fresh",
+      "terminal": false,
+      "owner": "reconcile-pass.mjs (via reconcile-fix-dispatch-daemon.mjs's fix/ci-heal ticks, every ~120s)",
+      "ownerCite": "scripts/conveyor/reconcile-pass.mjs:103",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "gh pr list --json ...,statusCheckRollup,mergeStateStatus,baseRefName,comments (scripts/conveyor/reconcile-pass.mjs:91 PR_LIST_JSON_FIELDS). This read is unconditionally trusted: nothing here (or anywhere downstream) distinguishes a check run computed against the PR's CURRENT base from one carried over from before a base retarget."
+    },
+    {
+      "id": "base-retargeted",
+      "label": "Stacked PR's base auto-retargeted onto main",
+      "terminal": false,
+      "owner": "none",
+      "ownerCite": "scripts/lib/pr-merge-gate.mjs:218",
+      "wait": {
+        "for": "a fresh required-check run against the new base",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/lib/pr-merge-gate.mjs:218-239"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "retargetStackedPrs (scripts/lib/pr-merge-gate.mjs:218) runs `gh pr edit --base <default>` the moment a PR's stacked base merges (scripts/merge-ai-prs.mjs:4888-4898), so the branch isn't deleted out from under it — but a base retarget is NOT a new commit event, so GitHub never enqueues a fresh CI run for it. Nothing anywhere re-checks that the PR's statusCheckRollup was ever computed against `main` at all; the PR just carries forward whatever check state it had before. KEY QUESTION (b) answered: no step anywhere provides `ci:required checks ran on head` on this path (see the assumes on pr-check-state-read's downstream consumers) — this is a genuine, unacknowledged gap, not merely a slow path.",
+      "ack": {
+        "no-owner": "xi4od2p",
+        "unbounded-wait": "xi4od2p"
+      }
+    },
+    {
+      "id": "ci-red",
+      "label": "Required check concluded failing",
+      "terminal": false,
+      "owner": "reconcile-core.mjs#planReconcile",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:890",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "classifyPr's ciFailed (scripts/progress-board.mjs:466-472) requires a CONCLUDED failing check in the rollup; reduceCheckState's own empty-rollup case reads 'unchecked', not 'red' (scripts/operations/pr-status.mjs:140-147) — so a PR reaching this state via base-retargeted only does so if the STALE, pre-retarget rollup happened to already be red. If it was green, the PR reads as classifyPr:'queued' (scripts/progress-board.mjs:513) and skips this whole flow, landing in @drain-land's accepted-unchecked-no-ci gap instead with no CI ever run against main."
+    },
+    {
+      "id": "hung-ci-run",
+      "label": "CI run stuck IN_PROGRESS/QUEUED past 45 min (never concluded)",
+      "terminal": false,
+      "owner": "reconcile-fix-dispatch-daemon.mjs#runHungCiRecoveryAllRepos (resident, installed com.we.fix-dispatch-daemon.plist)",
+      "ownerCite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:372",
+      "wait": {
+        "for": "the cancelled run's re-run to conclude",
+        "timeout": "45m",
+        "onTimeout": "hung-ci-run",
+        "cite": "scripts/conveyor/main-red-recovery.mjs:428"
+      },
+      "retries": {
+        "what": "cancel+rerun attempts against this exact head sha (counted every attempt, success or failure, via a durable PR comment marker)",
+        "cap": 2,
+        "onCap": "ci-heal-dispatch",
+        "cite": "scripts/conveyor/main-red-recovery.mjs:435"
+      },
+      "escalation": null,
+      "notes": "buildHungCandidates deliberately excludes any PR whose required check already CONCLUDED (scripts/conveyor/main-red-recovery.mjs:493) — reached only from pr-check-state-read directly, never from ci-red. A same-job repeat-hang on a DIFFERENT head sha (scripts/conveyor/main-red-recovery.mjs:543-555) also routes to ci-heal-dispatch immediately, ahead of its own sha's cap. The pass-daemon.mjs entry this pass ALSO has (skills-src/conveyor/daemon-manifest.mjs:161) has no launchd job installed; this daemon path is the only one confirmed live."
+    },
+    {
+      "id": "owed-ci-rerun-wait",
+      "label": "Refused: main was red when the check failed",
+      "terminal": false,
+      "owner": "reconcile-fix-dispatch-daemon.mjs#runMainRedRebaseAllRepos (resident, installed com.we.fix-dispatch-daemon.plist)",
+      "ownerCite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:416",
+      "wait": {
+        "for": "main's own last red CI window to close",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/main-red-recovery.mjs:137-139"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "KEY QUESTION (a), part 1: this state answers 'who performs the owed rerun' honestly — scripts/conveyor/reconcile-core.mjs:926-931 only REFUSES ('owed-ci-rerun') and names the file that should act; the actual mechanical rebase is scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery, and the ONLY thing that ever calls it with apply:true in production is reconcile-fix-dispatch-daemon.mjs (confirmed live via its own installed plist) — its own daemon-manifest.mjs entry (skills-src/conveyor/daemon-manifest.mjs:161) has NO launchd job. If main stays red indefinitely, this refusal re-fires every ~120s tick forever with no cap on how long — an honest unbounded wait, by the mechanism's own design (rebasing against a still-broken main proves nothing), but unbounded all the same.",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "rebase-onto-main",
+      "label": "Mechanical rebase onto current main (rebaseDropManifest)",
+      "terminal": false,
+      "owner": "ci-red-recovery-watch.mjs#refreshOntoMain (via reconcile-fix-dispatch-daemon.mjs)",
+      "ownerCite": "scripts/conveyor/ci-red-recovery-watch.mjs:136",
+      "wait": null,
+      "retries": {
+        "what": "rebase-onto-main attempts against this exact head sha (durable PR-comment-marker count, every attempt whether it succeeds or not)",
+        "cap": 2,
+        "onCap": "ci-heal-dispatch",
+        "cite": "scripts/conveyor/main-red-recovery.mjs:304"
+      },
+      "escalation": null,
+      "steps": [],
+      "notes": "Never a raw git merge / GitHub update-branch — the same no-checkout rebaseDropManifest plumbing the drain itself uses (scripts/conveyor/ci-red-recovery-watch.mjs:136-141). aheadBy===0 (already current, still red) is a separate refusal (main-red-recovery.mjs:259-264) that falls straight through to ci-heal-dispatch, same as a real DIRTY conflict never entering this state at all (reconcile-core.mjs:905)."
+    },
+    {
+      "id": "ci-heal-dispatch",
+      "label": "ci-heal agent claimed + brief filled",
+      "terminal": false,
+      "owner": "ci-heal-pr-dispatch.mjs#runReconcileCiHealDispatch (resident daemon; ALSO reachable, redundantly, from skills-src/conveyor/runner.mjs's inline mechanical pass if a human runs it directly)",
+      "ownerCite": "scripts/operations/ci-heal-pr-dispatch.mjs:185",
+      "wait": null,
+      "retries": {
+        "what": "durable CI-heal attempts, counted by CI_HEAL_COMMENT_MARKER comments on the PR itself (restart-surviving)",
+        "cap": 3,
+        "onCap": "ci-heal-exhausted",
+        "cite": "scripts/conveyor/reconcile-core.mjs:252"
+      },
+      "escalation": null,
+      "notes": "Dispatch is SKIPPED OUTRIGHT (not attempted-and-failed) whenever the operator's own Claude login is broken (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:472-491 planClaudeAuthDispatchGate) — no round is spent, but nothing here escalates that login break either; it just silently recurs every tick. A double-dispatch race between the resident daemon and a hand-run runner.mjs is closed by an atomic (repo,pr,headRefOid) file claim (scripts/conveyor/fix-dispatch-claim.mjs, scripts/operations/ci-heal-pr-dispatch.mjs:77-88), never the old (broken) guardedDispatch this file's docblock used to describe."
+    },
+    {
+      "id": "ci-heal-session-running",
+      "label": "Live Claude session reconstituting + repairing the lane",
+      "terminal": false,
+      "owner": "the spawned ci-heal-<pr> session; liveness tracked each tick by reconcile-core.mjs#bindAgents/assessLiveness",
+      "ownerCite": "skills-src/conveyor/fix-agent-ci-brief.md:47",
+      "wait": {
+        "for": "the session to exit and post the durable CI-heal marker comment",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:851"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "GENUINE GAP: assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:849-870) have no intrinsic time bound — a live pid simply refuses re-dispatch every tick forever, and an 'awaiting-permission' block is only ever promoted to a surfaced NOTE (reconcile-core.mjs:859-868), never an automatic timeout or kill. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all, so a hung or silently-exited ci-heal session is invisible to that mechanism too. The brief (skills-src/conveyor/fix-agent-ci-brief.md:74-75) tells the AGENT to stop and report if its own lane ref is gone, but nothing external ever forces that check.",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "ci-heal-completed",
+      "label": "Durable marker posted, CI green, review label untouched",
+      "terminal": true,
+      "outcome": "success",
+      "owner": null,
+      "escalation": null,
+      "notes": "Only the CI axis is repaired — review:human/review:pending/review:changes/review:accepted are never touched (scripts/conveyor/ci-heal-mark.mjs:2-19). The PR resumes whatever review/drain state it already had, now with a green required check."
+    },
+    {
+      "id": "ci-heal-exhausted",
+      "label": "Durable CI-heal attempt cap reached (3), still red",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": null,
+      "escalation": null,
+      "notes": "KEY QUESTION (a), part 2 / an honest silent-failure. reconcile-core.mjs:932-957 DOES compute a surfaced note (kind:'ci-heal-exhausted', naming the last failing check) — but #4191's own poster (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:259-261 defaultNoteCommentDryRun) defaults to DRY-RUN (WE_CONVEYOR_POST_NOTE_COMMENTS unset on the installed com.we.fix-dispatch-daemon.plist, confirmed live 2026-09-26), so the note is computed and logged to skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs's own stderr (.conveyor/fix-dispatch-daemon.log) but NEVER posted to the PR. The independent surfacing path (scripts/operations/operator-queue.mjs:220, scripts/operations/operator-notify.mjs) is only ever invoked inline by skills-src/conveyor/runner.mjs:336 (`operator-notify.mjs --once`), and runner.mjs itself has no installed launchd job either (confirmed via the same LaunchAgents listing). By default, today, this terminal state reaches no human unless they read the daemon's own log file by hand.",
+      "ack": {
+        "silent-failure": "#4191"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "pr-check-state-read",
+      "to": "ci-red",
+      "on": "required check concluded failing",
+      "kind": "normal",
+      "cite": "scripts/progress-board.mjs:466,510",
+      "provides": [
+        {
+          "kind": "ci",
+          "name": "required checks ran on head",
+          "cite": "scripts/progress-board.mjs:466,510",
+          "note": "a concluded / in-progress required check on this head is itself the evidence it ran"
+        }
+      ]
+    },
+    {
+      "from": "pr-check-state-read",
+      "to": "base-retargeted",
+      "on": "GitHub retargeted this PR's base onto main after its stacked base PR merged",
+      "kind": "normal",
+      "cite": "scripts/lib/pr-merge-gate.mjs:218"
+    },
+    {
+      "from": "pr-check-state-read",
+      "to": "hung-ci-run",
+      "on": "the CI run is still IN_PROGRESS/QUEUED past the 45m threshold (required check never concluded)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/main-red-recovery.mjs:482-509",
+      "provides": [
+        {
+          "kind": "ci",
+          "name": "required checks ran on head",
+          "cite": "scripts/conveyor/main-red-recovery.mjs:482-509",
+          "note": "a concluded / in-progress required check on this head is itself the evidence it ran"
+        }
+      ]
+    },
+    {
+      "from": "pr-check-state-read",
+      "to": "@drain-land",
+      "on": "check state is green, ordinary pending, or genuinely unchecked with zero runs — proceeds toward the merge queue",
+      "kind": "normal",
+      "cite": "scripts/progress-board.mjs:511-514"
+    },
+    {
+      "from": "base-retargeted",
+      "to": "ci-red",
+      "on": "reconcile-core next reads this PR — its (stale, pre-retarget) check rollup is unchanged",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-pass.mjs:103"
+    },
+    {
+      "from": "ci-red",
+      "to": "owed-ci-rerun-wait",
+      "on": "not DIRTY, rebase cap not exhausted, and the failure completed inside one of main's own red windows",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:905,914,921-931"
+    },
+    {
+      "from": "ci-red",
+      "to": "ci-heal-dispatch",
+      "on": "own failure / unknown attribution / DIRTY conflict / rebase cap already exhausted",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-core.mjs:932-963"
+    },
+    {
+      "from": "hung-ci-run",
+      "to": "ci-heal-dispatch",
+      "on": "cap reached (2 attempts) or the same job hung before on a different head sha (repeat-hang) — cancel-only",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/main-red-recovery.mjs:598-629"
+    },
+    {
+      "from": "owed-ci-rerun-wait",
+      "to": "rebase-onto-main",
+      "on": "main has recovered and aheadBy is known and > 0",
+      "kind": "normal",
+      "cite": "scripts/conveyor/main-red-recovery.mjs:255-283"
+    },
+    {
+      "from": "owed-ci-rerun-wait",
+      "to": "ci-heal-dispatch",
+      "on": "aheadBy resolves to 0 — already current, still red",
+      "kind": "normal",
+      "cite": "scripts/conveyor/main-red-recovery.mjs:259-264"
+    },
+    {
+      "from": "rebase-onto-main",
+      "to": "pr-check-state-read",
+      "on": "rebased (or confirmed already-current) — CI re-runs against the fresh tip",
+      "kind": "normal",
+      "cite": "scripts/conveyor/ci-red-recovery-watch.mjs:212-220"
+    },
+    {
+      "from": "rebase-onto-main",
+      "to": "ci-heal-dispatch",
+      "on": "2 rebase attempts against this head sha did not clear it",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/main-red-recovery.mjs:266-279"
+    },
+    {
+      "from": "ci-heal-dispatch",
+      "to": "ci-heal-session-running",
+      "on": "claim acquired, brief filled, session spawned",
+      "kind": "normal",
+      "cite": "scripts/operations/ci-heal-pr-dispatch.mjs:115-131"
+    },
+    {
+      "from": "ci-heal-dispatch",
+      "to": "ci-heal-exhausted",
+      "on": "durable CI-heal comment count >= 3",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/reconcile-core.mjs:933-937"
+    },
+    {
+      "from": "ci-heal-session-running",
+      "to": "ci-heal-completed",
+      "on": "durable CI-heal marker posted; gate green; re-pushed",
+      "kind": "normal",
+      "cite": "scripts/conveyor/ci-heal-mark.mjs:62-73"
+    },
+    {
+      "from": "ci-heal-session-running",
+      "to": "pr-check-state-read",
+      "on": "the session's process is no longer live (crashed / stood down / lane ref gone) with no marker posted — the next tick simply stops seeing it as live and re-plans fresh",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-core.mjs:851-870"
+    }
+  ],
+  "steps": [
+    {
+      "id": "retarget-base",
+      "state": "base-retargeted",
+      "actor": "merge-ai-prs.mjs (via scripts/lib/pr-merge-gate.mjs#retargetStackedPrs)",
+      "does": "gh pr edit <num> --base <default>, run at the moment the PR's stacked base merges, before its branch is deleted",
+      "cite": "scripts/lib/pr-merge-gate.mjs:218; scripts/merge-ai-prs.mjs:4888-4898",
+      "canFail": true,
+      "onFailure": "@conflict#stacked-pr-closed-by-github",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "gh"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "baseRefName=default",
+          "cite": "scripts/lib/pr-merge-gate.mjs:218-239"
+        }
+      ],
+      "notes": "canFail with no automated recovery IN THIS FLOW: this is the SAME retargetStackedPrs call conflict.flow.json models (pr-merge-gate.mjs:218,236-239) — a failed retarget leaves the base branch deleted out from under the PR, GitHub closes it, and a durable PR comment (scripts/merge-ai-prs.mjs:2318,4906) tells a HUMAN to re-target by hand or run the #3383/#4138 recovery path; never an automatic retry here. Hands off to that flow's own terminal failure state rather than re-modelling it."
+    },
+    {
+      "id": "evaluate-required-check",
+      "state": "ci-red",
+      "actor": "reconcile-core.mjs (classifyCiFailureAttribution / isPrCiFailureOwedRerun)",
+      "does": "reads requiredCheckCompletedAt off the already-fetched statusCheckRollup and asks whether it falls inside one of main's own red windows",
+      "cite": "scripts/conveyor/reconcile-core.mjs:890,921-931; scripts/conveyor/main-red-recovery.mjs:149-153",
+      "canFail": false,
+      "assumes": [
+        {
+          "kind": "ci",
+          "name": "required checks ran on head"
+        }
+      ],
+      "provides": [],
+      "notes": "Neither this read nor GitHub's own API distinguishes a check run computed against the CURRENT base from one carried over from before a base retarget — this assumption is never actually confirmed on the base-retargeted path (nothing there provides the fact), and on the ordinary direct-push path it holds only because GitHub's own push-triggered CI happens to run against the current tree, never because anything here checks it.",
+      "ack": {
+        "unprovided-assumption": "xi4od2p"
+      }
+    },
+    {
+      "id": "claude-auth-gate",
+      "state": "ci-heal-dispatch",
+      "actor": "reconcile-fix-dispatch-daemon",
+      "does": "cheap `claude auth status` probe once per tick (card x5kagse); a broken login skips all fix/ci-heal dispatch this tick",
+      "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:512",
+      "canFail": true,
+      "onFailure": "ci-heal-dispatch",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "auth",
+          "name": "claude-login",
+          "cite": "scripts/conveyor/claude-auth-health.mjs:156",
+          "note": "point-in-time probe at tick start; a login that expires mid-session is caught only by session-cleanup (claude-auth-expired axis)"
+        }
+      ],
+      "notes": "On a broken login the tick skips dispatch and retries next tick with no bound (same unbounded pause as fix.login-broken-paused)."
+    },
+    {
+      "id": "claim-and-fill-brief",
+      "state": "ci-heal-dispatch",
+      "actor": "ci-heal-pr-dispatch.mjs#dispatchCiHeal",
+      "does": "acquires an atomic (repo, pr, headRefOid) claim, resolves the repo profile + gate, fills fix-agent-ci-brief.md's placeholders",
+      "cite": "scripts/operations/ci-heal-pr-dispatch.mjs:63-118",
+      "canFail": true,
+      "onFailure": "ci-heal-dispatch",
+      "assumes": [
+        {
+          "kind": "auth",
+          "name": "claude-login"
+        },
+        {
+          "kind": "path-tool",
+          "name": "gh"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "fix-claim:<pr>",
+          "cite": "scripts/operations/ci-heal-pr-dispatch.mjs:77-88"
+        },
+        {
+          "kind": "lane",
+          "name": "<lane> acquired",
+          "cite": "scripts/operations/ci-heal-pr-dispatch.mjs:227,246-260"
+        }
+      ],
+      "notes": "A claim already held by another dispatcher (the resident daemon and a hand-run runner.mjs racing) returns {held:true} and releases the popped lane back to the pool rather than dead-ending; retried next tick."
+    },
+    {
+      "id": "spawn-session",
+      "state": "ci-heal-dispatch",
+      "actor": "dispatch-lane-io.mjs#createDispatchSinks (shelled by ci-heal-pr-dispatch.mjs)",
+      "does": "spawns the ci-heal-<pr> Claude session through createDispatchSinks — cwd is a per-session scratch dir (PR #2701), the lane number is only in the brief",
+      "cite": "scripts/operations/ci-heal-pr-dispatch.mjs:66,119-122; scripts/operations/dispatch-lane-io.mjs:1268",
+      "canFail": true,
+      "onFailure": "ci-heal-dispatch",
+      "assumes": [
+        {
+          "kind": "lane",
+          "name": "<lane> acquired"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1268"
+        },
+        {
+          "kind": "permission",
+          "name": "edit:<scratch>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1268"
+        }
+      ]
+    },
+    {
+      "id": "reconstitute-and-repair",
+      "state": "ci-heal-session-running",
+      "actor": "ci-heal-<pr> session",
+      "does": "acquires a free lane reset to the PR's pushed ref, rebases onto current main, diagnoses + repairs the failing check, gets the gate green, re-pushes HEAD, posts the durable marker, exits without merging",
+      "cite": "skills-src/conveyor/fix-agent-ci-brief.md:57-90",
+      "canFail": true,
+      "onFailure": "ci-heal-dispatch",
+      "assumes": [
+        {
+          "kind": "permission",
+          "name": "edit:<lane>"
+        },
+        {
+          "kind": "lane",
+          "name": "<lane> acquired"
+        },
+        {
+          "kind": "path-tool",
+          "name": "git"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "git",
+          "name": "lane at PR head",
+          "cite": "skills-src/conveyor/fix-agent-ci-brief.md:57-71"
+        }
+      ],
+      "notes": "onFailure here models the brief's own instruction to stop and report 'ci-heal not-applicable (lane ref gone)' (fix-agent-ci-brief.md:74-75) — a stand-down comment, not an automatic repair; the PR falls back to being re-evaluated fresh next tick since the session is then no longer live.",
+      "ack": {
+        "unprovided-assumption": "xrv69j6"
+      }
+    }
+  ]
+}

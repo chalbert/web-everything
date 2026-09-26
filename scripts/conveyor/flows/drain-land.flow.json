@@ -1,0 +1,507 @@
+{
+  "id": "drain-land",
+  "title": "Drain-land (resident merge-queue daemon)",
+  "summary": "The plateau-app resident drain daemon (tools/drain-daemon/daemon.mjs) holds the whole-process drain lease and runs scripts/merge-ai-prs.mjs --label=ready-to-merge --json as a one-shot child pass on a 60s interval from a dedicated, self-syncing WE clone. All drain LOGIC (mergeability, JIT numbering, resolve-on-land, rebase-drop) stays single-sourced in WE scripts/; the daemon only schedules it. Confirmed live 2026-09-26: ~/Library/LaunchAgents/com.plateau.drain-daemon.plist is installed and running from /Users/nicolasgilbert/workspace/plateau-drain-daemon, driving the WE clone at .lanes/we-drain-daemon/lane-1.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "plateau:tools/drain-daemon/daemon.mjs",
+    "plateau:tools/drain-daemon/lib.mjs",
+    "plateau:tools/drain-daemon/README.md",
+    "scripts/merge-ai-prs.mjs",
+    "scripts/lib/pr-merge-gate.mjs",
+    "scripts/lane-drain.mjs",
+    "scripts/pr-land.mjs",
+    "scripts/progress-board.mjs",
+    "scripts/operations/pr-status.mjs",
+    "scripts/conveyor/queue-scope.mjs"
+  ],
+  "entry": {
+    "state": "queued-for-merge",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.plateau.drain-daemon.plist",
+        "note": "WorkingDirectory=/Users/nicolasgilbert/workspace/plateau-drain-daemon (the daemon's own self-syncing plateau-app checkout; confirmed live via plutil -p, 2026-09-26)"
+      },
+      {
+        "kind": "env",
+        "name": "DRAIN_DAEMON_WE_CLONE",
+        "cite": "launchd:com.plateau.drain-daemon.plist",
+        "note": "points at the dedicated single-lane WE pool clone the child pass actually runs in (.lanes/we-drain-daemon/lane-1) — a DIFFERENT directory than cwd:<daemon-clone> above"
+      },
+      {
+        "kind": "env",
+        "name": "DRAIN_DAEMON_WE_PRIMARY",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "DRAIN_DAEMON_SELF_SYNC",
+        "cite": "launchd:com.plateau.drain-daemon.plist",
+        "note": "1 — opted in; self-sync guard is plateau:tools/drain-daemon/daemon.mjs:218-244"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "path-tool",
+        "name": "gh",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_ID",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_INSTALLATION_ID",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "env",
+        "name": "WE_GITHUB_APP_PRIVATE_KEY_PATH",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      },
+      {
+        "kind": "auth",
+        "name": "github-app-token",
+        "cite": "launchd:com.plateau.drain-daemon.plist"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "queued-for-merge",
+      "label": "PR carries ready-to-merge / review:accepted",
+      "terminal": false,
+      "owner": "tools/drain-daemon/daemon.mjs (resident, installed com.plateau.drain-daemon.plist)",
+      "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:370-383",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "A single-PR FAST DRAIN (scripts/pr-land.mjs, scripts/lane-drain.mjs) can also land a PR by BYPASSING the whole-process lease entirely (README.md: '/pr\\`/\\`/finish\\` single-PR fast drains bypass the lease and stay instant') — not modeled as a separate entry here since it converges on the same merge-candidate-evaluation/merge-attempt machinery; the numbering mutex (scripts/merge-ai-prs.mjs:5088) is what actually serializes the two paths, not this state."
+    },
+    {
+      "id": "lease-arbitration",
+      "label": "Whole-process drain lease: acquire, hold, or wait it out",
+      "terminal": false,
+      "owner": "tools/drain-daemon/daemon.mjs (its own while(true) loop)",
+      "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:370-383",
+      "wait": {
+        "for": "a foreign lease holder (an interactive session drain) to release or its 15-min TTL to expire",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "plateau:tools/drain-daemon/lib.mjs:309-317"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Deliberately unbounded BY DESIGN ('mixed mode is permanent', plateau:tools/drain-daemon/README.md — a foreign holder is WAITED OUT, never contended) — still an honest unbounded wait: nothing here ever alerts if a foreign holder never releases and never crashes past its TTL.",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    },
+    {
+      "id": "pass-running",
+      "label": "One child merge-ai-prs.mjs sweep in flight",
+      "terminal": false,
+      "owner": "tools/drain-daemon/daemon.mjs#runPass",
+      "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:286-313",
+      "wait": {
+        "for": "the child process to exit",
+        "timeout": "45m",
+        "onTimeout": "queued-for-merge",
+        "cite": "plateau:tools/drain-daemon/daemon.mjs:296-300"
+      },
+      "retries": {
+        "what": "consecutive failed passes (exit 2 merge-attempt-failed, exit 4 child-detected failure, or a spawn/kill failure) — exponential backoff, ceiling 900s, repeats indefinitely",
+        "cap": null,
+        "onCap": null,
+        "cite": "plateau:tools/drain-daemon/lib.mjs:423-440"
+      },
+      "escalation": {
+        "to": "operator",
+        "how": "best-effort desktop notification (osascript) once anomaly detection trips on the in-memory recent-pass window — never on every single failure",
+        "cite": "plateau:tools/drain-daemon/daemon.mjs:122-141"
+      },
+      "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "merge-candidate-evaluation",
+      "label": "Per-PR merge/skip decision (merge-ai-prs.mjs#classifyPr)",
+      "terminal": false,
+      "owner": "merge-ai-prs.mjs (the child pass)",
+      "ownerCite": "scripts/merge-ai-prs.mjs:555",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "decision==='merge' requires ALL of: producer-certified, required check green, mergeable==='MERGEABLE', mergeStateStatus CLEAN/UNSTABLE, non-empty body, and no uncleared review hold (scripts/merge-ai-prs.mjs:584-615). BEHIND (needs a rebase) is reported here as an ordinary skip and is NOT repaired by this flow — the fix-agent-ci-brief / #2183 rebuild path handles a landable-but-behind PR, out of this file's scope."
+    },
+    {
+      "id": "accepted-unchecked-no-ci",
+      "label": "Accepted / ready-to-merge, but ZERO check runs on this head",
+      "terminal": false,
+      "owner": "none",
+      "ownerCite": "scripts/merge-ai-prs.mjs:602",
+      "wait": {
+        "for": "something to notice this head was never actually checked and re-trigger CI or escalate",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/operations/pr-status.mjs:140-147"
+      },
+      "retries": {
+        "what": "the drain silently re-evaluates and re-skips this exact PR every ~60s sweep, forever, with no attempt count kept anywhere",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/merge-ai-prs.mjs:570,602"
+      },
+      "escalation": null,
+      "notes": "KEY QUESTION answered (the #2729 shape): reduceCheckState's empty-rollup case reads 'unchecked', never 'red' (scripts/operations/pr-status.mjs:140-147) — so merge-ai-prs.mjs's own gate reports the flat, indistinguishable-from-still-running reason 'required check \"test\" is not green' (scripts/merge-ai-prs.mjs:602) every sweep, with no escalation and no comment posted. Upstream, scripts/progress-board.mjs#classifyPr's ciFailed() is `false` on an empty rollup (scripts/progress-board.mjs:466-472,510), so the SAME PR reads as board-status 'queued' — healthy-looking — meaning scripts/conveyor/reconcile-core.mjs's whole ci-red branch (ci-heal dispatch, cap-exhausted note) never even sees it either. Nobody owns this PR: not the drain (repeats the skip forever), not reconcile-core (never classifies it as needing help), not the operator queue (no distinguishing signal to surface). The most common real cause is exactly ci-heal.flow.json's base-retargeted state (a stacked PR's base merges, GitHub retargets it onto main with no fresh CI run) — but this state is reached whenever a head genuinely has zero check runs for ANY reason, not only that one.",
+      "ack": {
+        "no-owner": "xi4od2p",
+        "unbounded-wait": "xi4od2p",
+        "uncapped-retry": "xi4od2p"
+      }
+    },
+    {
+      "id": "merge-attempt",
+      "label": "gh pr merge via the shared merge gate",
+      "terminal": false,
+      "owner": "scripts/lib/pr-merge-gate.mjs (caller='drain'), shelled by merge-ai-prs.mjs",
+      "ownerCite": "scripts/lib/pr-merge-gate.mjs:32",
+      "wait": null,
+      "retries": {
+        "what": "a failed real merge attempt (a genuine race: the head moved between the pass's own re-confirmation and this call, guarded by --match-head-commit) is retried next sweep with no count kept",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/merge-ai-prs.mjs:4980-4997"
+      },
+      "escalation": null,
+      "notes": "A merge failure on a PR the SAME pass just rebase-dropped is expected (CI is re-running against the new tip) and is not treated as a fault (scripts/merge-ai-prs.mjs:4988-4993); every other merge failure is reported in failedMerges and simply retried the next sweep.",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "post-merge-housekeeping",
+      "label": "JIT numbering + resolve-on-land + primary/local ff-sync",
+      "terminal": false,
+      "owner": "merge-ai-prs.mjs (child, under the numbering mutex)",
+      "ownerCite": "scripts/merge-ai-prs.mjs:5086-5178",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "withNumberingLock is a TTL-bounded mutex (scripts/merge-ai-prs.mjs:5088); on contention it proceeds WITHOUT the lock rather than waiting (scripts/merge-ai-prs.mjs:5178, 'numbered without it ... the #2318 duplicate-NNN tripwire is the backstop') — the tripwire is the ONLY thing that catches a real collision, and only on a LATER pass. resolve-on-land totality (scripts/merge-ai-prs.mjs:5143-5164) reports every landed item into exactly one of resolved/already-resolved/deferred/failed, so a withheld flip is at least visible in the pass's own stderr/--json — never a fully silent drop."
+    },
+    {
+      "id": "pr-landed",
+      "label": "Merged, numbered, resolved, leases released",
+      "terminal": true,
+      "outcome": "success",
+      "owner": null,
+      "escalation": null,
+      "notes": "The drain's terminal land event is the universal owner of post-land cleanup for every land path (scripts/lane-drain.mjs:33-40) — resolveLandedItem (scripts/lane-drain.mjs:1059) flips active/open→resolved, releaseItemLeases (scripts/lane-drain.mjs:1090, called at :481) releases every held lease."
+    },
+    {
+      "id": "duplicate-nnn-parked",
+      "label": "Duplicate NNN survives on main — globally red",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": null,
+      "escalation": {
+        "to": "operator",
+        "how": "a loud daemon.log line naming the incident + a best-effort desktop notification (osascript); polling cannot clear it",
+        "cite": "plateau:tools/drain-daemon/daemon.mjs:421-422,122-141"
+      },
+      "retries": {
+        "what": "the daemon still re-attempts the sweep every 900s (the backoff ceiling) forever — the escalation never actually stops the retrying, it only makes it loud",
+        "cap": null,
+        "onCap": null,
+        "cite": "plateau:tools/drain-daemon/lib.mjs:435-440"
+      },
+      "notes": "Detected only on exit 3 WITHOUT a carried reason (a bare process.exit(3) after the full report, never a fail('gh-error',...) call) — an exit 3 that DOES carry reason:'gh-error' (a transient gh error) takes the ordinary generic backoff instead and is never treated as this incident (plateau:tools/drain-daemon/lib.mjs:421-434). 'Polling cannot clear it' per the daemon's own README — this is explicitly an operator-only fix (WE #2318).",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "queued-for-merge",
+      "to": "lease-arbitration",
+      "on": "the next 60s tick",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:370"
+    },
+    {
+      "from": "lease-arbitration",
+      "to": "lease-arbitration",
+      "on": "lease held by a foreign owner — wait it out",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/lib.mjs:315"
+    },
+    {
+      "from": "lease-arbitration",
+      "to": "pass-running",
+      "on": "lease acquired (or already held by this daemon)",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:379-383"
+    },
+    {
+      "from": "pass-running",
+      "to": "merge-candidate-evaluation",
+      "on": "child pass reads the ready-to-merge/review:accepted candidate set",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:288"
+    },
+    {
+      "from": "merge-candidate-evaluation",
+      "to": "merge-attempt",
+      "on": "decision === 'merge'",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:584-597"
+    },
+    {
+      "from": "merge-candidate-evaluation",
+      "to": "accepted-unchecked-no-ci",
+      "on": "required check has zero runs on this head (reduceCheckState:'unchecked') despite review:accepted/ready-to-merge",
+      "kind": "normal",
+      "cite": "scripts/operations/pr-status.mjs:140-147"
+    },
+    {
+      "from": "merge-candidate-evaluation",
+      "to": "@conflict",
+      "on": "mergeStateStatus === 'DIRTY' — a real conflict with main",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:604"
+    },
+    {
+      "from": "merge-candidate-evaluation",
+      "to": "queued-for-merge",
+      "on": "any other skip (not certified, non-default base, required check red/pending, BEHIND, empty body, uncleared review hold) — retried next sweep",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:598-614"
+    },
+    {
+      "from": "accepted-unchecked-no-ci",
+      "to": "accepted-unchecked-no-ci",
+      "on": "next sweep, unchanged",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:602"
+    },
+    {
+      "from": "merge-attempt",
+      "to": "post-merge-housekeeping",
+      "on": "gh pr merge succeeded",
+      "kind": "normal",
+      "cite": "scripts/lib/pr-merge-gate.mjs:32-36"
+    },
+    {
+      "from": "merge-attempt",
+      "to": "queued-for-merge",
+      "on": "merge failed (race lost, or a real fault) — retried next sweep",
+      "kind": "failure",
+      "cite": "scripts/merge-ai-prs.mjs:4980-4997"
+    },
+    {
+      "from": "post-merge-housekeeping",
+      "to": "pr-landed",
+      "on": "numbering + resolve-on-land + ff-sync all completed (best-effort, non-fatal throughout)",
+      "kind": "normal",
+      "cite": "scripts/merge-ai-prs.mjs:5168-5179"
+    },
+    {
+      "from": "post-merge-housekeeping",
+      "to": "duplicate-nnn-parked",
+      "on": "a later pass discovers two files claiming the same NNN survives on main",
+      "kind": "failure",
+      "cite": "scripts/merge-ai-prs.mjs:5178"
+    },
+    {
+      "from": "pass-running",
+      "to": "lease-arbitration",
+      "on": "the lease was reclaimed away mid-pass (heartbeat failed — slept past the TTL, or a foreign holder took over); the in-flight child is killed",
+      "kind": "failure",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:343-356"
+    }
+  ],
+  "steps": [
+    {
+      "id": "acquire-lease",
+      "state": "lease-arbitration",
+      "actor": "tools/drain-daemon/daemon.mjs",
+      "does": "dl.acquireDrainLease(DRAIN_LOCK_ROOT, OWNER, {repoKey}) once the lease reads free/stale",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:379-383",
+      "canFail": true,
+      "onFailure": "lease-arbitration",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "node"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lock",
+          "name": "drain-lease",
+          "cite": "plateau:tools/drain-daemon/daemon.mjs:325-335"
+        }
+      ],
+      "notes": "A lost race (another process acquired first) simply loops back to re-arbitrate next tick — never a dead end."
+    },
+    {
+      "id": "refresh-clone",
+      "state": "pass-running",
+      "actor": "tools/drain-daemon/daemon.mjs#refreshClone",
+      "does": "git fetch + reset --hard origin/main + clean -fdq on the dedicated WE clone; npm ci --ignore-scripts only when the lockfile changed",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:248-281",
+      "canFail": true,
+      "onFailure": "pass-running",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "git"
+        },
+        {
+          "kind": "env",
+          "name": "DRAIN_DAEMON_WE_CLONE"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<we-drain-clone>"
+        },
+        {
+          "kind": "writable",
+          "name": "<we-drain-clone>"
+        },
+        {
+          "kind": "git",
+          "name": "origin/main fetched",
+          "cite": "plateau:tools/drain-daemon/daemon.mjs:251,259"
+        }
+      ],
+      "notes": "canFail with no dedicated onFailure state: a refresh failure just logs a WARN and the pass runs on the existing (possibly stale) checkout (plateau:tools/drain-daemon/daemon.mjs:277-280) — never blocks or reroutes, so onFailure loops back into the same pass-running state the next step (spawn-child-pass) already runs in."
+    },
+    {
+      "id": "spawn-child-pass",
+      "state": "pass-running",
+      "actor": "tools/drain-daemon/daemon.mjs#runPass",
+      "does": "spawns `node scripts/merge-ai-prs.mjs --label=ready-to-merge --json --under-lease=<OWNER>` with cwd=the WE clone",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:286-313",
+      "canFail": true,
+      "onFailure": "queued-for-merge",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<we-drain-clone>"
+        },
+        {
+          "kind": "lock",
+          "name": "drain-lease"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "cwd",
+          "name": "<we-drain-clone>",
+          "note": "the CHILD's own cwd, inherited from spawn()'s cwd option"
+        }
+      ]
+    },
+    {
+      "id": "evaluate-merge-gate",
+      "state": "merge-candidate-evaluation",
+      "actor": "merge-ai-prs.mjs#classifyPr",
+      "does": "certified? required-check green? mergeable? landable mergeStateStatus? non-empty body? review hold cleared?",
+      "cite": "scripts/merge-ai-prs.mjs:560-615",
+      "canFail": false,
+      "assumes": [
+        {
+          "kind": "ci",
+          "name": "required checks ran on head"
+        }
+      ],
+      "provides": [],
+      "notes": "This assumption is never actually confirmed here (or anywhere else in this flow) — GitHub's rollup is trusted as-is whatever produced it. accepted-unchecked-no-ci is what happens when the assumption is false (zero runs at all); ci-heal.flow.json's base-retargeted state names the most common concrete cause.",
+      "ack": {
+        "unprovided-assumption": "xi4od2p"
+      }
+    },
+    {
+      "id": "merge-pr",
+      "state": "merge-attempt",
+      "actor": "scripts/lib/pr-merge-gate.mjs (caller='drain')",
+      "does": "gh pr merge <n> --<method> --delete-branch --match-head-commit <sha> — the ONE place a gh pr merge to main may originate",
+      "cite": "scripts/lib/pr-merge-gate.mjs:1-36",
+      "canFail": true,
+      "onFailure": "merge-attempt",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "gh"
+        },
+        {
+          "kind": "auth",
+          "name": "github-app-token"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "pr",
+          "name": "mergeable",
+          "note": "re-confirmed by classifyPr's own fresh re-read immediately before this call (scripts/merge-ai-prs.mjs:619-629)"
+        }
+      ]
+    },
+    {
+      "id": "jit-number-and-resolve",
+      "state": "post-merge-housekeeping",
+      "actor": "merge-ai-prs.mjs (numberPendingHashes / planResolveOnLand / resolveLandedItem)",
+      "does": "assigns the real sequential NNN to every hash-keyed item now on main, then flips active/open→resolved for every fully-landed couple, then pushes both in one commit",
+      "cite": "scripts/merge-ai-prs.mjs:5088-5178",
+      "canFail": true,
+      "onFailure": "pr-landed",
+      "assumes": [
+        {
+          "kind": "git",
+          "name": "origin/main fetched"
+        },
+        {
+          "kind": "writable",
+          "name": "<we-drain-clone>"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "writes",
+          "name": "<we-drain-clone>/backlog/*.md"
+        }
+      ],
+      "notes": "Best-effort/non-fatal throughout, matching the numbering critical section's own posture — a push failure surfaces a warning (scripts/merge-ai-prs.mjs:5172-5174) but never unwinds the already-green land, so onFailure lands on the same pr-landed terminus the success path reaches (the PR itself is already merged before this housekeeping runs)."
+    }
+  ]
+}
