@@ -3,10 +3,11 @@ bornAs: xkw1yqc
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/review-escalation.mjs", "we:scripts/lib/marker-authorship.mjs", "we:scripts/review-set-label.mjs", "we:scripts/lib/__tests__/review-escalation.test.mjs"]
 relatedTo: ["4092"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
