@@ -1439,6 +1439,35 @@ describe('selectStatusCandidates — which PRs deserve a review-status refresh (
     expect(selectStatusCandidates([], [], null)).toEqual([]);
     expect(selectStatusCandidates([], [], undefined)).toEqual([]);
   });
+
+  // Live-caught 2026-09-26, PR #2742, card xg790dh: same root shape as the fixesOwed miss above, a FOURTH
+  // exclusion — a PR that moved from being owed a FIX to being owed a CI-HEAL (its fix session finished, its
+  // re-push then went CI-red) never got its status label re-derived either: `kind:'ci-heal'` matched neither
+  // `reviewsOwed` nor `fixesOwed`, and a ci-heal-owed PR is a real `dispatch` entry (not a refusal) whenever its
+  // cap is unspent — so `review-status:fixing` sat stale indefinitely once the fix finished.
+  it('includes every ciHealsOwed entry too — a PR owed a ci-heal deserves a status refresh exactly like one owed a fix', () => {
+    const ciHealsOwed = [{ prNumber: 2742, kind: 'ci-heal' }];
+    expect(selectStatusCandidates([], [], [], ciHealsOwed)).toEqual(ciHealsOwed);
+  });
+
+  it('combines reviewsOwed + fixesOwed + ciHealsOwed + every refusal, all four sources at once', () => {
+    const reviewsOwed = [{ prNumber: 1, kind: 'review' }];
+    const fixesOwed = [{ prNumber: 2, kind: 'fix' }];
+    const ciHealsOwed = [{ prNumber: 5, kind: 'ci-heal' }];
+    const refusals = [{ prNumber: 3, kind: 'owed-elsewhere' }, { prNumber: 4, kind: 'nothing-owed' }];
+    expect(selectStatusCandidates(reviewsOwed, refusals, fixesOwed, ciHealsOwed).map((c) => c.prNumber)).toEqual([1, 2, 5, 3, 4]);
+  });
+
+  it('a 3-arg call (ciHealsOwed omitted) still passes every refusal through unfiltered', () => {
+    const reviewsOwed = [{ prNumber: 1 }];
+    const refusals = [{ prNumber: 2, kind: 'owed-elsewhere' }];
+    expect(selectStatusCandidates(reviewsOwed, refusals, [])).toEqual([{ prNumber: 1 }, { prNumber: 2, kind: 'owed-elsewhere' }]);
+  });
+
+  it('tolerates non-array ciHealsOwed', () => {
+    expect(selectStatusCandidates([], [], [], null)).toEqual([]);
+    expect(selectStatusCandidates([], [], [], undefined)).toEqual([]);
+  });
 });
 
 it('binds names only for the invocation repo', () => {
