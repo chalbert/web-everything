@@ -455,14 +455,32 @@ describe('deliveredHashFromPr (#3914 — a card filed AND delivered in the same 
 
 describe('declaredResolvedIdsFromPr (#xqpqyr2 — ride-along cards a PR declares/resolves besides its own single ref-led id)', () => {
   describe('signal 1 — explicit "resolves #N" / "Resolves: …" LINE markers', () => {
-    it('credits a line-anchored "Resolves #N" / "resolves: #N, #M" marker', () => {
-      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Some context.\nResolves #4121\nMore text.' })).toEqual(['4121']);
-      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'resolves: #4121, #4134' })).toEqual(expect.arrayContaining(['4121', '4134']));
+    // Signal 1 is corroborated: the named card's own backlog file must be in the PR's changed files.
+    const touching4121 = ['scripts/a.mjs', 'backlog/4121-ride-along.md'];
+
+    it('credits a line-anchored "Resolves #N" / "resolves: #N, #M" marker whose card file the PR touched', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Some context.\nResolves #4121\nMore text.', changedFiles: touching4121 })).toEqual(['4121']);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'resolves: #4121, #4134', changedFiles: [...touching4121, 'backlog/4134-other.md'] })).toEqual(expect.arrayContaining(['4121', '4134']));
     });
 
     it('a bare mention mid-sentence is NOT credited — the exact "looks delivered" false positive this must avoid', () => {
-      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'This eventually resolves #4121 once the sibling lands.' })).toEqual([]);
-      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'See how #4121 was resolved previously.' })).toEqual([]);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'This eventually resolves #4121 once the sibling lands.', changedFiles: touching4121 })).toEqual([]);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'See how #4121 was resolved previously.', changedFiles: touching4121 })).toEqual([]);
+    });
+
+    // PR #2724 review (security/unverified-trust) — the marker text alone is a CLAIM, not evidence: a template,
+    // a copy-paste, or an over-claiming body must never flip a card the PR's own diff never touched.
+    it('an uncorroborated marker (the PR never touched backlog/<N>-*.md) is NEVER credited', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Resolves #9999', changedFiles: ['scripts/a.mjs', 'backlog/4200-fix.md'] })).toEqual([]);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Resolves #9999' })).toEqual([]); // changed files unknown → fail closed
+    });
+
+    it('credits only the corroborated ids of a multi-id marker', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'resolves: #4121, #9999', changedFiles: touching4121 })).toEqual(['4121']);
+    });
+
+    it('accepts gh\'s {path} changed-file objects as corroboration too', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Resolves #4121', changedFiles: touching4121.map((path) => ({ path })) })).toEqual(['4121']);
     });
   });
 
@@ -473,8 +491,13 @@ describe('declaredResolvedIdsFromPr (#xqpqyr2 — ride-along cards a PR declares
     const realTitle = 'drain numbering: linear applyLedger (xn6n5gp), pid-aware lock reclaim + never-run-unlocked (xuqk1vp), number-on-any-pass sweep (xb94mt5)';
     const landedNumberFor = (h) => ({ xn6n5gp: '4127', xuqk1vp: '4134', xb94mt5: '4121' }[h] ?? null);
 
+    // PR #2668's real changed files: it touched all three cards' (already numbered) backlog files.
+    const realFiles = ['backlog/4121-drain-number-pending.md', 'backlog/4127-drain-numbering-linear.md', 'backlog/4134-numbering-lock-reclaim.md', 'scripts/backlog/id.mjs'];
+    // PR #2689's real changed files: it filed both cards under their bornAs hashes.
+    const soakFiles = ['backlog/x0zg44l-daemon-soak-harness.md', 'backlog/xg6m4i5-rule-every-daemon-bug-fix.md', 'scripts/conveyor/soak/invariants.mjs'];
+
     it('extracts every parenthesized hash in the TITLE and cross-verifies each against landedNumberFor (PR #2668\'s real shape)', () => {
-      expect(declaredResolvedIdsFromPr('lane/xn6n5gp-numbering-linear-lock-safety', realTitle, { landedNumberFor }).sort())
+      expect(declaredResolvedIdsFromPr('lane/xn6n5gp-numbering-linear-lock-safety', realTitle, { changedFiles: realFiles, landedNumberFor }).sort())
         .toEqual(['4121', '4127', '4134'].sort());
     });
 
@@ -488,20 +511,42 @@ describe('declaredResolvedIdsFromPr (#xqpqyr2 — ride-along cards a PR declares
     it('extracts a hash inside a body HEADING line ("## … cards x0zg44l + xg6m4i5") (PR #2689\'s real shape)', () => {
       const body = '## Daemon soak harness (#4075, cards x0zg44l + xg6m4i5)\n\nSome prose that also happens to mention xdecoy9 in passing, which must NOT be credited.\n';
       const ln = (h) => ({ x0zg44l: '4169', xg6m4i5: '4172' }[h] ?? null);
-      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness (#4075)', { body, landedNumberFor: ln }).sort())
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness (#4075)', { body, changedFiles: soakFiles, landedNumberFor: ln }).sort())
         .toEqual(['4169', '4172'].sort());
     });
 
     it('extracts a hash inside a body BOLD-span line ("**Rule (xg6m4i5):** …") (PR #2689\'s real shape)', () => {
       const body = '**Rule (xg6m4i5):** the fix-agent brief and conveyor SKILL.md now say every daemon bug fix adds its real-world case to the soak harness.';
       const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
-      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness', { body, landedNumberFor: ln })).toEqual(['4172']);
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness', { body, changedFiles: soakFiles, landedNumberFor: ln })).toEqual(['4172']);
+    });
+
+    // PR #2724 review follow-up — the marker is a claim, as for signal 1: a bold/heading/title citation of a
+    // real card the PR never touched ("not fixed", "skipped", "still open") must not resolve it.
+    it('a verified hash is NOT credited when the PR never touched that card\'s file (under its hash or its number)', () => {
+      const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
+      for (const body of ['- **Not fixed (xg6m4i5):** deferred', '## Follow-up still open: xg6m4i5']) {
+        expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'x0zg44l: unrelated', { body, changedFiles: ['scripts/a.mjs'], landedNumberFor: ln })).toEqual([]);
+      }
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'fix (xg6m4i5)', { landedNumberFor: ln })).toEqual([]); // changed files unknown → fail closed
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'fix (xg6m4i5)', { changedFiles: ['scripts/a.mjs', 'backlog/4172-rule.md'], landedNumberFor: ln })).toEqual(['4172']);
     });
 
     it('a bare hash mention in ordinary prose (no bold span, no heading) is NEVER credited, even if it would verify', () => {
       const body = 'This builds on the approach xg6m4i5 took earlier, applied to a different daemon.';
       const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
       expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'x0zg44l: unrelated', { body, landedNumberFor: ln })).toEqual([]);
+    });
+
+    // PR #2724 review (correctness, 3 lenses) — a line that merely STARTS with a bold span must not turn the
+    // rest of its prose into a marker: only the hash INSIDE the leading bold span counts.
+    it('does not credit a hash outside a bold span, even on a bold-led line', () => {
+      const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
+      for (const body of [
+        '**Note:** this mirrors the fix already shipped for xg6m4i5 in a different daemon.',
+        '**Warning:** this does NOT fix xg6m4i5',
+        '- **Context:** follow-up work remains in xg6m4i5',
+      ]) expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'x0zg44l: unrelated', { body, landedNumberFor: ln })).toEqual([]);
     });
   });
 

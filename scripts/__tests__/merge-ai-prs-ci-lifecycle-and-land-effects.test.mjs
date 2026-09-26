@@ -1222,11 +1222,13 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
     expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' }, { fetchGuardSignals: noSignals, fetchDiff: () => '' })).toEqual([]);
   });
 
-  it('#3473 — lazy-fetch is SKIPPED entirely when the ref/title-only base is empty: fetchGuardSignals is never called', () => {
-    let called = false;
-    const spy = () => { called = true; return { body: '', changedFiles: null }; };
-    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo, fetchGuardSignals: spy, fetchDiff: () => '' })).toEqual([]);
-    expect(called).toBe(false);
+  // #3473's lazy fetch skipped this call when the ref/title base was empty; PR #2724's review relaxed that
+  // (a body-only ride-along of a no-id PR was missed), so the body IS read — and with no signal, credits nothing.
+  it('#3473 / PR #2724 — an empty ref/title base still reads the body once, and neutral signals credit nothing', () => {
+    let calls = 0;
+    const spy = () => { calls += 1; return { body: '', changedFiles: null }; };
+    expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: '' }, { isLocalRepo, fetchGuardSignals: spy, resolveHashNumber: () => null, fetchDiff: () => '' })).toEqual([]);
+    expect(calls).toBe(1);
   });
 
   it('#3473 — PR #1866\'s exact shape end-to-end: the ref/title-only base would credit #3443, but the injected body\'s "does not resolve #3443" disclaimer strips it', () => {
@@ -1303,14 +1305,22 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
       expect([...ids].sort((a, b) => String(a).localeCompare(String(b)))).toEqual([4172, 'x0zg44l'].sort((a, b) => String(a).localeCompare(String(b))));
     });
 
-    it('an ordinary single-card PR (no digit ids, no hash parens, no "resolves") never pays the extra fetch — fetchGuardSignals is untouched', () => {
-      let called = false;
-      const spy = () => { called = true; return { body: '', changedFiles: null }; };
+    // PR #2724 review — a PR with no id of its own used to be gated on a TITLE-only hint, so a ride-along
+    // declared only in its BODY was never read. This runs only on a confirmed merge, so the one fetch is cheap.
+    it('a PR with no id of its own and no title hint still reads its body — a corroborated body-only "Resolves #N" is credited', () => {
+      const fetchGuardSignals = () => ({ body: 'Housekeeping.\nResolves #4121', changedFiles: ['scripts/a.mjs', 'backlog/4121-ride-along.md'] });
       expect(landedIdsForCandidate(
         { hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: 'unrelated title with no ids at all' },
-        { isLocalRepo, fetchGuardSignals: spy, fetchDiff: () => '' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff: () => '' },
+      )).toEqual([4121]);
+    });
+
+    it('a PR with no id and no ride-along signal credits nothing', () => {
+      const fetchGuardSignals = () => ({ body: 'Resolves #9999', changedFiles: ['scripts/a.mjs'] });
+      expect(landedIdsForCandidate(
+        { hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: 'unrelated title with no ids at all' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff: () => '' },
       )).toEqual([]);
-      expect(called).toBe(false);
     });
   });
 });

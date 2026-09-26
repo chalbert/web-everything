@@ -351,12 +351,15 @@ export function deliveredHashFromPr(headRefName = '', title = '', { body = '', c
  * THREE conservative signals, each independently gated so a bare mention in prose never counts — the exact
  * "looks delivered" false-positive class this must avoid (per this module's own docstring above):
  *   1. An explicit "resolves #N" / "Resolves: #N, #M" LINE marker in the body — anchored to the START of a
- *      line (optional leading list marker / bold decoration), never a mid-sentence citation. This is the
- *      `Resolves #N` / `Refs #N` backstop `docs/agent/platform-decisions.md`'s
+ *      line (optional leading list marker / bold decoration), never a mid-sentence citation — AND corroborated
+ *      by the PR's own changed files naming that card's `backlog/<N>-*.md` (the text alone never resolves a
+ *      card). This is the `Resolves #N` / `Refs #N` backstop `docs/agent/platform-decisions.md`'s
  *      `#drain-multi-slice-card-interim-hold` note already anticipated as "a later, additive backstop."
  *   2. A structured bornAs-HASH card marker: a `x[0-9a-z]{6}` token that appears either (a) parenthesized
- *      anywhere in the PR's own TITLE, or (b) inside a markdown BOLD span or a HEADING line in the body —
- *      never a bare hash mention in ordinary prose elsewhere in the body. Every candidate hash is
+ *      anywhere in the PR's own TITLE, or (b) INSIDE a body line's leading markdown BOLD span, or on a HEADING
+ *      line — never a bare hash mention in ordinary prose elsewhere, including the prose that follows a
+ *      leading bold span on the same line. Like signal 1, it is corroborated: the PR's changed files must name
+ *      the card's own `backlog/<hash|N>-*.md`. Every candidate hash is
  *      cross-verified against `landedNumberFor` (a REAL `bornAs` record on `origin/main`); an unverifiable
  *      hash (a coincidental token, or a citation of unrelated work) is silently dropped — the text alone is
  *      never trusted.
@@ -373,24 +376,42 @@ export function declaredResolvedIdsFromPr(headRefName = '', title = '', { body =
   const ids = new Set();
   // Signal 1 — explicit resolves/Resolves marker LINES (never mid-sentence): "Resolves #4121", "resolves:
   // #4121, #4134", "Resolves #4121 and #4134" — optional leading `-`/`*` bullet and bold decoration.
+  // The marker is only a CLAIM: each id is credited only when the PR's own changed files include that card's
+  // `backlog/<N>-*.md` (PR #2724 review) — a template, a copy-paste or an over-claiming body naming a card the
+  // PR never touched credits nothing. Unknown changed files fail closed.
+  const touchedCards = (Array.isArray(changedFiles) ? changedFiles : [])
+    .map((f) => /(?:^|\/)backlog\/(\d{2,5}|x[0-9a-z]{6})-[^/]+\.md$/i.exec(String(f?.path ?? f))?.[1])
+    .filter(Boolean);
+  const touchedIds = new Set(touchedCards.filter((c) => /^\d/.test(c)).map((n) => n.padStart(3, '0')));
+  const touchedHashes = new Set(touchedCards.filter((c) => /^x/i.test(c)).map((h) => h.toLowerCase()));
   for (const rawLine of String(body || '').split(/\r?\n/)) {
     const line = rawLine.trim();
     const m = /^(?:[-*]\s+)?\*{0,2}resolve[sd]?:?\*{0,2}\s+((?:#\d{2,5}\b[\s,&]*(?:and\s+)?)+)$/i.exec(line);
-    if (m) for (const n of m[1].matchAll(/#(\d{2,5})/g)) ids.add(n[1].padStart(3, '0'));
+    if (!m) continue;
+    for (const n of m[1].matchAll(/#(\d{2,5})/g)) {
+      const id = n[1].padStart(3, '0');
+      if (touchedIds.has(id)) ids.add(id);
+    }
   }
-  // Signal 2 — structured bornAs-hash card markers (title parens; body bold span / heading line), each
-  // cross-verified against a REAL bornAs record before it is ever credited.
+  // Signal 2 — structured bornAs-hash card markers (title parens; body leading bold span / heading line), each
+  // cross-verified against a REAL bornAs record before it is ever credited. On a bold-led line only the text
+  // INSIDE the leading bold span counts — prose after it (`**Note:** unlike xg6m4i5, …`) is a citation.
   const hashCandidates = new Set();
   for (const m of String(title || '').matchAll(/\((x[0-9a-z]{6})\)/gi)) hashCandidates.add(m[1].toLowerCase());
   for (const rawLine of String(body || '').split(/\r?\n/)) {
-    const isMarkerLine = /^\s*(?:[-*+]\s+)?\*\*[^*\n]*\*\*/.test(rawLine) || /^\s{0,3}#{1,6}\s/.test(rawLine);
-    if (!isMarkerLine) continue;
-    for (const m of rawLine.matchAll(/\b(x[0-9a-z]{6})\b/gi)) hashCandidates.add(m[1].toLowerCase());
+    const bold = /^\s*(?:[-*+]\s+)?\*\*([^*\n]*)\*\*/.exec(rawLine);
+    const markerText = bold ? bold[1] : (/^\s{0,3}#{1,6}\s/.test(rawLine) ? rawLine : null);
+    if (markerText == null) continue;
+    for (const m of markerText.matchAll(/\b(x[0-9a-z]{6})\b/gi)) hashCandidates.add(m[1].toLowerCase());
   }
   if (typeof landedNumberFor === 'function') {
+    // Corroborated like signal 1: the PR must have touched the card's own file, under its hash or its number —
+    // a bold/heading citation of a card the PR never touched (`**Not fixed (xg6m4i5):** deferred`) is a claim.
     for (const hash of hashCandidates) {
       const landed = landedNumberFor(hash);
-      if (landed != null) ids.add(String(landed).padStart(3, '0'));
+      if (landed == null) continue;
+      const id = String(landed).padStart(3, '0');
+      if (touchedHashes.has(hash) || touchedIds.has(id)) ids.add(id);
     }
   }
   // Signal 3 — a backlog file the PR's OWN diff flips TO status: resolved (ground truth, not a heuristic).

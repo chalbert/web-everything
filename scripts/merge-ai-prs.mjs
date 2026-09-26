@@ -1552,8 +1552,8 @@ function attachManifestToVerdict(v, m, { repo = null, isLocalRepo = () => false,
 
 /**
  * #3473 — fetches the two extra signals `deliveredItemNumsFromPr`'s guards 6/7 need (a PR's own body, and its
- * changed-file list) via ONE `gh pr view --json body,files` call. Not called unconditionally — see
- * `landedIdsForCandidate` below for the lazy-fetch-on-non-empty-base rationale. Fail-soft, matching every other
+ * changed-file list) via ONE `gh pr view --json body,files` call — once per CONFIRMED-merged local candidate
+ * (`landedIdsForCandidate` below; #xqpqyr2 dropped #3473's lazy-fetch-on-non-empty-base gate). Fail-soft, matching every other
  * `gh` read in this file: any failure (auth, rate-limit, network, unparseable JSON) degrades to `{body: '',
  * changedFiles: null}` — both guards then no-op, so a `gh` hiccup degrades to the PRE-#3473 behaviour rather
  * than blocking or crashing a land.
@@ -1620,8 +1620,8 @@ export function defaultFetchDiff(c) {
  * not the looser `itemNumsFromPr`, is the right tool for an AUTO-COMMITTED resolve. Pure.
  *
  * #3473 — TWO-PASS: first compute the ref/title-only `base` (identical to pre-#3473 behaviour, zero extra
- * `gh` calls). Only when `base` is non-empty — i.e. this candidate would otherwise auto-resolve something —
- * lazily fetch the candidate's body/changed-files (`fetchGuardSignals`, one `gh pr view` call) and re-run
+ * `gh` calls). [Superseded by #xqpqyr2 below: the fetch now runs for every merged local candidate.] Only
+ * when `base` is non-empty — i.e. this candidate would otherwise auto-resolve something — lazily fetch the candidate's body/changed-files (`fetchGuardSignals`, one `gh pr view` call) and re-run
  * `deliveredItemNumsFromPr` WITH those signals, so guards 6/7 (the "does not resolve #NNN" disclaimer and the
  * all-.md-diff housekeeping exclusion) can strip a false credit before it reaches `landedThisPass`. This keeps
  * the extra `gh` round-trip off the overwhelming majority of candidates, which match nothing and must never
@@ -1633,10 +1633,12 @@ export function defaultFetchDiff(c) {
  *      scaffold-refile check — a hash already numbered on `origin/main` by an EARLIER pass/session resolves
  *      directly, with no dependence on this PR's own diff re-filing the (already-renamed) scaffold.
  *   2. A candidate now ALSO returns any RIDE-ALONG ids `declaredResolvedIdsFromPr` finds (coordinated cards a
- *      multi-card PR declares/resolves besides its own single ref-led id) — gated by a cheap TITLE-only
- *      pre-check (`titleHintsRideAlong`) so an ordinary single-card PR, which matches neither, still pays
- *      nothing extra; the diff fetch (signal 3's ground truth) is gated FURTHER, on `changedFiles` already
- *      naming a numbered `backlog/<NNN>-*.md` path (declaredResolvedIdsFromPr's signal 3 precondition).
+ *      multi-card PR declares/resolves besides its own single ref-led id). This relaxes #3473's lazy fetch:
+ *      EVERY merged local candidate now pays the one body/changed-files call, because a ride-along can be
+ *      declared only in the body of a PR with no id of its own (PR #2724 review — a TITLE-only pre-check
+ *      missed exactly that). Both call sites run only on a confirmed merge, so the cost is one call per
+ *      merge. The diff fetch (signal 3's ground truth) stays gated on `changedFiles` already naming a numbered
+ *      `backlog/<NNN>-*.md` path (declaredResolvedIdsFromPr's signal 3 precondition).
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
  * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
@@ -1650,12 +1652,9 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
   // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
   // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
   const hashLed = !base.length && deliveredHashFromPr(c.headRef, c.title) != null;
-  // #xqpqyr2 — a cheap TITLE-only pre-check for ride-along declarations: a parenthesized hash or a "resolves"
-  // word already in the title (in hand, zero extra `gh` calls) is enough to decide the body/diff fetch is
-  // worth paying for, matching #3473's own lazy-fetch rationale — an ordinary single-card PR's title matches
-  // neither and this candidate falls straight through to the pre-#xqpqyr2 early return below.
-  const titleHintsRideAlong = /\(x[0-9a-z]{6}\)/i.test(String(c.title || '')) || /\bresolves?\b/i.test(String(c.title || ''));
-  if (!base.length && !hashLed && !titleHintsRideAlong) return [];
+  // #xqpqyr2 — no title-only pre-check gates the body fetch (PR #2724 review): a ride-along declared only in
+  // the BODY of a PR with no id of its own was silently missed. Both call sites run only on a CONFIRMED merge,
+  // so the one extra `gh` call per merged PR is cheap next to a card left `active` forever.
   const { body, changedFiles } = fetchGuardSignals(c) || {};
   const ids = new Set();
   if (hashLed) {
