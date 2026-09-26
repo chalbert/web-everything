@@ -2,9 +2,10 @@
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 scope: ["we:scripts/operations/completion-record.mjs", "we:scripts/operations/completion-cli.mjs", "we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/hung-session.mjs", "we:skills-src/conveyor/fix-agent-ci-brief.md"]
 dateOpened: "2026-09-26"
+dateStarted: "2026-09-26"
 tags: []
 ---
 

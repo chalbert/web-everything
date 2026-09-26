@@ -33,8 +33,16 @@ describe('newCompletionRecord', () => {
     expect(isValidSessionSlug('fix-1234')).toBe(true);
   });
 
-  it('refuses a kind that is not review/fix', () => {
+  it('refuses a kind that is not review/fix/inspect/ci-heal', () => {
     expect(() => newCompletionRecord({ session: 'fix-1', kind: 'build' })).toThrow(/kind must be one of/);
+  });
+
+  it('accepts `ci-heal` (#4075/xg7m2wq — live incident PR #2724, 2026-09-26)', () => {
+    expect(newCompletionRecord({ session: 'ci-heal-2724', kind: 'ci-heal', pr: 2724, now: fixedNow })).toEqual({
+      v: COMPLETION_RECORD_VERSION, session: 'ci-heal-2724', kind: 'ci-heal', pr: '2724', item: null,
+      status: 'started', outcome: null, verdict: null, label: null, runId: null,
+      startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:00.000Z',
+    });
   });
 });
 
@@ -61,7 +69,7 @@ describe('validateCompletionRecord', () => {
     expect(ok).toBe(false);
     expect(errors).toEqual(expect.arrayContaining([
       'unsupported completion record version 2', 'missing or invalid `session`',
-      '`kind` must be one of review/fix/inspect', '`pr` must be a string or null',
+      '`kind` must be one of review/fix/inspect/ci-heal', '`pr` must be a string or null',
       '`status` must be one of started/done', 'missing or unparseable `startedAt`', 'missing or unparseable `updatedAt`',
     ]));
   });

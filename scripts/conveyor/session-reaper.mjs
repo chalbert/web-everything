@@ -122,7 +122,9 @@ import {
   deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
 } from '../operations/delivery-report-store.mjs';
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
-import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import {
+  readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs,
+} from './hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from './hung-session.mjs';
@@ -255,10 +257,14 @@ export const CLAUDE_AUTH_OUTCOME_LABEL = 'claude-auth';
 
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
- *  actually accepts. `ci-heal` is a real PR-kind session name but has NO completion-record kind at all (its own
- *  round-count/marker-comment mechanism is entirely separate, see `ci-heal-mark.mjs`) — minting one for it would
- *  invent a fact this repo's schema was never meant to hold, so it is deliberately excluded, not defaulted. */
-const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
+ *  actually accepts. `ci-heal` GAINED a completion-record kind #4075/xg7m2wq (live incident, PR #2724,
+ *  2026-09-26: a ci-heal session that had genuinely finished — "rebased onto main and pushed; no code change
+ *  was needed" — kept counting as a live holder of its PR forever, because neither this schema nor
+ *  `fix-agent-ci-brief.md` itself ever reported completion) — its own round-count/marker-comment mechanism
+ *  (`ci-heal-mark.mjs`) still exists separately and is unchanged, but a ci-heal session now ALSO gets a backstop
+ *  `status:'done'` record here the same way `review`/`fix`/`inspect` already do, so a ci-heal session that
+ *  crashes/exits before its own brief-mandated report still leaves a durable trace. */
+const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect', 'ci-heal']);
 
 /**
  * we:scripts/conveyor/session-reaper.mjs#planBackstopCompletion — THE ROOT-CAUSE FIX (epic #3383, xbv32pg
@@ -477,13 +483,14 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
+ *   idleFinishedFor?: ((session:object) => ({finished:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
   const {
     allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(),
-    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null, authExpiredFor = null,
+    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null, authExpiredFor = null, idleFinishedFor = null,
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap) return base;
@@ -531,6 +538,19 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
     let info = null;
     try { info = hungFor(session); } catch { info = null; }
     if (info && info.hung === true) return { reap: true, reason: `hung-transcript:${info.reason || 'stale'}` };
+  }
+
+  // Axis IDLE — general idle-turn-ended backstop (#4075/xg7m2wq, live incident PR #2724, 2026-09-26): a session
+  // whose own last assistant turn fully ended (no pending tool call) and has sat idle past a short threshold is
+  // independently confirmed finished, the SAME tier as axis AUTH/0 above and for the identical reason — this
+  // does not depend on the listing's `state`, on `cwd` (a dispatched session's `cwd` is its own scratch dir), or
+  // on the session's `kind` carrying any completion-record/no-outcome schema at all. It exists specifically as
+  // the catch-all for a brief that forgot its own completion-report step (`fix-agent-ci-brief.md` did, for
+  // every ci-heal session, until this same card fixed the root cause) — so it is checked here regardless.
+  if (typeof idleFinishedFor === 'function') {
+    let info = null;
+    try { info = idleFinishedFor(session); } catch { info = null; }
+    if (info && info.finished === true) return { reap: true, reason: `idle-finished:${info.reason || 'turn-ended-idle'}` };
   }
 
   // #4149 — neither corroborated axis fired: a `wrong-cwd` session falls through to `classifySessionReap`'s own
@@ -590,6 +610,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
+ *   idleFinishedFor?: ((session:object) => ({finished:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -804,6 +825,29 @@ export function makeAuthExpiredResolver() {
   return function authExpiredFor(session) {
     try {
       return readClaudeAuthExpiredInfo(session);
+    } catch {
+      return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
+ * Build an `idleFinishedFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}
+ * (#4075/xg7m2wq, live incident PR #2724, 2026-09-26): reads the session's OWN "last turn fully ended, then sat
+ * idle" verdict via `we:scripts/conveyor/hung-session.mjs#readIdleFinishedInfo` — the SAME shared detector
+ * `reconcile-core.mjs`'s `markIdleFinishedSessions` uses, so this reaper and the reconciler can never disagree
+ * about what "idle-finished" means (mirrors {@link makeHungResolver}/{@link makeAuthExpiredResolver}'s own
+ * reasoning for the identical property). `thresholdMs` defaults to `resolveIdleFinishedThresholdMs()`
+ * (`WE_IDLE_FINISHED_MINUTES`, default 10 min), read ONCE here in the IO shell, never inside the pure classifier.
+ * Unlike `hungFor`/`authExpiredFor`, this backstop applies to EVERY session kind, including ones no other axis
+ * in this file names at all (`conveyor`/`prepare`/`prepare-decision`/`investigate`/a future kind).
+ * @param {{thresholdMs?:number, now?:()=>number}} [io]
+ * @returns {(session:object) => ({finished:boolean, reason?:string}|null)}
+ */
+export function makeIdleFinishedResolver({ thresholdMs = resolveIdleFinishedThresholdMs(), now = Date.now } = {}) {
+  return function idleFinishedFor(session) {
+    try {
+      return readIdleFinishedInfo(session, now(), thresholdMs);
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
     }
@@ -1811,6 +1855,7 @@ function parseFlags(argv) {
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
  *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
+ *   idleFinishedFor?: ((session:object) => ({finished:boolean, reason?:string}|null))|null,
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
@@ -1842,6 +1887,9 @@ export function runSessionReaperPass({
   // Live incident fix, night of 2026-09-25/26 ET (epic #3383/#4075) — default ON, same convention as every
   // other axis this epic ships: see `hung-session.mjs#readClaudeAuthExpiredInfo`'s own file header for why.
   authExpiredFor = makeAuthExpiredResolver(),
+  // #4075/xg7m2wq (live incident PR #2724, 2026-09-26) — the general idle-turn-ended backstop, default ON like
+  // every other axis this epic ships: see `hung-session.mjs#classifyIdleFinished`'s own file header for why.
+  idleFinishedFor = makeIdleFinishedResolver(),
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -1878,7 +1926,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -2018,6 +2066,12 @@ function main(argv) {
   // `--no-auth-expired-detection` is the same rollback escape hatch, for the Claude-auth-expired axis (live
   // incident, night of 2026-09-25/26 ET) — default ON, same convention as every other axis this epic ships.
   const authExpiredFor = flags['no-auth-expired-detection'] ? null : makeAuthExpiredResolver();
+  // `--no-idle-finished-detection` is the same rollback escape hatch, for the general idle-turn-ended backstop
+  // (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) — default ON, same convention as every other axis this
+  // epic ships. `--idle-finished-minutes=<n>` overrides `WE_IDLE_FINISHED_MINUTES` for this one invocation.
+  const idleFinishedFor = flags['no-idle-finished-detection']
+    ? null
+    : makeIdleFinishedResolver(flags['idle-finished-minutes'] !== undefined ? { thresholdMs: Number(flags['idle-finished-minutes']) * 60 * 1000 } : {});
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -2030,7 +2084,7 @@ function main(argv) {
   // daemon calls {@link runDispatchScratchSweepPass} directly. Shares this CLI's own `--dry-run`.
   const runDispatchScratchSweep = !!flags['dispatch-scratch-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
   const dispatchScratchResult = runDispatchScratchSweep ? runDispatchScratchSweepPass({ dryRun }) : null;
 

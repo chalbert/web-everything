@@ -336,6 +336,106 @@ function summarizeWithApiError(summarize, line, fieldMax) {
   return summary;
 }
 
+// ── IDLE-TURN-ENDED BACKSTOP (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) ───────────────────────────────
+// LIVE INCIDENT. `ci-heal-2724` finished its work at ~13:50 ET ("rebased PR #2724 onto main and pushed; no code
+// change was needed") but `fix-agent-ci-brief.md` never told it to report completion — no kind in
+// `COMPLETION_KINDS` existed for `ci-heal` at all, until this same card added one (see `completion-record.mjs`).
+// That is the ROOT-CAUSE fix; THIS axis is the requested BACKSTOP for the case a brief forgets to report again,
+// for ANY kind, not only the ones `markSelfReportedDone`/`markAuthExpiredSessions` already understand.
+//
+// Different question from `classifyHungSession` above. That axis asks "has this session's transcript gone
+// stale" and grants extra grace (`PENDING_CALL_GRACE_MULTIPLIER`) when the newest entry is a still-unresolved
+// tool call, because a long foreground command (a gate run) can legitimately keep a session quiet for a while.
+// This axis asks a narrower, safer question: has the session's last assistant TURN fully ENDED — no pending
+// tool call at all — and then sat idle past a much shorter threshold. A session mid a real tool call is never
+// flagged here, at any age; only a session that has nothing left in flight and has simply gone quiet counts as
+// finished. That narrower gate is what makes a much shorter default threshold (10 minutes, a fifth of the
+// 30-minute hung default) safe to use for every kind, including ones (`conveyor`/`prepare`/`investigate`) this
+// file's other axes never cover at all.
+
+/** Default idle-finished threshold (10 minutes) when `WE_IDLE_FINISHED_MINUTES` is unset/invalid — short on
+ *  purpose: this axis only ever fires once the session's last turn has fully ended, so there is no foreground
+ *  work it could be mistaking for idleness. */
+export const DEFAULT_IDLE_FINISHED_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * we:scripts/conveyor/hung-session.mjs#classifyIdleFinished — PURE. See file header for the full contract.
+ * Unlike {@link classifyHungSession}, a pending tool call is an ABSOLUTE gate here, never merely a grace
+ * period: this axis exists specifically for "the turn ended and nothing followed", so a session still mid a
+ * tool call never counts as finished by this axis, at any age (the hung axis, with its own longer threshold and
+ * grace multiplier, is still what eventually catches a session genuinely stuck mid a long call).
+ * @param {{lastActivityMs:number, nowMs:number, thresholdMs:number, pendingToolUse?:boolean}} o
+ * @returns {{finished:boolean, reason:string, ageMs:number|null}}
+ */
+export function classifyIdleFinished({ lastActivityMs, nowMs, thresholdMs, pendingToolUse = false } = {}) {
+  if (!Number.isFinite(lastActivityMs) || !Number.isFinite(nowMs) || !Number.isFinite(thresholdMs) || thresholdMs <= 0) {
+    return { finished: false, reason: 'no-signal', ageMs: null };
+  }
+  const ageMs = nowMs - lastActivityMs;
+  if (pendingToolUse) return { finished: false, reason: 'pending-tool-call', ageMs };
+  if (ageMs < thresholdMs) return { finished: false, reason: 'fresh', ageMs };
+  return { finished: true, reason: 'turn-ended-idle', ageMs };
+}
+
+/** `WE_IDLE_FINISHED_MINUTES` → ms, floor-clamped to 1 minute so a bad env value can't silently disable this
+ *  axis by going zero/negative; falls back to {@link DEFAULT_IDLE_FINISHED_THRESHOLD_MS} on anything
+ *  unset/unparsable. Mirrors {@link resolveHungThresholdMs}'s own env-lookup shape. */
+export function resolveIdleFinishedThresholdMs(env = process.env) {
+  const raw = env?.WE_IDLE_FINISHED_MINUTES;
+  const n = Number(raw);
+  if (raw === undefined || raw === '' || !Number.isFinite(n) || n <= 0) return DEFAULT_IDLE_FINISHED_THRESHOLD_MS;
+  return Math.max(1, n) * 60 * 1000;
+}
+
+/**
+ * we:scripts/conveyor/hung-session.mjs#readIdleFinishedInfo — THE IO SHELL for one session (same row shape
+ * {@link readHungInfo} takes: a `claude agents --json` row or a session-reaper listing row, both carrying
+ * `cwd`+`sessionId`). Reuses the SAME bounded transcript read and `detectBlockedOnChild` pending-call check
+ * `readHungInfo` already does — ONE implementation of "read this session's own tail and find its last real
+ * activity + whether a tool call is still pending", never a second copy. NEVER throws; any failure to locate or
+ * read the transcript answers `{ finished: false, reason: 'no-signal' }` rather than guessing.
+ * @param {{cwd?:string, sessionId?:string}} agent
+ * @param {number} nowMs
+ * @param {number} thresholdMs
+ * @returns {{finished:boolean, reason:string, ageMs:number|null, transcriptPath?:string}}
+ */
+export function readIdleFinishedInfo(agent, nowMs, thresholdMs) {
+  const cwd = agent?.cwd, sessionId = agent?.sessionId;
+  if (!cwd || !sessionId) return { finished: false, reason: 'no-signal', ageMs: null };
+
+  let file;
+  try {
+    file = resolveSessionTranscript({ session: String(sessionId), cwd: String(cwd) });
+  } catch {
+    return { finished: false, reason: 'no-signal', ageMs: null }; // no transcript found — never guess
+  }
+
+  let entries;
+  try {
+    const { lines } = tailLines(file, READ_TAIL_LINES, READ_MAX_BYTES);
+    entries = lines.map((l) => summarizeEntry(l, READ_FIELD_MAX));
+  } catch {
+    return { finished: false, reason: 'no-signal', ageMs: null }; // unreadable transcript — never guess
+  }
+
+  let lastActivityMs = null;
+  for (const e of entries) {
+    const t = Date.parse(e?.ts ?? '');
+    if (Number.isFinite(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
+  }
+  if (lastActivityMs === null) {
+    try {
+      lastActivityMs = statSync(file).mtimeMs;
+    } catch {
+      return { finished: false, reason: 'no-signal', ageMs: null };
+    }
+  }
+
+  const pendingToolUse = detectBlockedOnChild(entries).pending === true;
+  const verdict = classifyIdleFinished({ lastActivityMs, nowMs, thresholdMs, pendingToolUse });
+  return { ...verdict, transcriptPath: file };
+}
+
 /**
  * we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo — THE IO SHELL for one session (same row
  * shape `readHungInfo` takes: a `claude agents --json` row or a session-reaper listing row, both carrying
