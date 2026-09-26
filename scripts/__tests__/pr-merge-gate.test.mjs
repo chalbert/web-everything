@@ -6,7 +6,7 @@
  *   a loud audit line). The gh shell is injected (never actually called).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody, isTestPath, parseUnifiedDiff, scanTestTampering, buildStackedPrListArgs, buildRetargetArgs, retargetStackedPrs } from '../lib/pr-merge-gate.mjs';
+import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody, isTestPath, parseUnifiedDiff, scanTestTampering, buildStackedPrListArgs, buildRetargetArgs, retargetStackedPrs, describeStackedTestGamingOrigin } from '../lib/pr-merge-gate.mjs';
 
 // A capturing fake gh exec + a capturing stderr sink, so nothing shells out and the audit line is observable.
 const fakeExec = () => { const calls = []; const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { ok: true }; }; return { exec, calls }; };
@@ -288,6 +288,41 @@ describe('pr-merge-gate — scanTestTampering (#2440 the deterministic gate)', (
     ].join('\n');
     // `deleted file mode` here attaches to the same non-test file → still not flagged.
     expect(scanTestTampering({ diffText: diff }).tampered).toBe(false);
+  });
+});
+
+describe('pr-merge-gate — describeStackedTestGamingOrigin (#2766/#2767 stacked-base attribution)', () => {
+  // #2767's actual live shape: it is opened on top of #2766's own branch; #2766 legitimately rewrites its
+  // "property 4" tests; #2767 inherits that same diff (it is stacked), so scanTestTampering trips the
+  // IDENTICAL tests-removed finding on #2767's own net diff too.
+  const findings = [{ path: 'scripts/operations/__tests__/review-loop-cli.test.mjs', kind: 'tests-removed', detail: 'net 2 test case(s) removed' }];
+
+  it('names the base when it is stacked-and-already-escalated and the finding path is one of its own files', () => {
+    const r = describeStackedTestGamingOrigin({
+      findings,
+      baseFiles: ['scripts/operations/__tests__/review-loop-cli.test.mjs', 'scripts/operations/review-loop-cli.mjs'],
+      baseAlreadyEscalated: true,
+    });
+    expect(r).toEqual({ sharedPaths: ['scripts/operations/__tests__/review-loop-cli.test.mjs'] });
+  });
+
+  it('returns null when there is no stacked base at all (baseFiles unknown)', () => {
+    expect(describeStackedTestGamingOrigin({ findings, baseAlreadyEscalated: true })).toBe(null);
+    expect(describeStackedTestGamingOrigin({ findings, baseFiles: null, baseAlreadyEscalated: true })).toBe(null);
+  });
+
+  it('returns null when the base is NOT already escalated — never attribute to an unparked sibling', () => {
+    expect(describeStackedTestGamingOrigin({
+      findings, baseFiles: ['scripts/operations/__tests__/review-loop-cli.test.mjs'], baseAlreadyEscalated: false,
+    })).toBe(null);
+  });
+
+  it('returns null when the finding is on a file the base never touched — a genuinely NEW finding', () => {
+    expect(describeStackedTestGamingOrigin({
+      findings: [{ path: 'scripts/only-in-this-pr.test.mjs', kind: 'tests-removed', detail: 'net 1 test case(s) removed' }],
+      baseFiles: ['scripts/operations/__tests__/review-loop-cli.test.mjs'],
+      baseAlreadyEscalated: true,
+    })).toBe(null);
   });
 });
 

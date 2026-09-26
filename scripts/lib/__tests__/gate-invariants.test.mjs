@@ -44,6 +44,8 @@ import {
   acceptanceCoversHead,
   normalizeDiffFingerprint,
   normalizeContributionFingerprint,
+  decideParkToHuman,
+  findContradictoryReviewVerdicts,
 } from '../review-escalation.mjs';
 import {
   TRUST_CHAIN,
@@ -843,5 +845,56 @@ describe('INVARIANT 16 — the bare /merge orphan-sweep path does not (yet) enfo
   it('…but clears the bare-sweep predicate regardless — hasUnclearedReviewLabel has no file-diff access to know it is engine-tier', () => {
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted])).toBe(false);
     expect(hasUnclearedReviewLabel([REVIEW_LABELS.accepted], { allowPending: true })).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// INVARIANT 17 — AT MOST ONE review:* VERDICT LABEL IS EVER LIVE AT ONCE (mutual exclusivity; live bug on
+// chalbert/web-everything#2766/#2767, 2026-09-26). `decideParkToHuman` is the ONE automated escalation path
+// that adds `review:human`; over the ENTIRE cross-product of pre-existing verdict-label combinations, applying
+// its decision (add + remove) must never leave a SECOND review:* verdict standing next to it. `keepHumanClearance:
+// true` is the one deliberate exception — it is what #x9xqexm's own invariant is FOR (never delete a genuinely
+// current human clearance) — so this invariant is asserted separately for `keepHumanClearance: false`
+// (the ordinary path, ALWAYS exclusive) and documents the narrower carve-out for `true`.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('INVARIANT 17 — at most one review:* verdict label is ever live at once (#2766/#2767)', () => {
+  const VERDICT_LABELS = [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.changes, REVIEW_LABELS.human];
+
+  it('decideParkToHuman(keepHumanClearance:false) leaves NO other review:* verdict standing, over every label subset', () => {
+    for (const set of powerset(VERDICT_LABELS)) {
+      const decision = decideParkToHuman({ currentLabels: set, keepHumanClearance: false });
+      const removed = new Set(decision.removeLabels);
+      const after = [...new Set([...set.filter((l) => !removed.has(l)), decision.addLabel])];
+      expect(findContradictoryReviewVerdicts(after)).toEqual([]);
+      expect(after).toContain(REVIEW_LABELS.human);
+    }
+  });
+
+  it('decideParkToHuman(keepHumanClearance:true) preserves ONLY a co-present review:accepted, never pending/changes', () => {
+    for (const set of powerset(VERDICT_LABELS)) {
+      const decision = decideParkToHuman({ currentLabels: set, keepHumanClearance: true });
+      const removed = new Set(decision.removeLabels);
+      const after = [...new Set([...set.filter((l) => !removed.has(l)), decision.addLabel])];
+      // The ONLY contradictory pair this carve-out may still leave is exactly [accepted, human] — never a
+      // THIRD label, and never pending/changes surviving beside human.
+      const contradiction = findContradictoryReviewVerdicts(after);
+      expect(contradiction.length === 0 || contradiction.sort().join(',') === [REVIEW_LABELS.accepted, REVIEW_LABELS.human].sort().join(',')).toBe(true);
+      expect(after).not.toContain(REVIEW_LABELS.pending);
+      expect(after).not.toContain(REVIEW_LABELS.changes);
+    }
+  });
+
+  it('findContradictoryReviewVerdicts is the CHECK — flags 2+, never 0 or 1, over the full verdict powerset', () => {
+    for (const set of powerset(VERDICT_LABELS)) {
+      const verdictsPresent = VERDICT_LABELS.filter((l) => set.includes(l));
+      const flagged = findContradictoryReviewVerdicts(set);
+      if (verdictsPresent.length > 1) expect(flagged.sort()).toEqual(verdictsPresent.sort());
+      else expect(flagged).toEqual([]);
+    }
+  });
+
+  it('#2766/#2767\'s own real label state is caught by the check (regression pin)', () => {
+    const live = [REVIEW_LABELS.accepted, REVIEW_LABELS.human, 'review-status:reviewing', 'review-round:1', REVIEW_LABELS.awaitingAdvisory];
+    expect(findContradictoryReviewVerdicts(live).sort()).toEqual([REVIEW_LABELS.accepted, REVIEW_LABELS.human].sort());
   });
 });

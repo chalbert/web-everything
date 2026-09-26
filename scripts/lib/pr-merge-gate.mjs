@@ -151,6 +151,34 @@ export function scanTestTampering({ diffText = '' } = {}) {
 }
 
 /**
+ * Is this PR's test-gaming signal (at least partly) INHERITED from an already-escalated stacked base, rather
+ * than genuinely new to this PR? Live shape (chalbert/web-everything#2766/#2767, 2026-09-26): #2767 is opened
+ * on top of #2766's own branch; #2766 rewrites its "property 4" tests (legitimately, per its own PR), and
+ * because #2767 is stacked on it, `scanTestTampering` sees that SAME diff as part of #2767's own net diff too
+ * and trips the identical `tests-removed` finding — a human reviewing #2767 cold has no way to know the
+ * finding is #2766's, not #2767's own.
+ *
+ * PURE, and deliberately LABEL-AGNOSTIC — this module never imports `review-escalation.mjs`'s label helpers
+ * (see the file header: it is the ONE place a `gh pr merge` may originate, kept free of that concern), so the
+ * caller decides `baseAlreadyEscalated` itself (e.g. `hasReviewLabel(basePr.labels, REVIEW_LABELS.human)`) and
+ * hands it in as a plain boolean.
+ * @param {{findings?: Array<{path: string}>, baseFiles?: string[]|null, baseAlreadyEscalated?: boolean}} o -
+ *   `findings` is THIS PR's own `scanTestTampering(...).findings`; `baseFiles` is the stacked base PR's own
+ *   changed-file set (best-effort — whatever the caller already fetched this pass, never a new `gh` call
+ *   here); `baseAlreadyEscalated` is whether the base PR is ITSELF already carrying `review:human`.
+ * @returns {{sharedPaths: string[]}|null} the finding paths this PR shares with the base's own changed files,
+ *   or `null` when there is no stacked-and-already-escalated base, or none of this PR's findings trace to it
+ */
+export function describeStackedTestGamingOrigin({ findings = [], baseFiles = null, baseAlreadyEscalated = false } = {}) {
+  if (!baseAlreadyEscalated || !Array.isArray(baseFiles) || !baseFiles.length) return null;
+  const baseSet = new Set(baseFiles);
+  const sharedPaths = [...new Set(
+    (Array.isArray(findings) ? findings : []).map((f) => f && f.path).filter((p) => p && baseSet.has(p)),
+  )];
+  return sharedPaths.length ? { sharedPaths } : null;
+}
+
+/**
  * Assert this caller MAY write to main, WITHOUT shelling a merge (used by non-gh write-to-main intents such as
  * pr-land's `--fallback-git` local `git merge`). `caller === 'drain'` always passes. Any other route THROWS
  * unless break-glass is armed — in which case it passes and emits the loud audit line. Returns
