@@ -28,7 +28,8 @@
  *      that sweep's own cross-referencing of an unrelated merged PR's ref/title: the PR THIS pass is closing
  *      names its own item directly, and its content has already been confirmed (by the SAME per-file check) to
  *      be on `main`. A PR whose ref names no item (`laneRefItemNum` returns `null`) simply skips step 3 — no
- *      guess is made about which card, if any, it was for.
+ *      guess is made about which card, if any, it was for. Step 3 also runs ONLY when step 2 succeeded: a PR
+ *      that failed to close is still open, so its card must stay open with it.
  *
  * DRY-RUN BY DEFAULT, LIKE EVERY SIBLING WATCH IN THIS FILE'S FAMILY (`parked-pr-conflict-watch.mjs`,
  * `duplicate-pr-watch.mjs`). `--apply` performs the three actions above; without it, this only reports what it
@@ -142,10 +143,14 @@ export function runAlreadyLandedWatch({
   const applied = [];
   if (apply) {
     for (const p of planned) {
-      const commented = postComment(p.prNumber, p.comment, { repo });
       const closed = closePr(p.prNumber, { repo });
+      // Comment only once the close took: a failed close leaves the PR planned again next tick, and commenting
+      // anyway would repeat the same note on every `--apply` run.
+      const commented = closed ? postComment(p.prNumber, p.comment, { repo }) : false;
       let resolved = null;
-      if (p.itemNum) {
+      // Only a PR that ACTUALLY closed gets its card resolved (PR #2769 review): if `gh pr close` failed, the PR
+      // is still open and still the work's only home — flipping its card now would strand it as "done".
+      if (closed && p.itemNum) {
         try { resolved = resolveItem(cwd, p.itemNum, { sync: true, publish: true }); }
         catch (e) { resolved = { flipped: false, alreadyResolved: false, reason: String(e?.message || e).split('\n')[0] }; }
       }

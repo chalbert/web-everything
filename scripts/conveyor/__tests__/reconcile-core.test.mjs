@@ -1063,6 +1063,16 @@ describe('case 5f-2 — ALREADY-LANDED pre-empts the conflict-fix dispatch (live
     })]);
   });
 
+  it('carries the PR\'s own `headRefName` on the refusal — the one fact `already-landed-watch.mjs` resolves the backlog card from (PR #2769 review)', async () => {
+    const { planAlreadyLandedCloses } = await import('../already-landed-watch.mjs');
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    expect(plan.refusals[0].headRefName).toBe('lane/4034-critical-work-gate');
+    // Wiring, not just shape: the watch's own planner, fed this real plan, derives the item to resolve.
+    expect(planAlreadyLandedCloses(plan)).toEqual([expect.objectContaining({ prNumber: 2752, itemNum: '4034' })]);
+  });
+
   it('still refuses `already-landed` (carrierPr null) when the carrier could not be attributed with confidence — the containment fact never depends on attribution', () => {
     const plan = planReconcile({
       prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: null } })], agents: [], now: NOW,

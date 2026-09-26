@@ -1,5 +1,38 @@
 import { describe, it, expect } from 'vitest';
-import { computeAlreadyLandedVerdict, attributeCarrierPr } from '../already-landed-content.mjs';
+import { computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ } from '../already-landed-content.mjs';
+
+describe('parseRawDiffZ', () => {
+  const Z = (...parts) => parts.join('\0') + '\0';
+  const B1 = '1'.repeat(40);
+  const B2 = '2'.repeat(40);
+  const NULL = '0'.repeat(40);
+
+  it('parses modify / add / delete records with status, path, destination mode and blob', () => {
+    const out = parseRawDiffZ(Z(
+      `:100644 100644 ${B1} ${B2} M`, 'a.mjs',
+      `:000000 100644 ${NULL} ${B1} A`, 'dir/new file.mjs',
+      `:100644 000000 ${B1} ${NULL} D`, 'gone.mjs',
+    ));
+    expect(out).toEqual([
+      { status: 'M', path: 'a.mjs', dstMode: '100644', dstBlob: B2 },
+      { status: 'A', path: 'dir/new file.mjs', dstMode: '100644', dstBlob: B1 },
+      { status: 'D', path: 'gone.mjs', dstMode: '000000', dstBlob: NULL },
+    ]);
+  });
+
+  it('keeps a mode-only change visible (same blob, new mode)', () => {
+    expect(parseRawDiffZ(Z(`:100644 100755 ${B1} ${B1} M`, 's.sh'))).toEqual([
+      { status: 'M', path: 's.sh', dstMode: '100755', dstBlob: B1 },
+    ]);
+  });
+
+  it('returns [] for empty or malformed input — never a partial guess', () => {
+    expect(parseRawDiffZ('')).toEqual([]);
+    expect(parseRawDiffZ(null)).toEqual([]);
+    expect(parseRawDiffZ(Z('garbage', 'a.mjs'))).toEqual([]);
+    expect(parseRawDiffZ(Z(`:100644 100644 ${B1} ${B2} M`, 'a.mjs', 'not-a-meta-line', 'b.mjs'))).toEqual([]);
+  });
+});
 
 describe('computeAlreadyLandedVerdict', () => {
   it('is landed when every file matches a commit on main', () => {

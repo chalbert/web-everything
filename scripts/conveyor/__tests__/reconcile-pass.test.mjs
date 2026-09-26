@@ -1,4 +1,4 @@
-import { vi, it, expect } from 'vitest';
+import { vi, it, expect, describe } from 'vitest';
 
 
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -115,64 +115,113 @@ it('defaultReadAheadBy reads ahead_by off the real compare-endpoint shape, and d
 // live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
 // own header for the incident. These pin the IO shell that computes `alreadyLandedInMain` off per-file blob
 // identity against `main`'s own history, injected so the whole path is exercisable with no real git/gh.
+const HEAD_2752 = '253d75c2b82988be773903cba4e5ed172be57fb8';
+const BASE_2752 = '06d01a43e0000000000000000000000000000000';
+const BLOB = 'b'.repeat(40);
+
 it('enrichPrsWithAlreadyLandedFacts skips a PR with no merge-status:conflicting label entirely — zero extra IO', async () => {
   const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
-  const readFiles = vi.fn();
+  const fetchRef = vi.fn();
+  const readMergeBase = vi.fn();
   const prs = [{ number: 1, labels: [{ name: 'review:changes' }] }];
-  const out = enrichPrsWithAlreadyLandedFacts(prs, { readFiles });
-  expect(readFiles).not.toHaveBeenCalled();
+  const out = enrichPrsWithAlreadyLandedFacts(prs, { fetchRef, readMergeBase });
+  expect(fetchRef).not.toHaveBeenCalled();
+  expect(readMergeBase).not.toHaveBeenCalled();
   expect(out).toEqual(prs);
   expect(out[0].alreadyLandedInMain).toBeUndefined();
 });
 
-it('enrichPrsWithAlreadyLandedFacts attaches alreadyLandedInMain with the attributed carrier PR when every file matches (PR #2752\'s real shape)', async () => {
+it('enrichPrsWithAlreadyLandedFacts attaches alreadyLandedInMain with the attributed carrier PR when every change matches (PR #2752\'s real shape)', async () => {
   const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
   const pr = {
-    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: '253d75c2b82988be773903cba4e5ed172be57fb8',
+    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: HEAD_2752,
     labels: [{ name: 'review:changes' }, { name: 'merge-status:conflicting' }],
   };
-  const readFiles = vi.fn(() => ['scripts/lib/critical-work.mjs', 'scripts/lib/__tests__/critical-work.test.mjs']);
   const fetchRef = vi.fn();
-  const readBlobAt = vi.fn((ref, file) => `${ref}:${file}`.slice(0, 10)); // any stable per-(ref,file) fake blob
+  const readMergeBase = vi.fn(() => BASE_2752);
+  const changes = [
+    { status: 'A', path: 'scripts/lib/critical-work.mjs', dstMode: '100644', dstBlob: BLOB },
+    { status: 'M', path: 'scripts/lib/provider-routing.mjs', dstMode: '100644', dstBlob: BLOB },
+  ];
+  const readChanges = vi.fn(() => changes);
   const findMatchingCommit = vi.fn(() => '22faaaa916445657928d5e30720881b830387ab6');
   const readPulls = vi.fn(() => [2759]);
-  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles, fetchRef, readBlobAt, findMatchingCommit, readPulls });
-  expect(readFiles).toHaveBeenCalledWith(2752, { repo: null });
-  expect(fetchRef).toHaveBeenCalledWith('lane/4034-critical-work-gate', {});
+  const out = enrichPrsWithAlreadyLandedFacts([pr], { fetchRef, readMergeBase, readChanges, findMatchingCommit, readPulls });
+  // Fetched by PR NUMBER — never by the author-controlled branch name (PR #2769 security review).
+  expect(fetchRef).toHaveBeenCalledWith(2752, {});
+  expect(readMergeBase).toHaveBeenCalledWith(HEAD_2752, 'origin/main', {});
+  expect(readChanges).toHaveBeenCalledWith(BASE_2752, HEAD_2752, {});
+  // Every change is searched only within `<merge-base>..origin/main`.
+  expect(findMatchingCommit).toHaveBeenCalledWith(changes[0], { base: BASE_2752, mainRef: 'origin/main' });
   expect(out[0].alreadyLandedInMain).toEqual({ carrierPr: 2759 });
   // one pulls lookup per DISTINCT matched commit, never one per file.
   expect(readPulls).toHaveBeenCalledTimes(1);
 });
 
-it('enrichPrsWithAlreadyLandedFacts leaves the PR untouched when even one file has no match — never guesses partial containment', async () => {
+it('enrichPrsWithAlreadyLandedFacts leaves the PR untouched when even one change has no match — never guesses partial containment', async () => {
   const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
   const pr = {
-    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: 'deadbeef',
+    number: 2752, headRefName: 'lane/4034-critical-work-gate', headRefOid: HEAD_2752,
     labels: [{ name: 'merge-status:conflicting' }],
   };
-  const readFiles = vi.fn(() => ['a.mjs', 'b.mjs']);
-  const readBlobAt = vi.fn(() => 'someblob');
-  const findMatchingCommit = vi.fn((file) => (file === 'a.mjs' ? 'commit1' : null));
-  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles, fetchRef: vi.fn(), readBlobAt, findMatchingCommit, readPulls: vi.fn() });
+  const readChanges = vi.fn(() => [
+    { status: 'A', path: 'b.txt', dstMode: '100644', dstBlob: BLOB },
+    { status: 'D', path: 'a.txt', dstMode: '000000', dstBlob: '0'.repeat(40) }, // a rename's source half
+  ]);
+  const findMatchingCommit = vi.fn((change) => (change.path === 'b.txt' ? 'commit1' : null));
+  const out = enrichPrsWithAlreadyLandedFacts([pr], {
+    fetchRef: vi.fn(), readMergeBase: () => BASE_2752, readChanges, findMatchingCommit, readPulls: vi.fn(),
+  });
   expect(out[0].alreadyLandedInMain).toBeUndefined();
 });
 
-it('enrichPrsWithAlreadyLandedFacts never guesses containment when the PR\'s files could not even be read', async () => {
+it('enrichPrsWithAlreadyLandedFacts never guesses containment with no merge-base, no readable changes, or a non-sha head', async () => {
   const { enrichPrsWithAlreadyLandedFacts } = await import('../reconcile-pass.mjs');
-  const pr = { number: 2752, headRefOid: 'deadbeef', labels: [{ name: 'merge-status:conflicting' }] };
-  const out = enrichPrsWithAlreadyLandedFacts([pr], { readFiles: () => [] });
-  expect(out[0].alreadyLandedInMain).toBeUndefined();
+  const pr = { number: 2752, headRefOid: HEAD_2752, labels: [{ name: 'merge-status:conflicting' }] };
+  const readChanges = vi.fn(() => []);
+  expect(enrichPrsWithAlreadyLandedFacts([pr], { fetchRef: vi.fn(), readMergeBase: () => null, readChanges })[0]
+    .alreadyLandedInMain).toBeUndefined();
+  expect(readChanges).not.toHaveBeenCalled();
+  expect(enrichPrsWithAlreadyLandedFacts([pr], { fetchRef: vi.fn(), readMergeBase: () => BASE_2752, readChanges })[0]
+    .alreadyLandedInMain).toBeUndefined();
+  const readMergeBase = vi.fn();
+  const hostile = { ...pr, headRefOid: '--output=/x' };
+  expect(enrichPrsWithAlreadyLandedFacts([hostile], { fetchRef: vi.fn(), readMergeBase })[0]).toBe(hostile);
+  expect(readMergeBase).not.toHaveBeenCalled();
 });
 
-it('defaultReadPrFiles reads the changed-file paths off `gh pr view --json files`, degrading to [] on any failure', async () => {
-  const { execFileSyncThrottled } = await import('../../lib/gh-throttle.mjs');
-  execFileSyncThrottled.mockReturnValueOnce(JSON.stringify({ files: [{ path: 'a.mjs' }, { path: 'b.mjs' }] }));
-  const { defaultReadPrFiles } = await import('../reconcile-pass.mjs');
-  expect(defaultReadPrFiles(2752, { repo: 'chalbert/web-everything' })).toEqual(['a.mjs', 'b.mjs']);
-  expect(execFileSyncThrottled).toHaveBeenCalledWith('gh', ['pr', 'view', '2752', '--json', 'files', '--repo', 'chalbert/web-everything'], expect.any(Object));
+it('defaultFetchRef fetches refs/pull/<n>/head behind --end-of-options into an explicit destination — never the branch name (PR #2769 security review)', async () => {
+  const { defaultFetchRef } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn();
+  defaultFetchRef(2752, { exec });
+  expect(exec).toHaveBeenCalledWith('git', [
+    'fetch', '--quiet', '--end-of-options', 'origin', '+refs/pull/2752/head:refs/already-landed/pr/2752',
+  ], expect.any(Object));
+  // A hostile branch-name-shaped value (the live exploit: `--upload-pack=<cmd>`) never reaches git at all.
+  exec.mockClear();
+  for (const bad of ['--upload-pack=touch /tmp/x;', 'lane/x', '0', '-1', '12abc', null, undefined, 2.5]) defaultFetchRef(bad, { exec });
+  expect(exec).not.toHaveBeenCalled();
+  expect(() => defaultFetchRef(1, { exec: () => { throw new Error('offline'); } })).not.toThrow();
+});
 
-  execFileSyncThrottled.mockImplementationOnce(() => { throw new Error('gh: not found'); });
-  expect(defaultReadPrFiles(2752, {})).toEqual([]);
+it('defaultReadMergeBase / defaultReadChanges guard their revisions and degrade to null / [] on failure', async () => {
+  const { defaultReadMergeBase, defaultReadChanges } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn(() => `${BASE_2752}\n`);
+  expect(defaultReadMergeBase(HEAD_2752, 'origin/main', { exec })).toBe(BASE_2752);
+  expect(exec).toHaveBeenCalledWith('git', ['merge-base', '--end-of-options', HEAD_2752, 'origin/main'], expect.any(Object));
+  expect(defaultReadMergeBase('--evil', 'origin/main', { exec: vi.fn() })).toBeNull();
+  expect(defaultReadMergeBase(HEAD_2752, 'origin/main', { exec: () => { throw new Error('x'); } })).toBeNull();
+
+  const raw = `:100644 100755 ${BLOB} ${BLOB} M\0s.sh\0`;
+  const dexec = vi.fn(() => raw);
+  expect(defaultReadChanges(BASE_2752, HEAD_2752, { exec: dexec })).toEqual([
+    { status: 'M', path: 's.sh', dstMode: '100755', dstBlob: BLOB },
+  ]);
+  expect(dexec).toHaveBeenCalledWith('git', [
+    'diff', '--raw', '-z', '--no-renames', '--no-abbrev', '--end-of-options', BASE_2752, HEAD_2752,
+  ], expect.any(Object));
+  expect(defaultReadChanges('nope', HEAD_2752, { exec: dexec })).toEqual([]);
+  expect(defaultReadChanges(BASE_2752, HEAD_2752, { exec: () => { throw new Error('x'); } })).toEqual([]);
 });
 
 // These four inject `exec` EXPLICITLY (mirroring `we:scripts/conveyor/__tests__/reconcile-core.test.mjs`'s own
@@ -181,32 +230,90 @@ it('defaultReadPrFiles reads the changed-file paths off `gh pr view --json files
 // a direct default-parameter reference to the bare `execFileSync` binding inside a freshly-added function here
 // was measured, live, to bypass it and run REAL git — explicit injection is the reliable, established way this
 // codebase asserts an exact argv with no dependence on that mock's own quirks.
-it('defaultReadBlobAt reads a git blob OID via rev-parse, degrading to null on any failure', async () => {
-  const { defaultReadBlobAt } = await import('../reconcile-pass.mjs');
-  const exec = vi.fn(() => '774a24d2703ada7a5c3bec4ced8696b13a5f6026\n');
-  expect(defaultReadBlobAt('253d75c2b', 'scripts/lib/critical-work.mjs', { exec })).toBe('774a24d2703ada7a5c3bec4ced8696b13a5f6026');
-  expect(exec).toHaveBeenCalledWith('git', ['rev-parse', '253d75c2b:scripts/lib/critical-work.mjs'], expect.any(Object));
-
-  const throwingExec = vi.fn(() => { throw new Error('fatal: bad revision'); });
-  expect(defaultReadBlobAt('deadbeef', 'missing.mjs', { exec: throwingExec })).toBeNull();
-});
-
-it('defaultFindMatchingMainCommit walks main\'s own log for the file and returns the first blob-identical commit, most-recent-first', async () => {
-  const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
-  const exec = vi.fn(() => 'commitA\ncommitB\ncommitC\n');
-  const readBlobAt = vi.fn((ref) => (ref === 'commitB' ? 'targetblob' : 'other'));
-  const found = defaultFindMatchingMainCommit('scripts/lib/critical-work.mjs', 'targetblob', { exec, readBlobAt });
-  expect(found).toBe('commitB');
+it('defaultReadEntryAt reads {mode, blob} for exactly the named path via ls-tree, degrading to null on any failure', async () => {
+  const { defaultReadEntryAt } = await import('../reconcile-pass.mjs');
+  const exec = vi.fn(() => `100755 blob 774a24d2703ada7a5c3bec4ced8696b13a5f6026\tscripts/run.sh\0`);
+  expect(defaultReadEntryAt('253d75c2b', 'scripts/run.sh', { exec })).toEqual({ mode: '100755', blob: '774a24d2703ada7a5c3bec4ced8696b13a5f6026' });
   expect(exec).toHaveBeenCalledWith('git', [
-    'log', '--format=%H', '-n300', 'origin/main', '--', 'scripts/lib/critical-work.mjs',
+    '--literal-pathspecs', 'ls-tree', '-z', '--full-tree', '--end-of-options', '253d75c2b', '--', 'scripts/run.sh',
   ], expect.any(Object));
+  expect(defaultReadEntryAt('253d75c2b', 'missing.mjs', { exec: () => '' })).toBeNull();
+  expect(defaultReadEntryAt('deadbeef', 'x.mjs', { exec: () => { throw new Error('fatal: bad revision'); } })).toBeNull();
 });
 
-it('defaultFindMatchingMainCommit returns null (never throws) with no target blob, or when the log read fails', async () => {
-  const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
-  expect(defaultFindMatchingMainCommit('a.mjs', null)).toBeNull();
-  const throwingExec = vi.fn(() => { throw new Error('not a git repo'); });
-  expect(defaultFindMatchingMainCommit('a.mjs', 'blob', { exec: throwingExec })).toBeNull();
+describe('defaultFindMatchingMainCommit — searches only `<merge-base>..main`, per change status (PR #2769 review)', () => {
+  const base = BASE_2752;
+  const mainRef = 'origin/main';
+
+  it('A/M: returns the first in-window commit whose entry has the SAME blob AND mode, most-recent-first', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const exec = vi.fn(() => 'commitA\ncommitB\ncommitC\n');
+    const readEntryAt = vi.fn((ref) => {
+      if (ref === base) return null; // an added file: absent at the PR's base
+      return ref === 'commitB' ? { mode: '100644', blob: BLOB } : { mode: '100644', blob: 'c'.repeat(40) };
+    });
+    const change = { status: 'A', path: 'scripts/lib/critical-work.mjs', dstMode: '100644', dstBlob: BLOB };
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec, readEntryAt })).toBe('commitB');
+    expect(exec).toHaveBeenCalledWith('git', [
+      '--literal-pathspecs', 'log', '--format=%H', '-n300', `${base}..origin/main`, '--', 'scripts/lib/critical-work.mjs',
+    ], expect.any(Object));
+  });
+
+  it('A/M: a same-blob, different-mode entry is NOT a match — a mode-only change is never "landed" by its old blob', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const change = { status: 'M', path: 's.sh', dstMode: '100755', dstBlob: BLOB };
+    const readEntryAt = () => ({ mode: '100644', blob: BLOB });
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec: () => 'c1\n', readEntryAt })).toBeNull();
+  });
+
+  it('A/M: an in-window match that main later UNDID is not landed — tip gone, or tip back at the base version', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const exec = () => 'carrier\n';
+    const OLD = 'a'.repeat(40);
+    const add = { status: 'A', path: 'n.mjs', dstMode: '100644', dstBlob: BLOB };
+    // added by a carrier, then the add was reverted: gone from the tip.
+    expect(defaultFindMatchingMainCommit(add, { base, mainRef, exec, readEntryAt: (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB } : null) })).toBeNull();
+    // modified by a carrier, then reverted: the tip holds the base version again.
+    const mod = { status: 'M', path: 'm.mjs', dstMode: '100644', dstBlob: BLOB };
+    const entry = (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB } : { mode: '100644', blob: OLD });
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: entry })).toBeNull();
+    // refined after the carry (tip differs from base and from the PR) — still landed.
+    const refined = (ref) => (ref === 'carrier' ? { mode: '100644', blob: BLOB } : ref === base ? { mode: '100644', blob: OLD } : { mode: '100644', blob: 'd'.repeat(40) });
+    expect(defaultFindMatchingMainCommit(mod, { base, mainRef, exec, readEntryAt: refined })).toBe('carrier');
+  });
+
+  it('D: landed only when the path is gone from main\'s tip AND an in-window commit deleted it', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const change = { status: 'D', path: 'dead.mjs', dstMode: '000000', dstBlob: '0'.repeat(40) };
+    const exec = vi.fn(() => 'delcommit\n');
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec, readEntryAt: () => null })).toBe('delcommit');
+    expect(exec).toHaveBeenCalledWith('git', [
+      '--literal-pathspecs', 'log', '--format=%H', '-n300', '--diff-filter=D', `${base}..origin/main`, '--', 'dead.mjs',
+    ], expect.any(Object));
+    // still alive on main (e.g. a rename's source main kept editing) — never landed, no log read at all.
+    const exec2 = vi.fn();
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec: exec2, readEntryAt: () => ({ mode: '100644', blob: BLOB }) })).toBeNull();
+    expect(exec2).not.toHaveBeenCalled();
+    // gone from the tip but no in-window deletion (it was deleted before the PR's base) — never landed.
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec: () => '', readEntryAt: () => null })).toBeNull();
+  });
+
+  it('an unsupported status (type change, unmerged) never matches', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const exec = vi.fn(() => 'c1\n');
+    for (const status of ['T', 'U', 'X']) {
+      expect(defaultFindMatchingMainCommit({ status, path: 'a', dstMode: '120000', dstBlob: BLOB }, { base, mainRef, exec, readEntryAt: () => ({ mode: '120000', blob: BLOB }) })).toBeNull();
+    }
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('returns null (never throws) with no base / main ref, or when the log read fails', async () => {
+    const { defaultFindMatchingMainCommit } = await import('../reconcile-pass.mjs');
+    const change = { status: 'A', path: 'a.mjs', dstMode: '100644', dstBlob: BLOB };
+    expect(defaultFindMatchingMainCommit(change, { base: null, mainRef })).toBeNull();
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef: null })).toBeNull();
+    expect(defaultFindMatchingMainCommit(change, { base, mainRef, exec: () => { throw new Error('not a git repo'); } })).toBeNull();
+  });
 });
 
 it('defaultReadPullsForCommit reads the PR numbers GitHub associates with a commit, degrading to [] on any failure', async () => {

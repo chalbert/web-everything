@@ -336,7 +336,7 @@ export function enrichPrsWithMainRedFacts(prs, {
 // own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
 // plain merge-tree/current-content diff.
 import { CONFLICT_LABEL } from './conflict-label.mjs';
-import { computeAlreadyLandedVerdict, attributeCarrierPr } from '../lib/already-landed-content.mjs';
+import { computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ } from '../lib/already-landed-content.mjs';
 
 /** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
  *  before giving up on that file (mirrors `we:scripts/backlog-stranded-sweep.mjs#AUTO_SWEEP_LOG_LIMIT`'s own
@@ -355,91 +355,161 @@ function hasLabel(labels, name) {
     .includes(name);
 }
 
+/** A full or abbreviated hex commit id — the only shape the git calls below ever put in a revision position. */
+const SHA_RE = /^[0-9a-f]{7,64}$/;
+/** The branch name shape `origin/<defaultBranch>` is built from — never dash-leading, never a range/revspec. */
+const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+const isSha = (s) => typeof s === 'string' && SHA_RE.test(s);
+const mainRefFor = (defaultBranch) =>
+  (typeof defaultBranch === 'string' && BRANCH_RE.test(defaultBranch) && !defaultBranch.startsWith('-')
+    ? `origin/${defaultBranch}` : null);
+/** `git --literal-pathspecs`: a changed path is matched as the literal file it names, never as a glob. */
+const GIT_LITERAL = ['--literal-pathspecs'];
+
 /**
- * we:scripts/conveyor/reconcile-pass.mjs#defaultReadPrFiles — the file paths this PR's own diff touches
- * (`gh pr view <n> --json files`, NOT part of `defaultReadPrs`'s own bulk `--json` query — fetching `files` for
- * every open PR on every tick would cost one extra call per PR for a fact only the already-landed check needs).
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef — best-effort fetch of the PR's own head, so a commit
+ * this checkout may never have seen is present locally before it is read. Never throws — a fetch failure just
+ * means the reads below fail closed (never landed).
+ *
+ * KEYED ON THE PR NUMBER, NEVER ON `headRefName` (PR #2769 security review). A PR's branch name is fully
+ * author-controlled, and git accepts a dash-leading one (`--upload-pack=<cmd>`), which the earlier bare
+ * `git fetch origin <headRefName>` would parse as an OPTION — measured to run an arbitrary command against a
+ * local-path remote. The ref fetched here is built from a validated positive integer (`refs/pull/<n>/head`),
+ * behind `--end-of-options`, into an EXPLICIT destination — the same shape
+ * `we:scripts/fetch-parked.mjs#resolveNetDiff` adopted when #2373 banned the bare opportunistic form.
  * @param {number} prNumber
- * @param {{exec?:Function, repo?:string|null}} [o]
- * @returns {string[]}
+ * @param {{exec?:Function, remote?:string}} [o]
  */
-export function defaultReadPrFiles(prNumber, { exec = execFileSyncThrottled, repo = null } = {}) {
+export function defaultFetchRef(prNumber, { exec = execFileSync, remote = 'origin' } = {}) {
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0 || String(n) !== String(prNumber)) return;
   try {
-    const argv = ['pr', 'view', String(prNumber), '--json', 'files'];
-    if (repo) argv.push('--repo', repo);
-    const out = exec('gh', argv, {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
-      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    // A private namespace, not `refs/remotes/…`: never collides with a real upstream branch, and stays out of
+    // every remote-tracking-ref scan the lane tooling runs.
+    exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+refs/pull/${n}/head:refs/already-landed/pr/${n}`], {
+      stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
     });
-    const parsed = JSON.parse(String(out || '{}'));
-    return Array.isArray(parsed?.files) ? parsed.files.map((f) => f?.path).filter(Boolean) : [];
+  } catch { /* best-effort — the reads below degrade to null, never to a guess */ }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMergeBase — the PR head's merge-base with `mainRef`, or
+ * `null`. This is the lower bound of the `<base>..main` search window (see
+ * `we:scripts/lib/already-landed-content.mjs`'s own header for why a pre-base match is never delivery).
+ * @param {string} headSha
+ * @param {string} mainRef
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultReadMergeBase(headSha, mainRef, { exec = execFileSync } = {}) {
+  if (!isSha(headSha) || !mainRef) return null;
+  try {
+    const out = String(exec('git', ['merge-base', '--end-of-options', headSha, mainRef], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadChanges — what the PR changes relative to its merge-base,
+ * with status, destination mode and blob per path (`git diff --raw -z --no-renames`, parsed by
+ * `we:scripts/lib/already-landed-content.mjs#parseRawDiffZ`). Replaces an earlier `gh pr view --json files`
+ * path list, which could not see a rename's source, a mode change, or a deletion (PR #2769 review).
+ * @param {string} base
+ * @param {string} headSha
+ * @param {{exec?:Function}} [o]
+ * @returns {Array<{status:string, path:string, dstMode:string, dstBlob:string}>}
+ */
+export function defaultReadChanges(base, headSha, { exec = execFileSync } = {}) {
+  if (!isSha(base) || !isSha(headSha)) return [];
+  try {
+    const out = exec('git', ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', '--end-of-options', base, headSha], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return parseRawDiffZ(out);
   } catch {
     return [];
   }
 }
 
 /**
- * we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef — best-effort `git fetch` of one ref, so a PR's own
- * head commit (which this checkout may never have seen before) is present locally before it is `rev-parse`d.
- * Never throws — a fetch failure just means the blob reads below will also fail closed to `null` (never landed).
- * @param {string} ref
- * @param {{exec?:Function, remote?:string}} [o]
- */
-export function defaultFetchRef(ref, { exec = execFileSync, remote = 'origin' } = {}) {
-  if (!ref) return;
-  try {
-    exec('git', ['fetch', remote, ref, '--quiet'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
-  } catch { /* best-effort — the blob read below degrades to null, never to a guess */ }
-}
-
-/**
- * we:scripts/conveyor/reconcile-pass.mjs#defaultReadBlobAt — the git blob OID a path holds at a commit
- * (`git rev-parse <ref>:<path>`), or `null` when the path does not exist there / the commit is unreachable.
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadEntryAt — the `{mode, blob}` a path holds at a commit
+ * (`git ls-tree`), or `null` when the path does not exist there / the commit is unreachable. Mode travels with
+ * the blob so a mode-only change is never matched by the unchanged blob alone.
  * @param {string} ref
  * @param {string} file
  * @param {{exec?:Function}} [o]
- * @returns {string|null}
+ * @returns {{mode:string, blob:string}|null}
  */
-export function defaultReadBlobAt(ref, file, { exec = execFileSync } = {}) {
+export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
+  if (!ref || !file) return null;
   try {
-    const out = exec('git', ['rev-parse', `${ref}:${file}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000 });
-    const oid = String(out || '').trim();
-    return oid || null;
+    const out = String(exec('git', [...GIT_LITERAL, 'ls-tree', '-z', '--full-tree', '--end-of-options', ref, '--', file], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+    }) || '');
+    for (const rec of out.split('\0')) {
+      const m = /^(\d{6}) \w+ ([0-9a-f]{7,64})\t(.*)$/s.exec(rec);
+      if (m && m[3] === file) return { mode: m[1], blob: m[2] };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 /**
- * we:scripts/conveyor/reconcile-pass.mjs#defaultFindMatchingMainCommit — walk `origin/<defaultBranch>`'s own
- * commit log for `file` (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) and return the first
- * commit whose blob for that path equals `targetBlob`, or `null`. THIS is the signal
- * `we:scripts/lib/already-landed-content.mjs`'s own header explains is robust to a rebase (blob identity does
- * not care about commit-graph shape) and to later refinement on `main` (the match can sit anywhere in the log,
- * not just at the tip) — unlike a plain `git merge-tree`/current-content diff, both measured to false-negative
- * on the live incident this detector exists for.
- * @param {string} file
- * @param {string|null} targetBlob
- * @param {{exec?:Function, defaultBranch?:string, windowLimit?:number, readBlobAt?:Function}} [o]
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFindMatchingMainCommit — the commit on `<base>..mainRef` that
+ * delivered this one change to `main`, or `null`. Per status:
+ *   - `A`/`M`: the first commit (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) whose entry for
+ *     the path has the SAME blob AND mode the PR's head has. Robust to a rebase (blob identity ignores graph
+ *     shape) and to later refinement on `main` (the match can sit anywhere in the window, not just at the tip).
+ *     `main`'s tip must still hold the path and must differ from the PR's base version — a carry that `main`
+ *     later reverted is not delivery. The log is not `--first-parent`, so a side-branch commit merged into
+ *     `main` can be the match (git's default history simplification already drops side branches whose net
+ *     change to the path is zero).
+ *   - `D`: the path must be absent from `mainRef`'s tip, and the deleting commit must sit in the window.
+ *   - anything else (`T`ype change, unmerged, unknown): unsupported → `null`, never a guess.
+ * Bounded below by the PR's own merge-base: see `we:scripts/lib/already-landed-content.mjs`'s header for why a
+ * match that predates it (a deliberate restoration) is never delivery.
+ * @param {{status:string, path:string, dstMode:string, dstBlob:string}} change
+ * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function}} o
  * @returns {string|null}
  */
-export function defaultFindMatchingMainCommit(file, targetBlob, {
-  exec = execFileSync, defaultBranch = 'main', windowLimit = ALREADY_LANDED_LOG_WINDOW, readBlobAt = defaultReadBlobAt,
+export function defaultFindMatchingMainCommit(change, {
+  base, mainRef, exec = execFileSync, windowLimit = ALREADY_LANDED_LOG_WINDOW, readEntryAt = defaultReadEntryAt,
 } = {}) {
-  if (!targetBlob) return null;
-  let commits;
-  try {
-    const out = exec('git', ['log', '--format=%H', `-n${windowLimit}`, `origin/${defaultBranch}`, '--', file], {
+  const path = change?.path;
+  if (!path || !isSha(base) || !mainRef) return null;
+  const logWindow = (extra) => {
+    const out = exec('git', [...GIT_LITERAL, 'log', '--format=%H', `-n${windowLimit}`, ...extra, `${base}..${mainRef}`, '--', path], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
     });
-    commits = String(out || '').split('\n').filter(Boolean);
+    return String(out || '').split('\n').filter(Boolean);
+  };
+  try {
+    if (change.status === 'D') {
+      if (readEntryAt(mainRef, path, { exec }) !== null) return null; // still alive on main — not delivered
+      return logWindow(['--diff-filter=D'])[0] || null;
+    }
+    if (change.status !== 'A' && change.status !== 'M') return null;
+    if (!change.dstBlob || !change.dstMode) return null;
+    // A match inside the window is not enough if `main` later UNDID it (a revert back to base, or deleting an
+    // added file): main's tip must still hold the path, and not the PR's own base version of it.
+    const tip = readEntryAt(mainRef, path, { exec });
+    if (!tip) return null;
+    const atBase = readEntryAt(base, path, { exec });
+    if (atBase && atBase.blob === tip.blob && atBase.mode === tip.mode) return null;
+    for (const c of logWindow([])) {
+      const e = readEntryAt(c, path, { exec });
+      if (e && e.blob === change.dstBlob && e.mode === change.dstMode) return c;
+    }
+    return null;
   } catch {
     return null;
   }
-  for (const c of commits) {
-    if (readBlobAt(c, file, { exec }) === targetBlob) return c;
-  }
-  return null;
 }
 
 /**
@@ -474,31 +544,32 @@ export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, r
  * mechanical conflict-fix for. A pass with no such PR (the common case) costs nothing beyond the label scan
  * `defaultReadPrs` already fetched every field for.
  * @param {Array<object>} prs
- * @param {{readFiles?:Function, fetchRef?:Function, readBlobAt?:Function, findMatchingCommit?:Function,
+ * @param {{fetchRef?:Function, readMergeBase?:Function, readChanges?:Function, findMatchingCommit?:Function,
  *   readPulls?:Function, repo?:string|null, defaultBranch?:string}} [o]
  * @returns {Array<object>}
  */
 export function enrichPrsWithAlreadyLandedFacts(prs, {
-  readFiles = defaultReadPrFiles, fetchRef = defaultFetchRef, readBlobAt = defaultReadBlobAt,
+  fetchRef = defaultFetchRef, readMergeBase = defaultReadMergeBase, readChanges = defaultReadChanges,
   findMatchingCommit = defaultFindMatchingMainCommit, readPulls = defaultReadPullsForCommit,
   repo = null, defaultBranch = 'main',
 } = {}) {
   const list = Array.isArray(prs) ? prs : [];
+  const mainRef = mainRefFor(defaultBranch);
   return list.map((pr) => {
     if (!hasLabel(pr?.labels, CONFLICT_LABEL)) return pr;
     const prNumber = Number(pr?.number);
     const headSha = pr?.headRefOid;
-    if (!Number.isInteger(prNumber) || !headSha) return pr;
+    if (!Number.isInteger(prNumber) || prNumber <= 0 || !isSha(headSha) || !mainRef) return pr;
 
-    const files = readFiles(prNumber, { repo });
-    if (!files.length) return pr; // could not even read the diff — never guess containment from nothing
+    fetchRef(prNumber, {});
+    const base = readMergeBase(headSha, mainRef, {});
+    if (!base) return pr; // no common history to bound the search by — never guess
+    const changes = readChanges(base, headSha, {});
+    if (!changes.length) return pr; // could not even read the diff — never guess containment from nothing
 
-    fetchRef(pr.headRefName, {});
-    const fileMatches = files.map((file) => {
-      const blob = readBlobAt(headSha, file, {});
-      const matchedCommit = blob ? findMatchingCommit(file, blob, { defaultBranch }) : null;
-      return { file, matchedCommit };
-    });
+    const fileMatches = changes.map((change) => ({
+      file: change.path, matchedCommit: findMatchingCommit(change, { base, mainRef }),
+    }));
 
     const verdict = computeAlreadyLandedVerdict(fileMatches);
     if (!verdict.landed) return pr;

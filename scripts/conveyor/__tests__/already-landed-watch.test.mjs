@@ -85,6 +85,16 @@ describe('runAlreadyLandedWatch', () => {
     expect(out.applied[0].resolved).toBeNull();
   });
 
+  it('--apply never resolves the card when the PR failed to close — the still-open PR keeps its card open (PR #2769 review)', () => {
+    const resolveItem = vi.fn(() => ({ flipped: true, alreadyResolved: false }));
+    const out = runAlreadyLandedWatch({
+      readPlan: () => fakePlan, apply: true, postComment: () => true, closePr: () => false, resolveItem,
+    });
+    expect(resolveItem).not.toHaveBeenCalled();
+    // …and no comment either: the PR is planned again next tick, so commenting now would repeat every run.
+    expect(out.applied).toEqual([{ prNumber: 2752, commented: false, closed: false, itemNum: '4034', resolved: null }]);
+  });
+
   it('--apply degrades a throwing resolveItem to a reported failure rather than throwing out of the whole pass', () => {
     const resolveItem = vi.fn(() => { throw new Error('backlog.mjs resolve failed: illegal from-status'); });
     const out = runAlreadyLandedWatch({

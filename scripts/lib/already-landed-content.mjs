@@ -21,7 +21,7 @@
  *     refined after the carrier PR landed it (a rewritten line, an added test case) — a byte-identical-to-HEAD
  *     check is exactly the false negative this module exists to avoid.
  *
- * THE SIGNAL THAT IS ROBUST: BLOB IDENTITY AT SOME POINT IN MAIN'S OWN HISTORY, PER FILE. `main`'s commit log
+ * THE SIGNAL THAT IS ROBUST: BLOB IDENTITY AT SOME POINT IN MAIN'S OWN HISTORY SINCE THE PR'S BASE, PER FILE. `main`'s commit log
  * for a path is the sequence of every distinct version that path has ever held on `main`. If the open PR's
  * CURRENT blob for a file is byte-identical to SOME commit's blob for that same path — not necessarily the
  * CURRENT one — then that exact content was, at some point, actually incorporated into `main`, whatever
@@ -30,6 +30,12 @@
  * at the tip). Confirmed live: `git rev-parse 253d75c2b:scripts/lib/critical-work.mjs` matches the blob at
  * commit `22faaaa91` on `origin/main` (part of PR #2759, itself a genuinely different tip than #2759's own
  * merge commit — an ordinary merge carries every original commit along, not just its own).
+ *
+ * BOUNDED TO `<merge-base>..main`, NEVER ALL OF MAIN'S HISTORY (PR #2769 review). A match that predates the PR's
+ * own merge-base with `main` proves nothing about delivery: a PR that deliberately RESTORES a file to an old
+ * version would match that old commit while `main` still holds something else. Only a commit `main` gained
+ * AFTER the PR branched off can have carried the PR's content there. The same range bounds a DELETION: it is
+ * landed only when the path is gone from `main`'s tip AND a commit in that range deleted it.
  *
  * WHAT THIS MODULE DOES NOT DO: it does not run `git`, `gh`, or touch the filesystem — every per-file match is
  * computed by the IO shell (`we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts`) and
@@ -43,6 +49,32 @@
  * all (`GET /repos/{o}/{r}/commits/{sha}/pulls` returning nothing — e.g. a direct push), NEVER invents a name;
  * the caller still gets the (true) containment fact, with `carrierPr: null`.
  */
+
+/**
+ * we:scripts/lib/already-landed-content.mjs#parseRawDiffZ — parse `git diff --raw -z --no-renames --no-abbrev
+ * <base> <head>` into one record per changed path: `{status, path, dstMode, dstBlob}`. Pure.
+ *
+ * WHY THE RAW DIFF, NOT `gh pr view --json files` (PR #2769 review). A bare path list drops three facts the
+ * containment verdict needs: a rename's SOURCE path (`--no-renames` splits it into `D <src>` + `A <dst>`, so the
+ * deletion half is checked on its own and a source still alive on `main` disqualifies the verdict), a file-mode
+ * change (`dstMode` is compared alongside the blob — a `chmod +x` whose blob never changed is not "landed" just
+ * because the old blob is on `main`), and the status itself (a `T`ype change, or anything else unrecognised,
+ * reads as unsupported and never matches). Malformed input yields `[]` — never a guess.
+ * @param {string} text
+ * @returns {Array<{status:string, path:string, dstMode:string, dstBlob:string}>}
+ */
+export function parseRawDiffZ(text) {
+  const tokens = String(text || '').split('\0');
+  const out = [];
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    const meta = tokens[i].replace(/^\n+/, '');
+    const path = tokens[i + 1];
+    const m = /^:(\d{6}) (\d{6}) ([0-9a-f]{7,64}) ([0-9a-f]{7,64}) ([A-Z])\d*$/.exec(meta);
+    if (!m || !path) return [];
+    out.push({ status: m[5], path, dstMode: m[2], dstBlob: m[4] });
+  }
+  return out;
+}
 
 /**
  * we:scripts/lib/already-landed-content.mjs#computeAlreadyLandedVerdict — is EVERY file this PR touches
