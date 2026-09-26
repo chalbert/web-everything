@@ -93,7 +93,7 @@ through to a real, mergeable PR (or whatever "done" means for the dispatch kind 
 and not "the agent's own portion worked." A run that produces real, high-quality work but never reaches a PR
 is a proven **agent**, not yet a proven **pipeline**.
 
-## Real end-to-end dispatch canary (`we:scripts/conveyor/canary.mjs`, x0nxuqd)
+## Real end-to-end dispatch canary (`we:scripts/conveyor/canary.mjs`, 4241)
 
 The soak harness (`we:scripts/conveyor/soak/`) simulates every session with a FAKE world — it cannot catch a
 break in the REAL `claude --bg` path, which is exactly what PR #2701 (dispatched sessions now start in a
