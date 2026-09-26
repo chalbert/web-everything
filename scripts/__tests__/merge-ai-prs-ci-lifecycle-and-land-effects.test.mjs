@@ -12,8 +12,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate } from '../merge-ai-prs.mjs';
-import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate, isAiGeneratedPr, isMechanicalMergeCommit } from '../merge-ai-prs.mjs';
+import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
 
@@ -187,6 +187,106 @@ describe('planCiLifecycleLabelUpdate (#2421 — the label add/remove plan enforc
   });
   it('tolerates string-shaped labels too (hasLabel\'s own tolerance)', () => {
     expect(planCiLifecycleLabelUpdate({ currentLabels: ['checking'], desired: 'ci:failed' })).toEqual({ toAdd: ['ci:failed'], toRemove: ['checking'] });
+  });
+});
+
+// #3729 — reproduces the live #2685/#2653 stale-`ci:failed` cause: `gh pr merge --merge` (this repo's own
+// drain merge method, we:scripts/lib/pr-merge-gate.mjs mergeMethodFlag default) leaves a GitHub-native
+// "Merge pull request #NNN from owner/branch" commit on `main` for every landed PR. A long-lived lane that
+// later merges `origin/main` into itself (a routine rebase-refresh, e.g. "Merge remote-tracking branch
+// 'origin/main' into lane/x") inherits every one of those already-landed merge commits into ITS OWN open
+// PR's `commits` list, because the PR's recorded `baseRefOid` predates them. Confirmed live against PR #2685
+// (chalbert/web-everything): its commit list carries a "Merge pull request #2688 from
+// chalbert/lane/4091-resolve-item" commit whose sole author is `web-everything[bot]` and whose body is the
+// merged PR's own title (never empty) — so it fails BOTH the old mechanical-merge test (headline pattern,
+// AND the empty-body requirement) while being authored by neither a human contributor nor Claude. Before this
+// fix that one noise commit alone flips `isAiGeneratedPr` to `false` for an otherwise 100%-Claude-authored
+// PR, which silently disqualifies it from the #2421 TOTAL ci-lifecycle reconcile
+// (`scripts/merge-ai-prs.mjs`'s `if (isAiGeneratedPr(withCommits))` gate) — so a `ci:failed` label from an
+// earlier red head is never cleared once the current head goes green.
+describe('#3729 — a GitHub-native "Merge pull request #NNN from …" commit must not disqualify an AI PR', () => {
+  // The exact shape `gh pr view --json commits` returned for PR #2688 on `main`, reproduced live 2026-09-25.
+  const githubMergeCommit = {
+    messageHeadline: 'Merge pull request #2688 from chalbert/lane/4091-resolve-item',
+    messageBody: 'backlog: resolve #4091 -- merged to main via PR #2678',
+    authors: [{ name: 'web-everything[bot]', email: '332649731+web-everything[bot]@users.noreply.github.com' }],
+  };
+
+  it('is recognized as a mechanical merge commit — carries no authored content of its own', () => {
+    expect(isMechanicalMergeCommit(githubMergeCommit)).toBe(true);
+  });
+
+  it('does not disqualify an otherwise fully-AI PR merely for having merged origin/main after other PRs landed', () => {
+    expect(isAiGeneratedPr({ commits: [claudeCommit(), claudeCommit(), githubMergeCommit] })).toBe(true);
+  });
+
+  it('a GitHub merge commit alone (no substantive AI commit) still does NOT qualify a PR as AI-generated', () => {
+    expect(isAiGeneratedPr({ commits: [githubMergeCommit] })).toBe(false);
+  });
+
+  it('end-to-end: with the noise commit correctly ignored, a green head clears a stale ci:failed exactly as #2421 promises', () => {
+    const pr = { commits: [claudeCommit(), githubMergeCommit] };
+    expect(isAiGeneratedPr(pr)).toBe(true); // eligible for the TOTAL reconcile at all (was the #3729 bug)
+    const desired = lifecycleLabelFromCiTruth({ blocked: false, checkGreen: true, checkFailed: false });
+    const plan = planCiLifecycleLabelUpdate({ currentLabels: [{ name: 'ci:failed' }], desired, owned: [CI_LIFECYCLE_LABELS.checking, CI_LIFECYCLE_LABELS.failed, CI_LIFECYCLE_LABELS.blocked] });
+    expect(plan.toRemove).toEqual(['ci:failed']);
+    expect(plan.toAdd).toEqual([]);
+  });
+});
+
+// #3729 residual — the GitHub-merge-commit fix above did NOT fully resolve the live case: PR #2685's REAL
+// inherited history also carries the drain's OWN direct-to-main bookkeeping commits (`drain: rebase … onto
+// …, drop transient .lane-manifest.json`, `drain: JIT-number … at land`, `drain: resolve #NNN on land`),
+// authored solely by the drain's own git identity — not a `Merge …` commit at all (so `isMechanicalMergeCommit`
+// correctly does NOT swallow it; a script REWRITING a real file, e.g. numbering a backlog card, is NOT
+// content-free the way a merge commit is), and carrying no Claude/human trailer either. Re-running
+// `isAiGeneratedPr` against PR #2685's actual live commit list (`gh pr view 2685 --json commits`, 2026-09-25)
+// confirms it STILL returns `false` after the merge-commit fix alone. This exact shape is already a RATIFIED,
+// known gap — `classifyPr`'s own #2196/#2326 comment names it verbatim ("the drain's OWN rebase … commit
+// stranded it") — and its ratified remedy is not to loosen `isAiGeneratedPr`/`isMechanicalMergeCommit`
+// (deliberately kept strict) but to certify via `certifyLabel || aiGenerated || humanCleared` instead. The
+// #2421 TOTAL ci-lifecycle reconcile had no such OR-path at all; this closes that asymmetry.
+describe('#3729 residual — the TOTAL ci-lifecycle reconcile must accept the SAME certification classifyPr already does (#2196/#2326), not aiGenerated alone', () => {
+  // The exact shape from PR #2685's real, live commit list (2026-09-25) that survives the merge-commit fix.
+  const drainRebaseCommit = {
+    messageHeadline: 'drain: rebase lane/xgqz204-dispatcher-reexec-worker-marker onto origi…',
+    messageBody: '…n/main, drop transient .lane-manifest.json',
+    authors: [{ name: 'test', email: 'test@test.com' }],
+  };
+
+  it('sanity: this real-shaped commit is neither mechanical nor AI — isAiGeneratedPr still says false', () => {
+    expect(isMechanicalMergeCommit(drainRebaseCommit)).toBe(false);
+    expect(isAiGeneratedPr({ commits: [claudeCommit(), drainRebaseCommit] })).toBe(false);
+  });
+
+  it('source-contract: the TOTAL branch certifies via aiGenerated OR the trust label OR a human clear — mirrors classifyPr\'s `certified`', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+    const idx = src.indexOf('// ── The #2421 TOTAL branch:');
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 2200);
+    expect(block).toMatch(/const ciLifecycleCertified = isAiGeneratedPr\(withCommits\) \|\| hasLabel\(withCommits, READY_TO_MERGE_LABEL\) \|\| hasLabel\(withCommits, REVIEW_LABELS\.accepted\);/);
+    expect(block).toMatch(/if \(ciLifecycleCertified\)/);
+  });
+
+  it('end-to-end: a PR with the drain-rebase noise commit but the ready-to-merge label still gets its stale ci:failed cleared', () => {
+    const pr = { commits: [claudeCommit(), drainRebaseCommit], labels: [{ name: READY_TO_MERGE_LABEL }] };
+    const certified = isAiGeneratedPr(pr) || hasLabel(pr, READY_TO_MERGE_LABEL) || hasLabel(pr, REVIEW_LABELS.accepted);
+    expect(certified).toBe(true); // was false before this fix (isAiGeneratedPr alone)
+    const desired = lifecycleLabelFromCiTruth({ blocked: false, checkGreen: true, checkFailed: false });
+    const plan = planCiLifecycleLabelUpdate({ currentLabels: [{ name: 'ci:failed' }], desired, owned: [CI_LIFECYCLE_LABELS.checking, CI_LIFECYCLE_LABELS.failed, CI_LIFECYCLE_LABELS.blocked] });
+    expect(plan.toRemove).toEqual(['ci:failed']);
+  });
+
+  it('end-to-end: the same PR with only a human review:accepted clearance (no label yet) also certifies', () => {
+    const pr = { commits: [claudeCommit(), drainRebaseCommit], labels: [{ name: REVIEW_LABELS.accepted }] };
+    const certified = isAiGeneratedPr(pr) || hasLabel(pr, READY_TO_MERGE_LABEL) || hasLabel(pr, REVIEW_LABELS.accepted);
+    expect(certified).toBe(true);
+  });
+
+  it('a genuine human orphan (no label, no clearance, no AI commit) still does NOT certify — never widened past #2196/#2326\'s own bar', () => {
+    const pr = { commits: [humanCommit], labels: [] };
+    const certified = isAiGeneratedPr(pr) || hasLabel(pr, READY_TO_MERGE_LABEL) || hasLabel(pr, REVIEW_LABELS.accepted);
+    expect(certified).toBe(false);
   });
 });
 

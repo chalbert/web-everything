@@ -3678,7 +3678,20 @@ async function runCli() {
       }
       // ── The #2421 TOTAL branch: every producer-owned open PR gets its checking/ci:failed/blocked state
       //    reconciled (mutually exclusive among themselves, cleared once none applies — e.g. once green). ──
-      if (isAiGeneratedPr(withCommits)) { // only the producer's own AI PRs — never a human orphan (mirrors #2216)
+      // #3729 — `isAiGeneratedPr(withCommits)` ALONE under-covers: a long-lived lane's inherited history can
+      // carry a substantive, non-AI commit that is neither human-authored content nor (before this item)
+      // recognized as mechanical — e.g. the drain's OWN `drain: rebase …`/`drain: JIT-number …` bookkeeping
+      // commits, or a `Merge branch …`/`Merge remote-tracking branch …` whose single-line subject GitHub's API
+      // splits into a non-empty "body" for a long branch name. `classifyPr` already has the identical gap and
+      // already has the fix for it (#2196/#2326): PRODUCER CERTIFICATION is `certifyLabel || aiGenerated ||
+      // humanCleared`, not `aiGenerated` alone — `ready-to-merge` is exclusively producer-applied (#2196) and
+      // `review:accepted` is a human's own certification, so EITHER is exactly as trustworthy a "this is the
+      // producer's own PR" signal as a clean AI-commit history, independent of what a stray administrative
+      // commit in its inherited history happens to look like. Reuse that SAME certification here rather than
+      // inventing a second one (or, worse, quietly widening `isAiGeneratedPr` itself away from #2196/#2326's
+      // deliberately strict definition).
+      const ciLifecycleCertified = isAiGeneratedPr(withCommits) || hasLabel(withCommits, READY_TO_MERGE_LABEL) || hasLabel(withCommits, REVIEW_LABELS.accepted);
+      if (ciLifecycleCertified) { // only the producer's own PRs — never a human orphan (mirrors #2216)
         const manifest = ctx.manifestByPr.get(`${repo || 'cwd'}::${p.number}`) ?? null;
         const blockedBy = manifest && Array.isArray(manifest.blockedBy) ? manifest.blockedBy.map(asItemId) : [];
         const blocked = blockedBy.some((b) => ctx.openItems.has(b));
