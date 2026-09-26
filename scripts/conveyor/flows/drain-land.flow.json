@@ -101,16 +101,13 @@
       "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:370-383",
       "wait": {
         "for": "a foreign lease holder (an interactive session drain) to release or its 15-min TTL to expire",
-        "timeout": null,
-        "onTimeout": null,
-        "cite": "plateau:tools/drain-daemon/lib.mjs:309-317"
+        "timeout": "30m",
+        "onTimeout": "lease-wait-escalated",
+        "cite": "plateau:tools/drain-daemon/lib.mjs:309-317,337-340"
       },
       "retries": null,
       "escalation": null,
-      "notes": "Deliberately unbounded BY DESIGN ('mixed mode is permanent', plateau:tools/drain-daemon/README.md — a foreign holder is WAITED OUT, never contended) — still an honest unbounded wait: nothing here ever alerts if a foreign holder never releases and never crashes past its TTL.",
-      "ack": {
-        "unbounded-wait": "xwo3j0l"
-      }
+      "notes": "Deliberately unbounded BY DESIGN ('mixed mode is permanent', plateau:tools/drain-daemon/README.md — a foreign holder is WAITED OUT, never contended). WE x5h527v closed the honest gap this used to be: past the timeout the daemon still never contends, but it now fires a ONE-TIME operator notice per holder episode (decideLeaseWaitEscalation) instead of staying silent forever."
     },
     {
       "id": "pass-running",
@@ -126,19 +123,16 @@
       },
       "retries": {
         "what": "consecutive failed passes (exit 2 merge-attempt-failed, exit 4 child-detected failure, or a spawn/kill failure) — exponential backoff, ceiling 900s, repeats indefinitely",
-        "cap": null,
-        "onCap": null,
-        "cite": "plateau:tools/drain-daemon/lib.mjs:423-440"
+        "cap": 6,
+        "onCap": "failure-streak-escalated",
+        "cite": "plateau:tools/drain-daemon/lib.mjs:423-440,475-476"
       },
       "escalation": {
         "to": "operator",
         "how": "best-effort desktop notification (osascript) once anomaly detection trips on the in-memory recent-pass window — never on every single failure",
         "cite": "plateau:tools/drain-daemon/daemon.mjs:122-141"
       },
-      "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream.",
-      "ack": {
-        "uncapped-retry": "xb4yerj"
-      }
+      "notes": "Timeout kill is SIGTERM then, after 10s, SIGKILL (plateau:tools/drain-daemon/daemon.mjs:296-300); the killed pass's unlanded PRs simply ride the next pass — no partial-merge risk since the merge itself is one atomic gh pr merge call downstream. WE x5h527v: the retry itself stays uncapped BY DESIGN (a drain must keep trying) — the cap only decides when to fire a one-time operator notice (decideFailureEscalation), never when to stop retrying."
     },
     {
       "id": "merge-candidate-evaluation",
@@ -229,14 +223,41 @@
       },
       "retries": {
         "what": "the daemon still re-attempts the sweep every 900s (the backoff ceiling) forever — the escalation never actually stops the retrying, it only makes it loud",
-        "cap": null,
-        "onCap": null,
-        "cite": "plateau:tools/drain-daemon/lib.mjs:435-440"
+        "cap": 6,
+        "onCap": "failure-streak-escalated",
+        "cite": "plateau:tools/drain-daemon/lib.mjs:435-440,475-476"
       },
-      "notes": "Detected only on exit 3 WITHOUT a carried reason (a bare process.exit(3) after the full report, never a fail('gh-error',...) call) — an exit 3 that DOES carry reason:'gh-error' (a transient gh error) takes the ordinary generic backoff instead and is never treated as this incident (plateau:tools/drain-daemon/lib.mjs:421-434). 'Polling cannot clear it' per the daemon's own README — this is explicitly an operator-only fix (WE #2318).",
-      "ack": {
-        "uncapped-retry": "xb4yerj"
-      }
+      "notes": "Detected only on exit 3 WITHOUT a carried reason (a bare process.exit(3) after the full report, never a fail('gh-error',...) call) — an exit 3 that DOES carry reason:'gh-error' (a transient gh error) takes the ordinary generic backoff instead and is never treated as this incident (plateau:tools/drain-daemon/lib.mjs:421-434). 'Polling cannot clear it' per the daemon's own README — this is explicitly an operator-only fix (WE #2318). WE x5h527v: a duplicate-NNN failure folds into the SAME consecutiveFailures counter as any other failed pass (decideFailureEscalation makes no special case for it), so the SAME 6-failure cap and the SAME shared failure-streak-escalated notice cover this incident too."
+    },
+    {
+      "id": "lease-wait-escalated",
+      "label": "Foreign lease wait exceeded the alert bound — operator notified once for this holder",
+      "terminal": false,
+      "owner": "tools/drain-daemon/daemon.mjs (its own while(true) loop)",
+      "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:388-407",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "daemon.log line + desktop notification + state-file leaseWaitEscalated, once per holder",
+        "cite": "plateau:tools/drain-daemon/lib.mjs:337-340"
+      },
+      "notes": "The daemon still never contends — it keeps waiting out the SAME holder exactly as lease-arbitration always did (WE x5h527v only adds the notice, decideLeaseWaitEscalation). Loops back to lease-arbitration: the next tick re-arbitrates (still waiting, or the holder released/expired and this daemon acquires)."
+    },
+    {
+      "id": "failure-streak-escalated",
+      "label": "Consecutive failed passes reached the cap — operator notified once for this streak",
+      "terminal": false,
+      "owner": "tools/drain-daemon/daemon.mjs (its own while(true) loop)",
+      "ownerCite": "plateau:tools/drain-daemon/daemon.mjs:446-462",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "daemon.log line + desktop notification + state-file failureStreakEscalated, once per streak",
+        "cite": "plateau:tools/drain-daemon/lib.mjs:475-476"
+      },
+      "notes": "Reached from pass-running's ordinary exponential-backoff failures AND from duplicate-nnn-parked's exit-3 park — decideFailureEscalation folds both into the SAME consecutiveFailures counter (WE x5h527v), so one cap covers both causes. Loops back to pass-running: the drain keeps retrying at the same backoff ceiling (a drain must keep trying — the cap's exit is 'a person is told', not 'stop')."
     }
   ],
   "transitions": [
@@ -337,6 +358,41 @@
       "on": "the lease was reclaimed away mid-pass (heartbeat failed — slept past the TTL, or a foreign holder took over); the in-flight child is killed",
       "kind": "failure",
       "cite": "plateau:tools/drain-daemon/daemon.mjs:343-356"
+    },
+    {
+      "from": "lease-arbitration",
+      "to": "lease-wait-escalated",
+      "on": "the wait on the SAME foreign holder exceeds the 30m alert bound (decideLeaseWaitEscalation), not yet notified for this holder episode",
+      "kind": "escalation",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:397-404"
+    },
+    {
+      "from": "lease-wait-escalated",
+      "to": "lease-arbitration",
+      "on": "next tick — still waiting it out (never contending), or the lease is now free/stale to acquire",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:405-406"
+    },
+    {
+      "from": "pass-running",
+      "to": "failure-streak-escalated",
+      "on": "consecutiveFailures reaches the 6-failure cap after a failed pass, not yet escalated for this streak (decideFailureEscalation)",
+      "kind": "escalation",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:450-462"
+    },
+    {
+      "from": "duplicate-nnn-parked",
+      "to": "failure-streak-escalated",
+      "on": "the SAME consecutiveFailures counter (a duplicate-NNN park counts as a failure) reaches the 6-failure cap, not yet escalated for this streak",
+      "kind": "escalation",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:450-462"
+    },
+    {
+      "from": "failure-streak-escalated",
+      "to": "pass-running",
+      "on": "next tick — the drain retries at the same backoff ceiling regardless (a drain must keep trying)",
+      "kind": "normal",
+      "cite": "plateau:tools/drain-daemon/daemon.mjs:464"
     }
   ],
   "steps": [
