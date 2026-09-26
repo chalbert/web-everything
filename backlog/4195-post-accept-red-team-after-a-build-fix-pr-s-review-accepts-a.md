@@ -3,10 +3,11 @@ bornAs: x00g3tt
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: active
 blockedBy: ["3949", "4194"]
 scope: ["we:scripts/operations/review-dispatch.mjs", "we:scripts/lib/jury-core.mjs", "we:scripts/conveyor/reconcile-core.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
 tags: []
 ---
 
