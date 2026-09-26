@@ -54,6 +54,19 @@ then **EXIT WITHOUT MERGING** — and **NEVER touch the review label** (`review:
 
 ## The arc — one command per transition
 
+### 0. Report `started` — BEFORE anything else (#3436, #4075/xg7m2wq)
+
+The one durable trace that a CI-heal of PR #{{PR_NUM}} was ever dispatched, written before step 1 can fail for
+any reason — a lane-pool outage, a crash, a refused effect. Without this a session that dies here is
+indistinguishable from one never dispatched at all (`we:backlog/3436-*.md`) — and, live-caught on PR #2724
+(2026-09-26), without a matching `report --status=done` at whichever exit this session actually reaches, a
+FINISHED ci-heal keeps counting as a live holder of its own PR forever, exactly the way `fix-agent-brief.md`'s
+own step 0/step-per-exit shape already prevents for a `review:changes` repair:
+
+```bash
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
+```
+
 ### 1. Reconstitute the PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**, so
@@ -72,7 +85,10 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
 
 - `--base={{LANE_REF}}` lands the clone on the pushed lane tip, so you **reuse the built work** — you are healing a
   diff's CI, not redoing the item. If `--base` fails to resolve (the ref was deleted / the PR was force-closed),
-  stop and report `#{{ITEM_NUM}} → ci-heal not-applicable (lane ref gone)`.
+  report the completion record and stop and report `#{{ITEM_NUM}} → ci-heal not-applicable (lane ref gone)`:
+  ```bash
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+  ```
 - **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
   here on your cwd may hold no `scripts/` directory at all — every remaining tool call in this brief is
   qualified with `{{WE_ROOT}}` for exactly that reason. Never drop the `{{WE_ROOT}}/` qualifier for a bare
@@ -88,8 +104,13 @@ git rebase origin/main
 
 Resolve any conflict the `/finish` way: **regenerate derived / generated artifacts** rather than hand-merging them,
 and **take-main for coordination JSON** (`claims.json`, registries). If it is a genuine same-line CODE overlap you
-cannot safely resolve, stop and report `#{{ITEM_NUM}} → ci-heal escalated (conflict with main)` — leave the PR as
-it is (do NOT force-push a bad rebase). A clean rebase alone often fixes a BEHIND `test` failure.
+cannot safely resolve, report the completion record and stop and report `#{{ITEM_NUM}} → ci-heal escalated
+(conflict with main)` — leave the PR as it is (do NOT force-push a bad rebase). A clean rebase alone often fixes a
+BEHIND `test` failure.
+
+```bash
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+```
 
 ### 3. Diagnose + repair the failing required check (repair ONLY the CI break)
 
@@ -107,8 +128,24 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
   hook blocks branch creation even in a lane clone). Keep scope within `{{SCOPE}}`. **Do NOT weaken or delete a
   test to go green**, and do NOT fold in unrelated work.
 - If the required check is red for a reason that is NOT a CI/rebase break — the diff itself is genuinely wrong and
-  needs a design call — do **NOT** guess: stop and report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a
-  CI break)`. The review gate (if any) still owes a human verdict; a human handles it via `/finish`.
+  needs a design call — do **NOT** guess: report the completion record and stop and report `#{{ITEM_NUM}} →
+  ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still owes a human verdict; a human
+  handles it via `/finish`.
+  ```bash
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
+  ```
+
+**If applying an otherwise-CLEAR repair is denied by a permission or tool-use guard, that is INFRASTRUCTURE
+FRICTION, not a judgment call.** The failing check still says exactly what to fix; only the *mechanism* to fix it
+failed. Report it as `blocked-on-infra` instead, so the reconciler retries this PR once the friction has had time
+to clear (`we:scripts/conveyor/reconcile-core.mjs#INFRA_RETRY_COOLOFF_MS`):
+
+```bash
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
+```
+
+Then report `#{{ITEM_NUM}} → blocked-on-infra (tool/permission denial applying an otherwise-clear CI heal on PR
+#{{PR_NUM}})` and exit — do not retry the same denied action yourself in a loop.
 
 **If a genuine code repair is needed, build-brief discipline still applies** (statute:
 [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
@@ -140,7 +177,12 @@ and prints `FULL SUITE (fallback)` with the reason — when a config / setup / d
 changed. **Never run the full suite yourself** (`npm run test:unit`, `npm test`, a bare `vitest run`): it takes
 10+ minutes, several fixers doing it at once starved the host, CI runs it anyway, and the Bash guard denies it.
 
-A red gate is a hard stop: do **not** re-push, and report `#{{ITEM_NUM}} → ci-heal gate-red`.
+A red gate is a hard stop: do **not** re-push, and report the completion record and report `#{{ITEM_NUM}} →
+ci-heal gate-red`:
+
+```bash
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=gate-red
+```
 
 ### 5. Converge before re-push — self-review the heal (proportionate to the change)
 
@@ -174,7 +216,8 @@ The heal is re-pushed. Record it with a durable comment — this is **the ONLY t
 a comment, **NOT** a label change:
 
 ```bash
-node "{{WE_ROOT}}/scripts/conveyor/ci-heal-mark.mjs" {{PR_NUM}} --repo={{REPO}} --reason={{REASON}}
+node "{{WE_ROOT}}/scripts/conveyor/ci-heal-mark.mjs" {{PR_NUM}} --repo={{REPO}} --reason={{REASON}} && \
+  node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=<no-change|healed>
 ```
 
 `ci-heal-mark.mjs` posts one comment whose leading line is the CI-heal marker. The conveyor counts those comments
@@ -183,6 +226,11 @@ flap forever on a genuinely-broken diff. It makes **NO** label change: `review:h
 `review:changes` are untouched. **Do NOT** run `rearm-review.mjs`, **do NOT** `gh pr edit --add/--remove-label`,
 **do NOT** touch `ready-to-merge` — only CI was repaired, so the PR's landability is decided exactly as before:
 a `ready-to-merge` PR lands once its re-run CI is green (the drain), a parked PR still awaits its human `/review`.
+
+**This completion record is the fix for the live incident that motivated this step** (#4075/xg7m2wq, PR #2724,
+2026-09-26): without it, a finished ci-heal session kept counting as a live holder of its own PR — nobody ever
+told the reconciler it was done. Use `--outcome=no-change` when step 2's clean rebase alone healed it (no
+commit at step 6); use `--outcome=healed` when step 3 made a real code repair.
 
 ### 8. Append a structured learnings entry to the session drop-box (#2614)
 
@@ -204,9 +252,13 @@ Skip only if you genuinely hit no generalizable friction.
 ### 9. EXIT — do not merge, do not touch the review label, do not release
 
 **Stop here.** Do NOT run `gh pr merge`. Do NOT run a drain. Do NOT `release` the lane. Do NOT change ANY review
-label. Your process EXIT is the signal you are done; the conveyor's merge watcher (`pr-watch.mjs {{PR_NUM}}`) and
-the next tick's state read (which now sees the CI recovering) carry it from here — a `ready-to-merge` PR lands once
-its re-run `test` is green (the drain), a parked PR keeps its human gate. Return a one-line result:
+label. Your process EXIT is the signal you are done — but it is NOT the only signal: your **completion record**
+(step 7, or whichever exit's own `report --status=done` you actually reached) is what tells the reconciler and
+the session reaper that you are done, so it never counts a finished ci-heal session as a live holder of its PR
+(the live gap this brief itself had until #4075/xg7m2wq — PR #2724, 2026-09-26). The conveyor's merge watcher
+(`pr-watch.mjs {{PR_NUM}}`) and the next tick's state read (which now sees the CI recovering) carry it from
+here — a `ready-to-merge` PR lands once its re-run `test` is green (the drain), a parked PR keeps its human gate.
+Return a one-line result:
 `#{{ITEM_NUM}} → PR #{{PR_NUM}} (ci-healed re-pushed | ci-heal escalated <reason> | ci-heal gate-red)`. A red gate /
 red CI / conflict is NOT watcher-visible — your one-line RETURN is the only signal that surfaces it, so always
 report it.
@@ -233,3 +285,10 @@ repair-only-CI, re-push, never-touch-the-review shape is identical.
   diff itself is genuinely wrong (not a CI/rebase break), escalate — don't paper over it.
 - **Work only through the normal verbs** — `acquire --base=<ref>` → rebase → repair → `git push … lane/*` →
   `ci-heal-mark.mjs` → daemon/human. No parallel state store, no review-label swap (#2612 / #2666 rulings).
+- **If you stop, say so IN YOUR COMPLETION RECORD** (#4075/xg7m2wq) — every exit above runs
+  `completion-cli.mjs report --status=done` before it returns, starting with `report --status=started` at step
+  0. A refusal (or a success) that leaves no completion record is indistinguishable from a still-live session,
+  and the PR it was healing keeps reading as held by a live process — the exact live incident (PR #2724,
+  2026-09-26) this rule exists to prevent. The record changes no PR label; it is read by
+  `we:scripts/conveyor/reconcile-core.mjs#markSelfReportedDone` and `we:scripts/conveyor/session-reaper.mjs`'s
+  own completion-record axis.

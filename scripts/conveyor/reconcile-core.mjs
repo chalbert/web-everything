@@ -591,12 +591,13 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
  * (`we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo` — ONE implementation, not two, mirroring
  * `markHungSessions`'s own `hung-session.mjs` reuse).
  *
- * A ci-heal session carries no completion-record schema at all ({@link
- * ../operations/completion-record.mjs#COMPLETION_KINDS} has no `ci-heal` entry — see
- * `session-reaper.mjs#BACKSTOP_COMPLETION_KINDS`'s own doc for why), so `markSelfReportedDone`'s
- * `outcome:'blocked-on-infra'` cool-off can never apply to one; THIS mark is what frees such a PR to be
- * reconciled again, immediately, the same way `hung` already does for a session with no self-report at all —
- * no synthetic cool-off invented for a kind whose schema was never meant to hold one.
+ * A `ci-heal` session GAINED a completion-record schema #4075/xg7m2wq ({@link
+ * ../operations/completion-record.mjs#COMPLETION_KINDS} now has a `ci-heal` entry — see
+ * `session-reaper.mjs#BACKSTOP_COMPLETION_KINDS`'s own doc for the live incident that added it), so an
+ * auth-failure exit now CAN leave a real `outcome:'blocked-on-infra'` record for one, same as `review`/`fix`.
+ * This mark stays regardless: it catches the auth-failure the INSTANT it shows in the transcript, without
+ * waiting on whatever report step the dispatched brief did or didn't reach before the CLI cut it off, and it
+ * still applies unchanged to a session whose kind carries no completion-record schema at all.
  * @param {Array<object>} agents - the `claude agents --json` rows (optionally already carrying `selfReportedDone`
  *   from {@link markSelfReportedDone} and/or `hung` from {@link markHungSessions}, run first).
  * @param {(agent:object) => ({authExpired:boolean, reason?:string}|null)} authExpiredInfoFor
@@ -610,6 +611,45 @@ export function markAuthExpiredSessions(agents, authExpiredInfoFor) {
     try { info = authExpiredInfoFor(a); } catch { info = null; }
     if (!info || info.authExpired !== true) return a;
     return { ...a, authExpired: true, authExpiredReason: info.reason ?? null };
+  });
+}
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#markIdleFinishedSessions — mark each listed session whose OWN
+ * transcript shows its last assistant turn fully ENDED (no pending tool call) and has sat idle past a short
+ * threshold, as `idleFinished: true`. Pure (the classification is injected via `idleFinishedInfoFor`); modeled
+ * directly on {@link markAuthExpiredSessions} just above — a SEPARATE pre-pass over AGENT rows, run before
+ * {@link assessLiveness}, never a change to that pinned function itself.
+ *
+ * WHY THIS EXISTS, SEPARATELY FROM EVERY AXIS ABOVE (#4075/xg7m2wq, live incident PR #2724, 2026-09-26).
+ * `markSelfReportedDone` only fires once a dispatched agent's OWN brief tells it to report completion — and
+ * `fix-agent-ci-brief.md` never did, for any outcome, until this same card fixed it (see
+ * `../operations/completion-record.mjs#COMPLETION_KINDS`). `markHungSessions`/`markAuthExpiredSessions` cover
+ * a stale transcript and an auth failure respectively, but neither is a general backstop for "the brief itself
+ * forgot the report step" across every OTHER kind this file's other axes don't name at all
+ * (`conveyor`/`prepare`/`prepare-decision`/`investigate`/a future kind not yet invented). This axis is that
+ * general backstop: it needs no kind-specific schema entry and no brief cooperation at all — it just reads
+ * whether the session's own last turn is genuinely over (see {@link
+ * ../hung-session.mjs#classifyIdleFinished} for why a pending tool call is an absolute gate, never merely
+ * extra grace, which is what makes a much shorter default threshold safe here).
+ *
+ * Run LAST, after every other axis, so a real self-report / hung / auth-expired verdict always wins first —
+ * this is the least specific signal of the four and should never race a more specific one.
+ * @param {Array<object>} agents - the `claude agents --json` rows (optionally already carrying `selfReportedDone`,
+ *   `hung`, `authExpired` from the earlier passes, run first).
+ * @param {(agent:object, nowMs:number, thresholdMs:number) => ({finished:boolean, reason?:string, ageMs?:number|null}|null)} idleFinishedInfoFor
+ * @param {number} nowMs
+ * @param {number} thresholdMs
+ * @returns {Array<object>} the same rows; idle-finished ones gain `idleFinished: true`, `idleFinishedReason`
+ */
+export function markIdleFinishedSessions(agents, idleFinishedInfoFor, nowMs, thresholdMs) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (String(a?.state ?? '').toLowerCase() === 'done' || a?.selfReportedDone === true || a?.hung === true || a?.authExpired === true) return a;
+    let info = null;
+    try { info = idleFinishedInfoFor(a, nowMs, thresholdMs); } catch { info = null; }
+    if (!info || info.finished !== true) return a;
+    return { ...a, idleFinished: true, idleFinishedReason: info.reason ?? null };
   });
 }
 
@@ -676,6 +716,11 @@ export function markAuthExpiredSessions(agents, authExpiredInfoFor) {
  * produces another `state` transition on its own — mirroring that finality here, the same way `done` already is,
  * is what frees the PR to be reconciled again rather than parking it at `liveness-unknown` forever.
  *
+ * AND the same holds for a session {@link markIdleFinishedSessions} has independently confirmed idle past its
+ * last-turn-ended threshold (`idleFinished: true`) — #4075/xg7m2wq, live incident PR #2724, 2026-09-26. Same
+ * upstream-fact reasoning as `hung`/`authExpired` immediately above, and the general backstop for every kind
+ * that has no self-report axis of its own at all (see that function's own doc).
+ *
  * THE ONE EXCEPTION TO `state === 'stopped'` MEANING FINISHED (#4149, epic #3383/#4075): a row
  * {@link markSelfReportedDone} marked `awaitingInfraCooloff: true` is NOT finished, even though session-reaper
  * now stops that process immediately (see that function's own doc) and the listing may therefore already read
@@ -691,7 +736,7 @@ export function assessLiveness(bound) {
     if (agent?.awaitingInfraCooloff === true) return false; // #4149 — the record's cool-off outranks `state`
     const state = String(agent?.state ?? '').toLowerCase();
     return state === 'done' || state === 'stopped' || agent?.selfReportedDone === true || agent?.hung === true
-      || agent?.authExpired === true;
+      || agent?.authExpired === true || agent?.idleFinished === true;
   };
   const list = (Array.isArray(bound) ? bound : []).filter((b) => !isFinished(b.agent));
   const ev = (b, kind, why) => ({

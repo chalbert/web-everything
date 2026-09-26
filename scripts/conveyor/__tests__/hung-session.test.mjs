@@ -18,6 +18,7 @@ import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyHungSession, resolveHungThresholdMs, DEFAULT_HUNG_THRESHOLD_MS, PENDING_CALL_GRACE_MULTIPLIER } from '../hung-session.mjs';
+import { classifyIdleFinished, resolveIdleFinishedThresholdMs, DEFAULT_IDLE_FINISHED_THRESHOLD_MS } from '../hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from '../hung-session.mjs';
@@ -241,6 +242,90 @@ describe('readHungInfo — the IO shell, against a REAL temp project store', () 
   it('a session id with no transcript on disk answers no-signal, never a guess', () => {
     const info = readHungInfo({ cwd, sessionId: 'no-such-session' }, Date.now(), 30 * 60_000);
     expect(info).toEqual({ hung: false, reason: 'no-signal', ageMs: null });
+  });
+});
+
+// ── IDLE-TURN-ENDED BACKSTOP — #4075/xg7m2wq, live incident PR #2724, 2026-09-26 ───────────────────────────────
+describe('classifyIdleFinished — PURE core', () => {
+  const NOW = 1_000_000_000;
+  const THRESHOLD = 10 * 60_000;
+
+  it('fresh (age < threshold) is never finished, pending or not', () => {
+    expect(classifyIdleFinished({ lastActivityMs: NOW - 1, nowMs: NOW, thresholdMs: THRESHOLD }))
+      .toEqual({ finished: false, reason: 'fresh', ageMs: 1 });
+  });
+
+  it('idle with NOTHING pending → finished at once, right at the threshold', () => {
+    const ageMs = THRESHOLD;
+    expect(classifyIdleFinished({ lastActivityMs: NOW - ageMs, nowMs: NOW, thresholdMs: THRESHOLD }))
+      .toEqual({ finished: true, reason: 'turn-ended-idle', ageMs });
+  });
+
+  it('a pending tool call is an ABSOLUTE gate — never finished, however old, unlike the hung axis\'s grace period', () => {
+    const wayPastThreshold = THRESHOLD * 100;
+    expect(classifyIdleFinished({ lastActivityMs: NOW - wayPastThreshold, nowMs: NOW, thresholdMs: THRESHOLD, pendingToolUse: true }))
+      .toEqual({ finished: false, reason: 'pending-tool-call', ageMs: wayPastThreshold });
+  });
+
+  it('any non-finite/invalid input answers no-signal, never a guess', () => {
+    expect(classifyIdleFinished({})).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+    expect(classifyIdleFinished({ lastActivityMs: NaN, nowMs: NOW, thresholdMs: THRESHOLD })).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+    expect(classifyIdleFinished({ lastActivityMs: NOW, nowMs: NOW, thresholdMs: 0 })).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+  });
+});
+
+describe('resolveIdleFinishedThresholdMs — WE_IDLE_FINISHED_MINUTES, IO shell only', () => {
+  it('defaults to 10 minutes when unset/empty', () => {
+    expect(resolveIdleFinishedThresholdMs({})).toBe(DEFAULT_IDLE_FINISHED_THRESHOLD_MS);
+    expect(resolveIdleFinishedThresholdMs({ WE_IDLE_FINISHED_MINUTES: '' })).toBe(DEFAULT_IDLE_FINISHED_THRESHOLD_MS);
+  });
+  it('reads a valid override in minutes', () => {
+    expect(resolveIdleFinishedThresholdMs({ WE_IDLE_FINISHED_MINUTES: '5' })).toBe(5 * 60_000);
+  });
+  it('falls back to the default on garbage, floor-clamped to 1 minute', () => {
+    expect(resolveIdleFinishedThresholdMs({ WE_IDLE_FINISHED_MINUTES: 'not-a-number' })).toBe(DEFAULT_IDLE_FINISHED_THRESHOLD_MS);
+    expect(resolveIdleFinishedThresholdMs({ WE_IDLE_FINISHED_MINUTES: '0' })).toBe(DEFAULT_IDLE_FINISHED_THRESHOLD_MS);
+  });
+});
+
+describe('readIdleFinishedInfo — the IO shell, against a REAL temp project store', () => {
+  let root, projects, cwd, sessionId, transcriptFile, readIdleFinishedInfo;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'idle-finished-test-'));
+    projects = join(root, 'projects');
+    cwd = '/Users/fixture/workspace/lane-9';
+    sessionId = 'sess-fixture-0002';
+    const slug = cwd.replaceAll('/', '-');
+    mkdirSync(join(projects, slug), { recursive: true });
+    transcriptFile = join(projects, slug, `${sessionId}.jsonl`);
+    vi.stubEnv('CLAUDE_PROJECTS_DIR', projects);
+    vi.resetModules();
+    ({ readIdleFinishedInfo } = await import('../hung-session.mjs'));
+  });
+  afterEach(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
+
+  it('the exact live shape (PR #2724): a turn fully ended, idle past 10 minutes → finished', () => {
+    const now = Date.now();
+    const staleTs = new Date(now - 20 * 60_000).toISOString(); // ~20 min idle, like ci-heal-2724
+    writeFileSync(transcriptFile, entryLine('assistant', staleTs, [{ type: 'text', text: 'I rebased PR #2724 onto the latest main and pushed it… No code change was needed' }]) + '\n');
+    const info = readIdleFinishedInfo({ cwd, sessionId }, now, 10 * 60_000);
+    expect(info.finished).toBe(true);
+    expect(info.reason).toBe('turn-ended-idle');
+  });
+
+  it('a still-pending tool_use is never finished, no matter how idle', () => {
+    const now = Date.now();
+    const staleTs = new Date(now - 60 * 60_000).toISOString();
+    writeFileSync(transcriptFile, entryLine('assistant', staleTs, [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'node scripts/verify-lane.mjs' } }]) + '\n');
+    const info = readIdleFinishedInfo({ cwd, sessionId }, now, 10 * 60_000);
+    expect(info.finished).toBe(false);
+    expect(info.reason).toBe('pending-tool-call');
+  });
+
+  it('missing cwd/sessionId, or no transcript on disk, answers no-signal, never a guess', () => {
+    expect(readIdleFinishedInfo({}, Date.now(), 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
+    expect(readIdleFinishedInfo({ cwd, sessionId: 'no-such-session' }, Date.now(), 10 * 60_000)).toEqual({ finished: false, reason: 'no-signal', ageMs: null });
   });
 });
 
