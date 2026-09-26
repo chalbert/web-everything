@@ -1,9 +1,10 @@
 ---
+bornAs: xilx617
 kind: story
 size: 5
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-note-comment.mjs", "we:scripts/operations/completion-store.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,11 +12,11 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Fix and review dispatch: round-cap and infra-retry exhaustion notify the operator; a long ci-heal session is bounded (flow gaps, reconcile-core)
 
-reconcile-core: every cap-exhausted refusal and a PR stuck cycling blocked-on-infra push a note on the #2725 notes channel; a live ci-heal/fix/review session past a bound gets a note. Clears 6 flow findings (xwuof33, xb4yerj, xwo3j0l) in fix, review, ci-heal flows.
+reconcile-core: every cap-exhausted refusal and a PR stuck cycling blocked-on-infra push a note on the #2725 notes channel; a live ci-heal/fix/review session past a bound gets a note. Clears 6 flow findings (4235, 4232, 4237) in fix, review, ci-heal flows.
 
 ## Slice
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - fix round-cap-hit (silent-failure)

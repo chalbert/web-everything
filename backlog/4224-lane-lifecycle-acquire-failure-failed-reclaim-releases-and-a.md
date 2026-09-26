@@ -1,9 +1,10 @@
 ---
+bornAs: x7w2lc1
 kind: story
 size: 3
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/lane-pool.mjs", "we:scripts/conveyor/lease-reaper.mjs", "we:scripts/conveyor/lane-pool-health-watch.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,11 +12,11 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Lane lifecycle: acquire failure, failed reclaim releases and a lane waiting for manual reclaim all reach someone (flow gaps, lane-pool/lease-reaper)
 
-lane-pool acquire-failed leaves a durable record the health watch can read; lease-reaper caps releases per pass and escalates repeated release failures; a finished-needs-review lane waiting on a person past a bound is re-surfaced. Clears lane-lifecycle acquire-failed, lane-reclaimed-stale, lane-manual-reclaim-blocked (xwuof33, xb4yerj, xwo3j0l).
+lane-pool acquire-failed leaves a durable record the health watch can read; lease-reaper caps releases per pass and escalates repeated release failures; a finished-needs-review lane waiting on a person past a bound is re-surfaced. Clears lane-lifecycle acquire-failed, lane-reclaimed-stale, lane-manual-reclaim-blocked (4235, 4232, 4237).
 
 ## Slice
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - lane-lifecycle acquire-failed (silent-failure)

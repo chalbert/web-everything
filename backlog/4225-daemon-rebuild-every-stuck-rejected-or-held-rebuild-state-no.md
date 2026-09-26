@@ -1,9 +1,10 @@
 ---
+bornAs: xfzc49z
 kind: story
 size: 5
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/lib/daemon-rebuild.mjs", "we:scripts/lib/daemon-overlays.mjs", "we:scripts/daemon-overlay.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,13 +12,13 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Daemon rebuild: every stuck, rejected or held rebuild state notifies, and the overlay-list lock timeout has its own exit (flow gaps, daemon-rebuild)
 
-daemon-rebuild: cap index-lock recovery, notify on a code-rejected build and on stuck-needs-hand-fix, raise clone-held-stale for a pinned refusal, catch the overlay-list mutex timeout as a named state; daemon-overlay CLI failure records a follow-up. Deferred behind open PR #2739 (same files). Clears 6 daemon-rebuild findings (xwuof33, xb4yerj, x56qzx8).
+daemon-rebuild: cap index-lock recovery, notify on a code-rejected build and on stuck-needs-hand-fix, raise clone-held-stale for a pinned refusal, catch the overlay-list mutex timeout as a named state; daemon-overlay CLI failure records a follow-up. Deferred behind open PR #2739 (same files). Clears 6 daemon-rebuild findings (4235, 4232, 4226).
 
 ## Slice
 
-**Deferred:** do not start until open PR #2739 (card x5wbsbc) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
+**Deferred:** do not start until open PR #2739 (card 4217) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - daemon-rebuild rebuild-safety-recovery (uncapped-retry)

@@ -1,9 +1,10 @@
 ---
+bornAs: xvaxtyd
 kind: story
 size: 2
 parent: "4075"
 status: open
-blockedBy: ["xr05jjl"]
+blockedBy: ["4220"]
 scope: ["we:scripts/merge-ai-prs.mjs"]
 dateOpened: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
@@ -11,13 +12,13 @@ tags: [conveyor, daemons, flows, flow-checker]
 
 # Drain: a PR whose merge attempt keeps failing is counted and escalated (flow gap, merge-ai-prs)
 
-merge-ai-prs: count consecutive failed merge attempts per PR head and park it for a person at a cap instead of retrying every sweep. Deferred behind open PR #2724 (same file). Clears drain-land merge-attempt (xb4yerj).
+merge-ai-prs: count consecutive failed merge attempts per PR head and park it for a person at a cap instead of retrying every sweep. Deferred behind open PR #2724 (same file). Clears drain-land merge-attempt (4232).
 
 ## Slice
 
-**Deferred:** do not start until open PR #2724 (card xqpqyr2) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
+**Deferred:** do not start until open PR #2724 (card 4216) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
 
-Sliced by FILE from the four flow-checker gap cards (xwuof33, xb4yerj, xwo3j0l, x56qzx8), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
+Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 
 Findings this slice clears:
 - drain-land merge-attempt (uncapped-retry)
