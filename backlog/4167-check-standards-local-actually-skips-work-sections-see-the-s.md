@@ -3,10 +3,11 @@ bornAs: xpfeeo8
 kind: story
 size: 5
 parent: "4163"
-status: open
+status: active
 blockedBy: ["4164"]
 scope: ["we:scripts/check-standards.mjs", "we:scripts/readiness/claimScope.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-26"
 tags: []
 ---
 
