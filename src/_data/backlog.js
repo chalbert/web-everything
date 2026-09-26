@@ -342,15 +342,18 @@ function loadReport(relPath) {
   return derive(content, { isReport: true });
 }
 
-module.exports = function backlog() {
+// #4166 — the loader body, factored out from the default export so a SCOPED caller (below) can hand it an
+// explicit, narrower file list instead of always re-deriving the full `readdirSync(BACKLOG_DIR)` listing.
+// `fileNames`, when given, is used AS-IS (basenames, `<id>.md`) instead of the whole-directory listing —
+// every line below is byte-identical to before this split.
+function buildBacklog(fileNames) {
   // Malformed YAML frontmatter in ONE item must not take down the whole load (#430): a single bad
   // file (the recurring trigger is a `graduatedTo:`/scalar value with an unquoted colon, which
   // js-yaml reads as a nested mapping and throws on) would otherwise hard-crash every consumer —
   // Eleventy, check:readiness, check:standards. We catch per-item, skip the bad file, and collect
   // it so the failure degrades to a reported warning, not a crash.
   const malformed = [];
-  const items = readdirSync(BACKLOG_DIR)
-    .filter((f) => f.endsWith('.md'))
+  const items = (Array.isArray(fileNames) ? fileNames : readdirSync(BACKLOG_DIR).filter((f) => f.endsWith('.md')))
     .map((file) => {
       const id = file.replace(/\.md$/, '');
       // Filenames lead with EITHER a numeric `NNN` (a LANDED item) or a provisional `xNNNNNN` hash (an
@@ -953,7 +956,29 @@ module.exports = function backlog() {
   };
 
   return items;
-};
+}
+
+module.exports = function backlog() { return buildBacklog(); };
+
+// #4166 — a SCOPED entry point for check-standards.mjs's `--local --files=` reference-following checks
+// (blockedBy edges, formerSlugs, the backlog-consuming lints in its 6d family): parses only the given
+// backlog/*.md basenames through the SAME pipeline the default export uses, instead of the whole ~4.1k-item
+// corpus — the measured cost this card targets. Cross-item derived fields that need items OUTSIDE the given
+// set for full accuracy (the `children` rollup, `dependents`/`transitiveUnblocks` reverse-edge reach, the
+// `projectPending` parent-chain walk) are correspondingly UNDER-COUNTED — never over-counted — relative to a
+// full load. That is safe for `check:standards`'s own purpose: every finding it can produce is either (a)
+// attributed to the item's OWN file, in which case `--local --files=`'s existing classification
+// (`partitionLocal`, scripts/readiness/claimScope.mjs) already demotes it to a note whenever that file sits
+// outside the effective scope, whether or not this loader under-counted its derived fields; or (b) a
+// path-less/aggregate finding (ctaless, the classification-collapse guard), which `--local` ALREADY demotes
+// unconditionally (`partitionLocal`'s "path-less global → note iff --local"). The caller is responsible for
+// widening `fileNames` to the full effective scope BEFORE calling — changed files, their outgoing
+// `blockedBy`/`parent`/`formerSlugs` targets, and any file GIT-GREP finds referencing a changed item's id —
+// exactly what `computeBacklogScope` in check-standards.mjs does; passing only the literal `--files=` set
+// would reproduce the false-green #4166 exists to close (a lane-caused broken edge on a file the lane didn't
+// itself edit, silently demoted). The Eleventy site build and every other consumer keep calling the default
+// export, completely unaffected by this addition.
+module.exports.loadBacklogScoped = function loadBacklogScoped(fileNames) { return buildBacklog(fileNames); };
 
 // Named export of the pure D3-readiness derivation (#621) for direct regression testing — Eleventy only
 // ever invokes the default function export, so attaching this property is inert to the build.
