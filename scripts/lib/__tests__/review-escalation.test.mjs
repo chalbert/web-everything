@@ -41,6 +41,8 @@ import {
   buildClearedHumanMarker,
   buildClearanceRevocationComment,
   CONFORMANCE_GRADING_PATHS,
+  decideParkToHuman,
+  findContradictoryReviewVerdicts,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
@@ -2002,6 +2004,61 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
     expect(shouldReparkForTestTampering({
       tampered: true, netDiffScored: true, humanClearedSha: '1111111', headSha: '2222222',
     })).toBe(true);
+  });
+
+  describe('decideParkToHuman + findContradictoryReviewVerdicts — #2766/#2767 mutual-exclusivity fix', () => {
+    // #2767's ACTUAL live label state (chalbert/web-everything, read 2026-09-26 via `gh pr view 2767 --json
+    // labels`): an unattended review loop recorded `review:accepted` at 21:46Z; three minutes later the
+    // anti-test-gaming gate parked `review:human` — but only ADDED it, so BOTH verdict labels survived
+    // together, alongside `review:awaiting-advisory` and the informative `review-status:reviewing`. This is
+    // the BEFORE proof: the raw label set is contradictory by `findContradictoryReviewVerdicts`'s own count.
+    const LIVE_2767_LABELS = [
+      'review:accepted', 'review:human', 'review-status:reviewing', 'review-round:1', 'review:awaiting-advisory',
+    ];
+
+    it('BEFORE — findContradictoryReviewVerdicts flags #2767\'s real (pre-fix) label state', () => {
+      expect(findContradictoryReviewVerdicts(LIVE_2767_LABELS).sort())
+        .toEqual([REVIEW_LABELS.accepted, REVIEW_LABELS.human].sort());
+      // A healthy single-verdict PR (or one with none at all) is never flagged.
+      expect(findContradictoryReviewVerdicts([REVIEW_LABELS.human])).toEqual([]);
+      expect(findContradictoryReviewVerdicts(['review-status:reviewing'])).toEqual([]);
+      expect(findContradictoryReviewVerdicts([REVIEW_LABELS.accepted, REVIEW_LABELS.changes]).sort())
+        .toEqual([REVIEW_LABELS.accepted, REVIEW_LABELS.changes].sort());
+    });
+
+    it('AFTER — decideParkToHuman replaces every other review:* verdict when it parks to human', () => {
+      const decision = decideParkToHuman({ currentLabels: LIVE_2767_LABELS, keepHumanClearance: false });
+      expect(decision.allowed).toBe(true);
+      expect(decision.addLabel).toBe(REVIEW_LABELS.human);
+      expect(decision.removeLabels).toEqual(expect.arrayContaining([
+        REVIEW_LABELS.accepted, REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted,
+      ]));
+      // Simulate applying the decision (add + remove) the same way the caller does, then re-check: the
+      // resulting label set is no longer contradictory — this is the live proof the fix actually closes #2767's
+      // bug, not just that the decision object LOOKS right in isolation.
+      const removed = new Set(decision.removeLabels);
+      const after = [...new Set([...LIVE_2767_LABELS.filter((l) => !removed.has(l)), decision.addLabel])];
+      expect(findContradictoryReviewVerdicts(after)).toEqual([]);
+      expect(after).toContain(REVIEW_LABELS.human);
+      expect(after).not.toContain(REVIEW_LABELS.accepted);
+      // `review:awaiting-advisory` and the informative `review-status:reviewing` are UNTOUCHED — this target
+      // only ever governs the four review:* VERDICT labels, never the advisory-pipeline state alongside them.
+      expect(after).toContain('review:awaiting-advisory');
+    });
+
+    it('keepHumanClearance:true preserves a GENUINE current human clearance (#x9xqexm) — never deletes it', () => {
+      const decision = decideParkToHuman({ currentLabels: LIVE_2767_LABELS, keepHumanClearance: true });
+      expect(decision.removeLabels).not.toContain(REVIEW_LABELS.accepted);
+      // …but still replaces the labels no sanctioned writer ever leaves standing beside a human hold.
+      expect(decision.removeLabels).toEqual(expect.arrayContaining([
+        REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted,
+      ]));
+    });
+
+    it('is ALWAYS allowed — a park is the drain protecting itself, never a refusable verdict', () => {
+      expect(decideParkToHuman({ currentLabels: [] }).allowed).toBe(true);
+      expect(decideParkToHuman({ currentLabels: [REVIEW_LABELS.human] }).allowed).toBe(true);
+    });
   });
 
   it('an UNATTRIBUTED marker is not a clearance — it would render two different names downstream', () => {

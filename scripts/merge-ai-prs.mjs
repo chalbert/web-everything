@@ -124,9 +124,16 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 // fingerprint reader (`parseReviewedDiff`), #2832/#984's hold-invariant helpers (`READY_TO_MERGE_LABEL`,
 // `isReviewHoldLabel`, `decideParkReadyStrip`), #2890's null-contract diff mapper (`diffHunksFrom`), and
 // #x9xqexm's contribution fingerprint reader (`parseReviewedContribution`). None supersedes another.
-import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath } from './lib/review-escalation.mjs';
+import { scoreEscalation, diffHunksFrom, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, reconcileEscalationReasonBlock, decideDurableEscalationRecord, bodyHasEscalationReason, shouldApplyReviewLabel, hasUnclearedReviewLabel, hasReviewLabel, parseReviewedSha, parseReviewedDiff, parseReviewedContribution, parseOperatorClearance, parseLatestHumanClearedSha, shouldReparkForTestTampering, buildClearanceRevocationComment, READY_TO_MERGE_LABEL, isReviewHoldLabel, decideParkReadyStrip, isEngineTierPath,
+  // #2766/#2767 — the mutual-exclusivity park decision (imported HERE, the leaf module, never from
+  // `review-set-label.mjs`, which itself imports `computeNetDiffText` FROM this file — a back-import would
+  // be a circular module cycle). `review-set-label.mjs` re-exports both for discoverability under the
+  // single-label-home doctrine (#2644); the decision itself lives beside `shouldReparkForTestTampering`, the
+  // predicate that already proves this target's own precondition (see `decideParkToHuman`'s own docstring).
+  decideParkToHuman,
+} from './lib/review-escalation.mjs';
 import { emptyBaselineState, parseBaselineState, serializeBaselineState, getBaseline, recordBaseline, diffBaseline } from './lib/review-baseline-state.mjs';
-import { mergePr, hasNonEmptyBody, scanTestTampering, retargetStackedPrs } from './lib/pr-merge-gate.mjs';
+import { mergePr, hasNonEmptyBody, scanTestTampering, retargetStackedPrs, describeStackedTestGamingOrigin } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes, isPostLandTreeDirty, landedNumberFor, resolveLandedItem } from './lane-drain.mjs'; // #2899 A5 — `resolveLandedItem` shares lane-drain's ONE resolve-on-land home, exactly as `numberPendingHashes` shares its numbering (never a fork)
 import { isHash } from './backlog/id.mjs'; // #2393 — a stackParent hash's bornAs-on-main lookup is hash-only
 import { withNumberingLock, withLandWriteLock, acquireDrainLease, heartbeatDrainLease, releaseDrainLease, drainLeaseStatus, drainOwner, DRAIN_LOCK_ROOT, localRepoSlug } from './readiness/drain-lock.mjs'; // #2391 — numbering-critical-section mutex + (#2683) the merge-write mutex (withLandWriteLock, same lock key) + (#2395) whole-process drain lease a `--watch` monitor holds for its lifetime + (#3440) localRepoSlug keys that lease per-repo
@@ -1521,6 +1528,10 @@ export function buildDrainVerdicts({ prsByRepo, readOf, repos = [], requiredChec
       if (relief.passWide && !!label) v.reliefPassWide = true;
       v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
       v.headRef = p.headRefName;
+      // #2766/#2767 — this PR's OWN base branch name (not `v.base`, the unrelated manifest-couple SHA above).
+      // Read so a later stacked-PR check can ask "is this PR's base another OPEN PR's head?" off data already
+      // fetched this pass, no extra `gh` call.
+      v.baseRefName = typeof p.baseRefName === 'string' ? p.baseRefName : null;
       attachManifestToVerdict(v, read.manifest ?? null, { repo, isLocalRepo, localSlug });
       v.prLabels = p.labels || [];
       // #2447 — the body's own `graduatedTo:` note, extracted now so the escalation pass (which no longer holds `p`)
@@ -4312,6 +4323,11 @@ async function runCli() {
       // are always CUMULATIVE while `changedFiles` may be de-inflated to `v.base…head`; the verdict's
       // `diffHunksBasisFiles` (= `humanBasisFiles`, same basis as the hunks) is what a detector pairs them with.
       const score = scoreEscalation({ changedFiles, diffLines, humanBasisFiles, cumulativeDiffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, diffHunks, basisNarrowed });
+      // #2766/#2767 — this PR's OWN changed-file set, stamped onto the verdict (best-effort — whatever this
+      // pass already scored, never a new `gh` call) so a LATER sibling verdict in this SAME batch can ask
+      // "did this PR's own commits touch the file my test-gaming finding cites?" without re-fetching — the
+      // stacked-base-origin check a few lines below (`describeStackedTestGamingOrigin`) is the one consumer.
+      v.changedFiles = Array.isArray(changedFiles) ? changedFiles : [];
       // #2447 — the graduatedTo RESOLUTION BASIS, off the same file set + diff text the score just read (no extra
       // `gh` call). Backlog-only is judged on the CUMULATIVE basis (`humanBasisFiles`) so a de-inflated stacked
       // base can never make a code-carrying PR claim "no code change". Presentation only: it feeds the park/skip
@@ -4357,8 +4373,19 @@ async function runCli() {
         v.escalateReasons = tamper.reasons;
         v.reason = `manifest baseline mismatch — post-review tamper suspected: ${tamper.reasons.join('; ')}`;
         if (!DRY_RUN) {
-          if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
-            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          // #2766/#2767 — same mutual-exclusivity target as the test-gaming park below, but this site has no
+          // `humanClearedSha` proof of its own (no fetch — the manifest-tamper trigger never checked comments),
+          // so `keepHumanClearance: true` UNCONDITIONALLY: a co-present `review:accepted` is left standing
+          // exactly as before (#x9xqexm — never delete an unproven-stale clearance), and only the labels this
+          // park CAN safely replace (`pending`/`changes`/`redteam:accepted`) are cleared. Closing this gap the
+          // same way the test-gaming site is closed needs the same head/comments fetch this site does not yet
+          // have; tracked as a residual rather than guessed at here.
+          const parkDecision = decideParkToHuman({ currentLabels: v.prLabels, keepHumanClearance: true });
+          if (parkDecision.addLabel && shouldApplyReviewLabel(parkDecision.addLabel, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', parkDecision.addLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          for (const staleLabel of parkDecision.removeLabels.filter((l) => hasReviewLabel(v.prLabels, l))) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', staleLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // mechanical-dispatcher — re-parking to review:human means the advisory panel has not seen THIS
           // diff either; carry review:awaiting-advisory alongside it so "not yet advised" stays a label even on
@@ -4412,10 +4439,37 @@ async function runCli() {
         v.escalated = 'yes';
         v.humanRequired = true;
         v.escalateReasons = gaming.reasons;
-        v.reason = `test-gaming suspected — CI-green may be manufactured by tampering with tests: ${gaming.reasons.join('; ')}`;
+        // #2766/#2767 — is this PR's own tampering finding (at least partly) INHERITED from an already-
+        // escalated stacked base (its own `baseRefName` IS another open PR's `headRef`, and that PR already
+        // carries `review:human`)? Best-effort, off data this SAME batch already fetched (`v.changedFiles`,
+        // stamped a few hundred lines up) — never a new `gh` call. Named in the park comment so the human
+        // reviews the shared root cause ONCE, on the base, instead of twice (#2767's actual live shape:
+        // stacked on #2766, which rewrote its own "property 4" tests legitimately).
+        const stackedBase = v.baseRefName ? verdicts.find((s) => s !== v && s.headRef === v.baseRefName) : null;
+        const stackedOrigin = stackedBase ? describeStackedTestGamingOrigin({
+          findings: gaming.findings,
+          baseFiles: stackedBase.changedFiles,
+          baseAlreadyEscalated: hasReviewLabel(stackedBase.prLabels, REVIEW_LABELS.human),
+        }) : null;
+        v.reason = `test-gaming suspected — CI-green may be manufactured by tampering with tests: ${gaming.reasons.join('; ')}`
+          + (stackedOrigin
+            ? ` — inherited from stacked base #${stackedBase.num} (${stackedOrigin.sharedPaths.join(', ')}); already `
+              + 'escalated for the same reason there — review once, on the base'
+            : '');
         if (!DRY_RUN) {
-          if (shouldApplyReviewLabel(REVIEW_LABELS.human, v.prLabels)) {
-            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', REVIEW_LABELS.human], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          // #2766/#2767 — MUTUAL EXCLUSIVITY. `keepHumanClearance` is `true` ONLY when the humanClearedSha
+          // fetch above never ran/succeeded (`tamperHeadSha === null`, incl. a `gh` fetch miss) — the fail-
+          // closed-toward-PRESERVATION direction (see `decideParkToHuman`'s own docstring). It successfully
+          // ran and found no match whenever we are inside this branch WITH a real `tamperHeadSha`, since a
+          // match would have made `shouldReparkForTestTampering` return `false` above — so `false` here is a
+          // proven fact, not a guess.
+          const keepHumanClearance = hasReviewLabel(v.prLabels, REVIEW_LABELS.accepted) && tamperHeadSha === null;
+          const parkDecision = decideParkToHuman({ currentLabels: v.prLabels, keepHumanClearance });
+          if (parkDecision.addLabel && shouldApplyReviewLabel(parkDecision.addLabel, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', parkDecision.addLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
+          for (const staleLabel of parkDecision.removeLabels.filter((l) => hasReviewLabel(v.prLabels, l))) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--remove-label', staleLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // mechanical-dispatcher — same as the manifest-tamper park above: a re-park has not been re-advised
           // either, so carry review:awaiting-advisory alongside review:human here too (#xlw02hw clears it).

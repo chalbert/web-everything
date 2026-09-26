@@ -75,6 +75,13 @@ import {
   // `parseReviewedSha`'s answer whenever it is non-null; a second independent parse would only ever agree.
   parseReviewedDiff, parseReviewedContribution, parseOperatorClearance,
   parseLatestHumanClearedSha, acceptanceCoversHead,
+  // #x9krtkc (mutual-exclusivity fix, #2766/#2767) — the automated-escalation park decision and its detector,
+  // re-exported below for the same reason `REASONLESS_BOUNCE_REFUSAL` is: this file is the SINGLE label home
+  // (#2644), so a reader looks HERE for what governs a label swap even though the pure decision itself lives
+  // in the leaf module merge-ai-prs.mjs's own gh-free imports resolve against (avoiding the circular import
+  // that keeping it here would force — `review-set-label.mjs` already imports `computeNetDiffText` FROM
+  // `merge-ai-prs.mjs`, so `merge-ai-prs.mjs` cannot import back from here).
+  decideParkToHuman, findContradictoryReviewVerdicts,
 } from './lib/review-escalation.mjs';
 // #4140 — `decideRestampHumanClearance` names the carried clearance's actor from TRUSTED comments only, so a later
 // untrusted `cleared-human` marker cannot rename it (the other three parsers it reaches gate themselves).
@@ -160,6 +167,19 @@ export const REVIEW_LABEL_TARGETS = Object.freeze(['accepted', 'changes', 'rearm
  * DECIDED; the leaf only holds the predicate that decision asks.
  */
 export { REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, RENDERED_FINDINGS_HEADING, bounceEvidenceFromWriteUp };
+
+/**
+ * we:scripts/review-set-label.mjs — THE AUTOMATED-ESCALATION PARK (mutual exclusivity, #2766/#2767), re-
+ * exported from `we:scripts/lib/review-escalation.mjs` for the same reason as the reasonless-bounce rule
+ * above: this file is the single label home (#2644), so it stays the one place a reader looks for what
+ * governs ANY label swap — including the one no `REVIEW_LABEL_TARGETS` member covers, because a park is not
+ * a CLI-driven reviewer verdict at all. `merge-ai-prs.mjs`'s two ad-hoc re-park sites (test-gaming,
+ * manifest-tamper) call `decideParkToHuman` directly (importing it from the leaf module, not from here — see
+ * that import's own comment for why) so `review:human` is never added without also replacing every other
+ * live `review:*` verdict it supersedes. `findContradictoryReviewVerdicts` is the companion DETECTOR: the
+ * "check that flags any PR carrying two review verdict labels" a reader (a test, a future sweep) reaches for.
+ */
+export { decideParkToHuman, findContradictoryReviewVerdicts };
 
 /**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and

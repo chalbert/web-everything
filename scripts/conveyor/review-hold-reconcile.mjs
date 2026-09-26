@@ -43,7 +43,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+import { REVIEW_LABELS, findContradictoryReviewVerdicts } from '../lib/review-escalation.mjs';
 import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { defaultListPrs } from './advisory-label-sweep.mjs';
@@ -76,19 +76,37 @@ export function planReviewHoldCleanup({ currentLabels = [] } = {}) {
     if (names.has(ADVISORY_LABELS.ACCEPTED)) remove.push(ADVISORY_LABELS.ACCEPTED);
     if (names.has(ADVISORY_LABELS.CHANGES)) remove.push(ADVISORY_LABELS.CHANGES);
   }
-  return { remove };
+  // (3) FLAG (never auto-remove) a co-present review:accepted + review:human — the #2766/#2767 mutual-
+  // exclusivity bug this sweep predates. `decideParkToHuman` (`we:scripts/lib/review-escalation.mjs`) now
+  // prevents this pair going FORWARD at write time, but a PR already carrying it needs its comment history read
+  // (was the `accepted` a GENUINE, currently-valid human clearance? #x9xqexm forbids an automated pass from
+  // ever deleting one of those) before either label can be safely dropped — data this label-only sweep does
+  // not have (`planReviewHoldCleanup` takes only `labels`, by design — see the file header). So this reports
+  // the contradiction for a human/operator to resolve (e.g. via `review-set-label.mjs --to=clear-human` or
+  // `--to=changes`), rather than guessing. Never included in `remove`.
+  //
+  // Checked on the label set AFTER point (1)'s own removal (never the raw observed set) — the `human` +
+  // `pending` pair point (1) already resolves is NOT this bug (it is the #2549 stray a sanctioned `rearm` could
+  // produce), and re-flagging it here would be this same sweep contradicting its own point (1) fix one line up.
+  const afterHoldCleanup = [...names].filter((n) => !remove.includes(n));
+  const flagged = findContradictoryReviewVerdicts(afterHoldCleanup);
+  return flagged.length ? { remove, flagged } : { remove };
 }
 
-/** True when the PR carries a label combination {@link planReviewHoldCleanup} would act on — the only PRs
- *  this pass has any business fetching/looking at closely (a cheap pre-filter before the pure plan). */
+/** True when the PR carries a label combination {@link planReviewHoldCleanup} would act on OR flag — the only
+ *  PRs this pass has any business fetching/looking at closely (a cheap pre-filter before the pure plan). */
 export function needsReviewHoldCleanup(pr) {
-  return planReviewHoldCleanup({ currentLabels: pr?.labels }).remove.length > 0;
+  const plan = planReviewHoldCleanup({ currentLabels: pr?.labels });
+  return plan.remove.length > 0 || !!plan.flagged?.length;
 }
 
 /**
- * Drop every stray review-hold / gate-scoped-advisory label off every open PR that carries one.
+ * Drop every stray review-hold / gate-scoped-advisory label off every open PR that carries one, and FLAG
+ * (never touch) any PR carrying a contradictory pair of review:* VERDICT labels (#2766/#2767) — see
+ * `planReviewHoldCleanup`'s point (3) for why a flag, not an auto-remove.
  * @param {{repo?: string|null, listPrs?: Function, provider?: object, dryRun?: boolean}} [o]
- * @returns {Array<{num: number, remove: string[], error?: string}>} one entry per PR that needed (or would need) a change.
+ * @returns {Array<{num: number, remove?: string[], flagged?: string[], error?: string}>} one entry per PR that
+ *   needed (or would need) a change, or carries a contradiction this sweep declines to resolve itself.
  */
 export function sweepReviewHoldLabels({
   repo = null, listPrs = defaultListPrs, provider = createGhProvider(), dryRun = false,
@@ -98,9 +116,9 @@ export function sweepReviewHoldLabels({
   let resolvedRepo = repo;
   for (const pr of Array.isArray(prs) ? prs : []) {
     const plan = planReviewHoldCleanup({ currentLabels: pr.labels });
-    if (plan.remove.length === 0) continue;
-    const entry = { num: pr.number, remove: plan.remove };
-    if (!dryRun) {
+    if (plan.remove.length === 0 && !plan.flagged?.length) continue;
+    const entry = { num: pr.number, ...(plan.remove.length ? { remove: plan.remove } : {}), ...(plan.flagged?.length ? { flagged: plan.flagged } : {}) };
+    if (!dryRun && plan.remove.length) {
       try {
         if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
         provider.setLabels(resolvedRepo, pr.number, { remove: plan.remove });
@@ -130,8 +148,13 @@ if (IS_CLI) {
         repo, dryRun, ...(prsFile ? { listPrs: () => readPrsFromFile(prsFile) } : {}),
       });
       for (const r of results) {
-        const did = dryRun ? 'would' : r.error ? 'FAILED to' : 'did';
-        writeLineSync(2, `  ⚠ PR #${r.num}: ${did} remove ${r.remove.join(',')} (stray review-hold / gate-scoped advisory)${r.error ? ` (${r.error})` : ''}`);
+        if (r.remove?.length) {
+          const did = dryRun ? 'would' : r.error ? 'FAILED to' : 'did';
+          writeLineSync(2, `  ⚠ PR #${r.num}: ${did} remove ${r.remove.join(',')} (stray review-hold / gate-scoped advisory)${r.error ? ` (${r.error})` : ''}`);
+        }
+        if (r.flagged?.length) {
+          writeLineSync(2, `  🚩 PR #${r.num}: carries contradictory review:* verdict labels (${r.flagged.join(',')}) — #2766/#2767 shape; this sweep does not auto-resolve it (needs comment history read to tell a genuine human clearance from a bare superseded one). Resolve via review-set-label.mjs --to=clear-human or --to=changes.`);
+        }
       }
       writeAllSync(1, `${JSON.stringify({ checked: true, changed: results.length, results })}\n`);
     } catch (e) {

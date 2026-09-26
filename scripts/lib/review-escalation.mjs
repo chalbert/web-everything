@@ -1566,6 +1566,79 @@ export function shouldReparkForTestTampering({ tampered, netDiffScored, humanCle
   return !(humanClearedSha && headSha && humanClearedSha === headSha);
 }
 
+/**
+ * we:scripts/lib/review-escalation.mjs#decideParkToHuman — THE AUTOMATED-ESCALATION LABEL SWAP (mutual-
+ * exclusivity fix; live bug on chalbert/web-everything#2766/#2767, 2026-09-26): when the drain's own re-score
+ * escalates a PR to `review:human` (test-gaming, manifest-tamper, …), it must not leave a prior `review:*`
+ * VERDICT standing next to the new hold. #2767's actual sequence: an unattended review loop recorded
+ * `review:accepted` at 21:46Z; three minutes later the anti-test-gaming gate (#2440/#xuboo0q) parked
+ * `review:human` — correctly, per `shouldReparkForTestTampering` above — but only ADDED the hold; the prior
+ * `review:accepted` was never removed, so the PR carried both labels at once. `hasUnclearedReviewLabel`
+ * already refuses to read that pair as cleared (#x9xqexm), so nothing merged — but the contradictory LABEL,
+ * not just the merge gate, is a real bug: `classifyPr` (`we:scripts/progress-board.mjs`) and the operator's
+ * own dispatch rule (`we:scripts/operations/operator-queue.mjs`) both read the PAIR, and a PR the drain just
+ * escalated must read as escalated everywhere, not just at the one gate that happens to check both labels.
+ *
+ * THE FIX IS WRITE-TIME, not a later sweep: a park is not a reviewer VERDICT at all (it carries no
+ * independence check, unlike `review-set-label.mjs`'s `accepted`/`changes` targets), so nothing stops it from
+ * ALSO clearing every stale verdict it supersedes — the same way `review-set-label.mjs#decideSetLabel`'s own
+ * targets already clear a stale `changes` on `accepted`, a stale `accepted`/`changes` on `clear-human`, etc.
+ * (see that file's docs for the pattern this mirrors). `review:pending` and `review:changes` are ALWAYS
+ * replaced — a park is a STRONGER hold than either. `redteam:accepted` goes too, same reasoning as
+ * `review-set-label.mjs`'s `changes`/`rearm` branches: an independent validator's sign-off on a diff a park
+ * just declared untrustworthy must not survive to cover a later plain re-accept.
+ *
+ * `review:accepted` is the ONE label #x9xqexm says an automated pass may never delete — but that invariant
+ * protects a GENUINE, CURRENTLY-VALID human clearance (`review-set-label.mjs --to=clear-human`'s own record),
+ * never a bare/superseded agent verdict. `keepHumanClearance` is the caller's OWN proof, computed the exact
+ * way `shouldReparkForTestTampering` already requires before this target is even reachable: a POSITIVE,
+ * successful read (never a fetch-miss/unknown — that fails closed the OTHER way, toward preservation)
+ * confirming `parseLatestHumanClearedSha(comments)` does NOT match the live head. A caller inside a
+ * `shouldReparkForTestTampering === true` branch has therefore already shown any co-present `accepted` is NOT
+ * that proof (a match would have made the repark predicate itself return `false`) — so `keepHumanClearance:
+ * false` there is not a guess, it is the SAME fact the caller just used to decide to park at all. A caller
+ * that could not confirm either way (a `gh` fetch miss) MUST pass `keepHumanClearance: true` — unknown fails
+ * closed toward NEVER deleting a record, the opposite direction from the escalation decision itself.
+ *
+ * ALWAYS ALLOWED — a park is the drain protecting itself, never a verdict a caller could be refused for.
+ * @param {{currentLabels?: Array, keepHumanClearance?: boolean}} o - `currentLabels` is the PR's OBSERVED
+ *   labels (string or `{name}` shape, per `hasReviewLabel`); `keepHumanClearance` (default `false`) is the
+ *   caller's own proof that a co-present `review:accepted` is NOT a currently-valid human clearance — pass
+ *   `true` only when that could not be established (fail closed toward preservation).
+ * @returns {{allowed: true, addLabel: string, removeLabels: string[], keepsHuman: true, reason: string}}
+ */
+export function decideParkToHuman({ currentLabels = [], keepHumanClearance = false } = {}) {
+  const removeLabels = [REVIEW_LABELS.pending, REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted];
+  if (!keepHumanClearance) removeLabels.push(REVIEW_LABELS.accepted);
+  return {
+    allowed: true,
+    addLabel: REVIEW_LABELS.human,
+    removeLabels,
+    keepsHuman: true,
+    reason: keepHumanClearance
+      ? 'parked to review:human — a live human clearance of this exact head is preserved (#x9xqexm); the '
+        + 'hold sits alongside it rather than over it'
+      : 'parked to review:human — every other review:* verdict label replaced (mutual exclusivity; a park is '
+        + 'a hold, not a verdict, so it carries none of its own)',
+  };
+}
+
+/**
+ * we:scripts/lib/review-escalation.mjs#findContradictoryReviewVerdicts — THE CHECK: does this PR carry more
+ * than one of the four review:* VERDICT/HOLD labels at once (`pending`, `accepted`, `changes`, `human`)? A
+ * healthy PR carries AT MOST ONE — `decideParkToHuman` above and every `review-set-label.mjs#decideSetLabel`
+ * target already enforce that going forward; this is the pure DETECTOR a reader (a test, a sweep, a status
+ * board) uses to flag a PR that predates the fix, or reached a contradictory state some other way. Pure,
+ * read-only — it does not say which label is wrong or decide a fix, only that the pair exists (#2766/#2767).
+ * @param {Array} labels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @returns {string[]} the review:* verdict labels found live, when 2+ (empty when 0 or 1 — not contradictory)
+ */
+export function findContradictoryReviewVerdicts(labels) {
+  const live = [REVIEW_LABELS.pending, REVIEW_LABELS.accepted, REVIEW_LABELS.changes, REVIEW_LABELS.human]
+    .filter((l) => hasReviewLabel(labels, l));
+  return live.length > 1 ? live : [];
+}
+
 /** The marker carrying the #x9xqexm CONTRIBUTION fingerprint, stamped beside `reviewed-sha` / `reviewed-diff`. */
 export const REVIEWED_CONTRIBUTION_MARKER = 'reviewed-contribution';
 const REVIEWED_CONTRIBUTION_RE = new RegExp(`<!--\\s*${REVIEWED_CONTRIBUTION_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');

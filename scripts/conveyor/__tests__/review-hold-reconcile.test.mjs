@@ -66,6 +66,26 @@ describe('planReviewHoldCleanup', () => {
     expect(planReviewHoldCleanup({ currentLabels: ['review:human', 'review:pending'] }))
       .toEqual({ remove: ['review:pending'] });
   });
+
+  // #2766/#2767 (2026-09-26) — the mutual-exclusivity bug this sweep PREDATES: an unattended review loop
+  // recorded review:accepted; the anti-test-gaming gate then parked review:human without removing it. This
+  // sweep FLAGS the pair rather than resolving it (point 3's own comment says why: a label-only read cannot
+  // tell a genuine human clearance from a bare superseded agent one, and #x9xqexm forbids guessing).
+  it('FLAGS (never removes) a co-present review:accepted + review:human — #2766/#2767\'s real label state', () => {
+    const live2767 = ['review:accepted', 'review:human', 'review-round:1', 'review:awaiting-advisory'];
+    expect(planReviewHoldCleanup({ currentLabels: live2767 })).toEqual({ remove: [], flagged: ['review:accepted', 'review:human'] });
+  });
+
+  it('does NOT re-flag the human+pending pair point (1) already resolves — that is #2549, not #2766/#2767', () => {
+    expect(planReviewHoldCleanup({ currentLabels: ['review:human', 'review:pending'] }))
+      .toEqual({ remove: ['review:pending'] }); // no `flagged` key at all — the resolved pair is not a contradiction
+  });
+
+  it('flags accepted+human even alongside the OTHER two independent strays, additively', () => {
+    expect(planReviewHoldCleanup({
+      currentLabels: ['review:accepted', 'review:human', 'review:pending', 'advisory:accepted'],
+    })).toEqual({ remove: ['review:pending'], flagged: ['review:accepted', 'review:human'] });
+  });
 });
 
 describe('needsReviewHoldCleanup', () => {
@@ -73,6 +93,10 @@ describe('needsReviewHoldCleanup', () => {
     expect(needsReviewHoldCleanup(pr(1, ['review:human', 'review:pending']))).toBe(true);
     expect(needsReviewHoldCleanup(pr(2, ['review:human']))).toBe(false);
     expect(needsReviewHoldCleanup(pr(3, []))).toBe(false);
+  });
+
+  it('is also true when the PR is only FLAGGED (nothing to remove) — #2766/#2767', () => {
+    expect(needsReviewHoldCleanup(pr(2767, ['review:accepted', 'review:human']))).toBe(true);
   });
 });
 
@@ -104,6 +128,16 @@ describe('sweepReviewHoldLabels', () => {
     });
     expect(results).toEqual([]);
     expect(p.calls.set).toEqual([]);
+  });
+
+  it('FLAGS #2767\'s real (pre-fix) label state — never calls setLabels for the contradiction', () => {
+    const p = provider();
+    const results = sweepReviewHoldLabels({
+      repo: 'chalbert/web-everything', provider: p,
+      listPrs: () => [pr(2767, ['review:accepted', 'review:human', 'review-round:1', 'review:awaiting-advisory'])],
+    });
+    expect(results).toEqual([{ num: 2767, flagged: ['review:accepted', 'review:human'] }]);
+    expect(p.calls.set).toEqual([]); // read-only — resolving it needs comment history this sweep does not read
   });
 
   it('dry-run reports the plan and never calls setLabels', () => {
