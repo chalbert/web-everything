@@ -1265,6 +1265,19 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
   // their card(s) `active` forever before this fix. Each test wires `resolveHashNumber`/`fetchDiff` exactly
   // like a production `landedIdsForCandidate` call would (never a real gh/git call from a unit test).
   describe('#xqpqyr2 — bornAs-hash-already-numbered + ride-along cards, real merged-PR shapes', () => {
+    // The frontmatter status move each real PR's own diff carried (PR #2724 review round 2 — the evidence a
+    // ride-along signal needs): `from: null` files the card new; otherwise the PR claimed it.
+    const statusDiff = (path, from, to) => [
+      `diff --git a/${path} b/${path}`,
+      ...(from == null ? ['new file mode 100644', '--- /dev/null'] : [`--- a/${path}`]),
+      `+++ b/${path}`,
+      from == null ? '@@ -0,0 +1,3 @@' : '@@ -1,3 +1,3 @@',
+      `${from == null ? '+' : ' '}---`,
+      ...(from == null ? [] : [`-status: ${from}`]),
+      `+status: ${to}`,
+      `${from == null ? '+' : ' '}---`,
+    ].join('\n');
+
     it('PR #2691\'s real shape: ref-led hash already numbered on main, PR\'s own diff never touches the backlog file at all', () => {
       const fetchGuardSignals = () => ({ body: '## Stronger live smoke (#4075, card xp4lw2v)', changedFiles: ['scripts/lib/daemon-live-smoke.mjs'] });
       const resolveHashNumber = (h) => (h === 'xp4lw2v' ? '4175' : null);
@@ -1281,11 +1294,17 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
         changedFiles: ['backlog/4121-drain-number-pending-hashes-on-any-pass-that-finds-them-not.md', 'backlog/4127-drain-numbering-make-applyledger-linear-one-hash-regex-not-o.md', 'backlog/4134-numbering-lock-reclaim-only-a-dead-holder-and-never-run-a-wr.md', 'scripts/backlog/id.mjs'],
       });
       const resolveHashNumber = (h) => ({ xn6n5gp: '4127', xuqk1vp: '4134', xb94mt5: '4121' }[h] ?? null);
+      const fetchDiff = () => fetchGuardSignals().changedFiles.slice(0, 3).map((f) => statusDiff(f, 'open', 'active')).join('\n');
       const ids = landedIdsForCandidate(
         { hasManifest: false, item: null, repo: null, headRef: 'lane/xn6n5gp-numbering-linear-lock-safety', title },
-        { isLocalRepo, fetchGuardSignals, resolveHashNumber, fetchDiff: () => '' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber, fetchDiff },
       );
       expect([...ids].sort()).toEqual([4121, 4127, 4134].sort());
+      // Without the diff there is no delivery evidence for the ride-alongs — only the ref-led card is credited.
+      expect(landedIdsForCandidate(
+        { hasManifest: false, item: null, repo: null, headRef: 'lane/xn6n5gp-numbering-linear-lock-safety', title },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber, fetchDiff: () => '' },
+      )).toEqual([4127]);
     });
 
     it('PR #2689\'s real shape: ref-led hash (not yet numbered) credited as a hash, PLUS a ride-along hash named only in a body heading', () => {
@@ -1298,11 +1317,18 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
       // landedNumberFor once IT is separately numbered (simulated here as already known, matching a replay
       // run against CURRENT main where the numbering has since happened).
       const resolveHashNumber = (h) => (h === 'xg6m4i5' ? '4172' : null);
+      const fetchDiff = () => fetchGuardSignals().changedFiles.slice(0, 2).map((f) => statusDiff(f, null, 'active')).join('\n');
       const ids = landedIdsForCandidate(
         { hasManifest: false, item: null, repo: null, headRef: 'lane/x0zg44l-daemon-soak-harness', title: 'x0zg44l: daemon soak harness — real daemons (#4075)' },
-        { isLocalRepo, fetchGuardSignals, resolveHashNumber, fetchDiff: () => '' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber, fetchDiff },
       );
       expect([...ids].sort((a, b) => String(a).localeCompare(String(b)))).toEqual([4172, 'x0zg44l'].sort((a, b) => String(a).localeCompare(String(b))));
+      // The true merge-time state (PR #2724 review round 2): the ride-along is not numbered yet either — its
+      // bare hash is credited too, for `planResolveOnLand` to re-key; the diff is fetched for hash-named cards.
+      expect(landedIdsForCandidate(
+        { hasManifest: false, item: null, repo: null, headRef: 'lane/x0zg44l-daemon-soak-harness', title: 'x0zg44l: daemon soak harness — real daemons (#4075)' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff },
+      ).sort()).toEqual(['x0zg44l', 'xg6m4i5']);
     });
 
     // PR #2724 review — a PR with no id of its own used to be gated on a TITLE-only hint, so a ride-along
@@ -1311,7 +1337,7 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
       const fetchGuardSignals = () => ({ body: 'Housekeeping.\nResolves #4121', changedFiles: ['scripts/a.mjs', 'backlog/4121-ride-along.md'] });
       expect(landedIdsForCandidate(
         { hasManifest: false, item: null, repo: null, headRef: 'release-2026', title: 'unrelated title with no ids at all' },
-        { isLocalRepo, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff: () => '' },
+        { isLocalRepo, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff: () => statusDiff('backlog/4121-ride-along.md', 'open', 'active') },
       )).toEqual([4121]);
     });
 

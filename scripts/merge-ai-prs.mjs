@@ -1585,12 +1585,12 @@ export function defaultResolveHashNumber(hash) {
 }
 
 /**
- * #xqpqyr2 — fetches a candidate's own unified diff (`gh pr diff`), the one signal `declaredResolvedIdsFromPr`'s
- * signal 3 (a backlog file the PR's OWN diff flips to `status: resolved`) needs beyond `defaultFetchLandGuardSignals`'s
- * body/changed-files. A SEPARATE call (`gh pr diff` has no `--json` counterpart to fold into the existing
- * `gh pr view` read) — kept off the hot path by `landedIdsForCandidate`'s own gate (only fetched when
- * `changedFiles` already names a numbered `backlog/<NNN>-*.md` path, the one precondition signal 3 can ever
- * match). Fail-soft: any failure degrades to `''`, under which `resolvedStatusIdsFromDiff` is a no-op.
+ * #xqpqyr2 — fetches a candidate's own unified diff (`gh pr diff`), the evidence every `declaredResolvedIdsFromPr`
+ * signal needs (a card's frontmatter status move) beyond `defaultFetchLandGuardSignals`'s body/changed-files.
+ * A SEPARATE call (`gh pr diff` has no `--json` counterpart to fold into the existing `gh pr view` read) — kept
+ * off the hot path by `landedIdsForCandidate`'s own gate (only fetched when `changedFiles` already names a
+ * backlog card file, numbered or hash-named — the only thing a status move can be read from). Fail-soft: any
+ * failure degrades to `''`, under which no ride-along is credited.
  * @param {{num?:(number|string), repo?:(string|null)}} c
  * @returns {string}
  */
@@ -1637,8 +1637,8 @@ export function defaultFetchDiff(c) {
  *      EVERY merged local candidate now pays the one body/changed-files call, because a ride-along can be
  *      declared only in the body of a PR with no id of its own (PR #2724 review — a TITLE-only pre-check
  *      missed exactly that). Both call sites run only on a confirmed merge, so the cost is one call per
- *      merge. The diff fetch (signal 3's ground truth) stays gated on `changedFiles` already naming a numbered
- *      `backlog/<NNN>-*.md` path (declaredResolvedIdsFromPr's signal 3 precondition).
+ *      merge. The diff fetch (every ride-along signal's evidence) stays gated on `changedFiles` already naming
+ *      a backlog card file, numbered or hash-named.
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
  * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
  * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
@@ -1663,11 +1663,12 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
   } else if (base.length) {
     for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles })) ids.add(asItemId(n));
   }
-  // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Signal 3's
-  // diff fetch is gated on `changedFiles` already naming a numbered backlog file — its only possible match.
-  const hasNumberedBacklogFile = Array.isArray(changedFiles)
-    && changedFiles.some((f) => /(?:^|\/)backlog\/\d{2,5}-[^/]+\.md$/.test(String(f?.path ?? f)));
-  const diff = hasNumberedBacklogFile ? (fetchDiff(c) || '') : '';
+  // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Every
+  // ride-along signal needs the diff (a card's frontmatter status move is the evidence), so its fetch is gated
+  // on `changedFiles` naming some backlog card file (numbered or hash-named) — the only possible match.
+  const hasBacklogCardFile = Array.isArray(changedFiles)
+    && changedFiles.some((f) => /(?:^|\/)backlog\/(?:\d{2,5}|x[0-9a-z]{6})-[^/]+\.md$/i.test(String(f?.path ?? f)));
+  const diff = hasBacklogCardFile ? (fetchDiff(c) || '') : '';
   for (const n of declaredResolvedIdsFromPr(c.headRef, c.title, { body, changedFiles, diff, landedNumberFor: resolveHashNumber })) ids.add(asItemId(n));
   return [...ids];
 }
