@@ -3,11 +3,12 @@ bornAs: xmgv6bx
 kind: story
 size: 3
 parent: "3718"
-status: active
+status: resolved
 relatedTo: ["2421", "3720"]
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs"]
 dateOpened: "2026-09-19"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
