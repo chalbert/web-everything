@@ -86,6 +86,9 @@ import { dirname, join } from 'node:path';
 import { homedir, hostname } from 'node:os';
 import { isLeaseStale, isReservedLease, LEASE_FILENAME, DEFAULT_LEASE_TTL_MINUTES } from '../lib/lane-lease.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+// #3903 — a mechanical dispatch's detached wrapper holds its lease; its `pid:<n>` handle lives in the run store.
+import { detachedHandlePid } from '../operations/detached-dispatch.mjs';
+import { createFileRunStore } from '../operations/run-store.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../operations/dispatch-lane.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // #xr4ygg7 (multi-repo slice 9, we:reports/2026-09-23-conveyor-multi-repo-gap-map.md) — the constellation table,
@@ -518,11 +521,20 @@ export function sessionPidAliveByName(sessions, { psOutput = null, isPidAlive = 
  *   lease against (no default — omitting it makes the absence branch always `null`, never guessing at an
  *   unknown age); `graceMs` defaults to {@link DISPATCH_GUARD_LISTING_GRACE_MINUTES}; `pidAlive` (#3383) = this
  *   session's REAL process-liveness read from {@link sessionPidAliveByName} (`null` when not supplied/unknown —
- *   exact back-compat with every pre-#3383 caller).
+ *   exact back-compat with every pre-#3383 caller); `wrapperAlive` (#3903) = whether a DETACHED delivery
+ *   wrapper the dispatcher started for this session is still running (see {@link detachedWrapperPidsBySession}).
  * @returns {boolean|null}
  */
-export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000, pidAlive = null } = {}) {
+export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DISPATCH_GUARD_LISTING_GRACE_MINUTES * 60_000, pidAlive = null, wrapperAlive = null } = {}) {
   const session = lease && typeof lease.session === 'string' ? lease.session : null;
+  // #3903 — A MECHANICAL DISPATCH'S LEASE IS HELD BY A DETACHED WRAPPER PROCESS, NOT A `claude --bg` SESSION.
+  // `deliver-item-run.mjs` acquires the lane under the dispatcher's session slug and then runs its agent (Codex,
+  // or a restricted `claude -p`) in the foreground of its own process, so that slug is NEVER in `claude agents`.
+  // Without this check the absence branch below reads a live, hour-long build as "never listed → gone" once the
+  // 10-minute grace passes and force-releases its lane mid-build. The wrapper's own pid (the run store's `pid:<n>`
+  // handle) is the direct answer: alive means NOT gone, full stop. `false`/`null` change nothing — a dead
+  // wrapper falls through to the ordinary absence logic, which is what reclaims its lane after it exits.
+  if (wrapperAlive === true) return false;
   // #x5wm9ot — was `itemNumFromSession(session) === null`, which after that function narrowed to item-kind-only
   // now reads EVERY PR_KIND session (review-/fix-/ci-heal-/inspect-) as "not dispatcher-minted, don't guess" —
   // exactly the TTL-only fallback bug #2 named. `isDispatcherMintedSession` is the general recognized-name
@@ -542,6 +554,28 @@ export function sessionGoneForLease(lease, sessionStates, { nowMs, graceMs = DIS
     return true; // aged past the grace window and still never listed — gone
   }
   return AGENT_GONE_STATES.has(sessionStates.get(session));
+}
+
+/**
+ * #3903 — PURE. Session slug → pid of the detached delivery wrapper the dispatcher started for it, read off run
+ * records ({@link createFileRunStore}'s shape): every IN-FLIGHT effect whose durable handle is `pid:<n>` (the
+ * shape `dispatch-providers/build.mjs` returns) and whose payload names its `sessionSlug`. A `claude --bg`
+ * short-id handle is not a wrapper and is skipped — the listing already answers for those.
+ *
+ * @param {Array<{effects?: Array<{status?: string, handle?: string|null, payload?: {sessionSlug?: string}}>}>} runs
+ * @returns {Map<string, number>}
+ */
+export function detachedWrapperPidsBySession(runs) {
+  const bySession = new Map();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    for (const e of Array.isArray(run?.effects) ? run.effects : []) {
+      if (e?.status !== 'in-flight') continue;
+      const pid = detachedHandlePid(e.handle);
+      const session = typeof e?.payload?.sessionSlug === 'string' ? e.payload.sessionSlug.trim() : '';
+      if (pid !== null && session) bySession.set(session, pid);
+    }
+  }
+  return bySession;
 }
 
 /**
@@ -708,6 +742,17 @@ function fetchSessionSignals(flags) {
   return { states, pidAlive };
 }
 
+/** #3903 — the io half of {@link detachedWrapperPidsBySession}: read every run record once, never throwing. */
+function readDetachedWrapperPids(store = createFileRunStore()) {
+  const runs = [];
+  let ids = [];
+  try { ids = store.list(); } catch { return new Map(); }
+  for (const id of Array.isArray(ids) ? ids : []) {
+    try { const run = store.read(id); if (run) runs.push(run); } catch { /* one bad record never blocks the sweep */ }
+  }
+  return detachedWrapperPidsBySession(runs);
+}
+
 /** Delegate the actual reclamation to lane-pool's release (reserved-lane protection lives there). */
 function releaseLane(pool, lane) {
   // #x5n4zn3 — was bare (no timeout): a real `lane-pool.mjs release` call, one per reaped lease.
@@ -741,6 +786,9 @@ function main(argv) {
   const nowMs = Date.now();
 
   const { states: sessionStates, pidAlive: sessionPidAlive } = fetchSessionSignals(flags); // states null when off
+  // #3903 — ONE read of the run store for every in-flight detached-wrapper pid. Best-effort: an unreadable
+  // store or record leaves the map empty/partial, which only means the old (listing-only) behaviour applies.
+  const wrapperPids = readDetachedWrapperPids();
 
   // Collect every held lease across the scanned pools into flat candidates, tagging each with the repo key ITS
   // POOL names (#xr4ygg7 — ground truth; see repoKeyForPool's own docblock for why this, never the session, is
@@ -778,9 +826,12 @@ function main(argv) {
     // into sessionGoneForLease's phantom-listing widening. Distinct from `pidAliveForLease` below, which
     // remains the dormant future-`agentPid` axis (today's leases carry no durable per-agent pid at all).
     const sessionPidAliveNow = c.lease?.session && sessionPidAlive.has(c.lease.session) ? sessionPidAlive.get(c.lease.session) : null;
+    // #3903 — a detached delivery wrapper's own pid (see `detachedWrapperPidsBySession`).
+    const wrapperPid = c.lease?.session ? wrapperPids.get(c.lease.session) : undefined;
+    const wrapperAlive = wrapperPid === undefined ? null : Boolean(defaultIsPidAlive(wrapperPid));
     return {
       prState,
-      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow }),
+      sessionGone: sessionGoneForLease(c.lease, sessionStates, { nowMs, pidAlive: sessionPidAliveNow, wrapperAlive }),
       pidAlive: pidAliveForLease(c.lease),
     };
   };

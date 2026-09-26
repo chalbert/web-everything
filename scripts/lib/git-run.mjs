@@ -125,3 +125,50 @@ export function verifyTreeBlob(run, tree, path, expectedOid, { cwd } = {}) {
   }
   return { ok: true };
 }
+
+/**
+ * Pure decision over `git rev-parse --is-shallow-repository`'s raw result. Returns `true`/`false`, or `null`
+ * when the probe itself is inconclusive (non-zero exit, unparseable stdout) — mirrors
+ * `we:scripts/lane-pool.mjs`'s own `isShallowClone` fail-open direction: an unreadable answer is read as "not
+ * proven shallow", never as license to loop an unshallow attempt forever on a broken git binary.
+ */
+export function parseIsShallow(stdout, status) {
+  if (Number(status) !== 0) return null;
+  const s = String(stdout || '').trim();
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  return null;
+}
+
+/**
+ * Ensure `cwd`'s checkout has full history before a `git merge-tree` (or `merge-base`) call that must walk back
+ * to a real common ancestor. THE LIVE INCIDENT THIS CLOSES: `we:scripts/lib/rebase-drop-manifest.mjs#
+ * rebaseDropManifest` fetches only the ONE lane ref it needs (`git fetch <remote> <laneRef>`) before probing
+ * `git merge-tree --write-tree <base> <laneRef>`. In a checkout that is ALREADY a shallow clone, fetching a
+ * BRAND-NEW ref inherits that shallow boundary by default — the newly-fetched ref lands as its own grafted ROOT
+ * commit with NO recorded parents, even though the real remote history connects it to `<base>` just fine.
+ * `git merge-tree` then finds no common ancestor at all and fails `fatal: refusing to merge unrelated
+ * histories` — indistinguishable, by that message alone, from two branches that truly share no history. This
+ * was LIVE-REPRODUCED (read-only) against PR #2752 (`lane/4034-critical-work-gate`, head `8e1f0c23d`) in the
+ * `wev-review-daemon` checkout: `.git/shallow` named that exact head sha as a shallow boundary (zero parents),
+ * while `origin/main` in the SAME checkout was fully deepened — so only a merge against that one ref broke, and
+ * only there. See backlog write-up for the full before/after.
+ *
+ * `git fetch <remote> --unshallow` is idempotent (a harmless non-zero exit on an already-full checkout, which
+ * this function ignores) and removes EVERY shallow boundary in the checkout — the fix that actually stops this
+ * from recurring, since deepening one ref at a time would just move the identical failure to the next
+ * newly-fetched branch.
+ * @param {(cmd:string,args:string[],opts?:object)=>{status:number,stdout:string,stderr:string}} run
+ * @param {{cwd?:string, remote?:string}} [o]
+ * @returns {{ok:true, wasShallow:boolean, unshallowed:boolean}|{ok:false, wasShallow:true, reason:string}}
+ */
+export function ensureFullHistory(run, { cwd, remote = 'origin' } = {}) {
+  const probe = run('git', ['rev-parse', '--is-shallow-repository'], { cwd });
+  const isShallow = parseIsShallow(probe.stdout, probe.status);
+  if (isShallow !== true) return { ok: true, wasShallow: false, unshallowed: false };
+  const uns = run('git', ['fetch', remote, '--unshallow', '--quiet'], { cwd });
+  if (uns.status !== 0) {
+    return { ok: false, wasShallow: true, reason: `fetch --unshallow failed (${String(uns.stderr || '').split('\n')[0]})` };
+  }
+  return { ok: true, wasShallow: true, unshallowed: true };
+}

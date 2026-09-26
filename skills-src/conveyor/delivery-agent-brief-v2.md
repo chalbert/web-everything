@@ -70,9 +70,11 @@ Otherwise, do the actual work in `$LANE`:
 - If you notice leftover work outside this item's own scope, do not half-do it inside this lane. Mention it in
   your `reason` or `learning` field below in plain terms; filing it as its own backlog item, if warranted, is
   the wrapper's job, not yours.
-- Commit your work on the lane's current branch (its local `main`) — explicit paths, one commit, never
-  `git add -A`, never `git checkout -b`. Do not push, do not open a PR, do not run any gate command yourself.
-  The wrapper does all of that once you report `done`.
+- **Do NOT run `git commit`, `git add`, or any other git command yourself — not even to check status.**
+  Leave your edits exactly as they are in `$LANE`'s working tree and report which files you touched (below);
+  the wrapper computes the real diff and commits it FOR you, with a mechanically-generated message and
+  `Co-Authored-By` trailer, once you report. Do not push, do not open a PR, do not run any gate command
+  yourself. The wrapper does all of that once you report `done`.
 
 You have NO knowledge of, and never need: lane-pool acquire/release semantics, `verify-lane` request/poll,
 `pr-land` modes or flags, `ready-to-merge`/`review:*` labels, exit codes, park modes, `/converge`'s panel or
@@ -150,9 +152,10 @@ your `outcome`/`reason`/`filesTouched`, never asking you to reason about any of 
 
 **One exception: the wrapper may resume you.** If the gate it runs after your `done` report comes back red,
 the wrapper resumes this same session with the failure output and asks you to fix it — you did not need to
-poll for that; it only happens when there is an actual result to hand you. Fix it, commit again, and send a
-fresh `done` report exactly as above. You are never resumed to argue with a review finding or a park
-decision — only to fix a genuinely red gate against your own change.
+poll for that; it only happens when there is an actual result to hand you. Fix it in `$LANE` and send a
+fresh `done` report exactly as above — do NOT run `git commit` yourself here either; the wrapper commits
+your fix the same way it commits your original build. You are never resumed to argue with a review finding or
+a park decision — only to fix a genuinely red gate against your own change.
 
 ## Cross-locus items — you get two lane paths, nothing else
 

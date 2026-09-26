@@ -58,6 +58,25 @@ Ports 8 files (we:scripts/operations/deliver-item-wrapper.mjs, we:scripts/operat
 - **Order fixed:** the wrapper needs `spawnAgentToCompletion` from #3906's `we:scripts/operations/dispatch-lane-io.mjs`, so this slice now lands after #3906 (not before). `we:scripts/operations/delivery-agent-marker.mjs` moved to #3906 to break the cycle.
 - Also owns `we:scripts/operations/open-pr.mjs` (the wrapper needs `extractSubmitResult`) and waits on 3917 for `findUnmarkedLocusRefs` in `we:scripts/check-standards-rules.mjs`.
 
+## Build-path slice delivered (2026-09-26)
+
+Landed the part of this card a Codex build needs to RUN end to end, ported from 6a2c8c1ab:
+we:scripts/operations/deliver-item-wrapper.mjs (3-way merge, base 21aaedb0b, 3 conflicts resolved as the merge
+notes say), we:scripts/operations/deliver-item-run.mjs (verbatim), we:scripts/operations/open-pr.mjs
+(`extractSubmitResult`), we:scripts/operations/delivery-report-store.mjs (lane-aware reports dir),
+we:skills-src/conveyor/delivery-agent-brief-v2.md (the wrapper commits, not the agent), and the `pid:` handle
+liveness in we:scripts/operations/dispatch-lane-io.mjs (`isDispatchHandleLive`, `stampLiveness`, the observer).
+
+Adapted to main (not on the prototype): a non-Claude build's PR body carries the #3690 `delegation` marker
+(`delegationForBuild`), so review accept writes its trial evidence row; and we:scripts/conveyor/lease-reaper.mjs no
+longer reads a live detached wrapper's lease as session-gone (it was never in `claude agents`, so an hour-long
+build would lose its lane after the 10-minute grace).
+
+The build row stays `agent` on main. A trial runs with `WE_BUILD_DISPATCH_MODE=mechanical` plus the card's own
+`deliveryAgent: codex` marker and reason. Still open here: we:scripts/operations/dispatch-task.mjs /
+we:scripts/operations/dispatch-task-io.mjs, the completion-record/completion-cli `task` kind and the
+v1-brief header.
+
 ## Graduation import check
 
 - 2026-09-25: graduation-import-check added blockedBy #4180 — the moved-in `we:scripts/operations/__tests__/dispatch-task.test.mjs` also imports a module #4180 owns.

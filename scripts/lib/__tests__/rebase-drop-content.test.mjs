@@ -648,3 +648,48 @@ describe('rebaseDropContent against a real git repository (#2923)', () => {
     expect(r.newCommit).toBeUndefined();
   });
 });
+
+// #x8pcbf3 — the SAME live incident `rebase-drop-manifest.test.mjs` proves against `rebaseDropManifest`
+// (PR #2752, `lane/4034-critical-work-gate`): this file's own `rebaseDropContent` fetches+merge-trees the
+// identical way, so it carries the identical shallow-checkout exposure. See
+// `we:scripts/lib/git-run.mjs#ensureFullHistory`'s own header for the full incident and live before/after.
+describe('rebaseDropContent — shallow-checkout recovery (#x8pcbf3, PR #2752)', () => {
+  const unrelatedThenResolves = (resolution) => {
+    let n = 0;
+    return () => (n++ === 0 ? { status: 128, stdout: '', stderr: 'fatal: refusing to merge unrelated histories\n' } : resolution);
+  };
+
+  it('merge-tree failing "unrelated histories" is fixed (unshallow) and RETRIED', () => {
+    const { run, calls } = scriptedRun({
+      'rev-parse': { stdout: 'true\n' },
+      fetch: { status: 0 },
+      'merge-tree': unrelatedThenResolves({ status: 0, stdout: 'cleanTree'.padEnd(40, '0') + '\n' }),
+    });
+    const r = rebaseDropContent({ laneRef: 'lane/x-shallow', run });
+    expect(r.action).toBe('skip'); // clean on retry → nothing to do, but the ordering is what this proves
+    expect(r.reason).toMatch(/no conflict/);
+    const order = calls.map((c) => c.args[0]);
+    expect(order.filter((c) => c === 'merge-tree')).toHaveLength(2);
+    const firstMergeTree = order.indexOf('merge-tree');
+    expect(order.indexOf('rev-parse')).toBeGreaterThan(firstMergeTree);
+    expect(calls.some((c) => c.args.includes('--unshallow'))).toBe(true);
+  });
+
+  it('an ORDINARY clean/conflicting merge never triggers the shallow-checkout recovery at all', () => {
+    const { run, calls } = scriptedRun({ ...MERGE_TREE_CLEAN });
+    rebaseDropContent({ laneRef: 'lane/x-notshallow', run });
+    expect(calls.filter((c) => c.args[0] === 'fetch')).toHaveLength(1);
+    expect(calls.some((c) => c.args[0] === 'rev-parse')).toBe(false);
+  });
+
+  it('merge-tree STILL fails "unrelated histories" after a successful unshallow → reported as a checkout defect', () => {
+    const { run } = scriptedRun({
+      'rev-parse': { stdout: 'true\n' },
+      fetch: { status: 0 },
+      'merge-tree': { status: 128, stdout: '', stderr: 'fatal: refusing to merge unrelated histories\n' },
+    });
+    const r = rebaseDropContent({ laneRef: 'lane/x-still-shallow', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/checkout was shallow, was unshallowed, and the merge STILL failed/);
+  });
+});

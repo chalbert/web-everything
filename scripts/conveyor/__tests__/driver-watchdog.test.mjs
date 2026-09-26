@@ -1195,6 +1195,7 @@ describe('the watchdog shares NONE of the driver\'s own decision logic', () => {
       'driver-mode.mjs',            // the launch-posture sidecar's GRAMMAR — bounded vs resident, path+parse only
       'driver-watchdog.mjs',
       'file-locks.mjs',             // the lease TTL primitive
+      'git-run.mjs',                // #x8pcbf3 — branch-sync's ensureFullHistory (shallow-checkout recovery)
       'infra-blocked.mjs',          // branch-sync's backoff primitives
       'queue-store.mjs',            // the sidecar GRAMMAR — parseQueue / normNum
       'resolve-runner-checkout.mjs',// lease pid → checkout
