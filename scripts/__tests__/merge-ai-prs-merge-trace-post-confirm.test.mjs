@@ -25,6 +25,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { buildDrainReasonComment, buildStackedBaseCloseReason, STACKED_BASE_CLOSE_KIND, hasDrainReasonComment } from '../merge-ai-prs.mjs';
 
 describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only after a CONFIRMED merge', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
@@ -130,5 +131,41 @@ describe('merge-ai-prs — #xngv3vn: the merge-trace comment is posted only afte
     const body = src.slice(idx, src.indexOf('};', idx));
     expect(body).toMatch(/merged\.push\(\{ num: c\.num, repo: c\.repo, headSha: c\.headSha \?\? null \}\);/);
     expect(body).toMatch(/postMergeTrace\(\);/);
+  });
+});
+
+// #4138 — LIVE INCIDENT, chalbert/web-everything#2578, 2026-09-24: closed TWICE by `web-everything[bot]` with
+// NO comment on either close. The FIRST close (21:44:43Z) is the #3383 stacked-base cascade this file's
+// `retargetStackedPrs` call site already retargets away from in the common case — but its own best-effort
+// failure path (`onFailed`) used to only log to stderr, so a PR `retargetStackedPrs` could not save still got
+// closed by GitHub moments later with nothing on the PR explaining why. Fixed: `onFailed` now ALSO posts a
+// `STACKED_BASE_CLOSE_KIND` reason comment, in the same synchronous block, strictly BEFORE the merge write
+// that deletes the base branch runs (source-contract below) — matching the "comment before the close" rule
+// `we:scripts/review-set-label.mjs` already applies to label swaps.
+describe('merge-ai-prs — #4138: a PR about to be closed by the stacked-base cascade gets a reason comment BEFORE the merge', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'merge-ai-prs.mjs'), 'utf8');
+
+  it('buildStackedBaseCloseReason names the doomed base ref and says this is not a content decision', () => {
+    const reason = buildStackedBaseCloseReason({ headRef: 'lane/3681-ratify-daemon-lifecycle' });
+    expect(reason).toMatch(/lane\/3681-ratify-daemon-lifecycle/);
+    expect(reason).toMatch(/NOT a merge\/content decision/);
+  });
+
+  it('renders under its OWN marker/heading — independent of park/skip/land/merge-trace — and dedupes like every other reason comment', () => {
+    const reasonText = buildStackedBaseCloseReason({ headRef: 'lane/x' });
+    const rendered = buildDrainReasonComment(STACKED_BASE_CLOSE_KIND, reasonText);
+    expect(rendered).toMatch(/^<!-- drain-stacked-base-close-reason -->/);
+    expect(rendered).toMatch(/may be closed by GitHub/);
+    expect(hasDrainReasonComment([{ body: rendered }], STACKED_BASE_CLOSE_KIND, reasonText)).toBe(true);
+  });
+
+  it('onFailed posts the reason comment, and the whole retarget block (comment included) runs BEFORE the merge write', () => {
+    const idx = src.indexOf('retargetStackedPrs({ repo: c.repo, headRef: c.headRef, defaultBranch: defBranch,');
+    expect(idx).toBeGreaterThan(-1);
+    const lockIdx = src.indexOf('const landLock = withLandWriteLock(', idx);
+    expect(lockIdx).toBeGreaterThan(idx); // #4138 — the retarget block (and its onFailed comment) precedes the merge write
+    const block = src.slice(idx, lockIdx);
+    expect(block).toMatch(/onFailed: \(num\) => \{/);
+    expect(block).toMatch(/postDrainReasonComment\(c\.repo, num, STACKED_BASE_CLOSE_KIND, buildStackedBaseCloseReason\(\{ headRef: c\.headRef \}\), null\);/);
   });
 });
