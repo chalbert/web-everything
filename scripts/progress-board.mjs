@@ -88,7 +88,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeOutputMix, ratioLabel } from './lib/output-mix.mjs';
-import { CI_TRUTH_EXCLUDED_CHECKS } from './operations/pr-status.mjs';
+import { CI_TRUTH_EXCLUDED_CHECKS, FAILING_CONCLUSIONS } from './operations/pr-status.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -446,12 +446,28 @@ function ghPrList(repo, args) {
 
 /** True when the check rollup carries at least one hard failure (vs merely pending), IGNORING any check named
  *  in {@link CI_TRUTH_EXCLUDED_CHECKS} (`we:scripts/operations/pr-status.mjs`) — those checks report
- *  review/merge-gate state, not code health; see that constant's docblock for the full incident. */
+ *  review/merge-gate state, not code health; see that constant's docblock for the full incident.
+ *
+ *  SINGLE-SOURCED off {@link FAILING_CONCLUSIONS} (`we:scripts/operations/pr-status.mjs`, #xznd5za) — this used
+ *  to hand-roll its OWN, narrower conclusion list (`FAILURE`/`TIMED_OUT`/`ACTION_REQUIRED`/`STARTUP_FAILURE`
+ *  only) that silently OMITTED `CANCELLED` (and `STALE`), while `FAILING_CONCLUSIONS` and
+ *  `we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed` both already treat a cancelled run as failing ("a real
+ *  hang/kill leaves no readable verdict, so it must not read as clean" — see that function's own docblock).
+ *  LIVE INCIDENT 2026-09-25, PR #2636 (chalbert/web-everything): the daemon's own hung-ci-recovery cancelled the
+ *  hung `test-shard (1)` run once its OWN cap was exhausted (`cancelled-no-rerun`, cap-exhausted, never re-run)
+ *  — `classifyPr` (which calls this function, and ONLY this function, for CI truth) then read the rollup as
+ *  having zero failing checks and returned phase `'open'` instead of `'ci-red'`, so `reconcile-core.mjs`'s
+ *  entire `ci-red` branch (the ci-heal dispatch AND its cap-exhausted escalation) was skipped outright — the PR
+ *  fell straight through to `nothing-owed`, forever, despite `we:scripts/conveyor/main-red-recovery.mjs`'s own
+ *  attribution check (fed by the DIFFERENT, already-correct `isRequiredCheckFailed`) independently confirming
+ *  "the required check failed … owed a ci-heal, not a rebase" on the very same tick. Two predicates for the same
+ *  question, one of them wrong, is the defect — reusing `FAILING_CONCLUSIONS` here removes the second
+ *  derivation entirely. */
 export function ciFailed(rollup) {
   return (rollup ?? []).some((c) => {
     if (CI_TRUTH_EXCLUDED_CHECKS.includes(String(c?.name ?? ''))) return false;
-    const v = String(c?.conclusion ?? c?.state ?? '').toUpperCase();
-    return v === 'FAILURE' || v === 'TIMED_OUT' || v === 'ACTION_REQUIRED' || v === 'STARTUP_FAILURE';
+    const v = String(c?.conclusion ?? c?.state ?? '').toLowerCase();
+    return FAILING_CONCLUSIONS.includes(v);
   });
 }
 
