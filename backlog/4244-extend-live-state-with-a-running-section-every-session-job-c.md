@@ -3,9 +3,10 @@ bornAs: x20lkf6
 kind: story
 size: 5
 parent: "3931"
-status: open
+status: resolved
 scope: ["we:scripts/operations/live-work.mjs", "we:scripts/operations/live-work-io.mjs", "we:scripts/operations/__tests__/live-work.test.mjs", "we:scripts/operations/run.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
