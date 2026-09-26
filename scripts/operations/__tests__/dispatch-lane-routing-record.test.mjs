@@ -35,7 +35,7 @@ import {
   REPO_ROOT, readTick, createDispatchSinks, buildAgentArgv, workerModelTable, resolveWorkerModel,
   defaultReadScorecards,
 } from '../dispatch-lane-io.mjs';
-import { decideDispatchRoute, CLAUDE_NATIVE_MODEL_BY_TIER } from '../../lib/dispatch-contracts.mjs';
+import { decideDispatchRoute } from '../../lib/dispatch-contracts.mjs';
 
 /** A root that is not lane-shaped — `assertNotALaneCheckout` refuses those, and this suite is not about it. */
 const PRIMARY = '/primary/webeverything';
@@ -109,13 +109,13 @@ const CODEX_TRIALS = ['bugfix', 'build-new-feature', 'doc-fix'].flatMap((taskTyp
 
 describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on Claude', () => {
   describe('with NO scorecards at all', () => {
-    it('build → routed/executed claude, tier sonnet, plannedWorkerModel claude-sonnet-5', () => {
+    it('build → routed/executed claude, tier sonnet, plannedWorkerModel sonnet (alias)', () => {
       const read = runReadTick('build');
       expect(read.routing.outcome).toBe('routed');
       expect(read.routing.routed).toBe('claude');
       expect(read.routing.executed).toBe('claude');
       expect(read.routing.tier).toBe('sonnet');
-      expect(read.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+      expect(read.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
     });
 
     it('fix and ci-heal → routed/executed claude, tier sonnet', () => {
@@ -124,7 +124,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         expect(read.routing.outcome, launchKind).toBe('routed');
         expect(read.routing.routed, launchKind).toBe('claude');
         expect(read.routing.executed, launchKind).toBe('claude');
-        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
       }
     });
 
@@ -133,7 +133,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         const read = runReadTick(launchKind);
         expect(read.routing.outcome, launchKind).toBe('role');
         expect(read.routing.routed, launchKind).toBeNull();
-        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
       }
     });
 
@@ -141,7 +141,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
       const read = runReadTick('prepare-decision');
       expect(read.routing.outcome).toBe('role');
       expect(read.routing.routed).toBeNull();
-      expect(read.plannedWorkerModel).toMatchObject({ tier: 'opus', model: 'claude-opus-5' });
+      expect(read.plannedWorkerModel).toMatchObject({ tier: 'opus', model: 'opus' });
     });
   });
 
@@ -155,7 +155,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         expect(read.routing.routed, launchKind).toBe('claude');
         expect(read.routing.executed, launchKind).toBe('claude');
         expect(read.routing.tier, launchKind).toBe('sonnet');
-        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+        expect(read.plannedWorkerModel, launchKind).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
         // the gate fired — it did not simply run out of matching trials.
         const gateEntry = read.routing.auditTrail.find((e) => e.criterion === 'critical-work-gate');
         expect(gateEntry, launchKind).toBeTruthy();
@@ -371,7 +371,7 @@ describe('(d) end to end: readTick → dispatch-lane → createDispatchSinks', (
     return { run: outcome.run, spawned };
   }
 
-  it('a build spawn carries --model claude-sonnet-5 exactly once, and the run record carries the routed/executed/workerModel triple', async () => {
+  it('a build spawn carries --model sonnet exactly once, and the run record carries the routed/executed/workerModel triple', async () => {
     const tick = {
       decisions: {
         spawnBuilds: [{ num: '9002', lane: 4 }], spawnPrepareScope: [], spawnPrepareDecision: [],
@@ -386,12 +386,12 @@ describe('(d) end to end: readTick → dispatch-lane → createDispatchSinks', (
     const argv = spawned[0].argv;
     const modelIdx = argv.indexOf('--model');
     expect(modelIdx).toBeGreaterThan(-1);
-    expect(argv[modelIdx + 1]).toBe('claude-sonnet-5');
+    expect(argv[modelIdx + 1]).toBe('sonnet');
     // exactly once
     expect(argv.filter((a) => a === '--model')).toHaveLength(1);
 
     const effect = run.effects.find((e) => e.type === DISPATCH_EFFECT);
-    expect(effect.dispatch.workerModel).toMatchObject({ name: 'claude-sonnet-5', tier: 'sonnet', source: 'table' });
+    expect(effect.dispatch.workerModel).toMatchObject({ name: 'sonnet', tier: 'sonnet', source: 'table' });
     expect(effect.dispatch.routedProvider).toBe('claude');
     expect(effect.dispatch.executedProvider).toBe('claude');
   });
@@ -402,13 +402,13 @@ describe('(d) end to end: readTick → dispatch-lane → createDispatchSinks', (
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape', () => {
-  const TABLE = { tier: 'sonnet', model: 'claude-sonnet-5', reason: "the standard's default" };
+  const TABLE = { tier: 'sonnet', model: 'sonnet', reason: "the standard's default" };
   const payload = { prompt: '# build #9001', sessionSlug: 'conveyor-9001' };
 
   it('injects exactly ONE --model from the table', () => {
     const argv = buildAgentArgv({ sessionId: 's1', payload, table: TABLE });
     expect(argv.filter((a) => a === '--model')).toHaveLength(1);
-    expect(argv[argv.indexOf('--model') + 1]).toBe('claude-sonnet-5');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('sonnet');
   });
 
   it('refuses an UNREASONED hand-set --model / -m / --model= in extraArgs — .notApplied is truthy', () => {
@@ -460,7 +460,7 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
   it('resolveWorkerModel returns the full documented shape for a plain table decision', () => {
     const decision = resolveWorkerModel({ extraArgs: [], table: TABLE });
     expect(decision).toEqual({
-      model: 'claude-sonnet-5', tier: 'sonnet', source: 'table', tableTier: 'sonnet',
+      model: 'sonnet', tier: 'sonnet', source: 'table', tableTier: 'sonnet',
       reason: "the standard's default", cleanArgs: [], refusal: null,
     });
   });
@@ -473,16 +473,19 @@ describe('(e) buildAgentArgv with a table, and resolveWorkerModel\'s own shape',
 describe('(f) workerModelTable', () => {
   it('a routed record whose model is a native Claude id → that id and its tier', () => {
     expect(workerModelTable({ outcome: 'routed', model: 'claude-sonnet-5', tier: 'sonnet' }))
-      .toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+      .toMatchObject({ tier: 'sonnet', model: 'sonnet' });
     expect(workerModelTable({ outcome: 'routed', model: 'claude-opus-5', tier: 'opus' }))
-      .toMatchObject({ tier: 'opus', model: 'claude-opus-5' });
+      .toMatchObject({ tier: 'opus', model: 'opus' });
+    // #3906 — the spawn flag is the tier ALIAS, never the record's pinned id: a worker must never run an older
+    // model than the current one of its tier (the pinned `claude-opus-5` predates Opus 5.5).
+    expect(workerModelTable({ outcome: 'routed', model: 'claude-opus-5', tier: 'opus' }).model).not.toMatch(/claude-opus-5/);
   });
 
-  it('a role record with a tier → that tier\'s native id', () => {
+  it('a role record with a tier → that tier\'s spawn alias', () => {
     expect(workerModelTable({ outcome: 'role', role: 'prepare', tier: 'sonnet' }))
-      .toMatchObject({ tier: 'sonnet', model: CLAUDE_NATIVE_MODEL_BY_TIER.sonnet });
+      .toMatchObject({ tier: 'sonnet', model: 'sonnet' });
     expect(workerModelTable({ outcome: 'role', role: 'prepare-decision', tier: 'opus' }))
-      .toMatchObject({ tier: 'opus', model: CLAUDE_NATIVE_MODEL_BY_TIER.opus });
+      .toMatchObject({ tier: 'opus', model: 'opus' });
   });
 
   it('an external route (a non-Claude model id) → null', () => {

@@ -2026,7 +2026,7 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     expect(spawned[0].argv.filter((_, i) => i !== settingsAt && i !== settingsAt + 1)).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
-      '--model', 'claude-sonnet-5',
+      '--model', 'sonnet',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',

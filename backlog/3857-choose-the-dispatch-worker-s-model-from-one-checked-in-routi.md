@@ -75,6 +75,7 @@ unreasoned hand-set `--model`/`-m`/`--model=` (and any Fable model), and the run
 block carries `workerModel` `{name, tier, source, tableTier, reason}`; `dispatch-lane` has the `modelReason`
 input. Role kinds (prepare, prepare-decision, investigate) also get their table tier's model on `dispatch-lane`
 (`workerModelTable`). The `dispatch-task` half graduates with #3903. Live dry-run over the queue (25 items x 6
-kinds): every route Claude; build/fix/ci-heal/prepare/investigate on `claude-sonnet-5`, prepare-decision and a
-docs/agent-scoped item on `claude-opus-5`.
+kinds): every route Claude; build/fix/ci-heal/prepare/investigate spawn with `--model sonnet`, prepare-decision
+and a docs/agent-scoped item with `--model opus`. The spawn flag is the tier's CLI ALIAS, not the pinned id the
+routing record carries (`claude-opus-5` would be older than today's Opus 5.5), so a worker is never downgraded.
 

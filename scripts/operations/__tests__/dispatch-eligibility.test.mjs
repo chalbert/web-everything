@@ -93,7 +93,7 @@ describe('dispatch-eligibility agrees with the live admission path', () => {
     // #3906 — the report names WHO would run each dispatchable item: Claude, on the tier table's model.
     for (const row of report.filter((r) => r.eligible)) {
       expect(row.route).toMatchObject({ outcome: 'routed', routed: 'claude', executed: 'claude', tier: 'sonnet' });
-      expect(row.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'claude-sonnet-5' });
+      expect(row.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
     }
   });
 

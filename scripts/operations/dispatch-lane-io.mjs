@@ -111,6 +111,16 @@ import { DETACHED_HANDLE_PREFIX } from './detached-dispatch.mjs';
  */
 const CLAUDE_NATIVE_MODEL_IDS = new Set(Object.values(CLAUDE_NATIVE_MODEL_BY_TIER));
 
+/**
+ * THE `--model` A CLAUDE WORKER IS SPAWNED WITH, per tier (#3906, operator 2026-09-26): the CLI's own ALIASES,
+ * never a pinned id. A pinned id silently DOWNGRADES a worker the day a newer model ships (the routing record's
+ * `claude-opus-5` would run an older Opus than the operator's own `opus` default, Opus 5.5 today). An alias
+ * always resolves to the current model of that tier. `CLAUDE_NATIVE_MODEL_BY_TIER` keeps naming the routing
+ * record's `model` (the trust key trials are measured under); only the spawn flag is an alias. Fable is never a
+ * tier here, and {@link resolveWorkerModel} still refuses it as a hand-set override.
+ */
+export const CLAUDE_SPAWN_MODEL_BY_TIER = Object.freeze({ haiku: 'haiku', sonnet: 'sonnet', opus: 'opus' });
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root, resolved by SCRIPT LOCATION and never by cwd — same reason `run-store.mjs` does it. */
 export const REPO_ROOT = resolve(HERE, '..', '..');
@@ -1310,8 +1320,9 @@ export function createDispatchSinks({
  * #3857/#3906 — THE MODEL-TIER TABLE'S ANSWER for one dispatch, as the `table` {@link buildAgentArgv} takes:
  * `{tier, model, reason}`, or `null` (no `--model` injected — the pre-#3857 pass-through).
  *
- *   - A ROUTED record whose `model` is a native Claude id → that id and its tier (the prototype's rule).
- *   - A ROLE record (`prepare`, `prepare-decision`, `investigate`) with a `tier` → that tier's native id.
+ *   - A ROUTED record whose `model` is a native Claude id → its tier's spawn ALIAS (`sonnet`/`opus`). The
+ *     prototype passed the pinned id; #3906 passes the alias so a worker is never an older model.
+ *   - A ROLE record (`prepare`, `prepare-decision`, `investigate`) with a `tier` → that tier's alias.
  *     ADAPTED from the prototype, which injected no model for a role dispatch (its record's `model` is always
  *     `null`). #3857's table rates `prepare-decision` Opus and the other roles Sonnet, and `dispatch-task`
  *     already applies that table to the same kinds, so `dispatch-lane` does too rather than leaving role
@@ -1323,13 +1334,11 @@ export function createDispatchSinks({
  */
 export function workerModelTable(routing) {
   if (!routing || typeof routing !== 'object') return null;
-  if (CLAUDE_NATIVE_MODEL_IDS.has(routing.model)) {
-    return { tier: routing.tier ?? null, model: routing.model, reason: routingTierReason(routing) };
-  }
-  if (routing.outcome === 'role' && routing.tier && Object.hasOwn(CLAUDE_NATIVE_MODEL_BY_TIER, routing.tier)) {
-    return { tier: routing.tier, model: CLAUDE_NATIVE_MODEL_BY_TIER[routing.tier], reason: routingTierReason(routing) };
-  }
-  return null;
+  const tier = routing.tier ?? null;
+  const claudeRoute = CLAUDE_NATIVE_MODEL_IDS.has(routing.model) || routing.outcome === 'role';
+  if (!claudeRoute || !tier || !Object.hasOwn(CLAUDE_SPAWN_MODEL_BY_TIER, tier)) return null;
+  // The spawn flag is the tier's ALIAS (see CLAUDE_SPAWN_MODEL_BY_TIER), so a worker always gets the current model.
+  return { tier, model: CLAUDE_SPAWN_MODEL_BY_TIER[tier], reason: routingTierReason(routing) };
 }
 
 /**
