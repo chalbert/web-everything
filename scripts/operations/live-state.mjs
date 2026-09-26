@@ -31,6 +31,7 @@
 import { op } from './registry.mjs';
 import { compute } from './step-kinds.mjs';
 import { DEFAULT_HEALTH_CONFIG } from '../conveyor/health-watch-core.mjs';
+import { assessLiveWork } from './live-work.mjs';
 
 export const LIVE_STATE_OP = 'live-state';
 
@@ -193,10 +194,19 @@ export function assessLiveState(read) {
     machineLoad: assessMachineLoadSection(read.machineLoad),
   };
   const overall = worstStatus(Object.values(sections).map((s) => s.status));
+  // Card x20lkf6 — the RUNNING section: every session/job right now, sorted stuck-and-dead-first. Built over
+  // this SAME already-assessed `read.heavyQueue` (never a second heavy-admission read) and the raw agent rows
+  // `live-state-io.mjs#collectLiveState` already enriched with last-activity/pid-liveness. Never contributes to
+  // `overall` — a stuck fixer session is agent-triage territory (`session-verdicts.mjs`'s own ladder), not a
+  // machine-health verdict this snapshot's colours speak to.
+  const running = Array.isArray(read.runningRows)
+    ? assessLiveWork({ observedAt: read.observedAt, rows: read.runningRows, heavyQueue: read.heavyQueue, prToCard: {} }).running
+    : [];
   return {
     observedAt: read.observedAt,
     overall,
     sections,
+    running,
     // The full already-assessed sub-reports ride along too — a caller that wants the raw daemon rows or the
     // heavy-queue table (the terminal render, a future /wip drill-down) reads them here rather than re-collecting.
     daemonStatus: read.daemonStatus,
