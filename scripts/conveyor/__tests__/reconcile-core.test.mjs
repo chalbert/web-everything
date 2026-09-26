@@ -818,6 +818,64 @@ describe('case 5e — ci-heal dispatch, capped by the durable heal-mark count, n
 // 01:30:55Z–02:31:25Z red window) and PR #2596 (`ahead_by: 0` — the operator's own manual branch refresh, still
 // red) — see `main-red-recovery.test.mjs` for the same real window, and that module's own file header for why a
 // rebase onto main (not a `gh run rerun`) is the real mechanism.
+// #xznd5za (epic #3383/#4075) — LIVE INCIDENT 2026-09-25: `chalbert/web-everything#2636`'s required check
+// `test-shard (1)` concluded CANCELLED (the daemon's own hung-ci-recovery cancel, applied only once its OWN
+// hung-recovery cap was exhausted — never re-run). `we:scripts/progress-board.mjs#ciFailed` used to hand-roll a
+// conclusion list that OMITTED `CANCELLED`, so `classifyPr` (this file's ONLY source of `phase` — see the file
+// header) read this PR as `'open'`, never `'ci-red'` — the whole ci-heal branch below, dispatch AND
+// cap-exhausted escalation alike, was skipped entirely and the PR fell through to `nothing-owed` forever, even
+// though `we:scripts/conveyor/main-red-recovery.mjs`'s own attribution (fed by the ALREADY-correct
+// `we:scripts/merge-ai-prs.mjs#isRequiredCheckFailed`) independently confirmed "required check failed … owed a
+// ci-heal, not a rebase" on the very same tick. This fixture is the REAL rollup read live off PR #2636 via `gh
+// pr view 2636 --repo chalbert/web-everything --json statusCheckRollup,comments` at the moment of the incident.
+describe('case 5h — a CANCELLED required check reads ci-red and is ci-healed, never nothing-owed (#xznd5za, PR #2636 real shape)', () => {
+  const pr2636CancelledRollup = [
+    { __typename: 'CheckRun', name: 'test-shard (1)', status: 'COMPLETED', conclusion: 'CANCELLED' },
+    { __typename: 'CheckRun', name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', name: 'test-shard (2)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', name: 'test-shard (3)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', name: 'test-shard (4)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ];
+  const pr2636 = (over = {}) => pr1563({
+    number: 2636, labels: lbl('ci:failed'), mergeStateStatus: 'BLOCKED',
+    statusCheckRollup: pr2636CancelledRollup, comments: [], ...over,
+  });
+
+  it('RED (the live bug, reproduced): before the fix this PR read phase `open` and was refused `nothing-owed` — pinned so a regression is caught even if `classifyPr` itself is never touched again', () => {
+    // Pins the FULL live symptom this incident actually showed: a `ci:failed`-labelled, required-check-failing
+    // PR that this pass nonetheless has NO opinion about. Asserting the fixed behaviour (below) already covers
+    // the regression; this case additionally documents, in the plan's own vocabulary, what the pre-fix output
+    // looked like — `nothing-owed` must never again be the verdict for a PR whose rollup carries a real failing
+    // conclusion, cancelled or otherwise.
+    const plan = planReconcile({ prs: [pr2636()], agents: [], now: NOW });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('nothing-owed');
+  });
+
+  it('under the cap: dispatches `ci-heal`, exactly PR #2636\'s real live count (2 of 3) at the moment of the incident', () => {
+    const comments = Array.from({ length: 2 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({ prs: [pr2636({ comments })], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2636, attempts: 2 })]);
+    expect(plan.dispatch[0].phase).toBe('ci-red');
+  });
+
+  it(`AT the cap (${CI_HEAL_ROUND_CAP} durable heal-mark comments): refused \`cap-exhausted\` AND escalated visibly — never silently \`nothing-owed\``, () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({ prs: [pr2636({ comments })], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'cap-exhausted', prNumber: 2636, attempts: CI_HEAL_ROUND_CAP, cap: CI_HEAL_ROUND_CAP, phase: 'ci-red',
+    })]);
+    // THE ESCALATION (#xznd5za) — a capped ci-red PR must be surfaced, not merely refused. The note's own text
+    // carries the literal phrase an operator/escalation-reader searches for.
+    expect(plan.notes).toEqual([expect.objectContaining({
+      kind: 'ci-heal-exhausted', prNumber: 2636, attempts: CI_HEAL_ROUND_CAP, cap: CI_HEAL_ROUND_CAP,
+    })]);
+    expect(plan.notes[0].text).toMatch(/ci-heal attempts exhausted/);
+  });
+});
+
 describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {
   const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
   const prRedAttributable = (over = {}) => pr1563({

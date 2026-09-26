@@ -3,9 +3,11 @@ bornAs: xy1ml9m
 kind: story
 size: 5
 parent: "4163"
-status: open
+status: resolved
 scope: ["we:scripts/readiness/check-standards-scope-replay.mjs", "we:scripts/readiness/claimScope.mjs"]
 dateOpened: "2026-09-25"
+dateStarted: "2026-09-25"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
