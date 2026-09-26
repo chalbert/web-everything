@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   defaultShimDir, shimGhPath, resolveRealGhBinary, renderGhShimScript, ensureGhShim, ghShimPathOverride,
-  buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, sanitizeSpawnEnv,
+  buildGhShimSettingsEnv, looksLikeAppTokenAuthFailure, ensureSettingsFileEnv, ensureSettingsFilePermissions, sanitizeSpawnEnv,
   defaultGhThrottleCliPath, checkoutShimDir,
 } from '../gh-app-shim.mjs';
 
@@ -471,6 +471,78 @@ describe('ensureSettingsFileEnv — the durable, per-checkout delivery path (#x8
     expect(ensureSettingsFileEnv({ cwd: null, env: {} })).toEqual({ ok: false, reason: 'no-cwd' });
     const result = ensureSettingsFileEnv({
       cwd: '/x', env: { PATH: 'x' }, mkdir: vi.fn(), writeFile: () => { throw new Error('read-only fs'); },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('write-failed');
+  });
+});
+
+describe('ensureSettingsFilePermissions — the permission counterpart to ensureSettingsFileEnv (#xrv69j6)', () => {
+  it('creates .claude/settings.local.json with the given additionalDirectories + allow rules, via a real tmpdir', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-perm-'));
+    try {
+      const result = ensureSettingsFilePermissions({
+        cwd, additionalDirectories: ['/lanes/lane-9'], allow: ['Edit(/lanes/lane-9/**)', 'Write(/lanes/lane-9/**)'],
+      });
+      const path = join(cwd, '.claude', 'settings.local.json');
+      expect(result).toEqual({ ok: true, path });
+      const written = JSON.parse(readFileSync(path, 'utf8'));
+      expect(written.permissions.additionalDirectories).toEqual(['/lanes/lane-9']);
+      expect(written.permissions.allow).toEqual(['Edit(/lanes/lane-9/**)', 'Write(/lanes/lane-9/**)']);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('is ADDITIVE and DEDUPES — preserves an existing file\'s other keys/env and never repeats an entry', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-perm-'));
+    try {
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      writeFileSync(join(cwd, '.claude', 'settings.local.json'), JSON.stringify({
+        env: { OTHER: 'kept' },
+        permissions: { additionalDirectories: ['/lanes/lane-9'], allow: ['Edit(/lanes/lane-9/**)'] },
+      }), 'utf8');
+      ensureSettingsFilePermissions({
+        cwd, additionalDirectories: ['/lanes/lane-9', '/lanes/lane-12'], allow: ['Edit(/lanes/lane-9/**)', 'Edit(/lanes/lane-12/**)'],
+      });
+      const written = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
+      expect(written.env).toEqual({ OTHER: 'kept' });
+      expect(written.permissions.additionalDirectories).toEqual(['/lanes/lane-9', '/lanes/lane-12']);
+      expect(written.permissions.allow).toEqual(['Edit(/lanes/lane-9/**)', 'Edit(/lanes/lane-12/**)']);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('a corrupt existing file is treated as empty, never thrown on', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-perm-'));
+    try {
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{ not json', 'utf8');
+      const result = ensureSettingsFilePermissions({ cwd, additionalDirectories: ['/lanes/lane-9'] });
+      expect(result.ok).toBe(true);
+      const written = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8'));
+      expect(written.permissions.additionalDirectories).toEqual(['/lanes/lane-9']);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op (never writes) when nothing is given to grant', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'we-settings-perm-'));
+    try {
+      const result = ensureSettingsFilePermissions({ cwd, additionalDirectories: [], allow: [] });
+      expect(result).toEqual({ ok: true, changed: false });
+      expect(existsSync(join(cwd, '.claude', 'settings.local.json'))).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('returns {ok:false} without throwing when no cwd is given, or when the write fails', () => {
+    expect(ensureSettingsFilePermissions({ cwd: null, additionalDirectories: ['/x'] })).toEqual({ ok: false, reason: 'no-cwd' });
+    const result = ensureSettingsFilePermissions({
+      cwd: '/x', additionalDirectories: ['/x'], mkdir: vi.fn(), writeFile: () => { throw new Error('read-only fs'); },
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('write-failed');

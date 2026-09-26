@@ -18,8 +18,9 @@ import heavyQueueWait from './heavy-queue-wait.mjs';
 import staleClaim from './stale-claim.mjs';
 import claudeAuthExpired from './claude-auth-expired.mjs';
 import machineOverload from './machine-overload.mjs';
+import dispatchPermissionStall from './dispatch-permission-stall.mjs';
 
 export const SMELLS = Object.freeze([
   daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
-  claudeAuthExpired, machineOverload,
+  claudeAuthExpired, machineOverload, dispatchPermissionStall,
 ]);

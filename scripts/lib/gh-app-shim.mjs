@@ -389,6 +389,67 @@ export function ensureSettingsFileEnv({
 }
 
 /**
+ * THE PERMISSION COUNTERPART to {@link ensureSettingsFileEnv} — merges `permissions.additionalDirectories`
+ * and `permissions.allow` into `<cwd>/.claude/settings.local.json`, ADDITIVE and NEVER-THROWING in exactly
+ * the same shape (dedup by value, never removes an existing entry, a corrupt/missing file is treated as
+ * empty rather than fatal).
+ *
+ * #xrv69j6 (epic #4075) — WHY THIS EXISTS. Since #4174/#2701 a dispatched session's cwd
+ * (`we:scripts/operations/dispatch-lane-io.mjs#dispatchSessionCwd`) is a scratch directory OUTSIDE every
+ * checkout, and its brief's very first real step (`lane-pool.mjs acquire`, then an Edit/Write into the lane
+ * it just leased) targets a directory the CLI has never granted. An unattended `--bg` session that hits
+ * Claude Code's own outside-cwd Edit/Write permission gate there has nobody to answer it and sits blocked
+ * forever — live case: `fix-2735` (session `61d6f087…`) sat blocked 36+ minutes on 2026-09-26, stalling PR
+ * #2735 (`review-status:fix-stalled`). `we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks`
+ * calls this at the SAME moment, into the SAME durable per-cwd file, that {@link ensureSettingsFileEnv}
+ * already writes the gh-shim env into — proven (see this module's own header) to reach a dispatched session
+ * even when the CLI's background-daemon spare pool serves the dispatch from an already-running process and
+ * silently drops a fresh `--settings` CLI argument. Writing directly into the file the session's own cwd
+ * will read from means its FIRST Edit lands inside an already-approved directory rather than a prompt.
+ *
+ * WHY NOT A SECOND WRITE INTO `permissions.allow` ALONE. `additionalDirectories` is the CLI's own directory
+ * grant (the same key `we:scripts/bootstrap-session.mjs#withPrimaryGitDir` writes at machine-bootstrap time
+ * for a lane's `--reference`d primary `.git`); `allow` rules (`Edit(<dir>/**)`, `Write(<dir>/**)`) additionally
+ * pre-approve the TOOL itself for that path. Both are written together so a directory is granted the same way
+ * whichever of the two the running CLI version actually consults for a background dispatch — untested in
+ * isolation here (the live proof is the dispatched session's own transcript, not a unit assertion about which
+ * key wins), so this errs toward carrying both rather than picking one.
+ * @param {{cwd:string, additionalDirectories?:string[], allow?:string[], readFile?:Function, writeFile?:Function, mkdir?:Function}} o
+ * @returns {{ok:boolean, path?:string, reason?:string, changed?:boolean}}
+ */
+export function ensureSettingsFilePermissions({
+  cwd, additionalDirectories = [], allow = [], readFile = readFileSync, writeFile = writeFileSync, mkdir = mkdirSync,
+}) {
+  if (!cwd) return { ok: false, reason: 'no-cwd' };
+  const dirs = additionalDirectories.filter(Boolean);
+  const rules = allow.filter(Boolean);
+  if (!dirs.length && !rules.length) return { ok: true, changed: false }; // nothing to grant — no-op, no write
+  const dir = join(cwd, '.claude');
+  const path = join(dir, 'settings.local.json');
+  try {
+    mkdir(dir, { recursive: true });
+    let existing;
+    try { existing = JSON.parse(readFile(path, 'utf8')); } catch { existing = null; }
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) existing = {};
+    const prevPerms = existing.permissions && typeof existing.permissions === 'object' ? existing.permissions : {};
+    const prevDirs = Array.isArray(prevPerms.additionalDirectories) ? prevPerms.additionalDirectories : [];
+    const prevAllow = Array.isArray(prevPerms.allow) ? prevPerms.allow : [];
+    const merged = {
+      ...existing,
+      permissions: {
+        ...prevPerms,
+        additionalDirectories: [...new Set([...prevDirs, ...dirs])],
+        allow: [...new Set([...prevAllow, ...rules])],
+      },
+    };
+    writeFile(path, `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+    return { ok: true, path };
+  } catch (e) {
+    return { ok: false, reason: 'write-failed', error: String((e && e.message) || e) };
+  }
+}
+
+/**
  * PURE: a shallow copy of `env` with `GH_TOKEN`/`GITHUB_TOKEN` REMOVED (not merely set to `''` — `gh` honors
  * either name, and a present-but-empty value is not guaranteed to be treated the same as absent).
  *

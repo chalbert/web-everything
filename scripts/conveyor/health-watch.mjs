@@ -285,7 +285,14 @@ export function probeAgents({ exec = run } = {}) {
   const arr = JSON.parse(exec('claude', ['agents', '--json'], { cwd: homedir() }));
   // `cwd`/`sessionId` carried through (additive — no existing smell reads `probes.agents` at all yet) so the
   // claude-auth-expired sign below can resolve each background session's own transcript.
-  return arr.map((a) => ({ name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId }));
+  // #xrv69j6 — `status`/`waitingFor` ALSO carried through (additive, same reasoning): a background session
+  // blocked on Claude Code's own unanswerable permission prompt reports `state: "blocked"`,
+  // `status: "waiting"`, `waitingFor: "permission prompt"` (measured live, `claude agents --json`, session
+  // `fix-2735`) — the `dispatch-permission-stall` smell below is the first reader.
+  return arr.map((a) => ({
+    name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId,
+    status: a.status ?? null, waitingFor: a.waitingFor ?? null,
+  }));
 }
 
 /**
