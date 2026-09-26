@@ -3,10 +3,11 @@ bornAs: x9ytnq8
 kind: story
 size: 3
 parent: "3443"
-status: active
+status: resolved
 scope: ["we:vitest.setup.ts", "we:vitest.config.ts", "we:vitest.integration.config.ts", "we:scripts/readiness/heavy-admission.mjs", "we:scripts/readiness/__tests__/heavy-admission.test.mjs", "we:scripts/readiness/file-locks.mjs", "we:scripts/readiness/__tests__/file-locks.test.mjs", "we:skills-src/batch-backlog-items/parallel-execute.workflow.js", "we:scripts/__tests__/parallel-execute-workflow.test.mjs", "we:.gitignore", "we:package-lock.json", "we:scripts/operator/converge.py", "we:skills-src/drain/SKILL.md"]
 dateOpened: "2026-09-22"
 dateStarted: "2026-09-24"
+dateResolved: "2026-09-25"
 tags: []
 ---
 
