@@ -3,9 +3,10 @@ bornAs: xbsmmwu
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/conveyor/session-reaper.mjs", "we:scripts/conveyor/hung-session.mjs", "we:scripts/conveyor/reconcile-core.mjs", "we:scripts/conveyor/reconcile-pass.mjs", "we:scripts/conveyor/health-smells/claude-auth-expired.mjs", "we:scripts/conveyor/health-smells/index.mjs", "we:scripts/conveyor/health-watch.mjs", "we:scripts/conveyor/health-watch-core.mjs", "we:scripts/conveyor/soak/breaks/claude-auth-expired.mjs", "we:scripts/conveyor/__tests__/sim/agent-actions.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
