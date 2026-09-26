@@ -250,7 +250,7 @@
       "escalation": null,
       "notes": "CONFIRMED GAP, from the code AND this host's own live launchd state: `--dispatch-scratch-sweep` is an opt-in CLI flag (session-reaper.mjs:2028-2031) that `runSessionReaperPass` itself has NO parameter for at all — review-daemon.mjs's `defaultReapSessions()` (the ONLY place either resident daemon calls this file) never passes it, and `ls ~/Library/LaunchAgents` on this machine shows no plist that runs `session-reaper.mjs --dispatch-scratch-sweep` on any cadence. So this axis is real, coded, tested — and, as far as this host's actual running daemons go, NEVER FIRES. Every dispatched session's scratch dir + trust entry accumulates forever unless an operator runs the CLI flag by hand. If it DID run: 24h grace (path A, WE_DISPATCH_SCRATCH_GRACE_HOURS) once matched to a terminal/absent claude-agents row, or a 7-day ceiling safety valve (path B, WE_DISPATCH_SCRATCH_CEILING_DAYS) when the match could not be resolved at all (session-reaper.mjs:1557-1604).",
       "ack": {
-        "silent-failure": "4235"
+        "silent-failure": "#4235"
       }
     },
     {

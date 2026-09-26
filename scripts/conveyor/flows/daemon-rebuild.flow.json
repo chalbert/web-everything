@@ -140,7 +140,7 @@
       "escalation": null,
       "notes": "index-lock recovery threshold defaults to 120000ms (WE_DAEMON_INDEX_LOCK_STALE_MS); interrupted-rebuild recovery threshold defaults to 30 min (WE_DAEMON_REBUILD_STALE_MS). A dirty tree caused ONLY by a known tracked daemon-state file (scripts/conveyor/run-scorecards.json) is migrated out of the tree automatically (migrateDaemonStateFiles, lines 828-833) before the safety check is re-run; any other dirt still refuses.",
       "ack": {
-        "uncapped-retry": "4232"
+        "uncapped-retry": "#4232"
       }
     },
     {
@@ -155,7 +155,7 @@
       "escalation": null,
       "notes": "FOLDS FOUR distinct no-automatic-recovery conditions the code itself treats identically (every tick just re-hits the same check and re-refuses): (a) rebuild-interrupted-unrecoverable — a crashed rebuild whose on-disk HEAD matches neither its recorded target nor a clean prevHead (daemon-rebuild.mjs:792-796); (b) quarantine — a failed post-smoke rollback or reset itself failed (:799-815, :944, :986, :1024-1028); (c) a persistently unsafe tree (dirty/local-commits/merge-in-progress/status-failed) that migrateDaemonStateFiles could not clear (:834-837); (d) overlay-state-corrupt, a hand-edited or half-written overlay list file (:854-857, scripts/lib/daemon-overlays.mjs:18-24). NONE of these four has an owner or a timeout: nothing here ever alerts an operator beyond the alerts.jsonl line + a stderr log line (daemon-rebuild.mjs's own `alert()`, lines 734-742) — this IS the silent-failure gap. The module's own docs say a human `git reset --hard`/file-fix is required; nothing pages anyone to do it.",
       "ack": {
-        "silent-failure": "4235"
+        "silent-failure": "#4235"
       }
     },
     {
@@ -187,7 +187,7 @@
       "escalation": null,
       "notes": "GAP distinct from clone-held-stale: a pinned-overlay refusal returns `finish({moved:false, reason: plan.reason, ...})` WITHOUT a `plan` field (daemon-rebuild.mjs:870-874), so it never satisfies finish()'s own condition for the loud 'clone-held-stale' alert (`result.plan?.ok && !result.plan.upToDate`, lines 743-753) that every OTHER stuck-and-behind outcome gets. The only signal is the original alert(plan.reason, plan.detail) call carrying PINNED_OVERLAY_MESSAGE/PINNED_OVERLAY_GONE_MESSAGE (lines 136-138, 872-874) — a human must already know to grep the alerts log for THIS specific reason string rather than the more discoverable clone-held-stale one. This is arguably the MOST likely to need a human (rebase the pinned branch, or unpin/re-register it) yet gets the WEAKEST signal of the stuck states.",
       "ack": {
-        "silent-failure": "4235"
+        "silent-failure": "#4235"
       }
     },
     {
@@ -271,7 +271,7 @@
       "escalation": null,
       "notes": "UNCAPPED, confirmed: state.rejected is written with no retryAt UNLESS every failed check is external-only (isExternalOnlyFailure, line 998); in that one sub-case a backoff is added (base 5min, doubling, capped at 60min via WE_DAEMON_REJECT_RETRY_MAX_MS, lines 660-664). A genuine code-shaped failure has NO backoff and NO cap at all — it stays rejected forever until the inputsKey changes (main moves, or the overlay list changes), by design (the file header calls this correct: 'the SAME broken build is never re-smoked every tick'), but nothing ever tells an operator it is sitting there rejected beyond the alerts log + the clone-held-stale line below.",
       "ack": {
-        "uncapped-retry": "4232"
+        "uncapped-retry": "#4232"
       }
     },
     {
@@ -347,7 +347,7 @@
       "escalation": null,
       "notes": "The operator (or whatever automated caller ran this CLI) sees a non-zero exit and a one-line stderr message; nothing here schedules a follow-up attempt. Narrower than before PR #2765 (2026-09-26): the write-lock-refused exit this state used to also cover no longer exists for add/remove (register-only, no clone lock taken) — the two remaining causes are a stuck/exhausted list mutex (daemon-overlays.mjs:139-169, THROWS, caught by the CLI's top-level `.catch` at scripts/daemon-overlay.mjs:142-146) and `cmd==='list'` hitting a corrupt overlay state file (scripts/daemon-overlay.mjs:108-114).",
       "ack": {
-        "silent-failure": "4235"
+        "silent-failure": "#4235"
       }
     }
   ],
@@ -639,7 +639,7 @@
       ],
       "notes": "THE FINDING: removeOverlay/appendOverlayEvent go through daemon-overlays.mjs's own withListLock mutex (20s bound, THROWS on timeout — daemon-overlays.mjs:139-169). This call site sits BEFORE doRebuild's own try/catch (which only starts at daemon-rebuild.mjs:935), so a thrown timeout here is NOT caught locally. It propagates out of withWriteLock (which still releases the write lock via its own finally, daemon-clone-lock.mjs:350-357) and out of `rebuild()` itself (daemon-self-sync.mjs:540, no try/catch there either) all the way up to runDaemonLoop's generic per-tick try/catch (skills-src/conveyor/review-daemon.mjs:129-134) — logged as an indistinguishable 'tick failed (non-fatal)' line, with the ENTIRE tick's real dispatch work skipped for that cycle, not just the rebuild. onFailure is genuinely null: no state in this flow specifically routes this failure anywhere.",
       "ack": {
-        "failure-no-exit": "4226"
+        "failure-no-exit": "#4226"
       }
     },
     {

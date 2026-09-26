@@ -126,7 +126,7 @@
       "escalation": null,
       "notes": "Computed once per daemon tick (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:477) from readClaudeAuthHealth (scripts/conveyor/claude-auth-health.mjs:134) OR'd with a cheap probeClaudeLoggedIn (:156). While paused, fix AND ci-heal are both skipped outright with no round-cap comment spent (skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:488-491). Self-clears purely via next tick's cheap probe; nothing pages a human beyond the daemon's own stderr log line (AUTH_PAUSE_LOG_MESSAGE, scripts/conveyor/claude-auth-health.mjs:67).",
       "ack": {
-        "unbounded-wait": "4237"
+        "unbounded-wait": "#4237"
       }
     },
     {
@@ -648,7 +648,7 @@
         }
       ],
       "ack": {
-        "unprovided-assumption": "4238"
+        "unprovided-assumption": "#4238"
       }
     }
   ]
