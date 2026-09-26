@@ -1,11 +1,14 @@
 ---
 kind: story
 size: 3
+tier: pinned
 parent: "2360"
 status: open
 blockedBy: ["2383"]
 dateOpened: "2026-07-10"
 tags: []
+deliveryAgent: codex
+deliveryAgentReason: "astra graduation trial (epic #3383/#4034/#3906): non-critical per the #4034/#2752 critical-work rule — frontierui SSR-renderer build-new-feature, no daemon/conveyor/gate/statute path in scope, fully prepared Done-when already on the card; operator-directed, 2026-09-26"
 scope:
   - frontierui:plugs/webdirectives/ssr/net/src/NetServerRenderer.cs
   - frontierui:plugs/webdirectives/ssr/net/src/Renderers.cs
