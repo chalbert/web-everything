@@ -3,9 +3,10 @@ bornAs: xrv69j6
 kind: story
 size: 5
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/lib/gh-app-shim.mjs", "we:scripts/conveyor/health-smells/"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
