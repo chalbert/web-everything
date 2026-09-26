@@ -1,4 +1,5 @@
 ---
+bornAs: x20lkf6
 kind: story
 size: 5
 parent: "3931"
@@ -10,7 +11,7 @@ tags: []
 
 # Extend live-state with a RUNNING section — every session/job, card/PR, kind, runtime, last activity, state, transcript
 
-Add a RUNNING section (new we:scripts/operations/live-work.mjs, sibling to we:scripts/operations/live-state.mjs card xvz55jf/#4213) joining we:scripts/operations/agent-activity.mjs (#3932), claude agents --json, review-job records (we:scripts/operations/review-job-store.mjs, .operations/review-jobs/*.json) and we:scripts/operations/heavy-queue.mjs — reusing every read, never re-deriving. For every session/job (background fix/ci-heal/build/prepare/review/canary dispatches, interactive chats, orchestrator workers + identifiable subagents): work item, kind, start time + runtime, last activity (transcript's last write), derived state (working/waiting-for-slot/idle>10min/blocked-on-prompt/dead), transcript path. Sort stuck+dead first. Feeds card xb2o3x0's plateau-app panel.
+Add a RUNNING section (new we:scripts/operations/live-work.mjs, sibling to we:scripts/operations/live-state.mjs card 4213/#4213) joining we:scripts/operations/agent-activity.mjs (#3932), claude agents --json, review-job records (we:scripts/operations/review-job-store.mjs, .operations/review-jobs/*.json) and we:scripts/operations/heavy-queue.mjs — reusing every read, never re-deriving. For every session/job (background fix/ci-heal/build/prepare/review/canary dispatches, interactive chats, orchestrator workers + identifiable subagents): work item, kind, start time + runtime, last activity (transcript's last write), derived state (working/waiting-for-slot/idle>10min/blocked-on-prompt/dead), transcript path. Sort stuck+dead first. Feeds card 4245's plateau-app panel.
 
 ## Done when
 

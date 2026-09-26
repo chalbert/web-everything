@@ -1,9 +1,10 @@
 ---
+bornAs: xb2o3x0
 kind: story
 size: 5
 parent: "3931"
 status: open
-blockedBy: ["x20lkf6"]
+blockedBy: ["4244"]
 scope: ["plateau:src/wip/wip-view.ts", "plateau:src/wip/wip-view.css", "plateau:src/wip/wip-read.ts", "plateau:src/wip/types.ts", "plateau:src/wip/wip-model.ts", "plateau:src/wip/wip-view.test.ts", "plateau:src/wip/wip-read.test.ts", "plateau:src/wip/wip-model.test.ts", "plateau:wip-relay.js", "plateau:scripts/wip-relay.test.mjs"]
 dateOpened: "2026-09-26"
 tags: []
@@ -11,7 +12,7 @@ tags: []
 
 # /wip: Running now panel under the machine-health strip — one row per session/job, stuck+dead in red at top
 
-A Running now panel on /wip, below the machine-health strip (card xi77igx/#4214, PR #184), one row per session or job with: work item, kind, start+runtime, last activity, derived state, transcript path or link. Stuck and dead rows render in red at the top. Fed through the existing /wip pipeline exactly as #4214 did (plateau:src/wip/wip-read.ts -> plateau:src/wip/wip-model.ts passthrough -> plateau:src/wip/wip-view.ts render -> plateau:wip-relay.js publish validation). Data source: WE card x20lkf6's live-state/live-work RUNNING section, read the same way plateau:src/wip/wip-read.ts already shells runner-activity.
+A Running now panel on /wip, below the machine-health strip (card 4214/#4214, PR #184), one row per session or job with: work item, kind, start+runtime, last activity, derived state, transcript path or link. Stuck and dead rows render in red at the top. Fed through the existing /wip pipeline exactly as #4214 did (plateau:src/wip/wip-read.ts -> plateau:src/wip/wip-model.ts passthrough -> plateau:src/wip/wip-view.ts render -> plateau:wip-relay.js publish validation). Data source: WE card 4244's live-state/live-work RUNNING section, read the same way plateau:src/wip/wip-read.ts already shells runner-activity.
 
 ## Done when
 
