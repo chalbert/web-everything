@@ -34,7 +34,7 @@ import { createGhProvider } from '../lib/review-label-provider.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** Matches this module's own label shape, and only this shape. */
-export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled)$/;
+export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|healing-ci|ci-heal-stalled)$/;
 
 /**
  * `claude agents --json` states this module treats as LIVE — something is currently actioned, or stuck trying
@@ -48,14 +48,26 @@ export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|
 const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
 
 /**
- * PURE: find the LIVE agent session (if any) bound to `pr` by NAME alone (`review-<pr>` / `fix-<pr>`) and
- * classify it. See {@link LIVE_STATES} for exactly which raw states count as live.
+ * PURE: find the LIVE agent session (if any) bound to `pr` by NAME alone (`review-<pr>` / `fix-<pr>` /
+ * `ci-heal-<pr>`) and classify it. See {@link LIVE_STATES} for exactly which raw states count as live.
+ *
+ * `ci-heal` ADDED (live gap found 2026-09-26, epic #4075/#3383, alongside the conflict-bounce audit this
+ * module's own header describes): a red required check with a live `ci-heal-<pr>` session
+ * (`we:scripts/operations/ci-heal-pr-dispatch.mjs`, minted via the SAME `mintSessionSlug`/`PR_KINDS` this file
+ * already imports — `ci-heal` has been a first-class `PR_KINDS` entry since #3438/#3967) had NO representation
+ * in this vocabulary at all: `deriveReviewStatus` only ever checked `review-<pr>`/`fix-<pr>`, so a PR mid-CI-heal
+ * showed no `review-status:*` label whatsoever — indistinguishable from a PR nothing is touching. Checked
+ * THIRD, after `review`/`fix`: a PR is never simultaneously owed a review/fix dispatch AND a ci-heal one
+ * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
+ * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
+ * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
  * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>}} o
- * @returns {{role:'review'|'fix', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'}|null}
+ * @returns {{role:'review'|'fix'|'ci-heal', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'healing-ci'|'ci-heal-stalled'}|null}
  */
 export function deriveReviewStatus({ pr, agents = [], repo = 'we' } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
+  const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
   const list = Array.isArray(agents) ? agents : [];
   // Prefer a `working` match over a `blocked` one for the SAME name (several historical rows can share a
   // name) — a session actually making progress right now is more informative than a stuck sibling. A `done`/
@@ -68,6 +80,8 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we' } = {}) {
   if (review) return { role: 'review', state: review.state === 'working' ? 'reviewing' : 'review-stalled' };
   const fix = liveFor(fixName);
   if (fix) return { role: 'fix', state: fix.state === 'working' ? 'fixing' : 'fix-stalled' };
+  const ciHeal = liveFor(ciHealName);
+  if (ciHeal) return { role: 'ci-heal', state: ciHeal.state === 'working' ? 'healing-ci' : 'ci-heal-stalled' };
   return null;
 }
 

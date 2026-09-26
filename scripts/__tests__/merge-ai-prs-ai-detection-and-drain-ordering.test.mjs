@@ -12,7 +12,7 @@ import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, revalidateForMerge, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isDrainBookkeepingCommit, isRequiredCheckGreen, hasLabel, classifyPr, revalidateForMerge, planLabelDrain, joinImplToCouples, parseWatchOpts, decideDrainLeaseGate, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, applyEscalationRelief, matchesOnlyTarget, isDegradedOpenPrListing, OPEN_PR_LIST_LIMIT } from '../merge-ai-prs.mjs';
 import { decideReviewGate, REVIEW_LABELS, READY_TO_MERGE_LABEL, decideParkReadyStrip } from '../lib/review-escalation.mjs';
 import { acquireDrainLease, drainLeaseStatus, localRepoSlug } from '../readiness/drain-lock.mjs';
 import { claudeCommit, humanCommit, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
@@ -43,6 +43,50 @@ describe('merge-ai-prs — AI detection', () => {
     expect(isAiGeneratedPr({ commits: [claudeCommit(), mechMerge] })).toBe(true);
     // but a mechanical merge alone (no substantive AI commit) does NOT qualify
     expect(isAiGeneratedPr({ commits: [mechMerge] })).toBe(false);
+  });
+
+  // Live-caught 2026-09-26 on `chalbert/web-everything#2741` (epic #4075/#3383): the drain lands a family of
+  // bookkeeping commits directly onto `main` — `drain: JIT-number …→#NNNN at land (#2288)` / `drain: resolve
+  // #NNNN on land (#2748)` — and a long-lived lane that merges a newer `main` into itself inherits them into
+  // its OWN PR's `commits` list, alongside a real merge commit whose body is git's own auto-appended
+  // `# Conflicts:` footer. Before the fix EITHER shape alone flipped `isAiGeneratedPr` to `false`, which (via
+  // `merge-ai-prs.mjs`'s `ciLifecycleCertified` gate) silently disqualified an otherwise fully-AI PR from the
+  // #2281-ratified ci-lifecycle reconcile — confirmed live: #2741 carried `review:pending, review-round:1`
+  // only, no `checking`/`ci:failed`/`blocked`/`ready-to-merge` label at all, while `test`/`daemon-soak` were
+  // IN_PROGRESS.
+  it('a drain JIT-number/resolve bookkeeping commit does not disqualify an AI PR (#2741, drain: prefix)', () => {
+    const drainJitNumber = { messageHeadline: 'drain: JIT-number x5wbsbc→#4217, xa4qo7n→#4218 at land (#2288)', messageBody: '', authors: [{ name: 'test', email: 'test@test.com' }] };
+    const drainResolve = { messageHeadline: 'drain: resolve #4216 on land (#2748)', messageBody: '', authors: [{ name: 'test', email: 'test@test.com' }] };
+    expect(isDrainBookkeepingCommit(drainJitNumber)).toBe(true);
+    expect(isDrainBookkeepingCommit(drainResolve)).toBe(true);
+    expect(isDrainBookkeepingCommit(claudeCommit())).toBe(false);
+    expect(isAiGeneratedPr({ commits: [claudeCommit(), drainJitNumber, drainResolve] })).toBe(true);
+    // a drain bookkeeping commit alone (no substantive AI commit) does NOT qualify
+    expect(isAiGeneratedPr({ commits: [drainJitNumber] })).toBe(false);
+  });
+
+  it('a merge commit whose body is only git\'s auto-appended `# Conflicts:` footer is still mechanical (#2741)', () => {
+    const mergeWithConflictFooter = {
+      messageHeadline: "Merge remote-tracking branch 'origin/main'",
+      messageBody: '# Conflicts:\n#\tscripts/conveyor/health-smells/index.mjs\n#\tscripts/conveyor/soak/breaks/index.mjs',
+      authors: [{ name: 'test', email: 'test@test.com' }],
+    };
+    expect(isMechanicalMergeCommit(mergeWithConflictFooter)).toBe(true);
+    expect(isAiGeneratedPr({ commits: [claudeCommit(), mergeWithConflictFooter] })).toBe(true);
+    // a REAL authored body (not just the `#`-prefixed footer) still disqualifies shape 1 — unchanged behavior
+    const mergeWithRealBody = { ...mergeWithConflictFooter, messageBody: 'resolved by keeping the health-smells rewrite\n\n# Conflicts:\n#\tfoo' };
+    expect(isMechanicalMergeCommit(mergeWithRealBody)).toBe(false);
+  });
+
+  it('PR #2741\'s real inherited-commit shape (drain bookkeeping + conflict-footer merge + a genuine AI fix) is AI-generated end to end', () => {
+    const commits = [
+      claudeCommit({ messageHeadline: 'WE #x5wbsbc: fallback' }),
+      { messageHeadline: 'drain: JIT-number xqpqyr2→#4216 at land (#2288)', messageBody: '', authors: [{ name: 'test', email: 'test@test.com' }] },
+      { messageHeadline: 'drain: resolve #4216 on land (#2748)', messageBody: '', authors: [{ name: 'test', email: 'test@test.com' }] },
+      { messageHeadline: "Merge remote-tracking branch 'origin/main'", messageBody: '# Conflicts:\n#\tscripts/conveyor/health-smells/index.mjs', authors: [{ name: 'test', email: 'test@test.com' }] },
+      claudeCommit({ messageHeadline: 'WE #xrv69j6: address review:changes on PR #2741 — merge main, resolve conflict' }),
+    ];
+    expect(isAiGeneratedPr({ commits })).toBe(true);
   });
 });
 

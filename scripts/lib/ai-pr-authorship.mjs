@@ -34,10 +34,29 @@ export function isAiCommit(commit) {
   return authors.some(isAiAuthor) || bodyHasTrailer;
 }
 
+/** Strip GIT'S OWN auto-appended `# Conflicts:` footer (and the `#\t<path>` lines under it, and blank lines)
+ *  from a merge commit body — the boilerplate `git merge`/`git commit` appends listing which paths conflicted,
+ *  present whenever a merge is committed non-interactively (`--no-edit`, or a script that never invokes the
+ *  edit-time comment-strip) REGARDLESS of whether the conflicts were resolved by a mechanical driver or a human.
+ *  Every line git generates here starts with `#` — never authored prose — so it is not evidence of "real
+ *  content added", the same direction shape 1's plain empty-body check already reasons from. Pure. */
+function stripGitConflictFooter(body) {
+  return String(body ?? '')
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('#'))
+    .join('\n')
+    .trim();
+}
+
 /** A mechanical integration commit — either shape below carries no NEW authored content of its own, so neither
  *  counts as human work and neither may disqualify an otherwise-AI PR:
- *   1. `Merge branch 'main' …` / `Merge remote-tracking …` with an EMPTY body — what `gh pr update-branch` /
- *      a local rebase-on-behind creates.
+ *   1. `Merge branch 'main' …` / `Merge remote-tracking …` with an EMPTY body (after stripping git's own
+ *      `# Conflicts:` footer, see {@link stripGitConflictFooter}) — what `gh pr update-branch` / a local
+ *      rebase-on-behind creates, WITH OR WITHOUT a real conflict along the way. Live-caught 2026-09-26 on
+ *      `chalbert/web-everything#2741`: `git merge origin/main` hit a conflict, git appended
+ *      `# Conflicts:\n#\t<path>\n#\t<path>` to the default commit message, and the commit went through
+ *      non-interactively — the body was therefore non-empty, and this shape's original bare `body === ''`
+ *      check missed it even though the footer is git's OWN generated boilerplate, never authored prose.
  *   2. `Merge pull request #NNN from owner/branch` — GitHub's OWN fixed-boilerplate merge-commit headline
  *      (created by `gh pr merge --merge` / the merge button; this repo's own drain default,
  *      `we:scripts/lib/pr-merge-gate.mjs`'s `mergeMethodFlag`). Its body is always non-empty (GitHub fills it
@@ -51,17 +70,43 @@ export function isAiCommit(commit) {
  *      earlier red head never cleared once the current head went green — confirmed live on PR #2685/#2653). */
 export function isMechanicalMergeCommit(commit) {
   const head = String(commit?.messageHeadline || '').trim();
-  const body = String(commit?.messageBody || '').trim();
+  const body = stripGitConflictFooter(commit?.messageBody);
   if (/^Merge (branch|remote-tracking branch) /i.test(head) && body === '') return true;
   if (/^Merge pull request #\d+ from \S+/i.test(head)) return true;
   return false;
 }
 
-/** A PR is AI-generated ONLY if — ignoring mechanical merge commits — it has ≥1 substantive commit and EVERY
- *  substantive commit is AI (one human content commit disqualifies it). */
+/** we:scripts/lib/ai-pr-authorship.mjs#isDrainBookkeepingCommit — a THIRD shape of mechanical integration
+ *  commit, live-caught 2026-09-26 on `chalbert/web-everything#2741`: the DRAIN ITSELF lands a family of
+ *  bookkeeping commits directly onto `main` (never through a `Merge …` headline `isMechanicalMergeCommit`
+ *  would catch) — `drain: JIT-number …→#NNNN at land (#2288)` / `drain: resolve #NNNN on land (#2748)`
+ *  (`we:scripts/lane-drain.mjs`'s own `committed = quietGit(…, ['commit', '-m', \`drain: …\`, …])` call sites) /
+ *  `drain: rebase …` (`we:scripts/lib/rebase-drop-content.mjs` / `rebase-drop-manifest.mjs`) / `drain: unqueue +
+ *  cleanup …` / `drain: reopen stranded …` / `drain: resolve epic … on last-child … land (#2752)`
+ *  (`we:scripts/conveyor/pr-watch.mjs`). A long-lived lane that merges/rebases a newer `main` into itself (the
+ *  SAME routine shape #3729 already fixed for a stray `Merge pull request #N` commit) inherits every one of
+ *  these into ITS OWN open PR's `commits` list — none of them add a line of authored content, all of them are
+ *  authored by whatever git identity lands the drain's own commits (never a human, never Claude's own
+ *  `Co-Authored-By` trailer) — so before this fix a single inherited `drain: …` commit silently flipped
+ *  `isAiGeneratedPr` to `false` for an otherwise fully-AI PR, which (via `merge-ai-prs.mjs`'s `ciLifecycleCertified`
+ *  gate) disqualified it from the #2421/#2281 TOTAL ci-lifecycle reconcile entirely: no `checking` / `ci:failed`
+ *  / `blocked` / `ready-to-merge` label ever applied, in violation of the #2281-ratified "exactly one
+ *  ci-lifecycle label present on every open AI PR, never inferred from absence" statute. CONFIRMED LIVE:
+ *  `chalbert/web-everything#2741` carried `review:pending, review-round:1` only — no ci-lifecycle label at all —
+ *  while `test`/`daemon-soak` were IN_PROGRESS, entirely because its inherited history carried
+ *  `drain: JIT-number …`/`drain: resolve #…` commits from `main` alongside its own genuinely-AI fix commits.
+ *  Matched on the shared `drain: ` headline prefix (every drain-authored bookkeeping commit uses it, by
+ *  convention — `we:scripts/lane-drain.mjs`, `rebase-drop-*.mjs`, `pr-watch.mjs` alike) rather than an
+ *  exhaustive per-shape list, so a future drain bookkeeping commit kind is covered for free. */
+export function isDrainBookkeepingCommit(commit) {
+  return /^drain: /i.test(String(commit?.messageHeadline || '').trim());
+}
+
+/** A PR is AI-generated ONLY if — ignoring mechanical merge commits and the drain's own bookkeeping commits —
+ *  it has ≥1 substantive commit and EVERY substantive commit is AI (one human content commit disqualifies it). */
 export function isAiGeneratedPr(pr) {
   const commits = Array.isArray(pr?.commits) ? pr.commits : [];
-  const substantive = commits.filter((c) => !isMechanicalMergeCommit(c));
+  const substantive = commits.filter((c) => !isMechanicalMergeCommit(c) && !isDrainBookkeepingCommit(c));
   return substantive.length > 0 && substantive.every(isAiCommit);
 }
 
