@@ -2,9 +2,10 @@
 bornAs: xd0c0h3
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/github-app-auth-env.mjs", "we:scripts/lib/github-app-token.mjs", "we:scripts/conveyor/github-app-status.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
