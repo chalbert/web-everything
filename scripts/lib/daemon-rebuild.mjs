@@ -722,6 +722,18 @@ export function candidateWorktreePath(root, env = process.env) {
  * smoke's checks spawn real `node`/`gh` child processes from it that need real dependencies; a repo with no
  * `node_modules` (or one whose checks then fail on a missing module) surfaces that as an ordinary check
  * failure, never a silent skip.
+ *
+ * xa4qo7n LIVE BUG, caught proving this very fix (2026-09-26 15:20 ET on `wev-review-daemon`): a `node_modules/`
+ * `.gitignore` entry (the near-universal convention — trailing slash, "directories only") does NOT match a
+ * SYMLINK of the same name (confirmed: `git status --porcelain` reports `?? node_modules` for a symlink even
+ * with that exact ignore rule in place), so the symlink this function creates made {@link checkTreeStaysClean}
+ * ALWAYS see the candidate as dirty — poisoning the reject-cache (`tree-stays-clean` is `mayBeTransient:false`)
+ * on every single rebuild that reached this step, in a repo with a `node_modules/`-style ignore rule. Fixed by
+ * {@link ensureNodeModulesExcluded}: a one-time, idempotent, repo-wide `node_modules` line (no trailing slash —
+ * matches files AND symlinks, not just real directories) appended to the shared `info/exclude` (this is NOT
+ * per-worktree; git resolves it from `--git-common-dir`, confirmed empirically — a PRIVATE per-worktree
+ * `info/exclude` file is never even read), so every worktree's status reads the symlink as ignored, exactly
+ * like the tracked `.gitignore` already treats the real directory.
  * @param {{root:string, sha:string, run:typeof gitRun, env?:NodeJS.ProcessEnv}} o
  * @returns {{ok:true, path:string}|{ok:false, reason:string}}
  */
@@ -739,10 +751,32 @@ export function materializeCandidate({ root, sha, run, env }) {
   try {
     const nodeModules = join(root, 'node_modules');
     if (existsSync(nodeModules) && !existsSync(join(path, 'node_modules'))) {
+      ensureNodeModulesExcluded({ root, git });
       symlinkSync(nodeModules, join(path, 'node_modules'), 'dir');
     }
   } catch { /* best-effort — see docblock above */ }
   return { ok: true, path };
+}
+
+/**
+ * One-time, idempotent: append a bare `node_modules` line (no trailing slash, so it matches a SYMLINK too, not
+ * only a real directory — see {@link materializeCandidate}'s docblock) to the repo's shared `info/exclude`,
+ * unless a line already says exactly that. Best-effort — a failure here just means a future candidate's
+ * `tree-stays-clean` check may see the symlink as dirt, same as before this fix; it never blocks the build.
+ * @param {{root:string, git:(args:string[])=>{status:number,stdout:string,stderr:string}}} o
+ */
+function ensureNodeModulesExcluded({ root, git }) {
+  const gd = git(['rev-parse', '--git-common-dir']);
+  if (gd.status !== 0) return;
+  const raw = String(gd.stdout || '').trim();
+  if (!raw) return;
+  const commonDir = isAbsolute(raw) ? raw : resolvePath(root, raw);
+  const excludePath = join(commonDir, 'info', 'exclude');
+  let existing = '';
+  try { existing = readFileSync(excludePath, 'utf8'); } catch { /* missing is fine — starts empty */ }
+  if (existing.split('\n').map((l) => l.trim()).includes('node_modules')) return; // already present
+  mkdirSync(dirname(excludePath), { recursive: true });
+  writeFileSync(excludePath, `${existing.replace(/\n?$/, '\n')}node_modules\n`);
 }
 
 /** Best-effort teardown of a candidate worktree — never throws. A failure here just leaves the fixed path for

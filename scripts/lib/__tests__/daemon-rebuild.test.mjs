@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
-  isDaemonManagedClone, daemonConveyorStateRoot,
+  isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
 import { gitRun } from '../main-staleness.mjs';
@@ -860,6 +860,62 @@ describe('rebuildClone', () => {
     const next = await rebuildClone({ root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
     expect(next.reason).toBe('quarantined');
     expect(runSmoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+// xa4qo7n LIVE BUG (2026-09-26 15:20 ET, proving this very fix on wev-review-daemon): a `node_modules/`
+// `.gitignore` entry (trailing slash — "directories only") does NOT match a SYMLINK of the same name, so the
+// node_modules symlink materializeCandidate creates made `daemon-live-smoke.mjs#checkTreeStaysClean` see the
+// candidate as dirty on EVERY rebuild in a repo with that (near-universal) ignore convention — poisoning the
+// reject-cache permanently (`tree-stays-clean` is `mayBeTransient:false`). Fixed by writing a bare `node_modules`
+// line (no trailing slash) to the repo's SHARED `info/exclude` — confirmed empirically it is NOT per-worktree.
+describe('materializeCandidate — node_modules symlink never reads as tree dirt (xa4qo7n)', () => {
+  it('a real node_modules DIRECTORY, ignored only via a trailing-slash .gitignore rule, symlinks in clean', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, '.gitignore', 'node_modules/\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add .gitignore']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    mkdirSync(join(cloneDir, 'node_modules', 'some-pkg'), { recursive: true });
+    writeFile(cloneDir, 'node_modules/some-pkg/index.js', 'module.exports = 1;\n');
+
+    const sha = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    const result = materializeCandidate({
+      root: cloneDir, sha, run: gitRun, env,
+    });
+    expect(result.ok).toBe(true);
+    try {
+      const status = spawnSync('git', ['status', '--porcelain'], { cwd: result.path, encoding: 'utf8' });
+      expect(status.stdout.trim()).toBe(''); // the whole point: no `?? node_modules` line
+      expect(existsSync(join(result.path, 'node_modules', 'some-pkg', 'index.js'))).toBe(true);
+      // The main clone's own worktree is unaffected by the shared info/exclude addition — still clean.
+      const rootStatus = spawnSync('git', ['status', '--porcelain'], { cwd: cloneDir, encoding: 'utf8' });
+      expect(rootStatus.stdout.trim()).toBe('');
+    } finally {
+      removeCandidate({
+        root: cloneDir, path: result.path, run: gitRun, env,
+      });
+    }
+  });
+
+  it('is idempotent — a second candidate build never duplicates the info/exclude line', async () => {
+    const { cloneDir, env } = makeFixture();
+    writeFile(cloneDir, '.gitignore', 'node_modules/\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'add .gitignore']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    mkdirSync(join(cloneDir, 'node_modules'), { recursive: true });
+    writeFile(cloneDir, 'node_modules/marker.js', '1\n');
+    const sha = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+
+    const first = materializeCandidate({ root: cloneDir, sha, run: gitRun, env });
+    removeCandidate({ root: cloneDir, path: first.path, run: gitRun, env });
+    const second = materializeCandidate({ root: cloneDir, sha, run: gitRun, env });
+    removeCandidate({ root: cloneDir, path: second.path, run: gitRun, env });
+
+    const excludeText = readFileSync(join(cloneDir, '.git', 'info', 'exclude'), 'utf8');
+    const lines = excludeText.split('\n').filter((l) => l.trim() === 'node_modules');
+    expect(lines.length).toBe(1);
   });
 });
 
