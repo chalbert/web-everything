@@ -473,7 +473,16 @@ function handleApi(store, rest) {
       const repoState = requireRepo(store, slug);
       let mergeBase;
       try { mergeBase = execFileSync('git', ['merge-base', a, b], { cwd: repoState.originPath, encoding: 'utf8' }).trim(); } catch { mergeBase = a; }
-      return jsonResult({ merge_base_commit: { sha: mergeBase }, files: listChangedFilesRest(repoState.originPath, a, b) }, jq);
+      // #4075 soak harness gap — GitHub's own `ahead_by` (commits in `b` that `a` lacks) / `behind_by` (the
+      // reverse): `reconcile-pass.mjs#defaultReadAheadBy` reads `.ahead_by`, and without it every main-red
+      // rebase candidate refused `unknown-ahead-by` in the simulator. `null` when either side is unresolvable.
+      const count = (range) => {
+        try { return Number(execFileSync('git', ['rev-list', '--count', range], { cwd: repoState.originPath, encoding: 'utf8' }).trim()); } catch { return null; }
+      };
+      return jsonResult({
+        merge_base_commit: { sha: mergeBase }, ahead_by: count(`${a}..${b}`), behind_by: count(`${b}..${a}`),
+        files: listChangedFilesRest(repoState.originPath, a, b),
+      }, jq);
     }
     if ((m = path.match(/^repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/))) {
       const slug = `${m[1]}/${m[2]}`;

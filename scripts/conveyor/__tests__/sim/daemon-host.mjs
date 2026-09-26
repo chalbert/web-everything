@@ -45,6 +45,11 @@ const PASS_DAEMONS = Object.freeze({
   'conflict-watch': { script: 'scripts/conveyor/parked-pr-conflict-watch.mjs', args: ['sweep', `--repo=${WE_SLUG}`] },
   'lane-health': { script: 'scripts/conveyor/lane-pool-health-watch.mjs', args: [`--repo=${WE_SLUG}`] },
   'merge-sweep': { script: 'scripts/merge-ai-prs.mjs', args: [] },
+  // One pass of the resident `/drain` watch (`merge-ai-prs.mjs --label=ready-to-merge --watch`), minus `--watch`
+  // (the scenario runner is the loop). Unlike the bare `merge-sweep`, `--label` turns on the #2421 ci-lifecycle
+  // label reconcile (`scripts/lib/reconcile-predicate.mjs#reconcileWouldRunFor`) — soak break
+  // `ci-heal-loop-stale-label-review-gate`.
+  drain: { script: 'scripts/merge-ai-prs.mjs', args: ['--label=ready-to-merge'] },
   'lease-reaper': { script: 'scripts/conveyor/lease-reaper.mjs', args: [] },
 });
 
