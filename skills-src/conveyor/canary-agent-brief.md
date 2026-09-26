@@ -80,7 +80,7 @@ afterward, never reviewed, never merged.
 ### 5. Release the lane and exit
 
 ```bash
-node scripts/lane-pool.mjs release --lane="$LANE" --session={{SESSION_SLUG}}
+node "{{WE_ROOT}}/scripts/lane-pool.mjs" release --session={{SESSION_SLUG}}
 ```
 
 Report one line: `canary {{CANARY_ID}} → pushed canary/{{CANARY_ID}} (gate green)` or the exact stage that
