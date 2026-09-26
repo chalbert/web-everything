@@ -23,6 +23,17 @@
  *      describe — live on PR #2578 (`advisory:accepted` stamped 13:29:54Z while `review:human`, `review:human`
  *      cleared 13:38:11Z, the advisory label never removed). `planReviewHoldCleanup` drops it.
  *
+ * A THIRD, HEALED — NOT MERELY DROPPED (#2766/#2767, 2026-09-26). `review:accepted` + `review:human` co-present
+ * is not a stray LEFTOVER a blind label removal can safely clean up — `decideParkToHuman`'s own write-time fix
+ * (`we:scripts/lib/review-escalation.mjs`) stops FUTURE occurrences, but an already-contradictory PR needs its
+ * COMMENT HISTORY read first: #x9xqexm forbids an automated pass from ever deleting a GENUINE, currently-valid
+ * human clearance, and a label-only read cannot tell one from a bare, superseded agent accept. So this sweep
+ * fetches comments ONLY for a PR that already carries the pair (cheap — never a list-wide hop), and:
+ *   - a genuine clearance of the LIVE head (`parseLatestHumanClearedSha` matches) → FLAG only, same as before;
+ *   - no such clearance (the confirmed #2766/#2767 shape) → HEAL: `review:accepted` comes off, `review:human`
+ *     stays, a durable comment explains why (`decideContradictoryVerdictHeal`/`buildContradictoryVerdictHealComment`).
+ *   - the fetch itself fails → FLAG only (fail closed toward NEVER deleting on unproven data).
+ *
  * NOT A DUPLICATE of `we:scripts/conveyor/advisory-label-sweep.mjs` — that sweep drops an advisory label whose
  * REVIEWED HEAD has gone stale (the PR moved past what the advisory looked at); this one drops an advisory label
  * whose REVIEW:HUMAN GATE has gone stale (the PR is no longer gate-self at all, so no head comparison is even
@@ -34,16 +45,20 @@
  * only a PR's `labels` and is fully unit-testable with no `gh`; {@link sweepReviewHoldLabels} is the IO shell,
  * with the PR list and the label provider injectable so the whole pass is testable without a real `gh` call too.
  *
- * WHAT IT NEVER DOES: add a label, or touch anything but the two removals named above. It never removes
- * `review:human` itself (that is `clear-human`'s job, a deliberate human/independent-agent act, never a sweep's),
- * and it never adds `review:pending`/`review:changes`/`review:accepted` — a stray label is dropped, never
- * replaced with a guess at what it should have said instead.
+ * WHAT IT NEVER DOES: add a label (the heal path's own `decideParkToHuman` decision never needs to — `human`
+ * is ALREADY live on every PR this sweep heals, by construction of the pair it heals), or touch anything but
+ * the removals named above. It never removes `review:human` itself (that is `clear-human`'s job, a deliberate
+ * human/independent-agent act, never a sweep's), and it never adds `review:pending`/`review:changes` — a stray
+ * label is dropped, never replaced with a guess at what it should have said instead.
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createGhProvider } from '../lib/review-label-provider.mjs';
-import { REVIEW_LABELS, findContradictoryReviewVerdicts } from '../lib/review-escalation.mjs';
+import {
+  REVIEW_LABELS, hasReviewLabel, findContradictoryReviewVerdicts, decideContradictoryVerdictHeal,
+  parseLatestHumanClearedSha,
+} from '../lib/review-escalation.mjs';
 import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { defaultListPrs } from './advisory-label-sweep.mjs';
@@ -101,12 +116,15 @@ export function needsReviewHoldCleanup(pr) {
 }
 
 /**
- * Drop every stray review-hold / gate-scoped-advisory label off every open PR that carries one, and FLAG
- * (never touch) any PR carrying a contradictory pair of review:* VERDICT labels (#2766/#2767) — see
- * `planReviewHoldCleanup`'s point (3) for why a flag, not an auto-remove.
+ * Drop every stray review-hold / gate-scoped-advisory label off every open PR that carries one, and — for a
+ * PR carrying the contradictory `review:accepted` + `review:human` pair (#2766/#2767) — either HEAL it
+ * (`review:accepted` off, a comment explaining why, `review:human` untouched) or FLAG it, depending on what
+ * that PR's own comment history proves. `readPrState`/comments are fetched LAZILY, only for a PR
+ * `planReviewHoldCleanup` already flagged from its labels alone — never a list-wide hop.
  * @param {{repo?: string|null, listPrs?: Function, provider?: object, dryRun?: boolean}} [o]
- * @returns {Array<{num: number, remove?: string[], flagged?: string[], error?: string}>} one entry per PR that
- *   needed (or would need) a change, or carries a contradiction this sweep declines to resolve itself.
+ * @returns {Array<{num: number, remove?: string[], healed?: string[], commentPosted?: boolean,
+ *   flagged?: string[], flagReason?: string, error?: string, fetchError?: string}>} one entry per PR that
+ *   needed (or would need) a change, was healed, or carries a contradiction this sweep could not resolve.
  */
 export function sweepReviewHoldLabels({
   repo = null, listPrs = defaultListPrs, provider = createGhProvider(), dryRun = false,
@@ -114,16 +132,56 @@ export function sweepReviewHoldLabels({
   const prs = listPrs({ repo });
   const results = [];
   let resolvedRepo = repo;
+  const repoOf = () => { if (resolvedRepo == null) resolvedRepo = provider.currentRepo(); return resolvedRepo; };
   for (const pr of Array.isArray(prs) ? prs : []) {
     const plan = planReviewHoldCleanup({ currentLabels: pr.labels });
     if (plan.remove.length === 0 && !plan.flagged?.length) continue;
-    const entry = { num: pr.number, ...(plan.remove.length ? { remove: plan.remove } : {}), ...(plan.flagged?.length ? { flagged: plan.flagged } : {}) };
+    const entry = { num: pr.number, ...(plan.remove.length ? { remove: plan.remove } : {}) };
     if (!dryRun && plan.remove.length) {
       try {
-        if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
-        provider.setLabels(resolvedRepo, pr.number, { remove: plan.remove });
+        provider.setLabels(repoOf(), pr.number, { remove: plan.remove });
       } catch (e) {
         entry.error = String((e && e.message) || e).split('\n')[0];
+      }
+    }
+    if (plan.flagged?.length) {
+      // LAZY fetch — one `gh pr view` (labels/headRefOid/comments in the SAME call, `PR_STATE_FIELDS`), only
+      // for a PR that already tripped the label-only check above.
+      let state = null;
+      let fetchErr = null;
+      try { state = provider.readPrState(repoOf(), pr.number); } catch (e) { fetchErr = String((e && e.message) || e).split('\n')[0]; }
+      const heal = decideContradictoryVerdictHeal({
+        currentLabels: pr.labels,
+        humanClearedSha: state ? parseLatestHumanClearedSha(state.comments) : null,
+        headSha: state ? state.headRefOid : null,
+        fetchOk: !!state,
+      });
+      if (heal.heal) {
+        const toRemove = heal.decision.removeLabels.filter((l) => hasReviewLabel(pr.labels, l));
+        entry.healed = toRemove;
+        if (!dryRun) {
+          // COMMENT FIRST (mirrors `review-set-label.mjs`'s own #2964 ordering, applied here in the SAFER
+          // direction for a REMOVAL rather than an accept: an orphan explanatory comment with no label change
+          // yet is at worst confusing for one tick; a silent label removal with no explanation behind it is
+          // strictly worse — an auditor sees the PR change shape with no record of why).
+          try {
+            provider.postComment(repoOf(), pr.number, heal.comment);
+            entry.commentPosted = true;
+          } catch (e) {
+            entry.error = String((e && e.message) || e).split('\n')[0];
+          }
+          if (toRemove.length) {
+            try {
+              provider.setLabels(repoOf(), pr.number, { remove: toRemove });
+            } catch (e) {
+              entry.error = entry.error ? `${entry.error}; ${String((e && e.message) || e).split('\n')[0]}` : String((e && e.message) || e).split('\n')[0];
+            }
+          }
+        }
+      } else {
+        entry.flagged = plan.flagged;
+        entry.flagReason = heal.reason;
+        if (fetchErr) entry.fetchError = fetchErr;
       }
     }
     results.push(entry);
@@ -152,8 +210,12 @@ if (IS_CLI) {
           const did = dryRun ? 'would' : r.error ? 'FAILED to' : 'did';
           writeLineSync(2, `  ⚠ PR #${r.num}: ${did} remove ${r.remove.join(',')} (stray review-hold / gate-scoped advisory)${r.error ? ` (${r.error})` : ''}`);
         }
+        if (r.healed?.length) {
+          const did = dryRun ? 'would heal' : 'healed';
+          writeLineSync(2, `  🩹 PR #${r.num}: ${did} — removed ${r.healed.join(',')} (no genuine human clearance found for the live head)${r.commentPosted ? ', comment posted' : ''}${r.error ? ` (${r.error})` : ''}`);
+        }
         if (r.flagged?.length) {
-          writeLineSync(2, `  🚩 PR #${r.num}: carries contradictory review:* verdict labels (${r.flagged.join(',')}) — #2766/#2767 shape; this sweep does not auto-resolve it (needs comment history read to tell a genuine human clearance from a bare superseded one). Resolve via review-set-label.mjs --to=clear-human or --to=changes.`);
+          writeLineSync(2, `  🚩 PR #${r.num}: carries contradictory review:* verdict labels (${r.flagged.join(',')}) — #2766/#2767 shape; not auto-resolved (${r.flagReason || 'unresolved'}${r.fetchError ? `, fetch error: ${r.fetchError}` : ''}). Resolve via review-set-label.mjs --to=clear-human or --to=changes.`);
         }
       }
       writeAllSync(1, `${JSON.stringify({ checked: true, changed: results.length, results })}\n`);

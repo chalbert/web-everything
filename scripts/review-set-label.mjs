@@ -82,6 +82,9 @@ import {
   // that keeping it here would force — `review-set-label.mjs` already imports `computeNetDiffText` FROM
   // `merge-ai-prs.mjs`, so `merge-ai-prs.mjs` cannot import back from here).
   decideParkToHuman, findContradictoryReviewVerdicts,
+  // #2766/#2767 follow-up — HEALING an existing contradictory pair (not just preventing a new one). Same
+  // re-export reasoning as the two above.
+  decideContradictoryVerdictHeal, buildContradictoryVerdictHealComment,
 } from './lib/review-escalation.mjs';
 // #4140 — `decideRestampHumanClearance` names the carried clearance's actor from TRUSTED comments only, so a later
 // untrusted `cleared-human` marker cannot rename it (the other three parsers it reaches gate themselves).
@@ -179,7 +182,7 @@ export { REASONLESS_BOUNCE_REFUSAL, isReasonlessBounce, RENDERED_FINDINGS_HEADIN
  * live `review:*` verdict it supersedes. `findContradictoryReviewVerdicts` is the companion DETECTOR: the
  * "check that flags any PR carrying two review verdict labels" a reader (a test, a future sweep) reaches for.
  */
-export { decideParkToHuman, findContradictoryReviewVerdicts };
+export { decideParkToHuman, findContradictoryReviewVerdicts, decideContradictoryVerdictHeal, buildContradictoryVerdictHealComment };
 
 /**
  * we:scripts/review-set-label.mjs#decideSetLabel — the PURE verdict-label decision. Given the target `to` and

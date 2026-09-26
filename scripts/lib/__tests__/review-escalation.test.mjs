@@ -43,6 +43,8 @@ import {
   CONFORMANCE_GRADING_PATHS,
   decideParkToHuman,
   findContradictoryReviewVerdicts,
+  decideContradictoryVerdictHeal,
+  buildContradictoryVerdictHealComment,
 } from '../review-escalation.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
@@ -2058,6 +2060,95 @@ describe('#xmnl36p — an automated re-score never revokes an operator clearance
     it('is ALWAYS allowed — a park is the drain protecting itself, never a refusable verdict', () => {
       expect(decideParkToHuman({ currentLabels: [] }).allowed).toBe(true);
       expect(decideParkToHuman({ currentLabels: [REVIEW_LABELS.human] }).allowed).toBe(true);
+    });
+  });
+
+  describe('decideContradictoryVerdictHeal — HEALING an EXISTING accepted+human pair (#2766/#2767 follow-up)', () => {
+    const LIVE_2767_LABELS = ['review:accepted', 'review:human', 'review-round:1', 'review:awaiting-advisory'];
+    // #2767's ACTUAL comments (`gh pr view 2767 --json comments`, re-fetched 2026-09-26): the unattended
+    // review-loop's plain accept, then two drain park comments — NO `clear-human` ceremony anywhere.
+    const bot = { login: 'web-everything' };
+    const LIVE_2767_COMMENTS = [
+      { body: '<!-- drain-park-reason -->\nheld — a review hold (review:pending) stands', author: bot },
+      { body: '✅ review — accepted\n\nRecorded by agent (unattended review-loop)', author: bot },
+      { body: '<!-- drain-park-reason -->\ntest-gaming suspected', author: bot },
+    ];
+    const LIVE_2767_HEAD = '8b8b1a510e5aa3db7bb1fc070040bca5b7c4dda5';
+
+    it('no contradiction → does not even look at comments/head', () => {
+      expect(decideContradictoryVerdictHeal({ currentLabels: [REVIEW_LABELS.human] }))
+        .toEqual({ heal: false, reason: 'no-contradiction' });
+    });
+
+    it('a pending+changes-shaped "contradiction" (not accepted+human) is unsupported, never guessed at', () => {
+      // findContradictoryReviewVerdicts flags any 2+ of the four; only accepted+human has a clearance concept.
+      expect(decideContradictoryVerdictHeal({
+        currentLabels: [REVIEW_LABELS.pending, REVIEW_LABELS.changes], fetchOk: true,
+      })).toEqual({ heal: false, reason: 'unsupported-pair' });
+    });
+
+    it('fetchOk:false (or omitted) fails closed toward NOT healing, regardless of the labels', () => {
+      expect(decideContradictoryVerdictHeal({ currentLabels: LIVE_2767_LABELS }))
+        .toEqual({ heal: false, reason: 'fetch-unavailable' });
+      expect(decideContradictoryVerdictHeal({
+        currentLabels: LIVE_2767_LABELS, humanClearedSha: 'aaa1111', headSha: 'aaa1111', fetchOk: false,
+      })).toEqual({ heal: false, reason: 'fetch-unavailable' }); // even a MATCHING sha pair is ignored if unproven
+    });
+
+    it('a GENUINE clearance of the live head is preserved — flagged, never healed (#x9xqexm)', () => {
+      const r = decideContradictoryVerdictHeal({
+        currentLabels: LIVE_2767_LABELS, humanClearedSha: 'aaa1111', headSha: 'aaa1111', fetchOk: true,
+      });
+      expect(r).toEqual({ heal: false, reason: 'genuine-clearance' });
+    });
+
+    it('a STALE clearance (older head) is NOT genuine — heals', () => {
+      const r = decideContradictoryVerdictHeal({
+        currentLabels: LIVE_2767_LABELS, humanClearedSha: 'aaa1111', headSha: 'bbb2222', fetchOk: true,
+      });
+      expect(r.heal).toBe(true);
+    });
+
+    it('BEFORE/AFTER — #2767\'s own real labels + comments + head: healed, review:accepted removed', () => {
+      const humanClearedSha = parseLatestHumanClearedSha(LIVE_2767_COMMENTS);
+      expect(humanClearedSha).toBe(null); // no clear-human ceremony ever ran — proven, not assumed
+      const r = decideContradictoryVerdictHeal({
+        currentLabels: LIVE_2767_LABELS, humanClearedSha, headSha: LIVE_2767_HEAD, fetchOk: true,
+      });
+      expect(r.heal).toBe(true);
+      expect(r.reason).toBe('no-genuine-clearance');
+      // Routed through decideParkToHuman (the SAME single decision the write-time fix uses) — never a second copy.
+      expect(r.decision).toEqual(decideParkToHuman({ currentLabels: LIVE_2767_LABELS, keepHumanClearance: false }));
+      expect(r.decision.removeLabels).toContain(REVIEW_LABELS.accepted);
+      const removed = new Set(r.decision.removeLabels);
+      const after = LIVE_2767_LABELS.filter((l) => !removed.has(l));
+      expect(findContradictoryReviewVerdicts(after)).toEqual([]);
+      expect(after).toContain(REVIEW_LABELS.human);
+      expect(after).not.toContain(REVIEW_LABELS.accepted);
+      expect(after).toContain('review:awaiting-advisory'); // untouched — not a review:* verdict label
+      expect(r.comment).toContain('review:accepted` removed');
+      expect(r.comment).toContain('review:human` remains');
+    });
+  });
+
+  describe('buildContradictoryVerdictHealComment', () => {
+    it('names "no ceremony ever recorded" when there is no humanClearedSha at all', () => {
+      const c = buildContradictoryVerdictHealComment({ humanClearedSha: null, headSha: 'abc1234' });
+      expect(c).toContain('no `--to=clear-human` ceremony was ever recorded');
+      expect(c).toContain('review-set-label.mjs <pr>');
+    });
+
+    it('names the STALE sha when one was recorded but does not cover the live head', () => {
+      const c = buildContradictoryVerdictHealComment({ humanClearedSha: 'aaa1111', headSha: 'bbb2222' });
+      expect(c).toContain('aaa1111');
+      expect(c).toContain('bbb2222');
+      expect(c).toContain('stale, not current');
+    });
+
+    it('falls back to "unknown" for the live head when a clearance was recorded but headSha is not (fetch partial)', () => {
+      const c = buildContradictoryVerdictHealComment({ humanClearedSha: 'aaa1111', headSha: null });
+      expect(c).toContain('aaa1111');
+      expect(c).toContain('(`unknown`)');
     });
   });
 

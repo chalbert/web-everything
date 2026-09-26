@@ -1639,6 +1639,81 @@ export function findContradictoryReviewVerdicts(labels) {
   return live.length > 1 ? live : [];
 }
 
+/**
+ * we:scripts/lib/review-escalation.mjs#decideContradictoryVerdictHeal — HEALING an EXISTING `review:accepted`
+ * + `review:human` pair (#2766/#2767's own live state, still standing after `decideParkToHuman` only stops
+ * FUTURE occurrences). Routes through `decideParkToHuman` — the SAME single decision `merge-ai-prs.mjs`'s
+ * write-time fix uses — so a healed PR and a freshly-parked one are governed by the identical rule, never a
+ * second copy that could drift.
+ *
+ * `findContradictoryReviewVerdicts` only ever detects the FOUR review:* labels; today the only pair it can
+ * find that ALSO has a "genuine clearance" escape is `accepted` + `human` (a `pending`/`changes` co-presence
+ * has no clearance concept and is a DIFFERENT, already-handled shape — `planReviewHoldCleanup`'s point (1)).
+ * Any other pair this ever starts flagging is `unsupported-pair` here — reported, never guessed at.
+ *
+ * THE SAME PROOF `decideParkToHuman`'s own `keepHumanClearance` needs, computed by the CALLER (this function
+ * stays pure — no `gh`): `humanClearedSha` from `parseLatestHumanClearedSha(comments)`, `headSha` the PR's live
+ * head, both READ, not assumed. `fetchOk` is the caller's own attestation that BOTH were actually read (not a
+ * `try/catch` default) — `false` (or omitted) fails closed toward `fetch-unavailable`, never toward healing on
+ * absent proof, mirroring `shouldReparkForTestTampering`'s "a fetch miss must never suppress the gate" — here
+ * inverted, since deleting a label is the risk-bearing direction, not adding a hold.
+ *
+ * A GENUINE current clearance (`humanClearedSha === headSha`) is preserved — never healed, only ever flagged —
+ * per #x9xqexm: an automated pass may never delete a real human clearance. That is the ONE thing that
+ * distinguishes healing from the ordinary park: a park's `keepHumanClearance:false` is PROVEN by the very fact
+ * the caller reached the park branch at all (see `decideParkToHuman`'s own docstring); a heal has no such
+ * built-in proof — it has to fetch and check separately, because the pair being healed could have arrived from
+ * ANY of several routes (this exact bug, a manual `gh` edit, an older pre-fix drain pass), not only the one
+ * `shouldReparkForTestTampering` already vetted.
+ * @param {{currentLabels?: Array, humanClearedSha?: string|null, headSha?: string|null, fetchOk?: boolean}} o
+ * @returns {{heal: boolean, reason: string, decision?: object, comment?: string}}
+ */
+export function decideContradictoryVerdictHeal({
+  currentLabels = [], humanClearedSha = null, headSha = null, fetchOk = false,
+} = {}) {
+  const contradiction = findContradictoryReviewVerdicts(currentLabels);
+  if (!contradiction.length) return { heal: false, reason: 'no-contradiction' };
+  if (!contradiction.includes(REVIEW_LABELS.accepted) || !contradiction.includes(REVIEW_LABELS.human)) {
+    return { heal: false, reason: 'unsupported-pair' };
+  }
+  if (!fetchOk) return { heal: false, reason: 'fetch-unavailable' };
+  if (humanClearedSha && headSha && humanClearedSha === headSha) return { heal: false, reason: 'genuine-clearance' };
+  return {
+    heal: true,
+    reason: 'no-genuine-clearance',
+    decision: decideParkToHuman({ currentLabels, keepHumanClearance: false }),
+    comment: buildContradictoryVerdictHealComment({ humanClearedSha, headSha }),
+  };
+}
+
+/**
+ * we:scripts/lib/review-escalation.mjs#buildContradictoryVerdictHealComment — the ONE comment the heal posts
+ * (#2766/#2767), explaining WHY `review:accepted` just came off a PR that still carries `review:human`. Pure
+ * string-building; the caller posts it via the SAME provider `review-set-label.mjs` uses.
+ * @param {{humanClearedSha?: string|null, headSha?: string|null}} o
+ */
+export function buildContradictoryVerdictHealComment({ humanClearedSha = null, headSha = null } = {}) {
+  const staleness = humanClearedSha
+    ? `a human clearance WAS recorded (SHA \`${humanClearedSha}\`), but it does not cover the live head `
+      + `(\`${headSha ?? 'unknown'}\`) — it is stale, not current`
+    : 'no `--to=clear-human` ceremony was ever recorded on this PR at all';
+  return [
+    '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**',
+    '',
+    'This PR carried both `review:accepted` and `review:human` at once: an automated verdict survived an '
+      + 'escalation to `review:human` that should have replaced it. The review-hold reconcile sweep checked '
+      + `this PR's own comment history for a live human clearance of the current head and found none — ${staleness}.`,
+    '',
+    '`review:accepted` is removed as the stale/superseded verdict; `review:human` remains the operative hold — '
+      + 'nothing here clears it. An independent review is still owed before this PR may land; clear it the '
+      + 'normal way once reviewed:',
+    '',
+    '```',
+    'node scripts/review-set-label.mjs <pr> --repo=<owner/name> --to=clear-human --actor="<you>" --reason="<why>"',
+    '```',
+  ].join('\n');
+}
+
 /** The marker carrying the #x9xqexm CONTRIBUTION fingerprint, stamped beside `reviewed-sha` / `reviewed-diff`. */
 export const REVIEWED_CONTRIBUTION_MARKER = 'reviewed-contribution';
 const REVIEWED_CONTRIBUTION_RE = new RegExp(`<!--\\s*${REVIEWED_CONTRIBUTION_MARKER}:\\s*([0-9a-f]{64})\\s*-->`, 'g');
