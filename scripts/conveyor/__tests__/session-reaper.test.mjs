@@ -1497,6 +1497,22 @@ describe('classifyDispatchScratchEntry — the pure per-folder verdict', () => {
       .toEqual({ reap: false, reason: 'not-yet' });
   });
 
+  // PR #2735 (A3 red-team of #2726/#4188) finding 1, MOST SERIOUS: path A (the grace branch, above) reaped an
+  // "unregistered" folder (no row at all for this uuid) WITHOUT ever consulting `liveCwdInUse` — only path B
+  // (the ceiling branch) gated on it. A folder can be unregistered YET still be a live process's own cwd (the
+  // listing can be incomplete/wrong for a genuinely-live long-running session — see this file's own header on
+  // why "no row" is weaker evidence than a real terminal state). Every deletion path must independently confirm
+  // no live process still has this directory as its cwd.
+  it('path A never reaps an unregistered folder once a live row claims this exact directory as its own cwd', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: DAY + 1, sessionRow: null, liveCwdInUse: true }, opts))
+      .toEqual({ reap: false, reason: 'live-cwd-in-use' });
+  });
+
+  it('path A never reaps a matched-terminal folder either, once a live row claims this exact directory as its own cwd', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: DAY + 1, sessionRow: { state: 'done' }, liveCwdInUse: true }, opts))
+      .toEqual({ reap: false, reason: 'live-cwd-in-use' });
+  });
+
   it('`graceMs: null` disables path A outright', () => {
     expect(classifyDispatchScratchEntry({ ageMs: 30 * DAY, sessionRow: { state: 'done' }, liveCwdInUse: false }, { graceMs: null, ceilingMs: null }))
       .toEqual({ reap: false, reason: 'not-yet' });
@@ -1657,6 +1673,28 @@ describe('runDispatchScratchSweepPass — the IO shell', () => {
     expect(result.wouldDelete).toEqual([{ dir: 'sess-dry-1', reason: 'finished:done' }]);
     expect(existsSync(dir)).toBe(true);
     expect(revokeCalled).toBe(false);
+  });
+
+  // PR #2735 finding 1 (MOST SERIOUS, live-caught): the folder's own uuid has NO row in the listing
+  // ("unregistered"), but a DIFFERENT live row in that same listing reports this exact directory as its own
+  // `cwd` — proof this is a real, not merely theoretical, shape: a long-running session's registry row can
+  // drift out of sync with the uuid its scratch folder was minted under while the process itself is still very
+  // much alive and still working out of that folder.
+  it('never deletes an unregistered folder that a DIFFERENT live row still claims as its own cwd', () => {
+    const dir = makeOldFolder('sess-ghost-1');
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [
+        { kind: 'background', sessionId: 'some-other-live-session', state: 'working', cwd: dir },
+      ],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: () => { throw new Error('must never be called — nothing was deleted'); },
+      log: () => {},
+    });
+    expect(result.deleted).toBe(0);
+    expect(result.kept).toBe(1);
+    expect(existsSync(dir)).toBe(true);
   });
 
   it('a missing dispatch-scratch root is a no-op, never a throw', () => {

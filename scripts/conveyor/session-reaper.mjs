@@ -1585,8 +1585,15 @@ export function classifyDispatchScratchEntry({ ageMs, sessionRow, liveCwdInUse }
     ? (TERMINAL_REAP_STATES.has(state) || ALREADY_STOPPED_STATES.has(state))
     : true; // no row at all for this uuid — the CLI has already forgotten it ("reaped"), the card's own 3rd case
   if (sessionRow && !matchedTerminal) return { reap: false, reason: 'still-live' }; // working/blocked — never touch
-  // Path A — matched (or reaped) + finished, once its own grace period has elapsed.
+  // Path A — matched (or reaped) + finished, once its own grace period has elapsed. GATED ON `!liveCwdInUse`
+  // TOO (PR #2735 red-team finding 1, MOST SERIOUS): "no row for this uuid" ("unregistered") is weaker evidence
+  // than a real terminal state — the listing can be incomplete/wrong for a genuinely-live long-running session
+  // (its row can drift out of sync with the uuid its own scratch folder was minted under) — so path A must
+  // independently confirm no OTHER live row in the same listing claims this exact directory as its own cwd
+  // before deleting it, exactly like path B already does below. Every deletion path requires "no live process
+  // has this as its cwd".
   if (matchedTerminal && graceMs !== null && ageMs >= graceMs) {
+    if (liveCwdInUse) return { reap: false, reason: 'live-cwd-in-use' };
     return { reap: true, reason: sessionRow ? `finished:${state}` : 'unregistered' };
   }
   // Path B — the ceiling safety valve, gated on no OTHER live row claiming this directory as its cwd.
