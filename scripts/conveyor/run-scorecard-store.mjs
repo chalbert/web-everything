@@ -317,7 +317,10 @@ export function writeStore(store, { path = resolveScorecardStorePath(), write = 
  * Append ONE scorecard row. REFUSES (throws) on an invalid row — a scorecard is a durable historical fact,
  * so a caller must fix the row rather than have it silently coerced or dropped.
  * @param {object} row - everything `validateScorecard` requires, plus whatever else Fork 2's shape names
- *   (`item`, `handle`, `effort`, `outcome`, `probationStatus`, `scoredAt`, …).
+ *   (`item`, `handle`, `effort`, `outcome`, `probationStatus`, `scoredAt`, …) — including `changedFiles` (#4034
+ *   follow-up, card 4034b), the PR's changed files net versus its base. This function stores whatever a writer
+ *   passes through unmodified (the spread below); every writer decides its OWN shape, this store enforces only
+ *   the bones every row must share, per {@link validateScorecard}.
  * @param {object} [io] - `readStore`/`writeStore`'s own injectable IO, threaded through for tests.
  * @returns {object} the stored row (with `scoredAt` filled in if the caller omitted it).
  */

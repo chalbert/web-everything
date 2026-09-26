@@ -345,6 +345,7 @@ function publishable(text) {
  */
 export function buildSeatRows({
   callId, pr, repo, provider, model, effort, seats, call, parsed, claudeFindings, claudeVerdict = null, quota = {}, durationMs = null,
+  changedFiles = null,
 }) {
   return seats.map((s) => {
     const seatParse = parsed?.[s.key] ?? { ok: false, verdict: null, findings: [] };
@@ -384,6 +385,12 @@ export function buildSeatRows({
       quotaResetsAt: quota.resetsAt ?? null,
       verifiedBy: 'independent-claude',
       outcome: null,
+      // The PR's changed files, net versus its base (#4034 follow-up, card 4034b) — the caller reads it off the
+      // SAME already-computed `read.netChangedFiles` the review loop stated to the seat as ground truth
+      // (`we:scripts/operations/review-pr.mjs`'s `read` step), never a fresh fetch: this row is written from
+      // data already in hand. `null` when the caller has none (never coerced to `[]`, which would misread as
+      // "touched nothing").
+      changedFiles: Array.isArray(changedFiles) ? changedFiles : null,
     };
   });
 }
@@ -497,6 +504,7 @@ export async function runExtraSeats({ pr, repo, lanePath, loopPayload, env = pro
         const quota = { usedPercent: run?.report?.quotaUsedPercent ?? null, resetsAt: toIsoInstant(run?.report?.quotaResetsAt) };
         const rows = buildSeatRows({
           callId, pr, repo, provider, model, effort, seats: group, call, parsed, claudeFindings, claudeVerdict, quota, durationMs: io.now() - t0,
+          changedFiles: read.netChangedFiles ?? null,
         });
         for (const row of rows) {
           try { io.append(row); rowsWritten += 1; } catch (e) { io.log(`added seats: evidence row for ${row.lens}/${provider} NOT written — ${e.message}`); }
@@ -876,12 +884,15 @@ export function claudeSeatForFinding(f) {
  * builder. `outcome` stays null on purpose — graduation reads the builder's DELEGATION trial (written separately),
  * so these rows never double-count a miss; their `taskType` is prefixed so no work-routing read can match them. PURE.
  */
-export function buildMissRows({ pr, repo, rev, runCallId, redTeamProvider, redTeamModel, builder, confirmed }) {
+export function buildMissRows({ pr, repo, rev, runCallId, redTeamProvider, redTeamModel, builder, confirmed, changedFiles = null }) {
   if (!confirmed.length) return [];
   const base = {
     subjectClass: 'work-agent', dispatchKind: RED_TEAM_MISS_DISPATCH_KIND, rubricVersion: RED_TEAM_RUBRIC,
     criteriaEvaluated: 0, score: null, deductions: [], item: null, handle: `review-${pr}`, pr, repo, rev,
     redTeamCallId: runCallId, redTeamProvider, redTeamModel, verifiedBy: 'independent-claude', outcome: null,
+    // The PR's changed files, net versus its base (#4034 follow-up, card 4034b) — carried over from the SAME
+    // `read.netChangedFiles` the seat row for this pass already stamped; see buildSeatRows's own note.
+    changedFiles: Array.isArray(changedFiles) ? changedFiles : null,
   };
   const summarize = (list) => list.map((f) => ({ summary: publishable(f.summary), category: f.category ?? null, file: f.file ?? null, line: f.line ?? null, impactIfUnfixed: f.impactIfUnfixed ?? null }));
   const rows = [];
@@ -931,12 +942,15 @@ export function renderRedTeamComment({ pr, rev, provider, model, findings, reche
  */
 async function finishRedTeamEffects({
   pr, repo, rev, title, callId, provider, model, findings, recheckStatus, foldedVerdict, builder, records, seatRow, post, record,
+  // Defaults from the fresh pass's own seat row (already stamped by buildSeatRows). A RESUME (`seatRow: null`,
+  // no fresh diff in hand) passes it explicitly from the prior row instead — see resumeRedTeam.
+  changedFiles = seatRow?.changedFiles ?? null,
 }, io) {
   const confirmed = findings.filter((f) => f.confirmedByRecheck);
   let rowsWritten = 0;
   let rowErrors = 0;
   if (record) {
-    const missRows = buildMissRows({ pr, repo, rev, runCallId: callId, redTeamProvider: provider, redTeamModel: model, builder, confirmed });
+    const missRows = buildMissRows({ pr, repo, rev, runCallId: callId, redTeamProvider: provider, redTeamModel: model, builder, confirmed, changedFiles });
     for (const r of [...(seatRow ? [seatRow] : []), ...missRows.filter((m) => !missRowRecorded(records, m))]) {
       try { io.append(r); rowsWritten += 1; } catch (e) { rowErrors += 1; io.log(`red team: evidence row (${r.missRole ?? r.seat}) NOT written — ${e.message}`); }
     }
@@ -958,6 +972,7 @@ async function finishRedTeamEffects({
           taskDescription: title || `PR #${pr}`, outcome: 'reworked', verifiedBy: 'independent-claude', informative: true,
           findings: `post-accept red team (${provider}/${model}) — ${confirmed.length} break(s) confirmed by Claude's re-check: ${confirmed.map((f) => f.summary).join(' | ')}`.slice(0, 1500),
           pr: Number(pr),
+          changedFiles,
         });
         delegationTrial = logged ? 'logged' : 'store-write-failed';
       } catch (e) {
@@ -1004,6 +1019,9 @@ async function resumeRedTeam({ pr, repo, rev, title, prior, records, post, recor
   const done = await finishRedTeamEffects({
     pr, repo, rev, title, callId: prior.callId, provider: prior.provider, model: prior.model, findings,
     recheckStatus: prior.recheckStatus ?? 'ok', foldedVerdict: prior.foldedVerdict ?? null, builder, records, seatRow: null, post, record,
+    // No fresh diff on a resume (the model never re-runs) — carry the prior row's OWN stamped scope forward
+    // rather than defaulting through a null seatRow.
+    changedFiles: prior.changedFiles ?? null,
   }, io);
   if (!done.didWork && !done.failed) return { status: 'already-ran', reason: `a clean red-team row already exists for #${pr} at ${rev.slice(0, 12)}` };
   return {
@@ -1093,6 +1111,7 @@ export async function runRedTeam({ pr, repo, lanePath, loopPayload, env = proces
 
     const [seatRow] = buildSeatRows({
       callId, pr, repo, provider, model, effort, seats: [RED_TEAM_SEAT], call, parsed, claudeFindings, claudeVerdict: verdict, quota, durationMs,
+      changedFiles: read.netChangedFiles ?? null,
     });
     const ran = seatRow.status === 'ok';
     const rawFindings = ran ? (parsed[RED_TEAM_SEAT.key]?.findings ?? []) : [];
