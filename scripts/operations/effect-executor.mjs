@@ -111,14 +111,29 @@ export function notApplied(message, extra = {}) {
  * cannot check", and {@link applyPendingEffects} refuses it exactly as it refuses an indeterminate `pending`.
  * {@link inFlightEntries} reports it under `unknown`, never `running`.
  */
-export function inFlight({ handle, expectedBy = null } = {}) {
+export function inFlight({ handle, expectedBy = null, dispatch } = {}) {
   if (!isPollableHandle(handle)) {
     throw new TypeError('operations: `inFlight` needs a durable `handle` with a visible character — a pid is not one (the OS reuses it)');
   }
   if (expectedBy !== null && !(typeof expectedBy === 'string' && !Number.isNaN(Date.parse(expectedBy)))) {
     throw new TypeError('operations: `inFlight.expectedBy` must be an ISO timestamp or null');
   }
-  return { [IN_FLIGHT]: true, handle: handle.trim(), expectedBy };
+  // #3717/#3906 — an optional `dispatch` record (the route, the executed provider, the worker model) the
+  // executor persists beside the handle. Plain JSON only: it lands in the run record as-is.
+  if (dispatch !== undefined && dispatch !== null) {
+    const plain = (v) => v && typeof v === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(v));
+    const visit = (v, seen = new Set()) => {
+      if (v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v))) return;
+      if ((!Array.isArray(v) && !plain(v)) || seen.has(v) || Reflect.ownKeys(v).some((k) => typeof k === 'symbol')) throw new TypeError('operations: dispatch must be plain JSON');
+      seen.add(v);
+      for (const x of Object.values(v)) visit(x, seen);
+      seen.delete(v);
+    };
+    if (!plain(dispatch)) throw new TypeError('operations: dispatch must be a plain JSON object or null');
+    visit(dispatch);
+    dispatch = JSON.parse(JSON.stringify(dispatch));
+  }
+  return { [IN_FLIGHT]: true, handle: handle.trim(), expectedBy, ...(dispatch === undefined ? {} : { dispatch }) };
 }
 
 /**
@@ -363,7 +378,8 @@ export async function applyPendingEffects(run, { sinks, store, stepIndex = null,
           );
         }
         // The handle arrives now, which is the earliest anything can know it. The status was already written.
-        current = withEntry(current, live.key, { handle: result.handle, expectedBy: result.expectedBy, error: null });
+        current = withEntry(current, live.key, { handle: result.handle, expectedBy: result.expectedBy, error: null,
+          ...(result.dispatch === undefined ? {} : { dispatch: result.dispatch }) });
         store.write(current);
         inFlightKeys.push(live.key);
         // HALT, exactly as a failure does. Effect N+1 must not run while N is still going — the ordering

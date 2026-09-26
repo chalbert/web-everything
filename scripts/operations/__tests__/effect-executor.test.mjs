@@ -423,6 +423,101 @@ describe('in-flight: started on purpose, outcome arrives later', () => {
 });
 
 /**
+ * #3717/#3906 — `inFlight`'s optional `dispatch` record: the route, the executed provider, the worker model
+ * the executor persists beside the handle. Plain JSON only, and deep-copied so a caller's later mutation of
+ * its own object cannot reach back into the run record.
+ */
+describe('inFlight\'s dispatch param (#3717/#3906)', () => {
+  function sinks(build, calls = []) {
+    return {
+      calls,
+      sinks: {
+        'start.build': async (p, ctx) => { calls.push(ctx.key); return build(p, ctx); },
+        'note.write': async () => ({ ok: true }),
+      },
+    };
+  }
+
+  it('accepts a plain JSON dispatch object and deep-copies it', async () => {
+    const store = createMemoryRunStore();
+    const original = { route: { provider: 'codex', model: 'gpt-6-astra' }, tier: 'opus' };
+    const s = sinks(() => inFlight({ handle: 'sess-abc', dispatch: original }));
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    const entry = outcome.run.effects.find((e) => e.key === KEY);
+    expect(entry.dispatch).toEqual(original);
+    original.tier = 'sonnet'; // mutate the caller's own object after the fact
+    original.route.model = 'mutated';
+    expect(entry.dispatch).toEqual({ route: { provider: 'codex', model: 'gpt-6-astra' }, tier: 'opus' });
+  });
+
+  it('omitted dispatch means no `dispatch` key on the marker, and leaves the entry\'s own declared `dispatch: true` flag untouched (not overwritten into an object)', async () => {
+    expect('dispatch' in inFlight({ handle: 'sess-abc' })).toBe(false);
+    const store = createMemoryRunStore();
+    const s = sinks(() => inFlight({ handle: 'sess-abc' }));
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    const entry = outcome.run.effects.find((e) => e.key === KEY);
+    // `dispatch` here is the effect's OWN declared boolean flag (engine.mjs), a different field than the
+    // marker's optional payload — omitting the payload must not clobber it into an object.
+    expect(entry.dispatch).toBe(true);
+  });
+
+  it('a null dispatch is accepted and carried through as null', () => {
+    expect(inFlight({ handle: 'sess-abc', dispatch: null })).toMatchObject({ dispatch: null });
+  });
+
+  it('throws TypeError on a non-plain dispatch object (a class instance)', () => {
+    class Custom { constructor() { this.a = 1; } }
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: new Custom() })).toThrow(TypeError);
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: new Custom() })).toThrow(/plain JSON/);
+  });
+
+  it('throws TypeError on a dispatch carrying a symbol key', () => {
+    const withSymbol = { [Symbol('secret')]: 1 };
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: withSymbol })).toThrow(TypeError);
+  });
+
+  it('throws TypeError on a dispatch with a nested symbol key', () => {
+    const nested = { outer: { [Symbol('secret')]: 1 } };
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: nested })).toThrow(TypeError);
+  });
+
+  it('throws TypeError on a dispatch with a function value', () => {
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: { fn: () => {} } })).toThrow(TypeError);
+  });
+
+  it('throws TypeError on a dispatch with a cyclic reference', () => {
+    const cyclic = { a: 1 };
+    cyclic.self = cyclic;
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: cyclic })).toThrow(TypeError);
+  });
+
+  it('throws TypeError on a non-finite number (NaN, Infinity) anywhere in the dispatch', () => {
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: { n: NaN } })).toThrow(TypeError);
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: { n: Infinity } })).toThrow(TypeError);
+    expect(() => inFlight({ handle: 'sess-abc', dispatch: { n: -Infinity } })).toThrow(TypeError);
+  });
+
+  it('accepts an array-valued dispatch and dispatch fields nested inside arrays', () => {
+    const original = { steps: [{ provider: 'codex' }, { provider: 'claude' }] };
+    expect(inFlight({ handle: 'sess-abc', dispatch: original }).dispatch).toEqual(original);
+  });
+
+  it('applyPendingEffects persists result.dispatch onto the in-flight entry, and a later replay with no dispatch keeps the prior one absent-safe', async () => {
+    const store = createMemoryRunStore();
+    const dispatch = { provider: 'codex', model: 'gpt-6-astra', tier: 'opus' };
+    const s = sinks(() => inFlight({ handle: 'sess-abc', dispatch }));
+    const run = atDispatchStep();
+    store.write(run);
+    const outcome = await applyPendingEffects(run, { sinks: s.sinks, store });
+    expect(outcome.run.effects.find((e) => e.key === KEY)).toMatchObject({ status: 'in-flight', handle: 'sess-abc', dispatch });
+  });
+});
+
+/**
  * A LOST HANDLE IS NOT "STILL RUNNING". In-flight is resumable because it can be OBSERVED; with no handle it
  * cannot be, so it has degraded into the same "might have started, cannot check" that `pending` means, and
  * gets the same refusal. Without this, a dispatch whose process died before reporting its handle reads as

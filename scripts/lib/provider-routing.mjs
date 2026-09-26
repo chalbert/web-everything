@@ -67,6 +67,7 @@
  */
 
 import { isUsableForExploration } from './model-capability-ratings.mjs';
+import { CODEX_MODEL } from './codex-model-routing.mjs';
 
 // ── EXPLORATION SIGNAL ONLY — advisory benchmarks, separate from supervision ──
 // @test-only-export-ok: Shared threshold for caller-visible exploration hints
@@ -214,6 +215,49 @@ export const DISPATCH_MACHINERY_PATHS = Object.freeze([
   'scripts/lib/provider-routing.mjs',
   'scripts/conveyor/tick-core.mjs',
 ]);
+
+/**
+ * EXTERNAL WORKER CANDIDATES (#3906) — the non-Claude models the router may route a dispatch worker to, each
+ * with the Claude tier it stands in for. A row does NOT grant trust: a candidate is still chosen only when its
+ * own `{provider, model, taskType}` trials earn it (`evaluateProviderFitness`), and never for a kind the
+ * {@link CRITICAL_WORK_GATE} holds. What a row adds is its `tierEquivalent`, carried onto the route so a
+ * reader sees which Claude tier the external worker is replacing.
+ *
+ * `gpt-6-astra` is listed at `opus`, not `sonnet`: it is reportedly close to Opus 5.5 (operator, 2026-09-26), so
+ * it may take work the tier table puts at Opus once its evidence allows, not only Sonnet-tier work. A model
+ * with no row here has `tierEquivalent: null` (unranked), and routes exactly as before this table existed.
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export const EXTERNAL_WORKER_CANDIDATES = Object.freeze([
+  Object.freeze({ provider: 'codex', model: CODEX_MODEL, tierEquivalent: CLAUDE_TIERS.OPUS }),
+]);
+
+/**
+ * The Claude tier an external `{provider, model}` stands in for, from {@link EXTERNAL_WORKER_CANDIDATES}, or
+ * `null` when the pair has no row. Pure.
+ * @param {string} provider
+ * @param {string|null} model
+ * @returns {string|null}
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export function externalTierEquivalent(provider, model) {
+  const row = EXTERNAL_WORKER_CANDIDATES.find((c) => c.provider === provider && c.model === model);
+  return row ? row.tierEquivalent : null;
+}
+
+/**
+ * THE CRITICAL-WORK GATE (#3906). A dispatch of one of these kinds builds or repairs product code, and no
+ * non-Claude worker is allowed to do that until #4034 (the critical-work test) exists — whatever its trial
+ * record says. For a gated kind the Gemini, Codex and dual-dispatch steps are skipped and the dispatch takes
+ * the Claude tier table. Other kinds, and any caller that names no `kind` (an interactive session asking for
+ * advice), are unaffected. Removing a kind from this list is how #4034 enables it.
+ */
+// @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
+export const CRITICAL_WORK_GATE = Object.freeze({
+  kinds: Object.freeze(['build', 'fix', 'ci-heal']),
+  until: '#4034',
+  reason: 'no non-Claude builder or fixer until #4034 (the critical-work test) exists',
+});
 
 /**
  * THE MODEL-TIER TABLE (#3857) — the ONE checked-in table deciding a dispatch worker's Claude tier, by
@@ -502,10 +546,24 @@ export function selectProvider(task, context) {
   const statuteFiles = filesTouched.filter(isStatuteTierPath);
   const hasStatuteFile = statuteFiles.length > 0;
 
+  // #3906 — the critical-work gate: a gated kind never reaches an external provider (steps 1-3 are skipped).
+  // `context.criticalWorkGate` replaces the default only when a caller states a different gate on purpose.
+  const gate = context?.criticalWorkGate && Array.isArray(context.criticalWorkGate.kinds) ? context.criticalWorkGate : CRITICAL_WORK_GATE;
+  const gated = gate.kinds.includes(kind);
+  const gatedFit = { fit: false, fitModel: null, reason: `kind '${kind}' is gated: ${gate.reason ?? CRITICAL_WORK_GATE.reason}.` };
+  if (gated) {
+    auditTrail.push({
+      criterion: 'critical-work-gate',
+      result: 'claude-only',
+      dataConsulted: `kind='${kind}', gated kinds=${gate.kinds.join(',')}`,
+      reasoning: gatedFit.reason,
+    });
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // Step 1: Gemini / Antigravity Fitness Check
   // ──────────────────────────────────────────────────────────────────────────
-  const geminiCheck = evaluateProviderFitness(
+  const geminiCheck = gated ? gatedFit : evaluateProviderFitness(
     ['gemini', 'antigravity'],
     taskType,
     filesTouched,
@@ -534,7 +592,7 @@ export function selectProvider(task, context) {
   // ──────────────────────────────────────────────────────────────────────────
   // Step 2: Codex Fitness Check
   // ──────────────────────────────────────────────────────────────────────────
-  const codexCheck = evaluateProviderFitness(
+  const codexCheck = gated ? gatedFit : evaluateProviderFitness(
     ['codex'],
     taskType,
     filesTouched,
@@ -554,6 +612,8 @@ export function selectProvider(task, context) {
     return {
       recommendation: RECOMMENDATIONS.CODEX,
       claudeTier: null,
+      // #3906 — the Claude tier this external model stands in for (`EXTERNAL_WORKER_CANDIDATES`), or null.
+      tierEquivalent: externalTierEquivalent('codex', codexCheck.fitModel),
       auditTrail,
       reasoning,
       explorationHint: getExplorationHint(taskType, scorecards, context),
@@ -566,7 +626,10 @@ export function selectProvider(task, context) {
   let bothFit = false;
   let bothReason = '';
 
-  if (hasStatuteFile) {
+  if (gated) {
+    bothFit = false;
+    bothReason = gatedFit.reason;
+  } else if (hasStatuteFile) {
     bothFit = false;
     bothReason = 'Statute-tier paths touched; policy requires Claude Opus, not external dual dispatch.';
   } else if (taskType === 'architectural-decision' || taskType === 'triage-research') {
