@@ -260,11 +260,13 @@ async function checkGhPrList({ ghChildEnv, budgets, runChild }) {
   }
 }
 
-async function checkReconcileDryRun({ root, repos, budgets, runChild }) {
+async function checkReconcileDryRun({ root, repos, budgets, runChild, env }) {
   const failures = [];
   for (const slug of repos) {
     try {
-      await runChild('node', ['scripts/conveyor/reconcile-pass.mjs', `--repo=${slug}`, '--json'], { cwd: root, timeoutMs: budgets.reconcileMs });
+      // x5wbsbc — `env` too (like every lane-pool check, #4139): a candidate smoke's env carries the LIVE
+      // clone's pool root / dispatch root (`daemon-rebuild.mjs#candidateSmokeEnv`), never the candidate path's.
+      await runChild('node', ['scripts/conveyor/reconcile-pass.mjs', `--repo=${slug}`, '--json'], { cwd: root, timeoutMs: budgets.reconcileMs, env });
     } catch (e) {
       failures.push(`${slug}: ${firstLine(e)}`);
     }

@@ -33,6 +33,8 @@ import claudeAuthExpired from './claude-auth-expired.mjs';
 import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
 import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
 import daemonOverlayLockWait from './daemon-overlay-lock-wait.mjs';
+import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
+import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -49,6 +51,8 @@ export const BREAKS = Object.freeze([
   claudeAuthFalsePositive,
   rebuildSmokeOffLock,
   daemonOverlayLockWait,
+  badOverlayFallsBack,
+  brokenSmokeHarnessHoldsLastGood,
 ]);
 
 export function breakById(id) {

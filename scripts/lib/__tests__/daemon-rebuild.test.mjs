@@ -118,6 +118,15 @@ function passSmoke() {
   return vi.fn(async () => ({ verdict: 'pass', attempts: 1, smoke: { results: [] } }));
 }
 
+// x5wbsbc — a smoke that fails ONLY the candidate carrying `file` (the bad change) and passes every other tree,
+// in particular the last-good control the rebuild now smokes before calling a failure a code regression (a stub
+// that failed EVERY tree would read, correctly, as a broken harness — `smoke-harness-broken`).
+function failsWhenFile(file, result) {
+  return vi.fn(async ({ root }) => (existsSync(join(root, file))
+    ? result
+    : { verdict: 'pass', attempts: 1, smoke: { results: [] } }));
+}
+
 // Short lock waits — no reader ever contends in this suite, so acquireWrite should always succeed immediately,
 // but keep the budget small regardless per the design spec's "use short lock waits in tests".
 const LOCK_OPTS = { waitMs: 2000, pollMs: 20 };
@@ -365,12 +374,13 @@ describe('rebuildClone', () => {
   it('smoke "code" restores HEAD, records the rejection, and the next call short-circuits without smoking', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/broken', (dir) => writeFile(dir, 'broken.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: 'lane/broken' }, { env });
+    // pinned: a pinned overlay is never dropped by the plain-main fallback (x5wbsbc), so this exercises the hold.
+    addOverlay(cloneDir, { ref: 'lane/broken', pinned: true }, { env });
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
-    const runSmoke = vi.fn(async () => ({
+    const runSmoke = failsWhenFile('broken.txt', {
       verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const first = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
@@ -382,7 +392,7 @@ describe('rebuildClone', () => {
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
     expect(second.reason).toBe('still-rejected');
-    expect(runSmoke).toHaveBeenCalledTimes(1); // not called again
+    expect(runSmoke).toHaveBeenCalledTimes(2); // candidate + the last-good control (x5wbsbc); not called again
   });
 
   it('smoke "transient" restores HEAD, never records a rejection, and re-runs smoke next call', async () => {
@@ -766,15 +776,15 @@ describe('rebuildClone', () => {
   ])('a "%s" smoke verdict never touches root at all — no reset, no rollback, no quarantine', async (verdict, reason) => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, `lane/rollback-${verdict}`, (dir) => writeFile(dir, 'r.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}` }, { env });
+    addOverlay(cloneDir, { ref: `lane/rollback-${verdict}`, pinned: true }, { env });
     const prevHead = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
 
     // Even though this `run` would fail a `reset --hard` back to prevHead, it must never be CALLED for a
     // failing smoke — root was never moved off prevHead in the first place.
     const run = failingResetRun(prevHead);
-    const runSmoke = vi.fn(async () => ({
+    const runSmoke = failsWhenFile('r.txt', {
       verdict, attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const result = await rebuildClone({
       root: cloneDir, env, run, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
@@ -991,11 +1001,11 @@ describe('dryRunRebuild', () => {
   it('reports stillRejected + "nothing (still-rejected)" when the plan matches the last recorded rejection', async () => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, 'lane/rejected', (dir) => writeFile(dir, 'rejected.txt', 'x\n'));
-    addOverlay(cloneDir, { ref: 'lane/rejected' }, { env });
+    addOverlay(cloneDir, { ref: 'lane/rejected', pinned: true }, { env });
 
-    const runSmoke = vi.fn(async () => ({
+    const runSmoke = failsWhenFile('rejected.txt', {
       verdict: 'code', attempts: 1, smoke: { results: [{ ok: false, name: 'x', detail: 'boom' }] },
-    }));
+    });
     const rebuildResult = await rebuildClone({
       root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS,
     });
@@ -1222,7 +1232,7 @@ describe('overlay list — concurrent add vs. a rebuild auto-remove (two real pr
 // Both gh checks failed together (GitHub/network), the verdict came back `code`, and the rejection stuck: the clone
 // sat 3 commits behind origin/main and the fix-dispatch daemon refused every repo as stale, silently.
 describe('rebuildClone — an external-only (gh) smoke rejection retries with backoff and alerts while held', () => {
-  const ghOnlyFailure = () => vi.fn(async () => ({
+  const ghOnlyFailure = () => failsWhenFile('next.txt', {
     verdict: 'code', attempts: 1,
     smoke: {
       results: [
@@ -1231,7 +1241,7 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
         { name: 'gh-pr-list', ok: false, mayBeTransient: true, detail: 'gh pr list failed: exited 1: weird gh output' },
       ],
     },
-  }));
+  });
 
   it('rejects with a retryAt, holds (alerting clone-held-stale) until it is due, then re-smokes and adopts', async () => {
     const { originDir, cloneDir, env } = makeFixture();
@@ -1278,10 +1288,10 @@ describe('rebuildClone — an external-only (gh) smoke rejection retries with ba
     const { originDir, cloneDir, env } = makeFixture();
     advanceMain(originDir, (dir) => writeFile(dir, 'next.txt', 'next\n'));
     const t0 = Date.now();
-    const treeFailure = vi.fn(async () => ({
+    const treeFailure = failsWhenFile('next.txt', {
       verdict: 'code', attempts: 1,
       smoke: { results: [{ name: 'reconcile-dry-run', ok: false, mayBeTransient: false, detail: 'boom' }] },
-    }));
+    });
     await rebuildClone({ root: cloneDir, env, runSmoke: treeFailure, prState: async () => null, lockOpts: LOCK_OPTS, now: () => t0 });
     expect(readRebuildState(cloneDir, env).rejected.retryAt).toBeUndefined();
     const runSmoke = passSmoke();

@@ -20,9 +20,10 @@
  *   4. {@link planActions} — what the shell would do (diagnose, notify, investigate, file). In `shadow` mode
  *      (slice 1 ships in shadow) only deterministic diagnoses and reports run; notify/investigate/file are
  *      planned but suppressed, so the operator can see what WOULD have happened — EXCEPT a smell that opts in
- *      via `notifyEvenInShadow` (#4077 continuation: `claude-auth-expired`), whose `notify` entries are never
- *      suppressed, in any mode. See {@link ../health-watch.mjs}'s own "THE MINIMAL NOTIFY PATH" doc for the
- *      execution side — before this, `notify` was planned but never actually SENT, in any mode, for any smell.
+ *      via `notifyEvenInShadow` (#4077 continuation: `claude-auth-expired`, `daemon-held-on-last-good`), whose
+ *      `notify` entries are never suppressed, in any mode. See {@link ../health-watch.mjs}'s own "THE MINIMAL
+ *      NOTIFY PATH" doc for the execution side — before this, `notify` was planned but never actually SENT, in
+ *      any mode, for any smell.
  *   5. {@link renderEpisodeReport} / {@link renderHealthSection} — the recommendation channel (4065 Fork 4):
  *      a durable per-episode report, and the HEALTH section the operator queue prints, whose first line is the
  *      health watch's own last-tick-completed age.

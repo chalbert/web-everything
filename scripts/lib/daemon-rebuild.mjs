@@ -61,6 +61,17 @@
  * ever be a crash on an ALREADY-VERIFIED build — recovery ({@link prepareRebuild}'s Step 0) promotes it straight
  * to `adopted` from the `inProgress` record's own echoed plan fields, with no re-smoke.
  *
+ * x5wbsbc (epic #4075) — A FAILED UPDATE NEVER BLOCKS DELIVERY (operator ruling 2026-09-26: "fallback on last
+ * working version rather than block delivery"). Live 12:11-12:40 ET the same day, every rebuild of
+ * `wev-review-daemon` was `smoke-rejected` (sticky) — not because the code was bad, but because the candidate
+ * worktree's smoke resolved the lane pool from the candidate's own path — and every dispatch refused as stale.
+ * Now: the candidate smoke runs in the live daemon's environment ({@link candidateSmokeEnv}); one candidate smoke
+ * per clone at a time ({@link acquireCandidateLock}); and a failing candidate falls back — plain main without
+ * the non-pinned overlays, else the last-good build, with a control smoke of that build telling a broken HARNESS
+ * (`smoke-harness-broken`, backoff, never sticky) from broken code ({@link smokeAndAdopt}). A held clone records
+ * `state.held` and keeps dispatching from its last-good build (`main-staleness.mjs#assertMainNotStale`,
+ * `daemon-last-good.mjs`); the health watch's `daemon-held-on-last-good` sign notifies after 15 min.
+ *
  * DRY RUN IS STRICTLY READ-ONLY ON THE REAL CLONE. {@link dryRunRebuild} never calls `git reset`, `git fetch`
  * (against the clone itself — it fetches into a disposable scratch bare repo instead), or anything else that
  * writes an object or moves a ref in `root`. It borrows `root`'s objects via `objects/info/alternates` (so the
@@ -104,6 +115,8 @@ import { runLiveSmokeWithRetry } from './daemon-live-smoke.mjs';
 import { isSafeBranchName } from './daemon-self-sync.mjs';
 import { gitRun } from './main-staleness.mjs';
 import { pinnedStateRoot } from '../conveyor/queue-store.mjs';
+import { daemonStateDir } from './daemon-last-good.mjs';
+import { defaultPoolRoot, workspaceFor } from './lane-pool-paths.mjs';
 
 // ── Fixed rebuild identity (see file header — DETERMINISM) ─────────────────────────────────────────────────
 
@@ -156,6 +169,7 @@ export const REBUILD_MECHANISM_PATHS = Object.freeze([
   'scripts/lib/daemon-self-sync.mjs',
   'scripts/lib/daemon-live-smoke.mjs',
   'scripts/daemon-overlay.mjs',
+  'scripts/lib/daemon-last-good.mjs',
 ]);
 
 /** The one human-readable line every pinned refusal carries. */
@@ -581,7 +595,8 @@ function fetchMainAndOverlays({ git, overlays }) {
 export const WE_DAEMON_STATE_DIR_ENV = 'WE_DAEMON_STATE_DIR';
 
 function stateDir(env = process.env) {
-  return (env && env[WE_DAEMON_STATE_DIR_ENV]) || join(homedir(), '.claude', 'daemon-self-sync-state');
+  // One definition, shared with the staleness guard's last-good read (x5wbsbc) — never two spellings.
+  return daemonStateDir(env);
 }
 
 /** `<stateDir>/<cloneKey>.rebuild.json` — reuses `daemon-overlays.mjs#cloneKey` so every per-clone state file
@@ -599,7 +614,7 @@ function alertsFilePath(root, env = process.env) {
 }
 
 const EMPTY_STATE = Object.freeze({
-  adopted: null, rejected: null, inProgress: null, quarantine: null, unverified: null,
+  adopted: null, rejected: null, inProgress: null, quarantine: null, unverified: null, held: null,
 });
 
 /**
@@ -619,6 +634,7 @@ export function readRebuildState(root, env = process.env) {
       inProgress: parsed?.inProgress ?? null,
       quarantine: parsed?.quarantine ?? null,
       unverified: parsed?.unverified ?? null,
+      held: parsed?.held ?? null,
     };
   } catch {
     return { ...EMPTY_STATE };
@@ -788,6 +804,91 @@ export function removeCandidate({ root, path, run, env }) {
   try { git(['worktree', 'prune']); } catch { /* best-effort */ }
 }
 
+// ── x5wbsbc — the candidate smoke runs in the LIVE daemon's environment, not the candidate path's ──────────
+
+/** Env var a candidate smoke carries naming the live clone it stands in for (diagnostics only). */
+export const SMOKE_LIVE_CLONE_ENV = 'WE_SMOKE_LIVE_CLONE';
+/** `dispatch-lane-io.mjs#DISPATCH_CWD_ENV` — restated (not imported: that module is far too heavy for the
+ *  rebuild mechanism to load); a unit test pins the two names equal. */
+export const DISPATCH_CWD_ROOT_ENV = 'WE_DISPATCH_CWD_ROOT';
+
+/**
+ * PURE: the env the live smoke runs with when its tree is a disposable candidate worktree instead of `root`.
+ *
+ * x5wbsbc, live 2026-09-26 12:11-12:40 ET on `wev-review-daemon`: every rebuild since #2731 was
+ * `smoke-rejected` (sticky) on `lane-acquire-release` — "no lanes provisioned for web-everything under
+ * ~/.claude/daemon-self-sync-state/.lanes/web-everything". Everything that derives a location from WHERE the
+ * checkout sits (`lane-pool-paths.mjs#defaultPoolRoot` → `<workspace>/.lanes`; `dispatch-lane-io.mjs`'s dispatch
+ * scratch root → `<workspace>/.operations/dispatch`) resolved against the CANDIDATE's path, which lives under the
+ * rebuild state dir — a pool with no lanes, and `.operations/` litter in the state dir. The live daemon
+ * resolves those from `root`. So every such location is resolved HERE, from `root`, and passed explicitly: an
+ * explicit `LANE_POOL_ROOT`/`WE_DISPATCH_CWD_ROOT` already in `env` wins (that is what the daemon itself would
+ * use); `PATH`/`HOME` are guaranteed present (a spawn with no PATH is `spawn git ENOENT`). The WE_*, GitHub App
+ * and `gh` env ride along untouched from `env` (the daemon's own), exactly as the old in-place smoke had them.
+ * @param {{root:string, env?:NodeJS.ProcessEnv}} o
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function candidateSmokeEnv({ root, env = process.env }) {
+  const out = { ...env };
+  if (!out.PATH) out.PATH = process.env.PATH || '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin';
+  if (!out.HOME) out.HOME = process.env.HOME || homedir();
+  out.LANE_POOL_ROOT = defaultPoolRoot(root, out);
+  if (!String(out[DISPATCH_CWD_ROOT_ENV] ?? '').trim()) {
+    out[DISPATCH_CWD_ROOT_ENV] = join(workspaceFor(root), '.operations', 'dispatch');
+  }
+  out[SMOKE_LIVE_CLONE_ENV] = root;
+  return out;
+}
+
+/** `<stateDir>/<cloneKey>.candidate.lock` — one candidate smoke per clone at a time (see {@link acquireCandidateLock}). */
+export function candidateLockPath(root, env = process.env) {
+  return join(stateDir(env), `${cloneKey(root)}.candidate.lock`);
+}
+
+/** A candidate lock older than this is taken over whatever its pid says (a smoke is bounded far below it). */
+export const CANDIDATE_LOCK_STALE_MS = 45 * 60_000;
+
+/**
+ * x5wbsbc — ONE candidate smoke per clone at a time. Live 2026-09-26 16:16-16:19 UTC: the review and fix daemons
+ * share `wev-review-daemon`, both rebuilt at tick start, and #2731's phase 2 is (rightly) unlocked — so both
+ * materialized the SAME fixed candidate path. The first smoke to finish ran `removeCandidate` while the second
+ * was still running: its remaining checks saw a deleted cwd (`spawn git ENOENT`, `no repo profile/gate resolved
+ * for "we"` — the repo profile's checkout no longer existed). An exclusive `wx` lockfile: a second rebuild
+ * returns `smoke-in-flight` at once (its daemon ticks on the current tree) instead of racing. A dead holder
+ * (same host, pid gone) or one older than {@link CANDIDATE_LOCK_STALE_MS} is taken over. Any OTHER fs error
+ * fails OPEN (proceed unlocked) — a lockfile problem must never itself block delivery.
+ * @returns {{ok:true, release:()=>void}|{ok:false, heldBy:string}}
+ */
+export function acquireCandidateLock({ root, env = process.env, now = () => Date.now() }) {
+  const path = candidateLockPath(root, env);
+  const me = { pid: process.pid, host: hostname() };
+  const release = () => {
+    try {
+      const cur = JSON.parse(readFileSync(path, 'utf8'));
+      if (cur?.pid === me.pid && cur?.host === me.host) unlinkSync(path);
+    } catch { /* already gone */ }
+  };
+  try { mkdirSync(dirname(path), { recursive: true }); } catch { /* surfaces below */ }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(path, JSON.stringify({ ...me, startedAt: new Date(now()).toISOString() }), { flag: 'wx' });
+      return { ok: true, release };
+    } catch (e) {
+      if (e?.code !== 'EEXIST') return { ok: true, release: () => {} };
+      let cur = null;
+      try { cur = JSON.parse(readFileSync(path, 'utf8')); } catch { cur = null; }
+      const startedMs = Date.parse(cur?.startedAt || '');
+      const aged = !Number.isFinite(startedMs) || now() - startedMs > CANDIDATE_LOCK_STALE_MS;
+      const dead = cur?.host === me.host && (() => {
+        try { process.kill(cur.pid, 0); return false; } catch (err) { return err?.code === 'ESRCH'; }
+      })();
+      if (cur && !aged && !dead) return { ok: false, heldBy: `${cur.host}:${cur.pid}` };
+      try { unlinkSync(path); } catch { /* raced another taker — retry once */ }
+    }
+  }
+  return { ok: false, heldBy: 'unknown' };
+}
+
 /**
  * PURE-ish (one alert side-effect): is `root` still safe to move, migrating known daemon-state-file dirt out of
  * the way first (see {@link migrateDaemonStateFiles}) exactly as the old single-phase `doRebuild` did at its own
@@ -820,7 +921,8 @@ function staleAlertDetail(result, state) {
     mainSha: result.plan.mainSha,
     target: result.plan.finalSha,
     retryAt: state.rejected?.inputsKey === result.plan.inputsKey ? (state.rejected.retryAt ?? null) : null,
-    message: 'the rebuild is holding this clone off origin/main — dispatches from it refuse as stale until this clears',
+    // x5wbsbc: a held clone keeps dispatching from its last-good build (`main-staleness.mjs#assertMainNotStale`).
+    message: 'the rebuild is holding this clone off origin/main — it keeps dispatching from its last-good build (x5wbsbc) until this clears',
   };
 }
 
@@ -910,6 +1012,7 @@ async function prepareRebuild({
             head: ip.target, inputsKey: ip.inputsKey ?? null, mainSha: ip.mainSha ?? null, applied: ip.applied ?? [], at: nowIso(),
           };
           state.rejected = null;
+          state.held = null;
           writeState();
           alert('rebuild-interrupted-recovered', { target: ip.target, headNow, promoted: true });
           // Short-circuit here (unlike the non-promoted branch below, which falls through to a fresh plan this
@@ -1010,13 +1113,24 @@ async function prepareRebuild({
 
   // ── Step 4: up-to-date / still-rejected short-circuits ──────────────────────────────────────────────
   if (plan.upToDate) {
-    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
+    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey || state.held) {
       state.adopted = {
         head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
       };
+      state.held = null; // x5wbsbc — current again: no longer held on a last-good build
       writeState();
     }
     return terminal({ moved: false, reason: 'up-to-date', plan });
+  }
+  // x5wbsbc — a BROKEN SMOKE HARNESS (every candidate, the last-good build included, fails the same checks) is
+  // not re-smoked on every main move: it would cost up to three full smokes per move and every one would fail
+  // the same way. Until its backoff expires the clone stays on its last-good build (and keeps dispatching —
+  // `main-staleness.mjs#assertMainNotStale`), whatever the new inputs are.
+  if (state.held?.reason === 'smoke-harness-broken' && state.rejected?.harnessBroken) {
+    const retryAtMs = Date.parse(state.rejected.retryAt || '');
+    if (Number.isFinite(retryAtMs) && nowMs() < retryAtMs) {
+      return terminal({ moved: false, reason: 'smoke-harness-broken-backoff', plan });
+    }
   }
   if (state.rejected?.inputsKey === plan.inputsKey) {
     // An external-only rejection (only gh/network checks failed) is never permanent: once its backoff expires
@@ -1044,7 +1158,7 @@ async function prepareRebuild({
   // Nothing left that can be decided without smoking a candidate first — hand off to rebuildClone's unlocked
   // build+smoke step, then {@link finalizeRebuild}.
   return {
-    terminal: false, plan, prevHead, alerts: alertsList,
+    terminal: false, plan, prevHead, overlays: overlaysBefore, alerts: alertsList,
   };
 }
 
@@ -1055,7 +1169,7 @@ async function prepareRebuild({
  * was never touched, so {@link rebuildClone} handles that case itself, with no lock and nothing to roll back.
  */
 async function finalizeRebuild({
-  root, env, log, run, stateOpts, now, plan, prevHead,
+  root, env, log, run, stateOpts, now, plan, prevHead, onAdopted,
 }) {
   const stEnv = { ...env, ...(stateOpts?.env || {}) };
   const git = makeGit({ run, cwd: root, env });
@@ -1077,6 +1191,10 @@ async function finalizeRebuild({
   const terminal = (result) => {
     const stale = staleAlertDetail(result, state);
     if (stale) alert('clone-held-stale', stale);
+    // x5wbsbc — runs INSIDE this write-lock hold, only on an adoption (e.g. drop the overlay a fallback proved bad).
+    if (result.adopted && typeof onAdopted === 'function') {
+      try { onAdopted({ alert }); } catch (e) { alert('on-adopted-failed', { error: String(e?.message || e) }); }
+    }
     return { ...result, alerts: alertsList };
   };
 
@@ -1085,11 +1203,12 @@ async function finalizeRebuild({
   // something else moved `root` entirely (abandon this attempt cleanly; the next tick recomputes a fresh plan).
   const headNow = verifyRev(git, 'HEAD');
   if (headNow === plan.finalSha) {
-    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey) {
+    if (!state.adopted || state.adopted.inputsKey !== plan.inputsKey || state.held) {
       state.adopted = {
         head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
       };
       state.rejected = null;
+      state.held = null;
       writeState();
     }
     return terminal({
@@ -1143,6 +1262,7 @@ async function finalizeRebuild({
       head: plan.finalSha, inputsKey: plan.inputsKey, mainSha: plan.mainSha, applied: plan.applied, at: nowIso(),
     };
     state.rejected = null;
+    state.held = null;
     state.inProgress = null;
     writeState();
     return terminal({
@@ -1213,132 +1333,278 @@ export async function rebuildClone({
   if (prep.value.terminal) {
     return { ...prep.value.result, alerts: prep.value.alerts };
   }
-  const { plan, prevHead, alerts: prepAlerts } = prep.value;
+  const { plan, prevHead, overlays: overlaysBefore = [], alerts: prepAlerts } = prep.value;
 
   // ── Phase 2 (UNLOCKED — the whole point of xa4qo7n): build + smoke a disposable candidate ───────────────
-  const candidate = materializeCandidate({
-    root, sha: plan.finalSha, run, env,
-  });
-  if (!candidate.ok) {
-    log.error?.(`daemon-rebuild: candidate-worktree-failed (${candidate.reason}) — not adopting ${plan.finalSha}, retrying next tick`);
+  // x5wbsbc: one candidate smoke per clone at a time (see acquireCandidateLock — two daemons share a clone).
+  const candLock = acquireCandidateLock({ root, env: stEnv, now });
+  if (!candLock.ok) {
+    log.error?.(`daemon-rebuild: smoke-in-flight — another rebuild (${candLock.heldBy}) is smoking a candidate for this clone; ticking on the current (last-good) tree`);
     return {
-      moved: false, reason: 'candidate-worktree-failed', detail: candidate.reason, plan, alerts: prepAlerts,
+      moved: false, reason: 'smoke-in-flight', heldBy: candLock.heldBy, plan, alerts: prepAlerts,
     };
   }
+  try {
+    return await smokeAndAdopt({
+      root, env, stEnv, log, run, runSmoke, stateOpts, now, plan, prevHead, overlaysBefore, prepAlerts, mainOnly,
+      finalLockOpts,
+    });
+  } finally {
+    candLock.release();
+  }
+}
+
+/** The failed check rows of a smoke result (`[]` for a pass or a missing result). */
+function failedRows(smokeResult) {
+  return (smokeResult?.smoke?.results || []).filter((r) => !r.ok);
+}
+
+/** PURE: does `control` fail every check `candidate` failed (by name)? — the "the harness itself is broken"
+ *  test: a failure the last-good build reproduces is not evidence against the candidate's code. */
+export function failsSameChecks(candidateFailed, controlFailed) {
+  const c = new Set((controlFailed || []).map((r) => r.name));
+  return Array.isArray(candidateFailed) && candidateFailed.length > 0 && candidateFailed.every((r) => c.has(r.name));
+}
+
+/**
+ * Phase 2 body (x5wbsbc — the operator's fallback ruling, 2026-09-26: "fallback on last working version rather
+ * than block delivery"). Smokes candidate A = `plan` (main + overlays). On a pass: adopt (phase 3), as before.
+ * On a `'code'` failure, in order:
+ *   (a) PLAIN MAIN: when A carries any NON-pinned overlay, build B = main + pinned overlays only and smoke it. B
+ *       passes ⇒ adopt B and DROP A's non-pinned overlays from the list (they are what broke it — every one is
+ *       reported, `overlay-dropped-smoke-failed`; with several, all are dropped as suspects, never bisected).
+ *   (b) otherwise the clone STAYS on its last-good build (`prevHead`, never touched) and `state.held` records
+ *       why; `main-staleness.mjs#assertMainNotStale` keeps dispatching from that build (max-age alert, never a
+ *       refusal), and the health watch's `daemon-held-on-last-good` sign notifies after 15 min.
+ *   (c) to tell (b) apart from a broken HARNESS, the last-good build itself (C = `prevHead`, full smoke, no
+ *       skip-unchanged) is smoked as a control: C failing every check A failed means the failure is the smoke's
+ *       environment, not the candidate — `smoke-harness-broken`, recorded with a retry backoff (never sticky),
+ *       and not re-smoked on every main move until that backoff expires (see `prepareRebuild`). Never blocks.
+ * `'transient'` (env noise that survived its retries) keeps today's rule — no reject record — and also holds.
+ */
+async function smokeAndAdopt({
+  root, env, stEnv, log, run, runSmoke, stateOpts, now, plan, prevHead, overlaysBefore, prepAlerts, mainOnly,
+  finalLockOpts,
+}) {
+  const alertsList = [];
+  const nowIso = () => new Date(now()).toISOString();
+  const alert = (kind, detail) => {
+    alertsList.push({ kind, detail });
+    log.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
+    try {
+      const file = alertsFilePath(root, stEnv);
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
+    } catch { /* best-effort audit trail only */ }
+  };
+  const git = makeGit({ run, cwd: root, env });
+  const smokeEnv = candidateSmokeEnv({ root, env });
+  const adoptedHead = readRebuildState(root, stEnv).adopted?.head ?? null;
 
   // #4044: the files changed since the LAST LIVE-VERIFIED build (HEAD before this move, when it is the adopted
   // one) — lets the smoke skip a tree-code check whose code none of them touch (see daemon-live-smoke.mjs
   // SMOKE_CHECKS). Unknown (not the adopted head, a failed diff) ⇒ null ⇒ full smoke.
-  let changedFiles = null;
-  const readState = readRebuildState(root, stEnv);
-  if (readState.adopted?.head && readState.adopted.head === prevHead) {
-    const d = makeGit({ run, cwd: root, env })(['diff', '--name-only', prevHead, plan.finalSha]);
-    if (d.status === 0) changedFiles = String(d.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
-  }
+  const changedSince = (sha) => {
+    if (!adoptedHead || adoptedHead !== prevHead) return null;
+    const d = git(['diff', '--name-only', prevHead, sha]);
+    return d.status === 0 ? String(d.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean) : null;
+  };
 
-  let smokeResult;
-  let smokeThrew = null;
-  const smokeStartedMs = now();
-  try {
-    smokeResult = await runSmoke({ root: candidate.path, env, changedFiles });
-  } catch (e) {
-    smokeThrew = e;
-  }
-  const smokeMs = now() - smokeStartedMs;
-  removeCandidate({
-    root, path: candidate.path, run, env,
-  });
-
-  if (smokeThrew) {
-    // `daemon-live-smoke.mjs` documents itself as never throwing — this is defense-in-depth only. Root was
-    // never touched (the smoke ran against the now-discarded candidate), so there is nothing to roll back and
-    // no lock to take; just report it like any other rejection and let the next tick retry fresh.
-    log.error?.(`daemon-rebuild: smoke-threw ${String(smokeThrew?.message || smokeThrew)}`);
-    return {
-      moved: false,
-      reason: 'smoke-threw',
-      plan,
-      alerts: [...prepAlerts, { kind: 'smoke-threw', detail: String(smokeThrew?.message || smokeThrew) }],
-    };
-  }
-
-  if (smokeResult.verdict !== 'pass') {
-    // Root was NEVER touched — no rollback, no lock, nothing to quarantine. Record the rejection (a genuine
-    // `'code'` verdict only — `'transient'` never poisons the reject-cache, see the file header / Module D).
-    const alertsList = [];
-    const nowIso = () => new Date(now()).toISOString();
-    const alert = (kind, detail) => {
-      alertsList.push({ kind, detail });
-      log.error?.(`daemon-rebuild: ${kind}${detail !== undefined ? ` ${JSON.stringify(detail)}` : ''}`);
-      try {
-        const file = alertsFilePath(root, stEnv);
-        mkdirSync(dirname(file), { recursive: true });
-        appendFileSync(file, `${JSON.stringify({ at: nowIso(), kind, detail })}\n`, 'utf8');
-      } catch { /* best-effort audit trail only */ }
-    };
-    if (smokeMs >= SLOW_SMOKE_ALERT_MS) {
+  /** Materialize `sha` as the candidate worktree, smoke it, tear it down. */
+  const smokeSha = async (sha, changedFiles, label) => {
+    const candidate = materializeCandidate({
+      root, sha, run, env,
+    });
+    if (!candidate.ok) return { worktreeFailed: candidate.reason };
+    let smokeResult = null;
+    let threw = null;
+    const t0 = now();
+    try {
+      smokeResult = await runSmoke({ root: candidate.path, env: smokeEnv, changedFiles });
+    } catch (e) {
+      threw = e;
+    }
+    const ms = now() - t0;
+    removeCandidate({
+      root, path: candidate.path, run, env,
+    });
+    if (ms >= SLOW_SMOKE_ALERT_MS) {
       alert('smoke-slow', {
-        ms: smokeMs, checks: (smokeResult.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
+        ms,
+        ...(label ? { candidate: label } : {}),
+        checks: (smokeResult?.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
       });
     }
-    if (smokeResult.verdict === 'code') {
-      const state = readRebuildState(root, stEnv);
-      const failed = (smokeResult.smoke?.results || []).filter((r) => !r.ok);
-      const failedNames = failed.map((r) => r.name).join(',');
-      const prev = state.rejected?.inputsKey === plan.inputsKey ? state.rejected : null;
-      state.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
-      if (isExternalOnlyFailure(failed)) {
-        const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
-        const delay = rejectRetryDelayMs(env, attempts);
-        Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(now() + delay).toISOString() });
+    return { smokeResult, threw, ms };
+  };
+
+  const finalize = async (p, onAdopted) => {
+    const fin = await withWriteLock(root, () => finalizeRebuild({
+      root, env, log, run, stateOpts, now, plan: p, prevHead, onAdopted,
+    }), finalLockOpts);
+    if (!fin.ok) {
+      if (fin.reason === 'tick-in-progress') {
+        log.error?.(`daemon-rebuild: could not take the write lock to finalize ${p.finalSha} after a passing smoke (reader ${fin.heldBy ?? '?'} still ticking) — retrying next tick`);
       }
-      writeRebuildState(root, state, stEnv);
-      alert('smoke-rejected', {
-        failed: failedNames,
-        details: failed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
-        ...(state.rejected.retryAt ? { retryAt: state.rejected.retryAt, attempts: state.rejected.attempts } : {}),
-      });
-      const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-rejected', plan }, state);
-      if (staleDetail) alert('clone-held-stale', staleDetail);
-      return { moved: false, reason: 'smoke-rejected', plan, alerts: [...prepAlerts, ...alertsList] };
+      return {
+        moved: false, reason: fin.reason, ...(fin.heldBy ? { heldBy: fin.heldBy } : {}), plan: p, alerts: [...prepAlerts, ...alertsList],
+      };
     }
-    // 'transient' — never poison the reject-cache.
-    alert('smoke-transient');
+    return { ...fin.value, alerts: [...prepAlerts, ...alertsList, ...fin.value.alerts] };
+  };
+
+  /** (b) — record that the clone stays on its last-good build, and why. `since` survives repeat holds. */
+  const hold = (reason, failed, extra = {}) => {
     const state = readRebuildState(root, stEnv);
-    const staleDetail = staleAlertDetail({ moved: false, reason: 'smoke-transient', plan }, state);
+    const since = state.held?.since ?? nowIso();
+    state.held = {
+      since,
+      reason,
+      failed: failed.map((r) => r.name).join(','),
+      details: failed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })).slice(0, 10),
+      lastGood: prevHead,
+      target: plan.finalSha,
+      mainSha: plan.mainSha,
+      updatedAt: nowIso(),
+      ...extra,
+    };
+    writeRebuildState(root, state, stEnv);
+    alert('daemon-held-on-last-good', {
+      reason, failed: state.held.failed, since, lastGood: prevHead, target: plan.finalSha,
+      message: 'the new build failed its live smoke — staying on the last working build and still dispatching from it (x5wbsbc)',
+    });
+    const staleDetail = staleAlertDetail({ moved: false, reason, plan }, state);
     if (staleDetail) alert('clone-held-stale', staleDetail);
+    return state;
+  };
+
+  // ── Candidate A: main + every overlay ──────────────────────────────────────────────────────────────────
+  const a = await smokeSha(plan.finalSha, changedSince(plan.finalSha), null);
+  if (a.worktreeFailed) {
+    log.error?.(`daemon-rebuild: candidate-worktree-failed (${a.worktreeFailed}) — not adopting ${plan.finalSha}, retrying next tick`);
+    return {
+      moved: false, reason: 'candidate-worktree-failed', detail: a.worktreeFailed, plan, alerts: [...prepAlerts, ...alertsList],
+    };
+  }
+  if (a.threw) {
+    // `daemon-live-smoke.mjs` documents itself as never throwing — this is defense-in-depth only. Root was
+    // never touched, so nothing to roll back; hold on last-good and let the next tick retry fresh.
+    alert('smoke-threw', String(a.threw?.message || a.threw));
+    hold('smoke-threw', []);
+    return { moved: false, reason: 'smoke-threw', plan, alerts: [...prepAlerts, ...alertsList] };
+  }
+  if (a.smokeResult.verdict === 'pass') return finalize(plan);
+
+  const failedA = failedRows(a.smokeResult);
+  if (a.smokeResult.verdict !== 'code') {
+    // 'transient' — never poison the reject-cache; hold on last-good (still dispatching), retry next tick.
+    alert('smoke-transient');
+    hold('smoke-transient', failedA);
     return { moved: false, reason: 'smoke-transient', plan, alerts: [...prepAlerts, ...alertsList] };
   }
 
-  // ── Phase 3 (locked, fast) — reached only after a PASSING smoke ─────────────────────────────────────────
-  const fin = await withWriteLock(root, () => finalizeRebuild({
-    root, env, log, run, stateOpts, now, plan, prevHead,
-  }), finalLockOpts);
-
-  if (!fin.ok) {
-    if (fin.reason === 'tick-in-progress') {
-      log.error?.(`daemon-rebuild: could not take the write lock to finalize ${plan.finalSha} after a passing smoke (reader ${fin.heldBy ?? '?'} still ticking) — retrying next tick`);
+  // Record A's rejection exactly as before (sticky until the inputs move, or backoff for external-only).
+  // `priorRejected` keeps the record this overwrites: a repeat `smoke-harness-broken` needs its attempt count
+  // to grow the backoff (see step (c) below).
+  let priorRejected = null;
+  {
+    const state = readRebuildState(root, stEnv);
+    priorRejected = state.rejected;
+    const failedNames = failedA.map((r) => r.name).join(',');
+    const prev = state.rejected?.inputsKey === plan.inputsKey ? state.rejected : null;
+    state.rejected = { inputsKey: plan.inputsKey, reason: failedNames, at: nowIso() };
+    if (isExternalOnlyFailure(failedA)) {
+      const attempts = (prev?.externalOnly ? (prev.attempts || 1) : 0) + 1;
+      const delay = rejectRetryDelayMs(env, attempts);
+      Object.assign(state.rejected, { externalOnly: true, attempts, retryAt: new Date(now() + delay).toISOString() });
     }
-    return {
-      moved: false, reason: fin.reason, ...(fin.heldBy ? { heldBy: fin.heldBy } : {}), plan, alerts: prepAlerts,
-    };
+    writeRebuildState(root, state, stEnv);
+    alert('smoke-rejected', {
+      failed: failedNames,
+      details: failedA.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
+      ...(state.rejected.retryAt ? { retryAt: state.rejected.retryAt, attempts: state.rejected.attempts } : {}),
+    });
   }
 
-  const result = fin.value;
-  const combinedAlerts = [...prepAlerts, ...result.alerts];
-  if (smokeMs >= SLOW_SMOKE_ALERT_MS) {
-    const slowDetail = {
-      ms: smokeMs, checks: (smokeResult.smoke?.results || []).map((r) => `${r.name}:${r.skipped ? 'skipped' : `${r.ms}ms`}`).join(' '),
-    };
-    combinedAlerts.push({ kind: 'smoke-slow', detail: slowDetail });
-    log.error?.(`daemon-rebuild: smoke-slow ${JSON.stringify(slowDetail)}`);
-    try {
-      const file = alertsFilePath(root, stEnv);
-      mkdirSync(dirname(file), { recursive: true });
-      appendFileSync(file, `${JSON.stringify({ at: new Date(now()).toISOString(), kind: 'smoke-slow', detail: slowDetail })}\n`, 'utf8');
-    } catch { /* best-effort */ }
+  // ── (a) plain main: drop every NON-pinned overlay and try again ──────────────────────────────────────
+  const rawByRef = new Map((overlaysBefore || []).map((o) => [o?.ref, o]));
+  const withPin = plan.applied.map((ap) => ({
+    ...ap, pinned: pinnedStatus(git, rawByRef.get(ap.ref) ?? {}, plan.mainSha, ap.sha).pinned,
+  }));
+  const suspects = withPin.filter((ap) => !ap.pinned);
+  let bFailed = null;
+  if (!mainOnly && suspects.length > 0) {
+    const pinnedOverlays = withPin.filter((ap) => ap.pinned).map((ap) => ({ ...(rawByRef.get(ap.ref) ?? {}), ref: ap.ref, pr: ap.pr }));
+    const planB = await planRebuild({
+      git, headSha: prevHead, mainRef: 'origin/main', overlays: pinnedOverlays,
+    });
+    if (planB.ok) {
+      const suspectInfo = suspects.map((ap) => ({ ref: ap.ref, pr: ap.pr }));
+      alert('fallback-plain-main', {
+        failed: failedA.map((r) => r.name).join(','), suspects: suspectInfo, target: planB.finalSha,
+        message: 'main + overlays failed the live smoke — retrying plain main (pinned overlays only) (x5wbsbc)',
+      });
+      const dropSuspects = ({ alert: finAlert }) => {
+        for (const s of suspectInfo) {
+          removeOverlay(root, s.ref, { env, why: 'smoke-failed' });
+          appendOverlayEvent(root, {
+            kind: 'dropped-smoke-failed', ref: s.ref, pr: s.pr, reason: failedA.map((r) => r.name).join(','),
+          }, { env });
+          finAlert('overlay-dropped-smoke-failed', {
+            ref: s.ref, pr: s.pr, failed: failedA.map((r) => r.name).join(','), suspects: suspectInfo.length,
+            message: suspectInfo.length > 1
+              ? 'dropped as one of several suspects — plain main passed without them; re-add the good ones'
+              : 'plain main passed without this overlay — it broke the live smoke; fix it, then re-add it',
+          });
+        }
+      };
+      // Plain main IS the build already running (an overlay was just added onto an otherwise-current clone) and
+      // that build is the smoke-verified one: nothing to smoke, just drop the suspect(s).
+      if (planB.finalSha === prevHead && adoptedHead === prevHead) {
+        const fin = await finalize(planB, dropSuspects);
+        return { ...fin, reason: 'fallback-plain-main', fallback: { from: plan.finalSha, to: planB.finalSha, dropped: suspectInfo } };
+      }
+      const b = await smokeSha(planB.finalSha, changedSince(planB.finalSha), 'plain-main');
+      if (!b.worktreeFailed && !b.threw && b.smokeResult?.verdict === 'pass') {
+        const fin = await finalize(planB, dropSuspects);
+        return { ...fin, reason: 'fallback-plain-main', fallback: { from: plan.finalSha, to: planB.finalSha, dropped: suspectInfo } };
+      }
+      bFailed = b.smokeResult ? failedRows(b.smokeResult) : null;
+      alert('fallback-plain-main-failed', {
+        failed: (bFailed || []).map((r) => r.name).join(',') || (b.worktreeFailed ? `worktree: ${b.worktreeFailed}` : 'threw'),
+      });
+    } else {
+      alert('fallback-plain-main-unplannable', { reason: planB.reason });
+    }
   }
-  return { ...result, alerts: combinedAlerts };
+
+  // ── (c) control: smoke the LAST-GOOD build itself — does the harness fail it the same way? ────────────
+  const c = await smokeSha(prevHead, null, 'last-good');
+  const cFailed = c.smokeResult ? failedRows(c.smokeResult) : null;
+  const harnessBroken = !!(cFailed && failsSameChecks(failedA, cFailed));
+  if (harnessBroken) {
+    const state = readRebuildState(root, stEnv);
+    const prevAttempts = priorRejected?.harnessBroken ? (priorRejected.attempts || 1) : 0;
+    const attempts = prevAttempts + 1;
+    const retryAt = new Date(now() + rejectRetryDelayMs(env, attempts)).toISOString();
+    state.rejected = {
+      ...(state.rejected || {}), inputsKey: plan.inputsKey, harnessBroken: true, attempts, retryAt,
+    };
+    writeRebuildState(root, state, stEnv);
+    alert('smoke-harness-broken', {
+      failed: failedA.map((r) => r.name).join(','),
+      details: cFailed.map((r) => ({ name: r.name, detail: redactDetail(r.detail) })),
+      alsoFailedOn: bFailed ? ['plain-main', 'last-good'] : ['last-good'],
+      retryAt,
+      attempts,
+      message: 'the smoke fails the LAST-GOOD build the same way — the smoke harness/environment is broken, not the candidate; never blocks: staying on last-good and dispatching (x5wbsbc)',
+    });
+    hold('smoke-harness-broken', failedA);
+    return { moved: false, reason: 'smoke-harness-broken', plan, alerts: [...prepAlerts, ...alertsList] };
+  }
+  if (!c.smokeResult) alert('last-good-control-unavailable', { reason: c.worktreeFailed ?? String(c.threw?.message || c.threw) });
+  hold('smoke-rejected', failedA, { controlPassed: !!(c.smokeResult && c.smokeResult.verdict === 'pass') });
+  return { moved: false, reason: 'smoke-rejected', plan, alerts: [...prepAlerts, ...alertsList] };
 }
 
 // ── dryRunRebuild — STRICTLY read-only on `root` ────────────────────────────────────────────────────────────
