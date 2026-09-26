@@ -568,30 +568,34 @@ export function formatHungReport({ dispatch = [], refusals = [], applied = [] } 
 // hung-run passes above: a required check that never even started, never CONCLUDED and never went
 // `IN_PROGRESS`/`QUEUED`. This half owns every real IO the missing-run pass needs: reading the LIVE required
 // context names off branch protection, the one extra per-candidate read (`gh api commits/<sha>` for the head
-// commit's own committed date — `gh pr list` never returns it), the two real triggers (`PUT
-// /pulls/{n}/update-branch` or `gh workflow run`), the durable marker comment, and clearing the stale `checking`
-// label this card's own scope names.
+// commit's own committed date — `gh pr list` never returns it), the two real triggers (a {@link refreshOntoMain}
+// rebase-and-push, or `gh workflow run`), the durable marker comment, and clearing the stale `checking` label
+// this card's own scope names.
 
 /**
  * we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadRequiredContexts — the LIVE required-check-name set
  * this pass watches, read off branch protection rather than hardcoded (`GET /repos/{repo}/branches/{branch}/
  * protection`'s own `required_status_checks.contexts`) — per this card's own scope ("read the required contexts
- * from branch protection"). Falls back to {@link DEFAULT_REQUIRED_CONTEXTS} on a read failure (e.g. a token
- * without the scope branch protection needs) — the safe direction: reasoning about a NARROWER set than the
- * truth can only under-fire this pass, never wrongly trigger CI for a context that was never actually required.
+ * from branch protection"). Returns `null` (UNKNOWN) on a read failure (e.g. a token without the scope branch
+ * protection needs) or with no `repo` to read — never a substituted default: a guessed set like `['test']` would
+ * classify a PR that has already reported a DIFFERENT required context (`smoke`) as "missing every run" and
+ * trigger CI it does not need (PR #2740 review). An explicitly empty/absent contexts list is preserved as `[]`
+ * (no required context → nothing can be missing). On `null`, {@link buildMissingRunCandidates} falls back to its
+ * narrower name-free "no CI-workflow check at all" test.
  * @param {{repo?:string|null, branch?:string, exec?:Function}} [o]
- * @returns {string[]}
+ * @returns {string[]|null}
  */
 export function defaultReadRequiredContexts({ repo = null, branch = 'main', exec = execFileSyncThrottled } = {}) {
-  if (!repo) return [...DEFAULT_REQUIRED_CONTEXTS];
+  if (!repo) return null;
   try {
     const out = exec('gh', ['api', `repos/${repo}/branches/${branch}/protection`, '--jq', '.required_status_checks.contexts'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
     });
-    const parsed = JSON.parse(String(out || '[]'));
-    return Array.isArray(parsed) && parsed.length ? parsed : [...DEFAULT_REQUIRED_CONTEXTS];
+    const parsed = JSON.parse(String(out || '').trim() || 'null');
+    if (parsed === null) return [];
+    return Array.isArray(parsed) ? parsed.filter((n) => typeof n === 'string' && n) : null;
   } catch {
-    return [...DEFAULT_REQUIRED_CONTEXTS];
+    return null;
   }
 }
 
@@ -618,33 +622,41 @@ export function defaultReadHeadCommittedAt(sha, { repo = null, exec = execFileSy
 
 /**
  * we:scripts/conveyor/ci-red-recovery-watch.mjs#triggerCiForPr — the ONE real write the missing-run pass
- * performs: prefer `PUT /pulls/{n}/update-branch` (which ALSO merges current `main` into the PR's head — closing
- * the same staleness {@link refreshOntoMain} exists for, for free) when the PR is behind `main`; otherwise ask
- * GitHub to run the CI workflow directly on the PR's own branch (`gh workflow run`, which needs — and this
- * repo's `we:.github/workflows/ci.yml` already declares — a `workflow_dispatch:` trigger). NEVER an empty-commit
- * push: this card's own scope limits that alternative to "the product's own push path", which neither exists
- * nor is needed here since both these paths are real GitHub-native ways to start a run without inventing a new
- * commit.
- * @param {{prNumber:number, headRefName?:(string|null), preferUpdateBranch?:boolean}} d
- * @param {{repo?:string|null, exec?:Function, workflowName?:string}} [o]
- * @returns {{ok:boolean, action:string, error?:string}}
+ * performs. When the PR is behind `main` (`preferUpdateBranch`), refresh it through {@link refreshOntoMain} —
+ * the SAME `rebaseDropManifest` plumbing this file's header mandates — whose push of the rebuilt tip starts a
+ * fresh `pull_request` run AND closes the staleness in one step. NEVER the raw `PUT /pulls/{n}/update-branch`
+ * REST endpoint: that server-side merge reintroduces the `.lane-manifest.json` collision `rebaseDropManifest`
+ * exists to avoid (this file's own header; PR #2740 review). If the refresh pushed nothing (`current`) or could
+ * not rebase (`skip`/`error` — a real conflict, left for a human), fall through to asking GitHub to run the CI
+ * workflow on the PR's own branch (`gh workflow run`, which needs — and `we:.github/workflows/ci.yml` already
+ * declares — a `workflow_dispatch:` trigger), recording the refresh outcome. NEVER an empty-commit push: this
+ * card's own scope limits that alternative to "the product's own push path", which neither exists nor is needed
+ * here.
+ * @param {{prNumber:number, headRefName?:(string|null), baseRefName?:(string|null), preferUpdateBranch?:boolean}} d
+ * @param {{repo?:string|null, exec?:Function, workflowName?:string, refresh?:Function, root?:string,
+ *   defaultBranch?:string}} [o]
+ * @returns {{ok:boolean, action:string, error?:string, refresh?:string, refreshError?:string}}
  */
-export function triggerCiForPr(d, { repo = null, exec = execFileSyncThrottled, workflowName = DEFAULT_MAIN_WORKFLOW_NAME } = {}) {
+export function triggerCiForPr(d, {
+  repo = null, exec = execFileSyncThrottled, workflowName = DEFAULT_MAIN_WORKFLOW_NAME, refresh = refreshOntoMain,
+  root = resolveLanePoolRepoPath(repo) ?? REPO_ROOT, defaultBranch = 'main',
+} = {}) {
   const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' };
   const repoArgs = repo ? ['--repo', repo] : [];
-  if (d?.preferUpdateBranch) {
-    try {
-      exec('gh', ['api', '-X', 'PUT', `repos/${repo}/pulls/${d.prNumber}/update-branch`], opts);
-      return { ok: true, action: 'update-branch' };
-    } catch (e) {
-      return { ok: false, action: 'update-branch', error: describeExecError(e) };
-    }
+  const refreshNote = {};
+  // Only a PR whose own base IS `defaultBranch` may be rebased onto it: a STACKED PR (based on another lane)
+  // would get unrelated `main` commits pushed into its branch (PR #2740 review) — it gets the dispatch instead.
+  if (d?.preferUpdateBranch && d?.headRefName && d?.baseRefName === defaultBranch) {
+    const r = refresh(d.headRefName, { base: `origin/${defaultBranch}`, root });
+    if (r.ok && r.action === 'rebased') return { ok: true, action: 'rebase-onto-main' };
+    refreshNote.refresh = r.action;
+    if (r.error) refreshNote.refreshError = r.error;
   }
   try {
     exec('gh', ['workflow', 'run', workflowName, '--ref', String(d?.headRefName ?? ''), ...repoArgs], opts);
-    return { ok: true, action: 'workflow-dispatch' };
+    return { ok: true, action: 'workflow-dispatch', ...refreshNote };
   } catch (e) {
-    return { ok: false, action: 'workflow-dispatch', error: describeExecError(e) };
+    return { ok: false, action: 'workflow-dispatch', error: describeExecError(e), ...refreshNote };
   }
 }
 
@@ -657,10 +669,11 @@ export function triggerCiForPr(d, { repo = null, exec = execFileSyncThrottled, w
  *   ok?:boolean, action?:string, error?:(string|null)}} [o]
  */
 export function defaultPostMissingRunComment(prNumber, {
-  exec = execFileSyncThrottled, repo = null, headRefName = null, headSha = null, ok = true, action = 'update-branch', error = null,
+  exec = execFileSyncThrottled, repo = null, headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
+  refresh = null, refreshError = null,
 } = {}) {
   const argv = ['pr', 'comment', String(prNumber), '--body', buildMissingRunComment({
-    headRefName, headSha, ok, action, error,
+    headRefName, headSha, ok, action, error, refresh, refreshError,
   })];
   if (repo) argv.push('--repo', repo);
   exec('gh', argv, {
@@ -710,9 +723,12 @@ export function sweepMissingRunRecovery({
   clearLabel = clearStaleCheckingLabel, thresholdMs = DEFAULT_MISSING_RUN_THRESHOLD_MS,
   maxRetriesPerSha = DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA, now = Date.now(),
 } = {}) {
-  const prs = readOpenPrs({ repo, extraFields: ['labels'] });
+  const prs = readOpenPrs({ repo, extraFields: ['labels', 'baseRefName'] });
+  // `null` (UNKNOWN — the protection read failed, as it does for the daemon's App token) is passed through as-is:
+  // {@link buildMissingRunCandidates} then uses its narrower "no CI-workflow check at all" test rather than a
+  // guessed name set (PR #2740 review).
   const requiredContexts = readRequiredContexts({ repo, branch: defaultBranch });
-  const rawCandidates = buildMissingRunCandidates(prs, { requiredContexts });
+  const rawCandidates = buildMissingRunCandidates(prs, { requiredContexts: requiredContexts ?? null });
   const prByNumber = new Map((Array.isArray(prs) ? prs : []).map((pr) => [Number(pr?.number), pr]));
   // Every per-candidate extra read below only runs for a PR {@link buildMissingRunCandidates} already narrowed
   // to (zero required-check rollup entries at all) — mirrors {@link sweepCiRedRecovery}/{@link sweepHungCiRecovery}'s
@@ -732,17 +748,20 @@ export function sweepMissingRunRecovery({
   const applied = [];
   if (apply) {
     for (const d of plan.dispatch) {
-      const result = trigger(d, { repo });
+      const result = trigger(d, { repo, defaultBranch });
       // Posted on EVERY attempt, success or failure — same discipline as every sibling durable marker in this
       // file: a permanently-failing trigger must still trip {@link DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA}'s cap.
       postComment(d.prNumber, {
         repo, headRefName: d.headRefName, headSha: d.headSha, ok: result.ok, action: result.action, error: result.error ?? null,
+        refresh: result.refresh ?? null, refreshError: result.refreshError ?? null,
       });
+      // Only clear `checking` once a real run was actually started — a failed trigger leaves no in-flight check,
+      // so {@link clearStaleCheckingLabel}'s own justification does not hold (PR #2740 review).
       const pr = prByNumber.get(d.prNumber);
       const currentLabels = (Array.isArray(pr?.labels) ? pr.labels : [])
         .map((l) => (typeof l === 'string' ? l : l?.name))
         .filter(Boolean);
-      const labelCleared = clearLabel(d.prNumber, { repo, currentLabels });
+      const labelCleared = result.ok ? clearLabel(d.prNumber, { repo, currentLabels }) : false;
       applied.push({
         prNumber: d.prNumber, headRefName: d.headRefName, why: d.why, labelCleared, ...result,
       });

@@ -436,8 +436,8 @@ export function runMainRedRebaseAllRepos({ repos = FIX_DISPATCH_DAEMON_REPOS, ti
  * disjoint population from the `hungCi`/`mainRedRebase` halves below (see
  * `we:scripts/conveyor/main-red-recovery.mjs`'s own "MISSING-CI-RUN RECOVERY" section for the full incident and
  * why neither existing pass sees it). `we:scripts/conveyor/ci-red-recovery-watch.mjs#sweepMissingRunRecovery`
- * implements the real writes (prefer `PUT /pulls/{n}/update-branch`, else `gh workflow run`, plus clearing the
- * stale `checking` label its own narrow true positive proves wrong) and is already registered per-repo in
+ * implements the real writes (prefer a `rebaseDropManifest` refresh onto `main` when behind it, else `gh workflow
+ * run`, plus clearing the stale `checking` label once a trigger actually succeeded) and is already registered per-repo in
  * `we:skills-src/conveyor/daemon-manifest.mjs` (`ci-red-recovery-watch-<repo>`, same CLI entry point as its two
  * siblings, per that file's own "same sweep invocation" comment) — but, mirroring EXACTLY the reason
  * {@link runHungCiRecoveryAllRepos}/{@link runMainRedRebaseAllRepos} both ride THIS daemon instead of that

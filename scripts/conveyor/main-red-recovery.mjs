@@ -691,21 +691,35 @@ export const MISSING_RUN_COMMENT_MARKER = '🚦 conveyor missing-run-recovery';
  * is a candidate only when EVERY required context is absent — one that has already reported for SOME of them
  * (a partial rollup) is not this pass's population; {@link buildHungCandidates}/the ordinary red/green paths
  * already own a partially-reported PR.
+ *
+ * UNKNOWN required contexts (`requiredContexts: null` — the branch-protection read failed, which it does for the
+ * daemon's GitHub App token: 403 "Resource not accessible by integration") → never guess a name set (a guessed
+ * `['test']` would flag a PR that already reported `smoke`; PR #2740 review). Instead fall back to the NARROWER,
+ * name-free test: a PR is a candidate only when its rollup has NO entry at all from the CI workflow
+ * (`workflowName`) — a PR that reported ANY CI-workflow check is never flagged.
  * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup` returns.
- * @param {{requiredContexts?:string[]}} [o]
- * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null)}>}
+ * @param {{requiredContexts?:(string[]|null), workflowName?:string}} [o]
+ * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null), baseRefName:(string|null)}>}
  */
-export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQUIRED_CONTEXTS } = {}) {
-  const names = (Array.isArray(requiredContexts) && requiredContexts.length) ? requiredContexts : DEFAULT_REQUIRED_CONTEXTS;
+export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQUIRED_CONTEXTS, workflowName = DEFAULT_MAIN_WORKFLOW_NAME } = {}) {
+  const unknown = requiredContexts === null;
+  // An explicitly EMPTY required set means nothing is required, so nothing can be missing — never substitute
+  // the default for it (PR #2740 review). Only `undefined`/a non-array non-null (no caller value) gets the default.
+  const names = unknown ? [] : (Array.isArray(requiredContexts) ? requiredContexts : DEFAULT_REQUIRED_CONTEXTS);
+  if (!unknown && !names.length) return [];
   const out = [];
   for (const pr of Array.isArray(prs) ? prs : []) {
     const prNumber = Number(pr?.number);
     if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
     const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
-    const reported = new Set(roll.map((c) => c?.name || c?.context).filter(Boolean));
-    const allMissing = names.every((n) => !reported.has(n));
+    const allMissing = unknown
+      ? !roll.some((c) => c?.workflowName === workflowName)
+      : (() => {
+        const reported = new Set(roll.map((c) => c?.name || c?.context).filter(Boolean));
+        return names.every((n) => !reported.has(n));
+      })();
     if (!allMissing) continue; // at least one required context has SOME entry — not this pass's population.
-    out.push({ prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null });
+    out.push({ prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null, baseRefName: pr?.baseRefName ?? null });
   }
   return out;
 }
@@ -738,8 +752,9 @@ export function isMissingRunOverdue({ headCommittedAt, now = Date.now(), thresho
  *      trigger that has not produced a real check run after this many tries is no longer "GitHub hasn't
  *      noticed yet" — hand it to a human/ci-heal instead.
  *   4. Otherwise → `trigger-ci` dispatch. `preferUpdateBranch` (true when `aheadBy > 0`) tells the IO shell to
- *      prefer `PUT /pulls/{n}/update-branch` (which ALSO merges current `main` in, closing the same staleness
- *      {@link planMainRedRebases} exists to fix, for free) over a bare `gh workflow run` dispatch.
+ *      prefer a `rebaseDropManifest` refresh onto `main` (whose push starts a fresh run AND closes the same
+ *      staleness {@link planMainRedRebases} exists to fix) over a bare `gh workflow run` dispatch — never the
+ *      raw `update-branch` REST endpoint (PR #2740 review).
  * @param {object} o
  * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null),
  *   headCommittedAt?:(string|null), aheadBy?:(number|null), triggerAttemptsForSha?:number}>} [o.candidates]
@@ -776,7 +791,8 @@ export function planMissingRunRecoveries({
       continue;
     }
     dispatch.push({
-      ...base, attempts, kind: 'trigger-ci', preferUpdateBranch: Number.isFinite(c?.aheadBy) ? c.aheadBy > 0 : false,
+      ...base, baseRefName: c?.baseRefName ?? null, attempts, kind: 'trigger-ci',
+      preferUpdateBranch: Number.isFinite(c?.aheadBy) ? c.aheadBy > 0 : false,
       why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} has had NO required-check run at all since its head commit, past the missing-run threshold — triggering CI`,
     });
   }
@@ -820,11 +836,17 @@ export function countMissingRunComments(comments, headSha = null) {
  * @returns {string}
  */
 export function buildMissingRunComment({
-  headRefName = null, headSha = null, ok = true, action = 'update-branch', error = null,
+  headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
+  refresh = null, refreshError = null,
 } = {}) {
+  // When a behind-main refresh was attempted but did not push (already current / a real conflict), say so — the
+  // trigger then fell back to a workflow dispatch, and a reader needs to know the branch is still behind.
+  const refreshNote = refresh
+    ? ` (refresh onto main first: ${refresh}${refreshError ? ` — ${refreshError}` : ''})`
+    : '';
   const outcome = ok
-    ? `this head had no required-check run at all — triggered CI via ${action}.`
-    : `attempted to trigger CI (${action}) and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing trigger cannot retry forever; once capped, this is left for a human/ci-heal look instead.`;
+    ? `this head had no required-check run at all — triggered CI via ${action}${refreshNote}.`
+    : `attempted to trigger CI (${action}${refreshNote}) and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing trigger cannot retry forever; once capped, this is left for a human/ci-heal look instead.`;
   return [
     MISSING_RUN_COMMENT_MARKER,
     '',

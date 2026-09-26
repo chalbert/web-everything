@@ -459,7 +459,7 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
   it('a PR with zero rollup entries for EVERY required context is a candidate', () => {
     const candidates = buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS });
     expect(candidates).toEqual([{
-      prNumber: 2729, headRefName: PR_2729.headRefName, headSha: PR_2729.headRefOid,
+      prNumber: 2729, headRefName: PR_2729.headRefName, headSha: PR_2729.headRefOid, baseRefName: null,
     }]);
   });
 
@@ -474,6 +474,21 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
   it('a PR whose required checks HAVE reported is never a candidate, whatever their outcome', () => {
     const green = { ...PR_2729, statusCheckRollup: [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] };
     expect(buildMissingRunCandidates([green], { requiredContexts: ['test'] })).toEqual([]);
+  });
+
+  it('an explicitly EMPTY required-context set yields no candidates — never substitutes the default (PR #2740 review)', () => {
+    expect(buildMissingRunCandidates([PR_2729], { requiredContexts: [] })).toEqual([]);
+  });
+
+  it('UNKNOWN required contexts (null) flags only a PR with no CI-workflow check at all — never a partially reported one', () => {
+    const ciSmoke = { __typename: 'CheckRun', name: 'smoke', workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' };
+    expect(buildMissingRunCandidates([{ ...PR_2729, statusCheckRollup: [ciSmoke] }], { requiredContexts: null })).toEqual([]);
+    expect(buildMissingRunCandidates([PR_2729], { requiredContexts: null })).toEqual([expect.objectContaining({ prNumber: 2729 })]);
+  });
+
+  it('the missing-run marker records a fallen-back refresh outcome', () => {
+    expect(buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'workflow-dispatch', refresh: 'skip', refreshError: 'conflict' }))
+      .toContain('triggered CI via workflow-dispatch (refresh onto main first: skip — conflict)');
   });
 
   it('isMissingRunOverdue: false before the threshold, true past it, false on an unreadable timestamp', () => {
