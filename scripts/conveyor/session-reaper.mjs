@@ -105,14 +105,14 @@
 import { parseSessionSlug } from './session-slug.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { readField } from '../backlog/frontmatter.mjs';
 import { stopSession } from '../operations/dispatch-abort.mjs';
-import { defaultListAgents, normalizeHandle, prListTimeoutMs } from '../operations/dispatch-lane-io.mjs';
+import { defaultListAgents, normalizeHandle, prListTimeoutMs, dispatchScratchRoot, revokeDispatchTrust } from '../operations/dispatch-lane-io.mjs';
 import { sleepSyncMs } from '../readiness/drain-lock.mjs';
 import {
   applyCompletionUpdate, completionPath, deleteCompletion, listCompletionSessions, newCompletionRecord, resolveCompletionsDir,
@@ -1528,6 +1528,183 @@ export function runRetentionSweepPass({
   };
 }
 
+// ── DISPATCH-SCRATCH SWEEP (#4188, bornAs `x5qketq`, epic #4075) ───────────────────────────────────────────
+// PR #2701 (card #4174) gave every dispatched session its own scratch cwd, a fresh directory under
+// `<workspace>/.operations/dispatch/<sessionId>` (`dispatch-lane-io.mjs#dispatchSessionCwd`, keyed by the SAME
+// uuid `createDispatchSinks` mints and hands the CLI as the session's own `sessionId`), and grants it CLI
+// workspace trust in the operator's `~/.claude.json` (`#grantDispatchTrust`) so `claude --bg` does not refuse
+// it as untrusted. Nothing removed either once the owning session finished, so both grow forever — this
+// section is that removal, a THIRD independent axis from the STOP pass (is the process still doing anything)
+// and the #4089 RETENTION SWEEP above (has the session's semantic RECORD — a completion/delivery report keyed
+// by its `review-<PR>`/`fix-<PR>`/… NAME — aged out). This axis is keyed by the session's raw UUID instead,
+// because that is the only identity a dispatch-scratch folder carries; it never touches a completion record,
+// a delivery report, or `claude rm`.
+//
+// THE SAME TWO-PATH SHAPE AS THE RETENTION SWEEP, deliberately reused rather than invented fresh:
+//   PATH A — matched + finished + grace. The folder's own uuid names a row in `claude agents --json --all`
+//     (matched by `sessionId`, never `id` — see this file's own header on why the two fields are not
+//     interchangeable) whose `state` is terminal ({@link TERMINAL_REAP_STATES}/{@link ALREADY_STOPPED_STATES}),
+//     OR the uuid names NO row at all (the CLI has already forgotten it — "reaped", the card's own third
+//     qualifying word, alongside "stopped"/"done"). Either way, once the folder has sat at least `graceMs`
+//     (default 24h) past its own last-modified time, it is safe to remove.
+//   PATH B — the ceiling safety valve, for a folder whose match could not be resolved at all this tick (an
+//     unreadable/empty `claude agents` listing) rather than one confirmed finished: once a folder is older than
+//     `ceilingMs` (default 7 days) it is removed anyway, UNLESS some OTHER still-live row in the SAME listing
+//     reports this exact directory as its own `cwd` — the closest proxy this file has for "a live process is
+//     still using it" without shelling a platform-specific `lsof`/`/proc` scan (macOS has no `/proc`).
+// A folder younger than both thresholds is always kept — the same "never guess" discipline as the STOP axes.
+
+/** `WE_DISPATCH_SCRATCH_GRACE_HOURS` → path A's grace, in ms. Default 24h, matching the card's own wording. */
+export const DISPATCH_SCRATCH_GRACE_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+/** `WE_DISPATCH_SCRATCH_CEILING_DAYS` → path B's ceiling, in ms. Default 7 days — generous relative to path A's
+ *  24h grace (this is the safety valve for when path A's own listing read failed, not the common case). */
+export const DISPATCH_SCRATCH_CEILING_MS_DEFAULT = 7 * 24 * 60 * 60 * 1000;
+
+/** `WE_DISPATCH_SCRATCH_GRACE_HOURS` → path A's grace, in ms. See {@link DISPATCH_SCRATCH_GRACE_MS_DEFAULT}. */
+export function resolveDispatchScratchGraceMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_DISPATCH_SCRATCH_GRACE_HOURS, 60 * 60 * 1000, DISPATCH_SCRATCH_GRACE_MS_DEFAULT);
+}
+
+/** `WE_DISPATCH_SCRATCH_CEILING_DAYS` → path B's ceiling, in ms. See {@link DISPATCH_SCRATCH_CEILING_MS_DEFAULT}. */
+export function resolveDispatchScratchCeilingMs(env = process.env) {
+  return parseRetentionDurationSetting(env.WE_DISPATCH_SCRATCH_CEILING_DAYS, 24 * 60 * 60 * 1000, DISPATCH_SCRATCH_CEILING_MS_DEFAULT);
+}
+
+/**
+ * THE PURE VERDICT for one dispatch-scratch folder. No fs/exec/clock — every signal is injected, same
+ * discipline as {@link classifyRetention}.
+ * @param {{ageMs: number|null, sessionRow: {state?:string}|null, liveCwdInUse: boolean}} candidate
+ * @param {{graceMs: number|null, ceilingMs: number|null}} opts
+ * @returns {{reap:boolean, reason:string}}
+ */
+export function classifyDispatchScratchEntry({ ageMs, sessionRow, liveCwdInUse } = {}, { graceMs, ceilingMs }) {
+  if (typeof ageMs !== 'number' || !Number.isFinite(ageMs) || ageMs < 0) return { reap: false, reason: 'unknown-age' };
+  const state = sessionRow?.state;
+  const matchedTerminal = sessionRow
+    ? (TERMINAL_REAP_STATES.has(state) || ALREADY_STOPPED_STATES.has(state))
+    : true; // no row at all for this uuid — the CLI has already forgotten it ("reaped"), the card's own 3rd case
+  if (sessionRow && !matchedTerminal) return { reap: false, reason: 'still-live' }; // working/blocked — never touch
+  // Path A — matched (or reaped) + finished, once its own grace period has elapsed.
+  if (matchedTerminal && graceMs !== null && ageMs >= graceMs) {
+    return { reap: true, reason: sessionRow ? `finished:${state}` : 'unregistered' };
+  }
+  // Path B — the ceiling safety valve, gated on no OTHER live row claiming this directory as its cwd.
+  if (ceilingMs !== null && ageMs >= ceilingMs && !liveCwdInUse) {
+    return { reap: true, reason: 'ceiling' };
+  }
+  return { reap: false, reason: 'not-yet' };
+}
+
+/**
+ * THE DISPATCH-SCRATCH SWEEP IO SHELL (#4188). Enumerates every folder directly under
+ * {@link dispatchScratchRoot}, matches each one's name (a session uuid) against a fresh `claude agents --json
+ * --all` listing by `sessionId` (never `id` — see the file header), and removes the ones
+ * {@link classifyDispatchScratchEntry} calls reapable: the directory tree itself, then (batched, ONE write) the
+ * `~/.claude.json` trust entries {@link revokeDispatchTrust} owns for every directory this pass actually
+ * deleted. A folder is NEVER removed and left un-revoked, or vice versa, within one pass — the folder delete
+ * happens first (the higher-value removal: a stale scratch dir is unbounded disk, the trust entry is a few
+ * bytes), and only directories that delete cleanly are ever handed to the trust revoke.
+ * @param {{
+ *   dispatchRoot?: string,
+ *   listAgents?: () => unknown[],
+ *   graceMs?: number|null,
+ *   ceilingMs?: number|null,
+ *   now?: number,
+ *   dryRun?: boolean,
+ *   readdirSyncFn?: Function,
+ *   statFn?: Function,
+ *   rmDirFn?: (dir:string) => void,
+ *   revokeTrust?: (dirs:string[]) => {revoked:string[]},
+ *   log?: (msg:string) => void,
+ * }} [o]
+ * @returns {{scanned:number, deleted:number, kept:number, trustRevoked:number, wouldDelete:Array|undefined}}
+ */
+export function runDispatchScratchSweepPass({
+  dispatchRoot = dispatchScratchRoot(),
+  listAgents = () => defaultListAgents({ exec: execFileSync, all: true }),
+  graceMs = resolveDispatchScratchGraceMs(),
+  ceilingMs = resolveDispatchScratchCeilingMs(),
+  now = Date.now(),
+  dryRun = false,
+  readdirSyncFn = readdirSync,
+  statFn = statSync,
+  rmDirFn = (dir) => rmSync(dir, { recursive: true, force: true }),
+  revokeTrust = (dirs) => revokeDispatchTrust(dirs),
+  log: logFn = log,
+} = {}) {
+  let names;
+  try {
+    names = readdirSyncFn(dispatchRoot, { withFileTypes: true })
+      .filter((e) => (typeof e.isDirectory === 'function' ? e.isDirectory() : true))
+      .map((e) => e.name)
+      // LIVE-CAUGHT (#4188, 2026-09-26): `dispatchScratchRoot()` is NOT exclusively this sweep's own namespace —
+      // a real machine was found with a `.lanes/.admission/gh` subtree living INSIDE `.operations/dispatch/`,
+      // an entirely different subsystem's state that merely shares the same parent directory. `isSafeSessionId`
+      // (this file's own filename-safety gate, reused rather than a second regex invented) rejects any name that
+      // doesn't start with an alnum — which a dotdir like `.lanes` never does — so this is never touched. A
+      // future non-uuid, non-dotfile collision is still theoretically possible; the STATE + trust match below
+      // (a real session row, or a confirmed-gone one) is the actual safety net for that, not this filter alone.
+      .filter((name) => isSafeSessionId(name));
+  } catch {
+    names = []; // no dispatch-scratch root at all yet (a fresh machine, or one that never dispatched) — nothing to do
+  }
+
+  let sessions;
+  try { sessions = listAgents() ?? []; } catch { sessions = []; } // an unreadable listing degrades to "no match for anyone" — Path A never fires, only Path B (ceiling) can act, and only once confirmed no live row claims the folder
+  const byId = new Map();
+  const liveCwds = new Set();
+  for (const s of sessions) {
+    if (s && s.sessionId != null) byId.set(String(s.sessionId), s);
+    const terminal = TERMINAL_REAP_STATES.has(s?.state) || ALREADY_STOPPED_STATES.has(s?.state);
+    if (!terminal && s?.cwd) liveCwds.add(String(s.cwd));
+  }
+
+  let deleted = 0;
+  let kept = 0;
+  const toRevoke = [];
+  const wouldDelete = dryRun ? [] : undefined;
+
+  for (const name of [...names].sort()) {
+    const dir = join(dispatchRoot, name);
+    let ageMs = null;
+    try { ageMs = now - statFn(dir).mtimeMs; } catch { /* stays null — `unknown-age` keeps it, never a guess */ }
+    const verdict = classifyDispatchScratchEntry(
+      { ageMs, sessionRow: byId.get(name) ?? null, liveCwdInUse: liveCwds.has(dir) },
+      { graceMs, ceilingMs },
+    );
+    if (!verdict.reap) { kept++; continue; }
+    if (dryRun) {
+      logFn(`  would remove dispatch-scratch ${name} (${verdict.reason})`);
+      wouldDelete.push({ dir: name, reason: verdict.reason });
+      continue;
+    }
+    try {
+      rmDirFn(dir);
+    } catch (e) {
+      logFn(`  ⚠ ${name}: dispatch-scratch rm failed: ${String(e?.message || e).split('\n')[0]}`);
+      kept++;
+      continue;
+    }
+    toRevoke.push(dir);
+    logFn(`  removed dispatch-scratch ${name} (${verdict.reason})`);
+    deleted++;
+  }
+
+  let trustRevoked = 0;
+  if (!dryRun && toRevoke.length) {
+    try { trustRevoked = (revokeTrust(toRevoke)?.revoked ?? []).length; } catch { /* best-effort — folders are already gone either way */ }
+  }
+
+  return {
+    scanned: names.length,
+    deleted: dryRun ? 0 : deleted,
+    kept,
+    trustRevoked: dryRun ? 0 : trustRevoked,
+    wouldDelete,
+  };
+}
+
 /**
  * The idle-timeout backstop's default threshold (6 hours) — see {@link classifySessionReapWithGroundTruth}'s
  * "Axis 3" doc for exactly when this applies (a `blocked` session, name+cwd already confirmed spawned by THIS
@@ -1841,9 +2018,14 @@ function main(argv) {
   // calls {@link runRetentionSweepPass} directly (already fully daemon-usable, no CLI needed) rather than
   // relying on this flag. Shares this CLI's own `--dry-run`.
   const runRetention = !!flags['retention-sweep'];
+  // `--dispatch-scratch-sweep` OPTS IN to the #4188 dispatch-scratch pass, same deliberate opt-in reasoning as
+  // `--retention-sweep` immediately above (it deletes directories and edits `~/.claude.json`). A resident
+  // daemon calls {@link runDispatchScratchSweepPass} directly. Shares this CLI's own `--dry-run`.
+  const runDispatchScratchSweep = !!flags['dispatch-scratch-sweep'];
 
   const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
+  const dispatchScratchResult = runDispatchScratchSweep ? runDispatchScratchSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
     // Matches the pre-#3383 CLI exactly: an unreadable listing means nothing safe to act on — exit clean, no
@@ -1852,7 +2034,7 @@ function main(argv) {
   }
 
   if (flags.json) {
-    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ...result, retention: retentionResult, dispatchScratch: dispatchScratchResult }, null, 2) + '\n');
   } else {
     const { scanned, stopped, alreadyGone, failures, anomalies, backstopWritten, wouldStop, wouldWriteBackstop, kept } = result;
     log(
@@ -1863,6 +2045,12 @@ function main(argv) {
       log(
         `session-reaper retention: ${retentionResult.scanned} session record set(s) scanned · ` +
           `${dryRun ? `${(retentionResult.wouldDelete ?? []).length} would be deleted, ${(retentionResult.wouldPruneRuns ?? []).length} run record(s) would be pruned` : `${retentionResult.deleted} deleted, ${retentionResult.runsPruned} run record(s) pruned`} · ${retentionResult.kept} kept`,
+      );
+    }
+    if (dispatchScratchResult) {
+      log(
+        `session-reaper dispatch-scratch: ${dispatchScratchResult.scanned} folder(s) scanned · ` +
+          `${dryRun ? `${(dispatchScratchResult.wouldDelete ?? []).length} would be removed` : `${dispatchScratchResult.deleted} removed, ${dispatchScratchResult.trustRevoked} trust entr${dispatchScratchResult.trustRevoked === 1 ? 'y' : 'ies'} revoked`} · ${dispatchScratchResult.kept} kept`,
       );
     }
   }

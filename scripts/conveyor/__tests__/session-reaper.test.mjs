@@ -57,11 +57,17 @@ import {
   makeChatSpawnGuardResolver,
   runStampChatSpawnHook,
   runMarkChatEndedHook,
+  classifyDispatchScratchEntry,
+  runDispatchScratchSweepPass,
+  resolveDispatchScratchGraceMs,
+  resolveDispatchScratchCeilingMs,
+  DISPATCH_SCRATCH_GRACE_MS_DEFAULT,
+  DISPATCH_SCRATCH_CEILING_MS_DEFAULT,
 } from '../session-reaper.mjs';
 import { OUTCOME_UNREADABLE } from '../hung-session.mjs';
 import { newCompletionRecord, applyCompletionUpdate, writeCompletion } from '../../operations/completion-store.mjs';
 import { newDeliveryReport, writeDeliveryReport } from '../../operations/delivery-report-store.mjs';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -1435,6 +1441,263 @@ describe('runRetentionSweepPass — the IO shell', () => {
 function tryReadCompletionSafe(dir, session) {
   return existsSync(join(dir, `${session}.json`));
 }
+
+// #4188 (bornAs `x5qketq`, epic #4075) — the dispatch-scratch sweep: reap a finished dispatched session's
+// scratch cwd folder (`.operations/dispatch/<uuid>`) and its CLI trust entry. Fixtures shaped as
+// `claude agents --json --all` rows, matched by `sessionId` (the folder's own name), never `id` — same
+// discipline the file header documents for the STOP axis.
+describe('classifyDispatchScratchEntry — the pure per-folder verdict', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const opts = { graceMs: DAY, ceilingMs: 7 * DAY };
+
+  it('keeps a young folder with no matching session at all (still within grace)', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 5 * 60 * 1000, sessionRow: null, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'not-yet' });
+  });
+
+  it('reaps a folder whose session is gone from the listing entirely, once past grace ("reaped")', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: DAY + 1, sessionRow: null, liveCwdInUse: false }, opts))
+      .toEqual({ reap: true, reason: 'unregistered' });
+  });
+
+  it('reaps a folder whose matched session is `done`, once past grace', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: DAY + 1, sessionRow: { state: 'done' }, liveCwdInUse: false }, opts))
+      .toEqual({ reap: true, reason: 'finished:done' });
+  });
+
+  it('reaps a folder whose matched session is `stopped`, once past grace', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: DAY + 1, sessionRow: { state: 'stopped' }, liveCwdInUse: false }, opts))
+      .toEqual({ reap: true, reason: 'finished:stopped' });
+  });
+
+  it('NEVER reaps a folder whose matched session is still `working`, no matter its age', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 30 * DAY, sessionRow: { state: 'working' }, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'still-live' });
+  });
+
+  it('NEVER reaps a folder whose matched session is still `blocked`, no matter its age', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 30 * DAY, sessionRow: { state: 'blocked' }, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'still-live' });
+  });
+
+  it('a finished match still younger than grace is kept, not reaped early', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 5 * 60 * 1000, sessionRow: { state: 'done' }, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'not-yet' });
+  });
+
+  it('path B — an unmatched folder past the ceiling is reaped when nothing live claims its cwd', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 8 * DAY, sessionRow: null, liveCwdInUse: false }, opts))
+      .toEqual({ reap: true, reason: 'unregistered' }); // already caught by path A (grace) — ceiling never needed here
+  });
+
+  it('path B never fires when a live session claims this exact directory as its cwd', () => {
+    // Simulates: no row matched BY sessionId, but grace already elapsed too — so this actually hits path A's
+    // "unregistered" branch first unless we gate grace off, proving the ceiling branch specifically:
+    expect(classifyDispatchScratchEntry({ ageMs: 8 * DAY, sessionRow: null, liveCwdInUse: true }, { graceMs: null, ceilingMs: 7 * DAY }))
+      .toEqual({ reap: false, reason: 'not-yet' });
+  });
+
+  it('`graceMs: null` disables path A outright', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 30 * DAY, sessionRow: { state: 'done' }, liveCwdInUse: false }, { graceMs: null, ceilingMs: null }))
+      .toEqual({ reap: false, reason: 'not-yet' });
+  });
+
+  it('`ceilingMs: null` disables path B outright', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: 30 * DAY, sessionRow: null, liveCwdInUse: true }, { graceMs: null, ceilingMs: null }))
+      .toEqual({ reap: false, reason: 'not-yet' });
+  });
+
+  it('an unreadable/negative age never reaps — never a guess', () => {
+    expect(classifyDispatchScratchEntry({ ageMs: null, sessionRow: null, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'unknown-age' });
+    expect(classifyDispatchScratchEntry({ ageMs: -5, sessionRow: null, liveCwdInUse: false }, opts))
+      .toEqual({ reap: false, reason: 'unknown-age' });
+  });
+});
+
+describe('runDispatchScratchSweepPass — the IO shell', () => {
+  let dispatchRoot;
+  beforeEach(() => {
+    dispatchRoot = mkdtempSync(join(tmpdir(), 'we-dispatch-scratch-'));
+  });
+  afterEach(() => {
+    rmSync(dispatchRoot, { recursive: true, force: true });
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const makeOldFolder = (name, ageMs = DAY + 60_000) => {
+    const dir = join(dispatchRoot, name);
+    mkdirSync(dir, { recursive: true });
+    const past = new Date(Date.now() - ageMs);
+    utimesSync(dir, past, past);
+    return dir;
+  };
+
+  it('removes a finished (done) session\'s folder and revokes its trust entry, once past grace', () => {
+    const dir = makeOldFolder('sess-done-1');
+    const revoked = [];
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [{ kind: 'background', sessionId: 'sess-done-1', state: 'done', cwd: dir }],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: (dirs) => { revoked.push(...dirs); return { revoked: dirs }; },
+      log: () => {},
+    });
+    expect(result.deleted).toBe(1);
+    expect(result.kept).toBe(0);
+    expect(result.trustRevoked).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(revoked).toEqual([dir]);
+  });
+
+  it('leaves a still-live session\'s folder AND trust entry completely untouched', () => {
+    const dir = makeOldFolder('sess-live-1', 30 * DAY); // old — age alone must never be enough
+    const revoked = [];
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [{ kind: 'background', sessionId: 'sess-live-1', state: 'working', cwd: dir }],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: (dirs) => { revoked.push(...dirs); return { revoked: dirs }; },
+      log: () => {},
+    });
+    expect(result.deleted).toBe(0);
+    expect(result.kept).toBe(1);
+    expect(result.trustRevoked).toBe(0);
+    expect(existsSync(dir)).toBe(true);
+    expect(revoked).toEqual([]);
+  });
+
+  it('removes a folder whose session has vanished from the listing entirely ("reaped"), once past grace', () => {
+    const dir = makeOldFolder('sess-gone-1');
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: (dirs) => ({ revoked: dirs }),
+      log: () => {},
+    });
+    expect(result.deleted).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('keeps a young folder even with no matching session — never guesses on a fresh dispatch race', () => {
+    const dir = makeOldFolder('sess-young-1', 60_000);
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: () => ({ revoked: [] }),
+      log: () => {},
+    });
+    expect(result.deleted).toBe(0);
+    expect(result.kept).toBe(1);
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  // LIVE-CAUGHT (2026-09-26): a real machine had `.lanes/.admission/gh` living INSIDE `.operations/dispatch/`
+  // — a wholly different subsystem's own state, not a session-scratch folder at all, sharing the same parent
+  // directory only by coincidence. This proves the fix: a dotdir is never even considered, no matter its age
+  // or match state, because it can never be a CLI-minted session id (`isSafeSessionId`'s own gate).
+  it('NEVER touches a dotdir (e.g. `.lanes`) sharing the dispatch root, no matter how old', () => {
+    const dir = makeOldFolder('.lanes', 30 * DAY);
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: () => ({ revoked: [] }),
+      log: () => {},
+    });
+    expect(result.scanned).toBe(0); // never even counted as a candidate
+    expect(result.deleted).toBe(0);
+    expect(existsSync(dir)).toBe(true);
+  });
+
+  it('a mixed listing removes only the finished/gone folders, never the live one, in one pass', () => {
+    const done = makeOldFolder('sess-mix-done');
+    const live = makeOldFolder('sess-mix-live', 30 * DAY);
+    const gone = makeOldFolder('sess-mix-gone');
+    const revoked = [];
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [
+        { kind: 'background', sessionId: 'sess-mix-done', state: 'done', cwd: done },
+        { kind: 'background', sessionId: 'sess-mix-live', state: 'working', cwd: live },
+      ],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      revokeTrust: (dirs) => { revoked.push(...dirs); return { revoked: dirs }; },
+      log: () => {},
+    });
+    expect(result.deleted).toBe(2);
+    expect(result.kept).toBe(1);
+    expect(existsSync(done)).toBe(false);
+    expect(existsSync(gone)).toBe(false);
+    expect(existsSync(live)).toBe(true);
+    expect(revoked.sort()).toEqual([done, gone].sort());
+  });
+
+  it('dry-run reports what would be removed without touching disk or revoking trust', () => {
+    const dir = makeOldFolder('sess-dry-1');
+    let revokeCalled = false;
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => [{ kind: 'background', sessionId: 'sess-dry-1', state: 'done', cwd: dir }],
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      dryRun: true,
+      revokeTrust: () => { revokeCalled = true; return { revoked: [] }; },
+      log: () => {},
+    });
+    expect(result.deleted).toBe(0);
+    expect(result.wouldDelete).toEqual([{ dir: 'sess-dry-1', reason: 'finished:done' }]);
+    expect(existsSync(dir)).toBe(true);
+    expect(revokeCalled).toBe(false);
+  });
+
+  it('a missing dispatch-scratch root is a no-op, never a throw', () => {
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot: join(dispatchRoot, 'does-not-exist'),
+      listAgents: () => [],
+      log: () => {},
+    });
+    expect(result).toMatchObject({ scanned: 0, deleted: 0, kept: 0 });
+  });
+
+  it('an unreadable `listAgents` degrades to no matches, never throws — path A cannot fire without a listing', () => {
+    const dir = makeOldFolder('sess-unreadable-1', 60_000); // young — grace alone would keep it anyway
+    const result = runDispatchScratchSweepPass({
+      dispatchRoot,
+      listAgents: () => { throw new Error('claude agents boom'); },
+      graceMs: DAY,
+      ceilingMs: 7 * DAY,
+      log: () => {},
+    });
+    expect(result.deleted).toBe(0);
+    expect(existsSync(dir)).toBe(true);
+  });
+});
+
+describe('resolveDispatchScratchGraceMs / resolveDispatchScratchCeilingMs — the env-overridable settings', () => {
+  it('default to 24h grace / 7 day ceiling when unset', () => {
+    expect(resolveDispatchScratchGraceMs({})).toBe(DISPATCH_SCRATCH_GRACE_MS_DEFAULT);
+    expect(resolveDispatchScratchCeilingMs({})).toBe(DISPATCH_SCRATCH_CEILING_MS_DEFAULT);
+    expect(DISPATCH_SCRATCH_GRACE_MS_DEFAULT).toBe(24 * 60 * 60 * 1000);
+    expect(DISPATCH_SCRATCH_CEILING_MS_DEFAULT).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+  it('`WE_DISPATCH_SCRATCH_GRACE_HOURS` / `WE_DISPATCH_SCRATCH_CEILING_DAYS` override the defaults', () => {
+    expect(resolveDispatchScratchGraceMs({ WE_DISPATCH_SCRATCH_GRACE_HOURS: '2' })).toBe(2 * 60 * 60 * 1000);
+    expect(resolveDispatchScratchCeilingMs({ WE_DISPATCH_SCRATCH_CEILING_DAYS: '3' })).toBe(3 * 24 * 60 * 60 * 1000);
+  });
+  it("'never' disables either path (null)", () => {
+    expect(resolveDispatchScratchGraceMs({ WE_DISPATCH_SCRATCH_GRACE_HOURS: 'never' })).toBeNull();
+    expect(resolveDispatchScratchCeilingMs({ WE_DISPATCH_SCRATCH_CEILING_DAYS: 'never' })).toBeNull();
+  });
+});
 
 // #4090 (epic #3383/#4075, statute clause 2) — the no-net-outcome outcome-timestamp resolvers.
 describe('lastCommitAheadOfBaseMs — the build/fix outcome signal', () => {
