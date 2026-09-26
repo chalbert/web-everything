@@ -507,7 +507,22 @@ export function classifyPr(pr) {
   // `review:accepted` SUPERSEDES `review:human`: the human hold has already been cleared, so the PR is
   // waiting on the merge queue, not on the operator. Without this an accepted PR sits in their section forever.
   if (labels.has('review:human') && !labels.has('review:accepted')) return 'needs-human';
-  if (ciFailed(pr?.statusCheckRollup)) return 'ci-red';
+  // xx6kg3f (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PR #2739 (chalbert/web-everything): `ciFailed`
+  // is ONLY as current as the ONE `statusCheckRollup` a caller happened to fetch this tick. This file's own
+  // header already treats a degraded `gh` read as a normal, expected mode ("`gh` missing, unauthenticated,
+  // offline or rate-limited must not lose the page") — but `classifyPr` itself never carried that principle
+  // into the ci-red branch: a caller whose OWN read came back with an empty or partial rollup (a rate limit,
+  // a partial GraphQL page, a `gh` hiccup — never a proof the check is actually green) had `ciFailed([])`
+  // read `false`, and an ALREADY-failed, ALREADY-accepted PR fell straight through to `queued` — reading as
+  // safe to land. The durable `ci:failed` label (`we:scripts/merge-ai-prs.mjs#CI_LIFECYCLE_LABELS.failed`,
+  // reconciled from `isRequiredCheckFailed`'s own LATEST-run read of the SAME required check, #2421) is a
+  // SEPARATE, independently-refreshed record of the identical fact — trusting it here costs nothing when the
+  // live rollup already agrees (the common case) and closes exactly this gap when it does not: a stale
+  // `ci:failed` label can at worst cost one wasted, harmless ci-heal dispatch (ci-heal never touches a
+  // `review:*` label and stands down once it finds nothing red — `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s
+  // own header) against the alternative this incident lived through — an accepted, genuinely red PR reading
+  // as `queued`/nothing-owed indefinitely. OR'd with the live scan, never a replacement for it.
+  if (ciFailed(pr?.statusCheckRollup) || labels.has('ci:failed')) return 'ci-red';
   if (merge === 'DIRTY' || merge === 'BEHIND') return 'conflicted';
   if (labels.has('review:pending')) return 'needs-review';
   if (labels.has('review:accepted') || labels.has('ready-to-merge')) return 'queued';
