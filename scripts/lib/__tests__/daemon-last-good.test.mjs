@@ -94,8 +94,29 @@ describe('cloneKeyOf matches daemon-overlays.mjs#cloneKey (the two per-clone sta
 // ── b. decideLastGood — pure ─────────────────────────────────────────────────────────────────────────────────
 
 describe('decideLastGood — pure', () => {
-  it('onLastGood is true only when head===adopted.head AND the tree is clean', () => {
-    const state = { adopted: { head: 'abc123' } };
+  it('onLastGood is false when the clone is merely behind — no held record, no build in flight (#3383 I-18)', () => {
+    expect(decideLastGood({
+      headSha: 'abc123', state: { adopted: { head: 'abc123' } }, dirty: false, nowMs: 0, maxAgeMs: 1000,
+    }).onLastGood).toBe(false);
+    expect(decideLastGood({
+      headSha: 'abc123', state: { adopted: { head: 'abc123' }, held: null, building: null }, dirty: false, nowMs: 0, maxAgeMs: 1000,
+    }).onLastGood).toBe(false);
+    // A candidate smoke in flight (a fresh build lease) holds the clone too…
+    const building = { token: 't', startedAt: new Date(0).toISOString() };
+    expect(decideLastGood({
+      headSha: 'abc123', state: { adopted: { head: 'abc123' }, building }, dirty: false, nowMs: 60_000, maxAgeMs: 1000,
+    }).onLastGood).toBe(true);
+    // …but a leftover lease past the stale window (a crashed/unreleased build) does not.
+    expect(decideLastGood({
+      headSha: 'abc123', state: { adopted: { head: 'abc123' }, building }, dirty: false, nowMs: 21 * 60_000, maxAgeMs: 1000,
+    }).onLastGood).toBe(false);
+    expect(decideLastGood({
+      headSha: 'abc123', state: { adopted: { head: 'abc123' }, building: { token: 't' } }, dirty: false, nowMs: 0, maxAgeMs: 1000,
+    }).onLastGood).toBe(false); // no startedAt — unreadable, not a hold
+  });
+
+  it('onLastGood is true only when held, head===adopted.head AND the tree is clean', () => {
+    const state = { adopted: { head: 'abc123' }, held: { since: new Date(0).toISOString(), reason: 'smoke-rejected' } };
     expect(decideLastGood({
       headSha: 'abc123', state, dirty: false, nowMs: 0, maxAgeMs: 1000,
     }).onLastGood).toBe(true);
@@ -112,7 +133,7 @@ describe('decideLastGood — pure', () => {
       headSha: 'abc123', state: null, dirty: false, nowMs: 0, maxAgeMs: 1000,
     }).onLastGood).toBe(false); // no state at all
     expect(decideLastGood({
-      headSha: 'abc123', state: { adopted: null }, dirty: false, nowMs: 0, maxAgeMs: 1000,
+      headSha: 'abc123', state: { adopted: null, held: state.held }, dirty: false, nowMs: 0, maxAgeMs: 1000,
     }).onLastGood).toBe(false); // nothing ever adopted
   });
 

@@ -37,6 +37,11 @@ export const WE_DAEMON_STATE_DIR_ENV = 'WE_DAEMON_STATE_DIR';
 export const LAST_GOOD_MAX_AGE_ENV = 'WE_DAEMON_LAST_GOOD_MAX_AGE_MS';
 export const DEFAULT_LAST_GOOD_MAX_AGE_MS = 24 * 60 * 60_000;
 
+/** Same env + default as `daemon-rebuild.mjs`'s `REBUILD_LEASE_STALE_ENV` / `DEFAULT_REBUILD_LEASE_STALE_MS`
+ *  (re-stated, not imported — see the file header's import-cycle note). */
+export const REBUILD_LEASE_STALE_ENV = 'WE_DAEMON_REBUILD_LEASE_STALE_MS';
+export const REBUILD_LEASE_STALE_MS_DEFAULT = 20 * 60_000;
+
 /** `<WE_DAEMON_STATE_DIR || ~/.claude/daemon-self-sync-state>`. */
 export function daemonStateDir(env = process.env) {
   return (env && env[WE_DAEMON_STATE_DIR_ENV]) || join(homedir(), '.claude', 'daemon-self-sync-state');
@@ -65,18 +70,27 @@ export function readRebuildStateFile(root, env = process.env) {
 }
 
 /**
- * PURE: is the clone running its last smoke-verified build?
- * `onLastGood` needs all three: a recorded `adopted.head`, HEAD equal to it, and a clean tree (a modified tree is
- * not the build the smoke verified). `heldSince`/`ageMs`/`overAge` come from `state.held` when the rebuild
- * recorded one (a smoke failure is what holds it); with no `held` record the age is unknown (`null`, never over).
+ * PURE: is the clone HELD on its last smoke-verified build?
+ * `onLastGood` needs all four: a recorded `adopted.head`, HEAD equal to it, a clean tree (a modified tree is not
+ * the build the smoke verified), AND the rebuild actually holding the clone there — a `state.held` record (a
+ * smoke failure kept it) or a `state.building` lease younger than {@link REBUILD_LEASE_STALE_MS_DEFAULT} (a
+ * candidate smoke is in flight — an older record is a leftover from a crashed/unreleased build, not a hold;
+ * same window as `daemon-rebuild.mjs#buildLeaseIsLive`, same env override). A clone that is merely
+ * behind because `origin/main` moved since its last rebuild is NOT held: the staleness guard must still refuse
+ * it, so `daemon-self-sync.mjs#withSelfSync` re-syncs and restarts within the same tick (#3383 I-18) instead of
+ * dispatching off stale code until the next interval. `heldSince`/`ageMs`/`overAge` come from `state.held`
+ * when recorded; with no `held` record the age is unknown (`null`, never over).
  * @param {{headSha:string|null, state:object|null, dirty?:boolean, nowMs:number, maxAgeMs:number}} o
  * @returns {{onLastGood:boolean, lastGood:string|null, held:object|null, heldSince:string|null,
  *   ageMs:number|null, overAge:boolean}}
  */
-export function decideLastGood({ headSha, state, dirty = false, nowMs, maxAgeMs }) {
+export function decideLastGood({ headSha, state, dirty = false, nowMs, maxAgeMs, leaseStaleMs = REBUILD_LEASE_STALE_MS_DEFAULT }) {
   const lastGood = state?.adopted?.head ?? null;
   const held = state?.held ?? null;
-  const onLastGood = !!(lastGood && headSha && headSha === lastGood && !dirty);
+  const leaseStartedMs = Date.parse(state?.building?.startedAt || '');
+  const building = Number.isFinite(leaseStartedMs) && nowMs - leaseStartedMs <= leaseStaleMs;
+  const holding = !!held || building;
+  const onLastGood = !!(lastGood && headSha && headSha === lastGood && !dirty && holding);
   const sinceMs = Date.parse(held?.since || '');
   const ageMs = Number.isFinite(sinceMs) ? Math.max(0, nowMs - sinceMs) : null;
   return {
@@ -99,5 +113,6 @@ export function lastGoodForClone({
 }) {
   return decideLastGood({
     headSha, state: readState(root, env), dirty, nowMs: now, maxAgeMs: lastGoodMaxAgeMs(env),
+    leaseStaleMs: Number(env?.[REBUILD_LEASE_STALE_ENV]) > 0 ? Number(env[REBUILD_LEASE_STALE_ENV]) : REBUILD_LEASE_STALE_MS_DEFAULT,
   });
 }
