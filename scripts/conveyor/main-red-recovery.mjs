@@ -635,3 +635,223 @@ export function planHungCiRecoveries({
   }
   return { dispatch, refusals };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// MISSING-CI-RUN RECOVERY — we:backlog/xi4od2p-*.md (parent #4075, epic #3383). LIVE INCIDENT 2026-09-26: PR
+// chalbert/web-everything#2729 (#4166) sat `review:accepted` + `MERGEABLE` but `BLOCKED`, labelled `checking`,
+// because its head 19889a0e never got a `test`/`smoke`/`daemon-soak` run queued AT ALL — not failed, not hung,
+// simply never created (only 3x `review-gate`, unrelated). Confirmed root cause: #2729 was opened stacked on
+// #2722's branch; when #2722 merged (2026-09-26 15:13:48Z), GitHub fired a `base_ref_changed` timeline event on
+// #2729 two seconds earlier (15:13:46Z), retargeting its base onto `main` — but a base-ref retarget alone never
+// triggers a new `pull_request`/`workflow_dispatch` run, so the required checks under the NEW base were simply
+// never queued. `gh run list --commit 19889a0e` returns nothing; `gh api commits/.../check-runs` shows only
+// `review-gate`.
+//
+// WHY NEITHER EXISTING PASS ABOVE SEES THIS. {@link isPrCiFailureOwedRerun} (main-red-rebase) and
+// {@link planHungCiRecoveries} (hung-run) both only reason about a required check that has already CONCLUDED
+// (a real `failure`/`cancelled`/… verdict) or is already `IN_PROGRESS`/`QUEUED` — {@link buildHungCandidates}
+// explicitly `continue`s past a PR whose rollup has NO entry at all for the CI workflow (`if (!ciChecks.length)
+// continue`), because that function's whole population is "a run IS open, is it hung". A PR whose required
+// checks never even started is a THIRD, disjoint population from both: not red, not hung, not green — simply
+// absent. This section is that population's pass. Mirrors the pure classify/plan shape of both passes above.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Default set of required check names this pass watches when the caller has none from branch protection —
+ *  see `ci-red-recovery-watch.mjs#defaultReadRequiredContexts`'s own docblock for why the REAL set is read
+ *  live off `GET /repos/{repo}/branches/{branch}/protection` rather than hardcoded here; this default only
+ *  covers a read failure or a test double that supplies none. */
+export const DEFAULT_REQUIRED_CONTEXTS = Object.freeze([DEFAULT_REQUIRED_CHECK]);
+
+/** How long a head sha may sit with zero rollup entries for every required context before this pass calls it
+ *  missing rather than "just hasn't started yet" — ordinary GitHub Actions queue latency is seconds, not
+ *  minutes (see {@link DEFAULT_HUNG_THRESHOLD_MS}'s own measured p95s for this repo's real run durations), so
+ *  10 minutes is generous headroom before treating silence as a genuine gap, per this card's own scope ("e.g.
+ *  10"). Configurable, mirroring every other threshold in this file. */
+export const DEFAULT_MISSING_RUN_THRESHOLD_MS = 10 * 60 * 1000;
+
+/** Mirrors {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}/{@link DEFAULT_MAX_HUNG_RETRIES_PER_SHA}'s own shape and
+ *  reasoning: a head sha whose missing-run trigger has already been attempted this many times without a real
+ *  check ever appearing is no longer "give it one more mechanical nudge" — it is a real signal (the workflow
+ *  itself is broken, Actions are disabled, a `gh` credential gap) this pass should stop absorbing and hand to a
+ *  human/ci-heal instead. */
+export const DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA = 2;
+
+/** The stable FIRST LINE of the durable missing-run-recovery comment, mirroring
+ *  {@link REBASE_ONTO_MAIN_COMMENT_MARKER}/{@link HUNG_CI_COMMENT_MARKER}'s own shape — a distinct marker text
+ *  so this cap never cross-counts with either sibling cap. */
+export const MISSING_RUN_COMMENT_MARKER = '🚦 conveyor missing-run-recovery';
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#buildMissingRunCandidates — narrow an open-PR listing to one row
+ * per PR whose rollup has NO entry at all — not `QUEUED`, not `IN_PROGRESS`, not `COMPLETED`, nothing — for ANY
+ * of `requiredContexts`. PURE. Deliberately independent of `buildHungCandidates`'s own `workflowName` filter: a
+ * required context is matched by NAME (mirroring `latestRequiredCheck`'s own `(c.name||c.context)` lookup),
+ * never by which workflow produced it, because the whole point of this population is "this name has NEVER
+ * reported", which a workflow-name filter can't even test (there is no row to read a workflow name off). A PR
+ * is a candidate only when EVERY required context is absent — one that has already reported for SOME of them
+ * (a partial rollup) is not this pass's population; {@link buildHungCandidates}/the ordinary red/green paths
+ * already own a partially-reported PR.
+ *
+ * UNKNOWN required contexts (`requiredContexts: null` — the branch-protection read failed, which it does for the
+ * daemon's GitHub App token: 403 "Resource not accessible by integration") → never guess a name set (a guessed
+ * `['test']` would flag a PR that already reported `smoke`; PR #2740 review). Instead fall back to the NARROWER,
+ * name-free test: a PR is a candidate only when its rollup has NO entry at all from the CI workflow
+ * (`workflowName`) — a PR that reported ANY CI-workflow check is never flagged.
+ * @param {Array<object>} prs - as `gh pr list --json number,headRefName,headRefOid,statusCheckRollup` returns.
+ * @param {{requiredContexts?:(string[]|null), workflowName?:string}} [o]
+ * @returns {Array<{prNumber:number, headRefName:(string|null), headSha:(string|null), baseRefName:(string|null)}>}
+ */
+export function buildMissingRunCandidates(prs, { requiredContexts = DEFAULT_REQUIRED_CONTEXTS, workflowName = DEFAULT_MAIN_WORKFLOW_NAME } = {}) {
+  const unknown = requiredContexts === null;
+  // An explicitly EMPTY required set means nothing is required, so nothing can be missing — never substitute
+  // the default for it (PR #2740 review). Only `undefined`/a non-array non-null (no caller value) gets the default.
+  const names = unknown ? [] : (Array.isArray(requiredContexts) ? requiredContexts : DEFAULT_REQUIRED_CONTEXTS);
+  if (!unknown && !names.length) return [];
+  const out = [];
+  for (const pr of Array.isArray(prs) ? prs : []) {
+    const prNumber = Number(pr?.number);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
+    const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
+    const allMissing = unknown
+      ? !roll.some((c) => c?.workflowName === workflowName)
+      : (() => {
+        const reported = new Set(roll.map((c) => c?.name || c?.context).filter(Boolean));
+        return names.every((n) => !reported.has(n));
+      })();
+    if (!allMissing) continue; // at least one required context has SOME entry — not this pass's population.
+    out.push({ prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null, baseRefName: pr?.baseRefName ?? null });
+  }
+  return out;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#isMissingRunOverdue — has a head sha with zero required-check
+ * rollup entries been sitting that way since further back than `thresholdMs`? PURE. Mirrors {@link isRunHung}'s
+ * own shape exactly, anchored on the head commit's own `committedDate` rather than a run's `startedAt` — there
+ * IS no run to anchor on here, which is precisely the defect this pass exists to close.
+ * @param {{headCommittedAt?:(string|null), now?:number, thresholdMs?:number}} o
+ * @returns {boolean}
+ */
+export function isMissingRunOverdue({ headCommittedAt, now = Date.now(), thresholdMs = DEFAULT_MISSING_RUN_THRESHOLD_MS } = {}) {
+  const committed = Date.parse(headCommittedAt);
+  if (!Number.isFinite(committed)) return false;
+  return (now - committed) >= thresholdMs;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#planMissingRunRecoveries — THE PASS `ci-red-recovery-watch.mjs`
+ * runs to decide which missing-run candidates are owed a trigger right now. PURE, total — every candidate
+ * yields exactly one dispatch or refusal, mirroring {@link planMainRedRebases}/{@link planHungCiRecoveries}'s
+ * own discipline.
+ *
+ * ORDER OF THE CHECKS:
+ *   1. `headCommittedAt` unreadable → `unknown-committed-at` (never guess).
+ *   2. Not overdue yet ({@link isMissingRunOverdue} false) → `not-overdue` — the ordinary case for a PR whose
+ *      head was JUST pushed/retargeted.
+ *   3. This head sha already used up its trigger-attempt cap → `missing-run-cap-exhausted`: a mechanical
+ *      trigger that has not produced a real check run after this many tries is no longer "GitHub hasn't
+ *      noticed yet" — hand it to a human/ci-heal instead.
+ *   4. Otherwise → `trigger-ci` dispatch. `preferUpdateBranch` (true when `aheadBy > 0`) tells the IO shell to
+ *      prefer a `rebaseDropManifest` refresh onto `main` (whose push starts a fresh run AND closes the same
+ *      staleness {@link planMainRedRebases} exists to fix) over a bare `gh workflow run` dispatch — never the
+ *      raw `update-branch` REST endpoint (PR #2740 review).
+ * @param {object} o
+ * @param {Array<{prNumber:number, headRefName?:(string|null), headSha?:(string|null),
+ *   headCommittedAt?:(string|null), aheadBy?:(number|null), triggerAttemptsForSha?:number}>} [o.candidates]
+ * @param {number} [o.now]
+ * @param {number} [o.thresholdMs]
+ * @param {number} [o.maxRetriesPerSha]
+ * @returns {{dispatch:Array<object>, refusals:Array<object>}}
+ */
+export function planMissingRunRecoveries({
+  candidates = [], now = Date.now(), thresholdMs = DEFAULT_MISSING_RUN_THRESHOLD_MS,
+  maxRetriesPerSha = DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA,
+} = {}) {
+  const dispatch = [];
+  const refusals = [];
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const prNumber = Number(c?.prNumber);
+    if (!Number.isInteger(prNumber) || prNumber <= 0) continue;
+    const base = { prNumber, headRefName: c?.headRefName ?? null, headSha: c?.headSha ?? null };
+    if (!Number.isFinite(Date.parse(c?.headCommittedAt))) {
+      refusals.push({ ...base, kind: 'unknown-committed-at', why: `PR #${prNumber}'s head commit date could not be read — refusing to guess whether it is overdue` });
+      continue;
+    }
+    if (!isMissingRunOverdue({ headCommittedAt: c.headCommittedAt, now, thresholdMs })) {
+      const minutes = Math.round(thresholdMs / 60000);
+      refusals.push({ ...base, kind: 'not-overdue', why: `PR #${prNumber}'s head has no required-check run yet, but has not been silent past the ${minutes}min missing-run threshold` });
+      continue;
+    }
+    const attempts = Number.isFinite(c?.triggerAttemptsForSha) ? c.triggerAttemptsForSha : 0;
+    if (attempts >= maxRetriesPerSha) {
+      refusals.push({
+        ...base, kind: 'missing-run-cap-exhausted', attempts,
+        why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} already had ${attempts} missing-run trigger attempt(s) that did not produce a real check run (cap ${maxRetriesPerSha}) — this needs a human/ci-heal look, not another mechanical trigger`,
+      });
+      continue;
+    }
+    dispatch.push({
+      ...base, baseRefName: c?.baseRefName ?? null, attempts, kind: 'trigger-ci',
+      preferUpdateBranch: Number.isFinite(c?.aheadBy) ? c.aheadBy > 0 : false,
+      why: `PR #${prNumber}'s head sha ${base.headSha ?? '?'} has had NO required-check run at all since its head commit, past the missing-run threshold — triggering CI`,
+    });
+  }
+  return { dispatch, refusals };
+}
+
+/** Mirrors `bodyHasExactLine` above (duplicated for the same reason {@link REBASE_ONTO_MAIN_COMMENT_MARKER}'s
+ *  own docblock gives — avoiding a circular import back from `ci-red-recovery-watch.mjs`). */
+function missingRunBodyHasExactLine(body, line) {
+  if (typeof body !== 'string' || typeof line !== 'string' || !line) return false;
+  return body.split('\n').some((l) => l === line);
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#countMissingRunComments — the DURABLE, restart-surviving
+ * missing-run trigger-attempt count for ONE head sha, mirroring {@link countRebaseOntoMainComments}/
+ * `ci-red-recovery-watch.mjs#countHungCiComments`'s own per-sha scoping and trusted-author gate exactly. Counts
+ * EVERY attempt marker regardless of outcome — a permanently-failing trigger must still trip the cap. PURE.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @param {string|null} [headSha]
+ * @returns {number}
+ */
+export function countMissingRunComments(comments, headSha = null) {
+  if (!Array.isArray(comments)) return 0;
+  let n = 0;
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !body.trimStart().startsWith(MISSING_RUN_COMMENT_MARKER)) continue;
+    if (!isTrustedMarkerAuthor(c)) continue;
+    if (headSha && !missingRunBodyHasExactLine(body, `sha: ${headSha}`)) continue;
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#buildMissingRunComment — the durable comment body posted after
+ * EVERY missing-run trigger attempt, success or failure — mirrors {@link buildRebaseOntoMainComment}'s own
+ * "count every attempt, not just every success" discipline. PURE.
+ * @param {{headRefName?:(string|null), headSha?:(string|null), ok?:boolean, action?:string, error?:(string|null)}} o
+ * @returns {string}
+ */
+export function buildMissingRunComment({
+  headRefName = null, headSha = null, ok = true, action = 'workflow-dispatch', error = null,
+  refresh = null, refreshError = null,
+} = {}) {
+  // When a behind-main refresh was attempted but did not push (already current / a real conflict), say so — the
+  // trigger then fell back to a workflow dispatch, and a reader needs to know the branch is still behind.
+  const refreshNote = refresh
+    ? ` (refresh onto main first: ${refresh}${refreshError ? ` — ${refreshError}` : ''})`
+    : '';
+  const outcome = ok
+    ? `this head had no required-check run at all — triggered CI via ${action}${refreshNote}.`
+    : `attempted to trigger CI (${action}${refreshNote}) and it FAILED: ${error ?? '(no error text captured)'} — this attempt still counts toward the retry cap so a persistently-failing trigger cannot retry forever; once capped, this is left for a human/ci-heal look instead.`;
+  return [
+    MISSING_RUN_COMMENT_MARKER,
+    '',
+    `branch: ${headRefName ?? '(unknown)'}`,
+    `sha: ${headSha ?? '(unknown)'}`,
+    `conveyor missing-run-recovery ${outcome}`,
+  ].join('\n');
+}
