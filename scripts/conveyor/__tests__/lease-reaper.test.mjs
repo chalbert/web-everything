@@ -37,6 +37,7 @@ import {
   AGENT_GONE_STATES,
   repoKeyForPool,
   fetchPrStatesForRepo,
+  detachedWrapperPidsBySession,
 } from '../lease-reaper.mjs';
 import { DEFAULT_LEASE_TTL_MINUTES } from '../../lib/lane-lease.mjs';
 import { DISPATCH_GUARD_LISTING_GRACE_MINUTES } from '../../operations/dispatch-lane.mjs';
@@ -471,6 +472,37 @@ describe('sessionStatesForReap — #1921 review fix: an ALL-EMPTY listing degrad
     expect(sessionStatesForReap([{ kind: 'interactive', name: 'conveyor-1', state: 'working' }])).toBe(null);
     expect(sessionStatesForReap(null)).toBe(null);
     expect(sessionStatesForReap(undefined)).toBe(null);
+  });
+});
+
+describe('#3903 — a lease held by a detached delivery wrapper (Codex build) is never read as session-gone while the wrapper runs', () => {
+  const agedLease = (session) => ({ session, acquiredAt: new Date(NOW - (GRACE_MS + 30 * 60_000)).toISOString() });
+  const states = sessionStateByName([{ kind: 'background', name: 'conveyor-9999', state: 'working' }]);
+
+  it('the wrapper session is never in `claude agents`, so WITHOUT the wrapper signal an hour-old build reads gone', () => {
+    expect(sessionGoneForLease(agedLease('conveyor-3622'), states, { nowMs: NOW })).toBe(true);
+  });
+
+  it('wrapperAlive: true → NOT gone, whatever the listing says', () => {
+    expect(sessionGoneForLease(agedLease('conveyor-3622'), states, { nowMs: NOW, wrapperAlive: true })).toBe(false);
+    expect(classifyReap(agedLease('conveyor-3622'), { nowMs: NOW, sessionGone: sessionGoneForLease(agedLease('conveyor-3622'), states, { nowMs: NOW, wrapperAlive: true }) }).reap).toBe(false);
+  });
+
+  it('wrapperAlive: false / null change nothing — a dead wrapper\'s lane is reclaimed as before', () => {
+    expect(sessionGoneForLease(agedLease('conveyor-3622'), states, { nowMs: NOW, wrapperAlive: false })).toBe(true);
+    expect(sessionGoneForLease(agedLease('conveyor-3622'), states, { nowMs: NOW, wrapperAlive: null })).toBe(true);
+  });
+
+  it('detachedWrapperPidsBySession maps only in-flight `pid:` handles to their session slug', () => {
+    const runs = [
+      { effects: [{ status: 'in-flight', handle: 'pid:4242', payload: { sessionSlug: 'conveyor-3622' } }] },
+      { effects: [{ status: 'in-flight', handle: 'a1b2c3d4', payload: { sessionSlug: 'conveyor-100' } }] }, // claude --bg
+      { effects: [{ status: 'succeeded', handle: 'pid:77', payload: { sessionSlug: 'conveyor-200' } }] }, // finished
+      { effects: [{ status: 'in-flight', handle: 'pid:88', payload: {} }] }, // no session
+      null,
+    ];
+    expect([...detachedWrapperPidsBySession(runs)]).toEqual([['conveyor-3622', 4242]]);
+    expect(detachedWrapperPidsBySession(undefined).size).toBe(0);
   });
 });
 

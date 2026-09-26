@@ -198,6 +198,35 @@ describe('assessLiveState — overall is the worst of every section', () => {
     expect(assessLiveState(withRedAuth).overall).toBe('red');
   });
 
+  it('running is [] (not thrown, not undefined) when the collector never carried runningRows — old snapshot shape stays valid', () => {
+    const read = {
+      observedAt: now,
+      daemonStatus: { daemons: [], anyRefusing: false, refusingDaemons: [], anyDown: false, downDaemons: [], anyStalled: false, staleDaemons: [], anyRecentAlerts: false, alertingDaemons: [] },
+      heavyQueue: { projectedWaitMinutesForNewJob: 0, freeCount: 1 },
+      health: { running: false, lastTick: null, episodes: [] },
+      lanePools: [], drain: { lastPass: null }, githubAuth: null, machineLoad: { loadavg: [0], cores: 1 },
+    };
+    expect(assessLiveState(read).running).toEqual([]);
+  });
+
+  it('card x20lkf6 — running carries the RUNNING section, built over runningRows + this SAME heavyQueue', () => {
+    const read = {
+      observedAt: now,
+      daemonStatus: { daemons: [], anyRefusing: false, refusingDaemons: [], anyDown: false, downDaemons: [], anyStalled: false, staleDaemons: [], anyRecentAlerts: false, alertingDaemons: [] },
+      heavyQueue: { projectedWaitMinutesForNewJob: 0, freeCount: 1, rows: [] },
+      health: { running: false, lastTick: null, episodes: [] },
+      lanePools: [], drain: { lastPass: null }, githubAuth: null, machineLoad: { loadavg: [0], cores: 1 },
+      runningRows: [{
+        id: 'sess-1', sessionId: 'sess-1', name: 'conveyor-4001', kind: 'background', pid: 111,
+        cwd: '/repo', state: 'working', startedAt: new Date(nowMs - 1000).toISOString(),
+        transcriptPath: '/t/ok.jsonl', lastActivityAt: nowMs - 500, pidAlive: true,
+      }],
+    };
+    const out = assessLiveState(read);
+    expect(out.running).toHaveLength(1);
+    expect(out.running[0]).toMatchObject({ runId: 'sess-1', kind: 'build', state: 'working' });
+  });
+
   it('throws on an unreadable snapshot rather than silently reporting green', () => {
     expect(() => assessLiveState(null)).toThrow();
   });

@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { laneGuardDecision, resolveReal, workspaceRootOf } from '../guard-lane.mjs';
+import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -357,5 +358,87 @@ describe('resolveReal + decision through the user-level memory symlink', () => {
     const real = resolveReal(target);
     expect(real).toContain(`${path.sep}webeverything${path.sep}agent-memory-src${path.sep}`);
     expect(laneGuardDecision(real, weRoot)).toMatch(/Agent memory is git-tracked/);
+  });
+});
+
+// #xpt9fvd — a resident daemon's OWN dedicated clone gets the SAME protection a primary checkout already
+// has. Three times on 2026-09-26 a worker hand-edited/copied files INSIDE wev-review-daemon (caught +
+// reverted each time); a dirty daemon clone BLOCKS that daemon's own rebuild until a person notices.
+describe('laneGuardDecision — DAEMON CLONE protection (#xpt9fvd)', () => {
+  const daemonRoots = daemonCloneRoots(WORKSPACE);
+
+  it('DENIES an Edit/Write into a daemon clone (wev-review-daemon)', () => {
+    const msg = laneGuardDecision(p('wev-review-daemon', 'notes.md'), WE_ROOT, { daemonCloneRoots: daemonRoots });
+    expect(msg).toMatch(/BLOCKED/);
+    expect(msg).toMatch(/DAEMON CLONE/);
+    expect(msg).toMatch(/daemon-overlay\.mjs add --clone=/);
+  });
+
+  it('DENIES into every seeded daemon clone, not just one', () => {
+    for (const name of ['wev-merge-daemon', 'wev-health-watch', 'wev-host-sampler', 'plateau-drain-daemon']) {
+      expect(laneGuardDecision(p(name, 'x.md'), WE_ROOT, { daemonCloneRoots: daemonRoots }), name).toMatch(/DAEMON CLONE/);
+    }
+  });
+
+  // THE STRUCTURAL REGRESSION THIS ARM EXISTS TO CLOSE: the WE drain's own dedicated clone sits UNDER
+  // `.lanes/`, which the ordinary lane-clone test (`inLane` — a bare `/.lanes/` substring test) would read as
+  // an ordinary pool lane and allow outright, exactly like any freshly-acquired lane. The daemon-clone check
+  // must win BEFORE that shortcut, since this path also satisfies `inLane`.
+  it('DENIES the drain clone under .lanes/ — the ordinary lane-clone allow-shortcut must NOT swallow it', () => {
+    const drainFile = p('.lanes', 'we-drain-daemon', 'lane-1', 'scripts', 'x.mjs');
+    expect(drainFile).toContain(`${path.sep}.lanes${path.sep}`); // sanity: this path WOULD read as an ordinary lane
+    const msg = laneGuardDecision(drainFile, WE_ROOT, { daemonCloneRoots: daemonRoots });
+    expect(msg).toMatch(/BLOCKED/);
+    expect(msg).toMatch(/DAEMON CLONE/);
+  });
+
+  it('ALLOWS an ordinary pool lane one directory over — the daemon-clone test does not over-match', () => {
+    const ordinaryLane = p('.lanes', 'web-everything', 'lane-7', 'scripts', 'x.mjs');
+    expect(laneGuardDecision(ordinaryLane, WE_ROOT, { daemonCloneRoots: daemonRoots })).toBeNull();
+  });
+
+  it('ALLOWS a daemon clone with NO registry roots configured — never blocks on an empty list', () => {
+    expect(laneGuardDecision(p('wev-review-daemon', 'notes.md'), WE_ROOT, { daemonCloneRoots: [] })).toBeNull();
+    expect(laneGuardDecision(p('wev-review-daemon', 'notes.md'), WE_ROOT)).toBeNull(); // default: []
+  });
+
+  it('there is NO LANE_GUARD_OFF-style escape hatch advertised for a daemon clone', () => {
+    const msg = laneGuardDecision(p('wev-review-daemon', 'notes.md'), WE_ROOT, { daemonCloneRoots: daemonRoots });
+    expect(msg).not.toMatch(/LANE_GUARD_OFF/);
+  });
+});
+
+// The impure half, through the REAL CLI: a clone registered ONLY via the overlay-state directory (no seed
+// entry needed) is protected too — proof that "derive from the registry" actually reaches the hook, not just
+// the hard-coded seed list.
+describe('#xpt9fvd — the guard-lane CLI protects a clone discovered via the daemon-overlay registry', () => {
+  const root = mkdtempSync(path.join(realpathSync(tmpdir()), 'guard-lane-daemon-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const overlayDir = path.join(root, 'overlay-state');
+  const fakeClone = path.join(root, 'some-new-daemon-clone'); // deliberately NOT in DAEMON_CLONE_SEED
+  mkdirSync(overlayDir, { recursive: true });
+  mkdirSync(fakeClone, { recursive: true });
+  writeFileSync(path.join(overlayDir, 'abc123.json'), JSON.stringify({ clone: fakeClone, overlays: [] }));
+
+  const runHook = (targetFile) => {
+    mkdirSync(path.dirname(targetFile), { recursive: true });
+    writeFileSync(targetFile, '// x\n');
+    const guard = path.join(realpathSync(path.join(here, '..')), 'guard-lane.mjs');
+    const res = spawnSync(process.execPath, [guard], {
+      input: JSON.stringify({ tool_input: { file_path: targetFile } }),
+      env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir, LANE_GUARD_OFF: '' },
+      encoding: 'utf8',
+    });
+    return { code: res.status, err: res.stderr || '' };
+  };
+
+  it('EXITS 2 (deny) for an Edit into a clone that is registered ONLY in the overlay state dir', () => {
+    const r = runHook(path.join(fakeClone, 'notes.md'));
+    expect(r.code).toBe(2);
+    expect(r.err).toMatch(/DAEMON CLONE/);
+  });
+
+  it('exits 0 (allow) for an unrelated file elsewhere', () => {
+    expect(runHook(path.join(root, 'unrelated', 'x.md')).code).toBe(0);
   });
 });

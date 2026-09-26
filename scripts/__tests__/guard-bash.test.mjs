@@ -17,11 +17,13 @@ import {
   usageReportSecretReadReason,
   isTruncatedOperationJson, truncatedOperationJsonReason,
   isTreeWritingBuildRun, isGeneratorScriptRun, isFileWriteRedirect, primaryTreeWriteReason,
+  daemonCloneWriteReason,
   mainSessionDelegateNudge, hasLeadingEnvEscape, canonicalCommand, shellTokens, stripHeredocBodies,
   splitSegments, runnerInvocation, parseSegments, unparseableReason, heredocScan,
   nestedCommandStrings, fileWriteTargets, collateralStepsNotice, mergeBreakGlassUsed,
   rawHeavyCommandReason, vitestRunFileTargetCount, RAW_VITEST_TARGETED_FILE_LIMIT,
 } from '../guard-bash.mjs';
+import { daemonCloneRoots } from '../lib/daemon-clone-registry.mjs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -3273,5 +3275,135 @@ describe('guard-bash — a decision-authoring agent may never run the mechanical
     expect(decide('git status && git add -- backlog/2568-a.md && git commit -F /lane-6/.msg.txt -- backlog/2568-a.md', K)).toBeNull();
     // the identical command with no dispatchKind at all (interactive) — untouched
     expect(decide('node scripts/backlog.mjs prepare-stamp 2568')).toBeNull();
+  });
+});
+
+// #xpt9fvd — a resident daemon's OWN dedicated clone (wev-review-daemon, wev-merge-daemon, wev-health-watch,
+// the drain's clone(s)) gets the SAME shell-write protection the #2749/#2788 primary-tree arm already gives a
+// constellation checkout. Three times on 2026-09-26 a worker hand-edited/copied files INSIDE the daemon's OWN
+// clone — caught + reverted each time, but a dirty clone BLOCKS that daemon's own rebuild until a person
+// notices. The proof matrix below is the literal deny/allow set the card asks for.
+describe('guard-bash — DAEMON CLONE write protection (#xpt9fvd)', () => {
+  const CLONE = '/ws/wev-review-daemon';
+  const LANE = '/ws/.lanes/web-everything/lane-53';
+  const roots = [CLONE];
+
+  it('DENIES an Edit-equivalent shell write with cwd already inside the clone', () => {
+    expect(daemonCloneWriteReason('echo hi > notes.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('sed -i s/a/b/ notes.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('tee notes.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+  });
+
+  it('DENIES cp/mv/rm with cwd already inside the clone', () => {
+    expect(daemonCloneWriteReason('cp fix.md notes.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('mv a.md b.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('rm old.md', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+  });
+
+  it('DENIES cp/rm run from OUTSIDE the clone with an explicit operand path INTO it', () => {
+    expect(daemonCloneWriteReason(`cp fix.md ${CLONE}/fix.md`, { cwd: LANE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason(`rm ${CLONE}/old.md`, { cwd: LANE, roots })).toMatch(/DAEMON CLONE/);
+  });
+
+  it('DENIES git reset/checkout/commit — cwd inside the clone, or via `-C <clone>` from elsewhere', () => {
+    expect(daemonCloneWriteReason('git reset --hard origin/main', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('git checkout -- .', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason('git commit -am wip', { cwd: CLONE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason(`git -C ${CLONE} reset --hard origin/main`, { cwd: LANE, roots })).toMatch(/DAEMON CLONE/);
+    expect(daemonCloneWriteReason(`git -C ${CLONE} commit -am wip`, { cwd: LANE, roots })).toMatch(/DAEMON CLONE/);
+  });
+
+  it('ALLOWS git fetch — diagnosis only, never touches the working tree (the explicit card decision)', () => {
+    expect(daemonCloneWriteReason('git fetch origin', { cwd: CLONE, roots })).toBeNull();
+    expect(daemonCloneWriteReason(`git -C ${CLONE} fetch origin`, { cwd: LANE, roots })).toBeNull();
+  });
+
+  it('ALLOWS read-only commands targeting the clone — `git -C <clone> log`, `cat`, `git status`', () => {
+    expect(daemonCloneWriteReason(`git -C ${CLONE} log`, { cwd: LANE, roots })).toBeNull();
+    expect(daemonCloneWriteReason('cat notes.md', { cwd: CLONE, roots })).toBeNull();
+    expect(daemonCloneWriteReason('git status', { cwd: CLONE, roots })).toBeNull();
+    expect(daemonCloneWriteReason('git diff', { cwd: CLONE, roots })).toBeNull();
+  });
+
+  it('ALLOWS the sanctioned overlay/rebuild CLIs invoked with --clone=<path> from a lane', () => {
+    expect(daemonCloneWriteReason(`node scripts/daemon-overlay.mjs add --clone=${CLONE} --ref=lane/fix --pr=1`, { cwd: LANE, roots })).toBeNull();
+    expect(daemonCloneWriteReason(`node scripts/lib/daemon-rebuild.mjs --clone=${CLONE}`, { cwd: LANE, roots })).toBeNull();
+    expect(daemonCloneWriteReason(`node scripts/lib/daemon-load-overlay.mjs --clone=${CLONE} --ref=lane/fix`, { cwd: LANE, roots })).toBeNull();
+  });
+
+  it('ALLOWS a write elsewhere entirely — an ordinary lane write is untouched', () => {
+    expect(daemonCloneWriteReason('echo hi > notes.md', { cwd: LANE, roots })).toBeNull();
+    expect(daemonCloneWriteReason('cp fix.md /tmp/fix.md', { cwd: LANE, roots })).toBeNull();
+    expect(daemonCloneWriteReason('git reset --hard origin/main', { cwd: LANE, roots })).toBeNull();
+  });
+
+  it('ALLOWS everything when the registry is empty — never blocks on an unconfigured/fault-read registry', () => {
+    expect(daemonCloneWriteReason('git reset --hard origin/main', { cwd: CLONE, roots: [] })).toBeNull();
+    expect(daemonCloneWriteReason('cp fix.md notes.md', { cwd: CLONE, roots: [] })).toBeNull();
+  });
+
+  it('reaches reason()/decide() — the real enforcement points, not just the pure predicate', () => {
+    const ctx = { cwd: CLONE, daemonCloneRoots: roots };
+    expect(reason('git reset --hard origin/main', ctx)).toMatch(/DAEMON CLONE/);
+    expect(decide('git status && git reset --hard origin/main', ctx)).toMatch(/DAEMON CLONE/);
+    expect(decide('git status', ctx)).toBeNull();
+    // untouched with NO daemon context at all (every other describe block in this file relies on this)
+    expect(decide('git reset --hard origin/main')).toBeNull();
+  });
+
+  it('daemonCloneRoots derives the real seed + registry union (sanity check, not a CLI test)', () => {
+    const real = daemonCloneRoots('/ws');
+    expect(real).toContain('/ws/wev-review-daemon');
+    expect(real).toContain('/ws/wev-merge-daemon');
+    expect(real).toContain('/ws/wev-health-watch');
+    expect(real).toContain('/ws/.lanes/we-drain-daemon/lane-1');
+  });
+});
+
+// The impure half, through the REAL CLI: a clone registered ONLY via the overlay-state directory (no seed
+// entry needed) is protected too — proof that "derive from the registry, don't hard-code only" actually
+// reaches the hook. Also the live end-to-end proof the card's PROOF section asks for.
+describe('#xpt9fvd — the guard-bash CLI protects a clone discovered via the daemon-overlay registry', () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'guard-bash-daemon-'));
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const overlayDir = join(root, 'overlay-state');
+  const fakeClone = join(root, 'some-new-daemon-clone'); // deliberately NOT in DAEMON_CLONE_SEED
+  const lane = join(root, 'lane');
+  mkdirSync(overlayDir, { recursive: true });
+  mkdirSync(fakeClone, { recursive: true });
+  mkdirSync(lane, { recursive: true });
+  writeFileSync(join(overlayDir, 'def456.json'), JSON.stringify({ clone: fakeClone, overlays: [] }));
+
+  // The house idiom (see the #3311 CLI-boundary block above): vitest rewrites `import.meta.url` to a
+  // non-file base, so `new URL(…, import.meta.url)` + `fileURLToPath` is NOT used here.
+  const GUARD = join(dirname(fileURLToPath(import.meta.url)), '..', 'guard-bash.mjs');
+  const runHook = (command, cwd) => {
+    const res = execFileSync(process.execPath, [GUARD], {
+      input: JSON.stringify({ tool_input: { command }, cwd }),
+      env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir },
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    return res ? JSON.parse(res) : null;
+  };
+
+  it('DENIES `cp` into the registry-discovered clone, run from a lane', () => {
+    const out = runHook(`cp fix.md ${join(fakeClone, 'fix.md')}`, lane);
+    expect(out?.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(out?.hookSpecificOutput?.permissionDecisionReason).toMatch(/DAEMON CLONE/);
+  });
+
+  it('DENIES `git reset --hard` with cwd inside the registry-discovered clone', () => {
+    const out = runHook('git reset --hard origin/main', fakeClone);
+    expect(out?.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+
+  it('ALLOWS `git -C <clone> log` and `cat` — read-only, unaffected', () => {
+    expect(runHook(`git -C ${fakeClone} log`, lane)).toBeNull();
+    expect(runHook(`cat ${join(fakeClone, 'x.md')}`, lane)).toBeNull();
+  });
+
+  it('ALLOWS the sanctioned overlay CLI invoked with --clone=<path> from a lane', () => {
+    expect(runHook(`node scripts/daemon-overlay.mjs add --clone=${fakeClone} --ref=lane/fix`, lane)).toBeNull();
   });
 });

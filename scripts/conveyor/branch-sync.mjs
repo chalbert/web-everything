@@ -54,6 +54,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { backoffMs, retryDecision } from './infra-blocked.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { ensureFullHistory } from '../lib/git-run.mjs';
 
 // ── TUNING (exported so a caller/test can override) ────────────────────────────────────────────────────────
 
@@ -272,7 +273,30 @@ export function runSyncOnce({
   //    narrower trigger (found in review): the attempt cap would still be reached every tick, but nothing
   //    would ever be written to the alert file / notified / logged as a banner — silently repeating exactly
   //    like the incident this file exists to fix, just for this one specific failure mode.
-  const probe = git(['merge-tree', '--write-tree', 'HEAD', `origin/${refName}`], cwd);
+  let probe = git(['merge-tree', '--write-tree', 'HEAD', `origin/${refName}`], cwd);
+  // #x8pcbf3 (live incident, PR #2752) — FIX AND RETRY, not a bare conflict: see `we:scripts/lib/git-run.mjs
+  // #ensureFullHistory`'s own header for the full incident. A checkout that is already a shallow clone inherits
+  // that shallow boundary onto any brand-new ref it fetches (like the `origin/<refName>` tracking ref step 1
+  // just wrote), which can make the probe above fail `fatal: refusing to merge unrelated histories` for a
+  // CHECKOUT-DEFECT reason, never a real conflict. Only paid for on this (rare) failure path — the ordinary
+  // happy path never runs an extra probe. Adapts this file's own `(args, cwd) -> {ok, stdout, stderr}` git
+  // contract to the shared helper's `(cmd, args, opts) -> {status, stdout, stderr}` one, rather than a second
+  // copy of the shallow-detection logic.
+  if (!probe.ok && /unrelated histories/i.test(probe.stderr || '')) {
+    const historyRun = (_cmd, cmdArgs) => {
+      const r = git(cmdArgs, cwd);
+      return { status: r.ok ? 0 : 1, stdout: r.stdout, stderr: r.stderr };
+    };
+    const history = ensureFullHistory(historyRun, { cwd, remote: 'origin' });
+    if (history.ok && history.unshallowed) {
+      log(`${iso(now)} sync: merge-tree reported "unrelated histories" — checkout was shallow, unshallowed, retrying the probe`);
+      probe = git(['merge-tree', '--write-tree', 'HEAD', `origin/${refName}`], cwd);
+    } else {
+      const why = history.ok ? 'checkout was not shallow at the time of the probe' : `checkout was shallow and could not be unshallowed (${history.reason || 'unknown reason'})`;
+      log(`${iso(now)} sync: merge-tree reported "unrelated histories" — ${why}; this may be a genuinely unrelated-history pair, not a checkout defect`);
+    }
+  }
+
   let conflictText = null;
   if (probe.ok) {
     const merge = git(['merge', `origin/${refName}`, '--no-edit', '--quiet'], cwd);

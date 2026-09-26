@@ -2,6 +2,7 @@
 bornAs: xx9738m
 kind: story
 size: 3
+tier: pinned
 parent: "2505"
 status: open
 relatedTo: ["2550"]
@@ -20,6 +21,8 @@ scope:
   - plateau-app:src/backlog-view/card-taxonomy-docs.test.ts
   - plateau-app:src/main.ts
 tags: [plateau-loop, console, webcases, web-docs, viewer, source-registry]
+deliveryAgent: codex
+deliveryAgentReason: "astra graduation trial (epic #3383/#4034/#3906): non-critical per the #4034/#2752 critical-work rule — a plateau-app product feature (webcases source registry) plus a WE data-contract file (we:contracts/backlog.ts), no daemon/conveyor/gate/statute path in scope, complete prepared Done-when; note the plateau-app:src/main.ts edit here and #3827's plateau:src/return-to.ts edit both touch plateau-app's routing area — sequence #3827 first if run concurrently with this item; operator-directed, 2026-09-26"
 dateOpened: "2026-07-25"
 ---
 

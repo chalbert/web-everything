@@ -167,6 +167,9 @@ import { LEASE_FILENAME, isLeaseStale, isForeignLease, laneMarkedSlug, assertedL
 import { writeAllSync } from './lib/write-all-sync.mjs';
 import { usageReportSecretDir, USAGE_REPORT_KEYCHAIN_SERVICE } from './lib/usage-report-secret-paths.mjs';
 import { classifySession } from './operations/session-role.mjs';
+// #xpt9fvd — the shared daemon-clone registry `guard-lane.mjs`'s Edit/Write arm also reads, so the two guards
+// can never disagree about which paths are a resident daemon's OWN clone.
+import { daemonCloneRoots, isDaemonCloneRealpath } from './lib/daemon-clone-registry.mjs';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
@@ -1760,6 +1763,104 @@ export function primaryTreeWriteReason(segment) {
   return null;
 }
 
+// ── #xpt9fvd — DAEMON CLONE write protection ───────────────────────────────────────────────────────────────
+//
+// A resident daemon's OWN dedicated clone (wev-review-daemon, wev-merge-daemon, wev-health-watch, the drain's
+// clone(s), …; the live registry is `daemon-clone-registry.mjs#daemonCloneRoots`) gets the SAME "no direct
+// write" protection the PRIMARY-tree arm above gives a constellation checkout — see that module's header for
+// why a hand-edit here is worse than a primary edit (it silently BLOCKS the daemon's own next rebuild until a
+// person notices, #xpt9fvd; caught+reverted 3x on 2026-09-26).
+
+/** git's `-C <path>` global-flag value, resolved against `cwd` — the effective directory a git invocation
+ *  targets when it is NOT simply `cwd` itself (`git -C wev-review-daemon log` reads/writes that clone from
+ *  wherever the shell actually sits). Pure — string-only, no fs. Returns `null` when `segment` is not a git
+ *  invocation or carries no `-C`, so the caller falls back to `cwd`. Reads the SAME wrapper-peeled,
+ *  basename-resolved `canonicalCommand` view `gitSubcommand` does, so a path-qualified/wrapped git
+ *  (`/usr/bin/git -C … log`, `env git -C … log`) still resolves.
+ *  KNOWN RESIDUAL: git allows REPEATED `-C` (each one relative to the previous); only the first is honoured
+ *  here. Every daemon-clone-diagnosis shape this guard has ever seen (`git -C <clone> log`) is a single `-C`,
+ *  so this is a documented simplification, not a hole any live shape has hit. */
+function gitDashCTarget(segment, cwd) {
+  const toks = shellTokens(canonicalCommand(segment)).filter((t) => !t.op);
+  if (!toks.length || toks[0].text !== 'git') return null;
+  for (let i = 1; i < toks.length - 1; i++) {
+    if (toks[i].text === '-C') return resolve(cwd || '.', toks[i + 1].text);
+  }
+  return null;
+}
+
+/** The deny message for a write inside daemon clone `dir`. A plain function (not a template literal alone) so
+ *  both call sites below — the git-subcommand arm and the FS-write arm — share one wording. */
+function daemonCloneWriteMessage(dir) {
+  return (
+    `a write inside a DAEMON CLONE ("${dir}", a resident daemon's own dedicated checkout — rebuilt by the ` +
+    `daemon itself, never by hand, #xpt9fvd) is blocked. This goes over the daemon's next rebuild invisibly, ` +
+    `and a dirty clone BLOCKS that rebuild (its own live-smoke gate refuses to run over an unexpected local ` +
+    `diff) until a person notices and reverts it by hand — caught+reverted 3x on 2026-09-26 before this guard ` +
+    `existed. Land the change the sanctioned way instead: work it in a LANE, then push it live early:\n` +
+    `  node scripts/daemon-overlay.mjs add --clone=${dir} --ref=<your lane branch> [--pr=<n>]\n` +
+    `Or \`node scripts/lib/daemon-rebuild.mjs\` / \`node scripts/lib/daemon-load-overlay.mjs --clone=${dir}\` — ` +
+    `both run from a LANE, targeting the clone by \`--clone=\`, never with cwd inside the clone itself and ` +
+    `never via a direct git mutation on it. A read-only command (\`git -C ${dir} log\`, \`cat\`) and ` +
+    `\`git fetch\` (diagnosis only — it never touches the working tree) are unaffected.`
+  );
+}
+
+/**
+ * The #xpt9fvd daemon-clone deny reason for `segment`, or null. Pure — reads only `cwd` (the caller's
+ * already-resolved effective directory; #2335's `resolveEffectiveCwd` honours a leading `cd`, same as every
+ * other cwd-gated arm in this file) and `roots` (the CLI-collected daemon-clone registry), both injected by
+ * the CLI wrapper exactly like `primaryCwd`/`foreignLiveLease` above — this function does no fs I/O itself.
+ *
+ * TWO SHAPES, both real 2026-09-26 incidents:
+ *   1. a git STATE-MUTATING subcommand (`GIT_STATE_SUBCOMMANDS`, minus `fetch`) whose EFFECTIVE directory —
+ *      its own `-C <path>` if it has one, else `cwd` — resolves inside a daemon clone: `git reset`/
+ *      `checkout`/`commit`/… run either with cwd already inside the clone, or from anywhere via
+ *      `git -C <clone-path> reset --hard`.
+ *   2. a non-git write — a shell redirect/`tee`/`sed -i`/`perl -pi` (`isFileWriteRedirect`, reused verbatim
+ *      from the primary-tree arm above) or an FS-mutating program (`FS_MUTATING_PROGRAMS`: `cp`/`mv`/`rm`/…)
+ *      — run with `cwd` already inside a daemon clone.
+ *
+ * `git fetch` IS ALLOWED — explicitly excluded from the deny set, checked before the daemon-directory test so
+ * it is allowed EVEN WHEN targeting a daemon clone by `-C`/cwd. It only updates remote-tracking refs, never
+ * the working tree or the index, so it cannot dirty a clone or race its rebuild — exactly the read-only
+ * "diagnose from outside" shape the card asks to keep open. Every OTHER `GIT_STATE_SUBCOMMANDS` entry
+ * (including `pull`, which fetches AND merges into the working tree) is denied. A pure READ op (`log`/
+ * `status`/`diff`/`show`/`rev-parse`/…) is never in scope at all: `gitSubcommand` still returns it, but this
+ * function only denies subcommands present in `GIT_STATE_SUBCOMMANDS`, so `git -C <clone> log` and `cat`
+ * never match either arm below and pass through unmentioned.
+ *
+ * A non-git write resolves EVERY operand it can find (the redirect/tee/sed-i/perl-pi targets `fileWriteTargets`
+ * already extracts, or an FS-mutating program's plain file operands) against `cwd` and denies if ANY lands in
+ * a daemon clone — so both an ambient cwd already inside one (`cd wev-review-daemon && rm x`) and an outside
+ * cwd naming one explicitly (`cp x /…/wev-review-daemon/y` run from a lane) are caught. Falls back to the
+ * ambient-cwd test alone when no operand is found at all (e.g. a bare `rm` with nothing to resolve).
+ */
+export function daemonCloneWriteReason(segment, { cwd = null, roots = [] } = {}) {
+  if (!roots.length) return null;
+  const s = String(segment || '');
+  const sub = gitSubcommand(s);
+  if (sub) {
+    if (sub === 'fetch') return null; // #xpt9fvd — diagnosis stays allowed; fetch never touches the working tree
+    if (!GIT_STATE_SUBCOMMANDS.has(sub)) return null; // a read op (log/status/diff/show/…) — never denied
+    const effectiveDir = gitDashCTarget(s, cwd) || cwd;
+    return isDaemonCloneRealpath(effectiveDir, roots) ? daemonCloneWriteMessage(effectiveDir) : null;
+  }
+  const prog = programWord(s);
+  const isWrite = isFileWriteRedirect(s);
+  const isFsMutate = FS_MUTATING_PROGRAMS.has(prog);
+  if (!isWrite && !isFsMutate) return null;
+  const targets = isWrite
+    ? fileWriteTargets(s)
+    : fileOperands(shellTokens(canonicalCommand(s)).filter((t) => !t.op).slice(1));
+  if (!targets.length) return isDaemonCloneRealpath(cwd, roots) ? daemonCloneWriteMessage(cwd) : null;
+  for (const t of targets) {
+    const abs = resolve(cwd || '.', t);
+    if (isDaemonCloneRealpath(abs, roots)) return daemonCloneWriteMessage(abs);
+  }
+  return null;
+}
+
 /** The #2749 WARN-only nudge for the un-script-decidable "this session should have delegated mechanical
  *  work" half — never denies (a hard-deny here would false-wedge a delegated subagent whose bare verify
  *  reports primary cwd, #2335/#2677). Fires when a verification-set command (`test:unit`/`check:standards`/
@@ -2658,7 +2759,7 @@ function globMatch(tokens, s) {
   return t === tokens.length;
 }
 
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [] } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -2666,6 +2767,12 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
   // context (unlike the arms below, which are gated on primaryCwd or a specific WE_DISPATCH_KIND value).
   const usageSecret = usageReportSecretReadReason(s, dispatchKind);
   if (usageSecret) return usageSecret;
+
+  // #xpt9fvd — a write targeting a DAEMON CLONE. Checked early and unconditionally (independent of
+  // `primaryCwd`/lease context — a daemon clone is neither a primary checkout nor an ordinary leased lane):
+  // see `daemonCloneWriteReason`'s own doc for the two shapes it catches and the one it deliberately does not.
+  const daemonWrite = daemonCloneWriteReason(s, { cwd, roots: daemonCloneRoots });
+  if (daemonWrite) return daemonWrite;
 
   // xpnhz4o — a bare full-suite run. Before the raw-heavy arm so a bare `vitest run` gets THIS message (which
   // names the selected gate) rather than one steering to `npm run test:unit`, itself now denied here.
@@ -3559,6 +3666,8 @@ if (IS_CLI) {
   let runInBackground = false;
   let dispatchKind = null;
   let agentSession = false;
+  let effectiveCwd = null;
+  let daemonRoots = [];
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -3591,10 +3700,15 @@ if (IS_CLI) {
     // #2335 — the reported cwd resets to the primary between calls; honour a leading `cd <lane>` so a genuine
     // lane mutation isn't misread as a primary one (and the #2323 git call runs in the lane, not the primary).
     const cwd = rp(resolveEffectiveCwd(cmd, ev.cwd || process.cwd()));
+    effectiveCwd = cwd;
     const weRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
     const workspace = dirname(weRoot);
     const primaries = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'].map((r) => rp(join(workspace, r)));
     primaryCwd = isPrimaryCwd(cwd, primaries);
+    // #xpt9fvd — the daemon-clone registry (seed ∪ every clone the overlay state dir has recorded), computed
+    // from the same `workspace` the primaries above use. A fault here fails open (empty list ⇒
+    // `daemonCloneWriteReason` denies nothing) rather than wedging the agent.
+    try { daemonRoots = daemonCloneRoots(workspace); } catch { daemonRoots = []; }
     // #2323 — only pay for the git call when it could possibly matter: a lane cwd about to run a
     // backlog-mutation command. Every other Bash call (the overwhelming majority) skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && isBacklogMutation(cmd)) staleBehind = commitsBehindUpstream(cwd);
@@ -3602,7 +3716,7 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession };
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed

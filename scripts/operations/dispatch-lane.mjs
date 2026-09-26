@@ -710,8 +710,14 @@ export function dispatchStillHolds(entry, at, {
 /**
  * The answers `stampLiveness` may give about where an in-flight record's liveness came from. Anything else
  * (including an absent field) reads as `unknown`, which is the honest word for a reader that did not say.
+ *
+ * `wrapper-pid` (#3645/#4212) — every row in flight was a detached delivery-wrapper handle (`pid:<n>`) and the
+ * answer came straight from the kernel, with no `claude agents` listing shelled at all. It is the STRONGEST
+ * source, not a weaker cousin of `claude-agents`: a listing can be unreadable or stale, but a kernel pid probe
+ * cannot degrade the same way, so it must be named rather than collapsing into `unknown` (which would make the
+ * guard look weaker than it is) or `claude-agents` (which would claim a listing that was never read).
  */
-export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'unreadable', 'not-needed']);
+export const LIVENESS_SOURCES = Object.freeze(['claude-agents', 'unreadable', 'not-needed', 'wrapper-pid']);
 
 /** A launch/suppression row from the tick core, or null. Shape-checked, never trusted blind. */
 function shapeRow(row, what) {

@@ -62,6 +62,8 @@ import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
 import { collectHeavyQueue } from './heavy-queue-io.mjs';
 import { liveStateOperation, LIVE_STATE_OP } from './live-state.mjs';
 import { collectLiveState } from './live-state-io.mjs';
+import { liveWorkOperation, LIVE_WORK_OP } from './live-work.mjs';
+import { collectLiveWork } from './live-work-io.mjs';
 import { routePrOutcomeOperation, ROUTE_PR_OUTCOME_OP } from './route-pr-outcome.mjs';
 import { createRouteOutcomeReader } from './route-pr-outcome-io.mjs';
 import { createHistoryReader } from './gate-health-io.mjs';
@@ -418,6 +420,16 @@ export const OPERATIONS = Object.freeze({
   // daemon's `history.jsonl`, the GitHub App status file, `os.loadavg`/`os.cpus`) are bound here, and ONLY here.
   [LIVE_STATE_OP]: () => ({
     declaration: liveStateOperation({ collect: collectLiveState }),
+    sinks: {},
+  }),
+  // Card x20lkf6 (epic #3931) — the RUNNING section: every session/job (background dispatches, the operator's
+  // interactive chats, subagents), joined to its card/PR via `agent-activity.mjs` (#3932), classified into
+  // working / waiting-for-a-test-slot / idle-too-long / blocked-on-a-permission-prompt / dead, sorted stuck and
+  // dead first. Read-only, same no-sinks reasoning as `agent-activity`/`heavy-queue`. `collectLiveWork`'s real
+  // reads (`claude agents --json`, review-job records, lane leases, each row's own transcript/log mtime, a pid
+  // liveness probe, the heavy-admission pool) are bound here, and ONLY here.
+  [LIVE_WORK_OP]: () => ({
+    declaration: liveWorkOperation({ collect: collectLiveWork }),
     sinks: {},
   }),
 });

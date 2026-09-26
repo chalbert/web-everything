@@ -2,12 +2,15 @@
 bornAs: xojug01
 kind: story
 size: 3
+tier: pinned
 parent: "2705"
 status: open
 blockedBy: ["2717"]
 scope: ["plateau-app:src/feature-tracker/feature-tracking.mount-conformance.test.ts", "plateau-app:src/feature-tracker/ft-integrated-v3.annotated.html"]
 dateOpened: "2026-07-27"
 tags: []
+deliveryAgent: codex
+deliveryAgentReason: "astra graduation trial (epic #3383/#4034/#3906): non-critical per the #4034/#2752 critical-work rule — pure test+fixture addition in plateau-app's feature-tracker, no daemon/conveyor/gate/statute path in scope, complete prepared Done-when already on the card; operator-directed, 2026-09-26"
 ---
 
 # S0b · Frozen-target annotation + anchor map + mount-conformance harness
