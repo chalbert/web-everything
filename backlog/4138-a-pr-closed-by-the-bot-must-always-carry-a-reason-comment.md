@@ -3,10 +3,11 @@ bornAs: x0esjde
 kind: story
 size: 5
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/pr-merge-gate.mjs", "we:scripts/prune-landed-lanes.mjs", "we:scripts/__tests__/pr-merge-gate.test.mjs"]
 dateOpened: "2026-09-25"
 dateStarted: "2026-09-25"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
