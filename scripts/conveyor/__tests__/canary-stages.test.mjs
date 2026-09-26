@@ -13,10 +13,18 @@
  *   green after (see the "red -> green" pair below).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   evaluateCanaryStages, detectPermissionPromptStall, CANARY_STAGES,
   DEFAULT_PERMISSION_PROMPT_GRACE_MS, LANE_ACQUIRED_RE, GATE_GREEN_RE,
+  mergeStickyStages, watchCanary, runCanaryCleanup, clipToolResults, TRANSCRIPT_SCAN_FIELD_MAX,
 } from '../canary-stages.mjs';
+import { gateFor } from '../../lib/repo-profile.mjs';
+import { summarizeEntry } from '../../../skills-src/inspect-agent-health/agent-health.mjs';
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const NOW = 2_000_000_000;
 
@@ -169,5 +177,204 @@ describe('regex fixtures used by the evaluator stay honest about what they match
   it('GATE_GREEN_RE matches a verify-lane check --json green read', () => {
     expect(GATE_GREEN_RE.test('{"sha":"x","status":"green","ok":true}')).toBe(true);
     expect(GATE_GREEN_RE.test('{"sha":"x","status":"red","ok":false}')).toBe(false);
+  });
+
+  it('CONTRACT: GATE_GREEN_RE matches the exact plain-text line the wired gate command (`gateFor()` → `verify-lane.mjs run`, no --json) prints', () => {
+    // The canary hands the spawned session `gateFor()`'s command, which never passes --json. Assert the regex
+    // against that command's REAL output, built from verify-lane.mjs's own `emit()` format + run-mode detail
+    // strings (read from the source so a reworded line breaks this test, not a live canary run).
+    const src = readFileSync(join(REPO_ROOT, 'scripts', 'verify-lane.mjs'), 'utf8');
+    expect(gateFor('chalbert/web-everything', { weRoot: REPO_ROOT })).not.toMatch(/--json/);
+    expect(src).toContain('`verify-lane [lane @ ${result.sha ? result.sha.slice(0, 8) : \'?\'}] ${result.status}: ${result.detail}\\n`');
+    const greenDetail = /detail: exitCode === 0 \? '([^']+)'/.exec(src)?.[1];
+    expect(greenDetail).toBeTruthy();
+    const redDetail = 'gate FAILED (exit 1) — run mode, no marker recorded.';
+    expect(GATE_GREEN_RE.test(`verify-lane [lane @ 645d67e7] green: ${greenDetail}`)).toBe(true);
+    expect(GATE_GREEN_RE.test(`verify-lane [lane @ 645d67e7] red: ${redDetail}`)).toBe(false);
+  });
+});
+
+describe('evaluateCanaryStages — cleaned-up ordering holds even with every cleanup fact true', () => {
+  it('a still-ALIVE session with laneReleased/branchDeleted/scratchReaped ALL true still fails cleaned-up (the finished guard must precede the all-true check)', () => {
+    const { stages } = evaluateCanaryStages({
+      spawned: true, entries: [], nowMs: NOW, sessionFinished: false, timedOut: true,
+      cleanup: { laneReleased: true, branchDeleted: true, scratchReaped: true },
+    });
+    const cleaned = stages.find((s) => s.name === 'cleaned-up');
+    expect(cleaned.status).toBe('fail');
+    expect(cleaned.detail).toMatch(/not yet finished/);
+  });
+});
+
+describe('mergeStickyStages — a pass is never undone by a later poll', () => {
+  it('keeps an earlier pass when the next poll reads pending/fail, but takes new passes and new verdicts otherwise', () => {
+    const prev = [{ name: 'lane-acquired', status: 'pass', detail: 'acquired lane-7' }, { name: 'edit-ok', status: 'pending', detail: '' }];
+    const next = [{ name: 'lane-acquired', status: 'pending', detail: '' }, { name: 'edit-ok', status: 'fail', detail: 'x' }];
+    expect(mergeStickyStages(prev, next)).toEqual([prev[0], next[1]]);
+    expect(mergeStickyStages(null, next)).toBe(next);
+  });
+});
+
+/** A scripted fake world for `watchCanary`: each poll pops the next listing (or throws for `'THROW'`). */
+function fakeWatchDeps({ listings, transcriptsByRowId, refExists = true }) {
+  let t = 0;
+  let i = 0;
+  const transcriptReads = [];
+  return {
+    transcriptReads,
+    deps: {
+      now: () => t,
+      sleep: async (ms) => { t += ms; },
+      listAgents: () => {
+        const l = listings[Math.min(i++, listings.length - 1)];
+        if (l === 'THROW') throw new Error('listing failed');
+        return l;
+      },
+      readTranscriptTail: (row) => {
+        transcriptReads.push(row?.sessionId ?? null);
+        return row ? transcriptsByRowId[row.sessionId] : { entries: [], newestEntryAtMs: null };
+      },
+      refExistsOnOrigin: () => refExists,
+    },
+  };
+}
+
+describe('watchCanary — the injected watch loop (review finding: stage evidence must survive session disappearance)', () => {
+  const successEntries = [
+    toolUse('a', 'Bash', 1000), toolResult('a', 1100, { content: 'acquired lane-49 for x (canary)' }),
+    toolUse('e', 'Edit', 1200), toolResult('e', 1300, { content: 'File created successfully' }),
+    toolUse('g', 'Bash', 1400), toolResult('g', 1500, { content: 'verify-lane [lane @ abcd1234] green: gate passed (run mode — no marker recorded).' }),
+  ];
+  const row = { name: 'canary-1', sessionId: 's1', cwd: '/scratch/s1', state: 'working' };
+  const opts = { sessionSlug: 'canary-1', branchRef: 'canary/1', startedAtMs: 0, timeoutMs: 100_000, pollMs: 10_000, listingGraceMs: 5_000 };
+
+  it('retains successful stages after the session disappears from a SUCCESSFUL listing read', async () => {
+    const { deps, transcriptReads } = fakeWatchDeps({ listings: [[row], []], transcriptsByRowId: { s1: { entries: successEntries, newestEntryAtMs: 1500 } } });
+    const r = await watchCanary({ ...opts, deps });
+    expect(r.sessionFinished).toBe(true);
+    expect(r.laneNumberSeen).toBe(49);
+    expect(transcriptReads).toEqual(['s1', 's1']); // the vanished session's transcript is still read via its last row
+    const byName = Object.fromEntries(r.stages.map((s) => [s.name, s.status]));
+    expect(byName).toMatchObject({ 'lane-acquired': 'pass', 'edit-ok': 'pass', 'gate-ran': 'pass', pushed: 'pass', 'session-finished': 'pass' });
+  });
+
+  it('retains a pass even when its evidence scrolls out of the bounded tail on a later poll', async () => {
+    const { deps } = fakeWatchDeps({ listings: [[row], [row], [{ ...row, state: 'done' }]], transcriptsByRowId: { s1: { entries: successEntries, newestEntryAtMs: 1500 } } });
+    let call = 0;
+    const read = deps.readTranscriptTail;
+    deps.readTranscriptTail = (r) => (++call === 1 ? read(r) : { entries: [], newestEntryAtMs: 1500 });
+    const r = await watchCanary({ ...opts, deps });
+    const byName = Object.fromEntries(r.stages.map((s) => [s.name, s.status]));
+    expect(byName).toMatchObject({ 'lane-acquired': 'pass', 'edit-ok': 'pass', 'gate-ran': 'pass' });
+  });
+
+  it('a FAILED listing read never promotes to finished — it runs to the bounded timeout instead', async () => {
+    const { deps } = fakeWatchDeps({ listings: ['THROW'], transcriptsByRowId: {} });
+    const r = await watchCanary({ ...opts, deps });
+    expect(r.sessionFinished).toBe(null);
+    expect(r.stages.find((s) => s.name === 'session-finished').status).toBe('fail');
+  });
+});
+
+/** Recording fake effects for `runCanaryCleanup`. `leasedTo` is either one answer for every lease read, or an
+ *  array of successive answers (before release, after release). */
+function fakeCleanupDeps({ releaseThrows = false, leasedTo = false, refExists = false, scratchExists = true } = {}) {
+  const calls = [];
+  let scratch = scratchExists;
+  const answers = Array.isArray(leasedTo) ? [...leasedTo] : null;
+  return {
+    calls,
+    deps: {
+      releaseLane: (lane, session) => { calls.push(['releaseLane', lane, session]); if (releaseThrows) throw new Error('release timed out'); },
+      laneLeasedTo: (lane, session) => { calls.push(['laneLeasedTo', lane, session]); return answers ? answers.shift() : leasedTo; },
+      refExistsOnOrigin: () => refExists,
+      deleteRemoteBranch: (ref) => { calls.push(['deleteRemoteBranch', ref]); refExists = false; },
+      pathExists: () => scratch,
+      removeDir: (p) => { calls.push(['removeDir', p]); scratch = false; },
+      revokeTrust: (ps) => { calls.push(['revokeTrust', ...ps]); },
+    },
+  };
+}
+
+describe('runCanaryCleanup — the injected cleanup step', () => {
+  const base = { laneNumberSeen: 49, sessionSlug: 'canary-1', branchRef: 'canary/1', pushedGroundTruth: null, scratchCwd: '/scratch/s1' };
+
+  it('REGRESSION GUARD: a session NOT confirmed finished never has its lane released, its scratch cwd removed, or its trust revoked', () => {
+    for (const sessionFinished of [false, null]) {
+      const { deps, calls } = fakeCleanupDeps();
+      const r = runCanaryCleanup({ ...base, sessionFinished, deps });
+      const destructive = calls.filter(([n]) => n === 'releaseLane' || n === 'removeDir' || n === 'revokeTrust');
+      expect(destructive).toEqual([]);
+      expect(r.laneReleased).toBe(null);
+      expect(r.scratchReaped).toBe(null);
+    }
+  });
+
+  it('a confirmed-finished session still holding its lease gets it released, scratch removed, trust revoked, pushed branch deleted', () => {
+    const { deps, calls } = fakeCleanupDeps({ refExists: true, leasedTo: [true, false] });
+    const r = runCanaryCleanup({ ...base, sessionFinished: true, deps });
+    expect(r).toEqual({ laneReleased: true, branchDeleted: true, scratchReaped: true, pushedForCleanup: true });
+    expect(calls.map(([n]) => n)).toEqual(['laneLeasedTo', 'releaseLane', 'laneLeasedTo', 'deleteRemoteBranch', 'removeDir', 'revokeTrust']);
+  });
+
+  it('a lane the agent ALREADY released (and maybe someone else re-leased) is never force-released — and counts as clean', () => {
+    const { deps, calls } = fakeCleanupDeps({ leasedTo: false });
+    const r = runCanaryCleanup({ ...base, sessionFinished: true, deps });
+    expect(r.laneReleased).toBe(true);
+    expect(calls.filter(([n]) => n === 'releaseLane')).toEqual([]);
+    const { stages } = evaluateCanaryStages({
+      spawned: true, entries: [], nowMs: NOW, sessionFinished: true, timedOut: true,
+      cleanup: { laneReleased: r.laneReleased, branchDeleted: r.branchDeleted, scratchReaped: r.scratchReaped },
+    });
+    expect(stages.find((s) => s.name === 'cleaned-up').status).toBe('pass');
+  });
+
+  it('a lease still held after the release attempt is a confirmed leak (false); an unreadable lease is never released and stays null', () => {
+    expect(runCanaryCleanup({ ...base, sessionFinished: true, deps: fakeCleanupDeps({ releaseThrows: true, leasedTo: [true, true] }).deps }).laneReleased).toBe(false);
+    const unreadable = fakeCleanupDeps({ leasedTo: null });
+    expect(runCanaryCleanup({ ...base, sessionFinished: true, deps: unreadable.deps }).laneReleased).toBe(null);
+    expect(unreadable.calls.filter(([n]) => n === 'releaseLane')).toEqual([]);
+  });
+});
+
+describe('transcript read path — gate-green evidence survives the summarizer (review finding: the green line is printed LAST)', () => {
+  // A realistic `verify-lane.mjs run` tool_result: the whole gate output streams first (thousands of chars of
+  // check:standards warnings), and the green line is the very last thing printed.
+  const gateOutput = `${'  warn test-only export (#2967): `x` in scripts/y.mjs — no non-test module imports it.\n'.repeat(60)}`
+    + '0 error(s), 2374 warning(s)\nverify-lane [lane @ 645d67e7] green: gate passed (run mode — no marker recorded).';
+  const rawLine = JSON.stringify({
+    type: 'user', timestamp: '2026-09-26T19:00:00.000Z',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'g', is_error: false, content: gateOutput }] },
+  });
+  const gateTool = toolUse('g', 'Bash', 1000);
+  const laneAndEdit = [...[toolUse('a', 'Bash', 900), toolResult('a', 901, { content: 'acquired lane-4 for c' })], toolUse('e', 'Edit', 950), toolResult('e', 951)];
+
+  it('CONTRACT: summarize (scan cap) → clipToolResults keeps the green line, so gate-ran passes', () => {
+    const entry = clipToolResults(summarizeEntry(rawLine, TRANSCRIPT_SCAN_FIELD_MAX));
+    expect(entry.blocks[0].content.length).toBeLessThan(gateOutput.length);
+    const { stages } = evaluateCanaryStages({ spawned: true, entries: [...laneAndEdit, gateTool, entry], nowMs: NOW, newestEntryAtMs: NOW, sessionFinished: true });
+    expect(stages.find((s) => s.name === 'gate-ran').status).toBe('pass');
+  });
+
+  it('RED shape: the old head-only 300-char cut loses the green line entirely', () => {
+    const entry = summarizeEntry(rawLine, 300);
+    expect(GATE_GREEN_RE.test(entry.blocks[0].content)).toBe(false);
+  });
+});
+
+describe('priorPasses — the dependency chain honours earlier passes (no stale PENDING on a finished run)', () => {
+  it('lane/edit/gate passed on an earlier poll, tail now empty, session finished, branch never pushed → pushed FAILS (not pending)', () => {
+    const { stages } = evaluateCanaryStages({
+      spawned: true, entries: [], nowMs: NOW, sessionFinished: true, pushedGroundTruth: false,
+      priorPasses: ['lane-acquired', 'edit-ok', 'gate-ran'],
+    });
+    expect(stages.find((s) => s.name === 'pushed').status).toBe('fail');
+  });
+
+  it('lane passed earlier, no edit ever seen, session finished → edit-ok FAILS (not "lane not yet acquired")', () => {
+    const { stages } = evaluateCanaryStages({ spawned: true, entries: [], nowMs: NOW, sessionFinished: true, priorPasses: ['lane-acquired'] });
+    const edit = stages.find((s) => s.name === 'edit-ok');
+    expect(edit.status).toBe('fail');
+    expect(edit.detail).toMatch(/lane acquired but no resolved edit/);
   });
 });

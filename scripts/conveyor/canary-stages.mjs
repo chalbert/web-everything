@@ -14,7 +14,10 @@
  * canary that unit tests can actually exercise without a real `claude --bg` spawn — feed it a constructed
  * transcript (a fixture) and a handful of booleans, and assert the verdict. `canary.mjs` itself does nothing
  * this file does not already decide; it only supplies the facts (transcript tail, lane-pool read, git read,
- * `claude agents` read) and prints/aggregates this file's answers.
+ * `claude agents` read) and prints/aggregates this file's answers. The watch loop ({@link watchCanary}) and the
+ * cleanup step ({@link runCanaryCleanup}) live here too, but take EVERY effect as an injected dependency — this
+ * module still imports no IO — so their ordering guarantees (never delete a live session's files; never lose
+ * a stage that already passed) are unit-tested rather than enforced by untested control flow in the shell.
  *
  * THE PERMISSION-PROMPT SIGNATURE, stated once here because it is the one stage this module exists to catch
  * that the fake-session soak harness cannot (PR #2701's live regression). A real permission prompt has no
@@ -116,9 +119,211 @@ function findResolvedResultMatching(entries, pattern) {
 /** Lane-acquire evidence pattern — matches `lane-pool.mjs`'s own stdout (`"acquired lane-49 for ..."`). */
 export const LANE_ACQUIRED_RE = /acquired lane-\d+/i;
 
-/** Gate-green evidence pattern — matches either a direct gate run's own success line or a `verify-lane check`
- *  read reporting `status":"green"` / `status: green`. */
-export const GATE_GREEN_RE = /"status"\s*:\s*"green"|status:\s*green\b|check:standards[^\n]*(pass|ok|✓)/i;
+/** Gate-green evidence pattern. The FIRST alternative is the one that matters: it matches the plain-text line
+ *  `verify-lane.mjs run` (no `--json`) prints on success — `verify-lane [lane @ <sha8>] green: gate passed …`
+ *  (its `emit()`) — which is exactly the command `gateFor()` resolves and `canary.mjs` hands the spawned
+ *  session. The remaining alternatives also accept a `--json` read (`"status":"green"`) or a bare
+ *  `status: green` / check:standards success line, so a hand-run variant of the gate still counts. */
+export const GATE_GREEN_RE = /verify-lane \[[^\]\n]*\] green:|"status"\s*:\s*"green"|status:\s*green\b|check:standards[^\n]*(pass|ok|✓)/i;
+
+/** Lane-number capture from `lane-pool.mjs acquire`'s own stdout — the watcher records it so cleanup knows
+ *  which lane (if any) the spawned session holds. */
+export const LANE_NUMBER_RE = /acquired lane-(\d+)/i;
+
+/** Per-field cap handed to `summarizeEntry` when the canary reads a transcript — large on purpose, so the
+ *  shared summarizer (which keeps only the HEAD of a field) never cuts off evidence before
+ *  {@link clipToolResults} gets to keep both ends. */
+export const TRANSCRIPT_SCAN_FIELD_MAX = 200_000;
+/** What survives of each tool_result after {@link clipToolResults}: this many chars from the head AND from the
+ *  tail. The tail matters: `verify-lane.mjs run` streams the whole gate output first and prints its
+ *  `verify-lane [lane @ …] green:` line LAST, so a head-only cut (the shared summarizer's own) always loses it. */
+export const TOOL_RESULT_KEEP_CHARS = 400;
+
+/**
+ * PURE: clip every tool_result's content in a `summarizeEntry`-shaped entry to its first and last
+ * `keep` chars (joined by a `… [N chars clipped] …` marker), so gate-green evidence at the END of a long
+ * output and lane-acquire evidence at its START both stay matchable while memory stays bounded.
+ * @param {object} entry
+ * @param {number} [keep]
+ * @returns {object}
+ */
+export function clipToolResults(entry, keep = TOOL_RESULT_KEEP_CHARS) {
+  if (!entry || !Array.isArray(entry.blocks)) return entry;
+  return {
+    ...entry,
+    blocks: entry.blocks.map((b) => {
+      if (b?.kind !== 'tool_result') return b;
+      const s = String(b.content ?? '');
+      if (s.length <= keep * 2) return b;
+      return { ...b, content: `${s.slice(0, keep)} … [${s.length - keep * 2} chars clipped] … ${s.slice(-keep)}` };
+    }),
+  };
+}
+
+/** PURE: the overall verdict for a list of stages — any fail wins, else any pending, else pass. */
+export function overallOf(stages) {
+  if (stages.some((s) => s.status === 'fail')) return 'fail';
+  if (stages.some((s) => s.status === 'pending')) return 'pending';
+  return 'pass';
+}
+
+/**
+ * PURE: merge one poll's fresh stage verdicts onto the previous poll's, keeping every PASS sticky. The
+ * evaluator itself is memoryless — it only sees the current bounded transcript tail — so without this a stage
+ * that already passed (lane acquired, edit resolved, gate green) would slide back to pending/fail once its
+ * evidence scrolls out of the tail, or once a finished session drops out of `claude agents --json` and its
+ * transcript can no longer be located. A pass is a fact that already happened; a later poll can never undo it.
+ * Deliberate consequence: a gate that went green once stays `gate-ran: pass` even if the agent later re-ran it
+ * red — this stage records "the gate ran green in this dispatch", and `pushed` is judged by origin's own ref.
+ * @param {Array<{name:string,status:string,detail:string}>|null} prevStages
+ * @param {Array<{name:string,status:string,detail:string}>} nextStages
+ * @returns {Array<{name:string,status:string,detail:string}>}
+ */
+export function mergeStickyStages(prevStages, nextStages) {
+  if (!Array.isArray(prevStages) || !prevStages.length) return nextStages;
+  const prevByName = Object.fromEntries(prevStages.map((s) => [s.name, s]));
+  return nextStages.map((s) => (prevByName[s.name]?.status === 'pass' && s.status !== 'pass' ? prevByName[s.name] : s));
+}
+
+/**
+ * THE WATCH LOOP, with every effect injected (no IO import in this module — `canary.mjs` wires the real
+ * listing / transcript / git reads). Polls until the session is confirmed finished or `timeoutMs` elapses.
+ *
+ * Two things keep earlier evidence from being lost (review finding on PR #2742): the LAST listed agent row is
+ * remembered, so the transcript is still read after the session drops out of the listing, and every stage
+ * verdict is merged with {@link mergeStickyStages}, so a pass survives its evidence leaving the bounded tail.
+ *
+ * @param {object} o
+ * @param {string} o.sessionSlug
+ * @param {string} o.branchRef
+ * @param {number} o.startedAtMs
+ * @param {number} o.timeoutMs
+ * @param {number} o.pollMs
+ * @param {number} o.listingGraceMs - spawn→listed lag; absence from a SUCCESSFUL read only counts as "gone" after it.
+ * @param {{now:()=>number, sleep:(ms:number)=>Promise<void>, listAgents:()=>Array<object>,
+ *   readTranscriptTail:(row:object|null)=>{entries:Array<object>, newestEntryAtMs:number|null},
+ *   refExistsOnOrigin:(ref:string)=>boolean|null}} o.deps - `listAgents` signals a failed read by THROWING.
+ * @returns {Promise<{sessionFinished:boolean|null, laneNumberSeen:number|null, pushedGroundTruth:boolean|null,
+ *   stages:Array<object>, overall:string}>}
+ */
+export async function watchCanary({ sessionSlug, branchRef, startedAtMs, timeoutMs, pollMs, listingGraceMs, deps }) {
+  let lastAgentRow = null;
+  let laneNumberSeen = null;
+  let pushedGroundTruth = null;
+  let sessionFinished = null;
+  let stages = null;
+
+  for (;;) {
+    const elapsedMs = deps.now() - startedAtMs;
+    const timedOut = elapsedMs >= timeoutMs;
+
+    let agentRow = null;
+    let listingOk = false;
+    try {
+      const rows = deps.listAgents();
+      agentRow = (Array.isArray(rows) ? rows : []).find((r) => r?.name === sessionSlug) || null;
+      listingOk = true;
+    } catch { /* a failed listing read is "not yet decidable", never a guess — listingOk stays false */ }
+
+    if (agentRow) {
+      lastAgentRow = agentRow;
+      sessionFinished = agentRow.state === 'done' || agentRow.state === 'failed' || agentRow.state === 'stopped';
+    } else if (listingOk && elapsedMs >= listingGraceMs) {
+      // Absent from a SUCCESSFUL read AND past the spawn→listed lag — genuinely gone. A FAILED read never
+      // reaches here: "the listing errored" and "the listing found nothing" are different facts.
+      sessionFinished = true;
+    } else {
+      sessionFinished = null;
+    }
+
+    // Read via the last row ever seen, so a session that already dropped out of the listing still has its
+    // transcript read (its cwd + session id do not change once it exits).
+    const { entries, newestEntryAtMs } = deps.readTranscriptTail(agentRow || lastAgentRow);
+    for (const e of entries) {
+      const m = LANE_NUMBER_RE.exec(String(e?.blocks?.map((b) => b.content || '').join(' ') || ''));
+      if (m) laneNumberSeen = Number(m[1]);
+    }
+
+    if (sessionFinished === true && pushedGroundTruth == null) pushedGroundTruth = deps.refExistsOnOrigin(branchRef);
+
+    const evaluated = evaluateCanaryStages({
+      spawned: true, entries, nowMs: deps.now(), newestEntryAtMs, pushedGroundTruth, sessionFinished, timedOut,
+      // Earlier passes feed the evaluator's own dependency chain (lane → edit → gate → push), so a downstream
+      // stage is judged on its OWN evidence rather than reading "lane not yet acquired" once the lane's
+      // evidence has scrolled out of the tail.
+      priorPasses: (stages || []).filter((s) => s.status === 'pass').map((s) => s.name),
+    });
+    stages = mergeStickyStages(stages, evaluated.stages);
+
+    if (sessionFinished === true || timedOut) break;
+    await deps.sleep(pollMs);
+  }
+  return { sessionFinished, laneNumberSeen, pushedGroundTruth, stages, overall: overallOf(stages) };
+}
+
+/**
+ * THE CLEANUP STEP, with every effect injected. Returns the three cleanup facts the evaluator's `cleaned-up`
+ * stage reads (`true` = confirmed clean, `false` = confirmed left behind, `null` = could not tell).
+ *
+ * THE LOAD-BEARING GUARANTEE: a session not CONFIRMED finished (`sessionFinished !== true`) never has its lane
+ * released or its scratch cwd deleted — those belong to a possibly-still-running process, and the resident
+ * `session-reaper.mjs` owns reaping them once it is really gone. Only the throwaway branch on origin is touched
+ * regardless (a network-only ref op, never a filesystem write near the session's cwd).
+ *
+ * The lease is READ before any release: the spawned agent normally releases its own lane on exit, and another
+ * session may already have re-acquired that lane number — so `release --force` must only ever run while the
+ * lease is confirmed to still be THIS canary session's own (`laneLeasedTo === true`). Already released
+ * (`false`) is a confirmed-clean `true` with nothing called; an unreadable lease (`null`) is left alone.
+ *
+ * @param {object} o
+ * @param {boolean|null} o.sessionFinished
+ * @param {number|null} o.laneNumberSeen
+ * @param {string} o.sessionSlug
+ * @param {string} o.branchRef
+ * @param {boolean|null} o.pushedGroundTruth
+ * @param {string} o.scratchCwd
+ * @param {{releaseLane:(lane:number, session:string)=>void, laneLeasedTo:(lane:number, session:string)=>boolean|null,
+ *   refExistsOnOrigin:(ref:string)=>boolean|null, deleteRemoteBranch:(ref:string)=>void,
+ *   pathExists:(p:string)=>boolean, removeDir:(p:string)=>void, revokeTrust:(paths:string[])=>void}} o.deps
+ * @returns {{laneReleased:boolean|null, branchDeleted:boolean|null, scratchReaped:boolean|null, pushedForCleanup:boolean|null}}
+ */
+export function runCanaryCleanup({ sessionFinished, laneNumberSeen, sessionSlug, branchRef, pushedGroundTruth, scratchCwd, deps }) {
+  const confirmedGone = sessionFinished === true;
+
+  let laneReleased = null;
+  if (laneNumberSeen == null) {
+    laneReleased = true; // no lane was ever seen acquired — nothing to release, vacuously clean.
+  } else if (confirmedGone) {
+    const held = deps.laneLeasedTo(laneNumberSeen, sessionSlug);
+    if (held === false) {
+      laneReleased = true; // already released (the agent's own exit path) — possibly re-leased to someone else.
+    } else if (held === true) {
+      try { deps.releaseLane(laneNumberSeen, sessionSlug); } catch { /* re-read below either way */ }
+      const after = deps.laneLeasedTo(laneNumberSeen, sessionSlug);
+      laneReleased = after === false ? true : after === true ? false : null;
+    } // else: lease unreadable — never release on a guess; stays null.
+  } // else: session not confirmed gone — deliberately not touched.
+
+  let branchDeleted = null;
+  const pushedForCleanup = pushedGroundTruth ?? deps.refExistsOnOrigin(branchRef);
+  if (pushedForCleanup === true) {
+    try { deps.deleteRemoteBranch(branchRef); } catch { /* re-checked below either way */ }
+    branchDeleted = deps.refExistsOnOrigin(branchRef) === false;
+  } else if (pushedForCleanup === false) {
+    branchDeleted = true; // never pushed — nothing to delete, vacuously clean.
+  } // else: could not even tell whether it exists — never claim cleaned up on a guess.
+
+  let scratchReaped = null;
+  if (confirmedGone) {
+    try {
+      if (deps.pathExists(scratchCwd)) deps.removeDir(scratchCwd);
+      deps.revokeTrust([scratchCwd]);
+    } catch { /* re-checked below */ }
+    scratchReaped = !deps.pathExists(scratchCwd);
+  } // else: deliberately not touched — see the guarantee above.
+
+  return { laneReleased, branchDeleted, scratchReaped, pushedForCleanup };
+}
 
 /**
  * THE EVALUATOR. PURE — every fact is a parameter, nothing here reads a clock, a file, or an env var.
@@ -137,6 +342,8 @@ export const GATE_GREEN_RE = /"status"\s*:\s*"green"|status:\s*green\b|check:sta
  * @param {{laneReleased:boolean|null, branchDeleted:boolean|null, scratchReaped:boolean|null}} [o.cleanup]
  * @param {boolean} [o.timedOut] - has the canary's own overall bounded watch run out? Turns every remaining
  *   `pending` stage into a `fail` (never leaves the report silently incomplete).
+ * @param {string[]} [o.priorPasses] - stage names an EARLIER poll already passed (the watcher's sticky merge);
+ *   they satisfy the lane → edit → gate → push dependency chain even once their evidence left the tail.
  * @returns {{stages:Array<{name:string,status:string,detail:string}>, overall:'pass'|'fail'|'pending'}}
  */
 export function evaluateCanaryStages({
@@ -150,8 +357,11 @@ export function evaluateCanaryStages({
   sessionFinished = null,
   cleanup = {},
   timedOut = false,
+  priorPasses = [],
 }) {
   const stages = [];
+  const prior = new Set(priorPasses);
+  const lastPassed = () => stages[stages.length - 1].status === 'pass' || prior.has(stages[stages.length - 1].name);
 
   // 1. spawned — known immediately, never pending.
   stages.push(stage('spawned', spawned ? 'pass' : 'fail', spawned ? 'dispatch effect returned a handle' : 'dispatch effect threw before any process existed'));
@@ -181,7 +391,7 @@ export function evaluateCanaryStages({
   } else {
     stages.push(stage('lane-acquired', timedOut ? 'fail' : 'pending', timedOut ? 'timed out with no lane recorded' : 'not yet decidable'));
   }
-  const laneOk = stages[stages.length - 1].status === 'pass';
+  const laneOk = lastPassed();
 
   // 4. edit-ok — a resolved (non-error) Edit/Write/MultiEdit tool_result, only meaningful once the lane exists.
   const editResolved = entries.some((e) => (e.blocks || []).some((b) => b.kind === 'tool_result' && !b.isError
@@ -195,7 +405,7 @@ export function evaluateCanaryStages({
   } else {
     stages.push(stage('edit-ok', 'pending', 'not yet decidable'));
   }
-  const editOk = stages[stages.length - 1].status === 'pass';
+  const editOk = lastPassed();
 
   // 5. gate-ran — a resolved result carrying the gate's own green marker.
   const gateEvidence = findResolvedResultMatching(entries, GATE_GREEN_RE);
@@ -208,7 +418,7 @@ export function evaluateCanaryStages({
   } else {
     stages.push(stage('gate-ran', 'pending', 'not yet decidable'));
   }
-  const gateOk = stages[stages.length - 1].status === 'pass';
+  const gateOk = lastPassed();
 
   // 6. pushed — ground truth (a real `git ls-remote` of the throwaway branch) is the only real evidence; the
   // transcript's own "git push" tool call resolving without error is corroborating but not sufficient (a push
@@ -259,8 +469,5 @@ export function evaluateCanaryStages({
     stages.push(stage('cleaned-up', 'pending', 'cleanup not yet attempted'));
   }
 
-  const anyFail = stages.some((s) => s.status === 'fail');
-  const anyPending = stages.some((s) => s.status === 'pending');
-  const overall = anyFail ? 'fail' : anyPending ? 'pending' : 'pass';
-  return { stages, overall };
+  return { stages, overall: overallOf(stages) };
 }

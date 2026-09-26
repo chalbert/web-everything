@@ -50,10 +50,10 @@ import { gateFor } from '../lib/repo-profile.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { resolveSessionTranscript } from '../operations/agent-usage-report.mjs';
 import { tailLines, summarizeEntry } from '../../skills-src/inspect-agent-health/agent-health.mjs';
-import { evaluateCanaryStages, CANARY_STAGES } from './canary-stages.mjs';
+import { evaluateCanaryStages, CANARY_STAGES, watchCanary, runCanaryCleanup, overallOf,
+  clipToolResults, TRANSCRIPT_SCAN_FIELD_MAX } from './canary-stages.mjs';
 
 const CANARY_BRIEF_PATH = join(REPO_ROOT, 'skills-src', 'conveyor', 'canary-agent-brief.md');
-const LANE_NUMBER_RE = /acquired lane-(\d+)/i;
 
 /** Default overall bounded watch — long enough for a real lane-acquire + tiny edit + diff-selected gate +
  *  push (a few minutes), short enough that a genuinely wedged canary (the exact #2701 shape) still reports in
@@ -64,7 +64,6 @@ const DEFAULT_POLL_MS = 8 * 1000;
  *  own discipline). */
 const TRANSCRIPT_TAIL_LINES = 60;
 const TRANSCRIPT_MAX_BYTES = 800_000;
-const TRANSCRIPT_FIELD_MAX = 300;
 
 function parseArgs(argv) {
   const out = { repo: CONSTELLATION_REPOS.we.slug, timeoutMs: DEFAULT_TIMEOUT_MS, pollMs: DEFAULT_POLL_MS };
@@ -102,6 +101,22 @@ function refExistsOnOrigin(ref, { root = REPO_ROOT } = {}) {
   }
 }
 
+/** Does `lane` still carry a live lease held by `session`? Read from `lane-pool.mjs status --json` (whose
+ *  per-lane `lease.session` is the slug `acquire --session=` recorded). Never throws — `null` on any read
+ *  failure, so the caller keeps "could not tell" distinct from a confirmed release. */
+function laneLeasedTo(lane, session) {
+  try {
+    const out = execFileSync('node', ['scripts/lane-pool.mjs', 'status', '--json'], {
+      cwd: REPO_ROOT, encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const row = (JSON.parse(out).lanes || []).find((l) => l?.lane === lane);
+    if (!row) return null;
+    return row.lease?.session === session;
+  } catch {
+    return null;
+  }
+}
+
 /** Bounded, never-throwing transcript read for one `claude agents --json` row. Mirrors
  *  `we:scripts/conveyor/hung-session.mjs#readHungInfo`'s own IO shape (same tail size discipline, same
  *  "prefer the transcript's own newest embedded timestamp over file mtime" rule) without importing that file's
@@ -117,7 +132,10 @@ function readTranscriptTail(agentRow) {
   let entries;
   try {
     const { lines } = tailLines(file, TRANSCRIPT_TAIL_LINES, TRANSCRIPT_MAX_BYTES);
-    entries = lines.map((l) => summarizeEntry(l, TRANSCRIPT_FIELD_MAX));
+    // Summarize with a large cap, THEN clip each tool_result to head + tail: the shared summarizer keeps only
+    // a field's head, which would always cut off `verify-lane run`'s green line (printed last, after the
+    // whole gate output).
+    entries = lines.map((l) => clipToolResults(summarizeEntry(l, TRANSCRIPT_SCAN_FIELD_MAX)));
   } catch {
     return { entries: [], newestEntryAtMs: null };
   }
@@ -197,63 +215,20 @@ async function main() {
   let pushedGroundTruth = null;
   let sessionFinished = spawned ? null : true; // a failed spawn is trivially "finished" — nothing is running.
   let finalStages = null;
-  let finalOverall = spawned ? 'pending' : 'fail';
 
   if (spawned) {
-    for (;;) {
-      const elapsedMs = Date.now() - startedAtMs;
-      const timedOut = elapsedMs >= timeoutMs;
-
-      let agentRow = null;
-      let listingOk = false;
-      try {
-        const rows = defaultListAgents({});
-        agentRow = (Array.isArray(rows) ? rows : []).find((r) => r?.name === sessionSlug) || null;
-        listingOk = true; // a THROW is the only failure signal `defaultListAgents` gives — see the catch below.
-      } catch { /* a failed listing read is treated as "not yet decidable", never a guess — listingOk stays false */ }
-
-      if (agentRow) {
-        if (agentRow.state === 'done' || agentRow.state === 'failed' || agentRow.state === 'stopped') {
-          sessionFinished = true;
-        } else {
-          sessionFinished = false;
-        }
-      } else if (listingOk && elapsedMs >= listingGraceMs) {
-        // Absent from a SUCCESSFUL listing read AND past the spawn→listed lag window
-        // (`DISPATCH_LISTING_GRACE_MINUTES`, the same constant the real dispatch observer uses) — genuinely
-        // gone, not merely "not yet visible". A FAILED read must never reach this branch (see below) — "the
-        // listing errored" and "the listing succeeded and found nothing" are different facts, and only the
-        // second one may ever promote to `true`.
-        sessionFinished = true;
-      } else {
-        sessionFinished = null;
-      }
-
-      const { entries, newestEntryAtMs } = readTranscriptTail(agentRow);
-      for (const e of entries) {
-        const m = LANE_NUMBER_RE.exec(String(e?.blocks?.map((b) => b.content || '').join(' ') || ''));
-        if (m) laneNumberSeen = Number(m[1]);
-      }
-
-      if (sessionFinished === true && pushedGroundTruth == null) {
-        pushedGroundTruth = refExistsOnOrigin(branchRef);
-      }
-
-      const evaluated = evaluateCanaryStages({
-        spawned: true,
-        entries,
-        nowMs: Date.now(),
-        newestEntryAtMs,
-        pushedGroundTruth,
-        sessionFinished,
-        timedOut,
-      });
-      finalStages = evaluated.stages;
-      finalOverall = evaluated.overall;
-
-      if (sessionFinished === true || timedOut) break;
-      await sleep(pollMs);
-    }
+    // The loop itself lives in `canary-stages.mjs#watchCanary` (unit-tested); this shell only wires the real
+    // reads. `defaultListAgents` signals a failed read by THROWING, which is exactly the contract it expects.
+    ({ sessionFinished, laneNumberSeen, pushedGroundTruth, stages: finalStages } = await watchCanary({
+      sessionSlug, branchRef, startedAtMs, timeoutMs, pollMs, listingGraceMs,
+      deps: {
+        now: () => Date.now(),
+        sleep,
+        listAgents: () => defaultListAgents({}),
+        readTranscriptTail,
+        refExistsOnOrigin: (ref) => refExistsOnOrigin(ref),
+      },
+    }));
   }
 
   // ── Cleanup — always runs, whatever the verdict above, but a session CONFIRMED STILL ALIVE never gets its
@@ -265,59 +240,31 @@ async function main() {
   // (+ its trust entry) and a stalled lane's lease (the lease-reaper stall backstop); this canary defers to
   // both rather than racing them against a session that may still be alive. ─────────────────────────────────
   log('cleaning up …');
-  const confirmedGone = sessionFinished === true;
-  if (!confirmedGone) {
+  if (sessionFinished !== true) {
     log(`session not confirmed finished (state may still be alive) — deferring lane release + scratch reap to the resident session-reaper rather than deleting a live process's files`);
   }
-
-  let laneReleased = null;
-  if (laneNumberSeen == null) {
-    laneReleased = true; // no lane was ever seen acquired — nothing to release, vacuously clean.
-  } else if (confirmedGone) {
-    try {
-      execFileSync('node', ['scripts/lane-pool.mjs', 'release', `--lane=${laneNumberSeen}`, `--session=${sessionSlug}`, '--force'], {
-        cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL', stdio: 'ignore',
-      });
-      laneReleased = true;
-    } catch {
-      // The spawned agent's own brief already releases its lane in its normal exit path — a failure here most
-      // often means "already released", which is the success case, not a failure.
-      laneReleased = null;
-    }
-  } else {
-    laneReleased = null; // session not confirmed gone — deliberately not touched (see header comment above).
-  }
-
-  let branchDeleted = null;
-  const pushedForCleanup = pushedGroundTruth ?? refExistsOnOrigin(branchRef);
-  if (pushedForCleanup === true) {
-    try {
-      execFileSync('git', ['push', 'origin', '--delete', branchRef], {
-        cwd: REPO_ROOT, encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL', stdio: 'ignore',
-      });
-      branchDeleted = refExistsOnOrigin(branchRef) === false;
-    } catch {
-      branchDeleted = refExistsOnOrigin(branchRef) === false;
-    }
-  } else if (pushedForCleanup === false) {
-    branchDeleted = true; // never pushed — nothing to delete, vacuously clean. Safe regardless of aliveness:
-    // this is a network-only ref check/delete on origin, never a filesystem write near the session's own cwd.
-  } else {
-    branchDeleted = null; // could not even tell whether it exists — never claim cleaned up on a guess.
-  }
-
-  let scratchReaped = null;
-  if (!confirmedGone) {
-    scratchReaped = null; // deliberately not touched — see header comment above.
-  } else {
-    try {
-      if (existsSync(scratchCwd)) rmSync(scratchCwd, { recursive: true, force: true });
-      revokeDispatchTrust([scratchCwd]);
-      scratchReaped = !existsSync(scratchCwd);
-    } catch {
-      scratchReaped = !existsSync(scratchCwd);
-    }
-  }
+  // The "never touch a live session's lane / scratch cwd" ordering lives in `canary-stages.mjs#runCanaryCleanup`
+  // (unit-tested with these same effects stubbed); this shell only supplies the real ones.
+  const { laneReleased, branchDeleted, scratchReaped, pushedForCleanup } = runCanaryCleanup({
+    sessionFinished, laneNumberSeen, sessionSlug, branchRef, pushedGroundTruth, scratchCwd,
+    deps: {
+      releaseLane: (lane, session) => {
+        execFileSync('node', ['scripts/lane-pool.mjs', 'release', `--lane=${lane}`, `--session=${session}`, '--force'], {
+          cwd: REPO_ROOT, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL', stdio: 'ignore',
+        });
+      },
+      laneLeasedTo,
+      refExistsOnOrigin: (ref) => refExistsOnOrigin(ref),
+      deleteRemoteBranch: (ref) => {
+        execFileSync('git', ['push', 'origin', '--delete', ref], {
+          cwd: REPO_ROOT, encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL', stdio: 'ignore',
+        });
+      },
+      pathExists: existsSync,
+      removeDir: (p) => rmSync(p, { recursive: true, force: true }),
+      revokeTrust: revokeDispatchTrust,
+    },
+  });
 
   const final = evaluateCanaryStages({
     spawned,
@@ -336,8 +283,7 @@ async function main() {
   const stagesByName = Object.fromEntries((finalStages || final.stages).map((s) => [s.name, s]));
   stagesByName['cleaned-up'] = final.stages.find((s) => s.name === 'cleaned-up');
   const mergedStages = CANARY_STAGES.map((name) => stagesByName[name]);
-  const mergedOverall = mergedStages.some((s) => s.status === 'fail') ? 'fail'
-    : mergedStages.some((s) => s.status === 'pending') ? 'pending' : 'pass';
+  const mergedOverall = overallOf(mergedStages);
 
   log(`canary ${canaryId} — ${repo} — done watching`);
   printStages(mergedStages, mergedOverall);
