@@ -528,7 +528,10 @@ describe('#3914 — resolve-on-land for a card filed AND delivered in the same h
       body: '',
       changedFiles: ['backlog/xaa7r2n-itemnumfromref.md', 'backlog/xspin01-follow-up.md', 'scripts/readiness/conveyor-state.mjs'],
     });
-    const landedItems = landedIdsForCandidate(landedPr, { isLocalRepo: (r) => r == null, fetchGuardSignals });
+    // #xqpqyr2 — resolveHashNumber/fetchDiff stubbed inert (this fixture has no real origin/main to read a
+    // bornAs record from, and this candidate's changedFiles are hash-named, never a numbered backlog file, so
+    // fetchDiff would never legitimately fire anyway) — keeps this test hermetic, never touching real git/gh.
+    const landedItems = landedIdsForCandidate(landedPr, { isLocalRepo: (r) => r == null, fetchGuardSignals, resolveHashNumber: () => null, fetchDiff: () => '' });
     const plan = planResolveOnLand({ landedItems, assigned: n.assigned });
 
     expect(plan.resolve).toEqual([nnnOf('xaa7r2n')]);            // failed before #3914: [] → stayed `active`

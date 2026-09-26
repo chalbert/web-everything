@@ -4,7 +4,7 @@
  *   and unit-tested without a real `gh`.
  */
 import { describe, it, expect } from 'vitest';
-import { itemNumsFromPr, extractItemNums, openPrItemNums, openPrsByItem, deliveredItemNumsFromPr, deliveredHashFromPr } from '../open-pr-items.mjs';
+import { itemNumsFromPr, extractItemNums, openPrItemNums, openPrsByItem, deliveredItemNumsFromPr, deliveredHashFromPr, declaredResolvedIdsFromPr, resolvedStatusIdsFromDiff } from '../open-pr-items.mjs';
 
 describe('itemNumsFromPr', () => {
   it('a batch lane ref → the item numbers, with the YYYY-MM-DD date prefix NOT read as items', () => {
@@ -415,5 +415,182 @@ describe('deliveredHashFromPr (#3914 — a card filed AND delivered in the same 
     expect(deliveredHashFromPr('lane/xaa7r2n-scope', 'WE #xaa7r2n: author scope: for #xaa7r2n')).toBeNull();
     expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xaa7r2n-card.md'] })).toBeNull();
     expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { body: 'No code changes — backlog only.' })).toBeNull();
+  });
+
+  // #xqpqyr2 — RED before this fix: a card cut from a bornAs hash that is ALREADY numbered on main by merge
+  // time (a JIT-numbering pass renamed backlog/<hash>-*.md → backlog/<NNN>-*.md before this PR's own diff was
+  // computed) used to return null forever — the merged PR's diff never touches the renamed file, so the
+  // scaffold-refile check above always failed. Real, live shape: PR #2691 (ref-led `xp4lw2v`, card #4175) —
+  // its own changed-file list names NO backlog file at all (the card was scaffolded/numbered earlier).
+  describe('landedNumberFor short-circuit (#xqpqyr2 — a hash already numbered on main by merge time)', () => {
+    it('resolves via landedNumberFor even when changedFiles has NO matching hash-named scaffold at all (PR #2691\'s real shape)', () => {
+      const landedNumberFor = (h) => (h === 'xp4lw2v' ? '4175' : null);
+      expect(deliveredHashFromPr('lane/xp4lw2v-stronger-live-smoke', 'xp4lw2v: live smoke dry-runs every dispatch kind (#4075)',
+        { changedFiles: ['scripts/lib/daemon-live-smoke.mjs'], landedNumberFor })).toBe('4175');
+    });
+
+    it('resolves via landedNumberFor even when the PR\'s diff touches the file under its NEW (numbered) name (PR #2668\'s real shape)', () => {
+      const landedNumberFor = (h) => (h === 'xn6n5gp' ? '4127' : null);
+      expect(deliveredHashFromPr('lane/xn6n5gp-numbering-linear-lock-safety', 'drain numbering: linear applyLedger (xn6n5gp)',
+        { changedFiles: ['backlog/4127-drain-numbering-make-applyledger-linear-one-hash-regex-not-o.md', 'scripts/backlog/id.mjs'], landedNumberFor })).toBe('4127');
+    });
+
+    it('falls back to the pre-existing scaffold-refile check when landedNumberFor is inert (not yet numbered on main)', () => {
+      const neverLanded = () => null;
+      expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xaa7r2n-card.md', 'scripts/a.mjs'], landedNumberFor: neverLanded })).toBe('xaa7r2n');
+      expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xother1-card.md', 'scripts/a.mjs'], landedNumberFor: neverLanded })).toBeNull();
+    });
+
+    it('omitting landedNumberFor entirely is IDENTICAL to before this fix (default is inert)', () => {
+      expect(deliveredHashFromPr('lane/xaa7r2n-x', '', { changedFiles: ['backlog/xother1-card.md'] })).toBeNull();
+    });
+
+    it('still respects the whole-PR guards even when landedNumberFor WOULD resolve — never overrides "stay conservative"', () => {
+      const landedNumberFor = () => '4127';
+      expect(deliveredHashFromPr('lane/xn6n5gp-scope', 'WE #xn6n5gp: author scope: for #xn6n5gp', { landedNumberFor })).toBeNull();
+      expect(deliveredHashFromPr('lane/xn6n5gp-x', '', { body: 'No code changes — backlog only.', landedNumberFor })).toBeNull();
+    });
+  });
+});
+
+describe('declaredResolvedIdsFromPr (#xqpqyr2 — ride-along cards a PR declares/resolves besides its own single ref-led id)', () => {
+  describe('signal 1 — explicit "resolves #N" / "Resolves: …" LINE markers', () => {
+    it('credits a line-anchored "Resolves #N" / "resolves: #N, #M" marker', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'Some context.\nResolves #4121\nMore text.' })).toEqual(['4121']);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'resolves: #4121, #4134' })).toEqual(expect.arrayContaining(['4121', '4134']));
+    });
+
+    it('a bare mention mid-sentence is NOT credited — the exact "looks delivered" false positive this must avoid', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'This eventually resolves #4121 once the sibling lands.' })).toEqual([]);
+      expect(declaredResolvedIdsFromPr('lane/4200-fix', 'a fix', { body: 'See how #4121 was resolved previously.' })).toEqual([]);
+    });
+  });
+
+  describe('signal 2 — structured bornAs-hash card markers, cross-verified against landedNumberFor', () => {
+    // #xqpqyr2 — PR #2668's real title: ref led `xn6n5gp` (→ #4127, handled by deliveredHashFromPr above);
+    // its title ALSO parenthesizes `xuqk1vp` (→ #4134) and `xb94mt5` (→ #4121) — two real cards this PR
+    // delivered that its ref/single-id extractor structurally could never see.
+    const realTitle = 'drain numbering: linear applyLedger (xn6n5gp), pid-aware lock reclaim + never-run-unlocked (xuqk1vp), number-on-any-pass sweep (xb94mt5)';
+    const landedNumberFor = (h) => ({ xn6n5gp: '4127', xuqk1vp: '4134', xb94mt5: '4121' }[h] ?? null);
+
+    it('extracts every parenthesized hash in the TITLE and cross-verifies each against landedNumberFor (PR #2668\'s real shape)', () => {
+      expect(declaredResolvedIdsFromPr('lane/xn6n5gp-numbering-linear-lock-safety', realTitle, { landedNumberFor }).sort())
+        .toEqual(['4121', '4127', '4134'].sort());
+    });
+
+    it('a hash the registry does NOT recognize is silently dropped — text alone is never trusted', () => {
+      expect(declaredResolvedIdsFromPr('lane/xn6n5gp-x', 'fix (xdecoy1)', { landedNumberFor: () => null })).toEqual([]);
+    });
+
+    // #xqpqyr2 — PR #2689's real body: a `## heading` line naming "cards x0zg44l + xg6m4i5" (ref-led x0zg44l →
+    // #4169 already handled elsewhere; the ride-along xg6m4i5 → #4172 is invisible without this), plus a
+    // separate bold `**Rule (xg6m4i5):**` line later in the same body.
+    it('extracts a hash inside a body HEADING line ("## … cards x0zg44l + xg6m4i5") (PR #2689\'s real shape)', () => {
+      const body = '## Daemon soak harness (#4075, cards x0zg44l + xg6m4i5)\n\nSome prose that also happens to mention xdecoy9 in passing, which must NOT be credited.\n';
+      const ln = (h) => ({ x0zg44l: '4169', xg6m4i5: '4172' }[h] ?? null);
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness (#4075)', { body, landedNumberFor: ln }).sort())
+        .toEqual(['4169', '4172'].sort());
+    });
+
+    it('extracts a hash inside a body BOLD-span line ("**Rule (xg6m4i5):** …") (PR #2689\'s real shape)', () => {
+      const body = '**Rule (xg6m4i5):** the fix-agent brief and conveyor SKILL.md now say every daemon bug fix adds its real-world case to the soak harness.';
+      const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-daemon-soak-harness', 'x0zg44l: daemon soak harness', { body, landedNumberFor: ln })).toEqual(['4172']);
+    });
+
+    it('a bare hash mention in ordinary prose (no bold span, no heading) is NEVER credited, even if it would verify', () => {
+      const body = 'This builds on the approach xg6m4i5 took earlier, applied to a different daemon.';
+      const ln = (h) => (h === 'xg6m4i5' ? '4172' : null);
+      expect(declaredResolvedIdsFromPr('lane/x0zg44l-x', 'x0zg44l: unrelated', { body, landedNumberFor: ln })).toEqual([]);
+    });
+  });
+
+  describe('signal 3 — a backlog file the PR\'s OWN diff flips to status: resolved', () => {
+    it('credits the id when resolvedStatusIdsFromDiff finds a real flip', () => {
+      const diff = [
+        'diff --git a/backlog/4200-example.md b/backlog/4200-example.md',
+        'index abc123..def456 100644',
+        '--- a/backlog/4200-example.md',
+        '+++ b/backlog/4200-example.md',
+        '@@ -2,3 +2,3 @@',
+        '-status: active',
+        '+status: resolved',
+      ].join('\n');
+      expect(declaredResolvedIdsFromPr('lane/4300-carrier', 'carrier PR', { diff })).toEqual(['4200']);
+    });
+  });
+
+  describe('whole-PR guards apply to ride-along credit too', () => {
+    it('an all-.md changed-file set never ride-along-credits, however the title/body reads', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-x', 'fix (xn6n5gp)', {
+        body: 'Resolves #4121',
+        changedFiles: ['backlog/4200-x.md'],
+        landedNumberFor: () => '4127',
+      })).toEqual([]);
+    });
+
+    it('a "no code changes" disclaimer never ride-along-credits', () => {
+      expect(declaredResolvedIdsFromPr('lane/4200-x', 'fix (xn6n5gp)', {
+        body: 'No code changes — backlog only. Resolves #4121',
+        landedNumberFor: () => '4127',
+      })).toEqual([]);
+    });
+  });
+});
+
+describe('resolvedStatusIdsFromDiff (#xqpqyr2 — the ground-truth half of declaredResolvedIdsFromPr\'s signal 3)', () => {
+  it('credits a numbered backlog file the diff flips TO status: resolved', () => {
+    const diff = [
+      'diff --git a/backlog/4200-example.md b/backlog/4200-example.md',
+      '--- a/backlog/4200-example.md',
+      '+++ b/backlog/4200-example.md',
+      '@@ -2,3 +2,3 @@',
+      '-status: active',
+      '+status: resolved',
+    ].join('\n');
+    expect(resolvedStatusIdsFromDiff(diff)).toEqual(['4200']);
+  });
+
+  it('a file already resolved before this diff (both +/- lines present) is NOT a real flip', () => {
+    const diff = [
+      'diff --git a/backlog/4200-example.md b/backlog/4200-example.md',
+      '--- a/backlog/4200-example.md',
+      '+++ b/backlog/4200-example.md',
+      '@@ -2,4 +2,4 @@',
+      '-status: resolved',
+      '-dateStarted: "2026-01-01"',
+      '+status: resolved',
+      '+dateFinished: "2026-01-02"',
+    ].join('\n');
+    expect(resolvedStatusIdsFromDiff(diff)).toEqual([]);
+  });
+
+  it('a hash-named (not-yet-numbered) backlog file is never matched — only a real NNN path counts', () => {
+    const diff = [
+      'diff --git a/backlog/xaa7r2n-example.md b/backlog/xaa7r2n-example.md',
+      '--- a/backlog/xaa7r2n-example.md',
+      '+++ b/backlog/xaa7r2n-example.md',
+      '@@ -2,3 +2,3 @@',
+      '-status: active',
+      '+status: resolved',
+    ].join('\n');
+    expect(resolvedStatusIdsFromDiff(diff)).toEqual([]);
+  });
+
+  it('a non-backlog file flipping some unrelated "status:" line is never matched', () => {
+    const diff = [
+      'diff --git a/scripts/config.mjs b/scripts/config.mjs',
+      '--- a/scripts/config.mjs',
+      '+++ b/scripts/config.mjs',
+      '@@ -1,2 +1,2 @@',
+      '-status: active',
+      '+status: resolved',
+    ].join('\n');
+    expect(resolvedStatusIdsFromDiff(diff)).toEqual([]);
+  });
+
+  it('empty/absent diff is a safe no-op', () => {
+    expect(resolvedStatusIdsFromDiff('')).toEqual([]);
+    expect(resolvedStatusIdsFromDiff()).toEqual([]);
   });
 });

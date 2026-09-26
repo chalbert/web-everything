@@ -140,7 +140,7 @@ import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.m
 // drift. Re-exported to keep this file's public surface (and its tests' import site) stable.
 import { remoteManifestApiArgs } from './lib/remote-manifest.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
-import { deliveredItemNumsFromPr, deliveredHashFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path
+import { deliveredItemNumsFromPr, deliveredHashFromPr, declaredResolvedIdsFromPr } from './lib/open-pr-items.mjs'; // #3441 — the STRICT delivery extractor (batch-final-segment-only, no bare #NNN citations) for the non-manifest resolve-on-land path; #xqpqyr2 — declaredResolvedIdsFromPr adds the ride-along-card signals
 // #2859 — the single canonical argv→flags reduction and reconcile predicate, pulled out to a dependency-free
 // leaf so plateau-app's drain-daemon guard can mirror it (and a cross-repo contract test can pin the mirror
 // to this source). See scripts/lib/reconcile-predicate.mjs for the full rationale.
@@ -1572,6 +1572,38 @@ export function defaultFetchLandGuardSignals(c) {
 }
 
 /**
+ * #xqpqyr2 — the ONE `landedNumberFor` call `landedIdsForCandidate` needs: a unary hash→NNN lookup, reusing
+ * lane-drain's own durable `bornAs:<hash>`-on-`origin/main` reader (imported at the top of this file) rather
+ * than re-deriving it. Fail-soft like every other read in this file: any git failure inside `landedNumberFor`
+ * already degrades to `null` (see its own `quietGit`), so a hiccup here just falls back to the pre-existing
+ * changed-file heuristic in `deliveredHashFromPr`/`declaredResolvedIdsFromPr`.
+ * @param {string} hash
+ * @returns {string|null}
+ */
+export function defaultResolveHashNumber(hash) {
+  try { return landedNumberFor(hash, process.cwd()); } catch { return null; }
+}
+
+/**
+ * #xqpqyr2 — fetches a candidate's own unified diff (`gh pr diff`), the one signal `declaredResolvedIdsFromPr`'s
+ * signal 3 (a backlog file the PR's OWN diff flips to `status: resolved`) needs beyond `defaultFetchLandGuardSignals`'s
+ * body/changed-files. A SEPARATE call (`gh pr diff` has no `--json` counterpart to fold into the existing
+ * `gh pr view` read) — kept off the hot path by `landedIdsForCandidate`'s own gate (only fetched when
+ * `changedFiles` already names a numbered `backlog/<NNN>-*.md` path, the one precondition signal 3 can ever
+ * match). Fail-soft: any failure degrades to `''`, under which `resolvedStatusIdsFromDiff` is a no-op.
+ * @param {{num?:(number|string), repo?:(string|null)}} c
+ * @returns {string}
+ */
+export function defaultFetchDiff(c) {
+  try {
+    const args = ['pr', 'diff', String(c?.num), ...(c?.repo ? ['--repo', c.repo] : [])];
+    return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch {
+    return '';
+  }
+}
+
+/**
  * #3441 — which item id(s) does a just-landed cascade candidate contribute to `landedThisPass`? A manifest
  * carrier (a couple, or a solo PR that pre-authored its own manifest) contributes its own `.item` exactly as
  * before (#2899 A5). A candidate with NO manifest is the delivery-agent-brief's DEFAULT path — a plain
@@ -1594,11 +1626,22 @@ export function defaultFetchLandGuardSignals(c) {
  * all-.md-diff housekeeping exclusion) can strip a false credit before it reaches `landedThisPass`. This keeps
  * the extra `gh` round-trip off the overwhelming majority of candidates, which match nothing and must never
  * pay for it — only a candidate already about to auto-resolve something pays the one extra call.
+ *
+ * #xqpqyr2 — TWO more effects, additive to the above (found via #2712's stale-claim health sign: real merged
+ * PRs #2668/#2689/#2691 all left their card(s) `active` forever):
+ *   1. `deliveredHashFromPr` now ALSO tries `resolveHashNumber` (→ `landedNumberFor`) before its changed-file
+ *      scaffold-refile check — a hash already numbered on `origin/main` by an EARLIER pass/session resolves
+ *      directly, with no dependence on this PR's own diff re-filing the (already-renamed) scaffold.
+ *   2. A candidate now ALSO returns any RIDE-ALONG ids `declaredResolvedIdsFromPr` finds (coordinated cards a
+ *      multi-card PR declares/resolves besides its own single ref-led id) — gated by a cheap TITLE-only
+ *      pre-check (`titleHintsRideAlong`) so an ordinary single-card PR, which matches neither, still pays
+ *      nothing extra; the diff fetch (signal 3's ground truth) is gated FURTHER, on `changedFiles` already
+ *      naming a numbered `backlog/<NNN>-*.md` path (declaredResolvedIdsFromPr's signal 3 precondition).
  * @param {{hasManifest?:boolean, item?:(number|string|null), repo?:(string|null), headRef?:string, title?:string, num?:(number|string)}} c
- * @param {{isLocalRepo?:function, fetchGuardSignals?:function}} [o]
- * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved (usually 0 or 1)
+ * @param {{isLocalRepo?:function, fetchGuardSignals?:function, resolveHashNumber?:function, fetchDiff?:function}} [o]
+ * @returns {Array<number|string>} `asItemId`-keyed ids this candidate's land proves resolved
  */
-export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals } = {}) {
+export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuardSignals = defaultFetchLandGuardSignals, resolveHashNumber = defaultResolveHashNumber, fetchDiff = defaultFetchDiff } = {}) {
   if (!c) return [];
   if (c.hasManifest) return c.item != null ? [asItemId(c.item)] : [];
   if (!isLocalRepo(c.repo)) return []; // an impl half never carries the resolve — only its WE carrier does
@@ -1607,13 +1650,27 @@ export function landedIdsForCandidate(c, { isLocalRepo = () => false, fetchGuard
   // is empty and the drain used to JIT-number the card and leave it `active` forever. Credit the HASH; the
   // caller's `planResolveOnLand` re-keys it to the NNN `numberPendingHashes` mints in this same land.
   const hashLed = !base.length && deliveredHashFromPr(c.headRef, c.title) != null;
-  if (!base.length && !hashLed) return [];
+  // #xqpqyr2 — a cheap TITLE-only pre-check for ride-along declarations: a parenthesized hash or a "resolves"
+  // word already in the title (in hand, zero extra `gh` calls) is enough to decide the body/diff fetch is
+  // worth paying for, matching #3473's own lazy-fetch rationale — an ordinary single-card PR's title matches
+  // neither and this candidate falls straight through to the pre-#xqpqyr2 early return below.
+  const titleHintsRideAlong = /\(x[0-9a-z]{6}\)/i.test(String(c.title || '')) || /\bresolves?\b/i.test(String(c.title || ''));
+  if (!base.length && !hashLed && !titleHintsRideAlong) return [];
   const { body, changedFiles } = fetchGuardSignals(c) || {};
+  const ids = new Set();
   if (hashLed) {
-    const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles });
-    return hash ? [hash] : [];
+    const hash = deliveredHashFromPr(c.headRef, c.title, { body, changedFiles, landedNumberFor: resolveHashNumber });
+    if (hash) ids.add(asItemId(hash));
+  } else if (base.length) {
+    for (const n of deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles })) ids.add(asItemId(n));
   }
-  return deliveredItemNumsFromPr(c.headRef, c.title, { body, changedFiles }).map(asItemId);
+  // #xqpqyr2 — ride-along ids ADD to whatever the primary path above found; they never replace it. Signal 3's
+  // diff fetch is gated on `changedFiles` already naming a numbered backlog file — its only possible match.
+  const hasNumberedBacklogFile = Array.isArray(changedFiles)
+    && changedFiles.some((f) => /(?:^|\/)backlog\/\d{2,5}-[^/]+\.md$/.test(String(f?.path ?? f)));
+  const diff = hasNumberedBacklogFile ? (fetchDiff(c) || '') : '';
+  for (const n of declaredResolvedIdsFromPr(c.headRef, c.title, { body, changedFiles, diff, landedNumberFor: resolveHashNumber })) ids.add(asItemId(n));
+  return [...ids];
 }
 
 /**
