@@ -1139,20 +1139,77 @@ export function resolveIdsForLandedPass(o = {}) {
  * `dryRun:true` (the drain's own `--dry-run`) computes and logs exactly what would resolve, WITHOUT writing —
  * this is what a drain dry-run's proof output shows: the strict candidates it would flip on a real pass.
  *
- * Injectable `sweepFn` (defaults to the real `autoStrandedSweepPass`) and `log`/`asJson` make this fully unit-
- * testable without touching real fs/git or running the rest of this 5000+-line module.
+ * WRITES TO MAIN ONLY UNDER THE LAND-WRITE MUTEX (PR #2700 review round 1). A flip is a commit + push to main,
+ * so it must hold `withLandWriteLock` like every other main-writing path here: a fast `--only=<pr>` drain
+ * bypasses the whole-process drain lease, and that mutex is the only thing serializing it against a resident
+ * `--watch` drain. So the step is two-phase. (1) An UNLOCKED preview (`apply:false`) — the common pass finds
+ * nothing and never touches the lock, git, or the network. (2) Only when there are candidates: ONE locked
+ * section that syncs main once, re-runs the sweep with `apply:true` and `resolveOpts:{sync:false,
+ * publish:false}` (so no flip does its own pull/push), then pushes once. The lock is taken with
+ * `runUnlockedOnContention:false`: a live holder means this pass SKIPS the apply (logged) and the next pass
+ * retries — idempotent, since a resolved card is never a candidate again. The sync (`defaultStrandedSweepSync`)
+ * also refuses unless the checkout is ATTACHED to `main` and fast-forwards cleanly — a fast drain running in a
+ * lane clone must never push that lane's commits to main. A failed push is reported as "committed locally but
+ * NOT pushed", never as a success, and the local flip commits are rolled back (`reset --keep`) so the next pass
+ * genuinely retries.
  *
- * @param {{dryRun?:boolean, asJson?:boolean, sweepFn?:function, log?:function}} [o]
- * @returns {{ok:boolean, ran:boolean, autoResolvable:Array, applied:Array, error:(string|null)}}
+ * Injectable `sweepFn` (defaults to the real `autoStrandedSweepPass`), `lockFn`/`syncFn`/`pushFn` and
+ * `log`/`asJson` make this fully unit-testable without touching real fs/git/locks or running the rest of this
+ * 5000+-line module.
+ *
+ * @param {{dryRun?:boolean, asJson?:boolean, sweepFn?:function, lockFn?:function, syncFn?:function, pushFn?:function, log?:function}} [o]
+ * @returns {{ok:boolean, ran:boolean, autoResolvable:Array, applied:Array, error:(string|null), skipped?:string, pushed?:boolean, pushWarning?:string}}
  */
-export function runStrandedSweepStep({ dryRun = false, asJson = false, sweepFn = autoStrandedSweepPass, log = (msg) => process.stderr.write(msg) } = {}) {
-  let report;
-  try {
-    report = sweepFn({ apply: !dryRun });
-  } catch (e) {
+export function runStrandedSweepStep({
+  dryRun = false,
+  asJson = false,
+  sweepFn = autoStrandedSweepPass,
+  lockFn = withLandWriteLock,
+  syncFn = defaultStrandedSweepSync,
+  pushFn = (o) => pushNumberingOnLand({ exec: execFileSync, ...o }),
+  rollbackFn = (sha) => { try { execFileSync('git', ['reset', '--keep', sha], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; } catch { return false; } },
+  log = (msg) => process.stderr.write(msg),
+} = {}) {
+  const errored = (e) => {
     const error = String((e && e.message) || e).split('\n')[0];
     if (!asJson) log(`  ⚠ stranded-sweep errored — skipped this pass, logging and continuing (xvr2o8r): ${error}\n`);
     return { ok: false, ran: false, autoResolvable: [], applied: [], error };
+  };
+  let report;
+  try {
+    report = sweepFn({ apply: false });
+  } catch (e) {
+    return errored(e);
+  }
+  let push = null;
+  if (!dryRun && report && typeof report === 'object' && report.ok && !report.mainLogUnavailable && (report.autoResolvable || []).length) {
+    let lock;
+    try {
+      lock = lockFn(() => {
+        const sync = syncFn() || {};
+        if (!sync.ok) return { skipped: sync.reason || 'sync-failed' };
+        const applied = sweepFn({ apply: true, resolveOpts: { sync: false, publish: false } });
+        const anyFlipped = !!(applied && Array.isArray(applied.applied) && applied.applied.some((a) => a.flipped));
+        const pushed = anyFlipped ? pushFn({ shouldPush: true }) : null;
+        // A failed push must not leave the flip commits on local main: the next pass reads the (now resolved)
+        // working-tree card and would never retry it, and the diverged main breaks every later ff-only sync/push.
+        const rolledBack = pushed && !pushed.pushed && sync.head ? rollbackFn(sync.head) : null;
+        return { applied, push: pushed ? { ...pushed, ...(rolledBack != null ? { rolledBack } : {}) } : null };
+      }, { runUnlockedOnContention: false, waitMs: 5_000 });
+    } catch (e) {
+      return errored(e);
+    }
+    const ids = report.autoResolvable.map((h) => `#${h.id}`).join(', ');
+    if (!lock.ran) {
+      if (!asJson) log(`  · stranded-sweep: land-write mutex held by ${lock.heldBy || '?'} — skipped resolving ${ids} this pass, will retry next pass (xvr2o8r)\n`);
+      return { ok: true, ran: false, autoResolvable: report.autoResolvable, applied: [], error: null, skipped: 'land-write-lock-contended' };
+    }
+    if (lock.result.skipped) {
+      if (!asJson) log(`  · stranded-sweep: ${lock.result.skipped} — skipped resolving ${ids} this pass; only a checkout attached to an up-to-date \`main\` may write the flip (xvr2o8r)\n`);
+      return { ok: true, ran: false, autoResolvable: report.autoResolvable, applied: [], error: null, skipped: lock.result.skipped };
+    }
+    report = lock.result.applied;
+    push = lock.result.push;
   }
   if (!report || typeof report !== 'object') {
     // A misbehaving injected sweepFn (or a future refactor that changes its shape) degrades the same way a
@@ -1174,13 +1231,35 @@ export function runStrandedSweepStep({ dryRun = false, asJson = false, sweepFn =
         const flipped = (report.applied || []).filter((a) => a.flipped).map((a) => `#${a.id}`);
         const already = (report.applied || []).filter((a) => a.alreadyResolved).map((a) => `#${a.id}`);
         const failed = (report.applied || []).filter((a) => !a.flipped && !a.alreadyResolved);
-        if (flipped.length) log(`  ✓ stranded-sweep resolved ${flipped.join(', ')} (strict commit-subject proof, #3916/xvr2o8r)\n`);
+        if (flipped.length && push && push.pushed) log(`  ✓ stranded-sweep resolved ${flipped.join(', ')} + pushed to main (strict commit-subject proof, #3916/xvr2o8r)\n`);
+        else if (flipped.length) log(`  ⚠ stranded-sweep resolved ${flipped.join(', ')} committed locally but NOT pushed (${(push && push.warning) || 'push not attempted'}) — the cards are NOT resolved on main yet; ${push && push.rolledBack ? 'local flip commits rolled back, next pass retries' : 'local flip commits could NOT be rolled back — reset local main by hand'} (#3916/xvr2o8r)\n`);
         if (already.length) log(`  · stranded-sweep: ${already.join(', ')} already resolved\n`);
         if (failed.length) log(`  ⚠ stranded-sweep FAILED to resolve ${failed.map((f) => `#${f.id} (${f.reason || 'unknown'})`).join(', ')} — resolve by hand (#3916/xvr2o8r)\n`);
       }
     }
   }
-  return { ok: true, ran: !!report.ran, autoResolvable: report.autoResolvable || [], applied: report.applied || [], error: null };
+  return {
+    ok: true, ran: !!report.ran, autoResolvable: report.autoResolvable || [], applied: report.applied || [], error: null,
+    ...(push ? { pushed: !!push.pushed, ...(push.warning ? { pushWarning: push.warning } : {}), ...(push.rolledBack != null ? { rolledBack: push.rolledBack } : {}) } : {}),
+  };
+}
+
+/**
+ * The stranded sweep's default sync (PR #2700 review round 1 self-review). The apply commits on HEAD and pushes
+ * `HEAD:main`, and — unlike the numbering push — runs on EVERY pass, including an `--only=<pr>` fast drain whose
+ * cwd is a lane clone sitting on that lane's own unreviewed commits. Pushing from there would publish the lane's
+ * work to main. So the flip is allowed only on a checkout ATTACHED to `main` that fast-forwards cleanly to
+ * origin; anything else is `{ ok:false }` and the caller skips the apply this pass. `head` is the post-sync sha
+ * the caller rolls back to if the push then fails.
+ * @returns {{ok:boolean, reason?:string, head?:string}}
+ */
+export function defaultStrandedSweepSync({ exec = execFileSync } = {}) {
+  const git = (args) => String(exec('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim();
+  let branch;
+  try { branch = git(['symbolic-ref', '--short', '-q', 'HEAD']); } catch { branch = ''; }
+  if (branch !== 'main') return { ok: false, reason: `checkout not attached to main (${branch || 'detached HEAD'})` };
+  try { git(['pull', '--ff-only']); } catch (e) { return { ok: false, reason: `main did not fast-forward to origin (${String((e && e.message) || e).split('\n')[0]})` }; }
+  try { return { ok: true, head: git(['rev-parse', 'HEAD']) }; } catch { return { ok: false, reason: 'could not read HEAD' }; }
 }
 
 /**
