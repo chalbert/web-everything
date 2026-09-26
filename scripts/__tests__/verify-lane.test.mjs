@@ -71,58 +71,35 @@ describe('verify-lane writer — overlapping-runs race (#2833 finding 1)', () =>
     expect(onDisk.status).toBe('green');
   });
 
-  it('the START write refuses to overwrite a terminal GREEN for a FOREIGN sha (#2833 finding 4)', () => {
-    // Before this run even begins, the marker on disk holds a terminal GREEN for a DIFFERENT sha Y (a sibling
-    // run's finished result). Starting a fresh verification for THIS head must NOT stamp a `running` marker over
-    // it — that would destroy the sibling's recorded green before any finish-write CAS could protect it. The
-    // start write applies the same sha compare-and-set: it refuses, writes nothing, and leaves green-Y intact.
+  it('the START write never destroys a terminal GREEN for a FOREIGN sha: it archives it and runs (#2833 finding 4, #3751)', () => {
+    // Before this run begins, the marker holds a terminal GREEN for a DIFFERENT sha Y. Finding 4 forbids destroying
+    // that result; #3751 keeps it in `.lane-verify.previous` instead of refusing, so this head's verify still runs.
     const greenY = JSON.stringify({ sha: OTHER_SHA, status: 'green', startedAt: '2026-08-02T00:00:00.000Z', finishedAt: '2026-08-02T00:01:00.000Z', suites: 'gate', exitCode: 0 });
     writeFileSync(marker(), greenY + '\n');
 
-    const { code, json } = runVerify('true'); // the suites would pass, but the run must never reach them
+    const { code, json } = runVerify('true');
 
-    expect(code).toBe(3);
-    expect(json?.status).toBe('superseded');
-    // The marker on disk is STILL the terminal green for Y — never clobbered by a running marker for THIS head.
-    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
-    expect(onDisk.sha).toBe(OTHER_SHA);
-    expect(onDisk.status).toBe('green');
+    expect(code).toBe(0);
+    expect(json?.status).toBe('green');
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).sha).toBe(headSha());
+    const kept = JSON.parse(readFileSync(join(dir, '.git', '.lane-verify.previous'), 'utf8'));
+    expect(kept.sha).toBe(OTHER_SHA);
+    expect(kept.status).toBe('green');
   });
 });
 
-describe('verify-lane START write — spent terminal markers (#3538)', () => {
-  it.each(['green', 'red'].flatMap(status =>
-    ['merged', 'unmerged', 'missing-ref', 'unknown-sha'].map(ancestry => ({ status, ancestry })),
-  ))('$status marker with $ancestry ancestry only yields when merged', ({ status, ancestry }) => {
-    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', headSha()], { cwd: dir });
-    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'marked'], { cwd: dir });
-    const markedSha = headSha();
-    if (ancestry === 'merged') {
-      execFileSync('git', ['update-ref', 'refs/remotes/origin/main', markedSha], { cwd: dir });
-    } else if (ancestry === 'missing-ref') {
-      execFileSync('git', ['update-ref', '-d', 'refs/remotes/origin/main'], { cwd: dir });
-    }
+describe('verify-lane — a terminal record for an EARLIER commit of this lane is archived, not a blocker (#3751, #3383)', () => {
+  it('a second verify after a new commit starts, runs, and keeps the old record in .lane-verify.previous', () => {
+    const first = runVerify('true');
+    expect(first.json.status).toBe('green');
+    const firstSha = headSha();
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-qm', 'next'], { cwd: dir });
-    const terminal = JSON.stringify({ sha: ancestry === 'unknown-sha' ? OTHER_SHA : markedSha, status, startedAt: '2026-08-02T00:00:00.000Z', finishedAt: '2026-08-02T00:01:00.000Z', suites: 'gate', exitCode: status === 'green' ? 0 : 2 }) + '\n';
-    writeFileSync(marker(), terminal);
-
-    // Observe the marker during the gate, proving the START write happened before execution.
-    const snapshot = join(dir, 'gate-start.json');
-    const gateScript = join(dir, 'gate.mjs');
-    writeFileSync(gateScript, `import { copyFileSync } from 'node:fs';\ncopyFileSync(${JSON.stringify(marker())}, ${JSON.stringify(snapshot)});\n`);
-    const { code, json } = runVerify(`node ${gateScript}`);
-
-    if (ancestry === 'merged') {
-      expect(code).toBe(0);
-      expect(json?.status).toBe('green');
-      expect(JSON.parse(readFileSync(snapshot, 'utf8'))).toMatchObject({ sha: headSha(), status: 'running', finishedAt: null });
-      expect(JSON.parse(readFileSync(marker(), 'utf8'))).toMatchObject({ sha: headSha(), status: 'green' });
-    } else {
-      expect(code).toBe(3);
-      expect(json?.status).toBe('superseded');
-      expect(existsSync(snapshot)).toBe(false);
-      expect(readFileSync(marker(), 'utf8')).toBe(terminal);
-    }
+    const second = runVerify('true');
+    expect(second.code).toBe(0);
+    expect(second.json.status).toBe('green');
+    expect(JSON.parse(readFileSync(marker(), 'utf8')).sha).toBe(headSha());
+    const prev = JSON.parse(readFileSync(join(dir, '.git', '.lane-verify.previous'), 'utf8'));
+    expect(prev).toMatchObject({ sha: firstSha, status: 'green' });
   });
 });
 
@@ -170,15 +147,15 @@ describe('verify-lane request (#3105) — stamp the marker, run nothing, return 
     expect(after.json.status).toBe('green');
   });
 
-  it('refuses to clobber a foreign TERMINAL marker — the same start-write guard `verify` applies', () => {
+  it('archives a foreign TERMINAL marker rather than clobbering it — the same start-write rule `verify` applies', () => {
     writeFileSync(marker(), JSON.stringify({ sha: OTHER_SHA, status: 'green', startedAt: 'x', finishedAt: 'y', suites: 'gate', exitCode: 0 }) + '\n');
     const { code, json } = runRequest('true');
-    expect(code).toBe(3);
-    expect(json.status).toBe('superseded');
-    // The foreign terminal record survives untouched.
-    const onDisk = JSON.parse(readFileSync(marker(), 'utf8'));
-    expect(onDisk.sha).toBe(OTHER_SHA);
-    expect(onDisk.status).toBe('green');
+    expect(code).toBe(0);
+    expect(json.status).toBe('requested');
+    // The foreign terminal record survives, in the archive.
+    const kept = JSON.parse(readFileSync(join(dir, '.git', '.lane-verify.previous'), 'utf8'));
+    expect(kept.sha).toBe(OTHER_SHA);
+    expect(kept.status).toBe('green');
   });
 });
 

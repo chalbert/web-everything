@@ -318,6 +318,33 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
       expect(left?.session).not.toBe('intruder');
     });
 
+    it('reclaims a lane that is ahead only by commits a remote branch already holds (#3383: a pushed POC tip)', () => {
+      provisionOne();
+      const acq = runPool(
+        [
+          'acquire', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest',
+          '--branch=main', '--no-install', '--no-reset', '--session=holder', '--ttl-minutes=0',
+        ],
+        { LANE_POOL_ROOT: poolRoot },
+      );
+      expect(acq.code).toBe(0);
+      const lane = acq.out.trim().split('\n').pop();
+      writeFileSync(join(lane, 'file.txt'), 'v1\npushed to a poc branch\n');
+      git(['add', 'file.txt'], lane);
+      git(['-c', 'user.email=t@t.com', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'on the poc branch'], lane);
+      git(['push', '--quiet', 'origin', 'HEAD:refs/heads/lane/poc'], lane);
+
+      const reclaim = runPool(
+        [
+          'acquire', '--lane=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest',
+          '--branch=main', '--no-install', '--session=next',
+        ],
+        { LANE_POOL_ROOT: poolRoot },
+      );
+      expect(reclaim.err).not.toMatch(/would destroy that work/);
+      expect(reclaim.code).toBe(0);
+    });
+
     it('--force still reclaims a TTL-stale, dirty lane (documented override, unchanged end state)', () => {
       provisionOne();
       const acq = runPool(
