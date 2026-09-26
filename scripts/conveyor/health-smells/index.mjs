@@ -20,8 +20,9 @@ import claudeAuthExpired from './claude-auth-expired.mjs';
 import daemonHeldOnLastGood from './daemon-held-on-last-good.mjs';
 import machineOverload from './machine-overload.mjs';
 import dispatchPermissionStall from './dispatch-permission-stall.mjs';
+import ghShimLanePath from './gh-shim-lane-path.mjs';
 
 export const SMELLS = Object.freeze([
   daemonSilent, daemonOwedNoDispatch, cloneStale, redPrUnattended, badCredentials, laneStarvation, healthTickOverrun, heavyQueueWait, staleClaim,
-  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall,
+  claudeAuthExpired, daemonHeldOnLastGood, machineOverload, dispatchPermissionStall, ghShimLanePath,
 ]);

@@ -60,6 +60,19 @@
  * through `gh-throttle.mjs`'s standalone CLI (`GH_THROTTLE_CLI`, baked in exactly like `REAL_GH`) instead of
  * execing `REAL_GH` directly — no per-call-site migration needed, unlike that module's other three adopters.
  *
+ * #4200-ish — GH_THROTTLE_CLI MUST NEVER DEPEND ON A LANE. Live fragility: a shim was found with
+ * `GH_THROTTLE_CLI` hard-coded to `.../.lanes/web-everything/lane-22/scripts/lib/gh-throttle.mjs` — a checkout
+ * the lane pool resets/recycles/deletes the moment its own PR lands, at which point every `gh` call routed
+ * through that shim broke at once. The old `import.meta.url`-sibling resolution baked in whatever checkout
+ * happened to be running the WRITING process's own copy of this file; if that process's own code lived in a
+ * lane (a dispatched fix/review session doing its own edit work there, per lane-clone doctrine), the baked path
+ * was the lane's, not a stable one. {@link defaultGhThrottleCliPath} now resolves it through
+ * `bootstrap-session.mjs#primaryCheckout` instead — the SAME derivation that module already uses for its own
+ * git-dir grant, specifically because a lane silently stops resolving once recycled. Belt-and-suspenders: the
+ * generated shim ALSO fails open (see {@link renderGhShimScript}'s own `#4200-ish` note) with a stderr warning
+ * whenever GH_THROTTLE_CLI (or one of ITS OWN sibling imports) is unavailable, so a still-stale shim, or one a
+ * not-yet-upgraded checkout keeps writing, degrades to a direct unthrottled `gh` call instead of breaking.
+ *
  * PURE CORE / IO SHELL: {@link resolveRealGhBinary}, {@link renderGhShimScript} and {@link ghShimPathOverride}
  * are pure (every input injected, including the filesystem probe). {@link ensureGhShim} is the one real write,
  * best-effort and never-throwing exactly like `github-app-auth-env.mjs#writeStatusFile`. {@link
@@ -67,20 +80,49 @@
  * to fold into a `claude --bg --settings` argument, or `null` when nothing should change.
  */
 
-import { existsSync, writeFileSync, chmodSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, mkdirSync, readFileSync, renameSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCachePath, resolveGithubAppEnvConfig } from './github-app-auth-env.mjs';
+import { primaryCheckout } from '../bootstrap-session.mjs';
 
 /**
- * #4064 — the absolute path to `we:scripts/lib/gh-throttle.mjs`, a SIBLING of this file, resolved once via
- * `import.meta.url` so the generated shim script (which never does its own repo-relative module resolution —
- * see {@link renderGhShimScript}'s header) can shell out to it by an unambiguous absolute path, exactly the
- * same way `realGhPath` is baked in. Overridable per call (tests only — production callers accept the default).
+ * #4200-ish (gh-shim-stable-path) — the absolute path to `we:scripts/lib/gh-throttle.mjs`, resolved through
+ * {@link primaryCheckout} — NEVER from wherever THIS module happens to be executing. The old `import.meta.url`
+ * sibling resolution baked in whatever checkout was running the CALLING process's own copy of this file — a
+ * lane clone, a scratch clone, a daemon clone mid-rebuild — and a lane is reset/recycled/deleted by the pool
+ * the instant its own PR lands (#104/lane-pool doctrine), which then silently breaks every `gh` call routed
+ * through a shim baked with that lane's path (live: a shim found hard-coding
+ * `.lanes/web-everything/lane-22/scripts/lib/gh-throttle.mjs`). `primaryCheckout` already solves exactly this
+ * class of problem for `bootstrap-session.mjs`'s own git-dir grant (see its own doc: "a lane is reset and
+ * recycled, so anything registered from inside one silently stops resolving") — reused here rather than
+ * re-derived. Falls back to the old sibling-of-this-file resolution only when the primary checkout can't be
+ * found on disk (an ephemeral host with no constellation layout at all), so this never returns a path that
+ * doesn't exist when a perfectly good one is available.
+ *
+ * REALPATH'D, NOT JUST RESOLVED — caught live running this exact fix's own test suite: the laptop's primary
+ * checkout is reachable through TWO names (`webeverything`, the real directory, and `web-everything`, a
+ * symlink alias `CONSTELLATION_REPOS` also lists), and `primaryCheckout` can hand back either one depending on
+ * probe order. `gh-throttle.mjs`'s own CLI entry point checks `import.meta.url === pathToFileURL(process.argv[1])`
+ * to decide whether it was invoked directly — but Node's ESM loader resolves `import.meta.url` through any
+ * symlink to the REAL path, while `process.argv[1]` (what {@link renderGhShimScript}'s generated script passes
+ * as `GH_THROTTLE_CLI`) is whatever string this function returns verbatim. Baking the symlink alias in made
+ * that comparison silently false: `main()` never ran, the CLI exited 0 with nothing printed, and every `gh`
+ * call through it looked like a no-op success. Resolving through {@link realpathSync} first means the baked
+ * path is always the same one Node's loader will report back, whichever alias `primaryCheckout` happened to
+ * probe.
+ * @param {{root?:string, exists?:(p:string)=>boolean, realpath?:(p:string)=>string}} [o] — overridable per call
+ *   (tests only; production callers accept the defaults, which read the real filesystem).
  */
-export function defaultGhThrottleCliPath() {
+export function defaultGhThrottleCliPath({ root, exists = existsSync, realpath = realpathSync } = {}) {
+  const primary = primaryCheckout(root, exists);
+  const candidate = join(primary, 'scripts', 'lib', 'gh-throttle.mjs');
+  if (exists(candidate)) {
+    try { return realpath(candidate); } catch { return candidate; } // best-effort — a fake `exists` in tests
+    // with no matching real file on disk falls back to the candidate string itself, never throws.
+  }
   return join(dirname(fileURLToPath(import.meta.url)), 'gh-throttle.mjs');
 }
 
@@ -229,16 +271,36 @@ const GH_THROTTLE_CLI = ${JSON.stringify(ghThrottleCliPath)};
 // machine died with \`node:internal/modules/cjs/loader:1227\` (Cannot find module) — the daemon rebuild's live
 // smoke rejected main on it and froze the daemon clone. A missing throttle CLI now degrades to a direct,
 // unthrottled REAL_GH call (same captured shape), never a crash: the throttle is pacing, not correctness.
+//
+// #4200-ish (gh-shim-stable-path): GH_THROTTLE_CLI itself is now baked in via \`primaryCheckout\` (see
+// \`defaultGhThrottleCliPath\`), so it should no longer point INTO a lane at generation time — but a shim
+// generated before this fix, or one a still-unpatched checkout keeps writing, can still bake a lane path; and
+// even a stable GH_THROTTLE_CLI has its OWN sibling imports (heavy-admission.mjs, file-locks.mjs, ...) that a
+// lane reset elsewhere could still break. Both degrade the SAME way: never a crash, always a stderr warning so
+// the fallback is visible rather than silently swallowed.
+function warnFallback(reason) {
+  try { process.stderr.write('gh-shim: ' + reason + ' — falling back to direct, unthrottled gh\\n'); } catch { /* best-effort */ }
+}
 function runDirect(argv, env) {
   return spawnSync(REAL_GH, argv, { stdio: ['inherit', 'pipe', 'pipe'], env, maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)} });
 }
 function throttleCliMissing(result) {
   if (!result || result.error || result.status === 0) return false;
   const err = result.stderr ? result.stderr.toString('utf8') : '';
-  return /Cannot find module/.test(err) && err.includes(GH_THROTTLE_CLI);
+  // Broadened past "GH_THROTTLE_CLI itself is missing": a lane reset can equally strand one of gh-throttle.mjs's
+  // OWN sibling imports (heavy-admission.mjs, file-locks.mjs, ...) while the entry file itself still exists, and
+  // that fails with the SAME "Cannot find module" shape but a DIFFERENT (sibling) path in the message — matching
+  // only \`err.includes(GH_THROTTLE_CLI)\` missed exactly that case. Any module-resolution failure out of a process
+  // that only ever runs GH_THROTTLE_CLI is the throttle CLI's own infra being broken, never a real \`gh\` failure
+  // (gh hasn't even been invoked yet on this path) — so the broader match is still safe, never a false fallback
+  // out of a genuine \`gh\` error.
+  return /Cannot find module/.test(err);
 }
 function runThrottled(argv, env) {
-  if (!existsSync(GH_THROTTLE_CLI)) return runDirect(argv, env);
+  if (!existsSync(GH_THROTTLE_CLI)) {
+    warnFallback('throttle CLI not found at ' + GH_THROTTLE_CLI);
+    return runDirect(argv, env);
+  }
   const result = spawnSync(process.execPath, [GH_THROTTLE_CLI, ...argv], {
     stdio: ['inherit', 'pipe', 'pipe'],
     env: Object.assign({}, env, { WE_GH_THROTTLE_GH_BIN: REAL_GH }),
@@ -246,8 +308,13 @@ function runThrottled(argv, env) {
     // — gh-throttle.mjs's own internal capture is ALSO sized to this same cap (#4064), so neither hop clips it.
     maxBuffer: ${JSON.stringify(SHIM_CAPTURE_MAX_BUFFER)},
   });
-  // The checkout vanished between the existsSync above and node resolving the entry — same degrade.
-  return throttleCliMissing(result) ? runDirect(argv, env) : result;
+  // The checkout vanished between the existsSync above and node resolving the entry (or one of its OWN
+  // imports did) — same degrade.
+  if (throttleCliMissing(result)) {
+    warnFallback('throttle CLI at ' + GH_THROTTLE_CLI + ' failed to load (its checkout or one of its own imports is unavailable)');
+    return runDirect(argv, env);
+  }
+  return result;
 }
 
 function freshCachedToken() {
