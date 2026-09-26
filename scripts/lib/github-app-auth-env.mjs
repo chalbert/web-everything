@@ -33,7 +33,7 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { mintInstallationToken } from './github-app-token.mjs';
+import { mintInstallationToken, getInstallationInfo } from './github-app-token.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 
 /**
@@ -66,7 +66,15 @@ const LEVEL = { read: 1, write: 2, admin: 3 };
 /**
  * Pure: which required permissions and repos does a minted installation NOT cover? An empty result on both
  * is the only state in which applying the App token is safe.
- * @param {{permissions?:object, repos?:string[]}} granted
+ *
+ * `granted.repositorySelection === 'all'` short-circuits the repo check entirely, ignoring `granted.repos`
+ * whatever it contains (even `[]` or `undefined`). Live-caught 2026-09-26: `GET /installation/repositories`
+ * (the source of `granted.repos`) can lag the installation's own `repository_selection` field for a short
+ * window right after a permission/repo-access change, and every one of `REQUIRED_APP_REPOS` was reported
+ * missing during that lag even though the installation already covered all of them. `repository_selection` is
+ * set synchronously on the installation resource the moment it changes on github.com, so an `'all'`
+ * installation covers every repo GitHub will ever add to it, by definition — never gated on enumerating one.
+ * @param {{permissions?:object, repos?:string[], repositorySelection?:string|null}} granted
  * @param {{permissions?:object, repos?:string[]}} [required]
  * @returns {{missingPermissions:string[], missingRepos:string[]}}
  */
@@ -75,6 +83,9 @@ export function findInstallationGaps(granted, { permissions = REQUIRED_APP_PERMI
   const missingPermissions = Object.entries(permissions)
     .filter(([name, level]) => (LEVEL[have[name]] ?? 0) < LEVEL[level])
     .map(([name, level]) => `${name}:${level}`);
+  if (granted?.repositorySelection === 'all') {
+    return { missingPermissions, missingRepos: [] };
+  }
   const haveRepos = new Set((granted?.repos ?? []).map((r) => String(r).toLowerCase()));
   const missingRepos = repos.filter((r) => !haveRepos.has(String(r).toLowerCase()));
   return { missingPermissions, missingRepos };
@@ -206,6 +217,15 @@ export function readGithubAppStatus(path = defaultStatusPath()) {
  * the same way a failed mint is — personal auth stays in effect, and the log names exactly what to grant — so
  * switching the App on can never leave the fleet less able to act than it was before. Only a token that
  * passed this check is ever written to the cache, so a cache hit needs no re-check.
+ *
+ * REPO CHECK PREFERS `repository_selection` OVER ENUMERATION (live-caught 2026-09-26). Right after minting,
+ * {@link getInstallationInfo} reads the installation's own `repository_selection` via the App's JWT — a field
+ * set synchronously on github.com, never subject to listing lag. `'all'` satisfies every repo requirement
+ * outright, with no call to `listRepos` at all. Only when it is `'selected'` (or unreadable) does this fall
+ * back to the enumeration-based check {@link listRepos} has always done. A verification failure (the info
+ * fetch AND, when it was needed, the repo listing both fail) is reported as its OWN reason,
+ * `access-check-failed` — distinct from `insufficient-access` — so a transient read failure is never
+ * misreported as though every required permission or repo were confirmed missing.
  * RECORDS ITS OUTCOME (#x8mpubm) to {@link defaultStatusPath} by default, on every path EXCEPT
  * `not-configured` (see the inline comment on `record` below for why that one reason is deliberately never
  * written) — so a fail-closed state that would otherwise sit invisible in one daemon's own log is checkable
@@ -214,6 +234,7 @@ export function readGithubAppStatus(path = defaultStatusPath()) {
  * `statusPath`/`writeStatus` entirely sees byte-identical behavior to before.
  * @param {{env?:NodeJS.ProcessEnv, cachePath?:string, now?:number, readCache?:Function, writeCache?:Function,
  *   mint?:typeof mintInstallationToken, listRepos?:(token:string)=>Promise<string[]>,
+ *   getInstallationInfo?:typeof getInstallationInfo,
  *   required?:{permissions?:object, repos?:string[]}, setEnv?:(token:string)=>void, log?:Console,
  *   statusPath?:string, writeStatus?:(path:string, status:object)=>void}} [o]
  * @returns {Promise<{applied:boolean, reason:string, missingPermissions?:string[], missingRepos?:string[]}>}
@@ -226,6 +247,7 @@ export async function ensureFreshGithubAppEnv({
   writeCache = writeCacheFile,
   mint = mintInstallationToken,
   listRepos = defaultListInstallationRepos,
+  getInstallationInfo: getInstallationInfoFn = getInstallationInfo,
   required,
   setEnv = (token) => { process.env.GH_TOKEN = token; },
   log = console,
@@ -252,17 +274,52 @@ export async function ensureFreshGithubAppEnv({
   let cached = readCache(cachePath);
   if (!isCacheFresh(cached, now)) {
     let minted;
-    let repos;
     try {
       minted = await mint({ appId: config.appId, installationId: config.installationId, privateKeyPath: config.privateKeyPath, now });
-      repos = await listRepos(minted.token);
     } catch (e) {
       // Never echo a partial token or the private key path's contents — only the API's own error message,
       // already scrubbed of secrets by github-app-token.mjs's own mint failure path.
       log.error?.(`github-app-auth-env: mint failed (falling back to personal auth): ${String((e && e.message) || e)}`);
       return record({ applied: false, reason: 'mint-failed' });
     }
-    const { missingPermissions, missingRepos } = findInstallationGaps({ permissions: minted.permissions, repos }, required);
+
+    // Read `repository_selection` off the installation resource itself FIRST (never subject to the listing
+    // endpoint's own lag — see this function's own docblock). A failure here is not fatal by itself: it just
+    // means we don't yet know whether this is an 'all' installation, so we fall through to the enumeration
+    // check exactly as before.
+    let repositorySelection = null;
+    try {
+      ({ repositorySelection } = await getInstallationInfoFn({ appId: config.appId, installationId: config.installationId, privateKeyPath: config.privateKeyPath, now }));
+    } catch (e) {
+      log.error?.(`github-app-auth-env: could not read the installation's repository_selection (falling back to enumeration): ${String((e && e.message) || e)}`);
+    }
+
+    // `repositorySelection === 'all'` needs no enumeration at all — every repo is covered by definition, and
+    // `listRepos` is never even called (never subject to its own lag). Anything else falls back to the
+    // enumeration this function has always done.
+    let repos = [];
+    let listFailed = false;
+    if (repositorySelection !== 'all') {
+      try {
+        repos = await listRepos(minted.token);
+      } catch (e) {
+        listFailed = true;
+        log.error?.(`github-app-auth-env: could not list the installation's repositories: ${String((e && e.message) || e)}`);
+      }
+    }
+
+    // A verification failure is never reported as "every repo is missing" — that would mislead an operator
+    // into granting access that was never actually absent. It is its own, distinct outcome (live-caught
+    // 2026-09-26): we know the mint itself succeeded (this token IS good), we simply could not confirm repo
+    // access one way or the other this tick — `repositorySelection` came back unknown/not-'all', AND the one
+    // remaining source of truth (enumeration) also failed — so the next tick tries again rather than trusting
+    // an empty `repos` list as a confirmed gap.
+    if (repositorySelection !== 'all' && listFailed) {
+      log.error?.('github-app-auth-env: could not verify the App installation\'s repository access this tick — NOT applying it, staying on personal auth. Retrying next tick.');
+      return record({ applied: false, reason: 'access-check-failed' });
+    }
+
+    const { missingPermissions, missingRepos } = findInstallationGaps({ permissions: minted.permissions, repos, repositorySelection }, required);
     if (missingPermissions.length || missingRepos.length) {
       log.error?.(
         'github-app-auth-env: App installation is missing access the fleet needs — NOT applying it, staying on personal auth. '

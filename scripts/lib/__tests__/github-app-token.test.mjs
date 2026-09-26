@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { generateKeyPairSync, verify as cryptoVerify } from 'node:crypto';
 import {
   buildAppJwt, mintInstallationToken, defaultSign, MAX_JWT_LIFETIME_SECONDS, CLOCK_DRIFT_TOLERANCE_SECONDS,
+  getInstallationInfo,
 } from '../github-app-token.mjs';
 
 // A fixture keypair, generated once for this test file — NOT a real GitHub App's key, never written to disk.
@@ -156,6 +157,71 @@ describe('mintInstallationToken — IO shell over injected fakes (no real fs, no
     await expect(mintInstallationToken({ installationId: '1', privateKeyPath: 'x', readKey, fetchImpl })).rejects.toThrow(/appId is required/);
     await expect(mintInstallationToken({ appId: '1', privateKeyPath: 'x', readKey, fetchImpl })).rejects.toThrow(/installationId is required/);
     await expect(mintInstallationToken({ appId: '1', installationId: '1', readKey, fetchImpl })).rejects.toThrow(/privateKeyPath is required/);
+    expect(readKey).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('getInstallationInfo — IO shell over injected fakes (no real fs, no real network)', () => {
+  const okArgs = () => ({
+    appId: '5037855',
+    installationId: '163880042',
+    privateKeyPath: '/fake/path/key.pem',
+    readKey: vi.fn(() => 'fake-pem-contents'),
+    buildJwt: vi.fn(() => 'fake.jwt.token'),
+  });
+
+  it('reads the key, builds the JWT, and GETs the installation resource with a Bearer JWT (never the installation token)', async () => {
+    const args = okArgs();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ permissions: { contents: 'write' }, repository_selection: 'all' }),
+    }));
+    const result = await getInstallationInfo({ ...args, fetchImpl });
+    expect(args.readKey).toHaveBeenCalledWith('/fake/path/key.pem');
+    expect(args.buildJwt).toHaveBeenCalledWith({ appId: '5037855', privateKeyPem: 'fake-pem-contents', now: expect.any(Number) });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.github.com/app/installations/163880042',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer fake.jwt.token',
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        }),
+      }),
+    );
+    expect(result).toEqual({ permissions: { contents: 'write' }, repositorySelection: 'all' });
+  });
+
+  it("defaults repositorySelection to null and permissions to {} when the API omits either", async () => {
+    const args = okArgs();
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    const result = await getInstallationInfo({ ...args, fetchImpl });
+    expect(result).toEqual({ permissions: {}, repositorySelection: null });
+  });
+
+  // Live-confirmed 2026-09-26: `GET /app/installations/{id}` answers 401 to an installation access token —
+  // only the App's own JWT works. This test pins the CONTRACT (a non-ok response throws, naming the status),
+  // not the live 401 itself, which needs no fixture to prove since it is exactly `mintInstallationToken`'s own
+  // non-ok handling, reused here.
+  it('a non-ok response throws with the HTTP status and the API\'s own body, never the JWT or key material', async () => {
+    const args = okArgs();
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 401, text: async () => 'Bad credentials' }));
+    await expect(getInstallationInfo({ ...args, fetchImpl })).rejects.toThrow(/HTTP 401.*Bad credentials/s);
+  });
+
+  it('a body read failure on the error path degrades gracefully, still reports the status', async () => {
+    const args = okArgs();
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 500, text: async () => { throw new Error('boom'); } }));
+    await expect(getInstallationInfo({ ...args, fetchImpl })).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('refuses a missing appId, installationId, or privateKeyPath before ever touching fs/network', async () => {
+    const readKey = vi.fn();
+    const fetchImpl = vi.fn();
+    await expect(getInstallationInfo({ installationId: '1', privateKeyPath: 'x', readKey, fetchImpl })).rejects.toThrow(/appId is required/);
+    await expect(getInstallationInfo({ appId: '1', privateKeyPath: 'x', readKey, fetchImpl })).rejects.toThrow(/installationId is required/);
+    await expect(getInstallationInfo({ appId: '1', installationId: '1', readKey, fetchImpl })).rejects.toThrow(/privateKeyPath is required/);
     expect(readKey).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
