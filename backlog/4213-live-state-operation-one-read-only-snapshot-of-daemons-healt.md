@@ -3,10 +3,11 @@ bornAs: xvz55jf
 kind: story
 size: 5
 parent: "3931"
-status: active
+status: resolved
 scope: ["we:scripts/operations/live-state.mjs", "we:scripts/operations/live-state-io.mjs", "we:scripts/operations/run.mjs"]
 dateOpened: "2026-09-26"
 dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
