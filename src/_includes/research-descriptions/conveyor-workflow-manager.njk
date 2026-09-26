@@ -1,0 +1,71 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/x3vjug7-workflow-manager-flows-as-executable-configuration/">x3vjug7</a> under the daemon
+  hardening epic <a href="/backlog/4075-conveyor-hardening-2026-09-24-incident-follow-ups/">#4075</a>. The operator's target (2026-09-26): migrate
+  <strong>all</strong> flow-like conveyor code to declared, executable configuration, so graphs can be generated
+  and inspected, and only step logic (classifiers, gates, effects) stays in code. The question is how.
+</p>
+
+<h2>What the code does today</h2>
+<ul>
+  <li><strong>Flows are described, not executed.</strong> Nine flow files (xr05jjl) describe every daemon
+    lifecycle as states and steps with owners, waits, retries, escalations and assumed/provided facts. The
+    checker finds 57 gaps: 21 unbounded waits, 13 uncapped retries, 11 silent failures, 5 unowned states, 5
+    unprovided assumptions, 2 failures with no exit.</li>
+  <li><strong>Flow state is re-derived every tick today, on purpose.</strong> The reconcile planner reads PR
+    labels, comments, agents and job records each tick, and counts attempts from PR comments: "a cap that a
+    restart can reset is not a cap".</li>
+  <li><strong>Replayed against the code before today's fixes, the checker catches 6 of 7 of the day's
+    knock-on bugs</strong> (cwd moved so edit permission was lost; a stripped smoke env; a shared candidate folder
+    and a held writer lock; a retargeted stacked PR that never got CI; an accepted red PR with no owner; a broken
+    login). It misses the App-auth misread: a wrong answer inside one check.</li>
+  <li><strong>A pure engine already exists for linear operations.</strong> The declared-operations engine steps a
+    run once per call, never does io, suspends for model / person / effect, and keys effects by run and step so
+    replay is safe. It has no graph, timers, retry caps or owners.</li>
+  <li><strong>The #4120 job model is ratified.</strong> Slow actions are detached jobs with durable records and
+    handles, relaunched from their last applied step. Review already runs as such a job.</li>
+</ul>
+
+<h2>Prior art</h2>
+<table>
+  <thead><tr><th>System</th><th>Config or code</th><th>Runs where</th><th>Lesson</th></tr></thead>
+  <tbody>
+    <tr><td>Temporal</td><td>Code (deterministic replay)</td><td>Server + DB</td><td>Solves timers and history, but a server joins the critical path and the graph is implicit in code.</td></tr>
+    <tr><td>Restate</td><td>Code (journal)</td><td>Single-binary server</td><td>Lighter server, same two objections.</td></tr>
+    <tr><td>Inngest</td><td>Code (<code>step.run</code>)</td><td>Single binary, SQLite by default</td><td>Lightest server; still code-first.</td></tr>
+    <tr><td>DBOS Transact</td><td>Code (decorated functions)</td><td>Library over Postgres (SQLite added 2026)</td><td>No server, but a database and still code-first.</td></tr>
+    <tr><td>AWS Step Functions (ASL)</td><td>JSON config</td><td>AWS only</td><td>Retry with MaxAttempts, Catch and TimeoutSeconds are first-class config: the fields our checker demands.</td></tr>
+    <tr><td>CNCF Serverless Workflow</td><td>YAML/JSON + jq</td><td>Several runtimes</td><td>Vendor-neutral, but jq expressions let logic leak into config.</td></tr>
+    <tr><td>W3C SCXML</td><td>XML statecharts</td><td>Any interpreter</td><td>The standard vocabulary: state, transition, guard, final, delayed send.</td></tr>
+    <tr><td>XState v5</td><td>Config + named guards/actions</td><td>In-process library</td><td>Named guards with implementations elsewhere is the right split; in-memory timers do not survive daemon restarts.</td></tr>
+    <tr><td>GitHub Actions</td><td>YAML + <code>${{ }}</code></td><td>GitHub</td><td>Cautionary: the expression language is where logic hides.</td></tr>
+  </tbody>
+</table>
+<p>
+  WE's own <a href="/projects/webworkflows/">Workflow Protocol</a> is an SCXML-style data-defined graph. Its scope
+  is UX step-intents, so it gives the conveyor its vocabulary, not its rules or its runtime.
+</p>
+
+<h2>Recommendation</h2>
+<ul>
+  <li><strong>Fork 1 (a)</strong> — no always-running server on the critical path: an in-repo engine over the
+    declared-operations engine and #4120 jobs, with restart-safe records and graphs drawn from the files that
+    run.</li>
+  <li><strong>Fork 2 (a)</strong> — flow state is derived each tick from live observations; the record keeps
+    only deadlines, job handles and a log.</li>
+  <li><strong>Fork 3 (a)</strong> — classifier guards with a closed set of outcomes, ordered first-match
+    transitions, no expressions in config.</li>
+  <li><strong>Fork 4 (a)</strong> — the engine is a library in the daemon that owns each state; hand-offs travel
+    through live state.</li>
+  <li><strong>Fork 5 (a)</strong> — the rebuild flow, which deploys the engine itself, stays code-driven and
+    runs in permanent shadow.</li>
+  <li>Migration: a per-flow off / shadow / on switch with fallback to the old path (flows that write
+    <code>main</code> fail closed); the checker becomes the engine's load-time admission test with no waivers
+    for unbounded waits, uncapped retries or unowned states, plus runtime probes of each step's assumed facts.
+    First slice: review.</li>
+</ul>
+
+<p>Full grounding: <code>reports/2026-09-26-workflow-manager-flows-as-executable-config.md</code>.</p>
+{% endraw %}
