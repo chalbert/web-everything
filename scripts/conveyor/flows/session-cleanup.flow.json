@@ -1,0 +1,546 @@
+{
+  "id": "session-cleanup",
+  "title": "Session cleanup — reap, release, revoke",
+  "summary": "A dispatched background session (review/fix/ci-heal/conveyor/prepare/inspect) is really FOUR independent resources that must each be cleaned up on their own schedule by their own mechanism, cross-checking the SAME `claude agents --json --all` listing but never sharing one clock: (1) the CLI's own session registration, reaped by session-reaper.mjs's several axes; (2) its per-session dispatch-scratch directory + CLI workspace trust entry, swept by a SEPARATE opt-in pass inside the same file; (3) the lane-pool lease it holds, reclaimed by lease-reaper.mjs; (4) the backlog card claim (`status: active`) it represents, released by orphan-claim-release.mjs. A FIFTH state — a session genuinely blocked on an interactive permission prompt, with nobody there to answer it — is named explicitly by a sibling file (reconcile-core.mjs#isAwaitingPermission) but is NOT specifically recognized by any of the four reap mechanisms above; it is only caught, indirectly and mechanically, by the generic hung-transcript axis once its silence outlives a grace window.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/conveyor/session-reaper.mjs",
+    "scripts/conveyor/hung-session.mjs",
+    "scripts/conveyor/close-session-sweep.mjs",
+    "scripts/conveyor/orphan-claim-release.mjs",
+    "scripts/conveyor/stand-down.mjs",
+    "scripts/conveyor/lease-reaper.mjs",
+    "scripts/conveyor/health-watch.mjs",
+    "scripts/conveyor/health-watch-core.mjs",
+    "scripts/conveyor/reconcile-core.mjs",
+    "scripts/conveyor/session-verdicts.mjs",
+    "scripts/conveyor/reconcile-note-comment.mjs",
+    "scripts/operations/operator-queue.mjs",
+    "scripts/operations/dispatch-abort.mjs",
+    "scripts/operations/dispatch-lane-io.mjs",
+    "scripts/lib/lane-lease.mjs",
+    "skills-src/conveyor/review-daemon.mjs",
+    "skills-src/conveyor/daemon-manifest.mjs",
+    "launchd:com.we.review-daemon.plist",
+    "launchd:com.we.fix-dispatch-daemon.plist",
+    "launchd:com.we.lease-reaper.plist"
+  ],
+  "entry": {
+    "state": "session-dispatched",
+    "provides": [
+      {
+        "kind": "cwd",
+        "name": "<scratch>",
+        "cite": "scripts/operations/dispatch-lane-io.mjs:1637-1650",
+        "note": "dispatchScratchRoot()/<sessionId> — a fresh directory per dispatched session, under <workspace>/.operations/dispatch/<sessionId>."
+      },
+      {
+        "kind": "permission",
+        "name": "edit:<scratch>",
+        "cite": "scripts/operations/dispatch-lane-io.mjs:1627-1650",
+        "note": "CLI workspace trust is granted for this exact directory so `claude --bg` does not refuse it as untrusted."
+      },
+      {
+        "kind": "lock",
+        "name": "lane-lease:<lane>",
+        "cite": "scripts/lib/lane-lease.mjs:35",
+        "note": "when the dispatch acquired a lane (build/fix/conveyor kinds), a `.lane-lease` marker is written; TTL default 240 min (DEFAULT_LEASE_TTL_MINUTES)."
+      },
+      {
+        "kind": "state-root",
+        "name": "<dispatch-scratch-root>",
+        "cite": "scripts/operations/dispatch-lane-io.mjs:1637"
+      },
+      {
+        "kind": "writable",
+        "name": "<dispatch-scratch-root>",
+        "cite": "scripts/conveyor/session-reaper.mjs:1637-1655"
+      },
+      {
+        "kind": "cwd",
+        "name": "<daemon-clone>",
+        "cite": "launchd:com.we.review-daemon.plist:WorkingDirectory",
+        "note": "the reap passes themselves (session-reaper.mjs) run in-process from the resident daemon's own checkout, not from the dispatched session's scratch dir."
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "launchd:com.we.review-daemon.plist:ProgramArguments"
+      },
+      {
+        "kind": "path-tool",
+        "name": "claude",
+        "cite": "launchd:com.we.review-daemon.plist:EnvironmentVariables.PATH"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "session-dispatched",
+      "label": "A background session is spawned (review-<PR> / fix-<PR> / ci-heal-<PR> / conveyor-<NUM> / prepare-<NUM> / inspect-<PR>)",
+      "terminal": false,
+      "owner": "the dispatching daemon (review-daemon.mjs / reconcile-fix-dispatch-daemon.mjs) via dispatch-lane.mjs",
+      "ownerCite": "scripts/operations/dispatch-lane-io.mjs:1627-1650",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "The session's own `claude agents` row's `cwd` is this per-session scratch dir, NOT the daemon's own checkout root — this is load-bearing for the whole reap side (see axis-terminal-state-or-ground-truth's own notes)."
+    },
+    {
+      "id": "session-running",
+      "label": "Session state: working / blocked (claude agents --json)",
+      "terminal": false,
+      "owner": "none (nothing watches liveness continuously; only the periodic reap passes below sample it)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:187-204",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Every detection axis below is a SEPARATE resolver, tried in a fixed order per session-reaper.mjs's own tiering (classifySessionReapWithGroundTruth). Sampled every ~120s from inside review-daemon/reconcile-fix-dispatch-daemon's own tick (skills-src/conveyor/review-daemon.mjs:446-452), scoped to sessions this daemon itself dispatched."
+    },
+    {
+      "id": "axis-no-outcome-stall",
+      "label": "Axis -1: no-net-outcome stall (a bot busily 'working', never advancing)",
+      "terminal": false,
+      "owner": "session-reaper.mjs (noOutcomeFor, checked first of all)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:501-509; scripts/conveyor/hung-session.mjs:169-266",
+      "wait": {
+        "for": "a new commit ahead of the lane's base (build/fix) / a new PR comment (review) / the target backlog file changing (prepare) since the LAST such outcome, or since start if none yet",
+        "timeout": "per-kind WINDOW (default minutes: conveyor 45, fix 30, review 30, prepare/prepare-decision 45), env-tunable via WE_NO_OUTCOME_<KIND>_WINDOW_MIN",
+        "onTimeout": "session-reaped-stopped",
+        "cite": "scripts/conveyor/hung-session.mjs:191-228,256-266"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "reason on reap is no-outcome:no-outcome-window (WINDOW) or no-outcome:ceiling (an absolute CEILING per kind, regardless of intermediate outcomes: default minutes conveyor 240/fix 120/review 60/prepare 180, clamped to never exceed the 240-min lane-lease TTL) — both land on session-reaped-stopped; the ceiling is a genuine bound, not an uncapped retry, so it is not modeled as a `retries` block. `ci-heal`/`inspect` kinds are NOT covered (the statute names exactly four kinds) — a stalled ci-heal/inspect session has no automatic exit here at all, only the generic hung-transcript axis below. An unreadable outcome source (OUTCOME_UNREADABLE) disables the WINDOW trigger only; the CEILING still fires regardless. Cite for the ceiling: scripts/conveyor/hung-session.mjs:217-228,258-260.",
+      "ack": {}
+    },
+    {
+      "id": "axis-claude-auth-expired",
+      "label": "Axis AUTH: the Claude CLI's own synthetic 'login expired' turn",
+      "terminal": false,
+      "owner": "session-reaper.mjs (authExpiredFor)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:521-525; scripts/conveyor/hung-session.mjs:268-370",
+      "wait": {
+        "for": "nothing — fires the instant the newest assistant turn IS the CLI's own isApiErrorMessage:true turn naming authentication_failed / 'login expired' / '/login'",
+        "timeout": "0 (no staleness window at all — deliberately instant, see hung-session.mjs:280-286)",
+        "onTimeout": "session-reaped-stopped",
+        "cite": "scripts/conveyor/hung-session.mjs:301-326"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "A SEPARATE, daemon-log-level detector for the SAME root cause also exists (health-watch-core.mjs's AUTH_ERROR regex over review-daemon/fix-dispatch-daemon's own log lines) and is the ONE smell allowed to send a real desktop notification even in the default 'shadow' mode (notifyEvenInShadow) — see daemon-level-unproductive-signal below. The two never talk to each other; they just happen to usually fire around the same real incident.",
+      "ack": {}
+    },
+    {
+      "id": "axis-hung-transcript",
+      "label": "Axis 0: hung-transcript detection (the session's own file stopped growing)",
+      "terminal": false,
+      "owner": "session-reaper.mjs (hungFor, overrides wrong-cwd)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:527-534",
+      "wait": {
+        "for": "new activity in the session's own transcript file (newest parseable entry timestamp, NOT the file's mtime — see hung-session.mjs's own measured mtime-drift finding)",
+        "timeout": "30 min default (WE_HUNG_TRANSCRIPT_MINUTES), tripled to 90 min while the newest transcript entry is a still-unresolved tool_use",
+        "onTimeout": "session-reaped-stopped",
+        "cite": "scripts/conveyor/hung-session.mjs:68-118"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "THIS IS THE ONLY MECHANISM THAT EVER TOUCHES A SESSION BLOCKED ON A PERMISSION PROMPT, and only by accident of shape: a CLI session sitting at an interactive y/n permission dialog has a tool_use block with no tool_result yet — structurally IDENTICAL, to this detector, to any other long-pending tool call (a slow verify-lane run, a hung sub-agent). See awaiting-permission-fifth-state for the semantic detector that actually names this condition, and why the two are not connected.",
+      "ack": {}
+    },
+    {
+      "id": "awaiting-permission-fifth-state",
+      "label": "GAP: session genuinely blocked on a permission prompt (the 'fifth state') — not reaped by name, only by the generic hung-transcript accident above",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "reconcile-core.mjs#isAwaitingPermission (a SIBLING mechanism, NOT one of this flow's own files, and NOT wired to any of them)",
+      "ownerCite": "scripts/conveyor/reconcile-core.mjs:438-447",
+      "wait": {
+        "for": "a human to answer the prompt, or manually clear the escalation",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/conveyor/reconcile-core.mjs:438-440 ('Three sessions have held one for 211.4 hours.')"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "a PR comment ('needs your decision: a session is blocked on a permission prompt', reconcile-note-comment.mjs:81) plus a line in operator-queue.mjs's own ESCALATIONS listing (operator-queue.mjs:400,405) and session-verdicts.mjs's own 'waiting-permission' verdict (session-verdicts.mjs:80-86,159-168)",
+        "cite": "scripts/conveyor/reconcile-core.mjs:76,96,167-170,438-447,857-863; scripts/conveyor/reconcile-note-comment.mjs:55,66,81; scripts/operations/operator-queue.mjs:400,405"
+      },
+      "notes": "RECORDED HONESTLY, per the brief: nothing in session-reaper.mjs / hung-session.mjs / close-session-sweep.mjs / orphan-claim-release.mjs / stand-down.mjs / lease-reaper.mjs / health-watch*.mjs (grep for permission/waitingFor/isAwaitingPermission across all of them: zero hits) ever checks `status:'waiting'` + `waitingFor` naming a permission prompt. This condition is detected ONLY by reconcile-core.mjs (imported by review-daemon's OWN reconcile/dispatch tick, not by its session-reaper call) and is explicitly designed to be TERMINAL for the reconciler with NO decay and NO clock — a human must clear it. Meanwhile, the SAME session, from session-reaper's point of view, is just 'a pending tool_use' and — once its own hung-transcript grace (90 min if pending, per axis-hung-transcript) elapses — WILL be `claude stop`-ed and have its lane/scratch released as 'hung', regardless of whether a human was seconds away from answering the prompt or reconcile-core had already escalated it. Two independent, uncoordinated mechanisms reach opposite conclusions about the SAME session.",
+      "ack": {
+        "unbounded-wait": "#3149"
+      }
+    },
+    {
+      "id": "axis-terminal-state-or-ground-truth",
+      "label": "Axes: listed-terminal-state / completion-record / backlog-or-PR ground truth",
+      "terminal": false,
+      "owner": "session-reaper.mjs (classifySessionReap base axis, completionFor, groundTruthFor)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:187-204,544-561",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "GAP, confirmed by the code's own live-incident comment: these three axes are SKIPPED ENTIRELY whenever the base classification is `wrong-cwd` (session-reaper.mjs:540 `if (cwdMismatch) return base;`) — and `wrong-cwd` is EXACTLY what a normally-dispatched review/fix session gets, because its own `cwd` is its per-session dispatch-scratch dir, not the daemon's `allowedCwd` (REPO_ROOT). session-reaper.mjs's own #4149 comment names three real sessions (fix-2003/fix-2115/fix-2267) that sat this way for TEN DAYS past their no-outcome ceiling before the fix that let axes -1/AUTH/0 override wrong-cwd. So for a normal dispatched session, ONLY no-outcome-stall / claude-auth-expired / hung-transcript can ever reap it via the daemon's own in-process call — a session whose `claude agents` state genuinely reached `done`/`failed`/`stopped`, or whose backlog/PR target is independently confirmed resolved, is NOT specially fast-tracked; it still has to wait out one of the three generic-signal axes above.",
+      "ack": {}
+    },
+    {
+      "id": "axis-idle-timeout-backstop",
+      "label": "Axis 3: idle-timeout backstop (LAST resort, blocked-only)",
+      "terminal": false,
+      "owner": "session-reaper.mjs (idleThresholdMs)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:563-570,1723",
+      "wait": {
+        "for": "session.state === 'blocked' and a readable numeric startedAt",
+        "timeout": "6 hours default (DEFAULT_IDLE_REAP_THRESHOLD_MS), wired unconditionally by review-daemon/fix-dispatch-daemon",
+        "onTimeout": "session-reaped-stopped",
+        "cite": "scripts/conveyor/session-reaper.mjs:1723; skills-src/conveyor/review-daemon.mjs:441,446-452"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Also skipped entirely on a wrong-cwd verdict or once `confirmedStillOpen` (a definite ground-truth 'still open') — the SAME cwd gap as the previous state, since this is 'below' the `cwdMismatch` short-circuit too.",
+      "ack": {}
+    },
+    {
+      "id": "session-reaped-stopped",
+      "label": "claude stop <id> issued — session registration cleared",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "session-reaper.mjs (stopSessionWithRetry -> dispatch-abort.mjs#stopSession)",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:1744,1749,1762; scripts/operations/dispatch-abort.mjs:72-86",
+      "wait": null,
+      "retries": {
+        "what": "claude stop <id> retried on failure",
+        "cap": 3,
+        "onCap": "session-running",
+        "cite": "scripts/conveyor/session-reaper.mjs:1744,1749"
+      },
+      "escalation": null,
+      "notes": "Past the 3-attempt cap, the failed stop is only logged; the session is left exactly as it was for the NEXT reaper pass (~120s later, re-entering at session-running) to retry from scratch — no escalation. A reported SUCCESS is also a hint, not a certainty (measured live against upstream anthropics/claude-code issues) — this reaper never re-polls to confirm the listing actually changed; 'alreadyGone' (a `No job matching` stderr) is treated as benign, not an error. This state clears ONLY the claude-agents registration; it does NOT by itself release the lane lease, the backlog claim, or the dispatch-scratch directory — those are the three separate states below, on their own separate schedules.",
+      "ack": {}
+    },
+    {
+      "id": "fixer-stood-down",
+      "label": "A fix agent deliberately stands down (needs human judgment) — durable PR comment, no label swap",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none (terminal for the reconciler; the intended exit is a human)",
+      "ownerCite": "scripts/conveyor/stand-down.mjs:1-33",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "one durable PR comment whose leading line is STAND_DOWN_MARKER ('🛑 conveyor fix — stood down, human judgment needed'); the reconciler treats any PR carrying it as terminal with NO decay and NO clock, forever, until a human clears it or takes the PR over via /finish",
+        "cite": "scripts/conveyor/stand-down.mjs:16-20,48"
+      },
+      "notes": "This is the session's own CHOSEN clean exit for an ambiguous/red-gate/conflict/lane-ref-gone case (STAND_DOWN_REASONS, stand-down.mjs:58-63) — the session itself still gets reaped normally via session-reaped-stopped once its own claude-agents row goes terminal; this state is about the PR-level marker outliving the session, not about the process."
+    },
+    {
+      "id": "dispatch-scratch-orphaned",
+      "label": "Dispatch-scratch directory + CLI trust entry left behind after the session is gone",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "session-reaper.mjs's own --dispatch-scratch-sweep pass — but NOT run by anything on a schedule",
+      "ownerCite": "scripts/conveyor/session-reaper.mjs:1531-1604,2028-2031",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "CONFIRMED GAP, from the code AND this host's own live launchd state: `--dispatch-scratch-sweep` is an opt-in CLI flag (session-reaper.mjs:2028-2031) that `runSessionReaperPass` itself has NO parameter for at all — review-daemon.mjs's `defaultReapSessions()` (the ONLY place either resident daemon calls this file) never passes it, and `ls ~/Library/LaunchAgents` on this machine shows no plist that runs `session-reaper.mjs --dispatch-scratch-sweep` on any cadence. So this axis is real, coded, tested — and, as far as this host's actual running daemons go, NEVER FIRES. Every dispatched session's scratch dir + trust entry accumulates forever unless an operator runs the CLI flag by hand. If it DID run: 24h grace (path A, WE_DISPATCH_SCRATCH_GRACE_HOURS) once matched to a terminal/absent claude-agents row, or a 7-day ceiling safety valve (path B, WE_DISPATCH_SCRATCH_CEILING_DAYS) when the match could not be resolved at all (session-reaper.mjs:1557-1604).",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    },
+    {
+      "id": "lane-lease-orphaned",
+      "label": "The session's lane-pool lease outlives it",
+      "terminal": false,
+      "owner": "lease-reaper.mjs, resident via com.we.lease-reaper.plist -> pass-daemon.mjs --pass=lease-reaper",
+      "ownerCite": "launchd:com.we.lease-reaper.plist; skills-src/conveyor/daemon-manifest.mjs:148",
+      "wait": {
+        "for": "the SAME claude agents --json --all listing (session-gone axis), or the lease's own TTL",
+        "timeout": "session-gone: absence past a 10-minute listing-visibility grace (DISPATCH_GUARD_LISTING_GRACE_MINUTES) OR a real ps-confirmed dead pid, checked BEFORE ttl; ttl-stale backstop: 240 min default (DEFAULT_LEASE_TTL_MINUTES)",
+        "onTimeout": "lane-lease-released",
+        "cite": "scripts/conveyor/lease-reaper.mjs:300-318,524; scripts/operations/dispatch-lane.mjs:324; scripts/lib/lane-lease.mjs:35"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "Reserved (permanent memory) leases are NEVER reaped on any axis (isReservedLease short-circuit, checked first). Unlike session/scratch cleanup, THIS axis genuinely IS resident on this host today (a real launchd job, confirmed via `plutil -p`) — the strongest-scheduled of the four resources.",
+      "ack": {}
+    },
+    {
+      "id": "lane-lease-released",
+      "label": "Lane returned to the pool",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "lease-reaper.mjs (delegates to lane-pool.mjs release --force, never rm's the marker itself)",
+      "ownerCite": "scripts/conveyor/lease-reaper.mjs:18-24",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": null
+    },
+    {
+      "id": "backlog-claim-orphaned",
+      "label": "The backlog card (status: active) the session was working outlives it",
+      "terminal": false,
+      "owner": "orphan-claim-release.mjs, registered in daemon-manifest.mjs but NOT resident on this host",
+      "ownerCite": "skills-src/conveyor/daemon-manifest.mjs:87,130",
+      "wait": {
+        "for": "no live lane lease AND no open PR AND no live claude-agents session AND no merged-PR delivery all naming this card",
+        "timeout": "48h default (DEFAULT_MIN_AGE_MS), measured conservatively from dateStarted/dateScaffolded/dateOpened",
+        "onTimeout": "backlog-claim-released",
+        "cite": "scripts/conveyor/orphan-claim-release.mjs:26-27,70,183-203"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "CONFIRMED GAP, same shape as dispatch-scratch: daemon-manifest.mjs defines this pass at a 6-hour interval with `--apply`, but no `com.we.conveyor-pass-daemon.orphan-claim-release.plist` (or equivalent) is installed on this host — only `merge-orphan-sweep` (a DIFFERENT, similarly-named pass) has a live plist. FAIL-CLOSED BY DESIGN even when it does run: if the lane-pool root, `gh pr list`, or `claude agents --json --all` is unreadable, EVERY card is skipped that pass, never guessed as orphaned (orphan-claim-release.mjs:28-29,190-192).",
+      "ack": {}
+    },
+    {
+      "id": "backlog-claim-released",
+      "label": "Card handed back to open (release) or settled (a born-active scaffold)",
+      "terminal": true,
+      "outcome": "success",
+      "owner": "orphan-claim-release.mjs via backlog.mjs release|settle, landed through its own lane -> commit -> verify -> parked PR",
+      "ownerCite": "scripts/conveyor/orphan-claim-release.mjs:31-33,360-386",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Reached via the pass's own lane-acquire + verify-lane + open-pr sequence (lane acquire: resolveLaneAcquireTimeoutMs(); verify: 30 min fixed, VERIFY_TIMEOUT_MS) — the lane is released in a `finally` regardless of outcome (best-effort; a failed release is left for lease-reaper to reclaim). Reversible by design — anyone can re-claim the card afterward. Cite: scripts/conveyor/orphan-claim-release.mjs:344-386."
+    },
+    {
+      "id": "daemon-level-unproductive-signal",
+      "label": "Meta-axis: the DAEMON's own tick pattern looks unproductive (not a per-session signal)",
+      "terminal": false,
+      "owner": "health-watch.mjs / health-watch-core.mjs, resident via com.we.health-watch.plist",
+      "ownerCite": "scripts/conveyor/health-watch-core.mjs:1-24,62; launchd:com.we.health-watch.plist",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "a real macOS desktop notification (notifyDesktopChecked) — but default mode is 'shadow', where EVERY notify is suppressed EXCEPT the one smell that opts in (claude-auth-expired, notifyEvenInShadow:true); every other high-severity episode is only written to a durable per-episode report file, never actually sent, until an operator flips mode out of shadow",
+        "cite": "scripts/conveyor/health-watch-core.mjs:385-392; scripts/conveyor/health-watch.mjs:454-474"
+      },
+      "notes": "A separate, coarser signal from everything else in this flow: it watches the DAEMON's log, not any one session's transcript, and its own claude-auth-expired smell (an AUTH_ERROR regex over log text) is INDEPENDENT of hung-session.mjs's own transcript-level claude-auth-expired axis (axis-claude-auth-expired) — two different code paths, same real-world incident, never cross-checked against each other. Timing is episode-based (openAfter/closeAfter sample counts, a flap cap of 3 re-opens/24h collapsing to one flapping episode, a 4-hour high-severity reminder) rather than a single wait/timeout pair — see health-watch-core.mjs:29-42.",
+      "ack": {}
+    }
+  ],
+  "transitions": [
+    {
+      "from": "session-dispatched",
+      "to": "session-running",
+      "on": "the CLI accepts the --bg spawn and the session begins working",
+      "kind": "normal",
+      "cite": "scripts/operations/dispatch-lane-io.mjs:1627-1650"
+    },
+    {
+      "from": "session-running",
+      "to": "axis-no-outcome-stall",
+      "on": "every reaper tick evaluates this axis first, for every non-terminal session",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:501-509"
+    },
+    {
+      "from": "axis-no-outcome-stall",
+      "to": "session-reaped-stopped",
+      "on": "stall:true (ceiling or window)",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/hung-session.mjs:256-266"
+    },
+    {
+      "from": "axis-no-outcome-stall",
+      "to": "axis-claude-auth-expired",
+      "on": "stall:false or the kind is uncovered (ci-heal/inspect)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:511-520"
+    },
+    {
+      "from": "axis-claude-auth-expired",
+      "to": "session-reaped-stopped",
+      "on": "authExpired:true",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/hung-session.mjs:315-326"
+    },
+    {
+      "from": "axis-claude-auth-expired",
+      "to": "axis-hung-transcript",
+      "on": "authExpired:false",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:527-534"
+    },
+    {
+      "from": "axis-hung-transcript",
+      "to": "session-reaped-stopped",
+      "on": "hung:true (30 min silent, or 90 min with a pending tool call)",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/hung-session.mjs:95-105"
+    },
+    {
+      "from": "axis-hung-transcript",
+      "to": "awaiting-permission-fifth-state",
+      "on": "the pending tool call this axis is quietly grading IS in fact an interactive permission prompt reconcile-core.mjs has already flagged (informational cross-reference — not a real code transition; the two mechanisms never actually communicate)",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/reconcile-core.mjs:438-447"
+    },
+    {
+      "from": "axis-hung-transcript",
+      "to": "axis-terminal-state-or-ground-truth",
+      "on": "hung:false",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:536-542"
+    },
+    {
+      "from": "axis-terminal-state-or-ground-truth",
+      "to": "session-reaped-stopped",
+      "on": "state is done/failed (base axis), or a completion record says done, or the target backlog item/PR is independently confirmed resolved — AND cwd matched the daemon's allowedCwd",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:187-204,544-561"
+    },
+    {
+      "from": "axis-terminal-state-or-ground-truth",
+      "to": "axis-idle-timeout-backstop",
+      "on": "none of those fired (including every case where wrong-cwd short-circuited them)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:563-570"
+    },
+    {
+      "from": "axis-idle-timeout-backstop",
+      "to": "session-reaped-stopped",
+      "on": "state:'blocked' and age >= 6h",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/session-reaper.mjs:563-570"
+    },
+    {
+      "from": "axis-idle-timeout-backstop",
+      "to": "session-running",
+      "on": "still too young / not blocked / confirmedStillOpen — kept exactly as is, re-evaluated next tick (~120s later)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:572"
+    },
+    {
+      "from": "session-running",
+      "to": "fixer-stood-down",
+      "on": "a fix-kind session hits an unresolvable ambiguous finding, a red gate, a same-line conflict, or a gone lane ref, and posts the stand-down marker instead of guessing",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/stand-down.mjs:8-20"
+    },
+    {
+      "from": "session-reaped-stopped",
+      "to": "dispatch-scratch-orphaned",
+      "on": "the session's own scratch directory + trust entry are never touched by the stop itself",
+      "kind": "normal",
+      "cite": "scripts/conveyor/session-reaper.mjs:1536-1541"
+    },
+    {
+      "from": "session-reaped-stopped",
+      "to": "lane-lease-orphaned",
+      "on": "if the session held a lane lease, releasing the claude-agents registration does not itself release the lane",
+      "kind": "normal",
+      "cite": "scripts/conveyor/lease-reaper.mjs:5-13"
+    },
+    {
+      "from": "session-reaped-stopped",
+      "to": "backlog-claim-orphaned",
+      "on": "if the session's backlog card is still status:active, stopping the session does not itself hand the card back",
+      "kind": "normal",
+      "cite": "scripts/conveyor/orphan-claim-release.mjs:7-13"
+    },
+    {
+      "from": "lane-lease-orphaned",
+      "to": "lane-lease-released",
+      "on": "session-gone (10-min grace + real pid check) or ttl-stale (240 min)",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/lease-reaper.mjs:300-318"
+    },
+    {
+      "from": "backlog-claim-orphaned",
+      "to": "backlog-claim-released",
+      "on": "48h age and every fail-closed signal source read cleanly and confirmed the owner gone",
+      "kind": "timeout",
+      "cite": "scripts/conveyor/orphan-claim-release.mjs:183-203"
+    },
+    {
+      "from": "session-running",
+      "to": "daemon-level-unproductive-signal",
+      "on": "out-of-band: the daemon's OWN log, across many sessions/ticks, starts showing a repeated pattern (owed work, 0 dispatched, blocking refusals, auth errors) — not triggered by any single session",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/health-watch-core.mjs:1-24"
+    },
+    {
+      "from": "daemon-level-unproductive-signal",
+      "to": "session-running",
+      "on": "the health watch's own next tick re-samples the log; this meta-axis never itself stops or reaps anything",
+      "kind": "normal",
+      "cite": "scripts/conveyor/health-watch.mjs:518-538"
+    }
+  ],
+  "steps": [
+    {
+      "id": "sample-agents-listing",
+      "state": "session-running",
+      "actor": "review-daemon.mjs / reconcile-fix-dispatch-daemon.mjs, in-process, every tick",
+      "does": "claude agents --json --all, then classifySessionReapWithGroundTruth over every row",
+      "cite": "scripts/conveyor/session-reaper.mjs:1856-1881; skills-src/conveyor/review-daemon.mjs:446-452",
+      "canFail": true,
+      "onFailure": "session-running",
+      "assumes": [
+        {
+          "kind": "cwd",
+          "name": "<daemon-clone>",
+          "cite": "launchd:com.we.review-daemon.plist:WorkingDirectory"
+        },
+        {
+          "kind": "path-tool",
+          "name": "node",
+          "cite": "launchd:com.we.review-daemon.plist:ProgramArguments"
+        }
+      ],
+      "provides": [],
+      "notes": "An unreadable/empty listing is indistinguishable from a bad read and degrades every axis to its own most-conservative default (never a guessed 'gone') — the reap side of the exact same fail-closed law orphan-claim-release.mjs states explicitly for its own listing read."
+    },
+    {
+      "id": "issue-claude-stop",
+      "state": "session-reaped-stopped",
+      "actor": "session-reaper.mjs (stopSessionWithRetry)",
+      "does": "claude stop <id> (session.id, never session.sessionId — a wrong-field bug this file's own header documents fixing), up to 3 attempts, 300ms/900ms backoff",
+      "cite": "scripts/conveyor/session-reaper.mjs:82-103,1744,1749,1762",
+      "canFail": true,
+      "onFailure": "session-running",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude",
+          "cite": "scripts/operations/dispatch-abort.mjs:72-73"
+        }
+      ],
+      "provides": [],
+      "notes": "Past the retry cap, a session that still won't stop after 3 attempts is logged and left exactly as it was, for the NEXT reaper tick (~120s later, re-entering at session-running) to try again from scratch — no distinct 'stuck stop' state, no escalation. Matches session-reaped-stopped's own retries.onCap."
+    },
+    {
+      "id": "sweep-dispatch-scratch",
+      "state": "dispatch-scratch-orphaned",
+      "actor": "session-reaper.mjs --dispatch-scratch-sweep (CLI-only; never invoked by either resident daemon)",
+      "does": "for each folder under dispatchScratchRoot(), match its uuid against the listing, then rm the directory and (batched) revoke its CLI trust entry",
+      "cite": "scripts/conveyor/session-reaper.mjs:1606-1704",
+      "canFail": true,
+      "onFailure": "dispatch-scratch-orphaned",
+      "assumes": [
+        {
+          "kind": "state-root",
+          "name": "<dispatch-scratch-root>",
+          "cite": "scripts/operations/dispatch-lane-io.mjs:1637"
+        },
+        {
+          "kind": "writable",
+          "name": "<dispatch-scratch-root>",
+          "cite": "scripts/conveyor/session-reaper.mjs:1637-1655"
+        }
+      ],
+      "provides": [],
+      "notes": "UNPROVIDED IN PRACTICE: this step assumes it is actually invoked on a schedule; nothing in this flow's own entry facts or any resident daemon's own steps ever provides that. See dispatch-scratch-orphaned's own notes for the confirmed-live evidence. Per-entry rm failures are logged and the entry is just kept (session-reaper.mjs:1673-1678) — it stays in dispatch-scratch-orphaned for whenever the CLI sweep is next run by hand."
+    }
+  ]
+}

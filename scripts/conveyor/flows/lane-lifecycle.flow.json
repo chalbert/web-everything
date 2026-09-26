@@ -1,0 +1,379 @@
+{
+  "id": "lane-lifecycle",
+  "title": "Lane lifecycle — acquire, lease, use, release/reclaim",
+  "summary": "A 'lane' is a git-worktree clone under the lane pool. The code has NO formal free/leased/in-use/released/reclaimed/kept state enum — it computes freshness each read from a lease-file (scripts/lib/lane-lease.mjs), whether that lease is TTL-stale, a separate 'reserved' flag, and a split between ownerSession (who dispatched/acquired it) and workerSession (who declared real occupancy via --adopt). 'Double-assignment' is handled as CONTESTED-lease detection, not a named state; 'stray' means a stray git branch HEAD attachment, not a stray commit. This file names the states the way a reviewer would recognise them, but every owner/wait/retry field is grounded in the code's own, less tidy vocabulary — recorded honestly per state, including where no cap or no escalation exists.",
+  "derivedFrom": {
+    "commit": "91cc453e4",
+    "date": "2026-09-26"
+  },
+  "sources": [
+    "scripts/lane-pool.mjs",
+    "scripts/lib/lane-lease.mjs",
+    "scripts/lib/free-lane-list.mjs",
+    "scripts/lib/lane-pool-paths.mjs",
+    "scripts/prune-landed-lanes.mjs",
+    "scripts/conveyor/lane-pool-health-watch.mjs",
+    "scripts/conveyor/lease-reaper.mjs",
+    "skills-src/conveyor/pass-daemon.mjs",
+    "skills-src/conveyor/daemon-manifest.mjs",
+    "scripts/operations/operator-queue.mjs",
+    "backlog/4173-lane-pool-acquire-wait-ms-still-overshoots-under-concurrent.md"
+  ],
+  "entry": {
+    "state": "lane-free",
+    "provides": [
+      {
+        "kind": "state-root",
+        "name": "<state-root>",
+        "cite": "scripts/lib/lane-pool-paths.mjs:65-68",
+        "note": "env LANE_POOL_ROOT (~-expanded), else <workspaceFor(checkoutRoot)>/.lanes. CORRECTION to the flows README's own shared vocabulary: the README (scripts/conveyor/flows/README.md:90) names this env var WE_LANE_POOL_ROOT, but the real code and every other in-repo doc comment use LANE_POOL_ROOT — the README's name appears to be a stale/inconsistent reference, not a second real env var (grep-confirmed: WE_LANE_POOL_ROOT appears nowhere else in the tree)."
+      },
+      {
+        "kind": "writable",
+        "name": "<state-root>",
+        "cite": "scripts/lib/lane-pool-paths.mjs:95-105",
+        "note": "guardedPoolRoot throws under vitest with no explicit override, closing a real 2026-09-23 incident where test suites hammered the real pool and stalled the drain/review-daemon for over an hour."
+      },
+      {
+        "kind": "path-tool",
+        "name": "git",
+        "cite": "scripts/lane-pool.mjs:1634-2101"
+      },
+      {
+        "kind": "path-tool",
+        "name": "node",
+        "cite": "scripts/lane-pool.mjs:1634-2101"
+      },
+      {
+        "kind": "path-tool",
+        "name": "npm",
+        "cite": "launchd:com.we.lease-reaper.plist",
+        "note": "PATH includes ~/.nvm/versions/node/v22.1.0/bin (node + npm) for every launchd-started caller; interactive callers inherit the shell PATH"
+      }
+    ]
+  },
+  "states": [
+    {
+      "id": "lane-free",
+      "label": "Lane unleased, clean, acquirable",
+      "terminal": false,
+      "owner": "scripts/conveyor/lane-pool-health-watch.mjs (per-repo watch, 5m cadence: litter-reap, trim, publish free-lane list)",
+      "ownerCite": "scripts/conveyor/lane-pool-health-watch.mjs:450-507; skills-src/conveyor/daemon-manifest.mjs:127 (HEALTH_WATCH_INTERVAL_MS=5*60_000)",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "The code has no 'free' string literal state — a lane reads as acquirable when it has no lease, or a lease that isLeaseStale() (scripts/lib/lane-lease.mjs:46-56) reads as stale everywhere. free-lane-list.mjs caches this pool's list (never trusted alone — acquire re-verifies atomically) with a 10-minute staleness ceiling (scripts/lib/free-lane-list.mjs:52)."
+    },
+    {
+      "id": "acquire-in-progress",
+      "label": "A caller runs `lane-pool.mjs acquire`",
+      "terminal": false,
+      "owner": "the calling process (a dispatched builder/fix/ci-heal/review session, or an operator) via lane-pool.mjs#cmdAcquire",
+      "ownerCite": "scripts/lane-pool.mjs:1634-2101",
+      "wait": {
+        "for": "a free, non-dirty, non-reserved lane — explicit --lane=N (tryClaimLane, atomic O_EXCL) or an auto-pick scan/poll loop",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/lane-pool.mjs:1767,1802-1809,1957-1994; backlog/4173-lane-pool-acquire-wait-ms-still-overshoots-under-concurrent.md (bornAs xj2k2pp, status: open)"
+      },
+      "retries": {
+        "what": "pool auto-growth on an empty acquirable scan (growPoolOnEmpty)",
+        "cap": "acquireGrowthMaxNew / acquireHardMaxFor (a per-repo configured ceiling)",
+        "onCap": "acquire-failed",
+        "cite": "scripts/lane-pool.mjs:1962-1977,2742-2787,1983-2000"
+      },
+      "escalation": null,
+      "notes": "The wait itself is entirely CALLER-supplied via --wait-ms (default 0 = instant fail, scripts/lane-pool.mjs:1767) — there is NO hard ceiling in the code for how long a caller may ask to wait, so timeout is recorded null (unbounded) here even though a caller can self-impose one. Worse: card xj2k2pp (backlog #4173, still open) measured that even a caller's own --wait-ms is not tight under concurrent load — 5 concurrent --wait-ms=20000 callers finished between 33s and 68s, up to 3.4x the requested wait, because the shared acquirability-scan lock serializes waiters (scripts/lane-pool.mjs:2533-2580). At the growth cap, acquire fails with a distinct 'all held/dirty' message (scripts/lane-pool.mjs:1983-2000) — the same acquire-failed terminus the ordinary exhausted-wait/lock-contention/provision-failure paths reach.",
+      "ack": {
+        "unbounded-wait": "#4173"
+      }
+    },
+    {
+      "id": "acquire-failed",
+      "label": "Acquire refused or exhausted",
+      "terminal": true,
+      "outcome": "failure",
+      "owner": "none — the error returns to the calling process, which owns its own retry judgment",
+      "ownerCite": "scripts/lane-pool.mjs:1983-2000",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "One of four distinct terminal messages: scan-timeout, lock-contention (the xj2k2pp case), provision-failure, or 'all held/dirty' (scripts/lane-pool.mjs:1983-2000). Nothing in lane-pool.mjs itself escalates this to an operator; it is the caller's own flow (e.g. build-dispatch) that decides what to do next.",
+      "ack": {
+        "silent-failure": "xwuof33"
+      }
+    },
+    {
+      "id": "lane-leased",
+      "label": "Lease minted (ownerSession recorded), not yet adopted",
+      "terminal": false,
+      "owner": "the acquiring caller (ownerSession)",
+      "ownerCite": "scripts/lib/lane-lease.mjs:177-201",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Lease fields: session, purpose, acquiredAt, ttlMinutes, host, pid (informational only — never ownership), ownerSession (durable CLAUDE_CODE_SESSION_ID), workflowLane, optional reserved, holder (minted per-holder slug), workerSession (declared occupant), predictedScope, base, renewedAt (scripts/lib/lane-lease.mjs:177-201,65-69). An acquired-but-unadopted lane is EXPLICITLY not protected as 'in use' for write purposes (scripts/lane-pool.mjs:2098) — a real, code-acknowledged window where the lane looks claimed but is not yet write-protected the way an adopted lane is."
+    },
+    {
+      "id": "lane-in-use",
+      "label": "Adopted — a real workerSession is running in the lane",
+      "terminal": false,
+      "owner": "the workerSession (the dispatched agent actually working in the lane)",
+      "ownerCite": "scripts/lib/lane-lease.mjs:295-316,296-298,312-316",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "`--adopt` (usually passed in the SAME acquire call, e.g. skills-src/conveyor/delivery-agent-brief.md:51-52) sets workerSession, distinguishing it from the ownerSession that merely dispatched it.",
+      "steps": [
+        "provision-deps"
+      ]
+    },
+    {
+      "id": "lease-ttl-expiring",
+      "label": "Leased, idle — TTL clock running",
+      "terminal": false,
+      "owner": "none — a passive timestamp comparison (isLeaseStale), not an actor",
+      "ownerCite": "scripts/lib/lane-lease.mjs:35,46-56",
+      "wait": {
+        "for": "DEFAULT_LEASE_TTL_MINUTES to elapse (or the holder to renew via renewedLease)",
+        "timeout": "240m (4h) default, overridable per-call via --ttl-minutes; a reserved lease never goes stale",
+        "onTimeout": "lane-reclaimed-stale",
+        "cite": "scripts/lib/lane-lease.mjs:35,46-56,65-69,74-76"
+      },
+      "retries": null,
+      "escalation": null,
+      "notes": "This IS a bounded wait with a real onTimeout, included for contrast with acquire's own unbounded wait above. On timeout the lease reads as stale — free everywhere; opportunistically reclaimed by the next acquire, or proactively by lease-reaper.mjs (scripts/lib/lane-lease.mjs:46-56), matching the existing lease-ttl-expiring→lane-reclaimed-stale transition."
+    },
+    {
+      "id": "contested-lease",
+      "label": "Double-assignment — two live leases share one ownerSession",
+      "terminal": false,
+      "owner": "none — lane-pool.mjs has no proactive detector; scripts/lib/lane-lease.mjs only guards release-time ownership resolution reactively",
+      "ownerCite": "scripts/lib/lane-lease.mjs:439-444",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Real 2026-08-14 incident: a release meant for one lane dropped a sibling lane's lease because both carried the same ownerSession (sibling agents of one dispatched session). isContestedLease now gates release's ownership fallback (leaseOwnedByCaller, scripts/lib/lane-lease.mjs:366-398) so a release can REFUSE rather than guess wrong — but nothing proactively surfaces a live contested pair to an operator; the guard only prevents making it worse at release time. A genuine no-owner / no-escalation gap for the underlying double-assignment itself."
+    },
+    {
+      "id": "lane-released",
+      "label": "Session releases the lane",
+      "terminal": false,
+      "owner": "the releasing caller via lane-pool.mjs#cmdRelease",
+      "ownerCite": "scripts/lane-pool.mjs:2236-2343",
+      "wait": null,
+      "retries": null,
+      "escalation": null,
+      "notes": "Drops the lease marker only after a TOCTOU-safe re-verify (takeMarkerIf, scripts/lane-pool.mjs:2317-2328); reaps known-safe scratch litter first (:2311-2317); refuses a reserved lease without --release-reserved (:2255-2261). A separate concern this state does NOT cover: prune-landed-lanes.mjs prunes stale origin/lane/* git REFS (not the local clone/lease), and despite its own docstring calling it a 'periodic sweep', grep across .mjs/.md/.plist found no cron/launchd/daemon wiring anywhere — it appears to be a manually-run script only (--yes to apply), a real automation gap distinct from the lease lifecycle itself (scripts/prune-landed-lanes.mjs:1-51,44-51)."
+    },
+    {
+      "id": "lane-reclaimed-stale",
+      "label": "Reclaimed — TTL-stale, session-gone, or PR-terminal",
+      "terminal": false,
+      "owner": "scripts/conveyor/lease-reaper.mjs (standalone pass-daemon, 120s cadence) OR lane-pool.mjs#cmdAcquire's own opportunistic reclaim",
+      "ownerCite": "scripts/conveyor/lease-reaper.mjs:300-318,712-720; skills-src/conveyor/daemon-manifest.mjs:148 (intervalMs=120_000); scripts/lane-pool.mjs:1391-1409",
+      "wait": null,
+      "retries": {
+        "what": "node lane-pool.mjs release --pool=<p> --lane=<n> --force per classified reap candidate",
+        "cap": null,
+        "onCap": null,
+        "cite": "scripts/conveyor/lease-reaper.mjs:795-809"
+      },
+      "escalation": null,
+      "notes": "Priority axes (scripts/conveyor/lease-reaper.mjs:300-318): reserved (never reaped) > pr-merged/pr-closed > session-gone (grace window DISPATCH_GUARD_LISTING_GRACE_MINUTES before absence counts as gone, :538-542) > ttl-stale (the 4h backstop) > pid-dead (DORMANT today — the lease's recorded pid is the short-lived acquire CLI, never the agent, so this axis can never fire under the current schema, :612-626). NO CAP on how many leases are reaped in one pass (:795-809, iterates every candidate unconditionally) and NO retry/backoff/alert on a failed individual release — logged and skipped, non-zero PROCESS exit only for an external wrapper to notice (:805-808,843), no operator alert. Also: lease-reaper.mjs resolves its own POOL_ROOT independently (expandHome(LANE_POOL_ROOT) || homedir()/workspace/.lanes, lease-reaper.mjs:578) rather than through lane-pool-paths.mjs's hardened workspace-derived default — it remains exposed to the exact $HOME-vs-checkout-location class of bug lane-pool-paths.mjs was built to fix (scripts/lib/lane-pool-paths.mjs:8-13).",
+      "ack": {
+        "uncapped-retry": "xb4yerj"
+      }
+    },
+    {
+      "id": "lane-manual-reclaim-blocked",
+      "label": "finished-needs-review / unknown-work — never auto-reclaimed",
+      "terminal": false,
+      "owner": "operator, surfaced via scripts/operations/operator-queue.mjs",
+      "ownerCite": "scripts/conveyor/lane-pool-health-watch.mjs:495-506",
+      "wait": {
+        "for": "an operator to review and either `keep` it or reclaim/release it by hand",
+        "timeout": null,
+        "onTimeout": null,
+        "cite": "scripts/operations/operator-queue.mjs"
+      },
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "surfaced in operator-queue.mjs's own reclaim queue",
+        "cite": "scripts/conveyor/lane-pool-health-watch.mjs:495-506"
+      },
+      "notes": "lane-pool-health-watch.mjs's auto-reclaim (#3383 gap 2) explicitly never touches a finished-needs-review/unknown-work verdict — 'left for a human' (:495-506). An operator can `keep` it: writes a .git/.lane-keep marker with a content fingerprint (HEAD sha + sorted dirty paths + sorted ahead shas) plus an optional --reason (scripts/lane-pool.mjs:3281-3300,659-667) — self-invalidating the moment any new commit/dirty change lands or a fresh acquire/reclaim happens (:3274-3280), never actively cleared otherwise. lane-pool.mjs itself never reads this marker for its own acquire/reset decisions; only lane-whois-core.mjs and operator-queue.mjs consume it.",
+      "ack": {
+        "unbounded-wait": "xwo3j0l"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "lane-free",
+      "to": "acquire-in-progress",
+      "on": "a caller runs lane-pool.mjs acquire",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:1634-2101"
+    },
+    {
+      "from": "acquire-in-progress",
+      "to": "lane-leased",
+      "on": "tryClaimLane / auto-pick succeeds",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:1317-1412"
+    },
+    {
+      "from": "acquire-in-progress",
+      "to": "acquire-failed",
+      "on": "wait/scan exhausted, lock-contention, provision-failure, or all held/dirty",
+      "kind": "failure",
+      "cite": "scripts/lane-pool.mjs:1983-2000"
+    },
+    {
+      "from": "lane-leased",
+      "to": "lane-in-use",
+      "on": "--adopt sets workerSession",
+      "kind": "normal",
+      "cite": "scripts/lib/lane-lease.mjs:295-316"
+    },
+    {
+      "from": "lane-leased",
+      "to": "lease-ttl-expiring",
+      "on": "no adopt; TTL clock runs unattended",
+      "kind": "normal",
+      "cite": "scripts/lib/lane-lease.mjs:46-56"
+    },
+    {
+      "from": "lane-in-use",
+      "to": "lane-released",
+      "on": "the workerSession finishes and calls release",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:2236-2343"
+    },
+    {
+      "from": "lane-in-use",
+      "to": "lease-ttl-expiring",
+      "on": "the session dies/crashes without releasing",
+      "kind": "failure",
+      "cite": "scripts/lib/lane-lease.mjs:46-56"
+    },
+    {
+      "from": "lane-in-use",
+      "to": "contested-lease",
+      "on": "a sibling agent under the SAME ownerSession acquires a second lane and a release targets the wrong one",
+      "kind": "failure",
+      "cite": "scripts/lib/lane-lease.mjs:439-444"
+    },
+    {
+      "from": "contested-lease",
+      "to": "lane-in-use",
+      "on": "release is refused by the ownership-fallback guard — the double assignment persists",
+      "kind": "failure",
+      "cite": "scripts/lib/lane-lease.mjs:366-398"
+    },
+    {
+      "from": "lease-ttl-expiring",
+      "to": "lane-in-use",
+      "on": "the holder renews before TTL elapses",
+      "kind": "normal",
+      "cite": "scripts/lib/lane-lease.mjs:65-69"
+    },
+    {
+      "from": "lease-ttl-expiring",
+      "to": "lane-reclaimed-stale",
+      "on": "TTL elapses with no renewal",
+      "kind": "timeout",
+      "cite": "scripts/lib/lane-lease.mjs:46-56"
+    },
+    {
+      "from": "lane-released",
+      "to": "lane-free",
+      "on": "lease marker dropped after TOCTOU-safe re-verify",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:2317-2328"
+    },
+    {
+      "from": "lane-reclaimed-stale",
+      "to": "lane-free",
+      "on": "a clean reap/reclaim (pr-merged/pr-closed/session-gone/ttl-stale) succeeds",
+      "kind": "normal",
+      "cite": "scripts/conveyor/lease-reaper.mjs:712-720"
+    },
+    {
+      "from": "lane-reclaimed-stale",
+      "to": "lane-manual-reclaim-blocked",
+      "on": "lane-whois verdict is finished-needs-review or unknown-work",
+      "kind": "escalation",
+      "cite": "scripts/conveyor/lane-pool-health-watch.mjs:495-506"
+    },
+    {
+      "from": "lane-manual-reclaim-blocked",
+      "to": "lane-free",
+      "on": "operator reclaims by hand (cmdReclaim, requires laneReclaimPreservationProof)",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:3181-3261,3134-3159"
+    },
+    {
+      "from": "lane-manual-reclaim-blocked",
+      "to": "lane-manual-reclaim-blocked",
+      "on": "operator `keep`s it instead — self-invalidates on the next real change",
+      "kind": "normal",
+      "cite": "scripts/lane-pool.mjs:3281-3300"
+    }
+  ],
+  "steps": [
+    {
+      "id": "claim-lane",
+      "state": "lane-leased",
+      "actor": "lane-pool.mjs acquire",
+      "does": "atomic O_EXCL lease claim on the chosen lane",
+      "cite": "scripts/lane-pool.mjs:1634",
+      "canFail": true,
+      "onFailure": "acquire-in-progress",
+      "assumes": [
+        {
+          "kind": "state-root",
+          "name": "<state-root>"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "<lane> acquired",
+          "cite": "scripts/lane-pool.mjs:1634"
+        }
+      ]
+    },
+    {
+      "id": "provision-deps",
+      "state": "lane-leased",
+      "actor": "lane-pool.mjs#provisionClaimedLane",
+      "does": "runs `npm ci` (or `npm install` with no lockfile) unless --no-install; deduped by a lockfile-hash marker so most acquires skip it",
+      "cite": "scripts/lane-pool.mjs:623-634,605-611,1629-1630",
+      "canFail": true,
+      "onFailure": "acquire-in-progress",
+      "assumes": [
+        {
+          "kind": "lane",
+          "name": "<lane> acquired",
+          "cite": "scripts/lane-pool.mjs:1634-2101"
+        },
+        {
+          "kind": "path-tool",
+          "name": "npm",
+          "cite": "scripts/lane-pool.mjs:626-627"
+        }
+      ],
+      "provides": [
+        {
+          "kind": "lane",
+          "name": "<lane> deps installed",
+          "cite": "scripts/lane-pool.mjs:605-611"
+        }
+      ],
+      "notes": "A deliberate, named exception (#3461) to the heavy-admission concurrency queue — npm ci runs inside acquire itself, never routed through the semaphore, so acquiring a lane is never blocked behind another lane's check:standards/test:unit run (scripts/lane-pool.mjs:612-622). ON FAILURE: for auto-pick, caught per-candidate and falls through to the next lane (scripts/lane-pool.mjs:1935-1944, logged 'releasing it and trying another candidate' — so onFailure here is really 'try acquire-in-progress again', recorded null because it is not a named state transition in the schema's sense, just an internal retry within the same acquire call); for an explicit --lane=N acquire it fails the WHOLE call and restores the pre-claim lease state (scripts/lane-pool.mjs:2041-2044)."
+    }
+  ]
+}
