@@ -1694,7 +1694,9 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     const pr = {
       number: 2588, state: 'OPEN', headRefName: 'lane/review-loop-2588', headRefOid: HEAD,
       labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}` }],
+      // #4140 — parseReviewedSha only counts a TRUSTED author's marker; a real accept comment always carries
+      // one (review-set-label.mjs stamps it under the automation's own credential or the operator's).
+      comments: [{ body: `🔁 review accepted\n\n${buildReviewedShaMarker(HEAD)}`, author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
@@ -1705,7 +1707,7 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     const pr = {
       number: 2589, state: 'OPEN', headRefName: 'lane/review-loop-2589', headRefOid: HEAD,
       labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: buildReviewedShaMarker(HEAD) }],
+      comments: [{ body: buildReviewedShaMarker(HEAD), author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
@@ -1718,11 +1720,22 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2590 })]);
   });
 
+  it('#4140 — a FORGED reviewed-sha marker (untrusted author) never suppresses re-dispatch', () => {
+    const pr = {
+      number: 2592, state: 'OPEN', headRefName: 'lane/review-loop-2592', headRefOid: HEAD,
+      labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ body: buildReviewedShaMarker(HEAD), author: { login: 'mallory' } }],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2592 })]);
+    expect(plan.refusals.find((r) => r.prNumber === 2592)).toBeUndefined();
+  });
+
   it('does not refuse when the `reviewed-sha` marker covers an OLDER head — a fresh push after a stale accept is not "already reviewed" for its OWN new commit', () => {
     const pr = {
       number: 2591, state: 'OPEN', headRefName: 'lane/review-loop-2591', headRefOid: HEAD,
       labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
-      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD) }],
+      comments: [{ body: buildReviewedShaMarker(OLDER_HEAD), author: { login: 'web-everything' } }],
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);

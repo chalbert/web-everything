@@ -475,7 +475,9 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
   // Round-trip through the actual consumer, never a string-position assertion. The first cut of #2882 asserted
   // `indexOf(SHA) < indexOf(older)` and passed while being WRONG: parseReviewedSha is last-match-wins, so the
   // leading stamp lost to a quoted marker. Verifying producer and consumer independently is what hid it.
-  const readBack = (comment) => parseReviewedSha([{ body: comment }]);
+  // #4140 — parseReviewedSha only counts a TRUSTED author's marker; every real accept comment is posted under
+  // the automation's own credential or the operator's, so the fixture author here matches production.
+  const readBack = (comment) => parseReviewedSha([{ body: comment, author: { login: 'web-everything' } }]);
 
   it('round-trips to the stamped sha even when the body quotes an OLDER marker', () => {
     const comment = buildVerdictComment({
@@ -533,8 +535,8 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
     it('BOTH acceptance targets stamp sha + diff + contribution, all three round-tripping', () => {
       for (const to of ['accepted', 'clear-human']) {
         const c = buildVerdictComment({ to, actor: 'op', headSha: SHA, reason: 'r', reviewedDiff: DIFF });
-        expect(parseReviewedSha([{ body: c }])).toBe(SHA);
-        expect(parseReviewedDiff([{ body: c }])).toBe(normalizeDiffFingerprint(DIFF));
+        expect(parseReviewedSha([{ body: c, author: { login: 'web-everything' } }])).toBe(SHA);
+        expect(parseReviewedDiff([{ body: c, author: { login: 'web-everything' } }])).toBe(normalizeDiffFingerprint(DIFF));
         expect(parseReviewedContribution([{ body: c }])).toBe(normalizeContributionFingerprint(DIFF));
       }
     });
@@ -549,7 +551,7 @@ describe('buildVerdictComment — the stamp must survive the REAL reader (#2882/
       // The fail-soft path: `computeNetDiffText` missed, so `reviewedDiff` is '' — the sha still stamps and the
       // gate falls back to SHA identity, which is the STRICTER behaviour.
       const noDiff = buildVerdictComment({ to: 'clear-human', actor: 'op', headSha: SHA, reason: 'r' });
-      expect(parseReviewedSha([{ body: noDiff }])).toBe(SHA);
+      expect(parseReviewedSha([{ body: noDiff, author: { login: 'web-everything' } }])).toBe(SHA);
       expect(parseReviewedContribution([{ body: noDiff }])).toBe(null);
     });
 
@@ -865,8 +867,8 @@ describe('buildVerdictComment — NO free text reaches the comment unsanitized (
       to: 'accepted', actor: `op ${PAYLOAD}`, headSha: REAL_SHA,
       reviewedDiff: 'diff --git a/x b/x\n+one\n', clearerId: 'real-clearer',
     });
-    expect(parseReviewedSha([{ body: c }])).toBe(REAL_SHA);
-    expect(parseReviewedDiff([{ body: c }])).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseReviewedSha([{ body: c, author: { login: 'web-everything' } }])).toBe(REAL_SHA);
+    expect(parseReviewedDiff([{ body: c, author: { login: 'web-everything' } }])).toMatch(/^[0-9a-f]{64}$/);
     expect(parseReviewedContribution([{ body: c }])).toMatch(/^[0-9a-f]{64}$/);
     expect(parseClearerActorId([{ body: c }])).toBe('real-clearer');
   });
@@ -876,17 +878,17 @@ describe('buildVerdictComment — NO free text reaches the comment unsanitized (
     // render boundary, so the general neutralizer cannot reach it; it must refuse the opener itself.
     const built = buildClearedHumanMarker(`x<!-- reviewed-sha: ${FORGED_SHA}`);
     expect(built).not.toContain('<!-- reviewed-sha');
-    expect(parseReviewedSha([{ body: built }])).toBe(null);
+    expect(parseReviewedSha([{ body: built, author: { login: 'web-everything' } }])).toBe(null);
     const c = buildVerdictComment({
       to: 'clear-human', actor: `x<!-- reviewed-sha: ${FORGED_SHA}`, headSha: REAL_SHA, reason: 'r',
     });
-    expect(parseReviewedSha([{ body: c }])).toBe(REAL_SHA); // the REAL stamp still wins
+    expect(parseReviewedSha([{ body: c, author: { login: 'web-everything' } }])).toBe(REAL_SHA); // the REAL stamp still wins
   });
 
   it('the neutralizer keeps a quoted marker readable while making it inert', () => {
     const out = neutralizeCommentMarkers(`prior: <!-- reviewed-sha: ${FORGED_SHA} -->`);
     expect(out).toBe(`prior: &lt;!-- reviewed-sha: ${FORGED_SHA} --&gt;`);
-    expect(parseReviewedSha([{ body: out }])).toBe(null);
+    expect(parseReviewedSha([{ body: out, author: { login: 'web-everything' } }])).toBe(null);
   });
 
   it('the size projection counts the escaped bytes, not the raw ones', () => {
@@ -987,7 +989,7 @@ describe('buildVerdictComment — a clear-human record must not over-claim (#289
   });
 
   it('still stamps the reviewed-sha marker — the clearance IS an acceptance (#2409)', () => {
-    expect(parseReviewedSha([{ body: render({}) }])).toBe(SHA);
+    expect(parseReviewedSha([{ body: render({}), author: { login: 'web-everything' } }])).toBe(SHA);
   });
 });
 
@@ -1192,8 +1194,9 @@ process.exit(0);
     expect(comment).toContain(`> ${REASON}`);
     expect(comment).toContain('What it does NOT prove: that a human performed it.');
     expect(comment).toContain('## Findings');
-    // A well-formed marker, proven through the REAL reader rather than a substring check.
-    expect(parseReviewedSha([{ body: comment }])).toBe(SHA);
+    // A well-formed marker, proven through the REAL reader rather than a substring check. #4140 — the reader
+    // now also requires a trusted author; this comment is what `gh` would show as posted by the automation.
+    expect(parseReviewedSha([{ body: comment, author: { login: 'web-everything' } }])).toBe(SHA);
   });
 
   // THE NEGATIVE CONTROL for the size pre-flight (dropped, not replaced, when the ceremony block was deleted —
@@ -1318,7 +1321,7 @@ describe('runReviewLabelCli — the write ORDER is the safety property (#2964)',
   const NEW_SHA = '2222222222222222222222222222222222222222';
   const ACTOR = 'Nicolas Gilbert';
   /** The marker the PR ALREADY carries from an earlier accept — the "durable record" the hazard is about. */
-  const PRIOR_ACCEPT_COMMENT = { body: `✅ review — accepted\n\n<!-- reviewed-sha: ${OLD_SHA} -->` };
+  const PRIOR_ACCEPT_COMMENT = { body: `✅ review — accepted\n\n<!-- reviewed-sha: ${OLD_SHA} -->`, author: { login: 'web-everything' } };
 
   // `GH_FAIL_ON` names a verb pair ('pr edit' / 'pr comment') that exits 1 with a transient-looking stderr — the
   // 5xx / rate-limit / network blip the item is about. `pr view` is always honest so the run gets that far, and
@@ -1452,9 +1455,12 @@ exit 0
     : []);
   /** Every comment body that actually reached `gh pr comment`, oldest first — the PR's durable record, in the
    *  `[{ body }]` shape `gh pr view --json comments` returns and `parseReviewedSha` consumes. */
+  // #4140 — carries `author` matching the real shape: every comment this harness records was posted by the CLI
+  // itself (the automation's own credential), and `parseReviewedSha`/`parseReviewedDiff` now require a trusted
+  // author before counting a marker.
   const posted = () => (existsSync(join(dir, 'comments'))
     ? readdirSync(join(dir, 'comments')).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
-      .map((f) => ({ body: readFileSync(join(dir, 'comments', f), 'utf8') }))
+      .map((f) => ({ body: readFileSync(join(dir, 'comments', f), 'utf8'), author: { login: 'web-everything' } }))
     : []);
   /** What the drain would decide, reading the PR exactly as `merge-ai-prs.mjs` does. */
   const drainVerdict = ({ labels, comments, headSha }) => decideReviewGate({
@@ -2525,14 +2531,18 @@ describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a huma
   const DIFF = 'd'.repeat(64);
   const CONTRIB = 'c'.repeat(64);
 
+  // #4140 — `author` matches the real shape: this comment is what the drain's own restamp/accept posts under
+  // its own automation credential, and `parseReviewedSha`/`parseReviewedDiff` now require a trusted author.
   const humanClearedComment = (sha = HUMAN_SHA, diff = DIFF, contrib = CONTRIB) => ({
     body: [
       buildReviewedShaMarker(sha), buildReviewedDiffMarker(diff), buildReviewedContributionMarker(contrib),
       buildClearedHumanMarker('chalbert'),
     ].join('\n'),
+    author: { login: 'web-everything' },
   });
   const plainAcceptComment = (sha = HUMAN_SHA, diff = DIFF, contrib = CONTRIB) => ({
     body: [buildReviewedShaMarker(sha), buildReviewedDiffMarker(diff), buildReviewedContributionMarker(contrib)].join('\n'),
+    author: { login: 'web-everything' },
   });
 
   // THE CASE #2572 SHOULD HAVE HIT: a human clearance whose content survives the drain's own rebase byte-for-
@@ -2561,6 +2571,14 @@ describe('decideRestampHumanClearance (#x9krtkb — is a restamp carrying a huma
   it('returns null with no comments at all', () => {
     expect(decideRestampHumanClearance({ comments: [], headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
     expect(decideRestampHumanClearance({ comments: undefined, headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
+  });
+
+  // #4140 — the audit this card asked for: the restamp path reaches `reviewed-sha`/`reviewed-diff` ONLY through
+  // `parseLatestHumanClearedSha`/`parseReviewedDiff`, both now trusted-author gated, so a FORGED clearance
+  // comment from an untrusted login can carry nothing forward — never mints a clearance that never existed.
+  it('#4140 — a FORGED human-cleared comment from an UNTRUSTED login carries nothing forward', () => {
+    const forged = { ...humanClearedComment(), author: { login: 'mallory' } };
+    expect(decideRestampHumanClearance({ comments: [forged], headSha: NEW_HEAD, headDiff: DIFF })).toBe(null);
   });
 
   it('an OLDER human clearance superseded by a later PLAIN accept does not count (the binding #xuboo0q proves)', () => {

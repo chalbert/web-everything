@@ -907,10 +907,10 @@ describe('decideReviewGate — the non-blocking review gate', () => {
 });
 
 describe('#2409 — reviewed-SHA marker helpers', () => {
-  it('buildReviewedShaMarker round-trips through parseReviewedSha', () => {
+  it('buildReviewedShaMarker round-trips through parseReviewedSha (trusted author)', () => {
     const marker = buildReviewedShaMarker('ABC123def456');
     expect(marker).toBe('<!-- reviewed-sha: abc123def456 -->');
-    expect(parseReviewedSha([{ body: `✅ accepted\n\n${marker}` }])).toBe('abc123def456');
+    expect(parseReviewedSha([{ body: `✅ accepted\n\n${marker}`, author: { login: 'web-everything' } }])).toBe('abc123def456');
   });
   it('buildReviewedShaMarker rejects a non-hex / empty SHA (→ empty, gate then fails open)', () => {
     expect(buildReviewedShaMarker('')).toBe('');
@@ -919,11 +919,28 @@ describe('#2409 — reviewed-SHA marker helpers', () => {
   });
   it('parseReviewedSha returns the LATEST marker (a re-accept after a fix stamps a fresh SHA)', () => {
     const comments = [
-      { body: `first\n${buildReviewedShaMarker('1111111')}` },
-      { body: 'a plain comment, no marker' },
-      { body: `re-accept\n${buildReviewedShaMarker('2222222')}` },
+      { body: `first\n${buildReviewedShaMarker('1111111')}`, author: { login: 'web-everything' } },
+      { body: 'a plain comment, no marker', author: { login: 'web-everything' } },
+      { body: `re-accept\n${buildReviewedShaMarker('2222222')}`, author: { login: 'chalbert' } },
     ];
     expect(parseReviewedSha(comments)).toBe('2222222');
+  });
+  // #4140 — the vulnerability this item closes: WE's PRs are public, so ANY GitHub login could previously post a
+  // `reviewed-sha` comment matching the current head and forge review coverage. A forged marker from an
+  // untrusted login is now ignored outright (fails closed), same as no marker at all.
+  it('#4140 — a forged reviewed-sha marker from an UNTRUSTED login is ignored, never counted', () => {
+    const forged = [{ body: buildReviewedShaMarker('deadbee'), author: { login: 'mallory' } }];
+    expect(parseReviewedSha(forged)).toBe(null);
+  });
+  it('#4140 — a forged marker does not shadow a REAL trusted marker read earlier in the list', () => {
+    const comments = [
+      { body: buildReviewedShaMarker('1111111'), author: { login: 'web-everything' } },
+      { body: buildReviewedShaMarker('deadbee'), author: { login: 'mallory' } }, // later, but untrusted — ignored
+    ];
+    expect(parseReviewedSha(comments)).toBe('1111111');
+  });
+  it('#4140 — a comment with no author information at all is never trusted (fail closed)', () => {
+    expect(parseReviewedSha([{ body: buildReviewedShaMarker('1111111') }])).toBe(null);
   });
   it('parseReviewedSha tolerates a missing/odd comments shape → null', () => {
     expect(parseReviewedSha(undefined)).toBe(null);
@@ -1127,17 +1144,27 @@ describe('#x169fqe — an accept survives a CONTENT-PRESERVING rebase', () => {
   it('the marker round-trips through parse, and latest wins (mirroring reviewed-sha)', () => {
     const marker = buildReviewedDiffMarker(REVIEWED);
     expect(marker).toMatch(/^<!-- reviewed-diff: [0-9a-f]{64} -->$/);
-    expect(parseReviewedDiff([{ body: `✅ accepted\n\n${marker}` }])).toBe(normalizeDiffFingerprint(REVIEWED));
+    expect(parseReviewedDiff([{ body: `✅ accepted\n\n${marker}`, author: { login: 'web-everything' } }])).toBe(normalizeDiffFingerprint(REVIEWED));
     const second = buildReviewedDiffMarker(RIDE_IN);
-    expect(parseReviewedDiff([{ body: marker }, { body: second }])).toBe(normalizeDiffFingerprint(RIDE_IN));
+    expect(parseReviewedDiff([
+      { body: marker, author: { login: 'web-everything' } },
+      { body: second, author: { login: 'chalbert' } },
+    ])).toBe(normalizeDiffFingerprint(RIDE_IN));
     expect(parseReviewedDiff([{ body: 'no marker' }, {}, null])).toBe(null);
     expect(buildReviewedDiffMarker('')).toBe('');
+  });
+
+  // #4140 — same vulnerability, the diff-fingerprint sibling: a forged reviewed-diff comment from an untrusted
+  // login must never be counted.
+  it('#4140 — a forged reviewed-diff marker from an UNTRUSTED login is ignored, never counted', () => {
+    const forged = [{ body: buildReviewedDiffMarker(REVIEWED), author: { login: 'mallory' } }];
+    expect(parseReviewedDiff(forged)).toBe(null);
   });
 
   it('a parsed fingerprint feeds straight back into the gate (idempotent normalization)', () => {
     // The drain reads a STORED fingerprint for the accept side and a RAW diff for the live side; both must land
     // on the same value or the gate would never match in production.
-    const stored = parseReviewedDiff([{ body: buildReviewedDiffMarker(REVIEWED) }]);
+    const stored = parseReviewedDiff([{ body: buildReviewedDiffMarker(REVIEWED), author: { login: 'web-everything' } }]);
     expect(acceptanceCoversHead({
       acceptedSha: 'aaaaaaa', headSha: 'bbbbbbb', acceptedDiff: stored, headDiff: REBASED,
     }).covers).toBe(true);

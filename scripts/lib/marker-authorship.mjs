@@ -33,16 +33,20 @@
  * however sympathetic-looking the text: {@link isTrustedMarkerAuthor} is the single gate every counter above now
  * runs its comments through before matching a marker line.
  *
+ * #4140 UPDATE: `we:scripts/lib/review-escalation.mjs#parseReviewedSha` / `#parseReviewedDiff` were the one
+ * follow-up named below that this item itself was filed to close, and it is now closed — both now run every
+ * comment through {@link isTrustedMarkerAuthor} before matching REVIEWED_SHA_MARKER/REVIEWED_DIFF_MARKER,
+ * exactly mirroring this file's own pattern. `review-set-label.mjs`'s restamp path (`decideRestampHumanClearance`)
+ * needed NO changes of its own: it only ever reaches those markers through `parseReviewedDiff`, so it inherits
+ * the gate for free. `parseReviewedContribution` (the `reviewed-contribution` marker) and
+ * `parseLatestHumanClearedSha` (`cleared-human`) were NOT touched — outside #4140's declared scope — and remain
+ * open follow-ups with the identical forge residual.
+ *
  * NOT IN SCOPE HERE (documented residuals, unchanged by this file, each with its own existing acknowledgment):
- *   - `we:scripts/lib/review-escalation.mjs#parseReviewedSha` / `#parseReviewedDiff` read the LATEST matching
- *     marker from ANY author — that file's own docblock already states this in as many words ("RESIDUAL (be
- *     honest — this is a trust signal) ... Not defended here") as a conscious, previously-ratified tradeoff, not
- *     an oversight this review surfaced. Narrowing it needs review-set-label.mjs's own accept/re-stamp contract
- *     touched, which is a separate, more invasive change than widening a read-only count function.
  *   - `we:scripts/conveyor/stuck-pr-dispatch-marker.mjs` gates an inspection DISPATCH (diagnosis only — no
  *     label/code/branch change), not a round cap or a terminal refusal; forging it wastes at most one inspection
  *     agent, not a fixer's remaining rounds or a permanent stand-down.
- *   Both are flagged in this item's PR body as follow-up candidates rather than folded in silently.
+ *   Flagged in this item's PR body as a follow-up candidate rather than folded in silently.
  *
  * PURE. No fs, no clock, no network. Reads `process.env` once per call (env overrides), same discipline
  * `we:scripts/conveyor/stand-down.mjs#AUTOMATION_LOGINS` already uses.

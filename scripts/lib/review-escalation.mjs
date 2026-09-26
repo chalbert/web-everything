@@ -19,6 +19,10 @@ import { isTrustChainPath, isPolicyCorePath, isPolicySpecPath, isPolicyDerivatio
 export { isStatutePath, isDeclarativeLeashPath };
 import MarkdownIt from 'markdown-it';
 import { POLICY_THRESHOLDS, POLICY_VERSION, POLICY_DIGEST } from './review-policy.mjs';
+// #4140 — the shared trusted-author gate `parseReviewedSha`/`parseReviewedDiff` now run every comment through
+// before matching REVIEWED_SHA_MARKER/REVIEWED_DIFF_MARKER, closing the residual `marker-authorship.mjs`'s own
+// header named as a flagged follow-up (that pair was the one durable marker left reading ANY commenter).
+import { isTrustedMarkerAuthor } from './marker-authorship.mjs';
 
 /** Shared operation identity; core consumers must not import operation declarations. */
 export const REVIEW_PR_OP_ID = 'review-pr';
@@ -1044,16 +1048,22 @@ export function buildReviewedShaMarker(sha) {
  * (most recent accept wins — a re-accept after a fix stamps a fresh SHA), or `null` when none is present
  * (accept predates this gate, or was applied out-of-band → the gate fails OPEN). Pure — no I/O.
  *
- * RESIDUAL (be honest — this is a trust signal): the marker is an ordinary PR comment, and this parse takes
- * the latest marker from ANY author. An actor who can comment on a PR that already carries `review:accepted`
- * could post a marker matching the current head and forge "coverage," defeating the gate for a ride-in commit.
- * Accepted under the single-tenant constellation trust model (the same posture as the sibling gates' fail-open
- * residuals); a hardened home would bind the marker to the label-applying actor / an immutable check-run, not a
- * free-form comment. Not defended here.
+ * #4140 — TRUSTED-AUTHOR GATED, closing the residual this docblock used to accept. WE's PRs are public, so
+ * before this, ANY GitHub login could post a comment matching the current head and forge "coverage," defeating
+ * the gate for a ride-in commit — the exact hole `we:scripts/lib/marker-authorship.mjs` closed for every OTHER
+ * durable marker counter (#3383) while explicitly flagging this pair as a follow-up in its own header. Every
+ * comment is now run through {@link isTrustedMarkerAuthor} (automation OR the repo operator — the same two
+ * principals every sibling counter already trusts) before its body is even scanned for the marker; an untrusted
+ * comment is skipped outright — fails closed, exactly as a comment with no author information at all already
+ * did. Mirrors the #3383 pattern rather than re-deriving it: this file has no fs/network of its own to add a
+ * durable log to, so the fail-closed skip is the same silent-but-provable posture every sibling counter
+ * (`stand-down.mjs`, `main-red-recovery.mjs`, `parked-pr-conflict-watch.mjs`, `reconcile-core.mjs`) already
+ * takes — pinned by a test here and in `marker-authorship.test.mjs`, not a runtime print.
  */
 export function parseReviewedSha(comments) {
   let latest = null;
   for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue; // #4140 — an untrusted commenter's marker is never counted
     const body = c && typeof c.body === 'string' ? c.body : '';
     if (!body) continue;
     let m;
@@ -1180,12 +1190,12 @@ export function buildReviewedDiffMarker(diffOrFingerprint) {
 
 /** Extract the reviewed-diff fingerprint from a PR's comments — LATEST marker wins, mirroring `parseReviewedSha`
  *  (a re-accept after a fix stamps a fresh pair). `null` when absent → the gate falls back to SHA identity.
- *  Carries the SAME forge residual documented on `parseReviewedSha`: it is an ordinary comment, not a signed
- *  artifact. It cannot make the gate LOOSER than that residual already allows — an actor who can forge a
- *  `reviewed-sha` for the live head already defeats the gate outright, without needing this. */
+ *  #4140 — TRUSTED-AUTHOR GATED, same as `parseReviewedSha` and for the identical reason: an untrusted
+ *  commenter's marker is skipped before its body is scanned, never counted. */
 export function parseReviewedDiff(comments) {
   let latest = null;
   for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue; // #4140 — an untrusted commenter's marker is never counted
     const body = c && typeof c.body === 'string' ? c.body : '';
     if (!body) continue;
     let m;
@@ -1528,8 +1538,9 @@ export function parseLatestHumanClearedSha(comments) {
  *
  * KNOWN RESIDUAL, ACCEPTED — a forged clearance CAN suppress THIS specific park (security review, PR #1459).
  * `parseLatestHumanClearedSha` reads marker CONTENT from `gh pr view --json comments`, never comment AUTHORSHIP
- * — the same accepted gap `parseReviewedSha` already carries for the neighbouring `#2409` gate (this file's
- * own header note). Before this function existed, `#2440`'s park was UNCONDITIONAL on a tampering hit — no
+ * — the `cleared-human` marker is NOT trusted-author gated (unlike `reviewed-sha`/`reviewed-diff`, closed by
+ * #4140; this one remains a flagged follow-up, same footing #4140 itself started from). Before this function
+ * existed, `#2440`'s park was UNCONDITIONAL on a tampering hit — no
  * comment content was ever consulted, so it was comment-immune. This function removes that immunity: on a PR
  * that already carries a REAL `review:accepted` label (comment-forgery alone cannot set that), an actor with
  * mere comment-post access (not label-write access) can post one comment carrying both markers for a NEW,
@@ -1562,7 +1573,9 @@ export function buildReviewedContributionMarker(diffOrFingerprint) {
 
 /** Extract the reviewed-contribution fingerprint from a PR's comments — LATEST marker wins, mirroring
  *  `parseReviewedSha` / `parseReviewedDiff`. `null` when absent → the gate behaves exactly as it did before
- *  #x9xqexm. Carries the same forge residual documented on `parseReviewedSha`. */
+ *  #x9xqexm. NOT trusted-author gated (unlike its two siblings, closed by #4140) — this marker is outside
+ *  #4140's declared scope and remains a flagged follow-up; the same forge residual `parseReviewedSha` used to
+ *  carry still applies here. */
 export function parseReviewedContribution(comments) {
   let latest = null;
   for (const c of Array.isArray(comments) ? comments : []) {

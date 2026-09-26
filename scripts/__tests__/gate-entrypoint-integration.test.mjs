@@ -95,7 +95,10 @@ if (a[0] === 'pr' && a[1] === 'view') {
   // the real prose-clearance path this test is FOR.
   if (fields.includes('headRefOid')) {
     const cs = [];
-    if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->' });
+    // #4140 — parseReviewedSha now only counts a TRUSTED author's marker (author.login: automation or the
+    // operator); a real accept comment always carries one (review-set-label.mjs stamps it under whichever
+    // credential ran the accept), so the fixture must too or this test would stop exercising the real path.
+    if (pr._reviewedSha) cs.push({ body: '<!-- reviewed-sha: ' + pr._reviewedSha + ' -->', author: { login: 'web-everything' } });
     if (pr._clearedBy) cs.push({ body: '✅ review — \`review:human\` cleared via the sanctioned path\\n\\nCleared by ' + pr._clearedBy + ' via \`review-set-label.mjs --to=clear-human\` (#2895).' });
     // xvzc4v4 advisory fix — with no explicit _headRefOid the live head IS the tip commit (as on real GitHub);
     // a fixture sets _headRefOid to something else to model a push landing after the pass-start commits read.
