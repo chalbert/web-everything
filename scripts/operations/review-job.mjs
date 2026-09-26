@@ -90,7 +90,8 @@ import { recorderFor, setActiveRecorder } from './telemetry-store.mjs';
 import { ACTOR_ENV } from '../lib/review-independence.mjs';
 import { INFRA_RETRY_COOLOFF_MS } from '../conveyor/reconcile-core.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
-import { extraSeatsEnabled, resolveSeatTimeoutMs } from './review-extra-seats.mjs';
+import { extraSeatsEnabled, redTeamEnabled, resolveSeatTimeoutMs } from './review-extra-seats.mjs';
+import { redTeamRequired } from '../lib/jury-core.mjs';
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 
@@ -259,7 +260,44 @@ export function createReviewJobIo({ root = REPO_ROOT, env = process.env, dir = r
         try { rmSync(loopFile, { force: true }); } catch { /* best effort */ }
       }
     },
+    // x00g3tt — the POST-ACCEPT RED TEAM, its own process and wall, run only after the added seats. Advisory: it
+    // posts one deduped comment and writes evidence; nothing it returns reaches a label, merge or verdict.
+    runRedTeam: ({ pr, repo, lanePath, loopPayload, slug }) => {
+      if (!redTeamEnabled(env)) return { status: 'disabled', reason: 'kill switch thrown' };
+      const loopFile = join(dir, `${slug}.red-team.loop.json`);
+      try {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(loopFile, JSON.stringify(loopPayload));
+        const r = node([
+          'scripts/operations/review-extra-seats.mjs', 'red-team', `--pr=${pr}`, `--repo=${repo}`, `--lane=${lanePath}`, `--loop-json=${loopFile}`,
+        ], { timeoutMs: resolveSeatTimeoutMs(env) + 20 * 60 * 1000 });
+        for (const line of String(r.stderr ?? '').split('\n').filter((l) => l && !/DeprecationWarning|trace-deprecation/.test(l))) {
+          writeLineSync(2, `  ${line}`);
+        }
+        const last = String(r.stdout ?? '').trim().split('\n').pop() ?? '';
+        try { return JSON.parse(last); } catch { return { status: 'error', reason: `red-team runner exit ${r.status}${r.signal ? ` (${r.signal})` : ''}, no result` }; }
+      } catch (e) {
+        return { status: 'error', reason: String(e?.message ?? e).slice(0, 300) };
+      } finally {
+        try { rmSync(loopFile, { force: true }); } catch { /* best effort */ }
+      }
+    },
     log: (line) => writeLineSync(2, `[${new Date().toISOString()}] ${line}`),
+  };
+}
+
+/** x00g3tt — the compact form of the red team's result the job prints (the full rows live in the store). */
+export function summarizeRedTeam(r) {
+  if (!r || typeof r !== 'object') return null;
+  return {
+    status: r.status ?? null,
+    ...(r.reason ? { reason: r.reason } : {}),
+    ...(r.status === 'ran' ? {
+      provider: r.provider, model: r.model, seatStatus: r.seat?.status ?? null, foldedVerdict: r.foldedVerdict ?? null,
+      recheckStatus: r.recheckStatus ?? null, confirmedMissCount: r.confirmedMissCount ?? 0,
+      findings: (r.findings ?? []).map((f) => ({ summary: f.summary, file: f.file ?? null, line: f.line ?? null, category: f.category ?? null, confirmed: f.confirmedByRecheck === true })),
+      delegationTrial: r.delegationTrial ?? null, comment: r.comment?.status ?? null, rowsWritten: r.rowsWritten ?? 0,
+    } : {}),
   };
 }
 
@@ -294,7 +332,9 @@ function tail(text, n = 400) {
  *   3. report `done` with the classified outcome / loop verdict / run id;
  *   4. release the lane and drop the job record — in `finally`, so every exit path cleans up;
  *   5. (#4194) only then, when the loop printed a finished review, run the ADDED non-Claude seats
- *      (`review-extra-seats.mjs`) and attach their summary as `extraSeats` — advisory, never read by any verdict.
+ *      (`review-extra-seats.mjs`) and attach their summary as `extraSeats` — advisory, never read by any verdict;
+ *   6. (x00g3tt) and, when that review ACCEPTED, the post-accept RED TEAM (`review-extra-seats.mjs red-team`),
+ *      attached as `redTeam` — advisory in v1: one deduped comment + evidence rows, never a label or a merge.
  * @param {{pr:number|string, repo:string, laneWaitMs?:number, loopTimeoutMs?:number}} o
  * @param {ReturnType<typeof createReviewJobIo>} [io]
  * @returns {{pr:number, repo:string, sessionSlug:string, outcome:string, verdict:(string|null),
@@ -318,6 +358,19 @@ export function runReviewJob(opts = {}, io = createReviewJobIo()) {
     io.log(`review-job ${out.sessionSlug}: added seats — ${extraSeats?.status ?? 'none'}${extraSeats?.reason ? ` (${extraSeats.reason})` : ''}`
       + `${Array.isArray(extraSeats?.seats) ? `: ${extraSeats.seats.map((x) => `${x.lens}@${x.provider}=${x.status}/${x.findingsCount ?? 0}f/${x.confirmedCount ?? 0}c`).join(', ')}` : ''}`);
     out.extraSeats = summarizeExtraSeats(extraSeats);
+  }
+  // x00g3tt — THE POST-ACCEPT RED TEAM: owed only when Claude's review ACCEPTED (`redTeamRequired`), and only after
+  // everything above. Same containment as the seats: a crash is a status in `redTeam`, never a changed outcome.
+  if (seatsBox.input && redTeamRequired(out.verdict) && typeof io.runRedTeam === 'function') {
+    let redTeam;
+    try {
+      redTeam = io.runRedTeam(seatsBox.input);
+    } catch (e) {
+      redTeam = { status: 'error', reason: tail(e?.message ?? e, 300) };
+    }
+    io.log(`review-job ${out.sessionSlug}: red team — ${redTeam?.status ?? 'none'}${redTeam?.reason ? ` (${redTeam.reason})` : ''}`
+      + `${redTeam?.status === 'ran' ? `: ${redTeam.findings?.length ?? 0} break(s), ${redTeam.confirmedMissCount ?? 0} confirmed, comment ${redTeam.comment?.status ?? '-'}` : ''}`);
+    out.redTeam = summarizeRedTeam(redTeam);
   }
   return out;
 }
