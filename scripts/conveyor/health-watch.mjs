@@ -46,6 +46,8 @@ export { healthDir, healthSectionLines };
 import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
+import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import { notifyDesktopChecked } from './branch-sync.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
 import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
 import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
@@ -264,7 +266,34 @@ export function probePrs({ exec = run } = {}) {
 
 export function probeAgents({ exec = run } = {}) {
   const arr = JSON.parse(exec('claude', ['agents', '--json'], { cwd: homedir() }));
-  return arr.map((a) => ({ name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt }));
+  // `cwd`/`sessionId` carried through (additive — no existing smell reads `probes.agents` at all yet) so the
+  // claude-auth-expired sign below can resolve each background session's own transcript.
+  return arr.map((a) => ({ name: a.name, state: a.state, kind: a.kind, startedAt: a.startedAt, cwd: a.cwd, sessionId: a.sessionId }));
+}
+
+/**
+ * Live incident, night of 2026-09-25/26 ET — the operator's own Claude login expired and every daemon-
+ * dispatched session hit an immediate CLI auth failure. Reads each BACKGROUND session's own transcript via the
+ * shared detector ({@link readClaudeAuthExpiredInfo}, `we:scripts/conveyor/hung-session.mjs` — the SAME one
+ * `session-reaper.mjs`'s reap axis and `reconcile-core.mjs`'s liveness mark both use, so this sign can never
+ * disagree with either about what "auth-expired" means) and returns just the ones it flags, each carrying its
+ * OWN `startedAt` (the "when" the `claude-auth-expired` smell's own 30-minute window measures from — these
+ * sessions fail on their very first turn, so `startedAt` IS effectively "when the failure happened").
+ * @param {Array<{name?:string, kind?:string, cwd?:string, sessionId?:string, startedAt?:string|number}>} agents
+ * @param {{readInfo?:Function}} [io]
+ * @returns {Array<{name:string, startedAt:number|null}>}
+ */
+export function probeAuthExpiredSessions(agents, { readInfo = readClaudeAuthExpiredInfo } = {}) {
+  const out = [];
+  for (const a of Array.isArray(agents) ? agents : []) {
+    if (a?.kind !== 'background' || !a?.cwd || !a?.sessionId) continue;
+    let info = null;
+    try { info = readInfo(a); } catch { info = null; }
+    if (info?.authExpired !== true) continue;
+    const startedAt = typeof a.startedAt === 'number' ? a.startedAt : Date.parse(a.startedAt ?? '');
+    out.push({ name: a.name ?? null, startedAt: Number.isFinite(startedAt) ? startedAt : null });
+  }
+  return out;
 }
 
 /**
@@ -348,6 +377,9 @@ export async function tick(flags = {}) {
     if (prs) probes.prs = prs;
     if (agents) probes.agents = agents;
     if (prs && agents) ghCache.at = now;
+    // claude-auth-expired's own probe needs only `agents` (the exact same listing, same cadence) — independent
+    // of whether `prs` also succeeded this tick, same reasoning as stale-claim's two probes just below.
+    if (agents) probes.authExpired = attempt('authExpired', () => probeAuthExpiredSessions(agents));
     // stale-claim's two probes ride the same 'gh' cadence (both are gh/git-heavy reads); independent of the
     // prs/agents pairing above — one failing never blocks the other.
     const staleState = attempt('staleState', () => probeStaleState());
@@ -393,6 +425,28 @@ export async function tick(flags = {}) {
     diagnoses.push({ key: p.key, command: d.command, code: d.code });
   }
 
+  // Real desktop notifications — THE MINIMAL NOTIFY PATH (#4077 slice 1 shipped with none: every `notify` plan
+  // entry was only ever reported as "Held back" in a report, never actually sent, in ANY mode — see
+  // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
+  // here: every pre-existing smell stays exactly as silent as before in shadow mode (nothing here changes for
+  // them), and the ONLY smell that can produce a non-suppressed entry while `mode: 'shadow'` is one that opts
+  // in via `notifyEvenInShadow` (today: `claude-auth-expired` alone — see that smell's own doc for why an
+  // expired operator login is urgent enough to break the "shadow mode notifies nothing" rule). Best-effort:
+  // `notifyDesktopChecked` already reports its own failure rather than throwing; a delivery failure here must
+  // never fail the tick.
+  const notifications = [];
+  for (const p of result.plan.filter((x) => x.kind === 'notify' && !x.suppressed)) {
+    const ep = state.episodes[p.key];
+    // `--dry-run`/`--no-notify` both skip actually SENDING one (an OS-visible side effect, unlike the
+    // read-only diagnoses above) — a dry-run reports what it would have sent via `result.plan` already.
+    if (!ep || flags['no-notify'] || flags['dry-run']) continue;
+    const title = `Health: ${ep.smell} — ${ep.subject}`;
+    const body = scrubText(ep.recommendation || ep.summary || 'See the health report.');
+    let sent;
+    try { sent = notifyDesktopChecked({ title, body }); } catch (e) { sent = { ok: false, error: String(e?.message || e) }; }
+    notifications.push({ key: p.key, ok: sent?.ok === true, error: sent?.ok === true ? null : scrubText(sent?.error ?? 'unknown') });
+  }
+
   const completedAt = Date.now();
   const durationMs = completedAt - started;
   state.lastTick = { completedAt: flags.now ? now : completedAt, durationMs, mode: config.mode, probeErrors };
@@ -418,7 +472,7 @@ export async function tick(flags = {}) {
   return scrubDeep({
     now: new Date(now).toISOString(), durationMs, mode: config.mode, stateDir: dir, ghSampled: !!probes.prs,
     probeErrors, transitions: result.transitions.map((t) => ({ type: t.type, key: t.key })),
-    plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, reports: written,
+    plan: result.plan.map(({ diagnose, ...rest }) => rest), diagnoses, notifications, reports: written,
     section: renderHealthSection(state, { now, reportDir }),
     skipped: result.evaluations.filter((e) => !e.results).map((e) => ({ smell: e.smell.id, missing: e.skipped, error: e.error })),
   });

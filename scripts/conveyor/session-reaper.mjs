@@ -122,7 +122,7 @@ import {
   deleteDeliveryReport, deliveryReportPath, listDeliveryReportSessions, resolveDeliveryReportsDir,
 } from '../operations/delivery-report-store.mjs';
 import { pruneTerminalRuns } from '../operations/run-store.mjs';
-import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
+import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo } from './hung-session.mjs';
 import {
   NO_OUTCOME_KINDS, resolveNoOutcomeWindowMs, resolveNoOutcomeCeilingMs, classifyNoOutcomeStall, OUTCOME_UNREADABLE,
 } from './hung-session.mjs';
@@ -246,6 +246,13 @@ export const BLOCKED_ON_INFRA_OUTCOME = 'blocked-on-infra';
  *  apart from a bot correctly stopped for looping. */
 export const STALLED_OUTCOME = 'stalled';
 
+/** The completion-record `label` a Claude-CLI-auth-expired backstop write carries (live incident, night of
+ *  2026-09-25/26 ET) — the outcome itself is the SAME {@link BLOCKED_ON_INFRA_OUTCOME} a genuine transcript-
+ *  stated infra block already mints (so `reconcile-core.mjs#markSelfReportedDone`'s existing 15-minute
+ *  infra-retry cool-off applies unchanged, no new downstream reader needed), with this label distinguishing
+ *  WHICH kind of infra outage it was for anyone who cares (an operator glancing at the record, a future sign). */
+export const CLAUDE_AUTH_OUTCOME_LABEL = 'claude-auth';
+
 /** The completion-record KINDS {@link planBackstopCompletion} will ever mint — the subset of
  *  `PR_KINDS` (`session-slug.mjs`) that {@link ../operations/completion-record.mjs}'s `COMPLETION_KINDS` schema
  *  actually accepts. `ci-heal` is a real PR-kind session name but has NO completion-record kind at all (its own
@@ -289,22 +296,32 @@ const BACKSTOP_COMPLETION_KINDS = new Set(['review', 'fix', 'inspect']);
  *   the CALLER ({@link runSessionReaperPass}, via {@link transcriptShowsIntendedBlockedOnInfra}) decides this;
  *   this function stays pure and takes the verdict as a plain boolean, never touching a transcript itself.
  * @param {boolean} [stalled] - #4090: the reap reason was this file's own no-net-outcome axis (a looping bot,
- *   never a crash) — mints {@link STALLED_OUTCOME} instead. Takes precedence over `blockedOnInfra` when both
- *   are somehow true (a no-outcome verdict is this reaper's OWN definite conclusion; a transcript's stray
- *   mention of infra trouble is comparatively weaker evidence and never overrides it). Only `review`/`fix`
- *   sessions can carry either — item-kind sessions (`conveyor`/`prepare`/`prepare-decision`) still have no
- *   completion-record schema at all, unchanged from before this card.
+ *   never a crash) — mints {@link STALLED_OUTCOME} instead. Takes precedence over `blockedOnInfra`/`authExpired`
+ *   when more than one is somehow true (a no-outcome verdict is this reaper's OWN definite conclusion; a
+ *   transcript's stray mention of infra trouble, or an auth failure, is comparatively weaker evidence and never
+ *   overrides it). Only `review`/`fix` sessions can carry any of the three — item-kind sessions
+ *   (`conveyor`/`prepare`/`prepare-decision`) still have no completion-record schema at all, unchanged from
+ *   before this card.
+ * @param {boolean} [authExpired] - live incident, night of 2026-09-25/26 ET (see `hung-session.mjs`'s own file
+ *   header for the full transcript shape): the reap reason was this file's own Claude-auth-expired axis. Mints
+ *   the SAME {@link BLOCKED_ON_INFRA_OUTCOME} `blockedOnInfra` already does (an expired login is exactly the
+ *   transient-infra-outage shape `markSelfReportedDone`'s 15-minute cool-off exists for — the operator logs back
+ *   in and retries make sense again), plus {@link CLAUDE_AUTH_OUTCOME_LABEL} so a reader can tell WHICH kind of
+ *   infra outage this was. Never overrides `stalled` (see above); outranks a bare `blockedOnInfra` when both are
+ *   somehow true, since this axis is a literal transcript-content match, not a heuristic phrase scan.
  * @returns {object|null} the completion record to write, or `null` when nothing is owed.
  */
-export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false) {
+export function planBackstopCompletion(session, existingRecord, now = () => new Date().toISOString(), blockedOnInfra = false, stalled = false, authExpired = false) {
   if (existingRecord && existingRecord.status === 'done') return null; // a real terminal record — never touch it
   const parsed = parseSessionSlug(session?.name);
   if (!parsed || parsed.itemKind) return null; // no grammar match, or an item-kind session (conveyor-*/prepare-*
   //                                               / prepare-decision-*) — those never carry a completion record.
   if (!BACKSTOP_COMPLETION_KINDS.has(parsed.kind)) return null; // e.g. `ci-heal` — no completion-record kind exists
   const base = existingRecord ?? newCompletionRecord({ session: session.name, kind: parsed.kind, pr: parsed.id, now });
-  const outcome = stalled ? STALLED_OUTCOME : (blockedOnInfra ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
-  return applyCompletionUpdate(base, { status: 'done', outcome }, now);
+  const outcome = stalled ? STALLED_OUTCOME : ((authExpired || blockedOnInfra) ? BLOCKED_ON_INFRA_OUTCOME : UNREPORTED_EXIT_OUTCOME);
+  const patch = { status: 'done', outcome };
+  if (!stalled && authExpired) patch.label = CLAUDE_AUTH_OUTCOME_LABEL;
+  return applyCompletionUpdate(base, patch, now);
 }
 
 /** How many transcript tail lines / bytes / chars-per-field {@link transcriptShowsIntendedBlockedOnInfra} reads
@@ -459,13 +476,14 @@ export function transcriptShowsIntendedBlockedOnInfra(session, {
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:boolean, reason:string}}
  */
 export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts = {}) {
   const {
     allowedCwd, neverReapWorking = false, completionFor = null, idleThresholdMs = 0, now = Date.now(),
-    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null,
+    hungFor = null, noOutcomeFor = null, chatSpawnGuardFor = null, authExpiredFor = null,
   } = opts || {};
   const base = classifySessionReap(session, { allowedCwd, chatSpawnGuardFor });
   if (base.reap) return base;
@@ -488,6 +506,22 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
     let info = null;
     try { info = noOutcomeFor(session); } catch { info = null; }
     if (info && info.stall === true) return { reap: true, reason: `no-outcome:${info.reason || 'stalled'}` };
+  }
+
+  // Axis AUTH — Claude CLI auth-expired detection (live incident, night of 2026-09-25/26 ET; see
+  // `hung-session.mjs`'s own file header for the full transcript shape). SAME TIER as axis -1/0 above/below,
+  // for the identical reason: a session whose OWN transcript shows the CLI's auth failure is independently
+  // confirmed done — its entire transcript IS that one failed turn, nothing ever appends after it — regardless
+  // of what the listing's own `state` says (these sessions sat `blocked`/`idle`, never advancing) and regardless
+  // of `cwd` (a dispatched fix/ci-heal session's `cwd` is its own per-session scratch dir, never the daemon's
+  // `allowedCwd`, so `wrong-cwd` would otherwise short-circuit this exactly the way #4149's own audit found for
+  // the hung/no-outcome axes). Checked ahead of axis 0's generic 30-minute hung-transcript timeout because this
+  // is a MORE SPECIFIC, INSTANT signal — no reason to wait out a staleness window when the transcript already
+  // names the exact cause.
+  if (typeof authExpiredFor === 'function') {
+    let info = null;
+    try { info = authExpiredFor(session); } catch { info = null; }
+    if (info && info.authExpired === true) return { reap: true, reason: `claude-auth-expired:${info.reason || 'claude-auth'}` };
   }
 
   // Axis 0 — hung-transcript detection. See doc above for why this runs BEFORE `neverReapWorking` below, and
@@ -555,6 +589,7 @@ export function classifySessionReapWithGroundTruth(session, groundTruthFor, opts
  *   hungFor?: ((session:object) => ({hung:boolean, reason?:string}|null))|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  * }} [opts]
  * @returns {{reap:Array, keep:Array}} each entry carries the original row plus its `reason`.
  */
@@ -750,6 +785,25 @@ export function makeHungResolver({ thresholdMs = resolveHungThresholdMs(), now =
   return function hungFor(session) {
     try {
       return readHungInfo(session, now(), thresholdMs);
+    } catch {
+      return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
+    }
+  };
+}
+
+/**
+ * Build an `authExpiredFor` resolver for {@link sessionReapPlan} / {@link classifySessionReapWithGroundTruth}
+ * (live incident, night of 2026-09-25/26 ET — see `hung-session.mjs`'s own file header for the full transcript
+ * shape): reads the session's OWN transcript for the Claude CLI auth-failure signature via
+ * `we:scripts/conveyor/hung-session.mjs#readClaudeAuthExpiredInfo` — the SAME shared detector
+ * `reconcile-core.mjs`'s `markAuthExpiredSessions` uses, so this reaper and the reconciler can never disagree
+ * about what "auth-expired" means (mirrors {@link makeHungResolver}'s own reasoning for the identical property).
+ * @returns {(session:object) => ({authExpired:boolean, reason?:string}|null)}
+ */
+export function makeAuthExpiredResolver() {
+  return function authExpiredFor(session) {
+    try {
+      return readClaudeAuthExpiredInfo(session);
     } catch {
       return null; // unreadable transcript / bad row shape — unknown, never reap on an unreadable signal
     }
@@ -1572,6 +1626,7 @@ function parseFlags(argv) {
  *   hungFor?: ((session:object) => object|null)|null,
  *   noOutcomeFor?: ((session:object) => ({stall:boolean, reason?:string}|null))|null,
  *   chatSpawnGuardFor?: ((session:object) => ({blocked:boolean, reason?:string})|null)|null,
+ *   authExpiredFor?: ((session:object) => ({authExpired:boolean, reason?:string}|null))|null,
  *   backstopCompletion?: boolean,
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
@@ -1600,6 +1655,9 @@ export function runSessionReaperPass({
   // #4091 (epic #3383/#4075, statute clause 4) — default ON: a session with no recorded link is unaffected
   // (see this axis's own header for why), so this is safe to run unconditionally, same as every other axis.
   chatSpawnGuardFor = makeChatSpawnGuardResolver(),
+  // Live incident fix, night of 2026-09-25/26 ET (epic #3383/#4075) — default ON, same convention as every
+  // other axis this epic ships: see `hung-session.mjs#readClaudeAuthExpiredInfo`'s own file header for why.
+  authExpiredFor = makeAuthExpiredResolver(),
   // xbv32pg follow-up (epic #3383) — THE ROOT-CAUSE FIX, not just a detection axis: see
   // {@link planBackstopCompletion}'s own docblock. Default ON, like every other axis this epic ships — a
   // caller that wants the pre-#3383 behavior byte-for-byte passes `backstopCompletion: false`.
@@ -1636,7 +1694,7 @@ export function runSessionReaperPass({
   }
   if (!Array.isArray(sessions)) sessions = [];
 
-  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor });
+  const { reap, keep } = sessionReapPlan(sessions, { groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, now, hungFor, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
 
   let stopped = 0;
   let alreadyGone = 0;
@@ -1659,11 +1717,16 @@ export function runSessionReaperPass({
         // why it outranks a transcript's stray blocked-on-infra mention); derived from the reap `reason` string
         // {@link classifySessionReapWithGroundTruth}'s axis -1 stamps, never re-derived from the session itself.
         const stalled = typeof reason === 'string' && reason.startsWith('no-outcome:');
+        // Live incident fix, night of 2026-09-25/26 ET — same derive-from-`reason` discipline as `stalled`
+        // above: the Claude-auth-expired axis already ran (inside `sessionReapPlan`, via `authExpiredFor`) to
+        // produce this exact reap; re-reading the transcript here would be a second, redundant IO call for a
+        // fact `reason` already carries.
+        const authExpired = !stalled && typeof reason === 'string' && reason.startsWith('claude-auth-expired:');
         let blockedOnInfra = false;
-        if (!stalled && typeof blockedOnInfraFor === 'function') {
+        if (!stalled && !authExpired && typeof blockedOnInfraFor === 'function') {
           try { blockedOnInfra = blockedOnInfraFor(session) === true; } catch { blockedOnInfra = false; }
         }
-        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled);
+        backstopRecord = planBackstopCompletion(session, readCompletionRecord(session?.name), undefined, blockedOnInfra, stalled, authExpired);
       } catch { backstopRecord = null; }
     }
     // `id` (the SHORT form), never `sessionId` (the full UUID `claude stop` does not match on) — see the file
@@ -1768,6 +1831,9 @@ function main(argv) {
   // `--no-chat-spawn-guard` is the same rollback escape hatch, for the #4091 chat-spawn scope guard — default
   // ON: a session with no recorded link is unaffected, so this is safe to run unconditionally.
   const chatSpawnGuardFor = flags['no-chat-spawn-guard'] ? null : makeChatSpawnGuardResolver();
+  // `--no-auth-expired-detection` is the same rollback escape hatch, for the Claude-auth-expired axis (live
+  // incident, night of 2026-09-25/26 ET) — default ON, same convention as every other axis this epic ships.
+  const authExpiredFor = flags['no-auth-expired-detection'] ? null : makeAuthExpiredResolver();
   // `--retention-sweep` OPTS IN to the #4089 retention pass — deliberately OPT-IN, not opt-out like this
   // file's other axes: unlike ground-truth/hung-detection/backstop-completion (which only ever change a STOP
   // decision), the retention sweep DELETES files and calls `claude rm` — a materially different blast radius
@@ -1776,7 +1842,7 @@ function main(argv) {
   // relying on this flag. Shares this CLI's own `--dry-run`.
   const runRetention = !!flags['retention-sweep'];
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
 
   if (result.unreadable) {
