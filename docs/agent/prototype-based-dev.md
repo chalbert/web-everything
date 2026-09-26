@@ -92,3 +92,26 @@ Replace or wire the production path only after a live run has gone the **full di
 through to a real, mergeable PR (or whatever "done" means for the dispatch kind in question) — not partway,
 and not "the agent's own portion worked." A run that produces real, high-quality work but never reaches a PR
 is a proven **agent**, not yet a proven **pipeline**.
+
+## Real end-to-end dispatch canary (`we:scripts/conveyor/canary.mjs`, x0nxuqd)
+
+The soak harness (`we:scripts/conveyor/soak/`) simulates every session with a FAKE world — it cannot catch a
+break in the REAL `claude --bg` path, which is exactly what PR #2701 (dispatched sessions now start in a
+scratch cwd outside every trusted checkout, card #4174) broke live: a session's first `Edit` into its own
+freshly-acquired lane clone can hang on an unanswerable permission prompt, invisible to any fake-session test.
+`canary.mjs` is the one real, live check for exactly this class of break: it dispatches ONE tiny real session
+through the SAME production sink (`we:scripts/operations/dispatch-lane-io.mjs#createDispatchSinks` — read-only
+import, same scratch cwd, same trust grant, same `--settings` env, same brief-filling machinery), watches it
+with bounded timeouts, and reports PASS/FAIL per stage: `spawned · no-permission-prompt · lane-acquired ·
+edit-ok · gate-ran · pushed · session-finished · cleaned-up`. Run it as `node scripts/conveyor/canary.mjs
+--repo=<owner>/<name>` after loading a daemon-dispatch overlay, before counting the change proven — the
+operator's standing rule for this class of change is one real end-to-end run, not unit tests alone.
+
+**A still-alive session's own files are never force-cleaned.** The canary's own first live run caught this
+live: its dispatched session stalled on exactly the #2701 permission-prompt shape and was still a real running
+process when the canary's bounded watch gave up — an earlier cut of the cleanup step force-deleted that
+session's scratch cwd anyway. `canary.mjs` now only releases the lane / deletes the scratch cwd once the
+session is CONFIRMED gone (absent from a successful `claude agents --json` read, past the listing-lag grace,
+or a listed terminal state) — never on a guess, and never while a listing read is merely failing. A session
+still confirmed alive at timeout is left for the resident `we:scripts/conveyor/session-reaper.mjs` to reap in
+the ordinary course, exactly as it already does for every other finished dispatch's scratch cwd.

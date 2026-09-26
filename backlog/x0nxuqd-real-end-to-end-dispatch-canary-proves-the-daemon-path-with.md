@@ -2,7 +2,7 @@
 kind: task
 parent: "4075"
 status: open
-scope: ["we:scripts/conveyor/canary.mjs", "we:scripts/conveyor/__tests__/canary.test.mjs", "we:docs/agent/prototype-based-dev.md"]
+scope: ["we:scripts/conveyor/canary.mjs", "we:scripts/conveyor/canary-stages.mjs", "we:scripts/conveyor/__tests__/canary-stages.test.mjs", "we:skills-src/conveyor/canary-agent-brief.md", "we:docs/agent/prototype-based-dev.md"]
 dateOpened: "2026-09-26"
 tags: []
 ---
@@ -16,5 +16,5 @@ Build we:scripts/conveyor/canary.mjs — a single entry point that dispatches a 
 1. **Executable** — `node we:scripts/conveyor/canary.mjs --repo=chalbert/web-everything` exits 0 with a
    PASS on every stage (spawned · no permission prompt · lane acquired · edit ok · gate ran · pushed ·
    session finished · cleaned up) on a real `claude --bg` run, and the stage evaluator's unit tests
-   (`npx vitest run we:scripts/conveyor/__tests__/canary.test.mjs`) go red→green against fixture
+   (`npx vitest run we:scripts/conveyor/__tests__/canary-stages.test.mjs`) go red→green against fixture
    transcripts, including a fixture that stalls on a permission prompt.
