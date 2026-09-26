@@ -3,10 +3,11 @@ bornAs: xs81oxb
 kind: story
 size: 3
 parent: "4075"
-status: active
+status: resolved
 scope: ["we:scripts/conveyor/parked-pr-conflict-watch.mjs", "we:scripts/lib/rebase-drop-manifest.mjs"]
 dateOpened: "2026-09-26"
 dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
