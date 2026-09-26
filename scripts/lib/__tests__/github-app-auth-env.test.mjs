@@ -36,6 +36,11 @@ const CONFIGURED_ENV = {
 const FULL_PERMS = { ...REQUIRED_APP_PERMISSIONS };
 const allRepos = vi.fn(async () => [...REQUIRED_APP_REPOS]);
 
+/** The default fake for the new `getInstallationInfo` dependency: a 'selected' installation, so every
+ *  pre-existing test below (written before `repository_selection` existed) keeps exercising `listRepos`
+ *  exactly as it did before this file added the 'all' short-circuit. */
+const selectedInfo = vi.fn(async () => ({ permissions: FULL_PERMS, repositorySelection: 'selected' }));
+
 describe('resolveGithubAppEnvConfig — opt-in, all three or none', () => {
   it('returns the config when all three env vars are set', () => {
     expect(resolveGithubAppEnvConfig(CONFIGURED_ENV)).toEqual({
@@ -91,7 +96,7 @@ describe('THE DEPLOY INCIDENT (2026-09-23) — an unvalidated token cached by an
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
       env: CONFIGURED_ENV, now: Date.parse('2026-09-23T13:20:00Z'), readCache: () => oldEntry, writeCache: vi.fn(),
-      mint, listRepos: vi.fn(async () => []), setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+      mint, listRepos: vi.fn(async () => []), getInstallationInfo: selectedInfo, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     expect(mint).toHaveBeenCalled();
     expect(result.reason).toBe('insufficient-access');
@@ -132,7 +137,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_fresh', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, getInstallationInfo: selectedInfo, setEnv, ...NOOP_STATUS,
     });
     expect(result).toEqual({ applied: true, reason: 'ok' });
     expect(mint).toHaveBeenCalledWith({
@@ -149,7 +154,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_new', expiresAt: '2026-09-23T14:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
-    await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS });
+    await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, getInstallationInfo: selectedInfo, setEnv, ...NOOP_STATUS });
     expect(mint).toHaveBeenCalled();
     expect(setEnv).toHaveBeenCalledWith('ghs_new');
   });
@@ -172,7 +177,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const writeCache = vi.fn();
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_recovered', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
     const setEnv = vi.fn();
-    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, setEnv, ...NOOP_STATUS });
+    const result = await ensureFreshGithubAppEnv({ env: CONFIGURED_ENV, now: NOW, readCache, writeCache, mint, listRepos: allRepos, getInstallationInfo: selectedInfo, setEnv, ...NOOP_STATUS });
     expect(result.applied).toBe(true);
     expect(setEnv).toHaveBeenCalledWith('ghs_recovered');
   });
@@ -186,7 +191,7 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const setEnv = vi.fn();
     const log = { error: vi.fn() };
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos, setEnv, log, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos, getInstallationInfo: selectedInfo, setEnv, log, ...NOOP_STATUS,
     });
     expect(result.applied).toBe(false);
     expect(result.reason).toBe('insufficient-access');
@@ -202,21 +207,75 @@ describe('ensureFreshGithubAppEnv — the IO shell, every effect injected', () =
     const listRepos = vi.fn(async () => REQUIRED_APP_REPOS.slice(0, 1));
     const setEnv = vi.fn();
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, getInstallationInfo: selectedInfo, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     expect(result.reason).toBe('insufficient-access');
     expect(result.missingPermissions).toEqual([]);
     expect(setEnv).not.toHaveBeenCalled();
   });
 
-  it('a failure LISTING repos is treated like a mint failure — never applied, never thrown', async () => {
+  // Live-caught 2026-09-26: a `listRepos` failure used to be bucketed as `mint-failed` — misleading, since the
+  // mint itself succeeded (the token IS good) and an operator reading that reason would think the App token
+  // was broken, not that one read of the (separate) repo listing failed. It is its own reason now, and it
+  // must never report every required repo as a confirmed gap on a read failure it never actually confirmed.
+  it("a failure LISTING repos — with repository_selection not 'all' — is its own reason, distinct from mint-failed and from a confirmed gap", async () => {
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_x', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
     const listRepos = vi.fn(async () => { throw new Error('HTTP 502'); });
     const setEnv = vi.fn();
+    const writeCache = vi.fn();
+    const log = { error: vi.fn() };
     const result = await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos, getInstallationInfo: selectedInfo, setEnv, log, ...NOOP_STATUS,
     });
-    expect(result).toEqual({ applied: false, reason: 'mint-failed' });
+    expect(result).toEqual({ applied: false, reason: 'access-check-failed' });
+    expect(setEnv).not.toHaveBeenCalled();
+    expect(writeCache).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('could not verify'));
+  });
+
+  // THE LIVE FIX (2026-09-26): the exact real response shape the fleet hit — a mint with every permission
+  // correctly granted, `repository_selection: 'all'` (an installation with access to every repository), and
+  // `listRepos` returning an INCOMPLETE list (simulating GitHub's own listing lag right after the operator
+  // changed the installation's access) — must still apply, because 'all' is checked BEFORE any enumeration.
+  it("THE LIVE FIX: repository_selection 'all' applies even when the repo LISTING is empty/incomplete — never calls listRepos at all", async () => {
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_all', expiresAt: '2026-09-26T15:08:07Z', permissions: FULL_PERMS });
+    const getInstallationInfoAll = vi.fn(async () => ({ permissions: FULL_PERMS, repositorySelection: 'all' }));
+    const listRepos = vi.fn(async () => []); // what the fleet actually saw mid-lag — must never be reached
+    const writeCache = vi.fn();
+    const setEnv = vi.fn();
+    const result = await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache, mint, listRepos,
+      getInstallationInfo: getInstallationInfoAll, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+    });
+    expect(result).toEqual({ applied: true, reason: 'ok' });
+    expect(listRepos).not.toHaveBeenCalled();
+    expect(setEnv).toHaveBeenCalledWith('ghs_all');
+    expect(writeCache).toHaveBeenCalled();
+  });
+
+  it("a getInstallationInfo failure alone (repository_selection unknown) falls back to the enumeration check, exactly as before this file added 'all'", async () => {
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_y', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
+    const getInstallationInfoFailing = vi.fn().mockRejectedValue(new Error('HTTP 500'));
+    const setEnv = vi.fn();
+    const result = await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos,
+      getInstallationInfo: getInstallationInfoFailing, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+    });
+    expect(allRepos).toHaveBeenCalled();
+    expect(result).toEqual({ applied: true, reason: 'ok' });
+    expect(setEnv).toHaveBeenCalledWith('ghs_y');
+  });
+
+  it('BOTH the repository_selection read and the repo listing failing is access-check-failed, never a confirmed gap', async () => {
+    const mint = vi.fn().mockResolvedValue({ token: 'ghs_z', expiresAt: '2026-09-23T13:00:00Z', permissions: FULL_PERMS });
+    const getInstallationInfoFailing = vi.fn().mockRejectedValue(new Error('fetch failed'));
+    const listRepos = vi.fn(async () => { throw new Error('fetch failed'); });
+    const setEnv = vi.fn();
+    const result = await ensureFreshGithubAppEnv({
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos,
+      getInstallationInfo: getInstallationInfoFailing, setEnv, log: { error: vi.fn() }, ...NOOP_STATUS,
+    });
+    expect(result).toEqual({ applied: false, reason: 'access-check-failed' });
     expect(setEnv).not.toHaveBeenCalled();
   });
 });
@@ -240,6 +299,20 @@ describe('findInstallationGaps — pure', () => {
     const repos = REQUIRED_APP_REPOS.map((r) => r.toUpperCase());
     expect(findInstallationGaps({ permissions: FULL_PERMS, repos }).missingRepos).toEqual([]);
   });
+
+  // THE LIVE BUG (2026-09-26): `repos` came back empty/incomplete during GitHub's own listing lag right after
+  // a permission/repo-access change, and every required repo was reported missing even though the installation
+  // had `repository_selection: 'all'`. This is the fix, at the pure-core level: 'all' is never gated on `repos`.
+  it("repository_selection 'all' reports zero missing repos regardless of what `repos` contains — empty, undefined, or incomplete", () => {
+    expect(findInstallationGaps({ permissions: FULL_PERMS, repos: [], repositorySelection: 'all' }).missingRepos).toEqual([]);
+    expect(findInstallationGaps({ permissions: FULL_PERMS, repositorySelection: 'all' }).missingRepos).toEqual([]);
+    expect(findInstallationGaps({ permissions: FULL_PERMS, repos: ['chalbert/web-everything'], repositorySelection: 'all' }).missingRepos).toEqual([]);
+  });
+
+  it("repository_selection 'selected' (or absent) still enforces the enumeration check exactly as before", () => {
+    expect(findInstallationGaps({ permissions: FULL_PERMS, repos: [], repositorySelection: 'selected' }).missingRepos).toEqual([...REQUIRED_APP_REPOS]);
+    expect(findInstallationGaps({ permissions: FULL_PERMS, repos: [] }).missingRepos).toEqual([...REQUIRED_APP_REPOS]);
+  });
 });
 
 describe('withGithubAppAuth — refresh at the top of every tick, never on a timer', () => {
@@ -251,7 +324,7 @@ describe('withGithubAppAuth — refresh at the top of every tick, never on a tim
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_t', expiresAt: '2099-01-01T00:00:00Z', permissions: FULL_PERMS });
     const effects = { tickOnce: vi.fn(() => { order.push('tick'); return { ok: 1 }; }), sleep: vi.fn(), intervalMs: 5 };
     const wrapped = withGithubAppAuth(effects, {
-      env: CONFIGURED_ENV, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos, setEnv, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, readCache: () => null, writeCache: vi.fn(), mint, listRepos: allRepos, getInstallationInfo: selectedInfo, setEnv, ...NOOP_STATUS,
     });
     const result = await wrapped.tickOnce();
     expect(order).toEqual(['setEnv', 'tick']);
@@ -271,7 +344,7 @@ describe('withGithubAppAuth — refresh at the top of every tick, never on a tim
     const tick = vi.fn(() => 'ran');
     const mint = vi.fn().mockRejectedValue(new Error('fetch failed'));
     const wrapped = withGithubAppAuth({ tickOnce: tick }, {
-      env: CONFIGURED_ENV, readCache: () => null, mint, listRepos: allRepos, setEnv: vi.fn(), log: { error: vi.fn() }, ...NOOP_STATUS,
+      env: CONFIGURED_ENV, readCache: () => null, mint, listRepos: allRepos, getInstallationInfo: selectedInfo, setEnv: vi.fn(), log: { error: vi.fn() }, ...NOOP_STATUS,
     });
     await expect(wrapped.tickOnce()).resolves.toBe('ran');
     expect(tick).toHaveBeenCalledTimes(1);
@@ -346,7 +419,7 @@ describe('ensureFreshGithubAppEnv — records its outcome to the status file on 
     const mint = vi.fn().mockResolvedValue({ token: 'ghs_bare', expiresAt: '2026-09-23T13:00:00Z', permissions: {} });
     const listRepos = vi.fn(async () => []);
     await ensureFreshGithubAppEnv({
-      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, setEnv: vi.fn(),
+      env: CONFIGURED_ENV, now: NOW, readCache: () => null, writeCache: vi.fn(), mint, listRepos, getInstallationInfo: selectedInfo, setEnv: vi.fn(),
       log: { error: vi.fn() }, statusPath: '/x/status.json', writeStatus,
     });
     expect(writeStatus).toHaveBeenCalledWith('/x/status.json', {

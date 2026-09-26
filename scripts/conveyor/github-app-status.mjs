@@ -49,6 +49,8 @@ export function formatGithubAppStatus(status) {
     lines.push('  The App installation is missing access it needs — gh calls are falling back to the operator\'s personal auth until this is granted on github.com:');
     if (status.missingPermissions?.length) lines.push(`    grant repository permissions: ${status.missingPermissions.join(', ')}`);
     if (status.missingRepos?.length) lines.push(`    add repositories to the installation: ${status.missingRepos.join(', ')}`);
+  } else if (status.reason === 'access-check-failed') {
+    lines.push('  Couldn\'t verify the App installation\'s repository access this tick (the mint itself succeeded — this is NOT a confirmed gap, just an unread check) — gh calls are falling back to the operator\'s personal auth until the next tick can verify.');
   }
   return lines.join('\n');
 }
