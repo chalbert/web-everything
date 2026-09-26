@@ -1,23 +1,28 @@
 /**
- * @file breaks/daemon-overlay-lock-wait.mjs — live break, 2026-09-26 (#4075, epic #3383, card xa4qo7n follow-up).
- * `scripts/daemon-overlay.mjs add/remove` took the clone's WRITE lock via `withWriteLock(root, fn, {})` — an
- * EMPTY options object, so it inherited `acquireWrite`'s raw 600s (10 MINUTE) default wait, with no `onBlocked`
- * logging. Live: an operator's `daemon-overlay.mjs add --pinned` run against `wev-review-daemon` (a real,
- * actively-ticking clone) reserved the writer key, then sat silently (0% CPU, no log line) for 8+ minutes
- * waiting for the clone's live readers to drain — during which EVERY daemon sharing the clone was refused
- * `writer-active` on every tick. Same class of freeze as `fix-daemon-lock-wait.mjs` (card 4044/#2625, which
- * bounded `daemon-rebuild.mjs#rebuildClone`'s own write-lock wait) — this CLI just never got that fix, because
- * it is a separate call site onto the SAME `daemon-clone-lock.mjs` primitive.
+ * @file breaks/daemon-overlay-lock-wait.mjs — live break, 2026-09-26 (#4229/#2760 follow-up, epic #3383/#4075).
+ * `scripts/daemon-overlay.mjs add/remove` took the clone's WRITE lock (`daemon-clone-lock.mjs`, Module A)
+ * around its mutation. Two earlier cuts only tightened HOW that wait behaved:
+ *   1. The very first cut called `withWriteLock(root, fn, {})` — an unbounded (raw 600s `acquireWrite` default)
+ *      wait. A live operator `add --pinned` run against `wev-review-daemon` sat silently for 8+ minutes waiting
+ *      for a live reader to drain, refusing every daemon sharing that clone on every tick (xa4qo7n).
+ *   2. xa4qo7n bounded that wait (`WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default 30s) and logged it. That shortened
+ *      the freeze but did not remove the real blocker: whenever the daemon's OWN rebuild — which runs on
+ *      every tick, often — already held the writer slot, `add` failed OUTRIGHT with `concurrent-mover` and no
+ *      wait at all (`acquireWrite` refuses immediately when another live writer holds the key). Live
+ *      2026-09-26: PR #2760 failed to register 4 times in a row this way.
+ * Both fixes treated the symptom (wait duration/visibility). The real fix: `add`/`remove` never needed the
+ * clone's lock at all — they only register/drop an entry in the overlay STORE
+ * (`~/.claude/daemon-overlays/<hash>.json`), which already serializes its own read-modify-write under a
+ * separate, tiny mkdir-mutex (`daemon-overlays.mjs#withListLock`). The next automatic rebuild (main + overlays,
+ * smoke-gated, falls back to last-good) is what actually applies it. So this CLI must return near-instantly and
+ * successfully EVEN WHILE the clone's writer lock is held live by a concurrent rebuild — the exact condition
+ * that broke PR #2760 four times.
  *
- * Fix: `daemon-overlay.mjs` now bounds its wait (`WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default 30s — this CLI's own
- * mutation is a tiny metadata write, never a rebuild, so it only needs to outlast whatever tick is CURRENTLY in
- * flight), logs when it starts waiting and who is blocking it, and reports `tick-in-progress` (retryable) on
- * timeout instead of hanging silently.
- *
- * Scenario: same shape as `fix-daemon-lock-wait.mjs` (a REAL separate process holds the sim clone's READ lock,
- * imported live from the tree under test), except this one runs `scripts/daemon-overlay.mjs add` ITSELF as a
- * REAL child process (not an in-process call) — the actual CLI a live operator runs — with its wait pinned
- * small via env, and asserts it gives up within that bound rather than the old silent 600s.
+ * Scenario: a REAL separate process holds the sim clone's WRITE lock (imported live from the tree under test —
+ * the exact shape a daemon's own in-flight rebuild holds it in), mimicking "the daemon's own rebuild holds the
+ * clone's writer lock" from the live incident. `scripts/daemon-overlay.mjs add` then runs as a REAL child
+ * process (the actual CLI an operator/automation runs) and must succeed near-instantly, with the ref actually
+ * registered in the overlay store — never refused, never waiting on the writer.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -27,8 +32,8 @@ import { fileURLToPath } from 'node:url';
 import { runSoak } from '../soak.mjs';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/hold-clone-lock.mjs', import.meta.url));
-const HOLD_MS = 25_000; // comfortably longer than the pinned 3s wait below.
-const WAIT_MS = 3_000;
+const HOLD_MS = 10_000; // comfortably longer than the near-instant add this scenario expects.
+const MAX_ADD_MS = 5_000; // generous ceiling for a plain metadata write; a lock-bound wait would blow well past this.
 
 async function waitForReady(path, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
@@ -41,16 +46,20 @@ async function waitForReady(path, timeoutMs = 10_000) {
 
 export default {
   id: 'daemon-overlay-lock-wait',
-  title: "scripts/daemon-overlay.mjs add/remove waited SILENTLY up to the clone lock's raw 600s default for a live reader, instead of a bounded, logged wait",
-  card: 'we:backlog/xa4qo7n (epic #4075/#3383)',
+  title: 'scripts/daemon-overlay.mjs add refused/blocked on the clone WRITE lock instead of only registering the overlay and returning at once',
+  card: 'we:backlog/4229 follow-up, PR #2760 (epic #4075/#3383)',
   fixedBy: {
-    sha: 'xa4qo7n-daemon-rebuild-offlock-smoke',
-    where: 'lane/xa4qo7n-daemon-rebuild-offlock-smoke',
+    sha: 'fix-overlay-register-only',
+    where: 'lane/fix-overlay-register-only',
     paths: ['scripts/daemon-overlay.mjs'],
   },
   fixPresent(root) {
     try {
-      return /OVERLAY_LOCK_WAIT_ENV/.test(readFileSync(join(root, 'scripts/daemon-overlay.mjs'), 'utf8'));
+      const src = readFileSync(join(root, 'scripts/daemon-overlay.mjs'), 'utf8');
+      // The fix removed the IMPORT of Module A entirely — add/remove never touch the clone's lock any more.
+      // (The file's own docs may still mention "daemon-clone-lock" by name in prose, so match the import shape
+      // specifically, never a bare substring.)
+      return !/import\(.*daemon-clone-lock|from\s+['"].*daemon-clone-lock/.test(src);
     } catch {
       return false;
     }
@@ -79,31 +88,31 @@ export default {
 
           const readyMarker = join(w.root, 'holder-ready');
           holder = spawn(process.execPath, [
-            FIXTURE, 'read', lockModulePath, w.simCloneRoot, String(HOLD_MS), readyMarker, w.env.WE_DAEMON_CLONE_LOCK_ROOT,
+            FIXTURE, 'write', lockModulePath, w.simCloneRoot, String(HOLD_MS), readyMarker, w.env.WE_DAEMON_CLONE_LOCK_ROOT,
           ], { env: w.env, stdio: 'ignore' });
           const ok = await waitForReady(readyMarker, 10_000);
-          if (!ok) throw new Error('daemon-overlay-lock-wait: the holder process did not acquire the read lock in time');
-          api.say(`r00 a real sibling process (pid ${holder.pid}) acquired the clone READ lock — daemon-overlay.mjs add must now contend for the WRITE lock`);
+          if (!ok) throw new Error('daemon-overlay-lock-wait: the holder process did not acquire the write lock in time');
+          api.say(`r00 a real sibling process (pid ${holder.pid}) acquired the clone WRITE lock (simulating an in-flight rebuild) — daemon-overlay.mjs add must NOT contend for it`);
 
           const startedAt = Date.now();
           const res = spawnSync(process.execPath, [
-            overlayCliPath, 'add', `--clone=${w.simCloneRoot}`, '--ref=lane/does-not-need-to-exist', '--json',
+            overlayCliPath, 'add', `--clone=${w.simCloneRoot}`, '--ref=lane/does-not-need-to-exist', '--pr=2760', '--json',
           ], {
-            env: { ...w.env, WE_DAEMON_OVERLAY_LOCK_WAIT_MS: String(WAIT_MS) },
+            env: w.env,
             encoding: 'utf8',
             timeout: 30_000,
           });
           const elapsed = Date.now() - startedAt;
-          api.say(`r00 daemon-overlay.mjs add exited ${res.status} after ${elapsed}ms (pinned wait ${WAIT_MS}ms) — stderr: ${(res.stderr || '').trim().split('\n').join(' | ')}`);
+          api.say(`r00 daemon-overlay.mjs add exited ${res.status} after ${elapsed}ms while the writer lock was held — stderr: ${(res.stderr || '').trim().split('\n').join(' | ')}`);
 
-          if (elapsed > WAIT_MS + 15_000) {
-            api.violation('overlay-add-unbounded-wait', `daemon-overlay.mjs add took ${elapsed}ms with a ${WAIT_MS}ms pinned wait — it did not honor the bound (or hung entirely)`);
+          if (elapsed > MAX_ADD_MS) {
+            api.violation('overlay-add-blocked-on-writer', `daemon-overlay.mjs add took ${elapsed}ms while the clone's writer lock was held by another process — it must never wait on that lock at all`);
           }
-          if (!/waiting up to \d+s for live reader/.test(res.stderr || '')) {
-            api.violation('overlay-add-silent-wait', `daemon-overlay.mjs add gave no "waiting up to Ns" log line while blocked on a live reader — a silent wait is exactly the live incident this scenario replays`);
+          if (res.status !== 0) {
+            api.violation('overlay-add-refused-by-writer-lock', `daemon-overlay.mjs add exited ${res.status} while the clone's writer lock was held (stderr: ${(res.stderr || '').trim()}) — register-only add must succeed regardless of the clone's lock state`);
           }
-          if (res.status === 0) {
-            api.violation('overlay-add-should-have-refused', 'daemon-overlay.mjs add succeeded while a live reader still held the clone — expected it to be refused (tick-in-progress) within its pinned wait');
+          if (!/"ref":"lane\/does-not-need-to-exist"/.test(res.stdout || '')) {
+            api.violation('overlay-add-not-registered', `daemon-overlay.mjs add did not report the ref registered in its JSON output: ${(res.stdout || '').trim()}`);
           }
         },
       });
@@ -114,7 +123,7 @@ export default {
   },
   judge(report) {
     return report.violations
-      .filter((v) => ['overlay-add-unbounded-wait', 'overlay-add-silent-wait', 'overlay-add-should-have-refused', 'crash'].includes(v.invariant))
+      .filter((v) => ['overlay-add-blocked-on-writer', 'overlay-add-refused-by-writer-lock', 'overlay-add-not-registered', 'crash'].includes(v.invariant))
       .map((v) => `${v.daemon ?? '-'} tick ${v.tick ?? '-'}: [${v.invariant}] ${v.detail}`);
   },
 };

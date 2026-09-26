@@ -6,35 +6,52 @@
  *   `main` plus an explicit overlay list kept in a per-clone state file OUTSIDE the clone. This is the
  *   add/remove/list surface a person (or a future automated caller) uses to register/drop an overlay ref.
  *
- * WHY THE WRITE LOCK IS IMPORTED LAZILY. `scripts/lib/daemon-clone-lock.mjs` (Module A, card 4041/x3ecgta) is
- * the per-clone reader/writer mutex clause 3(ii) requires, so on a real run this CLI takes the WRITE lock
- * around its add/remove mutation — it must serialize with a daemon's own tick/rebuild, never race it. But
- * Module A is a SEPARATE file authored concurrently with this one; importing it eagerly at module load would
- * make this file — and its own tests — depend on Module A's exact shape landing first. So the import is
- * DYNAMIC and happens ONLY inside the add/remove path, at the point the mutation actually runs. `list` never
- * touches it (a plain read needs no lock), and `--no-lock` (tests; or a future caller that already holds the
- * lock itself, e.g. `daemon-rebuild.mjs`) skips it entirely.
+ * THIS CLI NEVER TOUCHES THE CLONE'S WRITE LOCK (#4229/#2760 follow-up, epic #3383/#4075, 2026-09-26).
+ * add/remove ONLY register/drop an entry in the overlay STORE (`~/.claude/daemon-overlays/<hash>.json`) and
+ * return — the next automatic rebuild (`daemon-rebuild.mjs`'s object-DB build: main + overlays, smoke-gated,
+ * falls back to last-good on a failed smoke) is what actually applies the overlay to the clone's tree. That
+ * store already serializes its OWN read-modify-write under a tiny, separate mkdir-mutex
+ * (`daemon-overlays.mjs#withListLock`, added for the #2640/#2641/#2643 lost-add incidents) held for
+ * milliseconds — never across a smoke or a `git reset --hard` — so a concurrent add/remove and a rebuild's own
+ * auto-drop can never race each other or lose an entry. Taking the CLONE's reader/writer lock
+ * (`daemon-clone-lock.mjs`, Module A) on top of that added nothing but a way to block: a plain metadata write
+ * has no reason to wait for the clone's tree to be quiet.
+ *
+ * HISTORY. Two earlier cuts both still took Module A's write lock around the mutation and only tightened HOW
+ * that wait behaved:
+ *   1. The very first cut used `withWriteLock(root, fn, {})` — an unbounded (raw 600s `acquireWrite` default)
+ *      wait. A live operator `add --pinned` run against `wev-review-daemon` sat silently for 8+ minutes,
+ *      refusing every daemon sharing that clone on every tick (xa4qo7n).
+ *   2. xa4qo7n bounded that wait to `WE_DAEMON_OVERLAY_LOCK_WAIT_MS` (default 30s) and logged it. That
+ *      shortened the freeze but did not remove it: whenever the daemon's OWN rebuild (which runs on every
+ *      tick — often) held the writer slot, `add` still failed outright with `concurrent-mover`, no wait at
+ *      all, because `acquireWrite` refuses immediately when another live writer already holds the key. Live
+ *      2026-09-26: PR #2760 (`lane/4229-fix-dispatch-a-pr-refused-queue-cap-for-too-long-is-surfaced`) failed
+ *      to register 4 times in a row this way, and an earlier `add` that DID win the race then hung holding the
+ *      writer slot through its own readers-drain wait — freezing every other daemon on that clone meanwhile.
+ * Both fixes treated the SYMPTOM (how long/loud the wait is). The actual fix is that this CLI never needed the
+ * clone's lock in the first place — it never reads or writes anything inside the clone's working tree.
+ *
+ * IF SOMETHING EVER NEEDS "REGISTER AND ALSO APPLY RIGHT NOW, SYNCHRONOUSLY": that is a different, explicit
+ * operation, not a hidden default here. `scripts/lib/daemon-load-overlay.mjs` already IS that — it registers
+ * the ref (via the same `addOverlay`, Module B) and then runs a full gated `rebuildClone` (Module C, live-smoke
+ * + adopt/rollback) under the clone's write lock, on purpose, as a one-shot manual CLI. A caller that truly
+ * needs THIS CLI's mutation itself serialized with the clone's tree (rare — no current caller does) can already
+ * compose that explicitly with `node scripts/lib/daemon-clone-lock.mjs hold --clone=<path> -- node
+ * scripts/daemon-overlay.mjs add ...`, which takes the write lock around an arbitrary command. Nothing in this
+ * file does that implicitly any more.
  *
  * USAGE:
- *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--pinned|--unpinned] [--reason=..] [--by=..] [--no-lock] [--json]
- *   node scripts/daemon-overlay.mjs remove --clone=<path> --ref=<branch> [--reason=..] [--by=..] [--no-lock] [--json]
+ *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--pinned|--unpinned] [--reason=..] [--by=..] [--json]
+ *   node scripts/daemon-overlay.mjs remove --clone=<path> --ref=<branch> [--reason=..] [--by=..] [--json]
  *   node scripts/daemon-overlay.mjs list   --clone=<path> [--json]
  *
  * `--by` defaults to `$USER`. Every command prints the resulting list (remove also reports whether the ref was
- * actually present). Exit codes: 2 on bad usage (unknown command, missing `--clone`, `add`/`remove` missing
- * `--ref`, non-integer `--pr`); 1 when the write lock is refused (add/remove only); 0 otherwise — including a
- * `remove` of a ref that was never present, which is not a usage error.
- *
- * xa4qo7n follow-up (live 2026-09-26, epic #4075): this CLI's add/remove used to call `withWriteLock(root, fn,
- * {})` with NO wait bound at all — it inherited `acquireWrite`'s raw 600s (10 MINUTE) default. A live operator
- * run of `add` reserved the writer key, then sat silently (0% CPU, no log line) for 8+ minutes waiting for a
- * busy clone's readers to drain, during which EVERY daemon sharing the clone was refused `writer-active` on
- * every tick — the exact class of freeze card 4044/#2625 fixed for `daemon-rebuild.mjs#rebuildClone` (which
- * bounds its OWN write-lock wait to {@link DEFAULT_OVERLAY_LOCK_WAIT_MS}-scale via `WE_DAEMON_REBUILD_LOCK_WAIT_MS`,
- * logging both the wait start and the give-up) — this CLI just never got that same fix. It now bounds its wait
- * the same way (env `WE_DAEMON_OVERLAY_LOCK_WAIT_MS`, default {@link DEFAULT_OVERLAY_LOCK_WAIT_MS}), logs when
- * it starts waiting and who is blocking it, and on timeout reports `tick-in-progress` (retryable — the caller
- * already treats any `!ok` as "write lock refused" and exits 1) instead of silently hanging.
+ * actually present). `--no-lock` is still accepted (a no-op) so any older caller/script that still passes it
+ * keeps working unchanged. Exit codes: 2 on bad usage (unknown command, missing `--clone`, `add`/`remove`
+ * missing `--ref`, non-integer `--pr`); 1 on a fatal error (e.g. a corrupt overlay state file — `addOverlay`/
+ * `removeOverlay` refuse to overwrite one); 0 otherwise — including a `remove` of a ref that was never present,
+ * which is not a usage error.
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,12 +72,6 @@ function fail(msg) {
   process.stderr.write(`daemon-overlay: ${msg}\n`);
   process.exitCode = 2;
 }
-
-/** Env var bounding how long add/remove waits for live readers to drain before giving up — see the file header
- *  (xa4qo7n follow-up). Kept short: this CLI's own mutation is a tiny metadata write, not a rebuild, so it only
- *  ever needs to outlast whatever tick(s) are CURRENTLY in flight, never a long one. */
-export const OVERLAY_LOCK_WAIT_ENV = 'WE_DAEMON_OVERLAY_LOCK_WAIT_MS';
-export const DEFAULT_OVERLAY_LOCK_WAIT_MS = 30_000;
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -89,24 +100,8 @@ async function main() {
   let pinned;
   if (flags.pinned) pinned = true;
   else if (flags.unpinned) pinned = false;
-  const noLock = !!flags['no-lock'];
   const asJson = !!flags.json;
   const env = process.env;
-
-  // Run `fn` (the actual mutation) either bare (`--no-lock`) or under Module A's write lock, imported lazily —
-  // see the file header for why this import cannot be a top-of-file `import`. BOUNDED (xa4qo7n follow-up):
-  // never the raw 600s `acquireWrite` default — see OVERLAY_LOCK_WAIT_ENV.
-  const waitMs = Number(env[OVERLAY_LOCK_WAIT_ENV]) > 0 ? Number(env[OVERLAY_LOCK_WAIT_ENV]) : DEFAULT_OVERLAY_LOCK_WAIT_MS;
-  const withLockIfNeeded = async (fn) => {
-    if (noLock) return { ok: true, value: fn() };
-    const { withWriteLock } = await import('./lib/daemon-clone-lock.mjs');
-    return withWriteLock(root, () => fn(), {
-      waitMs,
-      onBlocked: ({ blockers, waitMs: w }) => process.stderr.write(
-        `daemon-overlay: waiting up to ${Math.round(w / 1000)}s for live reader(s) ${blockers.join(', ')} to finish their tick (xa4qo7n)\n`,
-      ),
-    });
-  };
 
   let output;
   if (cmd === 'list') {
@@ -118,33 +113,20 @@ async function main() {
       process.exitCode = 1;
     }
   } else if (cmd === 'add') {
-    const locked = await withLockIfNeeded(() => {
-      const list = addOverlay(root, {
-        ref: flags.ref, pr, addedBy: by, reason, pinned,
-      }, { env });
-      appendOverlayEvent(root, {
-        kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
-      }, { env });
-      return list;
-    });
-    if (!locked.ok) {
-      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason}${locked.heldBy ? ` — held by ${locked.heldBy}` : ''})\n`);
-      process.exitCode = 1;
-      return;
-    }
-    output = { list: locked.value };
+    // Register-only: `addOverlay` (Module B) does its own atomic read-modify-write under the list's own tiny
+    // mutex and returns immediately — this never touches the clone's tree or its reader/writer lock. See the
+    // file header for why that lock was dropped here.
+    const list = addOverlay(root, {
+      ref: flags.ref, pr, addedBy: by, reason, pinned,
+    }, { env });
+    appendOverlayEvent(root, {
+      kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
+    }, { env });
+    output = { list };
   } else {
-    const locked = await withLockIfNeeded(() => {
-      const { removed, list } = removeOverlay(root, flags.ref, { env, why: reason || 'operator' });
-      if (removed) appendOverlayEvent(root, { kind: 'removed', ref: flags.ref, by, reason }, { env });
-      return { removed, list };
-    });
-    if (!locked.ok) {
-      process.stderr.write(`daemon-overlay: write lock refused (${locked.reason}${locked.heldBy ? ` — held by ${locked.heldBy}` : ''})\n`);
-      process.exitCode = 1;
-      return;
-    }
-    output = locked.value;
+    const { removed, list } = removeOverlay(root, flags.ref, { env, why: reason || 'operator' });
+    if (removed) appendOverlayEvent(root, { kind: 'removed', ref: flags.ref, by, reason }, { env });
+    output = { removed, list };
   }
 
   if (asJson) {
