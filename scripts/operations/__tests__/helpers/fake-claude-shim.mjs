@@ -322,6 +322,18 @@ export function main(argv, env) {
     return;
   }
 
+  // ── `auth status --json` ────────────────────────────────────────────────────────────────────────────
+  // Card x5kagse (epic #4075/#3383) — `we:scripts/conveyor/claude-auth-health.mjs#probeClaudeLoggedIn`'s own
+  // cheap probe, faked exactly like every other axis in this shim via the SAME `store.faults` toggle
+  // (`w.claude.fault('auth-expired', true/false)`, no new API): `faults['auth-expired']` true → `loggedIn:
+  // false` (login still broken); unset/false → `loggedIn: true` (the shim's own default "everything's fine"
+  // baseline, matching every other command's fault-free default).
+  if (argv[0] === 'auth' && argv[1] === 'status') {
+    const faults = readStoreSnapshot(storePath).faults;
+    process.stdout.write(JSON.stringify({ loggedIn: !faults['auth-expired'] }));
+    return;
+  }
+
   // ── `stop <id>` ──────────────────────────────────────────────────────────────────────────────────────
   if (argv[0] === 'stop') {
     const id = argv[1];

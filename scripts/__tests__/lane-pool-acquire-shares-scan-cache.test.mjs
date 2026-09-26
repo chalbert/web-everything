@@ -96,6 +96,12 @@ afterEach(() => {
 });
 
 describe('#3383 acquire auto-pick shares the single-flight scan under concurrency', () => {
+  // #4075 follow-up (ci-heal-2721, 2026-09-26): every test in this file provisions several real lanes (real
+  // `git clone`s) and then races several concurrent real `node lane-pool.mjs acquire` child processes against
+  // each other — under real load (~3 runnable procs/core) that combination can easily outrun vitest's default
+  // 5000ms per-test timeout well before any of this file's own `--wait-ms`/`elapsedMs` bounds are even reached,
+  // which is indistinguishable from a real failure in the report. Explicit, generous it()-level timeouts below
+  // fix that layer without touching the actual behavior under test.
   it('3 concurrent auto-pick acquires each land on a distinct lane when lanes are free, sharing the scan work', async () => {
     provision(6);
     resetTrace();
@@ -105,7 +111,7 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     for (const r of rs) expect(r.code, r.err).toBe(0);
     const lanes = rs.map((r) => JSON.parse(r.out).lane).sort((a, b) => a - b);
     expect(new Set(lanes).size).toBe(3); // no two callers ever won the same lane
-  });
+  }, 30_000);
 
   it('a genuinely SATURATED pool (nothing acquirable) costs ~ONE shared scan total, not one per caller per poll tick', async () => {
     // The exact shape of the live incident: every candidate is ineligible, so no claim EVER succeeds — nothing
@@ -131,7 +137,7 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     const statusCalls = laneGitCalls().filter((c) => c.args.startsWith('status'));
     // Well under the ~54 an unshared, per-caller-per-tick rescan would cost; close to one scan's worth (6).
     expect(statusCalls.length).toBeLessThan(6 * 3);
-  });
+  }, 30_000);
 
   it('--wait-ms bounds total time even when the scan itself is slow (never an unbounded per-tick rescan)', () => {
     provision(8);
@@ -158,5 +164,5 @@ describe('#3383 acquire auto-pick shares the single-flight scan under concurrenc
     // #3383 — growth left ON here on purpose: a scan that merely ran out of time is not a full pool (all 8
     // lanes are free), so acquire must never clone new lanes because the scan was slow.
     expect(r.err).not.toMatch(/growing by up to|grew pool/);
-  });
+  }, 30_000);
 });

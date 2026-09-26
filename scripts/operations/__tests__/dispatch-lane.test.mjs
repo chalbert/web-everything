@@ -212,7 +212,8 @@ describe('the operation is callable at all', () => {
 describe('the lane comes from the tick core or nowhere', () => {
   it('does not declare a `lane` input — a caller cannot ask for one', () => {
     const { declaration } = registryFor();
-    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'num']);
+    // #3857 — `modelReason` is the one input added since: the reason a hand-set `--model` needs.
+    expect(Object.keys(declaration.input).sort()).toEqual(['bookkeepingFile', 'expectedWithinMinutes', 'modelReason', 'num']);
     expect(declaration.input.num.type).toBe('string'); // an id may be a `xNNNNNN` hash, never only a number
     expect(declaration.input.expectedWithinMinutes.default).toBe(DEFAULT_EXPECTED_WITHIN_MINUTES);
   });
@@ -2003,6 +2004,8 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
         // #3457/#3460 — stubbed so this suite never shells the real `gh` (readTick calls it lazily whenever a
         // launch clears, and every test here clears one).
         checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
+        // #3906 — hermetic routing evidence: no trials, never the host's shared scorecard store.
+        readScorecards: () => [],
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });
@@ -2106,9 +2109,11 @@ describe('#3165: the planner\'s prepare lists reach the spawner', () => {
     // #x36vidg — `--settings` always carries the Bash timeouts (plus the gh-shim PATH on an opted-in host).
     const settingsAt = spawned[0].argv.indexOf('--settings');
     expect(JSON.parse(spawned[0].argv[settingsAt + 1]).env).toMatchObject(DISPATCH_BASH_TIMEOUT_ENV);
+    // #3857/#3906 — the ONE deliberate argv change: the model-tier table's `--model` (a `build` is Sonnet).
     expect(spawned[0].argv.filter((_, i) => i !== settingsAt && i !== settingsAt + 1)).toEqual([
       '--bg', '-n', 'conveyor-3037',
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
+      '--model', 'sonnet',
       expectedPrompt('build', {
         ITEM_NUM: '3037', ITEM_SPEC_PATH: 'backlog/3037-declare-dispatch.md', LANE: 8,
         SESSION_SLUG: 'conveyor-3037', SCOPE: 'we:scripts/operations/', DELIVERY_BASE: 'main',
@@ -2325,6 +2330,7 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
         laneRefForPr: () => laneRef,
         // #3457/#3460 — same stub as the earlier `dispatchThrough` above, and for the same reason.
         checkAlreadyDone: () => ({ done: false, pr: null, checked: false }),
+        readScorecards: () => [],
       }),
     }));
     const run = advanceWhileRunning(startRun({ op: DISPATCH_LANE_OP, id: `run-${num}`, input: { num }, registry }), { registry });

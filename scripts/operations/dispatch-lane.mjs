@@ -64,6 +64,8 @@
 
 import { mintSessionSlug, PR_KINDS } from '../conveyor/session-slug.mjs';
 import { op } from './registry.mjs';
+// #3717 — the `taskType` derivation. PURE and import-free, which is why the DECLARATION may hold it.
+import { taskTypeFor } from '../lib/dispatch-task-type.mjs';
 // #3224 — the raw invocation this operation declares over. Declared in ONE place and read by two
 // consumers: `op()` validates its shape here, and the skill-wiring scan reads the same map.
 import { DECLARED_HOMES } from './declared-homes.mjs';
@@ -1080,9 +1082,51 @@ export function shapeDispatchRead(raw, { num, expectedWithinMinutes } = {}) {
     undefined,
     repairsExistingPr ? REPO_AWARE_VALUE_PATTERNS : undefined,
   );
+
+  // #3717 — THE ROUTE THIS DISPATCH TAKES, in two halves on opposite sides of this file's purity line.
+  //
+  //   THE DERIVATION is HERE: `we:scripts/lib/dispatch-task-type.mjs#taskTypeFor` imports nothing, so the
+  //   declaration keeps its "reaches nothing that can act" property. A dispatch whose `taskType` cannot be
+  //   DERIVED is REFUSED with the derivation's own named reason — never routed on a default.
+  //
+  //   THE PROVIDER CHOICE is computed by the io shell (`dispatch-lane-io.mjs#readTick`) and arrives as DATA on
+  //   `raw.routing`, because `decideDispatchRoute` reaches `node:fs` transitively. A read that carries no
+  //   routing record (every hand-built fixture) dispatches with `routing: null`: the decision is absent, and the
+  //   record says so rather than inventing one.
+  const notRouted = (routing, holdReason) => ({
+    ...base,
+    inFlightRuns: [], agedOutRuns, dispatching: false, lane: null, sessionSlug: null, prompt: null,
+    briefUnknownTokens: [], itemSpecPath: null, scope: [], dispatchedGuard: null, routing, holdReason,
+  });
+  const derivedTaskType = taskTypeFor({ kind: launchKind, cause: null, scopePaths: scope });
+  if (blocked('task-type', derivedTaskType.outcome === 'refused', derivedTaskType)) {
+    return notRouted(null,
+      `#${resolvedNum} has no mechanically derivable dispatch \`taskType\` — ${derivedTaskType.reason}. `
+      + 'Refusing to spawn: #3717 requires the provider to be computed from declared criteria before launch, '
+      + 'and a dispatch with no derivable `taskType` is refused rather than routed on a default.');
+  }
+  const routing = raw.routing && typeof raw.routing === 'object' ? raw.routing : null;
+  if (blocked('route', routing?.outcome === 'refused', routing ? { outcome: routing.outcome, refusal: routing.refusal ?? null } : null)) {
+    return notRouted(routing,
+      `#${resolvedNum} has no mechanically computed dispatch route — ${routing.refusal}. Refusing to spawn: `
+      + 'the provider is computed from declared criteria before launch, never chosen after it.');
+  }
+  // #3717 step 3 — the SUPERVISION GATE. `routing.supervisionHold` is non-null only when
+  // `WE_DISPATCH_SUPERVISION_ENFORCE` is on, which it is NOT by default on main (#4180 owns that switch). With it
+  // off this never holds and the dispatch is unchanged; the level is RECORDED either way.
+  if (blocked('supervision', Boolean(routing?.supervisionHold), routing?.supervisionHold ?? null)) {
+    return notRouted(routing, `#${resolvedNum} is held by the supervision gate — ${routing.supervisionHold}`);
+  }
   return {
     ...base,
     dispatching: true,
+    // THE COMPUTED ROUTE, frozen onto the read exactly as the filled brief is: the run record must say which
+    // provider was CHOSEN and which one actually RAN (#3717 step 4). `taskType` is carried separately because
+    // the DERIVATION runs here even when no provider decision arrived.
+    routing,
+    taskType: derivedTaskType.taskType,
+    taskTypeOutcome: derivedTaskType.outcome,
+    taskTypeReason: derivedTaskType.reason,
     lane: launch.lane,
     sessionSlug,
     itemSpecPath: specPath,
@@ -1138,6 +1182,10 @@ export function dispatchLaneOperation({ readTick } = {}) {
       // finding reports as `bookkeepingSource: 'none'`.
       bookkeepingFile: { type: 'string', required: false, default: '' },
       expectedWithinMinutes: { type: 'number', required: false, default: DEFAULT_EXPECTED_WITHIN_MINUTES },
+      // #3857 — the ONE way a hand-set `--model` in `WE_DISPATCH_AGENT_ARGS` is honoured: the spawn point
+      // (`dispatch-lane-io.mjs#resolveWorkerModel`) refuses it unless this reason rides the SAME call. Not
+      // named `model`: that is a control flag of the command-line adapter.
+      modelReason: { type: 'string', required: false, default: '' },
     },
     verdictFrom: 'plan',
 
@@ -1198,6 +1246,10 @@ export function dispatchLaneOperation({ readTick } = {}) {
           // `acquire`'s own stdout the dispatched agent will print later.
           occupancyFailOpen: read.occupancyFailOpen,
           occupancyWarning: read.occupancyWarning,
+          // #3717 — THE ROUTE ON THE VERDICT, where the decision is read: `routed` is what the declared
+          // criteria chose, `executed` the provider that can actually run it today.
+          routing: read.routing ?? null,
+          taskType: read.taskType ?? null,
         };
       },
     }),
@@ -1206,7 +1258,7 @@ export function dispatchLaneOperation({ readTick } = {}) {
     // DECLARES the start and performs none of it. One effect or zero — never two, because a lane holds one
     // agent and the whole guard apparatus exists to keep it that way.
     dispatch: effectStep({
-      reads: ['verdict', 'findings.read'],
+      reads: ['verdict', 'findings.read', 'input.modelReason'],
       effects: (view) => {
         const verdict = view.verdict || {};
         // THE NON-DISPATCH EXIT. Zero effects, which the engine resolves in the same `advance` rather than
@@ -1250,6 +1302,12 @@ export function dispatchLaneOperation({ readTick } = {}) {
             // visible point in the whole path, live, at the exact moment the fail-open lane goes live.
             occupancyFailOpen: read.occupancyFailOpen,
             occupancyWarning: read.occupancyWarning,
+            // #3717 — the computed route rides the payload so the RUN RECORD is where the routing decision, its
+            // audit trail and the routed/executed pair are read back from; the sink reads its tier from here.
+            routing: read.routing ?? null,
+            taskType: read.taskType ?? null,
+            // #3857 — carried to the spawn point so a hand-set `--model` is honoured only with a reason.
+            modelReason: view.input?.modelReason || null,
           },
         }];
       },

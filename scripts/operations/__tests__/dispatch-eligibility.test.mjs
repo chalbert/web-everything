@@ -46,6 +46,9 @@ function fixture(options = {}, tickOptions = {}) {
       unreadable: 0,
     }),
     listAgents: () => [{ id: 'live-agent' }],
+    // #3906 — hermetic routing inputs: no trials, no `deliveryAgent:` markers.
+    readScorecards: () => [],
+    readDeliveryAgentOverride: () => null,
     now: () => now,
   });
   return { readTick, runNode, recordLiveness };
@@ -80,10 +83,18 @@ describe('dispatch-eligibility agrees with the live admission path', () => {
     expect(report.map((row) => row.firstBlockingGate)).toEqual([null, 'blockedBy', 'in-flight-dispatch', null]);
     expect(report[0].gates.map((gate) => gate.name)).toEqual([
       'in-flight-dispatch', 'already-done', 'blockedBy', 'tick-launch', 'assigned-lane', 'item-spec', 'scope',
+      // #3906 — the routing gates, after the brief is filled: a derivable taskType, a computed route, no
+      // supervision hold.
+      'task-type', 'route', 'supervision',
     ]);
     expect(report[1].gates.at(-1)).toEqual({ name: 'blockedBy', pass: false, observed: ['8999'] });
     expect(report[2].gates).toHaveLength(1); // no invented passes after a short-circuit
     expect(report[3].markers.deliveryAgent).toBeNull();
+    // #3906 — the report names WHO would run each dispatchable item: Claude, on the tier table's model.
+    for (const row of report.filter((r) => r.eligible)) {
+      expect(row.route).toMatchObject({ outcome: 'routed', routed: 'claude', executed: 'claude', tier: 'sonnet' });
+      expect(row.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
+    }
   });
 
   it.each([

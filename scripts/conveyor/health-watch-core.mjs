@@ -154,6 +154,27 @@ export function parseDaemonLog(text) {
   return out;
 }
 
+// ── 1b. `ps` output parsing (machine-overload's own input) ──────────────────────────────────────────────────────
+
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\S+)\s+(.*)$/;
+
+/**
+ * PURE: parse `ps -Ao pid,ppid,pcpu,etime,command` output (any BSD/macOS `ps` in that column order) into rows.
+ * Skips the header line and anything else that does not start with `<pid> <ppid> <pcpu>` — never throws on a
+ * malformed line, so one odd row never loses the rest of the snapshot.
+ * @param {string} text
+ * @returns {Array<{pid:number, ppid:number, pcpu:number, etime:string, command:string}>}
+ */
+export function parsePsOutput(text) {
+  const out = [];
+  for (const raw of String(text ?? '').split('\n')) {
+    const m = PS_ROW.exec(raw);
+    if (!m) continue;
+    out.push({ pid: Number(m[1]), ppid: Number(m[2]), pcpu: Number(m[3]), etime: m[4], command: m[5].trim() });
+  }
+  return out;
+}
+
 /** A tick is UNPRODUCTIVE when it dispatched nothing while something blocked it (a blocking refusal, a failed
  *  dispatch, a no-lane deferral, a failed repo/whole tick). Idle, or owed work refused only by correct no-ops, is not. */
 export function tickIsUnproductive(t) {

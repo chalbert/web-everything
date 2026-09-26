@@ -3,11 +3,12 @@ bornAs: xs6zvqt
 kind: story
 size: 5
 parent: "3383"
-status: active
+status: resolved
 scope: ["we:scripts/lib/provider-routing.mjs", "we:scripts/lib/dispatch-task-type.mjs", "we:scripts/lib/dispatch-contracts.mjs", "we:scripts/operations/dispatch-task.mjs", "we:scripts/operations/dispatch-task-io.mjs", "we:scripts/operations/dispatch-lane-io.mjs", "we:scripts/operations/__tests__/dispatch-task.test.mjs", "we:scripts/lib/__tests__/provider-routing.test.mjs", "we:scripts/lib/__tests__/dispatch-task-type.test.mjs"]
 relatedTo: ["3717", "3801", "3643", "3730", "3784", "3798", "3690"]
 dateOpened: "2026-09-21"
 dateStarted: "2026-09-22"
+dateResolved: "2026-09-26"
 tags: [dispatch, model-routing, prototype]
 ---
 
@@ -66,3 +67,15 @@ Rows that CHANGE, named so a reviewer sees them: the size and file-count Opus tr
 4. **Executable** — one source of truth: `git grep -nE "STORY_KIND_RUNGS|(prepare-decision|ci-heal)['\"]?[[:space:]]*:[[:space:]]*(CLAUDE_TIERS\.|'(sonnet|opus))" -- scripts ':!**/__tests__/**'` matches only the new table's own definition and its imports, and finds no second `kind: tier` object; a test reads the two spawn files (we:scripts/operations/dispatch-task-io.mjs, we:scripts/operations/dispatch-lane-io.mjs) and asserts neither contains a tier or model literal.
 5. **Probed live** — one real `dispatch-task` call through we:scripts/operations/run.mjs on the prototype tip with a trivial brief and no env model: the run record it leaves shows `workerModel: { source: 'table', tier: 'sonnet' }` and the started session reports the Sonnet model; a second call with `WE_DISPATCH_AGENT_ARGS='["--model","opus"]'` and no reason is refused, and starts nothing.
 6. **Executable** — `npm run check:standards` reports 0 errors.
+
+## Graduated to main by #3906 (2026-09-26)
+
+The dispatch-lane half is on main: `buildAgentArgv` takes the table's decision and emits one `--model`, refuses an
+unreasoned hand-set `--model`/`-m`/`--model=` (and any Fable model), and the run record's in-flight `dispatch`
+block carries `workerModel` `{name, tier, source, tableTier, reason}`; `dispatch-lane` has the `modelReason`
+input. Role kinds (prepare, prepare-decision, investigate) also get their table tier's model on `dispatch-lane`
+(`workerModelTable`). The `dispatch-task` half graduates with #3903. Live dry-run over the queue (25 items x 6
+kinds): every route Claude; build/fix/ci-heal/prepare/investigate spawn with `--model sonnet`, prepare-decision
+and a docs/agent-scoped item with `--model opus`. The spawn flag is the tier's CLI ALIAS, not the pinned id the
+routing record carries (`claude-opus-5` would be older than today's Opus 5.5), so a worker is never downgraded.
+
