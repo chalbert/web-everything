@@ -19,12 +19,19 @@
  *   2. EXPECTED DEMAND per DISPATCH kind ({@link dispatchDemandMinutes}): review and the prepare family are
  *      EXEMPT (never held); fix and ci-heal cost one selected run plus one check:standards; a build costs that
  *      same unit times a count scaled by the card's `size`.
- *   3. PROJECTED WAIT = (remaining time on held slots + standard time of every live waiter + expected demand of
- *      sessions dispatched but not yet queued + the new dispatch's own demand) ÷ slots. A new dispatch is
- *      ADMITTED only while that stays ≤ {@link DEFAULT_QUEUE_MAX_WAIT_MINUTES} ({@link createQueueBudget}).
- *   4. FAST LANE: the short kinds ({@link FAST_LANE_KINDS}) queue in a lane of their own — first-come-first-served
- *      inside each lane, never behind a full-suite waiter — and, when there are ≥2 slots, one slot is reserved for
- *      them ({@link resolveFastSlots}, {@link slotOrderFor}).
+ *   3. PROJECTED WAIT, per queue lane ({@link laneProjection}). The backlog (remaining time on held slots +
+ *      standard time of every live waiter + expected demand of sessions dispatched but not yet queued + the new
+ *      dispatch) is split by kind: FULL-suite / other demand ÷ the HEAVY slots; short-job demand ÷ (the fast slots
+ *      + whatever heavy slots no heavy job holds or waits for). A dispatch's own demand is short (selected runs +
+ *      check:standards), so it is ADMITTED only while the short-lane wait stays ≤
+ *      {@link DEFAULT_QUEUE_MAX_WAIT_MINUTES} ({@link createQueueBudget}).
+ *   4. FAST LANE (operator decision on PR #2707): the fast slots are ADDED ON TOP of the cap, never carved out of
+ *      it. `WE_HEAVY_ADMISSION_CAP` (default 2) is the number of HEAVY slots — full suites and anything else — and
+ *      `WE_HEAVY_ADMISSION_FAST_SLOTS` (default 1) more slots exist only for the short kinds
+ *      ({@link FAST_LANE_KINDS}). Default 2 heavy + 1 fast; the weekend cap of 3 gives 3 + 1. A short job tries the
+ *      fast slot first and may also take any free heavy slot; a full suite never takes a fast slot. Short jobs
+ *      rank first-come-first-served among themselves, never behind a full-suite waiter
+ *      ({@link resolveFastSlots}, {@link slotOrderFor}).
  */
 
 /** Every heavy-command kind the queue distinguishes. Same vocabulary `we:scripts/operations/heavy-queue.mjs`
@@ -72,7 +79,7 @@ export const DEFAULT_BUILD_SIZE = 3;
 export const BUILD_SIZE_POINTS_PER_RUN = 2;
 export const MAX_BUILD_RUNS = 5;
 
-/** Reserved fast-lane slots when the operator sets nothing: one, whenever there are at least two slots. */
+/** Fast-lane slots added on top of the heavy cap when the operator sets nothing. */
 export const DEFAULT_FAST_SLOTS = 1;
 export const FAST_SLOTS_ENV = 'WE_HEAVY_ADMISSION_FAST_SLOTS';
 
@@ -196,17 +203,55 @@ export function queueBacklog({ held = [], waiting = [], pending = [], standardMi
   const heldRemainingMinutes = round1(heldRows.reduce((s, h) => s + h.remainingMinutes, 0));
   const waitingMinutes = round1(waitingRows.reduce((s, w) => s + w.expectedMinutes, 0));
   const pendingMinutes = round1(pending.reduce((s, p) => s + (Number(p.demandMinutes) || 0), 0));
+  // The per-lane split (PR #2707 operator decision): heavy demand queues on the heavy slots only; short demand —
+  // short holders / waiters and every pending dispatch (a dispatch's checks are short) — on fast + free heavy.
+  const isHeavy = (r) => queueLaneOf(r.kind) === 'slow';
+  const sum = (rows, f) => rows.reduce((acc, r) => acc + f(r), 0);
+  const heavyBacklogMinutes = round1(sum(heldRows.filter(isHeavy), (h) => h.remainingMinutes) + sum(waitingRows.filter(isHeavy), (w) => w.expectedMinutes));
+  const shortBacklogMinutes = round1(sum(heldRows.filter((r) => !isHeavy(r)), (h) => h.remainingMinutes)
+    + sum(waitingRows.filter((r) => !isHeavy(r)), (w) => w.expectedMinutes) + pendingMinutes);
   return {
     heldRemainingMinutes, waitingMinutes, pendingMinutes,
     backlogMinutes: round1(heldRemainingMinutes + waitingMinutes + pendingMinutes),
+    heavyBacklogMinutes, shortBacklogMinutes,
+    heldHeavyCount: heldRows.filter(isHeavy).length, waitingHeavyCount: waitingRows.filter(isHeavy).length,
     held: heldRows, waiting: waitingRows,
   };
 }
 
-/** THE FORMULA: (backlog + extra demand) ÷ slots, in minutes. `slots` below 1 is treated as 1. */
+/** The single-pool formula: (backlog + extra demand) ÷ slots, in minutes. `slots` below 1 is treated as 1. Used
+ *  only for a baseline without the per-lane split (see {@link createQueueBudget}); {@link laneProjection} is the
+ *  real one. */
 export function projectedWaitMinutes({ backlogMinutes = 0, extraMinutes = 0, slots = 1 } = {}) {
   const n = Number.isFinite(slots) && slots >= 1 ? slots : 1;
   return round1((backlogMinutes + extraMinutes) / n);
+}
+
+/**
+ * THE PER-LANE FORMULA (PR #2707 operator decision). Pure.
+ *   heavy wait = heavy backlog ÷ heavy slots;
+ *   free heavy slots = heavy slots − heavy jobs holding − heavy jobs waiting (floored at 0);
+ *   short wait = (short backlog + extra) ÷ (fast slots + free heavy slots). With no short capacity at all (no fast
+ *   slot and every heavy slot spoken for) a short job waits for the heavy lane to clear first.
+ * @returns {{heavyWaitMinutes:number, shortWaitMinutes:number, shortCapacity:number, freeHeavySlots:number}}
+ */
+export function laneProjection({
+  heavySlots = 1, fastSlots = 0, heavyBacklogMinutes = 0, shortBacklogMinutes = 0,
+  heldHeavyCount = 0, waitingHeavyCount = 0, extraShortMinutes = 0,
+} = {}) {
+  const heavy = Number.isFinite(heavySlots) && heavySlots >= 1 ? heavySlots : 1;
+  const fast = Number.isFinite(fastSlots) && fastSlots > 0 ? fastSlots : 0;
+  const heavyWaitMinutes = round1(heavyBacklogMinutes / heavy);
+  const freeHeavySlots = Math.max(0, heavy - heldHeavyCount - waitingHeavyCount);
+  const shortCapacity = fast + freeHeavySlots;
+  const short = shortBacklogMinutes + extraShortMinutes;
+  const shortWaitMinutes = shortCapacity > 0 ? round1(short / shortCapacity) : round1(heavyWaitMinutes + short / heavy);
+  return { heavyWaitMinutes, shortWaitMinutes, shortCapacity, freeHeavySlots };
+}
+
+/** Does this baseline carry the per-lane split {@link laneProjection} needs? */
+function hasLaneSplit(b) {
+  return !!b && Number.isFinite(b.heavySlots) && Number.isFinite(b.heavyBacklogMinutes) && Number.isFinite(b.shortBacklogMinutes);
 }
 
 /**
@@ -216,18 +261,25 @@ export function projectedWaitMinutes({ backlogMinutes = 0, extraMinutes = 0, slo
  *
  * An absent / bypassed / malformed baseline admits everything (`active:false`) — the gate FAILS OPEN, the same
  * posture #4076's load gate takes on a missing sample: a read outage must never wedge dispatch.
- * @param {{slots?:number, backlogMinutes?:number, maxWaitMinutes?:number, standardMinutes?:object, bypassed?:string}|null} baseline
+ * A baseline with the per-lane split (`heavySlots`, `fastSlots`, `heavyBacklogMinutes`, `shortBacklogMinutes`,
+ * `heldHeavyCount`, `waitingHeavyCount` — what `heavy-admission.mjs queue-status` prints) is costed with
+ * {@link laneProjection}: a dispatch's demand is short work, so it sees the SHORT-lane wait. A bare
+ * `{slots, backlogMinutes}` baseline is costed as one pool ({@link projectedWaitMinutes}).
+ * @param {object|null} baseline
  * @param {{extraMinutes?:number}} [o]  demand already known to be on its way (e.g. the tick's own fresh guards)
  */
 export function createQueueBudget(baseline, { extraMinutes = 0 } = {}) {
-  const active = !!baseline && !baseline.bypassed && Number.isFinite(baseline.slots) && Number.isFinite(baseline.backlogMinutes);
+  const split = !!baseline && !baseline.bypassed && hasLaneSplit(baseline);
+  const active = split || (!!baseline && !baseline.bypassed && Number.isFinite(baseline.slots) && Number.isFinite(baseline.backlogMinutes));
   const maxWait = Number.isFinite(baseline?.maxWaitMinutes) ? baseline.maxWaitMinutes : DEFAULT_QUEUE_MAX_WAIT_MINUTES;
   let added = Number.isFinite(extraMinutes) ? extraMinutes : 0;
   const decisions = [];
   /** Projected wait (minutes) a dispatch of `demandMinutes` would see if started right now. */
-  const projectFor = (demandMinutes = 0) => (active
-    ? projectedWaitMinutes({ backlogMinutes: baseline.backlogMinutes, extraMinutes: added + demandMinutes, slots: baseline.slots })
-    : null);
+  const projectFor = (demandMinutes = 0) => {
+    if (!active) return null;
+    if (split) return laneProjection({ ...baseline, extraShortMinutes: added + demandMinutes }).shortWaitMinutes;
+    return projectedWaitMinutes({ backlogMinutes: baseline.backlogMinutes, extraMinutes: added + demandMinutes, slots: baseline.slots });
+  };
   return {
     active,
     maxWaitMinutes: maxWait,
@@ -258,27 +310,25 @@ export function createQueueBudget(baseline, { extraMinutes = 0 } = {}) {
 }
 
 /**
- * How many slots are reserved for the fast lane. Pure over `env`. Default {@link DEFAULT_FAST_SLOTS} when there
- * are ≥2 slots, else 0 (the only slot can never be reserved — a full suite would then never run). Always leaves
- * at least one general slot.
+ * How many FAST-lane slots exist, ADDED ON TOP of the heavy cap (PR #2707 operator decision). Pure over `env`:
+ * `WE_HEAVY_ADMISSION_FAST_SLOTS` (≥ 0), default {@link DEFAULT_FAST_SLOTS}. Independent of the cap — the fast
+ * slots never reduce the number of heavy slots.
  */
-export function resolveFastSlots(cap, env = {}) {
-  const c = Number.isFinite(cap) && cap >= 1 ? Math.floor(cap) : 1;
+export function resolveFastSlots(env = {}) {
   const raw = env?.[FAST_SLOTS_ENV];
-  const n = raw != null && raw !== '' && Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : DEFAULT_FAST_SLOTS;
-  return c >= 2 ? Math.min(n, c - 1) : 0;
+  return raw != null && raw !== '' && Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : DEFAULT_FAST_SLOTS;
 }
 
 /**
- * The slot indices a job of `kind` may try, in order. The reserved fast slots are the HIGHEST indices. A fast
- * job tries its reserved slots first (leaving general slots to full suites), then any general slot; a slow job
- * tries only the general slots.
+ * The slot indices a job of `kind` may try, in order. Heavy slots are `0 … cap-1`; the fast slots come after them,
+ * `cap … cap+fast-1`. A short job tries the fast slots first, then any heavy slot; a full suite (or any other
+ * heavy job) tries only the heavy slots.
  * @returns {number[]}
  */
 export function slotOrderFor(kind, cap, fastSlots) {
   const c = Number.isFinite(cap) && cap >= 1 ? Math.floor(cap) : 1;
-  const f = Math.max(0, Math.min(fastSlots || 0, c - 1));
-  const general = Array.from({ length: c - f }, (_, i) => i);
-  const reserved = Array.from({ length: f }, (_, i) => c - f + i);
-  return queueLaneOf(normalizeKind(kind)) === 'fast' ? [...reserved, ...general] : general;
+  const f = Number.isFinite(fastSlots) && fastSlots > 0 ? Math.floor(fastSlots) : 0;
+  const heavy = Array.from({ length: c }, (_, i) => i);
+  const fast = Array.from({ length: f }, (_, i) => c + i);
+  return queueLaneOf(normalizeKind(kind)) === 'fast' ? [...fast, ...heavy] : heavy;
 }

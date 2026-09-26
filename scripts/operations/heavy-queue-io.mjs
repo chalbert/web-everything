@@ -22,7 +22,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import {
-  admissionStatus, admissionLockRoot, resolveCap, readLaneLease, isRankableWaiter, resolveQueueBaseline,
+  admissionStatus, admissionLockRoot, resolveCap, readLaneLease, isRankableWaiter, resolveQueueBaseline, resolveFastSlots,
 } from '../readiness/heavy-admission.mjs';
 import { SELECTED_GATE_MERGE_SHA } from './heavy-queue.mjs';
 import { redactCommandLine } from './command-redact.mjs';
@@ -104,7 +104,8 @@ export function collectHeavyQueue({
   const cap = resolveCap(env);
   const lockRoot = admissionLockRoot(repo, env);
   const nowMs = now();
-  const status = readAdmission({ lockRoot, cap, nowMs });
+  // Card xkyw1x4 — the fast-lane slots are added on top of the heavy cap, so the snapshot must include them.
+  const status = readAdmission({ lockRoot, cap, nowMs, fastSlots: resolveFastSlots(env) });
 
   const ancestorCache = new Map();
   const isAncestorCached = (r) => {
@@ -128,7 +129,7 @@ export function collectHeavyQueue({
 
   return {
     observedAt: new Date(nowMs).toISOString(),
-    cap: status.cap, heldCount: status.heldCount, freeCount: status.freeCount, staleWaiting: status.staleWaiting,
+    cap: status.cap, fastSlots: status.fastSlots ?? 0, heldCount: status.heldCount, freeCount: status.freeCount, staleWaiting: status.staleWaiting,
     held, waiting, queue,
   };
 }

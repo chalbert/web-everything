@@ -27,9 +27,7 @@ afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
  *  real work), release it. Records `{ owner, start, end }` into `timeline` so the test can reconstruct, at
  *  any instant, how many owners were concurrently INSIDE their held window. */
 async function runStubbedHeavyCommand({ lockRoot, cap, owner, holdMs, timeline, concurrentCounter }) {
-  // Card xkyw1x4 — no reserved fast-lane slot here: this test pins the plain counting semaphore (all `cap` slots
-  // usable by the same kind of job). The fast lane has its own suite (heavy-admission-fast-lane.test.mjs).
-  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, pollMs: 15, ceilingMs: 30_000, env: { WE_HEAVY_ADMISSION_FAST_SLOTS: '0' } });
+  const admission = await acquireSlotBlocking({ lockRoot, cap, owner, pollMs: 15, ceilingMs: 30_000 });
   expect(admission.ok).toBe(true); // this test's cap/timeout are sized so nobody times out — a timeout here is a test bug, not the behavior under test
   concurrentCounter.current += 1;
   concurrentCounter.max = Math.max(concurrentCounter.max, concurrentCounter.current);

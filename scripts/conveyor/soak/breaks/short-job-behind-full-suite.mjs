@@ -5,11 +5,12 @@
  * full suite took the last free slot and a short check arriving a moment later waited for a whole suite.
  *
  * Fix: the FAST LANE in `we:scripts/readiness/heavy-admission.mjs` — short kinds (selected / files / standards)
- * rank only among themselves, and with ≥2 slots one slot is reserved for them (`slotOrderFor`).
+ * rank only among themselves, and `WE_HEAVY_ADMISSION_FAST_SLOTS` (default 1) extra slots exist for them ON TOP of
+ * the heavy cap (`slotOrderFor`; operator decision on PR #2707) — both full suites still run at once.
  *
  * SCENARIO — REAL processes, a REAL (temp) admission root, no mocks: two `heavy-admission.mjs run --kind=FULL --
  * sleep <FULL_S>` processes start (cap 2), then a short `run --kind=selected -- true` starts. GREEN: the short job
- * gets the reserved slot and finishes in well under a second of queueing. RED (pre-fix): the second full suite
+ * gets the fast slot and finishes in well under a second of queueing. RED (pre-fix): the second full suite
  * took the last slot, so the short job's wall time includes a whole full-suite hold. `CI` is cleared for the
  * children on purpose — under `CI=true` the wrapper is a pass-through and the scenario would prove nothing.
  */

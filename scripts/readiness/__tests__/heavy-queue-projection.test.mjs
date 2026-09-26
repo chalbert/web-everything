@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyCommandKind, queueLaneOf, typicalMinutes, DEFAULT_STANDARD_MINUTES, TYPICAL_MIN_SAMPLES,
   classifyDispatchKind, dispatchDemandMinutes, queueBacklog, projectedWaitMinutes, createQueueBudget,
-  resolveFastSlots, slotOrderFor, DEFAULT_QUEUE_MAX_WAIT_MINUTES,
+  resolveFastSlots, slotOrderFor, DEFAULT_QUEUE_MAX_WAIT_MINUTES, laneProjection,
 } from '../heavy-queue-projection.mjs';
 
 describe('classifyCommandKind — the gate / wrapped command line → heavy kind', () => {
@@ -139,18 +139,37 @@ describe('createQueueBudget — several dispatches in quick succession', () => {
   });
 });
 
-describe('fast lane — reserved slots and slot order', () => {
-  it('reserves one slot by default when there are ≥2 slots, none with a single slot', () => {
-    expect(resolveFastSlots(1, {})).toBe(0);
-    expect(resolveFastSlots(2, {})).toBe(1);
-    expect(resolveFastSlots(3, {})).toBe(1);
-    expect(resolveFastSlots(3, { WE_HEAVY_ADMISSION_FAST_SLOTS: '0' })).toBe(0);
-    expect(resolveFastSlots(3, { WE_HEAVY_ADMISSION_FAST_SLOTS: '9' })).toBe(2); // always leaves a general slot
+describe('fast lane — slots ADDED ON TOP of the heavy cap (operator decision on PR #2707)', () => {
+  it('one fast slot by default, independent of the cap; configurable, never negative', () => {
+    expect(resolveFastSlots({})).toBe(1);
+    expect(resolveFastSlots({ WE_HEAVY_ADMISSION_FAST_SLOTS: '0' })).toBe(0);
+    expect(resolveFastSlots({ WE_HEAVY_ADMISSION_FAST_SLOTS: '2' })).toBe(2);
+    expect(resolveFastSlots({ WE_HEAVY_ADMISSION_FAST_SLOTS: '-3' })).toBe(0);
   });
-  it('a full suite never takes a reserved slot; a short job tries the reserved slot first, then any slot', () => {
-    expect(slotOrderFor('FULL', 3, 1)).toEqual([0, 1]);
-    expect(slotOrderFor('other', 3, 1)).toEqual([0, 1]);
-    expect(slotOrderFor('selected', 3, 1)).toEqual([2, 0, 1]);
-    expect(slotOrderFor('standards', 1, 0)).toEqual([0]);
+  it('a full suite uses only the heavy slots 0…cap-1; a short job tries the fast slots (after them) first, then any heavy slot', () => {
+    expect(slotOrderFor('FULL', 2, 1)).toEqual([0, 1]);
+    expect(slotOrderFor('other', 3, 1)).toEqual([0, 1, 2]);
+    expect(slotOrderFor('selected', 2, 1)).toEqual([2, 0, 1]);
+    expect(slotOrderFor('standards', 3, 1)).toEqual([3, 0, 1, 2]);
+    expect(slotOrderFor('files', 1, 0)).toEqual([0]);
+  });
+});
+
+describe('laneProjection — full-suite demand ÷ heavy slots, short demand ÷ (fast + free heavy slots)', () => {
+  it('2 full suites running on 2 heavy slots: a short job sees only the short backlog over the 1 fast slot', () => {
+    const p = laneProjection({ heavySlots: 2, fastSlots: 1, heavyBacklogMinutes: 36, shortBacklogMinutes: 6, heldHeavyCount: 2, waitingHeavyCount: 0 });
+    expect(p).toEqual({ heavyWaitMinutes: 18, shortWaitMinutes: 6, shortCapacity: 1, freeHeavySlots: 0 });
+  });
+  it('an idle heavy slot adds to the short capacity', () => {
+    expect(laneProjection({ heavySlots: 3, fastSlots: 1, shortBacklogMinutes: 12, heldHeavyCount: 1 })).toMatchObject({ shortCapacity: 3, shortWaitMinutes: 4 });
+  });
+  it('with no fast slot and every heavy slot spoken for, a short job waits for the heavy lane first', () => {
+    expect(laneProjection({ heavySlots: 2, fastSlots: 0, heavyBacklogMinutes: 40, shortBacklogMinutes: 4, heldHeavyCount: 2 }).shortWaitMinutes).toBe(22);
+  });
+  it('a split baseline is admitted on the SHORT-lane wait: a long full-suite queue alone does not hold a fix', () => {
+    const baseline = { heavySlots: 2, fastSlots: 1, slots: 3, heavyBacklogMinutes: 90, shortBacklogMinutes: 20, heldHeavyCount: 2, waitingHeavyCount: 3 };
+    const budget = createQueueBudget(baseline);
+    // short: (20 + 3.25n) / 1 → 23.25, 26.5, 29.75, 33 — the 4th quick fix is held; the 90-min heavy queue is not counted.
+    expect([1, 2, 3, 4].map(() => budget.tryAdmit('fix').admit)).toEqual([true, true, true, false]);
   });
 });

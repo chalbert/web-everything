@@ -152,11 +152,12 @@ export function assessHeavyQueue(read) {
   const queue = read.queue && typeof read.queue === 'object' ? read.queue : null;
   const projected = projectedWaitMinutesForNewJob({ rows, freeCount: read.freeCount, standardMinutes: queue?.standardMinutes });
   const admission = assessQueueAdmission(queue);
-  const headline = `${read.heldCount} of ${read.cap} held, ${rows.filter((r) => r.state === 'WAIT').length} waiting`
+  const slotsLabel = read.fastSlots ? `${read.cap} heavy + ${read.fastSlots} fast` : `${read.cap}`;
+  const headline = `${read.heldCount} of ${slotsLabel} held, ${rows.filter((r) => r.state === 'WAIT').length} waiting`
     + (read.freeCount > 0 ? ` — ${read.freeCount} free` : ` — projected wait for a new job: ~${projected}m`)
     + (admission ? ` — ${admission.headline}` : '');
   return {
-    observedAt, cap: read.cap, heldCount: read.heldCount, freeCount: read.freeCount,
+    observedAt, cap: read.cap, fastSlots: read.fastSlots ?? 0, heldCount: read.heldCount, freeCount: read.freeCount,
     waitingCount: rows.filter((r) => r.state === 'WAIT').length,
     projectedWaitMinutesForNewJob: projected, rows, headline,
     queueAdmission: admission,
@@ -182,15 +183,19 @@ export function assessQueueAdmission(queue) {
   const fix = byKind.fix;
   return {
     projectedWaitMinutes: queue.projectedWaitMinutes,
+    fullSuiteWaitMinutes: queue.heavyWaitMinutes ?? null,
     maxWaitMinutes: queue.maxWaitMinutes,
-    slots: queue.slots, fastSlots: queue.fastSlots,
+    slots: queue.slots, heavySlots: queue.heavySlots ?? null, fastSlots: queue.fastSlots,
+    shortCapacity: queue.shortCapacity ?? null, freeHeavySlots: queue.freeHeavySlots ?? null,
+    heavyBacklogMinutes: queue.heavyBacklogMinutes ?? null, shortBacklogMinutes: queue.shortBacklogMinutes ?? null,
     backlogMinutes: queue.backlogMinutes,
     heldRemainingMinutes: queue.heldRemainingMinutes, waitingMinutes: queue.waitingMinutes, pendingMinutes: queue.pendingMinutes,
     pending: queue.pending ?? [],
     standardMinutes: queue.standardMinutes, standardSource: queue.standardSource,
     byKind,
     headline: `projected wait if you start now: ~${queue.projectedWaitMinutes}m of ${queue.maxWaitMinutes}m max`
-      + ` (a fix → ~${fix.projectedMinutes}m, ${fix.admit ? 'admitted' : 'HELD queue-cap'})`,
+      + ` (a fix → ~${fix.projectedMinutes}m, ${fix.admit ? 'admitted' : 'HELD queue-cap'})`
+      + (queue.heavyWaitMinutes != null ? `; a full suite → ~${queue.heavyWaitMinutes}m` : ''),
   };
 }
 

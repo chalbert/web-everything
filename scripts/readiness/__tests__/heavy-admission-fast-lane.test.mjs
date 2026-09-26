@@ -38,43 +38,56 @@ function fakeTime({ start = T0, onSleep = () => {} } = {}) {
 }
 
 /** A slot held by a "full suite" that is still running (own pid → liveness unknown → the lease protects it). */
-function holdSlot(lockRoot, cap, owner, kind = 'FULL') {
-  const r = tryAcquireSlot({ lockRoot, cap, owner, pid: process.pid, nowMs: T0, nowIso: iso(T0), meta: { kind, acquiredAt: iso(T0) }, slots: [0] });
+function holdSlot(lockRoot, cap, owner, kind = 'FULL', slot = 0) {
+  const r = tryAcquireSlot({ lockRoot, cap, owner, pid: process.pid, nowMs: T0, nowIso: iso(T0), meta: { kind, acquiredAt: iso(T0) }, slots: [slot] });
   expect(r.ok).toBe(true);
 }
 
-describe('fast lane — a short job never waits behind a full-suite waiter', () => {
-  it('cap 2: with a full suite running and another full suite WAITING, a newer short job takes the reserved slot at once', async () => {
+describe('fast lane — the fast slot is ADDED ON TOP of the heavy cap (operator decision on PR #2707)', () => {
+  it('cap 2: TWO full suites run at once while a short job uses the fast slot', async () => {
     const lockRoot = tempRoot();
-    holdSlot(lockRoot, 2, 'lane-full-running');
-    // An OLDER full-suite waiter (a real, live marker — same pid → never reaped as dead).
-    markWaiting({ lockRoot, owner: 'lane-full-waiting', lane: '5', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
     const clock = fakeTime();
-    const r = await acquireSlotBlocking({
-      lockRoot, cap: 2, owner: 'lane-fixer-check', kind: 'selected', env: {}, ceilingMs: 60_000, log: () => {}, ...clock,
-    });
-    expect(r).toMatchObject({ ok: true, slot: 1, waitedMs: 0 });
-    expect(heldSlots({ lockRoot, cap: 2 }).map((h) => h.meta?.kind)).toEqual(['FULL', 'selected']);
+    const opts = { lockRoot, cap: 2, env: {}, ceilingMs: 10_000, log: () => {}, ...clock };
+    const a = await acquireSlotBlocking({ ...opts, owner: 'lane-full-a', kind: 'FULL' });
+    const b = await acquireSlotBlocking({ ...opts, owner: 'lane-full-b', kind: 'FULL' });
+    const c = await acquireSlotBlocking({ ...opts, owner: 'lane-fixer-check', kind: 'selected' });
+    expect([a, b, c].map((r) => [r.ok, r.slot, r.waitedMs])).toEqual([[true, 0, 0], [true, 1, 0], [true, 2, 0]]);
+    expect(heldSlots({ lockRoot, cap: 2, fastSlots: 1 }).map((h) => h.meta?.kind)).toEqual(['FULL', 'FULL', 'selected']);
+    // The fast slot is released like any other (the release scans past the heavy slots).
+    expect(releaseOwnedSlot({ lockRoot, cap: 2, owner: 'lane-fixer-check', fastSlots: 1 })).toEqual({ released: true, slot: 2 });
   });
 
-  it('cap 2: a full suite may NOT take the reserved fast slot, even when it is the only free slot', async () => {
+  it('cap 2: a THIRD full suite waits — it never takes the fast slot', async () => {
     const lockRoot = tempRoot();
-    holdSlot(lockRoot, 2, 'lane-full-running');
-    const clock = fakeTime();
-    const r = await acquireSlotBlocking({
-      lockRoot, cap: 2, owner: 'lane-second-full', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
-    });
+    holdSlot(lockRoot, 2, 'lane-full-a', 'FULL', 0);
+    holdSlot(lockRoot, 2, 'lane-full-b', 'FULL', 1);
+    const r = await acquireSlotBlocking({ lockRoot, cap: 2, owner: 'lane-full-c', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...fakeTime() });
     expect(r).toMatchObject({ ok: false, ceilingHit: true });
   });
 
-  it('cap 1 (no reserved slot): when the slot frees, the short job takes it ahead of an OLDER full-suite waiter', async () => {
+  it('a short job arriving after a full-suite WAITER still takes the fast slot at once', async () => {
     const lockRoot = tempRoot();
-    holdSlot(lockRoot, 1, 'lane-full-running');
+    holdSlot(lockRoot, 2, 'lane-full-a', 'FULL', 0);
+    holdSlot(lockRoot, 2, 'lane-full-b', 'FULL', 1);
     markWaiting({ lockRoot, owner: 'lane-full-waiting', lane: '5', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
-    // The running full suite finishes during the short job's first poll.
+    const r = await acquireSlotBlocking({ lockRoot, cap: 2, owner: 'lane-fixer-check', kind: 'standards', env: {}, ceilingMs: 60_000, log: () => {}, ...fakeTime() });
+    expect(r).toMatchObject({ ok: true, slot: 2, waitedMs: 0 });
+  });
+
+  it('when the fast slot is busy, a short job may take a free heavy slot', async () => {
+    const lockRoot = tempRoot();
+    holdSlot(lockRoot, 2, 'lane-short-busy', 'selected', 2);
+    const r = await acquireSlotBlocking({ lockRoot, cap: 2, owner: 'lane-fixer-check', kind: 'files', env: {}, ceilingMs: 10_000, log: () => {}, ...fakeTime() });
+    expect(r).toMatchObject({ ok: true, slot: 0 });
+  });
+
+  it('no fast slot (WE_HEAVY_ADMISSION_FAST_SLOTS=0), cap 1: when the slot frees, the short job still goes ahead of an OLDER full-suite waiter', async () => {
+    const lockRoot = tempRoot();
+    holdSlot(lockRoot, 1, 'lane-full-running', 'FULL', 0);
+    markWaiting({ lockRoot, owner: 'lane-full-waiting', lane: '5', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
     const clock = fakeTime({ onSleep: (n) => { if (n === 1) releaseOwnedSlot({ lockRoot, cap: 1, owner: 'lane-full-running' }); } });
     const r = await acquireSlotBlocking({
-      lockRoot, cap: 1, owner: 'lane-fixer-check', kind: 'standards', env: {}, ceilingMs: 60_000, log: () => {}, ...clock,
+      lockRoot, cap: 1, owner: 'lane-fixer-check', kind: 'standards', env: { WE_HEAVY_ADMISSION_FAST_SLOTS: '0' }, ceilingMs: 60_000, log: () => {}, ...clock,
     });
     expect(r).toMatchObject({ ok: true, slot: 0 });
     expect(clock.polls()).toBe(1);
@@ -83,20 +96,14 @@ describe('fast lane — a short job never waits behind a full-suite waiter', () 
   it('first-come-first-served still holds INSIDE the fast lane: an older short waiter goes first', async () => {
     const lockRoot = tempRoot();
     markWaiting({ lockRoot, owner: 'lane-older-short', lane: '7', pid: process.pid, kind: 'selected', nowIso: iso(T0 - 60_000) });
-    const clock = fakeTime();
-    const r = await acquireSlotBlocking({
-      lockRoot, cap: 1, owner: 'lane-newer-short', kind: 'files', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
-    });
+    const r = await acquireSlotBlocking({ lockRoot, cap: 1, owner: 'lane-newer-short', kind: 'files', env: {}, ceilingMs: 10_000, log: () => {}, ...fakeTime() });
     expect(r).toMatchObject({ ok: false, ceilingHit: true });
   });
 
   it('a full-suite waiter still ranks first-come-first-served among full suites', async () => {
     const lockRoot = tempRoot();
     markWaiting({ lockRoot, owner: 'lane-older-full', lane: '7', pid: process.pid, kind: 'FULL', nowIso: iso(T0 - 60_000) });
-    const clock = fakeTime();
-    const r = await acquireSlotBlocking({
-      lockRoot, cap: 2, owner: 'lane-newer-full', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...clock,
-    });
+    const r = await acquireSlotBlocking({ lockRoot, cap: 2, owner: 'lane-newer-full', kind: 'FULL', env: {}, ceilingMs: 10_000, log: () => {}, ...fakeTime() });
     expect(r).toMatchObject({ ok: false, ceilingHit: true });
   });
 });
@@ -157,7 +164,9 @@ describe('resolveQueueBaseline — held + waiting + dispatched-not-yet-queued', 
     const b = resolveQueueBaseline({ lockRoot, cap: 2, nowMs: NOW, env: {}, readLeases: () => leases, isLiveWaiter: () => true });
     expect(b.pending.map((p) => [p.lane, p.dispatchKind, p.demandMinutes])).toEqual([['3', 'fix', 3.25], ['4', 'build', 6.5]]);
     // FULL held 6m of 18 → 12 left; one selected waiter 3; pending 3.25 + 6.5 → 24.75 slot-min over 2 slots.
-    expect(b).toMatchObject({ heldRemainingMinutes: 12, waitingMinutes: 3, pendingMinutes: 9.75, backlogMinutes: 24.75, projectedWaitMinutes: 12.38, maxWaitMinutes: 30, fastSlots: 1 });
+    expect(b).toMatchObject({ heldRemainingMinutes: 12, waitingMinutes: 3, pendingMinutes: 9.75, backlogMinutes: 24.75, maxWaitMinutes: 30 });
+    // Per lane: heavy 12 over 2 heavy slots → 6m for a full suite; short 3 + 9.75 = 12.75 over 1 fast + 1 free heavy → 6.38m.
+    expect(b).toMatchObject({ heavySlots: 2, fastSlots: 1, slots: 3, heavyBacklogMinutes: 12, shortBacklogMinutes: 12.75, freeHeavySlots: 1, shortCapacity: 2, heavyWaitMinutes: 6, projectedWaitMinutes: 6.38 });
   });
 
   it('a dispatched session that already finished a heavy run since its lease began is not pending any more', () => {

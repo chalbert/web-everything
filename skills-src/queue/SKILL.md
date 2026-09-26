@@ -32,7 +32,9 @@ Then the headline: `verdict.heldCount` of `verdict.cap` held, `verdict.waitingCo
 `verdict.freeCount > 0`).
 
 Then **projected wait if you start now** (card xkyw1x4): `verdict.queueAdmission.projectedWaitMinutes` against
-`maxWaitMinutes` (30 by default), and for each kind in `verdict.queueAdmission.byKind` (review, fix, ci-heal,
+`maxWaitMinutes` (30 by default) — the wait a dispatch's short checks would see on the fast lane (fast slots + free
+heavy slots) — plus `fullSuiteWaitMinutes`, the wait a new full suite would see on the heavy slots. The fast slots
+(`fastSlots`, default 1) are added on top of the heavy cap. For each kind in `verdict.queueAdmission.byKind` (review, fix, ci-heal,
 build) whether one more session started now would be admitted or held `queue-cap` — the same rule the conveyor
 tick and the fix-dispatch daemon apply. `standardSource` says whether each kind's standard time is the rolling
 median of real holds or still the seed.
