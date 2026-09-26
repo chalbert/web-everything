@@ -19,6 +19,7 @@ const noopFixTick = () => ({ dispatched: [], refusals: [] });
 const noopCiHealTick = async () => ({ dispatched: [], refusals: [] });
 const noopHungCiTick = () => ({ dispatch: [], refusals: [], applied: [] });
 const noopMainRedRebaseTick = () => ({ dispatch: [], refusals: [], applied: [] });
+const noopMissingRunTick = () => ({ dispatch: [], refusals: [], applied: [] }); // xi4od2p (#4075/#3383) — sixth half
 
 describe('defaultNoteCommentDryRun — landed OFF by default (#4191)', () => {
   it('true with no env override — a brand-new PR-write action defaults to dry-run', () => {
@@ -123,7 +124,7 @@ describe('runTickAllRepos — now runs FIVE halves, notes included (#4191)', () 
     });
     const out = await runTickAllRepos({
       repos: ['repo-a'], fixTick: noopFixTick, ciHealTick: noopCiHealTick, hungCiTick: noopHungCiTick,
-      mainRedRebaseTick: noopMainRedRebaseTick, notesTick, notesDryRun: true,
+      mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick, notesDryRun: true,
     });
     expect(out.notes).toEqual([{ kind: 'ci-heal-exhausted', prNumber: 10, attempts: 3, cap: 3, text: 'exhausted', repo: 'repo-a' }]);
     expect(out.noteComments).toEqual([expect.objectContaining({ repo: 'repo-a', prNumber: 10, dryRun: true })]);
@@ -133,7 +134,7 @@ describe('runTickAllRepos — now runs FIVE halves, notes included (#4191)', () 
     const notesTick = ({ repo }) => { if (repo === 'repo-a') throw new Error('notes broke'); return { notes: [], prsByNumber: new Map() }; };
     const out = await runTickAllRepos({
       repos: ['repo-a'], fixTick: noopFixTick, ciHealTick: noopCiHealTick, hungCiTick: noopHungCiTick,
-      mainRedRebaseTick: noopMainRedRebaseTick, notesTick, notesDryRun: true,
+      mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick, notesDryRun: true,
     });
     expect(out.refusals).toEqual(expect.arrayContaining([{ repo: 'repo-a', prNumber: null, kind: 'tick-failed', why: 'notes broke' }]));
   });

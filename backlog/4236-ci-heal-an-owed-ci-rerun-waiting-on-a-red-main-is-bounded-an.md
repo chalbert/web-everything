@@ -16,7 +16,7 @@ main-red-recovery / ci-red-recovery-watch: a PR refused owed-ci-rerun past a bou
 
 ## Slice
 
-**Deferred:** do not start until open PR #2740 (card xi4od2p) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
+**Deferred:** do not start until open PR #2740 (card 4239) has landed — it owns the same files. (Not a `blockedBy` edge: that card is not on main yet.)
 
 Sliced by FILE from the four flow-checker gap cards (4235, 4232, 4237, 4226), so this slice's code scope is disjoint from every other slice's. The flow files under we:scripts/conveyor/flows/ cite file:line for each gap. Reuse what exists: the reconcile-notes channel (#2725, we:scripts/conveyor/reconcile-note-comment.mjs), the health-watch notify, and the existing caps.
 

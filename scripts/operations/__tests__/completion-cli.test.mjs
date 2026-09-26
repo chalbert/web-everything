@@ -29,13 +29,16 @@ afterEach(() => {
 });
 
 describe('sessionSlugForCompletion', () => {
-  it('mints the same review-<pr> / fix-<pr> grammar the dispatchers already use', () => {
+  it('mints the same review-<pr> / fix-<pr> / ci-heal-<pr> grammar the dispatchers already use', () => {
     expect(sessionSlugForCompletion({ kind: 'review', pr: 701 })).toBe('review-701');
     expect(sessionSlugForCompletion({ kind: 'fix', pr: '9' })).toBe('fix-9');
+    // #4075/xg7m2wq — live incident PR #2724, 2026-09-26: a ci-heal session had no way to mint its own
+    // completion-record slug via kind+pr, only ever via an explicit --session=.
+    expect(sessionSlugForCompletion({ kind: 'ci-heal', pr: 2724 })).toBe('ci-heal-2724');
   });
 
   it('refuses an unknown kind or a missing pr', () => {
-    expect(() => sessionSlugForCompletion({ kind: 'build', pr: 1 })).toThrow(/--kind must be review or fix/);
+    expect(() => sessionSlugForCompletion({ kind: 'build', pr: 1 })).toThrow(/--kind must be review, fix, or ci-heal/);
     expect(() => sessionSlugForCompletion({ kind: 'review', pr: null })).toThrow(/--pr is required/);
   });
 });
