@@ -102,6 +102,17 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { CONFLICT_LABEL } from './parked-pr-conflict-watch.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { writeLineSync } from '../lib/write-all-sync.mjs';
+// #4229 (bornAs xo2emdz, epic #4075/#3383) — the queue-cap-refusal durable counter + cap, and the two channels
+// it surfaces through past the cap: the reconcile-notes PR-comment channel (#2725, reused verbatim — see this
+// file's own `recordQueueCapRefusal` docblock for why `reconcile-note-comment.mjs` itself is never edited here)
+// and the health-watch-style desktop notify every sibling `round-cap-exhausted` population already uses
+// (`we:scripts/conveyor/parked-pr-conflict-watch.mjs`'s own `notifyDesktopChecked` call sites).
+import { defaultReadPrComments } from './ci-red-recovery-watch.mjs';
+import { planNoteComment, postNoteComment } from './reconcile-note-comment.mjs';
+import { notifyDesktopChecked } from './branch-sync.mjs';
+import {
+  QUEUE_CAP_REFUSAL_CAP, buildQueueCapRefusalComment, countQueueCapRefusals,
+} from './queue-cap-refusal-count.mjs';
 
 /** The template `we:skills-src/conveyor/fix-agent-brief.md` — the SAME brief `dispatch-lane.mjs`'s own
  *  tick-core-driven fix dispatch fills, read fresh per dispatch so an edit takes effect with no restart. */
@@ -890,6 +901,17 @@ export function dispatchFix(planned, {
  *   REAL constellation repo profile has `fix` on (see the docblock above).
  * @param {Function} [o.pickFreeLanes] - injectable; when omitted, defaults to {@link freeLaneNumbers} scoped to
  *   THIS repo's own lane pool (`profile.lanePoolRepo`) — never the WE pool for a non-WE repo.
+ * @param {number} [o.queueCapRefusalCap] - #4229: the durable `queue-cap` refusal cap, see
+ *   {@link recordQueueCapRefusal}; defaults to `we:scripts/conveyor/queue-cap-refusal-count.mjs
+ *   #QUEUE_CAP_REFUSAL_CAP`.
+ * @param {Function} [o.readPrComments] - #4229: injectable, defaults to the real
+ *   `we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadPrComments`; a test hands in a stub so this
+ *   pass never touches a real `gh` process for the queue-cap-refusal count.
+ * @param {Function} [o.postQueueCapComment] - #4229: injectable, defaults to the real
+ *   `we:scripts/conveyor/reconcile-note-comment.mjs#postNoteComment` (reused verbatim, see
+ *   {@link recordQueueCapRefusal}'s own docblock for why).
+ * @param {Function} [o.notifyQueueCapOperator] - #4229: injectable, defaults to the real
+ *   `we:scripts/conveyor/branch-sync.mjs#notifyDesktopChecked`.
  * @returns {{dispatched:Array<object>, refusals:Array<object>, reconcileRefusals:number,
  *   reconcileRefusalDetails:Array<object>}} `reconcileRefusals` stays the bare count this function has always
  *   returned (asserted by `we:scripts/conveyor/__tests__/reconcile-fix-dispatch.test.mjs`). `reconcileRefusalDetails`
@@ -927,6 +949,12 @@ export function runReconcileFixDispatch({
   // every test gets unless it opts in) = no gate; the CLI and the fix-dispatch daemon pass the live
   // `heavy-admission.mjs#resolveLiveQueueBaseline`.
   queueAdmission = null,
+  // #4229 — durable queue-cap-refusal counting + surfacing, injectable for tests exactly like every other IO
+  // seam above (never touching a real `gh`/`osascript` process unless the caller wants that).
+  queueCapRefusalCap = QUEUE_CAP_REFUSAL_CAP,
+  readPrComments = defaultReadPrComments,
+  postQueueCapComment = postNoteComment,
+  notifyQueueCapOperator = notifyDesktopChecked,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-fix-dispatch: --repo ${repo} is not a constellation repo`);
@@ -982,7 +1010,19 @@ export function runReconcileFixDispatch({
     // Card xkyw1x4 — queue-cap BEFORE a resume or a lane pop: either way a fix session runs its checks next.
     const q = queueBudget.tryAdmit('fix', { id: entry.pr });
     if (!q.admit) {
-      refusals.push({ pr: entry.pr, kind: 'queue-cap', why: queueCapWhy(q) });
+      const why = queueCapWhy(q);
+      const capResult = recordQueueCapRefusal({
+        pr: entry.pr,
+        repo: repoKey,
+        why,
+        cap: queueCapRefusalCap,
+        readPrComments,
+        postComment: postQueueCapComment,
+        notify: notifyQueueCapOperator,
+      });
+      refusals.push({
+        pr: entry.pr, kind: 'queue-cap', why, attempts: capResult.attempts, cap: queueCapRefusalCap, capExhausted: capResult.capExhausted,
+      });
       continue;
     }
     // #xazl9u3 — ask "would a resume work?" BEFORE ever touching the lane pool. Only a conflict-caused entry
@@ -1056,6 +1096,92 @@ export function queueBudgetFrom(queueAdmission, ctx = {}) {
 /** The human reason for a `queue-cap` refusal. */
 export function queueCapWhy(d) {
   return `projected heavy-test queue wait ${d.projectedMinutes}m would exceed ${d.maxWaitMinutes}m with this dispatch (+${d.demandMinutes}m) — retried next pass`;
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#planQueueCapRefusal — THE PURE DECISION for one `queue-cap`
+ * refusal (#4229, bornAs xo2emdz, epic #4075/#3383): given this PR's own durable queue-cap-refusal history, what
+ * (if anything) should this refusal write? Never posts anything itself — {@link recordQueueCapRefusal} is the
+ * IO shell that acts on this. No network, no fs, no clock (episode dedup is read straight off `comments`, same
+ * as every sibling `round-cap-exhausted` population).
+ *
+ *   - BELOW {@link QUEUE_CAP_REFUSAL_CAP}: post one more durable attempt marker (`postMarker: true`), no note
+ *     yet — mirrors `we:scripts/conveyor/unowned-rebase-attempt-count.mjs`'s own below-cap behavior.
+ *   - AT OR PAST THE CAP: post NO further marker (the count is capped at {@link QUEUE_CAP_REFUSAL_CAP} exactly,
+ *     so a saturated queue can never spam the thread once a human has been told) — instead plan the ONE-TIME
+ *     `round-cap-exhausted` note (`capKind: 'queue-cap'`), via `we:scripts/conveyor/reconcile-note-comment.mjs
+ *     #planNoteComment` so its own episode dedup (keyed on the attempts/cap pair) decides whether it has already
+ *     been posted this exhaustion.
+ *
+ * UNLIKE the unowned-rebase-drop cap, dispatch is NEVER stopped here either way — see
+ * `we:scripts/conveyor/queue-cap-refusal-count.mjs`'s own header for why retrying stays correct once the queue
+ * clears; only the operator-visible trace changes.
+ * @param {{pr:number, comments?:Array<object>|null, cap?:number}} o
+ * @returns {{attempts:number, capExhausted:boolean, postMarker:boolean, note:object|null}}
+ */
+export function planQueueCapRefusal({ pr, comments, cap = QUEUE_CAP_REFUSAL_CAP }) {
+  const priorAttempts = countQueueCapRefusals(comments);
+  if (priorAttempts < cap) {
+    return {
+      attempts: priorAttempts + 1, capExhausted: false, postMarker: true, note: null,
+    };
+  }
+  const note = {
+    kind: 'round-cap-exhausted',
+    prNumber: pr,
+    attempts: priorAttempts,
+    cap,
+    capKind: 'queue-cap',
+    text: `PR #${pr}'s fix dispatch has now been refused \`queue-cap\` ${priorAttempts} times (cap ${cap}) — the `
+      + 'projected heavy-test queue wait keeps exceeding budget every reconcile pass. Dispatch keeps retrying '
+      + 'automatically (the queue is expected to clear on its own); this note exists only so a human is not the '
+      + 'last to know if it does not.',
+  };
+  return {
+    attempts: priorAttempts, capExhausted: true, postMarker: false, note,
+  };
+}
+
+/**
+ * we:scripts/conveyor/reconcile-fix-dispatch.mjs#recordQueueCapRefusal — the IO shell over
+ * {@link planQueueCapRefusal}: reads this PR's own comment thread, posts the durable attempt marker OR the
+ * one-time `round-cap-exhausted` note (never both), and best-effort notifies the operator's desktop the same
+ * way every sibling `round-cap-exhausted` population already does. Both writes go through
+ * `we:scripts/conveyor/reconcile-note-comment.mjs#postNoteComment` — a plain `gh pr comment` shell, reused
+ * verbatim for the marker too (its body is just whatever the caller hands it; nothing about the shell itself is
+ * note-specific) — never a second hand-rolled `gh pr comment` call in this file.
+ *
+ * NEVER THROWS: every write here is best-effort observability, not a gate on the refusal itself — the refusal
+ * is ALREADY decided by `queueBudget.tryAdmit` at the call site; this only decides what to durably record about
+ * it, and a comment/notify failure must never mask that real decision.
+ * @param {{pr:number, repo:string, why?:string, cap?:number, readPrComments?:Function, postComment?:Function,
+ *   notify?:Function}} o
+ * @returns {{attempts:number, capExhausted:boolean}}
+ */
+export function recordQueueCapRefusal({
+  pr, repo, why, cap = QUEUE_CAP_REFUSAL_CAP,
+  readPrComments = defaultReadPrComments, postComment = postNoteComment, notify = notifyDesktopChecked,
+} = {}) {
+  let comments;
+  try { comments = readPrComments(pr, { repo }); } catch { comments = []; }
+  const plan = planQueueCapRefusal({
+    pr, comments, cap,
+  });
+  try {
+    if (plan.postMarker) {
+      postComment({ repo, pr, body: buildQueueCapRefusalComment(why) });
+    } else if (plan.note) {
+      const notePlan = planNoteComment(plan.note, comments);
+      if (!notePlan.alreadyPosted) {
+        postComment({ repo, pr, body: notePlan.body });
+        notify({
+          title: '🔔 conveyor — needs your decision',
+          body: `PR #${pr}: fix dispatch queue-cap refusals exhausted (${plan.attempts}/${cap})`,
+        });
+      }
+    }
+  } catch { /* best-effort observability — never mask the real (already-decided) refusal above */ }
+  return { attempts: plan.attempts, capExhausted: plan.capExhausted };
 }
 
 /**

@@ -3,10 +3,12 @@ bornAs: xo2emdz
 kind: story
 size: 2
 parent: "4075"
-status: open
+status: resolved
 blockedBy: ["4220"]
 scope: ["we:scripts/conveyor/reconcile-fix-dispatch.mjs"]
 dateOpened: "2026-09-26"
+dateStarted: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: [conveyor, daemons, flows, flow-checker]
 ---
 

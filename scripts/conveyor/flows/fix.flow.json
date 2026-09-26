@@ -137,16 +137,29 @@
       "ownerCite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983",
       "wait": null,
       "retries": {
-        "what": "queue-cap refusal, recomputed fresh every reconcile pass",
-        "cap": null,
-        "onCap": null,
-        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985"
+        "what": "durable queue-cap refusals, counted by QUEUE_CAP_REFUSAL_MARKER comments on the PR itself (restart-surviving, scripts/conveyor/queue-cap-refusal-count.mjs)",
+        "cap": 3,
+        "onCap": "queue-cap-exhausted",
+        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1011-1029,1122-1183"
       },
       "escalation": null,
-      "notes": "createQueueBudget (scripts/readiness/heavy-queue-projection.mjs:271, imported reconcile-fix-dispatch.mjs:79) costs each fix at its projected heavy-slot demand; tryAdmit refuses 'queue-cap' with no count cap and no escalation. A persistently saturated heavy queue can refuse the same PR indefinitely with nothing surfaced to a human.",
-      "ack": {
-        "uncapped-retry": "xb4yerj"
-      }
+      "notes": "#4229 (bornAs xo2emdz, epic #4075/#3383) — FIXED. createQueueBudget (scripts/readiness/heavy-queue-projection.mjs:271, imported reconcile-fix-dispatch.mjs:79) still refuses 'queue-cap' every pass while the projected heavy-slot demand exceeds budget — dispatch keeps retrying, exactly as before, since queue congestion is expected to clear on its own (queue-cap-refusal-count.mjs's own header). What changed: each of the first 3 refusals now posts a durable, PR-comment-backed marker (recordQueueCapRefusal, reconcile-fix-dispatch.mjs:1161), so a restart never resets the count.",
+      "ack": {}
+    },
+    {
+      "id": "queue-cap-exhausted",
+      "label": "Durable queue-cap refusal cap reached (3) — surfaced, monitoring continues",
+      "terminal": false,
+      "owner": "scripts/conveyor/reconcile-fix-dispatch.mjs#recordQueueCapRefusal",
+      "ownerCite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1161",
+      "wait": null,
+      "retries": null,
+      "escalation": {
+        "to": "operator",
+        "how": "round-cap-exhausted note (capKind: 'queue-cap') → PR comment (scripts/conveyor/reconcile-note-comment.mjs#postNoteComment, reused verbatim) + desktop notify (scripts/conveyor/branch-sync.mjs#notifyDesktopChecked)",
+        "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1161-1183; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
+      },
+      "notes": "#4229 — STILL REFUSES, never gives up: dispatch keeps recomputing tryAdmit every pass exactly as before (queue-cap-hit's own transition back to pr-flagged-for-fix is unchanged) — this state is the one-time note event, then ordinary retrying resumes. The note's episode key is the (attempts, cap) pair (round-cap-exhausted's own dedup, reconcile-note-comment.mjs#noteEpisodeKey), so the SAME exhaustion posts exactly once; a human letting it retry past a reset and burning through the cap again is a genuinely new episode."
     },
     {
       "id": "resume-attempted",
@@ -348,9 +361,23 @@
     {
       "from": "queue-cap-hit",
       "to": "pr-flagged-for-fix",
-      "on": "next pass recomputes the queue budget fresh",
+      "on": "next pass recomputes the queue budget fresh (below the durable cap — one more attempt marker posted)",
       "kind": "normal",
-      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985"
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:983-985,1122-1140"
+    },
+    {
+      "from": "queue-cap-hit",
+      "to": "queue-cap-exhausted",
+      "on": "the durable queue-cap-refusal count reaches its cap (3)",
+      "kind": "failure",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1122-1183; scripts/conveyor/queue-cap-refusal-count.mjs"
+    },
+    {
+      "from": "queue-cap-exhausted",
+      "to": "pr-flagged-for-fix",
+      "on": "note posted (or already posted this episode); ordinary retrying resumes (still refuses, never given up on)",
+      "kind": "normal",
+      "cite": "scripts/conveyor/reconcile-fix-dispatch.mjs:1161-1183"
     },
     {
       "from": "resume-attempted",
