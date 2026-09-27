@@ -11,7 +11,8 @@
  * notifies, files or edits anything but its own state dir. Ships in SHADOW mode (4065): what it WOULD notify /
  * dispatch is written into each report under "Held back".
  *
- * State lives under the pinned daemon state root (#4052): `<CONVEYOR_STATE_ROOT or repo root>/.conveyor/health/`
+ * State lives under the pinned daemon state root (#4052, `health-watch-section.mjs#healthDir`, the ONE shared
+ *   resolver every reader goes through — see that file's own header): `.conveyor/health/`
  *   state.json          episodes, per-daemon memory, log cursors, gh cache (written only by the tick)
  *   silences.json       tracked-silences (written only by `silence`/`unsilence`; the tick only reads it)
  *   last-tick.json      the last-tick-completed stamp (separate from the pass-daemon lease heartbeat, which
@@ -44,7 +45,6 @@ import { SMELLS } from './health-smells/index.mjs';
 import { healthDir, healthSectionLines } from './health-watch-section.mjs';
 
 export { healthDir, healthSectionLines };
-import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
 import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
@@ -583,8 +583,10 @@ export async function tick(flags = {}) {
   // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
   // here: every pre-existing smell stays exactly as silent as before in shadow mode (nothing here changes for
   // them), and the ONLY smell that can produce a non-suppressed entry while `mode: 'shadow'` is one that opts
-  // in via `notifyEvenInShadow` (today: `claude-auth-expired` and `daemon-held-on-last-good` — see each
-  // smell's own doc for why it is urgent enough to break the "shadow mode notifies nothing" rule). Best-effort:
+  // in via `notifyEvenInShadow` (`grep -l notifyEvenInShadow scripts/conveyor/health-smells/*.mjs` for the
+  // live list — deliberately not hand-enumerated here, since that list drifts every time a smell opts in and
+  // a stale copy here would read as authoritative; see each smell's own doc for why it is urgent enough to
+  // break the "shadow mode notifies nothing" rule). Best-effort:
   // `notifyDesktopChecked` already reports its own failure rather than throwing; a delivery failure here must
   // never fail the tick.
   const notifications = [];
