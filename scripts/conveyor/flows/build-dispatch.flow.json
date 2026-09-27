@@ -108,8 +108,8 @@
       "escalation": null,
       "notes": "No bound and no escalation: unlike 'unshaped-no-scope'/'needs-slice'/'needs-decision' holds, which get an operator-facing gloss (scripts/readiness/dispatch-plan.mjs:174-241), a capacity-cap/load-cap/queue-cap hold is silently retried every runner tick (120s default, skills-src/conveyor/runner.mjs:60) with nothing surfacing it. A manual dispatch-pause being unbounded until an operator acts is intentional; the mechanical caps sharing the identical no-escalation path do not read as intentional.",
       "ack": {
-        "no-owner": "4237",
-        "unbounded-wait": "4237"
+        "no-owner": "#4237",
+        "unbounded-wait": "#4237"
       }
     },
     {
@@ -131,7 +131,7 @@
         "surface-spawn-decision"
       ],
       "ack": {
-        "unbounded-wait": "4237"
+        "unbounded-wait": "#4237"
       }
     },
     {
@@ -162,7 +162,7 @@
       "escalation": null,
       "notes": "ENOENT/EACCES (PRE_SPAWN_REFUSALS, :1105) proves nothing started and is thrown as notApplied. Any OTHER spawn error is deliberately classified INDETERMINATE — 'claude --bg failed and whether an agent started is UNKNOWN' (dispatch-lane-io.mjs:1284-1286) — and nothing pages an operator; the error only surfaces in whatever invoked the dispatch-lane operation (the live /conveyor session's own output), with no durable alert. Silent-failure per the checker's own rule.",
       "ack": {
-        "silent-failure": "4235"
+        "silent-failure": "#4235"
       }
     },
     {
@@ -234,8 +234,8 @@
       "escalation": null,
       "notes": "On the 3rd stop failure the code logs '⚠ ... left for the next tick' (session-reaper.mjs:1961) and moves on — no operator alert, just a retry on the NEXT pass, uncapped across passes. This state is a genuine silent-failure per the checker's rule: outcome:failure with no escalation. It is also where the retry LOOP closes: the same build item becomes eligible again once its build guard's lane is confirmed no longer leased (retireBuildGuards, tick-core.mjs:508-527), with no equivalent of planFixSpawns' fixRetryCap for build — so a permission-prompt failure can repeat indefinitely, every ~4h+ cycle, with nothing ever telling the operator.",
       "ack": {
-        "silent-failure": "4235",
-        "uncapped-retry": "4232"
+        "silent-failure": "#4235",
+        "uncapped-retry": "#4232"
       }
     },
     {
@@ -286,8 +286,8 @@
       "escalation": null,
       "notes": "Exit 2 (CI red) / exit 3 (unmergeable/gh error/empty body) leave 'main' untouched (pr-land.mjs:77) with no code-guaranteed next step — recovery is the session's own judgment (rebase and re-run, or fix the body) per pr-land.mjs's own doc, not a mechanical transition; recorded honestly as a failure-no-exit rather than invented. Exit 4 is the one genuinely recoverable case: recorded in the conveyor infra-blocked state and auto-retried, never stranding main.",
       "ack": {
-        "silent-failure": "4235",
-        "unbounded-wait": "4237"
+        "silent-failure": "#4235",
+        "unbounded-wait": "#4237"
       }
     },
     {
@@ -601,7 +601,7 @@
         }
       ],
       "ack": {
-        "failure-no-exit": "4226"
+        "failure-no-exit": "#4226"
       },
       "notes": "canFail:true with onFailure:null is an HONEST failure-no-exit finding: a lost lane race is handled only by the agent's own judgment (delivery-agent-brief.md:63 prose 'report/exit'), with no mechanical state this flow can cite as the guaranteed next step."
     },
@@ -629,7 +629,7 @@
         }
       ],
       "ack": {
-        "unprovided-assumption": "4238"
+        "unprovided-assumption": "#4238"
       }
     },
     {

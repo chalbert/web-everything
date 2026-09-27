@@ -181,9 +181,9 @@
       "escalation": null,
       "notes": "KEY QUESTION answered (the #2729 shape): reduceCheckState's empty-rollup case reads 'unchecked', never 'red' (scripts/operations/pr-status.mjs:140-147) — so merge-ai-prs.mjs's own gate reports the flat, indistinguishable-from-still-running reason 'required check \"test\" is not green' (scripts/merge-ai-prs.mjs:602) every sweep, with no escalation and no comment posted. Upstream, scripts/progress-board.mjs#classifyPr's ciFailed() is `false` on an empty rollup (scripts/progress-board.mjs:466-472,510), so the SAME PR reads as board-status 'queued' — healthy-looking — meaning scripts/conveyor/reconcile-core.mjs's whole ci-red branch (ci-heal dispatch, cap-exhausted note) never even sees it either. Nobody owns this PR: not the drain (repeats the skip forever), not reconcile-core (never classifies it as needing help), not the operator queue (no distinguishing signal to surface). The most common real cause is exactly ci-heal.flow.json's base-retargeted state (a stacked PR's base merges, GitHub retargets it onto main with no fresh CI run) — but this state is reached whenever a head genuinely has zero check runs for ANY reason, not only that one.",
       "ack": {
-        "no-owner": "4239",
-        "unbounded-wait": "4239",
-        "uncapped-retry": "4239"
+        "no-owner": "#4239",
+        "unbounded-wait": "#4239",
+        "uncapped-retry": "#4239"
       }
     },
     {
@@ -221,7 +221,7 @@
       "escalation": null,
       "notes": "A merge failure on a PR the SAME pass just rebase-dropped is expected (CI is re-running against the new tip) and is not treated as a fault (scripts/merge-ai-prs.mjs:4988-4993); every other merge failure is reported in failedMerges and simply retried the next sweep.",
       "ack": {
-        "uncapped-retry": "4232"
+        "uncapped-retry": "#4232"
       }
     },
     {
@@ -244,7 +244,7 @@
       "escalation": null,
       "notes": "The couple-gate's own residual it cannot close (see couple-gate's notes): reached only when a carrier PASSED carrierPreflight (or already had merged impls) and its OWN `gh pr merge` still failed right after — a real, rare race (two repos, one write each, ~1s apart). Reported into the pass's JSON `coupleSplit` array plus one loud stderr line (scripts/merge-ai-prs.mjs:4924-4926) — that IS the whole escalation today; nothing pages an operator, nothing retries this specific carrier with priority, and nothing caps how many passes the SAME split can recur, each producing only another log line. The carrier itself still rejoins the ordinary merge-attempt retry loop next sweep (this state is an ADDITIONAL classification layered on that failure, not a replacement terminus) — tracked as its own gap, card 4247.",
       "ack": {
-        "silent-failure": "4247"
+        "silent-failure": "#4247"
       }
     },
     {
@@ -592,7 +592,7 @@
       "provides": [],
       "notes": "This assumption is never actually confirmed here (or anywhere else in this flow) — GitHub's rollup is trusted as-is whatever produced it. accepted-unchecked-no-ci is what happens when the assumption is false (zero runs at all); ci-heal.flow.json's base-retargeted state names the most common concrete cause.",
       "ack": {
-        "unprovided-assumption": "4239"
+        "unprovided-assumption": "#4239"
       }
     },
     {

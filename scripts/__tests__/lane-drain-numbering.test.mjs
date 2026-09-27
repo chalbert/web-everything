@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { numberPendingHashes, landedNumberFor, cardPathInTree, hasPendingHashFiles, numberPendingHashesIfAny, finalizeLand } from '../lane-drain.mjs';
 import { tryAcquireNumberingLock } from '../readiness/drain-lock.mjs';
+import { checkFlow } from '../conveyor/flows/flow-model.mjs';
 
 const DRAIN_CLI = join(process.cwd(), 'scripts/lane-drain.mjs');
 
@@ -450,6 +451,46 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     const flow = JSON.parse(readFileSync(join(repo, 'scripts/conveyor/flows/build-dispatch.flow.json'), 'utf8'));
     expect(flow.cite).toBe('backlog/2201-alpha.md:1');
     expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('rewrites a pending-hash `ack` value to "#NNN" (never bare NNN), and the flow checker accepts the result (#4247)', () => {
+    // Reproduces the OTHER live incident (#4247, main red): a flow file's `ack` value is documented
+    // (scripts/conveyor/flows/README.md) to accept ONLY "#NNNN" or a bare "xHASH" — never a bare NNN — so
+    // it is authored bare while the card is still pending ("silent-failure": "xhash02"). The SAME blind
+    // swap that correctly turns a docs/backlog hash reference into its landed form turned this into a bare
+    // "2201", which the checker's own CARD_RE then rejects as `bad-ack`. normalizeFlowAckCardRefs repairs
+    // it to "#2201" in the SAME land commit.
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xhash02-beta.md', '---\nkind: story\nstatus: resolved\n---\n# Beta\n');
+    write('scripts/conveyor/flows/build-dispatch.flow.json', JSON.stringify({
+      id: 'build-dispatch',
+      states: [{
+        id: 'session-spawn-failed',
+        terminal: true,
+        outcome: 'failure',
+        escalation: null,
+        ack: { 'silent-failure': 'xhash02' },
+      }],
+    }));
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', 'scripts', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo);
+    expect(res.assigned).toEqual([{ hash: 'xhash02', nnn: '2201' }]);
+    expect(res.committed).toBe(true);
+
+    const flowPath = join(repo, 'scripts/conveyor/flows/build-dispatch.flow.json');
+    const flow = JSON.parse(readFileSync(flowPath, 'utf8'));
+    // The canonical form is "#NNN", never bare "NNN" — the exact incident the checker's own error message
+    // names ("not a card id (#NNNN or xHASH)").
+    expect(flow.states[0].ack['silent-failure']).toBe('#2201');
+    expect(git('status', '--porcelain').trim()).toBe('');
+
+    // And the checker itself — not just this test's own reading of the shape — accepts the rewritten form:
+    // load the SAME file back through the real flow-model.mjs (the module real-flows.test.mjs / check.mjs
+    // --ci both run) and assert it raises no `bad-ack` finding.
+    const findings = checkFlow({ ...flow, _file: 'build-dispatch.flow.json' });
+    expect(findings.filter((f) => f.rule === 'bad-ack')).toEqual([]);
   });
 
   it('leaves an untracked/absent scripts/conveyor/flows/*.flow.json alone — never fatal when the dir has no match (#4075/xmd4pfa)', () => {

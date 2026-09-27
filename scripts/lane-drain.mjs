@@ -588,6 +588,30 @@ const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
 const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
 
 /**
+ * #4247 — the flow checker's own documented card-ref grammar (scripts/conveyor/flows/README.md: `"<card
+ * id, e.g. #4140 or x1a2b3c>"`, enforced by `CARD_RE` in flow-model.mjs) accepts a NUMERIC ref only with a
+ * leading `#`, but a HASH ref bare (no `#`, a hash needs no disambiguation). A flow file's `ack` value is
+ * therefore authored bare while the card is still pending (`"no-owner": "xwo3j0l"`) — valid, since a bare
+ * hash IS the documented form. The blind, generic hash→NNN swap `applyLedger` runs for every swept file
+ * (backlog/, docs/agent/, agent-memory-src/, scripts/conveyor/flows/) never invents a character; it only
+ * ever replaces the matched `xHASH` span, so a citation ALREADY written `#xHASH` in prose correctly becomes
+ * `#NNN`, and a backlog `blockedBy` (never `#`-prefixed by that field's own separate contract) correctly
+ * stays bare `NNN`. A flow `ack` value is the one place on the swept list authored bare but landing under a
+ * grammar that requires `#` for the numeric form — so the very same swap that is correct everywhere else
+ * produces an invalid bare `"4237"` here (main red, #4247: 68 `bad-ack`/rule findings, "is \"4237\", not a
+ * card id (#NNNN or xHASH)"). Rather than teach the generic, file-type-blind `applyLedger` this ONE field's
+ * grammar (or loosen the checker's documented, deliberate dual form), repair it narrowly, only on a file
+ * this pass already rewrote, only inside that file's own `ack: {...}` spans (an ack value never contains a
+ * literal `}`, so `[^}]*` cannot run past the block) — never touching a `cite`/line-number/notes digit
+ * elsewhere in the same file, and never sweeping a flow file this pass did not otherwise touch.
+ * @param {string} content  a `*.flow.json` file's raw text, POST the generic ledger swap
+ * @returns {string}
+ */
+export function normalizeFlowAckCardRefs(content) {
+  return content.replace(/"ack":\s*\{[^}]*\}/g, (block) => block.replace(/:(\s*)"(\d+)"/g, ':$1"#$2"'));
+}
+
+/**
  * JIT numbering (#2288) — the one place a backlog id is minted. Numbers EVERY provisional (hash-keyed)
  * backlog file now present on main, not just the couple's own id: a landed lane can carry LEFTOVER items
  * scaffolded during close-out (born hash-keyed), and those need numbering too. A hash file only reaches
@@ -796,6 +820,11 @@ export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const rewrittenNames = new Set(rewrites.map((r) => r.name));
   for (const file of resolvedFiles) {
     if (!rewrittenNames.has(file.name) && file.content !== contentByName.get(file.name)) rewrites.push(file);
+  }
+  // #4247 — repair a bare-digit `ack` value the swap above just produced (see normalizeFlowAckCardRefs'
+  // own docblock) in every flow file THIS pass rewrote; never a repo-wide sweep for pre-existing staleness.
+  for (const r of rewrites) {
+    if (r.name.endsWith('.flow.json')) r.content = normalizeFlowAckCardRefs(r.content);
   }
 
   // #4075 follow-up (xmd4pfa, hardening after the build-dispatch.flow.json incident) — NEVER COMMIT A

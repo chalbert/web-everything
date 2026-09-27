@@ -114,8 +114,8 @@
       "escalation": null,
       "notes": "retargetStackedPrs (scripts/lib/pr-merge-gate.mjs:218) runs `gh pr edit --base <default>` the moment a PR's stacked base merges (scripts/merge-ai-prs.mjs:4888-4898), so the branch isn't deleted out from under it — but a base retarget is NOT a new commit event, so GitHub never enqueues a fresh CI run for it. Nothing anywhere re-checks that the PR's statusCheckRollup was ever computed against `main` at all; the PR just carries forward whatever check state it had before. KEY QUESTION (b) answered: no step anywhere provides `ci:required checks ran on head` on this path (see the assumes on pr-check-state-read's downstream consumers) — this is a genuine, unacknowledged gap, not merely a slow path.",
       "ack": {
-        "no-owner": "4239",
-        "unbounded-wait": "4239"
+        "no-owner": "#4239",
+        "unbounded-wait": "#4239"
       }
     },
     {
@@ -166,7 +166,7 @@
       "escalation": null,
       "notes": "KEY QUESTION (a), part 1: this state answers 'who performs the owed rerun' honestly — scripts/conveyor/reconcile-core.mjs:926-931 only REFUSES ('owed-ci-rerun') and names the file that should act; the actual mechanical rebase is scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery, and the ONLY thing that ever calls it with apply:true in production is reconcile-fix-dispatch-daemon.mjs (confirmed live via its own installed plist) — its own daemon-manifest.mjs entry (skills-src/conveyor/daemon-manifest.mjs:161) has NO launchd job. If main stays red indefinitely, this refusal re-fires every ~120s tick forever with no cap on how long — an honest unbounded wait, by the mechanism's own design (rebasing against a still-broken main proves nothing), but unbounded all the same.",
       "ack": {
-        "unbounded-wait": "4237"
+        "unbounded-wait": "#4237"
       }
     },
     {
@@ -444,7 +444,7 @@
       "provides": [],
       "notes": "Neither this read nor GitHub's own API distinguishes a check run computed against the CURRENT base from one carried over from before a base retarget — this assumption is never actually confirmed on the base-retargeted path (nothing there provides the fact), and on the ordinary direct-push path it holds only because GitHub's own push-triggered CI happens to run against the current tree, never because anything here checks it.",
       "ack": {
-        "unprovided-assumption": "4239"
+        "unprovided-assumption": "#4239"
       }
     },
     {
@@ -561,7 +561,7 @@
       ],
       "notes": "onFailure here models the brief's own instruction to stop and report 'ci-heal not-applicable (lane ref gone)' (fix-agent-ci-brief.md:74-75) — a stand-down comment, not an automatic repair; the PR falls back to being re-evaluated fresh next tick since the session is then no longer live.",
       "ack": {
-        "unprovided-assumption": "4238"
+        "unprovided-assumption": "#4238"
       }
     }
   ]

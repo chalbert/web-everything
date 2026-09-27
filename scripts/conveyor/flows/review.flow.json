@@ -137,7 +137,7 @@
       },
       "notes": "No timeout at all: the gate stays closed until either the health-watch episode closes or the direct transcript scan of the most recently dispatched session stops seeing the auth-failure text (scripts/conveyor/claude-auth-health.mjs:82-125). Every review this tick is deferred, not lost (deferredForAuth, skills-src/conveyor/review-daemon.mjs:261-268,303).",
       "ack": {
-        "unbounded-wait": "4237"
+        "unbounded-wait": "#4237"
       }
     },
     {
