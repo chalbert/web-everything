@@ -122,6 +122,43 @@ export function tagReviewStatus({ pr, repo, listAgents = () => listAgentsWithRev
   return { changed: true, label: plan.add, removed: plan.remove };
 }
 
+/**
+ * THE IO SHELL, DISPATCH-TIME VARIANT (#3383 follow-up, live-caught 2026-09-26: a ci-heal dispatched for PR
+ * #2771 by `we:skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs` at 18:06 ET carried no `review-status:*`
+ * label at all, because ONLY the separate Review daemon's own tick ever called {@link tagReviewStatus} — and
+ * that tick was itself stuck behind an unbounded session-reap sweep the whole time; see
+ * `we:scripts/conveyor/session-reaper.mjs`'s own per-tick budget for that half of the incident).
+ *
+ * THE DAEMON THAT DISPATCHES A SESSION APPLIES ITS OWN STATUS TAG RIGHT AT DISPATCH — never waiting on a
+ * DIFFERENT daemon's tick to notice. This is deliberately NOT just "call `tagReviewStatus` from the fix
+ * daemon too": {@link tagReviewStatus} DERIVES its state from a fresh `claude agents --json` read (or an
+ * injected snapshot), and a session THIS SAME CALL just spawned is exactly the case
+ * `we:skills-src/conveyor/review-daemon.mjs`'s own header already documents as a real, measured race ("a
+ * `claude agents --json` listing lag right after a fresh spawn... a real (pre-existing, not newly introduced)
+ * race window") — reading the listing immediately after dispatch would often see nothing live yet and
+ * silently no-op the very tag this function exists to set. A caller that JUST dispatched the session already
+ * knows its state with certainty; this function applies that KNOWN state directly, with no listing read at
+ * all, and is otherwise byte-identical in its label mechanics to `tagReviewStatus` — same idempotent
+ * `planStatusLabelChange`, same label home (`provider.ensureLabel`/`setLabels`), so the two never fight: this
+ * one seeds the tag the instant it's true, and the Review daemon's own {@link tagReviewStatus} pass (fed by
+ * `we:scripts/conveyor/reconcile-core.mjs#selectStatusCandidates`) remains the periodic RECONCILER that
+ * corrects it once the session finishes, stalls, or the listing catches up — never a second, competing writer.
+ * @param {{pr:number|string, repo:string, state:string|null, provider?:object, currentLabels?:Array<{name?:string}|string>}} o
+ * @returns {{changed:boolean, label:string|null, removed:string[]}}
+ */
+export function applyReviewStatus({ pr, repo, state, provider = createGhProvider(), currentLabels: suppliedLabels } = {}) {
+  const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
+  if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
+  const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
+  const plan = planStatusLabelChange({ status: state ? { state } : null, currentLabels });
+  if (!plan.add && plan.remove.length === 0) {
+    return { changed: false, label: state ? `review-status:${state}` : null, removed: [] };
+  }
+  if (plan.add) provider.ensureLabel(repo, plan.add, { color: 'c5def5', description: 'informative: a reviewer/fixer is currently working this PR, or stuck (auto-managed)' });
+  provider.setLabels(repo, pr, { add: plan.add ?? undefined, remove: plan.remove });
+  return { changed: true, label: plan.add, removed: plan.remove };
+}
+
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) {
   const argv = process.argv.slice(2);
