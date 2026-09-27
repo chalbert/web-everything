@@ -1,4 +1,5 @@
 ---
+bornAs: x0lxgal
 kind: story
 size: 5
 parent: "4075"
