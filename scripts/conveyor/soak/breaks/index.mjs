@@ -45,6 +45,7 @@ import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
 import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
 import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
 import rebuildFinalizeStarved from './rebuild-finalize-starved.mjs';
+import staleFixingLabelCiHealOwed from './stale-fixing-label-ci-heal-owed.mjs';
 import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
 
 export const BREAKS = Object.freeze([
@@ -75,6 +76,7 @@ export const BREAKS = Object.freeze([
   alreadyLandedPrGetsFixer,
   rebuildFinalizeStarved,
   largeReapBacklogStarvesDispatch,
+  staleFixingLabelCiHealOwed,
 ]);
 
 export function breakById(id) {
