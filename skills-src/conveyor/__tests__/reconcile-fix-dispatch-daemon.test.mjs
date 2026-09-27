@@ -609,6 +609,18 @@ describe('withFixDispatchClaimRefresh — dup-heal-dispatch: refreshes live clai
     expect(ticked).toBe(true);
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('fix-dispatch claim refresh failed (non-fatal)'));
   });
+
+  // PR #2789 review (antigravity) — an async refresh must be awaited, never iterate a Promise (TypeError).
+  it('an ASYNC refresh is awaited — its refreshed rows are logged and the tick still runs', async () => {
+    const log = { error: vi.fn() };
+    const refresh = async () => ({ checked: 1, refreshed: [{ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A' }] });
+    let ticked = false;
+    const wrapped = withFixDispatchClaimRefresh({ tickOnce: async () => { ticked = true; return {}; } }, { log, refresh });
+    await wrapped.tickOnce();
+    expect(ticked).toBe(true);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('refreshed live claim ci-heal-2784'));
+    expect(log.error).not.toHaveBeenCalledWith(expect.stringContaining('refresh failed'));
+  });
 });
 
 describe('buildCliDaemonEffects — tickOnce is wired to runTickAllRepos, not the old fix-only call (#xngv3vn)', () => {

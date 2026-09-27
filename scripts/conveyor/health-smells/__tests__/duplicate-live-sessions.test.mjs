@@ -83,6 +83,21 @@ describe('duplicate-live-sessions.evaluate', () => {
     expect(out[0].recommendation).toMatch(/do not stop/i);
   });
 
+  // PR #2789 review (correctness) — asserts the smell against the REAL production probe's output shape, not a
+  // hand-built fixture, so a probe/smell field mismatch (sessionId/cwd dropped by the probe) is caught here.
+  it('carries sessionIds/cwds through from the real health-watch probeAgents() output shape', async () => {
+    const { probeAgents } = await import('../../health-watch.mjs');
+    const raw = [
+      { name: 'ci-heal-2784', state: 'working', kind: 'background', startedAt: 't1', cwd: '/lanes/lane-1', sessionId: 'sid-a' },
+      { name: 'ci-heal-2784', state: 'working', kind: 'background', startedAt: 't2', cwd: '/lanes/lane-2', sessionId: 'sid-b' },
+    ];
+    const agents = probeAgents({ exec: () => JSON.stringify(raw) });
+    const [row] = duplicateLiveSessions.evaluate({ agents });
+    expect(row.measure.sessionIds).toEqual(['sid-a', 'sid-b']);
+    expect(row.measure.cwds).toEqual(['/lanes/lane-1', '/lanes/lane-2']);
+    expect(row.measure.startedAts).toEqual(['t1', 't2']);
+  });
+
   it('reports nothing when every name has at most one live session', () => {
     expect(duplicateLiveSessions.evaluate({ agents: [agent()] })).toHaveLength(0);
   });

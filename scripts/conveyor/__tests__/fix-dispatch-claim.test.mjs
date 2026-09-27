@@ -23,8 +23,9 @@ import { join } from 'node:path';
 import {
   DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES, fixDispatchClaimRoot, fixDispatchClaimOwner, fixDispatchResource,
   acquireFixDispatchClaim, releaseFixDispatchClaim, readFixDispatchClaim, fixDispatchSessionName,
-  isClaimSessionLive, listFixDispatchClaims, refreshLiveFixDispatchClaims,
+  isClaimSessionLive, listFixDispatchClaims, refreshLiveFixDispatchClaims, MAX_FIX_DISPATCH_CLAIM_REFRESH_MS,
 } from '../fix-dispatch-claim.mjs';
+import { heartbeat } from '../../readiness/file-locks.mjs';
 import { dispatchFix, tryResumeFix } from '../reconcile-fix-dispatch.mjs';
 import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
 import { buildAuthorActorMarker } from '../../lib/review-independence.mjs';
@@ -209,6 +210,83 @@ describe('listFixDispatchClaims / refreshLiveFixDispatchClaims — the tick-time
     expect(reclaimed).toMatchObject({ ok: true, reason: 'lease-expired' });
   });
 
+  // PR #2789 review (correctness) — a HUNG session keeps reporting `state: 'working'` until the reaper reaps
+  // it; before this fix the refresh re-heartbeated its claim forever instead of letting the TTL reclaim it.
+  it('a HUNG-but-"working" session (transcript stale) is NOT refreshed — the plain TTL reclaims its claim', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0), leaseMinutes: 10 });
+    const listAgentsAll = () => [{ name: 'ci-heal-2784', state: 'working', cwd: '/x', sessionId: 'sid' }];
+    const hungInfoFor = () => ({ hung: true, reason: 'stale-transcript' });
+    for (const m of [9, 18, 27]) {
+      refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, hungInfoFor, nowMs: T0 + m * 60_000, nowIso: () => iso(T0 + m * 60_000) });
+    }
+    const at = T0 + 27 * 60_000;
+    expect(acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'C', lockRoot: claimRoot, nowMs: at, nowIso: iso(at) }))
+      .toMatchObject({ ok: true, reason: 'lease-expired' });
+  });
+
+  it('an agent row already carrying an upstream finished verdict (hung / selfReportedDone / authExpired) is NOT live', () => {
+    for (const flag of ['hung', 'selfReportedDone', 'authExpired']) {
+      const agentsAll = [{ name: 'ci-heal-2784', state: 'working', [flag]: true }];
+      expect(isClaimSessionLive({ repo: 'we', pr: 2784, kind: 'ci-heal', agentsAll })).toBe(false);
+    }
+  });
+
+  it('HARD CEILING: even a session that reads live forever stops being refreshed past MAX_FIX_DISPATCH_CLAIM_REFRESH_MS', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0), leaseMinutes: 10 });
+    const listAgentsAll = () => [{ name: 'ci-heal-2784', state: 'working' }];
+    const hungInfoFor = () => ({ hung: false });
+    const inside = T0 + MAX_FIX_DISPATCH_CLAIM_REFRESH_MS - 60_000;
+    expect(refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, hungInfoFor, nowMs: inside, nowIso: () => iso(inside) }).refreshed).toHaveLength(1);
+    const past = T0 + MAX_FIX_DISPATCH_CLAIM_REFRESH_MS + 60_000;
+    expect(refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, hungInfoFor, nowMs: past, nowIso: () => iso(past) }).refreshed).toHaveLength(0);
+  });
+
+  it('claimedAt: a reentrant re-acquire of a LIVE lease keeps it; re-acquiring an EXPIRED leftover (same daemon owner) starts fresh', () => {
+    const at = (m) => ({ nowMs: T0 + m * 60_000, nowIso: iso(T0 + m * 60_000) });
+    const read = () => readFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', lockRoot: claimRoot }).meta.claimedAt;
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, leaseMinutes: 10, ...at(0) });
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, leaseMinutes: 10, ...at(5) });
+    expect(read()).toBe(iso(T0));
+    // Hours later the SAME long-running daemon dispatches the PR again over its own never-released leftover.
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, leaseMinutes: 10, ...at(300) });
+    expect(read()).toBe(iso(T0 + 300 * 60_000));
+  });
+
+  it('a legacy claim with no claimedAt is stamped on its first refresh, so the ceiling applies to it too', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    const [entry] = listFixDispatchClaims(claimRoot);
+    const { claimedAt, ...legacyMeta } = entry.meta;
+    expect(claimedAt).toBe(iso(T0));
+    heartbeat(claimRoot, fixDispatchResource({ repo: 'we', pr: 2784, kind: 'ci-heal' }), 'A', iso(T0), null, legacyMeta);
+    const listAgentsAll = () => [{ name: 'ci-heal-2784', state: 'working' }];
+    const r = refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, hungInfoFor: () => ({ hung: false }), nowMs: T0 + 60_000, nowIso: () => iso(T0 + 60_000) });
+    expect(r.refreshed).toHaveLength(1);
+    expect(readFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', lockRoot: claimRoot }).meta.claimedAt).toBe(iso(T0 + 60_000));
+  });
+
+  // PR #2789 review (security/toctou) — the refresh used an owner snapshot from the listing and heartbeat-wrote
+  // it blindly, clobbering a DIFFERENT owner that released+re-acquired in between.
+  it('never clobbers a claim re-acquired by a DIFFERENT owner between the listing and the heartbeat write', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', headSha: 'sha1', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    const listAgentsAll = () => {
+      // Between listFixDispatchClaims() and the heartbeat: A releases, C wins the same resource.
+      releaseFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot });
+      acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', headSha: 'sha2', owner: 'C', lockRoot: claimRoot, nowMs: T0 + 1000, nowIso: iso(T0 + 1000) });
+      return [{ name: 'ci-heal-2784', state: 'working' }];
+    };
+    const result = refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll, hungInfoFor: () => ({ hung: false }), nowMs: T0 + 2000, nowIso: () => iso(T0 + 2000) });
+    expect(result.refreshed).toHaveLength(0);
+    expect(readFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', lockRoot: claimRoot })).toMatchObject({ owner: 'C', meta: { headSha: 'sha2' } });
+    expect(releaseFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'C', lockRoot: claimRoot })).toEqual({ released: true });
+  });
+
+  // PR #2789 review (antigravity) — an async listing would have been silently read as "no agents" (a Promise is
+  // not an array), skipping every refresh. It must fail LOUDLY instead.
+  it('an async (Promise-returning) listAgentsAll is refused loudly, never silently treated as an empty listing', () => {
+    acquireFixDispatchClaim({ repo: 'we', pr: 2784, kind: 'ci-heal', owner: 'A', lockRoot: claimRoot, nowMs: T0, nowIso: iso(T0) });
+    expect(() => refreshLiveFixDispatchClaims({ lockRoot: claimRoot, listAgentsAll: async () => [] })).toThrow(TypeError);
+  });
+
   it('a lock root with no claims at all is a no-op (never calls listAgentsAll unnecessarily)', () => {
     let called = false;
     const result = refreshLiveFixDispatchClaims({ lockRoot: join(claimRoot, 'empty'), listAgentsAll: () => { called = true; return []; } });
@@ -381,5 +459,29 @@ describe('dispatchCiHeal — two racing dispatchers, one PR: exactly one spawn',
     expect(b).toMatchObject({ held: true, reason: 'held', heldBy: 'dispatcher-A' });
 
     expect(sinkCalls).toHaveLength(1); // ← THE PROOF: tonight's actual duplicate-dispatch shape, now refused.
+  });
+});
+
+// PR #2789 review (codex-correctness) — the kind-discrimination test above bypassed the real callers. If
+// dispatchCiHeal ever dropped its explicit `kind: 'ci-heal'`, it would fall back to 'fix' and a live fix claim
+// would silently suppress ci-heal for the same PR. Drives BOTH real dispatch functions through one claim root.
+describe('dispatchFix and dispatchCiHeal acquire independent claims for the same PR', () => {
+  it('both spawn for one PR; a second attempt of EITHER kind is then held', async () => {
+    const { DISPATCH_EFFECT } = await import('../../operations/dispatch-lane.mjs');
+    const planned = { itemNum: '3438', pr: 1764, laneRef: 'lane/3438-x', scope: ['we:x'], lane: 9, headRefOid: 'sha-mixed' };
+    const spawnCalls = [];
+    const spawnAgent = () => { spawnCalls.push('fix'); return ''; };
+    const sinks = { [DISPATCH_EFFECT]: async () => { spawnCalls.push('ci-heal'); return { handle: 'agent-1' }; } };
+    const fixOpts = { root: '/repo', readBrief: () => REAL_TEMPLATE_STUB, claimRoot, spawnAgent };
+    const healOpts = { readBrief: () => 'heal {{PR_NUM}} {{ITEM_NUM}} {{LANE_REF}} {{LANE}} {{SESSION_SLUG}} {{SCOPE}} {{REASON}}', sinks, claimRoot };
+
+    const fixA = dispatchFix(planned, { ...fixOpts, mintSessionId: () => 'sid-a', claimOwner: 'dispatcher-A' });
+    expect(fixA.held).toBeUndefined();
+    const healA = await dispatchCiHeal(planned, { ...healOpts, claimOwner: 'dispatcher-A' });
+    expect(healA.held).toBeUndefined(); // ← a live FIX claim must not suppress ci-heal for the same PR.
+
+    expect(dispatchFix(planned, { ...fixOpts, mintSessionId: () => 'sid-b', claimOwner: 'dispatcher-B' })).toMatchObject({ held: true });
+    expect(await dispatchCiHeal(planned, { ...healOpts, claimOwner: 'dispatcher-B' })).toMatchObject({ held: true });
+    expect(spawnCalls).toEqual(['fix', 'ci-heal']);
   });
 });

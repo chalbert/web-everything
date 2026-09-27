@@ -82,10 +82,11 @@ import { join } from 'node:path';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolveCoordinationRoot } from '../operations/coordination-root.mjs';
 import {
-  reserve, readLockEntry, releaseLockDir, parseLockEntry, heartbeat,
+  reserve, readLockEntry, releaseLockDir, parseLockEntry, heartbeat, isLeaseExpired,
 } from '../readiness/file-locks.mjs';
 import { mintSessionSlug } from './session-slug.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
+import { readHungInfo, resolveHungThresholdMs } from './hung-session.mjs';
 
 /** How long an unreleased claim survives before a DIFFERENT owner may reclaim it (dead-holder floor). Chosen
  *  well above the measured 26+s `claude agents --json --all` listing lag ({@link ../operations/dispatch-lane-io.mjs})
@@ -144,8 +145,15 @@ export function acquireFixDispatchClaim({
   const resource = fixDispatchResource({ repo, pr, kind });
   // `headSha` rides in `meta` only (diagnostics — which commit was in flight) — never part of the resource
   // identity above (see this file's own header for the live incident that made keying on it wrong).
+  // `claimedAt` anchors {@link MAX_FIX_DISPATCH_CLAIM_REFRESH_MS}; a heartbeat re-writes `meta` verbatim, so it
+  // survives every refresh. A reentrant same-owner re-acquire of a STILL-LIVE lease keeps the original
+  // `claimedAt`; an expired leftover entry (claims are not released on success, and the daemon's `host:pid`
+  // owner never changes) is a NEW dispatch and starts a fresh clock.
+  const prior = readLockEntry(lockRoot, fixDispatchResource({ repo, pr, kind }));
+  const claimedAt = prior?.owner === owner && prior?.meta?.claimedAt && !isLeaseExpired(prior, nowMs, leaseMinutes)
+    ? prior.meta.claimedAt : nowIso;
   const meta = {
-    host, sessionId, repo, pr, kind, headSha: headSha ?? null,
+    host, sessionId, repo, pr, kind, headSha: headSha ?? null, claimedAt,
   };
   // `pidLiveness` is ALWAYS 'unknown' — see this file's own header for why a fast PID-dead reclaim would be
   // actively wrong here (the acquiring dispatcher's own exit is expected completion, not a crash).
@@ -213,8 +221,17 @@ export function isClaimSessionLive({ repo, pr, kind = 'fix', agentsAll }) {
   return (Array.isArray(agentsAll) ? agentsAll : []).some((a) => (
     a && String(a.name ?? '') === name
     && a.state !== 'done' && a.state !== 'stopped' && a.state !== 'failed'
+    // PR #2789 review: raw `state` lies for a HUNG session (it keeps reading 'working' until reaped). Honor the
+    // same upstream AGENT-level finished verdicts `reconcile-core.mjs#assessLiveness` already trusts.
+    && a.hung !== true && a.selfReportedDone !== true && a.authExpired !== true
   ));
 }
+
+/** Absolute ceiling on how long {@link refreshLiveFixDispatchClaims} keeps ONE claim alive, measured from its
+ *  original acquire (`meta.claimedAt`). A backstop for a session that reads live forever while not actually
+ *  progressing and that no hung detector caught: past this, the refresh stops and the plain TTL reclaims it.
+ *  Well above any real fix/ci-heal run, and above `hung-session.mjs`'s own 30-min hung threshold. */
+export const MAX_FIX_DISPATCH_CLAIM_REFRESH_MS = 4 * 60 * 60 * 1000;
 
 /**
  * we:scripts/conveyor/fix-dispatch-claim.mjs#listFixDispatchClaims — every currently-held claim under
@@ -254,23 +271,57 @@ export function listFixDispatchClaims(lockRoot = fixDispatchClaimRoot()) {
  * claim whose session is NOT confirmed live (already finished, or — the spawn-listing-lag case this file's own
  * `DEFAULT_FIX_DISPATCH_CLAIM_TTL_MINUTES` comment already covers — not yet visible in the listing) is left
  * untouched: the plain TTL still recovers it exactly as before this fix, dead-holder recovery unchanged.
- * @param {{lockRoot?:string, listAgentsAll?:Function, nowIso?:()=>string}} [o]
+ *
+ * PR #2789 review hardening:
+ *  - HUNG: every candidate agent row is first run through `hung-session.mjs#readHungInfo` (injectable as
+ *    `hungInfoFor`) — the SAME detector `reconcile-pass.mjs` feeds `markHungSessions` — so a session stuck at
+ *    `state: 'working'` with a stale transcript is not "live" here either.
+ *  - CEILING: past {@link MAX_FIX_DISPATCH_CLAIM_REFRESH_MS} since `meta.claimedAt`, a claim is never refreshed.
+ *  - OWNERSHIP: the entry is RE-READ immediately before the heartbeat write and skipped unless the on-disk owner
+ *    still matches the listed one — the same owner check `releaseFixDispatchClaim` makes — so a claim released
+ *    and re-acquired by a different owner during the sweep is skipped, not overwritten. (Read-then-write, not
+ *    atomic: the residual window is the microseconds between that re-read and the write.)
+ *  - A session judged hung, or older than the ceiling, deliberately LOSES its claim to the plain TTL — so a
+ *    genuinely slow-but-alive run past those bounds can be re-dispatched. That matches the reaper's own view.
+ *  - SYNC ONLY: `listAgentsAll` must return an array; a Promise throws, rather than reading as "no agents".
+ * @param {{lockRoot?:string, listAgentsAll?:Function, hungInfoFor?:Function, hungThresholdMs?:number,
+ *   nowMs?:number, nowIso?:()=>string}} [o]
  * @returns {{checked:number, refreshed:Array<{repo:string, pr:number, kind:string, headSha:string|null, owner:string}>}}
  */
 export function refreshLiveFixDispatchClaims({
   lockRoot = fixDispatchClaimRoot(),
   listAgentsAll = () => defaultListAgents({ all: true }),
+  hungInfoFor = readHungInfo,
+  hungThresholdMs = resolveHungThresholdMs(),
   nowIso = () => new Date().toISOString(),
+  nowMs = Date.parse(nowIso()),
 } = {}) {
   const claims = listFixDispatchClaims(lockRoot);
   if (!claims.length) return { checked: 0, refreshed: [] };
-  const agentsAll = listAgentsAll();
+  const listed = listAgentsAll();
+  if (listed && typeof listed.then === 'function') {
+    throw new TypeError('refreshLiveFixDispatchClaims: listAgentsAll must be synchronous (got a Promise)');
+  }
   const refreshed = [];
   for (const entry of claims) {
-    const { repo, pr, kind, headSha = null } = entry.meta;
+    const { repo, pr, kind, headSha = null, claimedAt = null } = entry.meta;
+    const claimedMs = Date.parse(claimedAt ?? '');
+    if (Number.isFinite(claimedMs) && nowMs - claimedMs > MAX_FIX_DISPATCH_CLAIM_REFRESH_MS) continue;
+    const name = fixDispatchSessionName({ repo, pr, kind });
+    const agentsAll = (Array.isArray(listed) ? listed : []).filter((a) => a && String(a.name ?? '') === name)
+      .map((a) => {
+        let info = null;
+        try { info = hungInfoFor(a, nowMs, hungThresholdMs); } catch { info = null; }
+        return info?.hung === true ? { ...a, hung: true } : a;
+      });
     if (!isClaimSessionLive({ repo, pr, kind, agentsAll })) continue;
     const resource = fixDispatchResource({ repo, pr, kind });
-    heartbeat(lockRoot, resource, entry.owner, nowIso(), entry.pid ?? null, entry.meta);
+    const current = readLockEntry(lockRoot, resource);
+    if (!current || current.owner !== entry.owner) continue;
+    // Write back the FRESHLY re-read entry (not the listing snapshot); a pre-`claimedAt` claim is stamped now so
+    // the ceiling applies to it from here on.
+    const meta = current.meta?.claimedAt ? current.meta : { ...(current.meta ?? entry.meta), claimedAt: nowIso() };
+    heartbeat(lockRoot, resource, current.owner, nowIso(), current.pid ?? null, meta);
     refreshed.push({
       repo, pr, kind, headSha, owner: entry.owner,
     });

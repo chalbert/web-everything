@@ -68,6 +68,7 @@ export default {
         count: list.length,
         sessionIds: list.map((a) => a.sessionId ?? null),
         cwds: list.map((a) => a.cwd ?? null),
+        startedAts: list.map((a) => a.startedAt ?? null),
       },
       summary: `${list.length} live sessions are all named "${name}" — a duplicate dispatch under one name.`,
       recommendation: `Do not stop any of "${name}"'s ${list.length} live copies yourself — report it. The `

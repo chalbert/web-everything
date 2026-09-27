@@ -784,11 +784,12 @@ export function withFixDispatchClaimRefresh(effects, { log = console, refresh = 
       // TTL still recovers a claim this refresh could not reach.
       let result = { checked: 0, refreshed: [] };
       try {
-        result = refresh();
+        // Awaited so an async `refresh` can never hand a Promise to the loop below (PR #2789 review).
+        result = await refresh();
       } catch (e) {
         log.error(`reconcile-fix-dispatch-daemon: fix-dispatch claim refresh failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
       }
-      for (const r of result.refreshed) {
+      for (const r of Array.isArray(result?.refreshed) ? result.refreshed : []) {
         log.error(`reconcile-fix-dispatch-daemon: refreshed live claim ${r.kind}-${r.pr} (${r.repo}) — still owned by ${r.owner}`);
       }
       return tick(...args);
