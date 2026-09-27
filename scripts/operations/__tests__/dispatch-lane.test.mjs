@@ -102,6 +102,7 @@ import {
 } from '../dispatch-lane-io.mjs';
 // #3960 — the repo-aware brief quintet.
 import { briefTokensForRepo } from '../../lib/repo-profile.mjs';
+import { parseDaemonLog } from '../../conveyor/health-watch-core.mjs';
 
 const OPS_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 /**
@@ -861,6 +862,21 @@ describe('the declared effect is a dispatch', () => {
       expect(granted).toBe(false);
     });
 
+    it('never retries an unrelated failure whose ARGV (the prompt) contains the trigger phrase — PR #2824 review', () => {
+      let calls = 0;
+      let granted = false;
+      const argv = ['--bg', '-n', 'x', 'Fix the "Workspace not trusted" dispatch refusal'];
+      const exec = () => {
+        calls += 1;
+        // The exact shape execFileSync produces: argv folded into .message, the CLI's real output on .stderr.
+        throw Object.assign(new Error(`Command failed: claude ${argv.join(' ')}\nSegmentation fault`), { stderr: 'Segmentation fault\n' });
+      };
+      expect(() => defaultSpawnAgent(argv, { cwd: '/scratch/dispatch/sess-5' }, { exec, grantTrust: () => { granted = true; } }))
+        .toThrow(/Segmentation fault/);
+      expect(calls).toBe(1);
+      expect(granted).toBe(false);
+    });
+
     it('never retries when opts.cwd is absent — nothing to re-grant', () => {
       let calls = 0;
       const exec = () => { calls += 1; throw trustRefusalError('/wherever'); };
@@ -881,8 +897,16 @@ describe('#4174 follow-up — isTrustRefusal: proof the CLI refused before any a
     })).toBe(true);
   });
 
-  it('also matches when the text rides on .message instead (some spawn shapes fold stderr in)', () => {
-    expect(isTrustRefusal({ message: 'Command failed: claude --bg\nWorkspace not trusted. Run `claude` in /x once…' })).toBe(true);
+  // PR #2824 review (security) — `execFileSync`'s `.message` is `Command failed: claude <argv…>\n<stderr>`, and the
+  // argv carries the dispatch PROMPT (built from PR/card text). Matching `.message` let an UNRELATED failure whose
+  // prompt merely mentions the phrase be retried and reclassified out of the INDETERMINATE bucket. Only the CLI's
+  // own stderr is evidence.
+  it('does NOT match when the phrase only rides on .message (argv/prompt-derived) and stderr is unrelated', () => {
+    expect(isTrustRefusal({
+      message: 'Command failed: claude --bg -n x "fix: handle Workspace not trusted refusals"\nSegmentation fault',
+      stderr: 'Segmentation fault\n',
+    })).toBe(false);
+    expect(isTrustRefusal({ message: 'Command failed: claude --bg\nWorkspace not trusted. Run `claude` in /x once…' })).toBe(false);
   });
 
   it('does not match an unrelated failure', () => {
@@ -1074,6 +1098,41 @@ describe('what the sink actually runs', () => {
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(outcome.run.effects[0].status).toBe('failed');
     expect(inFlightEntries(outcome.run).unknown).toHaveLength(0);
+  });
+
+  // PR #2824 review — producer→parser contract: the message the sink emits for a double trust refusal is what
+  // the daemon logs, so `health-watch-core`'s `dispatch-trust-refused` backstop must recognise THAT text, not
+  // only the CLI's raw stderr.
+  it('#4174 follow-up — the sink\'s own trust-refusal message is counted by the health-watch parser', async () => {
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: () => {
+        throw Object.assign(new Error('Command failed: claude --bg -n x'), {
+          stderr: 'Workspace not trusted. Run `claude` in /x once and accept the trust prompt, then retry.\n',
+        });
+      },
+    });
+    let message = '';
+    try { await sinks[DISPATCH_EFFECT]({ prompt: 'p', sessionSlug: 's', num: '1' }); } catch (e) { message = e.message; }
+    expect(message).toMatch(/no agent exists/);
+    const line = `reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #1 — ${message}`;
+    expect(parseDaemonLog(line).trustRefusals).toBe(1);
+  });
+
+  it('#4174 follow-up — an unrelated failure whose PROMPT mentions "Workspace not trusted" stays INDETERMINATE (PR #2824 review)', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => {
+        throw Object.assign(new Error(`Command failed: claude ${argv.join(' ')} Workspace not trusted\nSegmentation fault`), {
+          stderr: 'Segmentation fault\n',
+        });
+      },
+    });
+    const outcome = await applyPendingEffects(run, { sinks, store });
+    expect(outcome.run.effects[0]).toMatchObject({ status: 'in-flight', handle: null });
+    expect(inFlightEntries(outcome.run).unknown).toHaveLength(1);
   });
 
   it('any OTHER failure is INDETERMINATE — in-flight with no handle, refused on replay', async () => {

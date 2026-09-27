@@ -1248,9 +1248,10 @@ export function isPreSpawnRefusal(error) {
  * CLI prints this and exits before a single tool call, let alone an agent turn, has happened — but it carries no
  * `.code` `isPreSpawnRefusal` recognises, so before this it fell all the way through to the INDETERMINATE branch
  * and every one of those 17 refusals was logged "whether an agent started is UNKNOWN" even though the CLI's own
- * stderr proves the answer is "no". Matched against BOTH `error.stderr` (what `execFileSync` actually captures)
- * and `error.message` (which folds stderr in for some spawn shapes) so neither surface can hide it from the
- * other.
+ * stderr proves the answer is "no". Matched against `error.stderr` ONLY — the CLI's own output stream, which is
+ * where this text lives. NEVER `error.message`: `execFileSync` builds it as `Command failed: claude <argv…>\n
+ * <stderr>`, and the argv carries the dispatch PROMPT (PR/card text), so an unrelated failure whose prompt merely
+ * mentions the phrase would be retried and reclassified out of the INDETERMINATE bucket (PR #2824 review).
  *
  * WHY THIS KEEPS HAPPENING despite `grantDispatchTrust` already granting trust right before every spawn
  * ({@link ensureDispatchSessionCwd}, #4174, plus the `withFileLock` hardening of #4188): the lock only
@@ -1263,11 +1264,11 @@ export function isPreSpawnRefusal(error) {
  * (the `Mac:<pid>` markers in the daemon's own log) make that window real, not theoretical, and it is exactly
  * why the refusal is INTERMITTENT rather than constant: it only bites when another `claude` process's write
  * straddles the grant-to-spawn gap for this one session's fresh, never-reused scratch cwd.
- * @param {{stderr?: string, message?: string}} error
+ * @param {{stderr?: string}} error
  */
 const TRUST_REFUSAL_PATTERN = /Workspace not trusted/;
 export function isTrustRefusal(error) {
-  return TRUST_REFUSAL_PATTERN.test(String(error?.stderr ?? '')) || TRUST_REFUSAL_PATTERN.test(String(error?.message ?? ''));
+  return TRUST_REFUSAL_PATTERN.test(String(error?.stderr ?? ''));
 }
 
 /**

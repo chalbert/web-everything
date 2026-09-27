@@ -296,6 +296,19 @@ describe('parseDaemonLog / foldDaemonMemory — trust refusals', () => {
     const mem = foldDaemonMemory(undefined, sample('fix-dispatch-daemon', 'Workspace not trusted. Run `claude` in /x once and accept the trust prompt, then retry.', { mtimeMs: 0 }), 0);
     expect(mem.trustRefusalTimes).toHaveLength(1);
   });
+
+  // PR #2824 review — memory persisted by a daemon build that predates `trustRefusalTimes` must not crash the fold.
+  it('folds a refusal into LEGACY memory that has no trustRefusalTimes field', () => {
+    const legacy = foldDaemonMemory(undefined, sample('fix-dispatch-daemon', '', { mtimeMs: 0 }), 0);
+    delete legacy.trustRefusalTimes;
+    const mem = foldDaemonMemory(legacy, sample('fix-dispatch-daemon', 'Workspace not trusted. Run `claude` in /x once and accept the trust prompt, then retry.', { mtimeMs: 1, sizeBytes: 10 }), 1);
+    expect(mem.trustRefusalTimes).toHaveLength(1);
+  });
+
+  it('counts the dispatch sink\'s normalized refusal line (lower-case "workspace not trusted")', () => {
+    const line = 'reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #2822 — claude could not be started (workspace not trusted for /x/dispatch/a) — no agent exists';
+    expect(parseDaemonLog(line).trustRefusals).toBe(1);
+  });
 });
 
 describe('smell: dispatch-trust-refused', () => {
@@ -330,6 +343,12 @@ describe('smell: dispatch-trust-refused', () => {
     const state = emptyHealthState();
     const r = runHealthTick(state, { daemonLogs: [sample('fix-dispatch-daemon', text, { mtimeMs: 0 })] }, [dispatchTrustRefused], 0);
     expect(r.transitions.some((t) => t.type === 'opened')).toBe(false);
+  });
+
+  it('opens on the sink\'s normalized refusal lines alone, with no raw CLI stderr logged (PR #2824 review)', () => {
+    const text = ['a', 'b'].map((s) => `reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #2822 — claude could not be started (workspace not trusted for /x/dispatch/${s}) — no agent exists`).join('\n');
+    const r = runHealthTick(emptyHealthState(), { daemonLogs: [sample('fix-dispatch-daemon', text, { mtimeMs: 0 })] }, [dispatchTrustRefused], 0);
+    expect(r.transitions.some((t) => t.type === 'opened' && t.key === 'dispatch-trust-refused::dispatch-trust')).toBe(true);
   });
 });
 

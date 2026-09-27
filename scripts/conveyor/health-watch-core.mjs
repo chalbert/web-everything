@@ -64,8 +64,10 @@ const AUTH_ERROR = /Bad credentials|HTTP 401\b|401 Unauthorized|status(?:Code)?[
 // here too, mirroring `AUTH_ERROR` above, so the `dispatch-trust-refused` smell can see a STREAK across ticks
 // even though `we:scripts/operations/dispatch-lane-io.mjs`'s own spawn-time retry already resolves most of them
 // silently — this is the backstop for whatever still slips through (both retries losing the same race, or a
-// dispatch path that reaches `claude --bg` without going through that retry at all).
-const TRUST_REFUSAL_ERROR = /Workspace not trusted/;
+// dispatch path that reaches `claude --bg` without going through that retry at all). Case-insensitive so it also
+// counts the dispatch sink's own normalized message (`… (workspace not trusted for <dir>) — no agent exists`),
+// which is what the daemon actually logs once both retries lose (PR #2824 review).
+const TRUST_REFUSAL_ERROR = /workspace not trusted/i;
 
 /** Refusal kinds that mean the daemon WANTED to act and could not — the "refusing everything" signal. Every
  *  other kind (`nothing-owed`, `live-process`, `no-findings`, `cap-exhausted`, …) is a correct no-op. */
@@ -277,12 +279,14 @@ export function foldDaemonMemory(prev, sample, now) {
   if (parsed.authErrors > 0) {
     for (let i = 0; i < parsed.authErrors; i += 1) mem.authErrorTimes.push(sample.bootstrap ? sample.mtimeMs : now);
   }
+  // Memory persisted by a build that predates this field has no array yet — default it before pushing.
+  mem.trustRefusalTimes = [...(mem.trustRefusalTimes || [])];
   if (parsed.trustRefusals > 0) {
     for (let i = 0; i < parsed.trustRefusals; i += 1) mem.trustRefusalTimes.push(sample.bootstrap ? sample.mtimeMs : now);
   }
   const keepAfter = now - 2 * HOUR;
   mem.authErrorTimes = mem.authErrorTimes.filter((t) => t >= keepAfter).slice(-200);
-  mem.trustRefusalTimes = (mem.trustRefusalTimes || []).filter((t) => t >= keepAfter).slice(-200);
+  mem.trustRefusalTimes = mem.trustRefusalTimes.filter((t) => t >= keepAfter).slice(-200);
   mem.noLaneTimes = mem.noLaneTimes.filter((e) => e.at >= keepAfter).slice(-500);
   mem.recentTicks = mem.recentTicks.filter((e) => e.at >= keepAfter).slice(-300);
   mem.prRefusals = Object.fromEntries(Object.entries(mem.prRefusals).sort((a, b) => b[1].at - a[1].at).slice(0, 200));
