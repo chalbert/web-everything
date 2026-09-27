@@ -873,6 +873,47 @@ describe('ci-red-recovery-watch — sweepMissingRunRecovery (PR #2729 fixture: z
     });
     expect(result.dispatch).toEqual([]);
   });
+
+  // Live incident, chalbert/web-everything#2793 (landing freeze, 2026-09-27) — real `gh pr view` shape: base
+  // `main`, `mergeable: CONFLICTING`, `mergeStateStatus: DIRTY`, empty rollup, head sha
+  // 8be3bce0e51990837b7f9c016b407ec0f1657a1c already carrying 2 prior missing-run trigger-attempt comments.
+  // Before the fix this sweep triggered CI a third time (or, having already spent 2 attempts, refused
+  // `missing-run-cap-exhausted`) on a PR that can never produce a `pull_request` run at all — see
+  // `main-red-recovery.mjs#buildMissingRunCandidates`'s own docblock. After the fix it is not this pass's
+  // population at all: no dispatch, no refusal, `trigger` never called.
+  const PR_2793 = {
+    number: 2793, headRefName: 'lane/rerun-after-main-fix', baseRefName: 'main',
+    headRefOid: '8be3bce0e51990837b7f9c016b407ec0f1657a1c', mergeable: 'CONFLICTING', statusCheckRollup: [],
+    labels: [{ name: 'review:pending' }, { name: 'merge-status:conflicting' }],
+  };
+  const PR_2793_PRIOR_ATTEMPTS = [
+    { body: '🚦 conveyor missing-run-recovery\n\nsha: 8be3bce0e51990837b7f9c016b407ec0f1657a1c\nattempt 1', author: { login: 'web-everything' } },
+    { body: '🚦 conveyor missing-run-recovery\n\nsha: 8be3bce0e51990837b7f9c016b407ec0f1657a1c\nattempt 2', author: { login: 'web-everything' } },
+  ];
+
+  it('RED before the fix: #2793\'s real shape (mergeable CONFLICTING, empty rollup, 2 prior attempts) refuses missing-run-cap-exhausted', () => {
+    const { mergeable, ...withoutMergeable } = PR_2793; // reproduces the pre-fix read (no `mergeable` in extraFields)
+    const trigger = vi.fn();
+    const result = sweepMissingRunRecovery({
+      apply: true, readOpenPrs: () => [withoutMergeable], readRequiredContexts: () => ['test'],
+      readHeadCommittedAt: () => '2026-09-27T01:00:00Z', readAheadBy: () => 0, readComments: () => PR_2793_PRIOR_ATTEMPTS,
+      trigger, now: Date.parse('2026-09-27T05:50:00Z'),
+    });
+    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2793, kind: 'missing-run-cap-exhausted' })]);
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it('GREEN after the fix: #2793\'s real conflicting shape is excluded outright — no dispatch, no refusal, never triggered', () => {
+    const trigger = vi.fn();
+    const result = sweepMissingRunRecovery({
+      apply: true, readOpenPrs: () => [PR_2793], readRequiredContexts: () => ['test'],
+      readHeadCommittedAt: () => '2026-09-27T01:00:00Z', readAheadBy: () => 0, readComments: () => PR_2793_PRIOR_ATTEMPTS,
+      trigger, now: Date.parse('2026-09-27T05:50:00Z'),
+    });
+    expect(result.dispatch).toEqual([]);
+    expect(result.refusals).toEqual([]);
+    expect(trigger).not.toHaveBeenCalled();
+  });
 });
 
 describe('ci-red-recovery-watch — formatMissingRunReport', () => {

@@ -47,7 +47,11 @@ export { healthDir, healthSectionLines };
 import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
+import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
+import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
+import { stuckOnPermissionPrompt } from './health-smells/dispatch-permission-stall.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
 import { RUNNER_LOCK_ROOT } from '../../skills-src/conveyor/runner-lock.mjs';
@@ -303,11 +307,50 @@ export function probeMachineLoad({ getLoadAvg = loadavg, getCpuCount = () => cpu
   return { load1, load5, load15, cpuCount: Math.max(1, getCpuCount()) };
 }
 
+/** `gh-call-failures`' input: the TAIL (last `maxBytes`) of gh-throttle's sidecar `calls.jsonl`, parsed. The
+ *  file grows unbounded (14MB live), so only the tail is read; a torn first line is skipped. `[]` if absent. */
+export function probeGhCalls({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), maxBytes = 2 * 1024 * 1024 } = {}) {
+  if (!existsSync(logPath)) return [];
+  const size = statSync(logPath).size;
+  const len = Math.min(size, maxBytes);
+  const buf = Buffer.alloc(len);
+  const fd = openSync(logPath, 'r');
+  try { readSync(fd, buf, 0, len, size - len); } finally { closeSync(fd); }
+  const out = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch { /* torn first line / partial write */ }
+  }
+  return out;
+}
+
+/** `gh-graphql-budget`'s input: the App installation's REAL GraphQL bucket (the in-band `rateLimit` field — never
+ *  the REST `/rate_limit` endpoint, whose `graphql` entry disagreed with it live) plus the throttle's active
+ *  shared budget-block records. 1 GraphQL point per tick. */
+export function probeGraphqlBudget({ exec = run, lockRoot = ghThrottleLockRoot(), nowMs = Date.now() } = {}) {
+  let sample = null;
+  try {
+    const raw = exec('gh', budgetProbeArgs('graphql'));
+    const j = JSON.parse(String(raw || '{}'))?.data?.rateLimit;
+    if (j && typeof j.remaining === 'number') sample = { remaining: j.remaining, limit: typeof j.limit === 'number' ? j.limit : null, resetAt: j.resetAt || null };
+  } catch { sample = null; }
+  const blocks = [];
+  try {
+    for (const f of readdirSync(lockRoot)) {
+      if (!/^budget-block-.*\.json$/.test(f)) continue;
+      try { const b = JSON.parse(readFileSync(join(lockRoot, f), 'utf8')); if (Number.isFinite(b?.untilMs) && b.untilMs > nowMs) blocks.push(b); } catch { /* torn */ }
+    }
+  } catch { /* no lock root yet */ }
+  return { sample, blocks };
+}
+
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
-    const raw = exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']);
-    for (const pr of JSON.parse(raw)) {
+    // #gh-graphql-budget — the host-shared open-PR snapshot when this is the real `run` (never a test's fake exec).
+    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt' }) : null;
+    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']));
+    for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
@@ -353,6 +396,35 @@ export function probeAuthExpiredSessions(agents, { readInfo = readClaudeAuthExpi
     if (info?.authExpired !== true) continue;
     const startedAt = typeof a.startedAt === 'number' ? a.startedAt : Date.parse(a.startedAt ?? '');
     out.push({ name: a.name ?? null, startedAt: Number.isFinite(startedAt) ? startedAt : null });
+  }
+  return out;
+}
+
+/**
+ * #x9fbg1x, live incident `fix-2748`/`fix-2770` (2026-09-26) — reads each session `stuckOnPermissionPrompt`
+ * (`we:scripts/conveyor/health-smells/dispatch-permission-stall.mjs`) already names as stuck on an unanswerable
+ * permission prompt, and asks the SAME shared detector `reconcile-core.mjs#markBgIsolationStalls` uses
+ * (`we:scripts/conveyor/bg-isolation-stall.mjs#readBgIsolationStallInfo`) whether its OWN transcript shows
+ * Claude Code's own background-session worktree-isolation guard refusal ("Call EnterWorktree first…")
+ * specifically, rather than some other permission gate (e.g. the lane-grant one `dispatch-permission-stall`
+ * already covers generically). Returns only the ones it confirms — modeled directly on
+ * {@link probeAuthExpiredSessions} just above, same shape, same "read a transcript only for a candidate the
+ * cheap listing check already narrowed to" cost discipline.
+ * @param {Array<{name?:string, kind?:string, state?:string, waitingFor?:string, cwd?:string, sessionId?:string, startedAt?:string|number}>} agents
+ * @param {{readInfo?:Function}} [io]
+ * @returns {Array<{name:string, sessionId:string|null, cwd:string|null, startedAt:number|null, evidence:string|null}>}
+ */
+export function probeBgIsolationStalls(agents, { readInfo = readBgIsolationStallInfo } = {}) {
+  const out = [];
+  for (const a of stuckOnPermissionPrompt(agents)) {
+    let info = null;
+    try { info = readInfo(a); } catch { info = null; }
+    if (info?.stall !== true) continue;
+    const startedAt = typeof a.startedAt === 'number' ? a.startedAt : Date.parse(a.startedAt ?? '');
+    out.push({
+      name: a.name ?? null, sessionId: a.sessionId ?? null, cwd: a.cwd ?? null,
+      startedAt: Number.isFinite(startedAt) ? startedAt : null, evidence: info.evidence ?? null,
+    });
   }
   return out;
 }
@@ -436,6 +508,12 @@ export async function tick(flags = {}) {
   probes.machineLoad = attempt('machineLoad', () => (flags['machine-load-fixture']
     ? JSON.parse(readFileSync(flags['machine-load-fixture'], 'utf8'))
     : probeMachineLoad()));
+  // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
+  probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
+  // `gh-graphql-budget` — every tick (1 GraphQL point): the real bucket + the throttle's shared budget blocks.
+  // `--graphql-budget-fixture=FILE` (a `{sample, blocks}` JSON) in tests; skipped under `--no-gh`.
+  if (flags['graphql-budget-fixture']) probes.graphqlBudget = attempt('graphqlBudget', () => JSON.parse(readFileSync(flags['graphql-budget-fixture'], 'utf8')));
+  else if (!flags['no-gh']) probes.graphqlBudget = attempt('graphqlBudget', () => probeGraphqlBudget());
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
@@ -452,6 +530,9 @@ export async function tick(flags = {}) {
     // claude-auth-expired's own probe needs only `agents` (the exact same listing, same cadence) — independent
     // of whether `prs` also succeeded this tick, same reasoning as stale-claim's two probes just below.
     if (agents) probes.authExpired = attempt('authExpired', () => probeAuthExpiredSessions(agents));
+    // #x9fbg1x — same cadence/gating reasoning as `authExpired` just above: needs only the same `agents`
+    // listing, independent of whether `prs` also succeeded this tick.
+    if (agents) probes.bgIsolationStalls = attempt('bgIsolationStalls', () => probeBgIsolationStalls(agents));
     // stale-claim's two probes ride the same 'gh' cadence (both are gh/git-heavy reads); independent of the
     // prs/agents pairing above — one failing never blocks the other.
     const staleState = attempt('staleState', () => probeStaleState());

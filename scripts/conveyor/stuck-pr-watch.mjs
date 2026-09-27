@@ -43,6 +43,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { createGhProvider } from '../lib/review-label-provider.mjs';
@@ -72,6 +73,9 @@ export const PR_LIST_JSON_FIELDS = 'number,headRefName,headRefOid,labels,mergeab
  * @returns {Array<object>}
  */
 export function defaultListOpenPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
+  // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
+  // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: PR_LIST_JSON_FIELDS }); if (shared) return shared; }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });

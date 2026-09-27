@@ -29,7 +29,32 @@ import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
+// #xconv1-evidence (chalbert/web-everything#2766/#2767 misfire) — a CONVERTED advisory note
+// (`we:scripts/lib/review-escalation.mjs#renderConvertedAdvisoryNote`, posted by
+// `we:scripts/conveyor/convert-advisory-dispatch.mjs`) carries its OWN leading marker, never
+// `ADVISORY_NOTE_MARKER` (that one is `renderAdvisoryNote`'s, in `we:scripts/operations/review-pr.mjs`). Both
+// functions below used to recognize ONLY `ADVISORY_NOTE_MARKER` as "an advisory note is here" — so a PR whose
+// only advisory note was a CONVERTED one (#2766/#2767's exact shape) never had a `lastNoteIndex` at all:
+// {@link isLatestAdvisoryFindingAddressed} returned `false` UNCONDITIONALLY, no matter what a fixer posted
+// afterward, and `we:scripts/conveyor/reconcile-core.mjs`'s advisory-fix branch kept re-dispatching a fixer that
+// could never mechanically prove "addressed" — CONFIRMED as the reason 3 advisory-fix rounds each correctly
+// found nothing to fix and still burned the cap to `cap-exhausted (3/3)`. `isAdvisoryNoteLine` below is the one
+// place both leading-line checks are widened to accept EITHER marker, so the two counters can never drift apart
+// on which notes exist again.
+import { CONVERTED_ADVISORY_NOTE_MARKER } from '../lib/review-escalation.mjs';
 import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
+
+/** #xconv1-evidence — pure: is `body`'s leading line EITHER shape of advisory note (a fresh `advise`-step one,
+ *  or a converted #xconv1 one)? Single-sourced so {@link isLatestAdvisoryFindingAddressed} and
+ *  {@link isAdvisoryMechanismStandDownSuperseded} can never disagree on what counts as "a note happened here".
+ * @param {string} body
+ * @returns {boolean}
+ */
+function isAdvisoryNoteLine(body) {
+  if (typeof body !== 'string') return false;
+  const head = body.trimStart();
+  return head.startsWith(ADVISORY_NOTE_MARKER) || head.startsWith(CONVERTED_ADVISORY_NOTE_MARKER);
+}
 // #3383 — the shared trusted-author gate every marker COUNTER runs a comment through (broader than
 // `isSelfAuthored` above: automation OR the repo operator). `isSelfAuthored` stays in use, unchanged, for the
 // two narrower ORDER-based supersede checks below — that is a distinct, already-reviewed discipline
@@ -125,7 +150,7 @@ export function isLatestAdvisoryFindingAddressed(comments) {
   let lastNoteIndex = -1;
   for (let i = 0; i < comments.length; i += 1) {
     const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_NOTE_MARKER)) lastNoteIndex = i;
+    if (isAdvisoryNoteLine(body)) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < comments.length; j += 1) {
@@ -175,7 +200,7 @@ export function isAdvisoryMechanismStandDownSuperseded(comments, index) {
   let lastNoteIndex = -1;
   for (let i = 0; i < before.length; i += 1) {
     const b = typeof before[i] === 'string' ? before[i] : before[i]?.body;
-    if (typeof b === 'string' && b.trimStart().startsWith(ADVISORY_NOTE_MARKER)) lastNoteIndex = i;
+    if (isAdvisoryNoteLine(b)) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < before.length; j += 1) {

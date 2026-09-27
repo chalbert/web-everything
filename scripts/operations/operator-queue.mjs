@@ -87,6 +87,9 @@ export function evaluatePr(pr) {
     reasons.push(`label/comment disagreement: ${ADVISORY_LABELS.CHANGES} is set but ${parsedText}`);
   } else if (!accepted && parsed === ADVISORY_OUTCOMES.ACCEPT) {
     reasons.push(`label/comment disagreement: ${parsedText} but ${ADVISORY_LABELS.ACCEPTED} is absent`);
+  } else if (parsed && parsed !== ADVISORY_OUTCOMES.ACCEPT && parsed !== ADVISORY_OUTCOMES.CHANGES) {
+    // A converted note's `inconclusive` (PR #2781 review, round 4): neither cleared nor blocking, no label owed.
+    reasons.push(`advisory is ${parsed} on this head (a human must confirm the escalation)`);
   }
 
   const checks = (pr.statusCheckRollup ?? []).filter((check) => check.name !== 'review-gate');

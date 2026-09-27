@@ -697,6 +697,37 @@ describe('main-red-recovery — buildMissingRunCandidates / isMissingRunOverdue 
     expect(buildMissingRunCandidates([PR_2729], { requiredContexts: null })).toEqual([expect.objectContaining({ prNumber: 2729 })]);
   });
 
+  // Live incident, chalbert/web-everything#2793 (landing freeze, 2026-09-27): real `gh pr view` shape —
+  // `mergeable: CONFLICTING`, `mergeStateStatus: DIRTY`, empty `statusCheckRollup` (GitHub creates no merge ref
+  // for a conflicting PR, so no `pull_request`-triggered check can ever start). Before the fix this read as an
+  // ordinary missing-run candidate and got retriggered every sweep until the cap burned — a permanent
+  // false-positive with nothing to do with "GitHub hasn't noticed the push yet".
+  const PR_2793_CONFLICTING = {
+    number: 2793,
+    headRefName: 'lane/rerun-after-main-fix',
+    headRefOid: '8be3bce0e51990837b7f9c016b407ec0f1657a1c',
+    mergeable: 'CONFLICTING',
+    statusCheckRollup: [],
+  };
+
+  it('RED before the fix: a real merge conflict (mergeable CONFLICTING, empty rollup) reads as an ordinary missing-run candidate', () => {
+    // Reproduces the pre-fix shape by ignoring `mergeable` — pinned so a future regression that stops passing
+    // `mergeable` through silently re-opens the #2793 cap-burn.
+    const { mergeable, ...withoutMergeable } = PR_2793_CONFLICTING;
+    expect(buildMissingRunCandidates([withoutMergeable], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([
+      expect.objectContaining({ prNumber: 2793 }),
+    ]);
+  });
+
+  it('GREEN after the fix: a real merge conflict (mergeable CONFLICTING) is NEVER a missing-run candidate, whatever its rollup — #2793', () => {
+    expect(buildMissingRunCandidates([PR_2793_CONFLICTING], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([]);
+    // Case-insensitive, and inert (unchanged behaviour) when `mergeable` is absent entirely.
+    expect(buildMissingRunCandidates([{ ...PR_2793_CONFLICTING, mergeable: 'conflicting' }], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([]);
+    expect(buildMissingRunCandidates([PR_2729], { requiredContexts: REQUIRED_CONTEXTS })).toEqual([
+      expect.objectContaining({ prNumber: 2729 }),
+    ]);
+  });
+
   it('the missing-run marker records a fallen-back refresh outcome', () => {
     expect(buildMissingRunComment({ headSha: 'sha-a', ok: true, action: 'workflow-dispatch', refresh: 'skip', refreshError: 'conflict' }))
       .toContain('triggered CI via workflow-dispatch (refresh onto main first: skip — conflict)');

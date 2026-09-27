@@ -118,7 +118,7 @@ import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 // and an advisory-fix round on a `needs-human` PR carrying `advisory:changes`. Both are true leaves — no fs, no
 // clock, no process, no network — so importing them keeps this file PURE and leaf-light exactly as its own
 // header requires.
-import { countConflictFixComments, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
+import { countStaleConflictFixRounds, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 import {
   countAdvisoryFixComments, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
@@ -138,7 +138,13 @@ import {
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
-import { parseReviewedSha } from '../lib/review-escalation.mjs';
+import { parseReviewedSha, planConvertSupersededVerdict, targetedCheckQuestion } from '../lib/review-escalation.mjs';
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — a PR whose own content is ALREADY on `main`,
+// carried there by a different PR that stacked on its branch and merged first, never owes a fix or a review.
+// The verdict itself (`pr.alreadyLandedInMain`, per-file blob-identity evidence) is computed by the IO shell
+// (`we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts`, `we:scripts/lib/
+// already-landed-content.mjs`); this file only reads the already-decided fact off the PR record, exactly like
+// `requiredCheckCompletedAt`/`aheadByOnMain` above.
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
@@ -158,7 +164,12 @@ import { parseReviewedSha } from '../lib/review-escalation.mjs';
  * being re-planned, and the cap is the SAME durable floor (`countCiHealComments`) either path would read off
  * the PR, never two independent counters.
  */
-export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
+// #xconv1 (chalbert/web-everything#2766/#2767 unblock) — `convert-advisory` is the FOURTH kind: a `needs-human`
+// PR whose CURRENT head already completed an independent jury review that a LATER escalation superseded (never
+// a fresh push — see the ONE-REVIEW-PER-HEAD block below). It converts that verdict into the standing advisory
+// note plus one targeted check on the escalation's own reason, instead of dispatching a whole second panel run
+// (`kind:'review'`) at a head nobody has touched since — see {@link planConvertSupersededVerdict}.
+export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal', 'convert-advisory']);
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#REFUSAL_KINDS — every reason this pass declines to dispatch. Frozen and
@@ -207,12 +218,26 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          A review already ran against this exact commit; dispatching another risks a second,
  *                          contradicting verdict landing on a commit nobody has touched since (the live #2588
  *                          incident this refusal closes: 3 review sessions in 16 minutes on one head, "changes"
- *                          then "accepted" 5 minutes apart).
+ *                          then "accepted" 5 minutes apart). #xconv1 (chalbert/web-everything#2766/#2767
+ *                          unblock) carved out ONE exception: a `needs-human` PR in this exact shape whose
+ *                          comments also carry a LATER escalation (test-gaming/manifest-tamper park, or the
+ *                          #2773 mutual-exclusivity heal) is not this risk at all — `review:human` already
+ *                          forbids a second ACCEPT — so that shape dispatches `kind:'convert-advisory'` instead
+ *                          of refusing here; see `planConvertSupersededVerdict` and {@link dispatchReviewRow}.
+ *   `already-landed`    — live incident, chalbert/web-everything PR #2752 (#4034/#2748): every file this PR
+ *                          touches is byte-identical to some commit already on `main` — its own content was
+ *                          carried there by a DIFFERENT PR (often one stacked on its branch that merged first)
+ *                          while THIS PR's ref was separately rebased and drifted into an apparent conflict.
+ *                          Nothing is owed here — not a fix (there is nothing left to change), not a review
+ *                          (there is nothing new to judge) — and dispatching a fix risks it "resolving" the
+ *                          apparent conflict by reverting the carrier PR's later work. This PR should be closed
+ *                          and its backlog card resolved, never dispatched; see
+ *                          `we:scripts/conveyor/already-landed-watch.mjs` for the pass that acts on it.
  */
 export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
-  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head',
+  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head', 'already-landed',
 ]);
 
 /**
@@ -265,14 +290,37 @@ export const CI_HEAL_ROUND_CAP = 3;
 /**
  * we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ROUND_CAP — the durable cap a MECHANICAL
  * conflict-resolution round binds on (#xkmu3gv). Mirrors {@link CI_HEAL_ROUND_CAP} exactly: its OWN, smaller
- * cap, counted by `we:scripts/conveyor/conflict-fix-round-count.mjs#countConflictFixComments` — never
- * `roundCap`'s shared rearm/advisory counters, and never reduced by however many ordinary negotiation rounds a
+ * cap, counted by `we:scripts/conveyor/conflict-fix-round-count.mjs#countStaleConflictFixRounds` (2026-09-27:
+ * counts only rounds against the CURRENT target, see {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock for
+ * why a plain per-marker count was wrong) — never `roundCap`'s shared rearm/advisory counters, and never
+ * reduced by however many ordinary negotiation rounds a
  * PR has already spent (CONFIRMED LIVE: `chalbert/web-everything#2549` was already at 5 of 5 ordinary rounds
  * when PR #2577's routing rule newly offered it a conflict fix, and the shared cap refused it before the fixer
  * ever ran — see that leaf's own header for the full incident). A PR that ALSO exhausts three
  * conflict-resolution rounds still needs a person, exactly as an exhausted `roundCap` does.
  */
 export const CONFLICT_FIX_ROUND_CAP = 3;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#CONFLICT_FIX_ABSOLUTE_CEILING — PR #2787 live incident (2026-09-27):
+ * `main` moving fast made THREE mechanical conflict-resolution rounds each genuinely SUCCEED (each posted its
+ * own {@link CONFLICT_FIX_COMMENT_MARKER}) against three DIFFERENT targets in a row (a stacked base rebased
+ * twice, then the base itself landed and the PR retargeted to `main`) — `countConflictFixComments` could not
+ * tell "the same conflict still unresolved" apart from "a fresh conflict against newer work", so
+ * {@link CONFLICT_FIX_ROUND_CAP} (3) was spent on three CLEAN repairs and the fourth, genuinely first-ever
+ * main-base conflict was refused `cap-exhausted` before a fixer ever tried it.
+ * {@link countStaleConflictFixRounds} now counts against `CONFLICT_FIX_ROUND_CAP` only the rounds that resolved
+ * the SAME target this PR is STILL conflicting against (same ref, same sha where known) — a round against a
+ * ref/sha that has since moved on doesn't count, because the mechanism worked; the PR just kept getting new
+ * work under it. That alone would let a PR whose target genuinely never stops moving retry FOREVER, though
+ * (every round would look "fresh" by construction) — this is the hard ceiling that still catches THAT true
+ * loop: the RAW total of conflict-fix rounds ever run (`countStaleConflictFixRounds`'s own `total`), regardless
+ * of staleness, still refuses `cap-exhausted` once it reaches this bound. 3x the per-target cap — generous
+ * enough that a PR legitimately outrunning a fast-moving target for a while is not punished for it, but still
+ * finite: a PR that needed this many rounds, of ANY kind, is exactly the "a person must take it over" case
+ * {@link CONFLICT_FIX_ROUND_CAP} already exists to name.
+ */
+export const CONFLICT_FIX_ABSOLUTE_CEILING = CONFLICT_FIX_ROUND_CAP * 3;
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#ADVISORY_FIX_ROUND_CAP — the durable cap an ADVISORY-FIX round on a
@@ -630,6 +678,33 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#markBgIsolationStalls — #x9fbg1x: mark each listed session ALREADY
+ * classified {@link isAwaitingPermission} whose OWN transcript shows Claude Code's own background-session
+ * worktree-isolation guard refusal ("Call EnterWorktree first…") as `bgIsolationStall: true`. Pure (the
+ * classification is injected via `stallInfoFor`); modeled directly on {@link markHungSessions} just above —
+ * a SEPARATE pre-pass over AGENT rows, run before {@link assessLiveness}, never a change to that pinned
+ * function itself (which only reads the flag this pass attaches).
+ *
+ * ONLY CALLS `stallInfoFor` FOR A SESSION ALREADY AWAITING PERMISSION — cheap by construction: every other
+ * session skips a transcript read entirely, so this pass costs nothing on the common (not-stuck) path. See
+ * `we:scripts/conveyor/bg-isolation-stall.mjs` for the detector (a THIRD mechanical signal in the same family
+ * as `we:scripts/conveyor/hung-session.mjs`, reusing its exact transcript-tail-read machinery).
+ * @param {Array<object>} agents - the `claude agents --json` rows.
+ * @param {(agent:object) => ({stall:boolean, reason?:string, evidence?:string|null})} stallInfoFor
+ * @returns {Array<object>} the same rows; stalled ones gain `bgIsolationStall: true`, `bgIsolationStallEvidence`
+ */
+export function markBgIsolationStalls(agents, stallInfoFor) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (!isAwaitingPermission(a)) return a; // cheap skip — see docblock
+    let info = null;
+    try { info = stallInfoFor(a); } catch { info = null; }
+    if (!info || info.stall !== true) return a;
+    return { ...a, bgIsolationStall: true, bgIsolationStallEvidence: info.evidence ?? null };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#markAuthExpiredSessions — mark each listed session whose OWN
  * transcript ends on the Claude CLI's own synthetic auth-failure turn (`isApiErrorMessage` with an
  * `authentication_failed` error or `Login expired · Please run /login`) as `authExpired: true`. Pure (the
@@ -813,10 +888,26 @@ export function assessLiveness(bound) {
 
   for (const b of list) {
     if (isAwaitingPermission(b.agent)) {
+      // #x9fbg1x — a MORE SPECIFIC reason, layered on top of the generic fifth state, when
+      // `markBgIsolationStalls` (a separate pre-pass, mirroring `markHungSessions`) has already read this
+      // session's OWN transcript and confirmed the block is Claude Code's own background-session
+      // worktree-isolation guard ("Call EnterWorktree first…") rather than some other permission prompt. Never
+      // changes `kind` (still `awaiting-permission` — the dispatch refusal is identical either way) or
+      // `REFUSAL_KINDS`'s exhaustive set; purely an added, clearer `why`/`stallReason` for a human or the
+      // health watch to act on precisely, rather than filing it under the same catch-all as every other
+      // unanswerable prompt. See `we:scripts/conveyor/bg-isolation-stall.mjs` for the detector.
+      const stalled = b.agent?.bgIsolationStall === true;
       return {
-        ...ev(b, 'awaiting-permission', `session is blocked on "${String(b.agent.waitingFor)}" — a background agent has nobody to ask, so it will never advance on its own`),
+        ...ev(
+          b,
+          'awaiting-permission',
+          stalled
+            ? 'session is blocked on Claude Code\'s own background-session worktree-isolation guard ("Call EnterWorktree first…") — the dispatched session\'s lane clone already IS its isolation, so this is a product-fixable stall (bg-isolation-stall), not a genuine question for a human'
+            : `session is blocked on "${String(b.agent.waitingFor)}" — a background agent has nobody to ask, so it will never advance on its own`,
+        ),
         startedAt: b.agent?.startedAt ?? null,
         waitingFor: String(b.agent.waitingFor),
+        ...(stalled ? { stallReason: 'bg-isolation-stall' } : {}),
       };
     }
   }
@@ -874,6 +965,31 @@ function dispatchReviewRow({
   const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
   const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
   if (headSha && reviewedSha && reviewedSha === headSha) {
+    // #xconv1 (chalbert/web-everything#2766/#2767 unblock, epic #3383/#4075) — a `needs-human` PR in this
+    // EXACT shape (accepted, then escalated — never a fresh push, or `reviewedSha` would no longer equal
+    // `headSha`) is NOT the #2588 risk this refusal exists for: `review-pr.mjs`'s own `confirm` step
+    // already refuses a second ACCEPT on a `review:human` PR (we:skills-src/review/SKILL.md, "A
+    // `review:human` PR is never agent-cleared"), so dispatching here can never land the contradicting
+    // verdict #2588 lived. What IS owed is CONVERTING the superseded verdict into the standing advisory
+    // note plus one targeted check on the escalation's own reason — never re-running the whole panel.
+    // Checked ONLY for `needs-human`: a `needs-review` PR in this shape is the genuine #2588 race (no
+    // escalation ever posted there — the label would have moved off `needs-review` the moment
+    // `review:accepted` landed), so it keeps the ORIGINAL, unconditional refusal below.
+    const conversion = withPhase?.phase === 'needs-human'
+      ? planConvertSupersededVerdict({ headSha, reviewedSha, comments: pr?.comments })
+      : { convert: false };
+    if (conversion.convert) {
+      dispatch.push({
+        ...base, ...withPhase, kind: 'convert-advisory', headSha, reviewedSha, ...extra,
+        acceptComment: conversion.acceptComment, escalation: conversion.escalation,
+        targetedCheckQuestion: targetedCheckQuestion(conversion.escalation),
+        why: `this head (\`${headSha}\`) already completed an independent jury review, superseded by a ` +
+          `later ${conversion.escalation.kind} escalation, not by any defect the panel found — convert ` +
+          'that verdict into the standing advisory note (plus one targeted check on the escalation ' +
+          'reason) instead of re-running the whole panel (#xconv1)',
+      });
+      return;
+    }
     refuse('already-reviewed-head', {
       ...withPhase, headSha, reviewedSha, ...extra,
       why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +
@@ -943,6 +1059,9 @@ function dispatchReviewRow({
  *   labels,statusCheckRollup,mergeStateStatus,comments` returns them, each optionally carrying `transcriptMtimeMs`
  *   (EVIDENCE ONLY — no decision reads it). `baseRefName` is what the STACKED-BASE CONFLICT branch keys on
  *   (#3383); its absence just means every `conflicted` PR falls through to the pre-#3383 `owed-elsewhere` path.
+ *   `alreadyLandedInMain` (optional, `{carrierPr:(number|null)}`) is the ALREADY-LANDED verdict (live incident
+ *   PR #2752) computed by the IO shell's per-file blob-identity check against `main`'s own history; its absence
+ *   means every PR falls through unaffected, exactly as before this branch existed.
  * @param {Array<object>} [o.agents] - `claude agents --json` entries, each optionally carrying the two facts the
  *   listing cannot supply and the IO shell resolves: `laneHeadOid` (the `HEAD` of the lane at `cwd`) and
  *   `pidAlive` (`process.kill(pid, 0)` → `true`/`false`; absent = not probed = UNKNOWN).
@@ -1013,6 +1132,12 @@ export function planReconcile({
   // OPTION, never an env read — this file stays pure; a test sets it directly to exercise both sides of the
   // bound with no clock mocking.
   liveSessionOverrunMs = LIVE_SESSION_OVERRUN_MS,
+  // #2787-live-incident (2026-09-27) — `origin/<defaultBranch>`'s own current tip, a CHEAP, purely-local fact
+  // (`reconcile-pass.mjs`'s IO shell resolves it with one `git rev-parse`, piggybacked on the fetch
+  // `assertMainNotStale` already ran this same tick — no extra `gh` call, no GraphQL/REST budget exposure).
+  // `null` (the default, and what every existing test/caller gets unless it opts in) degrades the staleness
+  // comparison below to ref-name-only — see {@link countStaleConflictFixRounds}'s own docblock.
+  mainSha = null,
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -1058,6 +1183,20 @@ export function planReconcile({
       prContainsMainGreenSha: typeof pr?.prContainsMainGreenSha === 'boolean' ? pr.prContainsMainGreenSha : null,
       mergeBaseCheckRuns: Array.isArray(pr?.mergeBaseCheckRuns) ? pr.mergeBaseCheckRuns : null,
       mergeBaseRunConclusion: typeof pr?.mergeBaseRunConclusion === 'string' ? pr.mergeBaseRunConclusion : null,
+      // #x9fbg1x-live-incident (2026-09-27) — the PR's OWN already-changed files, when the IO shell's `gh pr
+      // list` read carried them (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS` now asks for `files`, served for free
+      // off the shared `#gh-graphql-budget` snapshot — see `pr-snapshot.mjs#SNAPSHOT_FIELDS`, which already
+      // fetches this for every open PR). EVIDENCE ONLY here (no decision in THIS file reads it — mirrors
+      // `aheadByOnMain`/`body` above); `reconcile-fix-dispatch.mjs#planFixesFromReconcile` reads it so a
+      // no-declared-scope fix dispatch can fence itself off this PR's real changed files WITHOUT a second,
+      // rate-limit-exposed `gh pr diff` call of its own. Projected to plain repo-relative path strings (the
+      // same shape `fetchDiffPaths` already returns) right here at the pure core's boundary, not left as raw
+      // `{path, additions, deletions}` objects for every consumer to re-derive. `null` (not `[]`) when the
+      // shell's own read did not carry `files` at all (an older caller, or a `--prs-file` snapshot built before
+      // this field existed) — a caller must tell "not fetched" apart from "genuinely no files changed".
+      files: Array.isArray(pr?.files)
+        ? pr.files.map((f) => (typeof f?.path === 'string' ? f.path : String(f ?? ''))).filter(Boolean)
+        : null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
     // xilx617 (epic #4075/#3383) — EVERY `cap-exhausted` refusal EXCEPT the `ci-red` one above (which already
@@ -1135,6 +1274,9 @@ export function planReconcile({
       refuse(live.kind, {
         pid: live.pid, cwd: live.cwd, sha: live.sha, sessionId: live.sessionId, why: live.why,
         ...(live.waitingFor ? { waitingFor: live.waitingFor, startedAt: live.startedAt } : {}),
+        // #x9fbg1x — the MORE SPECIFIC reason, when `markBgIsolationStalls` confirmed one; never present
+        // otherwise, so an ordinary `awaiting-permission` refusal is byte-identical to before this existed.
+        ...(live.stallReason ? { stallReason: live.stallReason } : {}),
       });
       // The permission block is the case that must never be merely refused. Three sessions have held one for
       // 211.4 hours; a refusal buried in a list is how that stayed invisible. It gets its own surfaced note.
@@ -1144,8 +1286,10 @@ export function planReconcile({
         notes.push({
           kind: 'awaiting-permission', prNumber, pid: live.pid, cwd: live.cwd, sessionId: live.sessionId,
           waitingFor: live.waitingFor, startedAt: live.startedAt, heldHours,
+          ...(live.stallReason ? { stallReason: live.stallReason } : {}),
           text: `PR #${prNumber}: a session in ${live.cwd} is blocked on "${live.waitingFor}"`
-            + `${heldHours == null ? '' : ` for ${heldHours}h`} and nobody is there to answer it — nothing here will advance until a person clears it`,
+            + `${heldHours == null ? '' : ` for ${heldHours}h`} and nobody is there to answer it — nothing here will advance until a person clears it`
+            + (live.stallReason === 'bg-isolation-stall' ? ' (confirmed: Claude Code\'s own EnterWorktree/bgIsolation guard — see we:scripts/lib/dispatch-bg-isolation.mjs)' : ''),
         });
       }
       // xilx617 (epic #4075/#3383) — a LIVE session (never `awaiting-permission`, which already notes above)
@@ -1174,6 +1318,34 @@ export function planReconcile({
     }, requiredChecks);
     const check = reduceCheckState(pr?.statusCheckRollup, requiredChecks);
     const withPhase = { phase, check: check.state, labels: labelNames(pr?.labels) };
+
+    // ── ALREADY-LANDED — its OWN branch, AHEAD OF EVERY OTHER CHECK IN THIS LOOP (`ci-red`, the advisory-fix
+    // branch, STACKED-BASE, the generic `OWED` table — every one of them would otherwise dispatch a fixer or a
+    // reviewer at a PR with nothing left to change). Live incident, chalbert/web-everything PR #2752: bounced
+    // (`review:changes`) AND `merge-status:conflicting`, which — unchecked — hits `isConflictBounce` below and
+    // dispatches a mechanical conflict-fix. But every file it touches is already, byte-for-byte, on `main`
+    // (carried there by PR #2759, which stacked on #2752's branch and merged first); a fixer would find nothing
+    // to repair, and one asked to "resolve the conflict" could revert the carrier PR's later work instead. The
+    // verdict (`pr.alreadyLandedInMain`) is computed by the IO shell from PER-FILE BLOB IDENTITY against `main`'s
+    // own commit history — see `we:scripts/lib/already-landed-content.mjs`'s own header for why that signal, and
+    // not a plain `merge-tree`/current-content diff, is what survives a rebase plus later refinement on `main`.
+    // Checked ahead of liveness-derived phase branching but AFTER `stood-down`/liveness themselves (REFUSALS 1
+    // and 4 above) — a PR a human has already stood down on, or one a live session is genuinely working, still
+    // takes priority over this one; this only pre-empts dispatching FRESH work at an already-landed PR.
+    if (pr?.alreadyLandedInMain) {
+      const carrierPr = pr.alreadyLandedInMain.carrierPr ?? null;
+      refuse('already-landed', {
+        ...withPhase, carrierPr,
+        why: carrierPr
+          ? `every file this PR touches is already byte-identical to a commit on \`${defaultBranch}\` — carried` +
+            ` there by #${carrierPr}, which merged first while this PR's own branch was separately rebased.` +
+            ' Nothing to fix or review; it should be closed and its backlog card resolved, never dispatched.'
+          : `every file this PR touches is already byte-identical to a commit on \`${defaultBranch}\`, though the` +
+            ' PR that carried it there could not be attributed with confidence. Nothing to fix or review; it' +
+            ' should be closed and its backlog card resolved, never dispatched.',
+      });
+      continue;
+    }
 
     // ── `ci-red` (multi-repo slice 7) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table,
     // because it needs neither of that table's two remaining checks: REFUSAL 2 ("no findings, no fixer") does
@@ -1449,12 +1621,22 @@ export function planReconcile({
       const baseRefName = pr?.baseRefName ?? null;
       const isStackedBase = Boolean(baseRefName) && baseRefName !== defaultBranch;
       if (isStackedBase) {
-        const conflictAttempts = countConflictFixComments(pr?.comments);
-        if (conflictAttempts >= conflictFixCap) {
+        // #2787-live-incident — see {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock: `currentRef` is this
+        // PR's OWN stacked base (never `defaultBranch` here, by construction of `isStackedBase`); a round
+        // resolved against an EARLIER tip of that same base (rebased since, or a wholly different base this PR
+        // once stacked on) does not count against the smaller per-target cap, only the hard ceiling.
+        const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
+          currentRef: baseRefName, currentSha: null,
+        });
+        if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
           refuseCapExhausted({
             ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'stacked-rebase',
-            why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
-              ` — mechanical rebase against its base \`${baseRefName}\` is exhausted here and a person must take it`,
+            why: conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING
+              ? `this PR's own durable conflict-fix count is ${conflictTotal} against the hard ceiling of ` +
+                `${CONFLICT_FIX_ABSOLUTE_CEILING} (${conflictAttempts} against its current target, base ` +
+                `\`${baseRefName}\`) — this PR keeps re-conflicting no matter how many rounds run; a person must take it over`
+              : `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
+                ` — mechanical rebase against its base \`${baseRefName}\` is exhausted here and a person must take it`,
           });
         } else {
           dispatch.push({
@@ -1462,7 +1644,8 @@ export function planReconcile({
             attempts: conflictAttempts, cap: conflictFixCap,
             why: `conflicts with its own base \`${baseRefName}\` (not \`${defaultBranch}\`) — a stacked PR the ` +
               'drain will never land regardless of labels, so this is a mechanical rebase against its base, ' +
-              `never a rebase owed to the drain; ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent`,
+              `never a rebase owed to the drain; ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent` +
+              (conflictTotal > conflictAttempts ? ` (${conflictTotal} total rounds ever run, against earlier targets)` : ''),
           });
         }
         continue;
@@ -1530,12 +1713,23 @@ export function planReconcile({
     // rounds ever run). See that constant's own docblock for the full incident.
     const isConflictBounce = phase === 'bounced' && withPhase.labels.includes(CONFLICT_LABEL);
     if (isConflictBounce) {
-      const conflictAttempts = countConflictFixComments(pr?.comments);
-      if (conflictAttempts >= conflictFixCap) {
+      // #2787-live-incident — `currentRef` is `defaultBranch` (this population is, by definition, a main-base
+      // conflict); `mainSha` is `origin/<defaultBranch>`'s own current tip, when the IO shell supplied one (see
+      // {@link CONFLICT_FIX_ABSOLUTE_CEILING}'s own docblock). A round that resolved against an EARLIER main —
+      // main moved and created a genuinely NEW conflict since — does not count against the smaller per-target
+      // cap below, only the hard ceiling.
+      const { stale: conflictAttempts, total: conflictTotal } = countStaleConflictFixRounds(pr?.comments, {
+        currentRef: defaultBranch, currentSha: mainSha,
+      });
+      if (conflictAttempts >= conflictFixCap || conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING) {
         refuseCapExhausted({
           ...withPhase, attempts: conflictAttempts, cap: conflictFixCap, capKind: 'conflict-fix',
-          why: `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
-            ' — mechanical conflict-resolution is exhausted here and a person must take it',
+          why: conflictTotal >= CONFLICT_FIX_ABSOLUTE_CEILING
+            ? `this PR's own durable conflict-fix count is ${conflictTotal} against the hard ceiling of ` +
+              `${CONFLICT_FIX_ABSOLUTE_CEILING} (${conflictAttempts} against its current target, \`${defaultBranch}\`)` +
+              ' — this PR keeps re-conflicting no matter how many rounds run; a person must take it over'
+            : `this PR's own durable conflict-fix count is ${conflictAttempts} against a cap of ${conflictFixCap}` +
+              ' — mechanical conflict-resolution is exhausted here and a person must take it',
         });
         continue;
       }
@@ -1550,6 +1744,7 @@ export function planReconcile({
         findings, attempts: conflictAttempts, cap: conflictFixCap,
         why: `bounced with ${findings} finding(s) via a mechanical conflict-resolution route (merge-status:conflicting),`
           + ` nothing live is working it, and ${conflictAttempts} of ${conflictFixCap} conflict-fix attempts are spent`
+          + (conflictTotal > conflictAttempts ? ` (${conflictTotal} total rounds ever run, against earlier targets)` : '')
           + (advisoryAlsoPending
             ? ' — this PR also carries an admitted advisory:changes finding, owed its own advisory-fix round once this conflict clears'
             : ''),

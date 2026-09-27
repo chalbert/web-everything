@@ -75,6 +75,11 @@ describe('parseAdvisories', () => {
     expect(latestAdvisory([note({ outcome: 'accept', verdict: '🔁 changes requested' })]).outcome).toBe('accept');
   });
 
+  it('a stated outcome outside accept|changes is returned AS STATED, never defaulted to the clearing `accept` (PR #2781 review, round 4)', () => {
+    expect(latestAdvisory([note({ outcome: 'inconclusive', verdict: '❓ inconclusive' })]).outcome).toBe('inconclusive');
+    expect(latestAdvisory([note({ outcome: 'Mystery', verdict: '✅ pass' })]).outcome).toBe('mystery');
+  });
+
   it('ignores comments without both a verdict line and a Net basis line, and orders newest first', () => {
     const newer = note({ head: 'b'.repeat(40), at: '2026-09-19T13:00:00Z' });
     const parsed = parseAdvisories([note(), { body: '**Verdict:** x' }, { body: 'hello' }, newer]);
