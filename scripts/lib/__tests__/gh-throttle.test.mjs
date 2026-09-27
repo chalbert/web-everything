@@ -12,16 +12,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import {
   DEFAULT_GH_CONCURRENCY_CAP, DEFAULT_ACQUIRE_TIMEOUT_MS, DEFAULT_RETRY_MAX_ATTEMPTS,
   DEFAULT_RETRY_BASE_MS, DEFAULT_RETRY_CAP_MS,
   DEFAULT_GH_POINTS_BUDGET_PER_MIN, GH_POINTS_WINDOW_MS, DEFAULT_HEADER_WAIT_CAP_MS,
+  DEFAULT_GH_WRITE_BUDGET_PER_MIN,
   resolveGhCap, resolveAcquireTimeoutMs, resolveRetryMaxAttempts, resolveGhPointsBudgetPerMin, resolveHeaderWaitCapMs,
+  resolveGhWriteBudgetPerMin,
   isRateLimitShaped, retryBackoffMs,
   parseGhDebugResponseHeaders, parseGraphQLRateLimit, classifyRateLimitSignal, calibratedBackoffMs,
   acquireGhSlotSync, releaseGhSlotSync, ghThrottleStatus,
   decideGhPointsSpend, acquireGhPointsSync, ghThrottleLogPath, recordGhCallLogEntry,
+  acquireGhWriteBudgetSync, classifyGhWrite, deriveGhCaller,
   runGhSync, execFileSyncThrottled, runGhCliPassthrough,
 } from '../gh-throttle.mjs';
 
@@ -578,6 +581,117 @@ describe('acquireGhPointsSync — cross-process points budget over a real lock r
   });
 });
 
+// ── #gh-write-burst — classifyGhWrite / deriveGhCaller / the write-only budget ──────────────────────────────
+describe('resolveGhWriteBudgetPerMin — env override, clamped sane', () => {
+  it('defaults, ignores garbage, floors a fractional override, rejects < 1', () => {
+    expect(resolveGhWriteBudgetPerMin({})).toBe(DEFAULT_GH_WRITE_BUDGET_PER_MIN);
+    expect(resolveGhWriteBudgetPerMin({ WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN: 'nope' })).toBe(DEFAULT_GH_WRITE_BUDGET_PER_MIN);
+    expect(resolveGhWriteBudgetPerMin({ WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN: '12.9' })).toBe(12);
+    expect(resolveGhWriteBudgetPerMin({ WE_GH_THROTTLE_WRITE_BUDGET_PER_MIN: '0' })).toBe(DEFAULT_GH_WRITE_BUDGET_PER_MIN);
+  });
+});
+
+describe('classifyGhWrite — mutation vs read, PURE', () => {
+  it('pr: edit/comment/close/merge/reopen/ready/create/review are writes, view/list/diff/checks are not', () => {
+    expect(classifyGhWrite(['pr', 'edit', '123'])).toBe(true);
+    expect(classifyGhWrite(['pr', 'comment', '123'])).toBe(true);
+    expect(classifyGhWrite(['pr', 'merge', '123'])).toBe(true);
+    expect(classifyGhWrite(['pr', 'view', '123'])).toBe(false);
+    expect(classifyGhWrite(['pr', 'list'])).toBe(false);
+    expect(classifyGhWrite(['pr', 'diff', '123'])).toBe(false);
+  });
+
+  it('label create/delete/edit are writes; run list is not, run cancel/rerun are', () => {
+    expect(classifyGhWrite(['label', 'create', 'x'])).toBe(true);
+    expect(classifyGhWrite(['run', 'list'])).toBe(false);
+    expect(classifyGhWrite(['run', 'cancel', '1'])).toBe(true);
+  });
+
+  it('api: an explicit --method decides (GET/HEAD are reads, everything else is a write)', () => {
+    expect(classifyGhWrite(['api', '--method', 'GET', 'repos/o/r'])).toBe(false);
+    expect(classifyGhWrite(['api', '--method', 'get', 'repos/o/r'])).toBe(false); // case-insensitive
+    expect(classifyGhWrite(['api', '--method', 'PATCH', 'repos/o/r'])).toBe(true);
+    expect(classifyGhWrite(['api', '--method', 'POST', 'repos/o/r'])).toBe(true);
+  });
+
+  it('api: no --method falls back to gh\'s own POST-on-a-field-flag inference', () => {
+    expect(classifyGhWrite(['api', 'repos/o/r'])).toBe(false); // no method, no field flag → gh defaults to GET
+    expect(classifyGhWrite(['api', 'repos/o/r/labels', '-f', 'name=x'])).toBe(true); // -f → gh defaults to POST
+    expect(classifyGhWrite(['api', 'repos/o/r', '-F', 'per_page=100'])).toBe(true);
+  });
+
+  it('an unrecognized subcommand is never classified as a write (safe default: never over-throttle)', () => {
+    expect(classifyGhWrite(['repo', 'view'])).toBe(false);
+    expect(classifyGhWrite([])).toBe(false);
+    expect(classifyGhWrite(undefined)).toBe(false);
+  });
+});
+
+describe('deriveGhCaller — attribution precedence: explicit override > GH_CALLER env > argv[1] basename > "unknown"', () => {
+  it('an explicit throttle.caller wins over everything', () => {
+    expect(deriveGhCaller({ caller: 'explicit-caller' }, { GH_CALLER: 'env-caller' })).toBe('explicit-caller');
+  });
+
+  it('GH_CALLER env wins when no explicit override is given', () => {
+    expect(deriveGhCaller({}, { GH_CALLER: 'parked-pr-conflict-watch-we' })).toBe('parked-pr-conflict-watch-we');
+  });
+
+  it('falls back to this process\'s own argv[1] basename when neither is set (in-process mechanical passes get this for free)', () => {
+    expect(deriveGhCaller({}, {})).toBe(basename(process.argv[1] || ''));
+  });
+});
+
+// ── acquireGhWriteBudgetSync — the SEPARATE write-only budget gate, REAL temp lock root (#gh-write-burst) ─────
+describe('acquireGhWriteBudgetSync — cross-process WRITE budget over a real lock root, independent of the points budget', () => {
+  let lockRoot;
+  beforeEach(() => { lockRoot = mkdtempSync(join(tmpdir(), 'gh-throttle-write-budget-')); });
+  afterEach(() => { rmSync(lockRoot, { recursive: true, force: true }); });
+
+  it('admits a write that fits the budget immediately', () => {
+    const sleep = vi.fn();
+    const r = acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: 5, owner: 'A', now: () => 0, sleep });
+    expect(r.ok).toBe(true);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('a write past the per-minute WRITE budget WAITS instead of firing — the #gh-write-burst fix itself', () => {
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls = [];
+    const sleep = (ms) => { sleepCalls.push(ms); clock += ms; };
+    const windowMs = 100;
+    const common = { lockRoot, budgetPerMin: 2, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 10_000, windowMs };
+
+    expect(acquireGhWriteBudgetSync(common).ok).toBe(true);
+    expect(acquireGhWriteBudgetSync(common).ok).toBe(true);
+    expect(sleepCalls.length).toBe(0);
+
+    const r3 = acquireGhWriteBudgetSync(common); // third write in the window — over budget, must queue
+    expect(r3.ok).toBe(true);
+    expect(sleepCalls.length).toBeGreaterThan(0);
+    expect(clock).toBeGreaterThanOrEqual(windowMs);
+  });
+
+  it('fails OPEN on timeout, mirroring every other gate in this module', () => {
+    let clock = 0;
+    const now = () => clock;
+    const sleep = (ms) => { clock += ms; };
+    const r1 = acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: 1, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 10_000, windowMs: 60_000 });
+    expect(r1.ok).toBe(true);
+    const r2 = acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: 1, owner: 'A', now, sleep, pollMs: 10, timeoutMs: 50, windowMs: 60_000 });
+    expect(r2.ok).toBe(false);
+    expect(r2.timedOut).toBe(true);
+  });
+
+  it('is INDEPENDENT of the points budget — exhausting one never blocks the other', () => {
+    // Points budget exhausted...
+    expect(acquireGhPointsSync({ lockRoot, points: 5, budgetPerMin: 5, owner: 'A', now: () => 0, sleep: vi.fn() }).ok).toBe(true);
+    // ...but the write budget, a separate ledger under the same lock root, is untouched.
+    const r = acquireGhWriteBudgetSync({ lockRoot, budgetPerMin: 5, owner: 'A', now: () => 0, sleep: vi.fn() });
+    expect(r.ok).toBe(true);
+  });
+});
+
 // ── the sidecar call/exhausted-retry log (#3670) ────────────────────────────────────────────────────────────
 describe('recordGhCallLogEntry — best-effort JSONL append', () => {
   it('appends one JSON line per call, carrying op/attempt/points/outcome', () => {
@@ -652,6 +766,83 @@ describe('runGhSync — points budget + sidecar log wiring (#3670)', () => {
     expect(entries.length).toBe(1);
     expect(entries[0].outcome).toBe('call');
     expect(entries[0].ok).toBe(false);
+  });
+});
+
+// ── #gh-write-burst — the write-only budget and caller attribution, wired through runGhSync/runGhCliPassthrough
+describe('runGhSync — write budget + caller attribution (#gh-write-burst)', () => {
+  it('logs caller and w:true on a mutation, w:false on a read — the classification calls.jsonl now carries', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => 'ok');
+    runGhSync(['pr', 'view', '1'], { throttle: { lockRoot, cap: 2, sleep: () => {}, exec, caller: 'test-caller' } });
+    runGhSync(['pr', 'edit', '1', '--add-label', 'x'], { throttle: { lockRoot, cap: 2, sleep: () => {}, exec, caller: 'test-caller' } });
+    const entries = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entries.every((e) => e.caller === 'test-caller')).toBe(true);
+    expect(entries.find((e) => e.op === 'pr view').w).toBe(false);
+    expect(entries.find((e) => e.op === 'pr edit').w).toBe(true);
+  });
+
+  it('a caller with no explicit caller/GH_CALLER still gets ITS OWN argv[1] basename, never "unknown", for an in-process call', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => 'ok');
+    runGhSync(['pr', 'view', '1'], { throttle: { lockRoot, cap: 2, sleep: () => {}, exec, env: {} } });
+    const [entry] = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entry.caller).toBe(basename(process.argv[1] || ''));
+  });
+
+  it('a mutation past the WRITE budget queues (sleeps) even though the points budget alone would have let it through', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => 'ok');
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls = [];
+    const sleep = (ms) => { sleepCalls.push(ms); clock += ms; };
+    // A generous points budget (100/min) but a tight write budget (1/min) — proves the two gates are independent
+    // and that the write gate is the one that actually queues the burst this incident's fix targets.
+    const common = {
+      lockRoot, cap: 2, sleep, now, exec, owner: 'same-owner',
+      budgetPerMin: 100, points: 1, writeBudgetPerMin: 1, pollMs: 10, pointsWindowMs: 100, op: 'pr-edit',
+    };
+    runGhSync(['pr', 'edit', '1'], { throttle: common });
+    expect(sleepCalls.length).toBe(0); // first write fits the 1-write budget immediately
+    runGhSync(['pr', 'edit', '2'], { throttle: common });
+    expect(sleepCalls.length).toBeGreaterThan(0); // second write in the same window must queue
+  });
+
+  it('a READ is never gated by the write budget, however tight — only classifyGhWrite-true calls consult it', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const exec = vi.fn(() => 'ok');
+    const sleep = vi.fn();
+    const common = { lockRoot, cap: 2, sleep, exec, owner: 'same-owner', budgetPerMin: 100, points: 1, writeBudgetPerMin: 1, op: 'pr-view' };
+    runGhSync(['pr', 'view', '1'], { throttle: common });
+    runGhSync(['pr', 'view', '2'], { throttle: common });
+    runGhSync(['pr', 'view', '3'], { throttle: common }); // three reads, write budget of 1 — never consulted for reads
+    expect(sleep).not.toHaveBeenCalled();
+  });
+});
+
+describe('runGhCliPassthrough — write budget + caller attribution (#gh-write-burst)', () => {
+  it('logs caller and w:true for a mutation argv', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.from('{}'), stderr: Buffer.alloc(0), error: null }));
+    runGhCliPassthrough(['pr', 'comment', '1', '--body', 'x'], { throttle: { lockRoot, cap: 2, sleep: () => {}, caller: 'gh-throttle.mjs-cli-caller' }, spawn });
+    const [entry] = readJsonl(ghThrottleLogPath(lockRoot));
+    expect(entry.caller).toBe('gh-throttle.mjs-cli-caller');
+    expect(entry.w).toBe(true);
+  });
+
+  it('a mutation past the write budget queues, mirroring runGhSync', () => {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'gh-t-'));
+    const spawn = vi.fn(() => ({ status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), error: null }));
+    let clock = 0;
+    const now = () => clock;
+    const sleepCalls = [];
+    const sleep = (ms) => { sleepCalls.push(ms); clock += ms; };
+    const common = { lockRoot, cap: 2, sleep, now, owner: 'same-owner', budgetPerMin: 100, points: 1, writeBudgetPerMin: 1, pollMs: 10, pointsWindowMs: 100 };
+    runGhCliPassthrough(['pr', 'edit', '1'], { throttle: common, spawn });
+    expect(sleepCalls.length).toBe(0);
+    runGhCliPassthrough(['pr', 'edit', '2'], { throttle: common, spawn });
+    expect(sleepCalls.length).toBeGreaterThan(0);
   });
 });
 
