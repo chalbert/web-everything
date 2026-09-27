@@ -63,6 +63,10 @@ import { rateFor, usdFromTokens } from '../backlog/cost-rates.mjs';
 import { appendScorecard, readStore } from './run-scorecard-store.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { readField } from '../backlog/frontmatter.mjs';
+import { CONSTELLATION_REPOS, DEFAULT_REPO_KEY } from '../lib/constellation-repos.mjs';
+
+/** A row with no `repo` is a WE row (pre-multi-repo records) — resolved from the registry, never a literal. */
+const DEFAULT_REPO_SLUG = CONSTELLATION_REPOS[DEFAULT_REPO_KEY].slug;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..');
@@ -751,7 +755,7 @@ export function phaseForKind(kind) {
 /** The demand a row belongs to: `<repo>#<pr-or-item>`. Rows with neither `pr` nor `item` are their own
  *  singleton group (`sessionName` keyed) rather than silently merged together under one `#unknown` bucket. */
 export function rollupKey(row) {
-  const repo = row.repo ?? 'chalbert/web-everything';
+  const repo = row.repo ?? DEFAULT_REPO_SLUG;
   if (row.pr) return `${repo}#pr${row.pr}`;
   if (row.item) return `${repo}#item${row.item}`;
   return `${repo}#session:${row.sessionName ?? 'unknown'}`;
@@ -769,7 +773,7 @@ export function rollupByDemand(rows, { sizeForItem = () => null } = {}) {
     const key = rollupKey(row);
     if (!groups.has(key)) {
       groups.set(key, {
-        key, repo: row.repo ?? 'chalbert/web-everything', pr: row.pr ?? null, item: row.item ?? null,
+        key, repo: row.repo ?? DEFAULT_REPO_SLUG, pr: row.pr ?? null, item: row.item ?? null,
         sessions: 0, byPhase: {},
       });
     }
