@@ -436,6 +436,122 @@ describe('runReviewLoopOnce — property 4, MECHANIZED (#2749 fix, 2026-09-26 sc
     expect(out.run.pending.of).toBe('human');
     expect(fileItemCalled).toBe(false);
   });
+
+  it('an effect-halted accept AFTER a successful filing (the label swap threw) exits 1, never reported as a clean accept', async () => {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const throwingSinks = {
+      ...recordingSinks([]),
+      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
+    };
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: throwingSinks,
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-mechanized-halted',
+      fileItem: stubFileItem(),
+    });
+    expect(out.stopped).toBe('effect-halted');
+    expect(out.code).toBe(1);
+  });
+});
+
+// PR #2767 advisory (test-gaming check): the mechanized branch above did NOT retire the learnings-pool
+// `isPreventionOutstandingClear` branch — it is still reachable whenever a HUMAN answers `accept` on a parked
+// `prevention-outstanding` run (e.g. after a mechanized filing failed and they filed the card by hand). The
+// tests that pinned that branch's own guarantees (per-finding failure isolation, loud filing failure, and
+// "an effect-halted resume is not a clean clear") are kept here, re-routed through that real path.
+describe('runReviewLoopOnce — a human `--answer=accept` resume of a parked prevention-outstanding run still files '
+  + 'its guard(s) to the learnings pool (the isPreventionOutstandingClear branch)', () => {
+  /** Opens a run whose mechanized filing FAILS, so it stays parked for the resume under test. */
+  async function parkedPreventionRun({ answer = PREVENTION_ANSWER, runId }) {
+    const { declaration, registry } = registryFor({});
+    const store = createMemoryRunStore();
+    const opened = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(answer), mintRunId: () => runId,
+      fileItem: async () => { throw new Error('backlog write failed'); },
+    });
+    expect(opened.stopped).toBe('confirm');
+    return { declaration, registry, store };
+  }
+
+  it('files every named guard and reports the accept', async () => {
+    const { declaration, registry, store } = await parkedPreventionRun({ runId: 'r-clear' });
+    const seen = [];
+    let filedCount = 0;
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: ['--resume=r-clear', '--answer=accept'], store, sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'unused',
+      appendLearning: (entry) => { filedCount += 1; return { record: entry, path: `pool/${filedCount}.json` }; },
+    });
+    expect(out.code).toBe(0);
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    expect(seen.map((s) => s.type)).toContain(REVIEW_EFFECTS.LABEL);
+    expect(filedCount).toBeGreaterThan(0);
+    expect(out.lines.join('\n')).toMatch(/prevention-outstanding auto-cleared to accept/);
+  });
+
+  it('reports a failed filing loudly without undoing the accept that already recorded', async () => {
+    const { declaration, registry, store } = await parkedPreventionRun({ runId: 'r-clear-fails' });
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: ['--resume=r-clear-fails', '--answer=accept'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'unused',
+      appendLearning: () => { throw new Error('pool file locked'); },
+    });
+    expect(out.code).toBe(1);
+    expect(out.stopped).toBe('complete');
+    expect(out.run.findings.confirm).toBe('accept');
+    expect(out.lines.join('\n')).toMatch(/FAILED to file \(some guard\(s\) may be unfiled\): pool file locked/);
+  });
+
+  it('isolates a single oversized guard\'s BUILD failure — the OTHER guard(s) in the same run still file', async () => {
+    // `buildPreventionQueueEntry` REFUSES (throws) rather than truncates a `prevention` string that overflows
+    // `FIELD_CAPS.suggestion`; the build step, not just the append, is caught PER FINDING.
+    const { declaration, registry, store } = await parkedPreventionRun({ answer: MIXED_LENGTH_ANSWER, runId: 'r-clear-mixed' });
+    let filedCount = 0;
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: ['--resume=r-clear-mixed', '--answer=accept'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(MIXED_LENGTH_ANSWER), mintRunId: () => 'unused',
+      appendLearning: (entry) => { filedCount += 1; return { record: entry, path: `pool/${filedCount}.json` }; },
+    });
+    expect(out.stopped).toBe('complete');
+    expect(out.code).toBe(1); // the oversized guard failed to build
+    expect(filedCount).toBeGreaterThan(0); // the short guard still filed despite its sibling's failure
+    expect(out.lines.join('\n')).toMatch(/filed →/);
+    expect(out.lines.join('\n')).toMatch(/FAILED to file \(some guard\(s\) may be unfiled\)/);
+  });
+
+  // Independent review of PR #1784 (CONFIRMED): a mid-apply failure must not take the filing branch nor exit 0.
+  const throwingLabelSinks = () => ({
+    ...recordingSinks([]),
+    [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
+  });
+
+  it('an effect-halted resume (the accept label swap threw) is NOT treated as prevention-outstanding-clear — no filing, exit code 1', async () => {
+    const { declaration, registry, store } = await parkedPreventionRun({ runId: 'r-clear-halted' });
+    let filedCount = 0;
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: ['--resume=r-clear-halted', '--answer=accept'], store, sinks: throwingLabelSinks(),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'unused',
+      appendLearning: () => { filedCount += 1; return { record: {}, path: '' }; },
+    });
+    expect(out.stopped).toBe('effect-halted');
+    expect(out.code).toBe(1);
+    expect(filedCount).toBe(0);
+  });
+
+  it('same effect-halted case, --json: exit code still 1, no `preventionFiled` field', async () => {
+    const { declaration, registry, store } = await parkedPreventionRun({ runId: 'r-clear-halted-json' });
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: ['--resume=r-clear-halted-json', '--answer=accept', '--json'], store, sinks: throwingLabelSinks(),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'unused',
+      appendLearning: () => { throw new Error('must not be called'); },
+    });
+    expect(out.code).toBe(1);
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.stopped).toBe('effect-halted');
+    expect(payload).not.toHaveProperty('preventionFiled');
+  });
 });
 
 describe('runReviewLoopOnce — property 3: a gate-self PR is UNCHANGED', () => {
