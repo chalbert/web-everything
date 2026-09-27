@@ -1,9 +1,10 @@
 ---
+bornAs: xnfj1tp
 kind: story
 size: 8
 parent: "4075"
 status: open
-blockedBy: ["xgos7st"]
+blockedBy: ["4307"]
 scope: ["we:scripts/conveyor/land-overlap-yield.mjs", "we:scripts/conveyor/__tests__/land-overlap-yield.test.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/__tests__/merge-ai-prs-overlap-yield.test.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.mjs", "we:scripts/conveyor/soak/breaks/small-pr-lands-over-large-in-review.soak.test.mjs", "we:scripts/conveyor/soak/breaks/index.mjs"]
 dateOpened: "2026-09-27"
 tags: []
@@ -13,16 +14,16 @@ tags: []
 
 PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs touching the same files (2826 in we:scripts/conveyor/review-status-tag.mjs; earlier 2819 in we:scripts/operations/ci-heal-pr-dispatch.mjs) landed while it was in review. Each conflict cost a fixer round, CI and a re-review. #4295 coordinates overlapping work at DISPATCH, through the daemons' claim stores; nothing looks at overlap at LAND time, and work outside those claim stores is never coordinated. This card adds a pure land-time planner to the drain (we:scripts/merge-ai-prs.mjs) that holds a ready PR for a bounded time while a larger overlapping PR is in final review.
 
-**Blocked by decision xgos7st, which is filed but NOT prepared.** It chooses whether the drain holds a ready PR that overlaps a larger PR in review at all. This card is prepared for that decision's proposed default (Fork 1 A, bounded yield). If the ruling is different, this card is re-prepared, not built as written. An independent review rated it **not build-ready yet** (see the end); the design below already folds in that review's findings.
+**Blocked by decision 4307, which is filed but NOT prepared.** It chooses whether the drain holds a ready PR that overlaps a larger PR in review at all. This card is prepared for that decision's proposed default (Fork 1 A, bounded yield). If the ruling is different, this card is re-prepared, not built as written. An independent review rated it **not build-ready yet** (see the end); the design below already folds in that review's findings.
 
 ## Evidence
 
-- #2821 (`lane/fix-procedure`): opened 18:26Z, 20 files, +1807/−118. Review bounces at 19:00Z and 20:00Z (findings). #2826 merged at 20:30Z touching `we:scripts/conveyor/review-status-tag.mjs`; #2821 was labelled `merge-status:conflicting` at 20:32Z; the conflict watch bounced it again at 20:52Z because the round-2 fixer (done 20:44Z) had not merged main. Conflict cleared at 21:16Z. Cost of that one overlap: 44 minutes, a fixer round (two sessions, see x3qhvy9), a full CI run and a fresh review round.
+- #2821 (`lane/fix-procedure`): opened 18:26Z, 20 files, +1807/−118. Review bounces at 19:00Z and 20:00Z (findings). #2826 merged at 20:30Z touching `we:scripts/conveyor/review-status-tag.mjs`; #2821 was labelled `merge-status:conflicting` at 20:32Z; the conflict watch bounced it again at 20:52Z because the round-2 fixer (done 20:44Z) had not merged main. Conflict cleared at 21:16Z. Cost of that one overlap: 44 minutes, a fixer round (two sessions, see 4306), a full CI run and a fresh review round.
 - Earlier the same day #2819 (merged 18:13Z) conflicted with it in `we:scripts/operations/ci-heal-pr-dispatch.mjs`.
 
 ## How this relates to existing machinery
 
-- **#4295 (x3bt7x7)** coordinates DISPATCH across build+build, fix+fix and build+fix, on DECLARED scope, for work that goes through the daemons' claim stores. **This card works at LAND time, on ACTUAL changed files, for every open PR the drain sees**, including orchestrator and human PRs, under-declared scope, and two PRs that are both already open. #2821 and #2826 were orchestrator-dispatched and never went through those claim stores. So this is the land-time complement, not a duplicate. Shared primitive only: `we:scripts/conveyor/build-dispatch-policy.mjs#pathsOverlap` (near line 69), with the repo compared separately.
+- **#4295 (4295)** coordinates DISPATCH across build+build, fix+fix and build+fix, on DECLARED scope, for work that goes through the daemons' claim stores. **This card works at LAND time, on ACTUAL changed files, for every open PR the drain sees**, including orchestrator and human PRs, under-declared scope, and two PRs that are both already open. #2821 and #2826 were orchestrator-dispatched and never went through those claim stores. So this is the land-time complement, not a duplicate. Shared primitive only: `we:scripts/conveyor/build-dispatch-policy.mjs#pathsOverlap` (near line 69), with the repo compared separately.
 - **`we:scripts/readiness/overlap-chain.mjs`** stacks items inside one serial batch against pushed frontiers. Not used: the drain faces two already-open PRs with independent bases.
 - **The drain.** `we:scripts/merge-ai-prs.mjs#planLabelDrain` (near line 1901) builds `{ready, deferred}` from `blockedBy`/`stackParents`/couple waits (near line 1967–1996). The live cascade re-runs it through `replan` after every merge (near line 5050) and then applies the couple planner (`we:scripts/lib/couple-cascade.mjs`, near line 85). The open-PR context comes from the shared snapshot (`we:scripts/lib/pr-snapshot.mjs`, `SNAPSHOT_FIELDS` near line 38, which already has `files` with per-file counts and `isDraft`).
 
@@ -78,7 +79,7 @@ PR 2821 (20 files) conflicted with main twice on 2026-09-27 because smaller PRs 
 
 ## Tasks
 
-1. After xgos7st is prepared and ratified: confirm the ruling matches this card; if not, stop and re-prepare.
+1. After 4307 is prepared and ratified: confirm the ruling matches this card; if not, stop and re-prepare.
 2. Write the soak break. Show it RED on an `origin/main` baseline with only the break's own files applied: `node we:scripts/conveyor/soak/run.mjs break small-pr-lands-over-large-in-review` exits 1. Record the baseline sha in the break's header; `fixedBy` later names the change commit.
 3. The pure module and its unit tests.
 4. Wire it into `planLabelDrain`/`replan`, the CLI flags, the deferred field and the idle accounting, with test 2.

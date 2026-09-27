@@ -1,4 +1,5 @@
 ---
+bornAs: xgos7st
 kind: decision
 status: open
 dateOpened: "2026-09-27"
@@ -9,13 +10,13 @@ tags: []
 
 Large daemon PRs keep drifting into conflict with main because smaller overlapping PRs land ahead of them while they sit in review (PR 2821, 20 files, conflicted twice on 2026-09-27; each conflict cost a fixer round, CI and a re-review). The drain (we:scripts/merge-ai-prs.mjs) lands whatever is ready, in item order, with no notion of an open overlapping PR still in review. Forks: should the drain briefly hold a ready PR that overlaps a larger PR in review (bounded yield), and, separately, may a PR keep its review after a clean mechanical rebase?
 
-**Status: filed, NOT yet prepared.** The forks below carry options, tradeoffs and a proposed bold default from the preparation of the build card (xnfj1tp). There is no `/research/` topic and no skeptic pass yet, so `/prepare` must finish this item before anyone rules on it. An independent Codex review of the build card (recorded on xnfj1tp) already reshaped these forks: it added the status-quo and eligible-only options, split review carry-over into its own fork, and showed an overlap-only size order can cycle.
+**Status: filed, NOT yet prepared.** The forks below carry options, tradeoffs and a proposed bold default from the preparation of the build card (4308). There is no `/research/` topic and no skeptic pass yet, so `/prepare` must finish this item before anyone rules on it. An independent Codex review of the build card (recorded on 4308) already reshaped these forks: it added the status-quo and eligible-only options, split review carry-over into its own fork, and showed an overlap-only size order can cycle.
 
 ## Context
 
-- **The cost, measured on one PR.** #2821 (`lane/fix-procedure`, 20 files, +1807/−118) opened 18:26Z. #2826 merged at 20:30Z, touching `we:scripts/conveyor/review-status-tag.mjs`, which #2821 also changes. The conflict watch labelled #2821 `merge-status:conflicting` at 20:32Z. The conflict was cleared at 21:16Z. That is 44 minutes, two fixer sessions (one a duplicate, see x3qhvy9), a full CI run and a fresh review round. Earlier the same day #2819 conflicted with it in `we:scripts/operations/ci-heal-pr-dispatch.mjs`.
+- **The cost, measured on one PR.** #2821 (`lane/fix-procedure`, 20 files, +1807/−118) opened 18:26Z. #2826 merged at 20:30Z, touching `we:scripts/conveyor/review-status-tag.mjs`, which #2821 also changes. The conflict watch labelled #2821 `merge-status:conflicting` at 20:32Z. The conflict was cleared at 21:16Z. That is 44 minutes, two fixer sessions (one a duplicate, see 4306), a full CI run and a fresh review round. Earlier the same day #2819 conflicted with it in `we:scripts/operations/ci-heal-pr-dispatch.mjs`.
 - **What the drain does today.** `we:scripts/merge-ai-prs.mjs#planLabelDrain` (near line 1901) orders ready PRs by `blockedBy`/`stackParents` edges, then by item number, then by PR number (near line 2013). It knows nothing about an open PR that is NOT ready. Its only conflict help is at land time for the PR being landed (the manifest rebase-drop and the non-overlapping-hunk auto-resolve, #2198 and #2371).
-- **Existing overlap machinery.** `we:scripts/readiness/overlap-chain.mjs` stacks overlapping items at AUTHORING time, inside one serial batch. #4295 (x3bt7x7) will serialize overlapping BUILD dispatches. Neither sees work that was dispatched outside the build daemon, or two PRs that are both already open. #2821 and #2826 were both orchestrator-dispatched fixes.
+- **Existing overlap machinery.** `we:scripts/readiness/overlap-chain.mjs` stacks overlapping items at AUTHORING time, inside one serial batch. #4295 (4295) will serialize overlapping BUILD dispatches. Neither sees work that was dispatched outside the build daemon, or two PRs that are both already open. #2821 and #2826 were both orchestrator-dispatched fixes.
 
 ## Fork 1 — land-time ORDER when a ready PR overlaps an open PR in review
 
@@ -45,4 +46,4 @@ This is a separate axis, not an alternative to A: it changes what a conflict COS
 
 ## Proposed ruling — NOT READY (needs /prepare, then explicit ratification)
 
-Fork 1 A; Fork 2 keep today's rule and prepare B separately; Fork 3 as defaulted above. The build card is xnfj1tp.
+Fork 1 A; Fork 2 keep today's rule and prepare B separately; Fork 3 as defaulted above. The build card is 4308.
