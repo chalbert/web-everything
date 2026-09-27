@@ -264,7 +264,7 @@ export async function runReconcileCiHealDispatch({
       // entry (see this function's own docblock — "a CI-heal entry carries neither on `reconcile-core.mjs`'s
       // own `dispatch` row" was true of item/scope, never of `headRefOid`).
       headRefOid: entry.headRefOid ?? null,
-      altBranch: entry.altBranch ?? null, // fix procedure — saved repair of a re-armed concurrent-author pause.
+      ...(entry.altBranch ? { altBranch: entry.altBranch } : {}), // fix procedure — saved repair of a re-armed pause.
     };
 
     if (lanes.length === 0) {

@@ -68,6 +68,10 @@ export const STAND_DOWN_REASONS = Object.freeze({
   'gate-red': 'the gate stayed RED after the repair, and a red diff must never be re-pushed',
   'conflict': 'a genuine same-line conflict with `main` blocked the repair',
   'lane-ref-gone': 'the PR\'s lane ref no longer resolves, so the ~done work could not be reconstituted',
+  // fix procedure (2026-09-27) — NOT terminal: the CLI posts {@link CONCURRENT_AUTHOR_PAUSE_MARKER} for this
+  // reason instead of a stand-down. The clause names "concurrent author" so that even a comment built through
+  // {@link buildStandDownComment} with it is reclassified as a pause by {@link isConcurrentAuthorStandDownBody}.
+  'concurrent-author': 'a concurrent author pushed to this PR\'s lane mid-repair; this is a re-armable pause, not a judgment call',
 });
 
 /**
@@ -395,7 +399,7 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail(`usage: stand-down.mjs <pr> [--repo=<owner/name>] [--reason=<${[...Object.keys(STAND_DOWN_REASONS), 'concurrent-author'].join('|')}>] [--actor=<name>] [--detail=<text>] [--head=<sha> --alt=<lane/…-alt> --alt-sha=<sha>]  (pr must be a positive integer)`);
+    fail(`usage: stand-down.mjs <pr> [--repo=<owner/name>] [--reason=<${Object.keys(STAND_DOWN_REASONS).join('|')}>] [--actor=<name>] [--detail=<text>] [--head=<sha> --alt=<lane/…-alt> --alt-sha=<sha>]  (pr must be a positive integer)`);
   }
   const actor = typeof flags.actor === 'string' ? flags.actor : undefined;
   const detail = typeof flags.detail === 'string' ? flags.detail : undefined;

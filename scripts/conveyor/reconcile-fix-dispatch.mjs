@@ -269,7 +269,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       planned.push({
         itemNum: null, pr, laneRef: headRefName, scope: itemlessScope, scopeSource: 'pr-diff',
         isConflict: isConflictItemless, body: entry.body ?? null, headRefOid: entry.headRefOid ?? null,
-        altBranch: entry.altBranch ?? null, // fix procedure — a saved repair to recover first (see dispatchFix).
+        ...(entry.altBranch ? { altBranch: entry.altBranch } : {}), // fix procedure — a saved repair to recover first.
       });
       continue;
     }
@@ -370,7 +370,7 @@ export function planFixesFromReconcile(dispatchEntries, findItemFn, loadItems, r
       // belongs to THIS pr before trusting it (see that function's own docblock).
       headRefOid: entry.headRefOid ?? null,
       // fix procedure — the saved alt branch of a concurrent-author pause this PR re-armed from, if any.
-      altBranch: entry.altBranch ?? null,
+      ...(entry.altBranch ? { altBranch: entry.altBranch } : {}),
     });
   }
   return { planned, refusals };
