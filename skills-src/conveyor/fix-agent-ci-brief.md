@@ -33,7 +33,7 @@
 | `{{SCOPE}}` | the item's `scope:` frontmatter, repo-qualified & comma-joined (same as the build's scope) |
 | `{{REASON}}` | why it fired — `red-ci` (a required check went red) or `behind` (BEHIND + parked) — for the durable comment |
 | `{{REPO}}` | the target repo's gh slug (e.g. `chalbert/web-everything`) — every `--repo=` flag below |
-| `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — `.` for WE, an absolute checkout path for a sibling repo |
+| `{{LANE_REPO}}` | what `lane-pool.mjs --repo=` itself expects — an absolute checkout path always (equal to `{{WE_ROOT}}` for WE, a sibling's own checkout otherwise; landing-freeze fix — was `.` for WE, which broke from this dispatch's own scratch cwd) |
 | `{{GATE_COMMAND}}` | the diff-selected gate for the target repo — `node <WE_ROOT>/scripts/verify-lane.mjs run --repo=.` (`gateFor(...)`, `we:scripts/lib/repo-profile.mjs`; xpnhz4o) |
 | `{{WE_ROOT}}` | the absolute WE checkout that owns every tool this brief runs (`ci-heal-mark.mjs`, `lane-pool.mjs`, …) |
 | `{{ATTRIBUTION}}` | the commit-title reference — `WE #{{ITEM_NUM}}`-shaped for WE today, `PR #{{PR_NUM}}` for an item-less heal |

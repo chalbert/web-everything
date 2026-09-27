@@ -2383,7 +2383,11 @@ describe('#3332: the planner\'s fix and CI-heal lists reach the spawner', () => 
     // The io shell's `raw.repoTokens` (this suite's own real checkout) reached the brief — `{{ATTRIBUTION}}`
     // reproduces the pre-#3960 hardcoded `WE #{{ITEM_NUM}}` literal exactly.
     expect(prompt).toContain('"WE #2608: address review:changes on PR #701');
-    expect(prompt).toContain(`node "${REPO_ROOT}/scripts/lane-pool.mjs" acquire --repo=.`);
+    // Landing-freeze fix (lane-leftover-reclaim) — `--repo=` is now an absolute path (`{{LANE_REPO}}` ==
+    // `{{WE_ROOT}}` for `we`), never the literal `.`: a `.` resolved relative to THIS dispatched session's own
+    // scratch cwd (never the checkout — #4174), which is exactly the "acquire --repo=. could not find the repo"
+    // failure this fix closes.
+    expect(prompt).toContain(`node "${REPO_ROOT}/scripts/lane-pool.mjs" acquire --repo=${REPO_ROOT}`);
     expect(run.findings.read.briefUnknownTokens).toEqual(['{{LIKE_THIS}}', '{{PLACEHOLDERS}}']);
     // criterion 5 (guard half) — picked out of a `fixGuards` list holding a SIBLING PR for the same item, not
     // merely the first entry.
@@ -2554,7 +2558,9 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
     // xpnhz4o — the gate is the diff-selected verify-lane run, never the bare full suite.
     expect(prompt).toContain(`node ${tokens.WE_ROOT}/scripts/verify-lane.mjs run --repo=.          # this repo's own gate`);
     expect(prompt).not.toContain('npm run test:unit && npm run check:standards');
-    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/lane-pool.mjs" acquire --repo=. --lane=5`);
+    // Landing-freeze fix (lane-leftover-reclaim) — `--repo=` is now `{{LANE_REPO}}`, an absolute path equal to
+    // `{{WE_ROOT}}` for `we` (was the literal `.`, broken from a dispatched session's scratch cwd — #4174).
+    expect(prompt).toContain(`node "${tokens.WE_ROOT}/scripts/lane-pool.mjs" acquire --repo=${tokens.LANE_REPO} --lane=5`);
     expect(prompt).toContain('gh pr view 701 --json title,body,comments --repo chalbert/web-everything');
   });
 

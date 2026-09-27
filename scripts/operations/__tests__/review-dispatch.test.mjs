@@ -23,6 +23,13 @@ import {
 } from '../review-dispatch.mjs';
 import { buildReviewJudgeRequest, DEFAULT_LENS } from '../review-pr.mjs';
 import { dispatchSessionCwd } from '../dispatch-lane-io.mjs';
+import { repoProfile } from '../../lib/repo-profile.mjs';
+
+// Landing-freeze fix (lane-leftover-reclaim) — `we`'s lane-pool `--repo=` value is now ALWAYS an absolute path
+// (see `repo-profile.mjs`'s own docblock: the literal `.` broke for a dispatched session, whose cwd is a
+// scratch directory outside the checkout, not the checkout itself). Computed once here, from the SAME
+// `repoProfile` this file's own code under test calls, rather than re-hardcoded.
+const WE_LANE_REPO = repoProfile('we').lanePoolRepo;
 
 // #3433 — the two argv elements every dispatched review session carries, ahead of anything else, so the tests
 // below don't hand-duplicate the join.
@@ -41,7 +48,7 @@ const REAL_TEMPLATE_STUB = [
 describe('planReviewDispatch', () => {
   it('derives a distinct, review-only session slug', () => {
     expect(planReviewDispatch({ pr: 1234, repo: 'chalbert/web-everything' })).toEqual({
-      pr: 1234, repo: 'chalbert/web-everything', repoKey: 'we', laneRepo: '.', sessionSlug: 'review-1234',
+      pr: 1234, repo: 'chalbert/web-everything', repoKey: 'we', laneRepo: WE_LANE_REPO, sessionSlug: 'review-1234',
     });
   });
 
@@ -607,7 +614,7 @@ it('fills the real brief with the selected repo pool on acquire and release', as
   const { readFileSync } = await import('node:fs');
   const template = readFileSync('skills-src/review/review-agent-brief.md', 'utf8');
   for (const [repo, laneRepo, sessionSlug] of [
-    ['we', '.', 'review-49'], ['frontierui', '/home/test/workspace/frontierui', 'review-fui-49'],
+    ['we', WE_LANE_REPO, 'review-49'], ['frontierui', '/home/test/workspace/frontierui', 'review-fui-49'],
   ]) {
     const result = dispatchReview({ pr: 49, repo, root: '/repo', home: '/home/test', checkoutExists: () => true,
       checkStaleness: FRESH, readBrief: () => template, spawnAgent: () => '', mintSessionId: () => 'session',

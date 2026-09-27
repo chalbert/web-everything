@@ -1562,6 +1562,27 @@ function restoreLeaseAfterRefusedClaim(dir, preExisting) {
 }
 
 /**
+ * Landing-freeze fix (lane-leftover-reclaim) — logs the commit(s) a patch-equivalence-based reclaim is about
+ * to drop. Only ever called once `provablyPushed` (or an operator's explicit `--force`) already cleared this
+ * lane, so nothing here is a NEW decision — it exists purely so the reclaim is auditable after the fact, the
+ * same way every other destructive step in this file logs what it is about to do. Best-effort: a `git log`
+ * failure never blocks the reclaim itself, it just means fewer details in the log line.
+ * @param {string} dir
+ * @param {string} branch
+ * @param {number} n
+ */
+function logReclaimedAheadCommits(dir, branch, n) {
+  const out = tryGit(['log', '--oneline', `origin/${branch}..HEAD`], dir);
+  const lines = out ? out.split('\n').filter(Boolean) : [];
+  if (lines.length === 0) return;
+  log(
+    `  lane-${n}: reclaiming ${lines.length} local commit(s), already patch-equivalent to work pushed elsewhere ` +
+      `(no unique content — safe to drop):`,
+  );
+  for (const line of lines) log(`    ${line}`);
+}
+
+/**
  * #3407 — land a JUST-CLAIMED lane on `origin/<branch>` (or `--base`) and ready its deps, exactly as a
  * provisioned lane would be. Extracted out of `cmdAcquire` so BOTH claim paths can share one implementation
  * while handling a failure here differently: explicit-lane (its only caller before this split) still fails
@@ -1604,6 +1625,13 @@ function provisionClaimedLane(repo, chosen, targetWasReserved) {
             `or investigate/salvage the tree first.`,
         );
       }
+      // Landing-freeze fix (lane-leftover-reclaim) — a reclaim reached ONLY via the patch-equivalence
+      // relaxation just above (never via a genuinely clean lane, where `ahead` is already 0) drops real local
+      // commits, even though none of them carry unique content. Log exactly what is being dropped, same spirit
+      // as every other destructive step in this file, so the reclaim is auditable after the fact rather than a
+      // silent disappearance — shared by BOTH claim routes (explicit `--lane=N` and auto-pick), since both
+      // funnel through this one reset.
+      if (ahead > 0) logReclaimedAheadCommits(dir, repo.branch, chosen);
     }
     const baseRef = flags.base ? resolveBaseRef(dir, flags.base, chosen) : `origin/${repo.branch}`;
     // #2419 — `checkout -B <branch> <baseRef>`, NOT `reset --hard <baseRef>`. A bare reset moves whatever
@@ -1737,11 +1765,23 @@ function cmdAcquire(repo) {
       const { uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
       // #3383 — litter-only "dirty" (known-safe agent scratch, `we:scripts/lib/lane-litter.mjs`'s allowlist)
       // must not force an explicit `--lane=N` acquire into `--force` any more than it forces auto-pick to
-      // skip the lane (auto-pick applies the identical relaxation). `ahead` deliberately stays the RAW fact
-      // here — #2452's provably-pushed relaxation is scoped to auto-pick only; an explicit target that is
-      // genuinely ahead still needs `--force`.
+      // skip the lane (auto-pick applies the identical relaxation).
       const dirty = litterAdjustedDirty(dir, uncommitted > 0);
-      if (dirty || ahead > 0) {
+      // Landing-freeze fix (lane-leftover-reclaim) — `ahead` USED to stay the raw fact here ("#2452's
+      // provably-pushed relaxation is scoped to auto-pick only"), on the reasoning that an explicit target is
+      // deliberately named, so it should always demand `--force` if genuinely ahead. Live incident, 2026-09-26
+      // (ci-heal-2783): a fix/ci-heal dispatch brief NAMES its lane explicitly (picked by `list --acquirable`,
+      // which already applies this exact relaxation via `effectiveDirtyOrAhead`/`aheadIsProvablyPushed`) —
+      // `--repo=<LANE_REPO> --lane=<LANE>` in `skills-src/conveyor/fix-agent-brief.md` /
+      // `fix-agent-ci-brief.md`. That mismatch — the picker says free, the picked path demands `--force` — left
+      // a dispatched session needing `--force` (denied by the auto-mode classifier as "Interfere With
+      // Workloads"/"Modify Shared Resources") just to take a lane the pool's own scan already vouched for.
+      // `provisionClaimedLane`'s own post-fetch re-verify (below, #2924) already applies this SAME relaxation
+      // for both claim routes — this pre-claim guard was the one place still out of step. Only `ahead` is
+      // relaxed here, never `dirty`: a patch-equivalent commit is PROVABLY already safe on origin (nothing is
+      // lost by dropping it); uncommitted/untracked tree state has no such proof and still needs `--force`.
+      const provablyPushed = ahead === 0 || aheadIsProvablyPushed(dir, localRemoteShas(dir), repo.branch);
+      if (dirty || !provablyPushed) {
         // #3383 — a refusal hands the lane back: the claim above already wrote OUR lease, and leaving it would hold
         // a lane nobody is using until its TTL (found live 2026-09-24: two refused acquires held lane-1 and lane-11).
         restoreLeaseAfterRefusedClaim(dir, preExisting);
@@ -2406,6 +2446,85 @@ const freeListMaxAgeMs = () => numFlagOrEnv('free-list-max-age-ms', FREE_LANE_LI
 
 function invalidateListCache(repo) {
   try { rmSync(LIST_CACHE_FILE(repo), { force: true }); } catch { /* best-effort — the fingerprint still guards */ }
+  try { rmSync(VERDICT_MEMO_FILE(repo), { force: true }); } catch { /* best-effort — each entry's fingerprint still guards */ }
+}
+
+// ── list --acquirable: per-lane "holds un-pushed work" memo ─────────────────────────────────────────
+// WHY (live 2026-09-26 22:37Z, load ~25, 133 lanes): the daemon smoke's `list --acquirable --no-cache --limit=1`
+// overran its 120s scan budget at lane-47. Traced: lanes 1..46 were UNLEASED but held work (dirty, or commits
+// ahead that `aheadIsProvablyPushed` could not prove pushed), so the lease-first skip never applied and every
+// scan re-ran the full dirty/ahead proof in each — `status` ×2, `rev-list`, `cherry`, `diff-tree | patch-id`
+// (~0.6s/lane idle, ~2.5s/lane under load). The answer for such a lane does not change until its git state
+// does, so the scan now remembers it.
+//
+// SOUNDNESS. Only NEGATIVE verdicts ("work lives here — not acquirable") are memoized, keyed on a STAT-ONLY
+// fingerprint read before the probe (HEAD, the branch tip it names, the local `origin/<branch>` ref, packed-refs,
+// `.git/index`, the lease marker — no git spawned). A reused entry can only under-report capacity, never hand a
+// lane with work to `acquire` (and `acquire` re-verifies before any reset anyway, #2924). The staleness that
+// remains — work that became pushed/landed on the REMOTE with nothing local changing, or untracked files removed
+// without touching the index — is bounded by `--verdict-memo-max-age-ms` / LANE_POOL_VERDICT_MEMO_MAX_AGE_MS
+// (default 10 min), staggered per lane so the whole memo never expires in one scan. A verdict computed after the
+// scan deadline (a killed git reads as null) or on a failed `ls-remote` is never recorded. `--no-verdict-memo`
+// disables it; provision/refresh drop it with the list cache.
+const VERDICT_MEMO_FILE = (repo) => join(repo.poolDir, '.acquirable-verdict-memo.json');
+const DEFAULT_VERDICT_MEMO_MAX_AGE_MS = 10 * 60_000;
+const verdictMemoMaxAgeMs = () => numFlagOrEnv('verdict-memo-max-age-ms', 'LANE_POOL_VERDICT_MEMO_MAX_AGE_MS', DEFAULT_VERDICT_MEMO_MAX_AGE_MS);
+
+/** Stat/read-only fingerprint of the lane state a dirty/ahead verdict depends on. `null` when unreadable. */
+function laneVerdictFingerprint(dir, branch) {
+  try {
+    const gitDir = join(dir, '.git');
+    const readRef = (ref) => { try { return readFileSync(join(gitDir, ref), 'utf8').trim(); } catch { return '-'; } };
+    const statSig = (p) => { try { const s = statSync(join(gitDir, p)); return `${s.mtimeMs}:${s.size}`; } catch { return '-'; } };
+    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+    const tip = head.startsWith('ref: ') ? readRef(head.slice(5).trim()) : head;
+    const index = statSync(join(gitDir, 'index'));
+    return [head, tip, readRef(`refs/remotes/origin/${branch}`), statSig('packed-refs'), `${index.mtimeMs}:${index.size}`, statSig(LEASE_FILENAME)].join('|');
+  } catch {
+    return null;
+  }
+}
+
+function readVerdictMemo(repo) {
+  if (flags['no-verdict-memo'] || verdictMemoMaxAgeMs() <= 0) return null;
+  let m = null;
+  try { m = JSON.parse(readFileSync(VERDICT_MEMO_FILE(repo), 'utf8')); } catch { /* none yet */ }
+  const lanes = m && m.v === 1 && m.branch === repo.branch && m.lanes && typeof m.lanes === 'object' ? m.lanes : {};
+  return { lanes, updates: new Map() };
+}
+
+/** A lane's memoized "not acquirable" verdict, if its fingerprint still matches and it is young enough. */
+function verdictMemoHit(memo, repo, n, nowMs) {
+  const e = memo?.lanes?.[n];
+  if (!e || typeof e.at !== 'number' || !e.fp) return false;
+  const maxAge = verdictMemoMaxAgeMs() * (0.5 + ((n * 37) % 50) / 100); // staggered: 50%–99% of the max age
+  if (nowMs - e.at >= maxAge || e.at > nowMs + 1000) return false;
+  return e.fp === laneVerdictFingerprint(laneDir(repo, n), repo.branch);
+}
+
+function noteVerdict(memo, n, fp, info, remoteShasBox) {
+  if (!memo) return;
+  const doa = info?.dirtyOrAhead;
+  const holdsWork = !!doa && (doa.dirty || doa.ahead > 0);
+  const provable = holdsWork && fp && !(doa.ahead > 0 && !doa.dirty && remoteShasBox?.failed);
+  memo.updates.set(n, provable ? { fp, at: Date.now(), dirty: !!doa.dirty, ahead: doa.ahead } : null);
+}
+
+function writeVerdictMemo(repo, memo) {
+  if (!memo || memo.updates.size === 0) return;
+  const file = VERDICT_MEMO_FILE(repo);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    // Merge onto the LATEST file (a concurrent scan may have written other lanes meanwhile), then tmp+rename.
+    const cur = readVerdictMemo(repo)?.lanes ?? {};
+    const lanes = { ...cur };
+    for (const [n, e] of memo.updates) {
+      if (e) lanes[n] = e;
+      else delete lanes[n];
+    }
+    writeFileSync(tmp, JSON.stringify({ v: 1, branch: repo.branch, lanes }) + '\n');
+    renameSync(tmp, file);
+  } catch { try { rmSync(tmp, { force: true }); } catch { /* ignore */ } }
 }
 // Stat-only fingerprint of the pool's lease state: which lanes exist + each marker's mtime (0 = no marker).
 function leaseFingerprint(repo) {
@@ -2492,6 +2611,7 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
   const startedMs = Date.now();
   scanDeadlineMs = scanTimeoutMs > 0 ? startedMs + scanTimeoutMs : null;
   const overrun = () => scanDeadlineMs !== null && Date.now() > scanDeadlineMs;
+  let memo = null;
   const overrunFail = (where) => {
     scanDeadlineMs = null;
     throw Object.assign(new Error(`list --acquirable scan exceeded its ${scanTimeoutMs}ms budget ${where} (pool "${repo.name}" under ${repo.poolDir}) — refusing to return a partial/unsound answer. Raise --scan-timeout-ms / LANE_POOL_LIST_SCAN_TIMEOUT_MS, or check for a hung git (#xn432dz)`), { scanTimeout: true });
@@ -2512,8 +2632,16 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
     // own auto-pick.
     const remoteShasBox = { value: null };
     const out = [];
+    memo = readVerdictMemo(repo);
     for (const n of existingLanes(repo)) {
-      const ok = isLaneAcquirable(laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs), nowMs, ttlMs);
+      let ok = false;
+      if (!verdictMemoHit(memo, repo, n, Date.now())) {
+        const fp = memo ? laneVerdictFingerprint(laneDir(repo, n), repo.branch) : null;
+        const info = laneAcquirableInfo(repo, n, remoteShasBox, nowMs, ttlMs);
+        ok = isLaneAcquirable(info, nowMs, ttlMs);
+        if (overrun()) overrunFail(`at lane-${n}`); // before noteVerdict: a past-deadline verdict may rest on a killed git
+        noteVerdict(memo, n, fp, info, remoteShasBox);
+      }
       if (overrun()) overrunFail(`at lane-${n}`);
       if (ok) {
         out.push(n);
@@ -2523,6 +2651,9 @@ function scanAcquirable(repo, { limit = null, scanTimeoutMs }) {
     return out.map((n) => laneDir(repo, n));
   } finally {
     scanDeadlineMs = null;
+    // Also on an overrun: every verdict recorded so far finished inside the deadline, so the NEXT scan skips
+    // those lanes and gets further — a scan that times out under load still makes the next one cheaper.
+    writeVerdictMemo(repo, memo);
   }
 }
 
@@ -3385,6 +3516,8 @@ const KNOWN_FLAGS = new Set([
   'repo', 'reserve', 'scope', 'session', 'ttl-minutes', 'wait-ms',
   // #xn432dz — list --acquirable's single-flight cache / early-stop / bounded-scan knobs.
   'limit', 'no-cache', 'cache-ttl-ms', 'scan-timeout-ms',
+  // list --acquirable's per-lane "holds un-pushed work" memo (see VERDICT_MEMO_FILE).
+  'no-verdict-memo', 'verdict-memo-max-age-ms',
   // #4025 — provision --acquirable's per-call new-lane cap, and trim's own cap/dry-run knobs.
   'max-new', 'max', 'dry-run',
   // #3383 — acquire's own growth-on-empty knobs: hard ceiling and per-call new-lane cap.
