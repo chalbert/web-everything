@@ -90,10 +90,23 @@ function resolveProfileKey(input) {
  * slug tag (`fui`/`pa`), or a scope prefix (`we`/`fui`/`frontierui`/`plateau`/`plateau-app`), with or without a
  * trailing `:`. Returns `null` for anything unrecognized — NEVER throws. Frozen. PURE given `home`.
  *
- * `lanePoolRepo` matches `scripts/operations/review-dispatch.mjs#planReviewDispatch`'s own derivation exactly
- * (the one this function replaces there): `we` is the literal `'.'` (lane-pool.mjs's own cwd-toplevel default —
- * NOT `null`; this value is interpolated straight into a brief's `--repo=${laneRepo}`, so it must be a real,
- * shell-safe token), every sibling repo is its absolute, `$HOME`-expanded checkout path.
+ * `lanePoolRepo` is what `lane-pool.mjs --repo=` expects — this value is interpolated straight into a brief's
+ * `--repo=${laneRepo}`, so it must be a real, shell-safe token. It is ALWAYS `checkoutPath` (an absolute,
+ * `$HOME`-expanded path), for `we` exactly as much as for a sibling repo.
+ *
+ * Landing-freeze fix (lane-leftover-reclaim) — `we` used to be the literal `'.'` here (`lane-pool.mjs`'s own
+ * cwd-toplevel default), on the assumption that whatever process fills a brief with this value is running
+ * FROM the WE checkout, so a relative `.` resolves to it. #4174 broke that assumption for every DISPATCHED
+ * session: its cwd is a scratch directory OUTSIDE the checkout (`dispatch-lane-io.mjs#dispatchSessionCwd`),
+ * chosen deliberately so a stray file the agent writes before it has a lane of its own never dirties the
+ * checkout that dispatched it. A brief's ONE pre-lane command — `acquire --repo=${LANE_REPO}` — still ran with
+ * `--repo=.`, which from a scratch cwd resolves to THAT scratch directory, not the checkout; live-caught
+ * 2026-09-26 (ci-heal-2783's own transcript): `acquire --repo=.` failed to find the repo at all. An absolute
+ * path is correct in EVERY caller: it is exactly the same location `.` would have resolved to for a caller
+ * whose cwd already was the checkout (the common case before #4174, and still true for every non-brief
+ * internal caller — `tick-core.mjs`/`reconcile-fix-dispatch.mjs`/`ci-heal-pr-dispatch.mjs` all still run with
+ * cwd = the checkout), so this is a strictly more robust superset, never a behavior change for any caller that
+ * already worked.
  * @param {unknown} keyOrSlugOrPrefix
  * @param {{home?: string}} [o] - `home` is injectable (mirrors `planReviewDispatch`'s own `home` param) so a
  *   test can resolve a sibling checkout path without touching the real `$HOME`.
@@ -108,7 +121,7 @@ export function repoProfile(keyOrSlugOrPrefix, { home = homedir() } = {}) {
   if (key === null) return null;
   const meta = CONSTELLATION_REPOS[key];
   const checkoutPath = key === 'we' ? WE_CHECKOUT_ROOT : resolve(meta.path.replace(/^\$HOME(?=\/|$)/, home));
-  const lanePoolRepo = key === 'we' ? '.' : checkoutPath;
+  const lanePoolRepo = checkoutPath;
   return Object.freeze({
     key,
     slug: meta.slug,
