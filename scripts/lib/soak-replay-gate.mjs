@@ -55,7 +55,18 @@ const FIX_WORD_RE = /\b(bug|broke|broken|regression|incident)\b/i;
 // ends the line, and a greedy `\s*` right before the capture group would swallow it and let the (lazy) group
 // spill onto the NEXT line looking for trailing whitespace to stop at — silently "waiving" off body text that
 // was never meant as the reason.
-const WAIVER_RE = /^[ \t]*soak-waiver:[ \t]*(.*?)[ \t]*\r?$/im;
+//
+// Tolerant of common markdown decoration around the KEY (case-insensitive already, via the `i` flag), since
+// real PR bodies write this as a markdown list item with the key bolded rather than as bare text — verified
+// against #2783's actual body (`- **Soak-waiver**: change is confined to a pure decision function …`), which
+// the earlier bare `soak-waiver:` form did not match at all:
+//   - an optional leading list-bullet marker (`-`, `*`, `+`, or `1.`/`1)`) before the key;
+//   - optional `*`/`_` emphasis markers (bold/italic, `*`/`**`/`_`/`__`) directly around the key; and
+//   - the `:` allowed either inside or outside the closing emphasis (`**Soak-waiver**:` and `**Soak-waiver:**`
+//     both read as the same key:reason pair to a human, so both must parse the same way here).
+// A bare `soak-waiver: <reason>` line (no decoration at all) still matches unchanged — decoration is optional,
+// never required.
+const WAIVER_RE = /^[ \t]*(?:[-*+]|\d+[.)])?[ \t]*[*_]{0,3}soak-waiver[*_]{0,3}[ \t]*:[ \t]*[*_]{0,3}[ \t]*(.*?)[ \t]*\r?$/im;
 
 /**
  * Heuristic "does this PR read as a bug fix" signal — see this module's header comment for the full

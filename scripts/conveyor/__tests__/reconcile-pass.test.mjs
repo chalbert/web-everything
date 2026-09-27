@@ -36,6 +36,33 @@ it('normalises a bare repo KEY (e.g. --repo=we) to its gh owner/name slug before
   expect(enrichMainRed).toHaveBeenCalledWith([], { repo: 'chalbert/web-everything', defaultBranch: 'main' });
 });
 
+// #2748 false-red follow-up (soak-replay-gate, PR #2775) — `runReconcilePass` is the ONE call site wired
+// end-to-end: it fetches the repo's required status-check names (cached, `we:scripts/lib/required-status-
+// checks.mjs`) and threads them into `planReconcile`, so `classifyPr`'s `ci-red` phase means a REQUIRED check
+// failed rather than "any check outside a hand-maintained exclusion list". `readRequiredChecks` is injectable
+// like every other reader in this file, so this is exercised with no network.
+it('fetches the required set once per pass and threads it into planReconcile (never ci-red on an advisory-only red)', async () => {
+  const { runReconcilePass } = await import('../reconcile-pass.mjs');
+  const rollup = [
+    { name: 'soak-replay-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'daemon-soak', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ];
+  const readRequiredChecks = vi.fn(() => ({ checks: ['test', 'smoke', 'daemon-soak'], source: 'live' }));
+  const plan = runReconcilePass({
+    repo: 'chalbert/web-everything',
+    readPrs: () => [{
+      number: 2748, headRefName: 'lane/x', labels: [{ name: 'review:accepted' }, { name: 'ready-to-merge' }],
+      mergeStateStatus: 'CLEAN', statusCheckRollup: rollup, comments: [],
+    }],
+    readAgents: () => [], enrich: (agents) => agents, readRequiredChecks,
+  });
+  expect(readRequiredChecks).toHaveBeenCalledWith({ repo: 'chalbert/web-everything', branch: 'main' });
+  expect(plan.dispatch).toEqual([]);
+  expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2748 })]);
+});
+
 it('maps repo slugs before binding and refuses unknown repos before IO', async () => {
   const { runReconcilePass } = await import('../reconcile-pass.mjs');
   const options = {
