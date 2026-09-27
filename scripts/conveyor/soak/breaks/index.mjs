@@ -22,6 +22,7 @@
 import unsupportedRepoDirt from './unsupported-repo-dirt.mjs';
 import scorecardDirt from './scorecard-dirt.mjs';
 import ghShimMidRebuild from './gh-shim-mid-rebuild.mjs';
+import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
 import ciHealEmptyScope from './ci-heal-empty-scope.mjs';
 import laneAcquireUnderLoad from './lane-acquire-under-load.mjs';
 import fixDaemonLockWait from './fix-daemon-lock-wait.mjs';
@@ -49,6 +50,7 @@ export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
   scorecardDirt,
   ghShimMidRebuild,
+  pinnedOverlayConflictSkipped,
   ciHealEmptyScope,
   laneAcquireUnderLoad,
   fixDaemonLockWait,

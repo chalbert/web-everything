@@ -195,6 +195,37 @@ function pinnedStatus(git, raw, mainSha, ovSha) {
   return String(diff.stdout ?? '').trim() ? { pinned: true, why: 'mechanism' } : { pinned: false, why: null };
 }
 
+/** The mechanism files main itself must carry for a build WITHOUT a skipped pinned overlay to still rebuild
+ *  (re-read the overlay list, re-apply the overlay once rebased). */
+const MECHANISM_CORE_PATHS = Object.freeze(['scripts/lib/daemon-rebuild.mjs', 'scripts/lib/daemon-overlays.mjs']);
+
+/**
+ * xpinskip (live 2026-09-26 23:39 ET) — may a CONFLICTING pinned overlay be skipped for this build instead of
+ * refusing the whole rebuild? The pin exists so a build never lands on a tree that cannot rebuild itself (the
+ * 2026-09-25 #2625 incident: the overlay CARRIED daemon-rebuild.mjs; plain main had no rebuild at all). That
+ * danger is real only when main lacks the mechanism the overlay brings. So a skip is allowed only when:
+ *   - the pin is DERIVED (`why === 'mechanism'`) — an explicit `--pinned` flag is the operator's own "refuse,
+ *     never build without it" and is honored; an `'unknown'` pin (git could not answer) fails closed;
+ *   - main already has every core mechanism file AND every mechanism file the overlay touches — i.e. the
+ *     overlay only CHANGES a mechanism main already runs; it never ADDS one main lacks.
+ * The skipped overlay stays registered; once its branch is rebased it merges cleanly and re-applies.
+ * Fail closed on any git error.
+ * @returns {{skippable:boolean, why:string, paths?:string[]}}
+ */
+function pinnedConflictSkippable(git, mainSha, ovSha, pinnedBy) {
+  if (pinnedBy !== 'mechanism') return { skippable: false, why: pinnedBy === 'flag' ? 'explicit-pin' : 'pin-unknown' };
+  const mb = git(['merge-base', mainSha, ovSha]);
+  const base = String(mb.stdout ?? '').trim();
+  if (mb.status !== 0 || !base) return { skippable: false, why: 'merge-base-failed' };
+  const diff = git(['diff', '--name-only', base, ovSha, '--', ...REBUILD_MECHANISM_PATHS]);
+  if (diff.status !== 0) return { skippable: false, why: 'diff-failed' };
+  const touched = String(diff.stdout ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const missing = [...new Set([...MECHANISM_CORE_PATHS, ...touched])]
+    .filter((p) => git(['cat-file', '-e', `${mainSha}:${p}`]).status !== 0);
+  if (missing.length > 0) return { skippable: false, why: 'main-lacks-mechanism', paths: missing };
+  return { skippable: true, why: 'main-has-mechanism', paths: touched };
+}
+
 // ── planRebuild — pure over an injected git(args) runner ────────────────────────────────────────────────────
 
 /**
@@ -208,7 +239,7 @@ function pinnedStatus(git, raw, mainSha, ovSha) {
  *   prState?:(pr:number)=>(Promise<string|null>|string|null), mainOnly?:boolean}} o
  * @returns {Promise<{ok:false, reason:'main-unresolved'}|{ok:true, mainSha:string, finalSha:string,
  *   applied:Array<{ref:string,pr:number|null,sha:string}>,
- *   decisions:Array<{ref:string,pr:number|null,action:'remove'|'drop'|'apply',reason:string,sha:string|null}>,
+ *   decisions:Array<{ref:string,pr:number|null,action:'remove'|'drop'|'skip'|'apply',reason:string,sha:string|null}>,
  *   alerts:Array<object>, inputsKey:string, upToDate:boolean}>}
  */
 export async function planRebuild({
@@ -227,9 +258,11 @@ export async function planRebuild({
     alerts.push({ kind: 'overlays-refused-main-only', detail: { count: overlays.length } });
   }
 
-  // A pinned overlay may only leave the build because main already has it (`pr-merged` / `in-main`). Any other
-  // exit (conflict, failed merge/commit, closed PR, deleted ref) REFUSES the whole rebuild instead: the clone
-  // keeps its current tree, and nothing on the overlay list changes (see REBUILD_MECHANISM_PATHS).
+  // A pinned overlay may only leave the build because main already has it (`pr-merged` / `in-main`), or — for
+  // a CONFLICT only — be SKIPPED this pass when main already runs the mechanism it changes (see
+  // `pinnedConflictSkippable`; the entry stays registered). Any other exit (a conflict main cannot survive,
+  // failed merge/commit, closed PR, deleted ref) REFUSES the whole rebuild instead: the clone keeps its current
+  // tree, and nothing on the overlay list changes (see REBUILD_MECHANISM_PATHS).
   const refusePinned = (ref, pr, sha, dropReason, why) => {
     const conflict = ['conflict', 'merge-tree-failed', 'commit-tree-failed'].includes(dropReason);
     return {
@@ -262,7 +295,25 @@ export async function planRebuild({
     }
     const dropOrRefuse = (reason) => {
       const p = pinnedStatus(git, raw, mainSha, ovSha);
-      if (p.pinned) return refusePinned(ref, pr, ovSha, reason, p.why);
+      if (p.pinned) {
+        // xpinskip — one conflicting pinned overlay must never freeze the fleet: when main already runs the
+        // mechanism this overlay only changes, build WITHOUT it this pass (skip ≠ drop: it stays registered).
+        const s = reason === 'conflict' ? pinnedConflictSkippable(git, mainSha, ovSha, p.why) : { skippable: false };
+        if (s.skippable) {
+          decisions.push({ ref, pr, action: 'skip', reason: 'pinned-overlay-conflict-skipped', sha: ovSha });
+          alerts.push({
+            kind: 'pinned-overlay-conflict-skipped',
+            detail: {
+              ref, pr, sha: ovSha, pinnedBy: p.why, mechanismPaths: s.paths,
+              message: `pinned overlay ${ref}${pr != null ? ` (PR #${pr})` : ''} conflicts with main — building main + the other overlays without it; it stays registered and re-applies once its branch is rebased`,
+            },
+          });
+          return null;
+        }
+        const refused = refusePinned(ref, pr, ovSha, reason, p.why);
+        if (s.why) refused.detail.skipRefusedBecause = s.paths ? `${s.why}: ${s.paths.join(',')}` : s.why;
+        return refused;
+      }
       decisions.push({ ref, pr, action: 'drop', reason, sha: ovSha });
       return null;
     };
@@ -1162,6 +1213,24 @@ async function prepareRebuild({
   if (!plan.ok) {
     // A pinned refusal keeps the current tree AND the overlay list untouched (no decisions were applied).
     alert(plan.reason, plan.detail);
+    // xpinskip — a pinned refusal that still stands (explicit pin, or main lacks the mechanism) must not freeze
+    // dispatch either: when the clone sits on its last smoke-verified build, record it as HELD there, so
+    // `main-staleness.mjs#assertMainNotStale` dispatches from that build (x5wbsbc) instead of refusing every
+    // tick as stale, and `daemon-held-on-last-good` flags it after 15 min. The next adoption clears it.
+    if (/^pinned-overlay-/.test(plan.reason) && state.adopted?.head && state.adopted.head === prevHead) {
+      const d = plan.detail || {};
+      state.held = {
+        since: state.held?.since ?? nowIso(),
+        reason: plan.reason,
+        failed: `${d.ref ?? '?'}${d.pr != null ? ` (PR #${d.pr})` : ''}: ${d.message ?? plan.reason}`,
+        details: [],
+        lastGood: prevHead,
+        target: null,
+        mainSha: null,
+        updatedAt: nowIso(),
+      };
+      writeState();
+    }
     return terminal({ moved: false, reason: plan.reason, ...(plan.detail ? { detail: plan.detail } : {}) });
   }
   for (const d of plan.decisions) {

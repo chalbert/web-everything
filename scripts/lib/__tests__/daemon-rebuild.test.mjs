@@ -1291,6 +1291,121 @@ describe('rebuildClone — pinned overlays never conflict-drop (self-destruct gu
   });
 });
 
+// ── xpinskip — one conflicting pinned overlay must never freeze the fleet ─────────────────────────────────
+// Live 2026-09-26 23:39 ET on wev-review-daemon: #2768 (lane/fix-rebuild-finalize) only CHANGES
+// scripts/lib/daemon-rebuild.mjs, which main already carries — so it is auto-pinned ('mechanism'). main moved,
+// #2768 conflicted, the rebuild refused (`pinned-overlay-conflict`) every tick, the clone fell 2 commits behind,
+// and the fix daemon refused ALL dispatch in all three repos as stale. These replay that shape with real git.
+describe('rebuildClone — a conflicting pinned overlay is skipped (not dropped) when main has the mechanism', () => {
+  function seedMechanismOnMain(cloneDir) {
+    writeFile(cloneDir, 'scripts/lib/daemon-rebuild.mjs', '// main rebuild v1\n');
+    writeFile(cloneDir, 'scripts/lib/daemon-overlays.mjs', '// main overlays v1\n');
+    writeFile(cloneDir, 'shared.txt', 'original\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'seed mechanism + shared.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+  }
+  /** A fix to a mechanism file main already has, plus an edit main will later conflict on (the #2768 shape). */
+  function pushMechanismFix(originDir, ref, sharedText = 'overlay change\n') {
+    return pushBranch(originDir, ref, (dir) => {
+      writeFile(dir, 'scripts/lib/daemon-rebuild.mjs', '// main rebuild v1 + finalize fix\n');
+      writeFile(dir, 'shared.txt', sharedText);
+    });
+  }
+  const readAt = (cloneDir, path) => readFileSync(join(cloneDir, path), 'utf8');
+
+  it('moves the clone to main + the OTHER overlays, keeps the pinned one registered, alerts once, re-applies after a rebase', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedMechanismOnMain(cloneDir);
+    pushMechanismFix(originDir, 'lane/fix-rebuild-finalize');
+    pushBranch(originDir, 'lane/other', (dir) => writeFile(dir, 'other.txt', 'other\n'));
+    addOverlay(cloneDir, { ref: 'lane/fix-rebuild-finalize', pr: 2768 }, { env });
+    addOverlay(cloneDir, { ref: 'lane/other', pr: 2771 }, { env });
+
+    const first = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS });
+    expect(first.moved).toBe(true);
+    expect(readAt(cloneDir, 'scripts/lib/daemon-rebuild.mjs')).toContain('finalize fix');
+
+    const mainSha = advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+
+    // Before the fix this tick refused `pinned-overlay-conflict` and never moved the clone.
+    const runSmoke = passSmoke();
+    const second = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => 'OPEN', lockOpts: LOCK_OPTS });
+    expect(second.moved).toBe(true);
+    expect(runSmoke).toHaveBeenCalled(); // smoked as usual
+    expect(gitOk(cloneDir, ['merge-base', '--is-ancestor', mainSha, 'HEAD']) === '').toBe(true);
+    expect(readAt(cloneDir, 'shared.txt')).toBe('main change\n');
+    expect(existsSync(join(cloneDir, 'other.txt'))).toBe(true); // the non-conflicting overlay is still built in
+    expect(readAt(cloneDir, 'scripts/lib/daemon-rebuild.mjs')).toBe('// main rebuild v1\n'); // main's own mechanism
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/fix-rebuild-finalize', 'lane/other']);
+    const kinds = second.alerts.map((a) => a.kind);
+    expect(kinds.filter((k) => k === 'pinned-overlay-conflict-skipped')).toHaveLength(1);
+    expect(kinds).not.toContain('pinned-overlay-conflict');
+    expect(kinds).not.toContain('overlay-conflict-dropped');
+    expect(second.alerts.find((a) => a.kind === 'pinned-overlay-conflict-skipped').detail).toMatchObject({
+      ref: 'lane/fix-rebuild-finalize', pr: 2768, pinnedBy: 'mechanism', mechanismPaths: ['scripts/lib/daemon-rebuild.mjs'],
+    });
+    expect(readRebuildState(cloneDir, env).held).toBeNull();
+
+    // The branch is rebased onto the new main — the SAME registration re-applies with no operator step.
+    const dir = makeAuthorClone(originDir);
+    gitOk(dir, ['checkout', '-q', '-B', 'lane/fix-rebuild-finalize', 'origin/main']);
+    writeFile(dir, 'scripts/lib/daemon-rebuild.mjs', '// main rebuild v1 + finalize fix\n');
+    gitOk(dir, ['add', '-A']);
+    gitOk(dir, ['commit', '-q', '-m', 'rebased']);
+    gitOk(dir, ['push', '-q', '-f', 'origin', 'HEAD:refs/heads/lane/fix-rebuild-finalize']);
+
+    const third = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS });
+    expect(third.moved).toBe(true);
+    expect(readAt(cloneDir, 'scripts/lib/daemon-rebuild.mjs')).toContain('finalize fix');
+    expect(existsSync(join(cloneDir, 'other.txt'))).toBe(true);
+    expect(third.alerts.map((a) => a.kind)).not.toContain('pinned-overlay-conflict-skipped');
+  });
+
+  it('dryRunRebuild previews the skip: rebuild-and-smoke onto main + the other overlays', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    seedMechanismOnMain(cloneDir);
+    pushMechanismFix(originDir, 'lane/mech-fix');
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+    addOverlay(cloneDir, { ref: 'lane/mech-fix', pr: 1 }, { env });
+    const dry = await dryRunRebuild({ root: cloneDir, env, prState: async () => null });
+    expect(dry.wouldDo).toBe('rebuild-and-smoke');
+    expect(dry.plan.ok).toBe(true);
+    expect(dry.plan.finalSha).toBe(dry.plan.mainSha);
+    expect(dry.plan.decisions).toEqual([expect.objectContaining({ ref: 'lane/mech-fix', action: 'skip' })]);
+  });
+
+  it('still REFUSES when the overlay ADDS a mechanism file main lacks — and holds the clone on its last-good build', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    writeFile(cloneDir, 'shared.txt', 'original\n');
+    gitOk(cloneDir, ['add', '-A']);
+    gitOk(cloneDir, ['commit', '-q', '-m', 'seed shared.txt']);
+    gitOk(cloneDir, ['push', '-q', 'origin', 'main']);
+    pushBranch(originDir, 'lane/brings-mechanism', (dir) => {
+      writeFile(dir, 'scripts/lib/daemon-rebuild.mjs', '// the whole mechanism\n');
+      writeFile(dir, 'shared.txt', 'overlay change\n');
+    });
+    addOverlay(cloneDir, { ref: 'lane/brings-mechanism', pr: 2625 }, { env });
+    const first = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS });
+    expect(first.moved).toBe(true);
+    const lastGood = gitOk(cloneDir, ['rev-parse', 'HEAD']).trim();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.txt', 'main change\n'));
+
+    const second = await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => 'OPEN', lockOpts: LOCK_OPTS });
+    expect(second.moved).toBe(false);
+    expect(second.reason).toBe('pinned-overlay-conflict');
+    expect(second.detail.skipRefusedBecause).toMatch(/^main-lacks-mechanism: /);
+    // Held on last-good ⇒ the staleness guard dispatches from it instead of refusing every tick (x5wbsbc).
+    const { held } = readRebuildState(cloneDir, env);
+    expect(held).toMatchObject({ reason: 'pinned-overlay-conflict', lastGood });
+    expect(held.failed).toContain('lane/brings-mechanism (PR #2625)');
+    const { decideLastGood } = await import('../daemon-last-good.mjs');
+    expect(decideLastGood({
+      headSha: lastGood, state: readRebuildState(cloneDir, env), nowMs: Date.now(), maxAgeMs: 86_400_000,
+    }).onLastGood).toBe(true);
+  });
+});
+
 // ── overlay-list race (live 2026-09-24/25: #2640, #2641, #2643 each needed repeated adds) ────────────────────
 // Two REAL processes on a throwaway clone: process A is a real `rebuildClone` auto-removing a merged overlay;
 // while A sits inside its read→write window (widened by the test-only RMW delay; A drops a marker file when it
