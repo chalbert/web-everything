@@ -1313,12 +1313,14 @@ describe('EXTERNAL_WORKER_CANDIDATES, externalTierEquivalent and the critical-wo
     expect(externalTierEquivalent('gemini', 'gemini-3.1-pro')).toBeNull();
   });
 
-  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal, basis #4034, every row closed by default', () => {
+  it('CRITICAL_WORK_GATE holds exactly build, fix and ci-heal, basis #4034; only doc-fix and ci-heal are open (probation, 2026-09-27)', () => {
     expect(CRITICAL_WORK_GATE.kinds).toEqual(['build', 'fix', 'ci-heal']);
     expect(CRITICAL_WORK_GATE.basis).toBe('#4034');
     const rows = CRITICAL_WORK_GATE.openForNonCritical;
-    expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'conflict-resolution', 'doc-fix'].sort());
-    expect(Object.values(rows).every((v) => v === false)).toBe(true);
+    expect(Object.keys(rows).sort()).toEqual(['bugfix', 'build-new-feature', 'ci-heal', 'conflict-resolution', 'doc-fix'].sort());
+    expect(Object.entries(rows).filter(([, v]) => v === true).map(([k]) => k).sort()).toEqual(['ci-heal', 'doc-fix']);
+    // bugfix is the NEXT step — it stays closed.
+    expect(rows.bugfix).toBe(false);
   });
 
   it('a gated kind (build/fix/ci-heal) recommends claude despite a clean Codex track record, auditing a critical-work-gate entry', () => {

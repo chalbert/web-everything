@@ -451,7 +451,7 @@ function compare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 export function routeDispatch(profile, options = {}) {
   try {
     const errors = [...validateDispatchProfile(profile).errors];
-    const { stage, kind, scorecards = [], taskKey, tags = [], criticalWorkGate } = options;
+    const { stage, kind, scorecards = [], taskKey, tags = [], criticalWorkGate, simple = false } = options;
     if (!ROUTE_STAGES.includes(stage)) errors.push('stage is invalid');
     if (stage === 'story' && !STORY_KINDS.includes(kind)) errors.push('kind is invalid');
     if (errors.length) return refused(errors);
@@ -459,7 +459,7 @@ export function routeDispatch(profile, options = {}) {
     // The router does not filter roles: work and supervisor evidence must never mix.
     const records = routingRecords(scorecards).filter(r => r.role !== 'supervise'), ownAudit = [], routerAudit = [];
     const high = profile.risk === 'high' || profile.filesTouched.some(isStatuteTierPath);
-    const out = { mode: 'acting', shadow: null, backend: null, spotCheck: null, role: stage === 'story' ? kind === 'build' ? SUPERVISOR_ROLE : 'lane-agent' : 'task-agent', provider: null, model: null, tier: null, supervision: SUPERVISION_LEVELS.FULL, alternateBackend: null, auditTrail: [] };
+    const out = { mode: 'acting', shadow: null, backend: null, spotCheck: null, role: stage === 'story' ? kind === 'build' ? SUPERVISOR_ROLE : 'lane-agent' : 'task-agent', provider: null, model: null, tier: null, supervision: SUPERVISION_LEVELS.FULL, alternateBackend: null, probationWorker: null, auditTrail: [] };
     if (stage === 'story') {
       out.provider = RECOMMENDATIONS.CLAUDE;
       // #3857 — the same model-tier table a code-change dispatch uses, RUNG_KINDS-gated (every STORY_KINDS
@@ -475,12 +475,14 @@ export function routeDispatch(profile, options = {}) {
       // the RAW scorecards, because `routingRecords` projects away the scope evidence a miss row may carry.
       const criticalWork = criticalWorkVerdict({ taskType: profile.taskType, filesTouched: profile.filesTouched, estimatedLoc: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, risk: profile.risk });
       const criticalMisses = criticalMissesFor(scorecards, profile.taskType);
-      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
+      const context = { filesTouched: [...profile.filesTouched], estimatedSize: profile.estimatedLoc, acceptanceTestable: profile.acceptanceTestable, scorecards: records, kind, tags, criticalWork, criticalMisses, simple: simple === true, ...(criticalWorkGate ? { criticalWorkGate } : {}) };
       const selected = selectProvider(task, context);
       routerAudit.push(...selected.auditTrail);
       out.provider = selected.recommendation;
       if (selected.recommendation === RECOMMENDATIONS.CLAUDE) {
         out.tier = selected.claudeTier; out.model = CLAUDE_NATIVE_MODEL_BY_TIER[out.tier]; out.alternateBackend = selected.alternateBackend ?? null;
+        // agy-launcher-probation — the roster pick for an opened, non-critical taskType (Claude stays the fallback).
+        out.probationWorker = selected.probationWorker ?? null;
       } else if (selected.recommendation === RECOMMENDATIONS.BOTH) {
         ownAudit.push(audit('both-supervision', SUPERVISION_LEVELS.FULL, 'dual-provider route', 'No single provider/model/taskType triple can graduate dual dispatch.'));
       } else {
@@ -1199,7 +1201,10 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       return routeRefused(kind, derivation, `the dispatch profile does not validate: ${built.errors.join('; ')}`);
     }
 
-    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey, kind, tags, criticalWorkGate });
+    // agy-launcher-probation — a `behind` CI heal (a rebase, no failing test to diagnose) is the one SIMPLE task
+    // today; only a simple task may go to the Antigravity-Gemini probation worker (#3922).
+    const simple = kind === 'ci-heal' && String(dispatch?.reason ?? '').trim() === 'behind';
+    const out = routeDispatch(built.profile, { stage: 'task', scorecards, taskKey: dispatch?.taskKey, kind, tags, criticalWorkGate, simple });
     if (out.role === 'refused') {
       return routeRefused(kind, derivation, `the router refused this dispatch: ${out.auditTrail.map((a) => a.reasoning).join('; ')}`);
     }
@@ -1275,6 +1280,9 @@ export function decideDispatchRoute(dispatch = {}, { scorecards = [], enforceSup
       sized,
       sizeSource,
       override: override.value,
+      // agy-launcher-probation — the probation worker a launcher may run this dispatch on (see
+      // `provider-routing.mjs#selectProbationWorker`), or null. An item's own `deliveryAgent:` override wins.
+      probationWorker: override.value ? null : (out.probationWorker ?? null),
       refusal: null,
       supervisionEnforced: enforceSupervision,
       supervisionHold: null,

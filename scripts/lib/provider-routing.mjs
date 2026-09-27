@@ -133,11 +133,26 @@ export const CLAUDE_TIERS = Object.freeze({
   OPUS: 'opus',
 });
 
+// agy-launcher-probation (2026-09-27): re-checked against the live catalog, not assumed. `agy models` on agy
+// 1.2.12 lists exactly two Claude backends — `claude-sonnet-4-6` ("Claude Sonnet 4.6 (Thinking)") and
+// `claude-opus-4-6-thinking` ("Claude Opus 4.6 (Thinking)") — so these ARE the current Claude models
+// Antigravity offers; nothing newer is available through it yet. Re-run `agy models` before changing a row.
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
 export const AGY_CLAUDE_MODEL_BY_TIER = Object.freeze({
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-6-thinking',
 });
+
+/** When and against which agy build {@link AGY_CLAUDE_MODEL_BY_TIER} was last checked against `agy models`. */
+// @test-only-export-ok: a dated provenance record for the operator and the next re-check, pinned by its own test
+export const AGY_MODEL_CATALOG_CHECK = Object.freeze({ agyVersion: '1.2.12', checkedOn: '2026-09-27' });
+
+/**
+ * The Gemini model an Antigravity-Gemini probation worker runs (#3922: Gemini takes only SIMPLE steps, under a
+ * Claude/Codex checker). Flash, not Pro: the one clean Antigravity record so far is Flash on already-understood
+ * mechanical work (conflict resolution, 10 landed). `high` is the Flash tier's top reasoning setting.
+ */
+export const AGY_GEMINI_SIMPLE_MODEL = 'gemini-3.8-flash-high';
 
 // @test-only-export-ok: Shared library exported for interactive Claude sessions and conveyor runners
 export const SUPERVISION_LEVELS = Object.freeze({
@@ -183,6 +198,10 @@ export const PROVEN_TASK_ENVELOPES = Object.freeze({
   'build-new-feature': Object.freeze({ maxLoc: 300, maxFiles: 3 }),
   'self-fix': Object.freeze({ maxLoc: 200, maxFiles: 2 }),
   'other': Object.freeze({ maxLoc: 300, maxFiles: 3 }),
+  // agy-launcher-probation — a CI heal repairs a red/BEHIND PR; its own diff (not the PR's) is what this bounds.
+  // No trial exists yet, so the bound is deliberately smaller than `bugfix`'s. The external-heal launcher checks
+  // the heal diff against it after the run and refuses to push a bigger one.
+  'ci-heal': Object.freeze({ maxLoc: 150, maxFiles: 3 }),
 });
 
 /**
@@ -251,7 +270,7 @@ export function externalTierEquivalent(provider, model) {
  * takes the Claude tier table — UNLESS every one of these holds:
  *
  *   1. the task's `taskType` row in `openForNonCritical` is `true` (an explicit, per-taskType operator switch;
- *      every row lands `false`, so today nothing changes);
+ *      `doc-fix` and `ci-heal` are open on probation since 2026-09-27, every other row is `false`);
  *   2. the caller supplied the critical-work verdict (`context.criticalWork`, from
  *      `we:scripts/lib/critical-work.mjs#criticalWorkVerdict`) and it says NOT critical — a missing verdict
  *      fails closed;
@@ -260,7 +279,10 @@ export function externalTierEquivalent(provider, model) {
  *      critical work is never outweighed by any clean streak.
  *
  * Even then the provider must still earn the work on its own trials (`evaluateProviderFitness`), and an opened
- * gated kind never takes the dual-dispatch (`both`) step. Supervision is unchanged: every such PR still gets the
+ * gated kind never takes the dual-dispatch (`both`) step. The exception is an opened taskType with a
+ * {@link PROBATION_ROSTER} row: there the recommendation stays Claude (the fallback executor) and one roster
+ * worker is offered beside it as `probationWorker` ({@link selectProbationWorker}), so the worker earns its
+ * record on real, non-critical work. Supervision is unchanged: every such PR still gets the
  * full review plus the A2/A3 seats. Other kinds, and a caller with no `kind` (an interactive session asking for
  * advice), are unaffected.
  *
@@ -269,11 +291,15 @@ export function externalTierEquivalent(provider, model) {
 // @test-only-export-ok: Shared library exported for the mechanical dispatch path (#3906) and its own test
 export const CRITICAL_WORK_GATE = Object.freeze({
   kinds: Object.freeze(['build', 'fix', 'ci-heal']),
+  // agy-launcher-probation (operator, 2026-09-27): `doc-fix` and the new `ci-heal` taskType are opened ON
+  // PROBATION — non-critical work only, one of the PROBATION_ROSTER workers, full review on every result.
+  // `bugfix` stays closed; it is the next step, once these two have data.
   openForNonCritical: Object.freeze({
     'build-new-feature': false,
     'bugfix': false,
     'conflict-resolution': false,
-    'doc-fix': false,
+    'doc-fix': true,
+    'ci-heal': true,
   }),
   basis: '#4034',
   reason: 'a non-Claude worker takes build/fix/ci-heal work only for a non-critical task of an opened taskType (#4034)',
@@ -305,6 +331,102 @@ function decideCriticalWorkGate(gate, kind, taskType, context) {
     reason: `taskType '${taskType}' is opened for non-critical work, and this task is not critical`,
     vetoes: misses.filter((m) => m && m.taskType === taskType),
   };
+}
+
+/**
+ * THE PROBATION WORKERS (agy-launcher-probation, operator 2026-09-27) — the non-Claude workers an OPENED,
+ * non-critical {@link CRITICAL_WORK_GATE} taskType may be launched on while they build a record. Each row names
+ * WHO runs the work (`provider`/`model`, the trust unit), WHAT reports it on the run record (`executor`, the
+ * #2815 field), and WHICH synchronous launcher script runs it. `checker` names the second provider that must
+ * pass the result before it is pushed (Gemini only: #3922 lets it take simple steps under a Claude/Codex check).
+ * `simpleOnly` rows are offered only when the caller says the task is simple.
+ */
+// @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
+export const PROBATION_WORKERS = Object.freeze({
+  codex: Object.freeze({ id: 'codex', provider: 'codex', model: CODEX_MODEL, executor: 'codex', launcher: 'scripts/codex-direct-task.mjs', simpleOnly: false, checker: null }),
+  'antigravity-claude': Object.freeze({ id: 'antigravity-claude', provider: 'antigravity', model: null, executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', simpleOnly: false, checker: null }),
+  'antigravity-gemini': Object.freeze({ id: 'antigravity-gemini', provider: 'antigravity', model: AGY_GEMINI_SIMPLE_MODEL, executor: 'antigravity', launcher: 'scripts/gemini-direct-task.mjs', simpleOnly: true, checker: 'codex' }),
+});
+
+/**
+ * Which probation workers each opened taskType may use, in tie-break order. A taskType with no row here gets no
+ * probation worker even when its gate row is open (it then routes on earned trials alone, as before).
+ */
+// @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
+export const PROBATION_ROSTER = Object.freeze({
+  'doc-fix': Object.freeze(['antigravity-claude', 'codex']),
+  'ci-heal': Object.freeze(['antigravity-claude', 'codex', 'antigravity-gemini']),
+});
+
+/**
+ * PICK ONE PROBATION WORKER for an opened, non-critical task. PURE and deterministic over its arguments.
+ *
+ * Refuses (returns `worker: null`) for statute-tier paths, judgment taskTypes, a scope outside the proven
+ * envelope (not checked for `ci-heal`: the heal's own diff is unknown up front, so the launcher bounds it after
+ * the run instead), and a taskType with no roster row. Otherwise, over the roster:
+ *   1. drop a `simpleOnly` worker unless `simple === true`;
+ *   2. drop a worker whose exact {provider, model, taskType} triple has a critical miss (`vetoes`, #4034);
+ *   3. rank a worker whose most recent JUDGED trial for this taskType was not clean after one whose was (a
+ *      launch row still awaiting its review has no outcome yet and is not a failure);
+ *   4. then the worker with FEWER recorded trials for this taskType, launch rows included (probation collects
+ *      data evenly, and a launch moves the rotation on before its review lands);
+ *   5. then roster order.
+ * Every pick is supervised `full`, fully reviewed, and owes a run rating — probation never lightens either.
+ *
+ * @param {{taskType: string, tier?: string, simple?: boolean, filesTouched?: string[], estimatedSize?: number,
+ *   scorecards?: Array<object>, vetoes?: Array<object>}} o
+ * @returns {{worker: object|null, auditTrail: Array<object>, reason: string}}
+ */
+// @test-only-export-ok: Shared library exported for the probation launcher (agy-launcher-probation) and its own test
+export function selectProbationWorker({ taskType, tier = CLAUDE_TIERS.SONNET, simple = false, filesTouched = [], estimatedSize = 0, scorecards = [], vetoes = [] } = {}) {
+  const auditTrail = [];
+  const none = (reason) => ({ worker: null, auditTrail, reason });
+  const roster = PROBATION_ROSTER[taskType];
+  if (!roster) return none(`taskType '${taskType}' has no probation roster`);
+  if (taskType === 'architectural-decision' || taskType === 'triage-research') return none(`taskType '${taskType}' needs Claude judgment`);
+  if (filesTouched.some(isStatuteTierPath)) return none('statute-tier paths stay on Claude');
+  if (taskType !== 'ci-heal' && !isWithinProvenEnvelope(taskType, estimatedSize, filesTouched.length)) {
+    return none(`scope (${filesTouched.length} files, ${estimatedSize} LOC) exceeds the proven '${taskType}' envelope`);
+  }
+  const records = Array.isArray(scorecards) ? scorecards : [];
+  const candidates = [];
+  roster.forEach((id, order) => {
+    const def = PROBATION_WORKERS[id];
+    const model = def.model ?? AGY_CLAUDE_MODEL_BY_TIER[tier] ?? AGY_CLAUDE_MODEL_BY_TIER.sonnet;
+    if (def.simpleOnly && simple !== true) {
+      auditTrail.push({ criterion: `probation-candidate:${id}`, result: 'skipped', dataConsulted: `simple=${simple === true}`, reasoning: 'offered only for a simple task' });
+      return;
+    }
+    if (vetoes.some((v) => v?.provider === def.provider && v.model === model && v.taskType === taskType)) {
+      auditTrail.push({ criterion: `probation-candidate:${id}`, result: 'vetoed', dataConsulted: `${def.provider}/${model}/${taskType}`, reasoning: 'a critical miss is on record for this exact triple (#4034)' });
+      return;
+    }
+    const rows = getSortedRecordsForProviderAndTask(records, [def.provider], taskType).filter((r) => r.model === model);
+    // A launch row with no outcome yet (awaiting its review) counts as a trial for the rotation, never as a failure.
+    const lastJudged = rows.find((r) => r.outcome != null);
+    const recentFailure = lastJudged && !isCleanRecord(lastJudged) ? 1 : 0;
+    candidates.push({ def, model, order, recentFailure, trials: rows.length });
+    auditTrail.push({ criterion: `probation-candidate:${id}`, result: `recentFailure=${recentFailure} trials=${rows.length}`, dataConsulted: `${def.provider}/${model}/${taskType}`, reasoning: 'eligible' });
+  });
+  if (!candidates.length) return none(`no probation worker is eligible for '${taskType}'`);
+  candidates.sort((a, b) => a.recentFailure - b.recentFailure || a.trials - b.trials || a.order - b.order);
+  const pick = candidates[0];
+  const worker = Object.freeze({
+    id: pick.def.id,
+    provider: pick.def.provider,
+    model: pick.model,
+    executor: pick.def.executor,
+    launcher: pick.def.launcher,
+    checker: pick.def.checker,
+    taskType,
+    trials: pick.trials,
+    supervision: SUPERVISION_LEVELS.FULL,
+    review: 'full',
+    runRating: 'required',
+  });
+  const reason = `probation worker ${worker.id} (${worker.provider}/${worker.model}) for '${taskType}': last trial ${pick.recentFailure ? 'not clean' : 'clean or none'}, ${pick.trials} trial(s) so far; full review and a run rating are owed on the result`;
+  auditTrail.push({ criterion: 'probation-worker', result: worker.id, dataConsulted: `roster=${roster.join(',')}, simple=${simple === true}`, reasoning: reason });
+  return { worker, auditTrail, reason };
 }
 
 /**
@@ -612,6 +734,10 @@ export function selectProvider(task, context) {
   const gatedKindOpen = gateDecision !== null && gateDecision.open;
   const vetoes = gatedKindOpen ? gateDecision.vetoes : [];
   const gatedFit = { fit: false, fitModel: null, reason: gated ? `${gateDecision.reason}.` : '' };
+  // agy-launcher-probation — an opened taskType with a probation roster never switches the recommendation to an
+  // external provider: Claude stays the recommended (fallback) executor, and the roster's pick rides beside it as
+  // `probationWorker` for a launcher to run. Earned-fitness checks below still run, for the audit trail.
+  const probationTask = gatedKindOpen && Object.hasOwn(PROBATION_ROSTER, taskType);
   if (gateDecision) {
     auditTrail.push({
       criterion: 'critical-work-gate',
@@ -640,7 +766,7 @@ export function selectProvider(task, context) {
     reasoning: geminiCheck.reason,
   });
 
-  if (geminiCheck.fit) {
+  if (geminiCheck.fit && !probationTask) {
     const reasoning = `Gemini is fit for task '${taskType}' (${description || 'unnamed'}): model '${geminiCheck.fitModel}' has a clean verified track record without unresolved findings, scope (${filesTouched.length} files, ${estimatedSize} LOC) is within proven envelope, and no statute-tier paths are touched.`;
     return {
       recommendation: RECOMMENDATIONS.GEMINI,
@@ -670,7 +796,7 @@ export function selectProvider(task, context) {
     reasoning: codexCheck.reason,
   });
 
-  if (codexCheck.fit) {
+  if (codexCheck.fit && !probationTask) {
     const reasoning = `Codex is fit for task '${taskType}' (${description || 'unnamed'}): model '${codexCheck.fitModel}' has a clean verified track record without unresolved findings, scope (${filesTouched.length} files, ${estimatedSize} LOC) is within proven envelope, and no statute-tier paths are touched.`;
     return {
       recommendation: RECOMMENDATIONS.CODEX,
@@ -794,12 +920,26 @@ export function selectProvider(task, context) {
           : `Offered agy model '${cliModel}' by default for capacity relief on the same Claude tier.`,
   });
 
-  const reasoning = `Claude (${claudeTier}) is recommended for task '${taskType}' (${description || 'unnamed'}): external models (Gemini/Codex) were not fit or lacked clean track record. Effort tier '${claudeTier}' assigned because: ${claudeReason}`;
+  let probationWorker = null;
+  if (probationTask) {
+    const picked = selectProbationWorker({
+      taskType, tier: claudeTier, simple: context?.simple === true, filesTouched, estimatedSize, scorecards, vetoes,
+    });
+    auditTrail.push(...picked.auditTrail);
+    if (!picked.worker) auditTrail.push({ criterion: 'probation-worker', result: 'none', dataConsulted: `taskType='${taskType}'`, reasoning: picked.reason });
+    probationWorker = picked.worker;
+  }
+
+  const reasoning = probationWorker
+    ? `Claude (${claudeTier}) stays the fallback for '${taskType}' (${description || 'unnamed'}); the gate is open for this non-critical task, so probation worker ${probationWorker.id} is offered to run it. Effort tier '${claudeTier}' assigned because: ${claudeReason}`
+    : `Claude (${claudeTier}) is recommended for task '${taskType}' (${description || 'unnamed'}): external models (Gemini/Codex) were not fit or lacked clean track record. Effort tier '${claudeTier}' assigned because: ${claudeReason}`;
 
   return {
     recommendation: RECOMMENDATIONS.CLAUDE,
     claudeTier,
     alternateBackend,
+    // agy-launcher-probation — the roster pick for an opened, non-critical taskType, or null. See PROBATION_ROSTER.
+    probationWorker,
     auditTrail,
     reasoning,
     explorationHint: getExplorationHint(taskType, scorecards, context),
