@@ -3820,10 +3820,10 @@ order and has no notion of an open PR still in review.
 2. **This is a conflict-COST strategy, not a conflict-reduction one.** It decides **who pays** for reconciling
    an overlap that already exists (the smaller PR re-lands with less to re-review than the larger one would),
    and stops the repeated knock-back of one large PR — it does not shrink the underlying edit collision.
-   Dispatch-time overlap **avoidance** (#4295 / x3bt7x7, coordinating daemon-claimed work before it is even
-   dispatched) is the reduction layer; the two compose rather than duplicate: x3bt7x7 prevents some overlaps
+   Dispatch-time overlap **avoidance** (#4295 / 4295, coordinating daemon-claimed work before it is even
+   dispatched) is the reduction layer; the two compose rather than duplicate: 4295 prevents some overlaps
    from being dispatched at all, this rule decides land order for whatever overlaps still occur — including
-   work dispatched outside the daemons' claim stores, which x3bt7x7 never sees.
+   work dispatched outside the daemons' claim stores, which 4295 never sees.
 3. **Configurable by SETTINGS, not only a CLI flag.** Both the on/off switch and the window length live in
    the repo's normal settings/config mechanism — a **tracked, committed**, defaults-in-code JSON config file
    beside the affected script (`we:scripts/drain-overlap-yield-config.json`), edited only through a sanctioned
@@ -3841,7 +3841,7 @@ order and has no notion of an open PR still in review.
 5. **What was explicitly left open.** A second, independent axis — may a PR keep its review state after a
    clean mechanical rebase, instead of always resetting to a fresh review round — was raised during
    preparation and is **NOT ruled by this entry**. It is its own decision card
-   ([xf6sp7r](/backlog/xf6sp7r-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)), status quo
+   ([4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)), status quo
    (always re-review) standing as its default until it is separately prepared and ratified. This repo's
    convention is one ruling per decision card, so a second axis surfaced mid-prep is split out rather than
    folded into an existing ruling.
@@ -3853,7 +3853,7 @@ order can cycle). Build tracked on #4308. Composes with
 [#4295](../../backlog/4295/)
 (dispatch-time reduction layer, distinct axis) and does not alter
 [#pr-flow-rollout-mechanism](#pr-flow-rollout-mechanism) (the drain stays the sole `main` writer; this rule
-only reorders what it lands next). Open follow-on: [xf6sp7r](/backlog/xf6sp7r-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)
+only reorders what it lands next). Open follow-on: [4310](/backlog/4310-may-a-pr-keep-its-review-after-a-clean-mechanical-rebase-or/)
 (review carry-over after a mechanical rebase, unruled).
 
 ---
