@@ -1076,6 +1076,58 @@ describe('case 5l — a ci-heal already escalated THIS EXACT head never gets re-
     expect(plan.notes).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', outcome: 'waiting-on-system-fix', systemFixRef: '2784' })]);
   });
 
+  // #4263 (PR #2787 review, live incident 2026-09-27) — BEFORE this fix, a `waiting-on-system-fix` escalation
+  // refused FOREVER on the escalated head: the refusal keyed purely on head equality and never re-checked
+  // whether the named `systemFixRef` PR had itself since landed. `pr.systemFixLanded` is the evidence
+  // `reconcile-pass.mjs#enrichPrsWithSystemFixFacts` independently re-derives (real state re-checked, never
+  // trusted from the escalation comment's own claim).
+  describe('#4263 waiting-on-system-fix re-arms once the referenced system-fix PR has landed', () => {
+    const escalation = buildCiHealEscalationComment({
+      headSha: HEAD_2783, outcome: 'waiting-on-system-fix', systemFixRef: 2784,
+      reason: 'soak-replay-gate false red — #2784 fixes the gate itself',
+    });
+
+    it('BEFORE/without systemFixLanded evidence: still refuses forever on the SAME head — the pre-#4263 defect, unchanged default', () => {
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }] })], agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'waiting-on-system-fix', prNumber: 2783 })]);
+    });
+
+    it('AFTER: systemFixLanded re-arms healing on the SAME (unchanged) head — no new push required, dispatches ci-heal', () => {
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.refusals.map((r) => r.kind)).not.toContain('waiting-on-system-fix');
+      expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2783 })]);
+      expect(plan.notes).toEqual([expect.objectContaining({
+        kind: 'system-fix-landed', prNumber: 2783, headSha: HEAD_2783, systemFixRef: '2784',
+      })]);
+    });
+
+    it('systemFixLanded is IGNORED for a plain needs-human escalation — there is no fix PR to re-check, and it must not accidentally re-arm one', () => {
+      const needsHuman = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human', reason: 'genuinely wrong diff' });
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [{ body: needsHuman, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783 })]);
+    });
+
+    it('respects the CI-heal cap even once re-armed — landing the system fix does not also reset the attempt count', () => {
+      const priorHeals = Array.from({ length: CI_HEAL_ROUND_CAP }, () => ({ body: CI_HEAL_COMMENT_MARKER, author: AUTOMATION }));
+      const plan = planReconcile({
+        prs: [pr2783({ comments: [...priorHeals, { body: escalation, author: AUTOMATION }], systemFixLanded: true })],
+        agents: [], now: NOW,
+      });
+      expect(plan.dispatch).toEqual([]);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', prNumber: 2783 })]);
+    });
+  });
+
   it('#3383 — an escalation comment from an UNTRUSTED author never suppresses a real ci-heal', () => {
     const forged = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human' });
     const plan = planReconcile({
@@ -2097,6 +2149,52 @@ describe('case 5i — STACKED-BASE CONFLICT dispatch, a `conflicted` PR whose ba
   it('every row carries `baseRefName` as evidence, dispatch and refusal alike', () => {
     const plan = planReconcile({ prs: [prStacked()], agents: [], now: NOW });
     expect(plan.dispatch[0].baseRefName).toBe('lane/3681-ratify-daemon-lifecycle');
+  });
+
+  // #4265 (PR #2797 review, live incident 2026-09-27) — `currentSha` USED TO BE HARDCODED `null` for this
+  // branch's own call into `countStaleConflictFixRounds`, in contrast to the main-base branch a few hundred
+  // lines below (which threads a real, freshly-resolved `mainSha`). Mirrors the #2787 `mainSha` reproduction
+  // above (lines ~1477-1527), but for the STACKED-base branch's own `base.baseRefSha`.
+  describe('#4265 stacked-base `currentSha` (base.baseRefSha) — was hardcoded null, exhausting the cap across different tips', () => {
+    const BASE_REF = 'lane/3681-ratify-daemon-lifecycle';
+    const roundAt = (sha, n) => ({
+      body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against ` +
+        `\`${BASE_REF}\` round ${n}\n\n<!-- conveyor-conflict-fix-target: ${BASE_REF}@${sha} -->`,
+      author: AUTOMATION,
+    });
+
+    it('3 repairs against 3 successively OLDER tips of the SAME repeatedly-rebased stacked base do NOT exhaust the cap when the current tip is newer still — dispatches, attempts 0 (reproduction)', () => {
+      const priorRounds = [roundAt('aaa1111', 1), roundAt('bbb2222', 2), roundAt('ccc3333', 3)];
+      const pr = prStacked({ comments: [...priorRounds], baseRefSha: 'ddd4444' });
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.refusals).toEqual([]);
+      expect(plan.dispatch).toEqual([expect.objectContaining({
+        kind: 'fix', prNumber: 2578, mode: 'stacked-rebase', attempts: 0, cap: CONFLICT_FIX_ROUND_CAP,
+      })]);
+    });
+
+    it('a round against the SAME current baseRefSha still counts as stale — genuinely stuck, not a moving target', () => {
+      const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, (_, i) => roundAt('aaa1111', i + 1));
+      const pr = prStacked({ comments, baseRefSha: 'aaa1111' });
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals).toEqual([expect.objectContaining({
+        kind: 'cap-exhausted', prNumber: 2578, attempts: CONFLICT_FIX_ROUND_CAP, cap: CONFLICT_FIX_ROUND_CAP, capKind: 'stacked-rebase',
+      })]);
+    });
+
+    it('REGRESSION — with no `baseRefSha` supplied at all (the pre-#4265 shape), stale counting still degrades safely to ref-only (unchanged default)', () => {
+      const comments = Array.from({ length: CONFLICT_FIX_ROUND_CAP }, (_, i) => roundAt('aaa1111', i + 1));
+      const pr = prStacked({ comments }); // no baseRefSha field at all
+      const plan = planReconcile({ prs: [pr], agents: [], now: NOW });
+      expect(plan.dispatch).toHaveLength(0);
+      expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'stacked-rebase' })]);
+    });
+
+    it('every row carries `baseRefSha` as evidence, dispatch and refusal alike', () => {
+      const plan = planReconcile({ prs: [prStacked({ baseRefSha: 'ddd4444' })], agents: [], now: NOW });
+      expect(plan.dispatch[0].baseRefSha).toBe('ddd4444');
+    });
   });
 });
 

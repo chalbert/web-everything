@@ -120,7 +120,14 @@ describe('latestCiHealEscalationForHead — the head-scoping that makes a new pu
 // escalate, so after a clean-but-unpushed rebase `git rev-parse HEAD` names a local commit GitHub never saw: a
 // marker stamped with it never matches `pr.headRefOid`, reconcile ignores it, and the same heal is dispatched
 // again. Every escalation command in the brief must stamp the PR's PUBLISHED head, read off GitHub.
-describe('fix-agent-ci-brief.md — every escalation marker targets the PR\'s published head, never the local HEAD', () => {
+//
+// #4269 (PR #2787 review, same finding's SECOND half, 2026-09-27) — reading that published head FRESH, live, at
+// EACH escalation exit (as this describe block itself used to assert was correct) is its own bug: a push landing
+// mid-session, AFTER diagnosis began but BEFORE an escalation exit runs, would hand a live `gh pr view` read a
+// head this session never actually examined, and the marker would be stamped against it — silently suppressing
+// healing on a revision nobody diagnosed. The fix: the brief now captures the head ONCE, at step 0 (before
+// diagnosis begins), into `$EXAMINED_HEAD`, and every escalation exit stamps ONLY that captured value.
+describe('fix-agent-ci-brief.md — every escalation marker targets the head this session actually examined, never the local HEAD nor a fresh live re-read', () => {
   const BRIEF = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'skills-src', 'conveyor', 'fix-agent-ci-brief.md'), 'utf8');
   const markerCalls = BRIEF.match(/ci-heal-escalation-mark\.mjs" \{\{PR_NUM\}\}[^\n]*\n[^\n]*/g) || [];
   it('finds every escalation call in the brief (sanity — one per escalation exit)', () => {
@@ -129,7 +136,16 @@ describe('fix-agent-ci-brief.md — every escalation marker targets the PR\'s pu
   it('escalation after an unpushed rebase targets the published PR head — no call stamps --head from the local HEAD', () => {
     expect(BRIEF).not.toMatch(/--head="\$\(git rev-parse HEAD\)"/);
   });
-  it('every escalation call reads --head off the PR\'s own headRefOid', () => {
-    for (const call of markerCalls) expect(call).toMatch(/--head="\$\(gh pr view \{\{PR_NUM\}\} --repo \{\{REPO\}\} --json headRefOid --jq \.headRefOid\)"/);
+  it('every escalation call stamps the CAPTURED $EXAMINED_HEAD — never a fresh, live gh pr view re-read at escalation time (#4269)', () => {
+    for (const call of markerCalls) {
+      expect(call).toMatch(/--head="\$EXAMINED_HEAD"/);
+      expect(call).not.toMatch(/--head="\$\(gh pr view/);
+    }
+  });
+  it('$EXAMINED_HEAD is itself captured off the PR\'s own headRefOid, exactly once, before any escalation call', () => {
+    const captureIndex = BRIEF.indexOf('EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)"');
+    expect(captureIndex).toBeGreaterThan(-1);
+    const firstMarkerCallIndex = BRIEF.indexOf(markerCalls[0]);
+    expect(captureIndex).toBeLessThan(firstMarkerCallIndex);
   });
 });

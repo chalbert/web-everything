@@ -2647,6 +2647,56 @@ describe('#3960: the fix/ci-heal briefs fill repo-aware, and reproduce WE\'s pre
   });
 });
 
+// #4269 (PR #2787 review, live incident 2026-09-27) — the ci-heal brief's escalation commands used to read the
+// PR's PUBLISHED head LIVE, via a fresh `gh pr view … --json headRefOid` substitution, AT ESCALATION TIME —
+// after diagnosis, possibly minutes later. A push landing mid-session between the start of diagnosis and an
+// escalation exit would hand that live read a head this session never actually examined, and the escalation
+// marker would be stamped against it — silently suppressing healing on a revision nobody diagnosed. The fix:
+// capture the head ONCE, at step 0 (before diagnosis begins), into `$EXAMINED_HEAD`, and use ONLY that captured
+// value at every escalation exit — never a fresh `gh pr view` read taken at escalation time.
+describe('#4269: the ci-heal brief captures the examined head ONCE and never re-reads it live at escalation time', () => {
+  const CI_HEAL_BRIEF_RAW = readFileSync(briefPath(REPO_ROOT, 'ci-heal'), 'utf8');
+  const LIVE_HEAD_READ = 'gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid';
+
+  it('captures EXAMINED_HEAD from exactly one live `gh pr view` read, at step 0', () => {
+    const captureLines = CI_HEAL_BRIEF_RAW.split('\n').filter((l) => /^EXAMINED_HEAD=/.test(l.trim()));
+    expect(captureLines).toHaveLength(1);
+    expect(captureLines[0]).toContain(LIVE_HEAD_READ);
+  });
+
+  it('every escalation exit\'s --head= uses ONLY the captured $EXAMINED_HEAD — never a fresh live re-read', () => {
+    const headArgs = [...CI_HEAL_BRIEF_RAW.matchAll(/--head="([^"]*)"/g)].map((m) => m[1]);
+    expect(headArgs.length).toBeGreaterThanOrEqual(4); // lane-ref-gone, conflict, needs-human, waiting-on-system-fix
+    for (const arg of headArgs) expect(arg).toBe('$EXAMINED_HEAD');
+    // The live read pattern must appear EXACTLY once in the whole brief — the step-0 capture — never again as a
+    // `--head=` argument at any escalation exit.
+    const liveReadOccurrences = CI_HEAL_BRIEF_RAW.split(LIVE_HEAD_READ).length - 1;
+    expect(liveReadOccurrences).toBe(1);
+  });
+
+  it('the capture happens BEFORE every escalation exit that uses it (step 0, ahead of lane acquire and diagnosis)', () => {
+    const captureIndex = CI_HEAL_BRIEF_RAW.indexOf('EXAMINED_HEAD="$(gh pr view');
+    expect(captureIndex).toBeGreaterThan(-1);
+    const headUseIndices = [...CI_HEAL_BRIEF_RAW.matchAll(/--head="\$EXAMINED_HEAD"/g)].map((m) => m.index);
+    expect(headUseIndices.length).toBeGreaterThanOrEqual(4);
+    for (const idx of headUseIndices) expect(idx).toBeGreaterThan(captureIndex);
+  });
+
+  it('the filled prompt carries the capture and every escalation command intact, for the real fix agent to run verbatim', () => {
+    const tokens = briefTokensForRepo('we', {
+      itemNum: '2638', checkoutExists: () => true,
+      readPackageJson: () => JSON.stringify({ scripts: { 'test:unit': 'vitest run', 'check:standards': 'node scripts/check-standards.mjs' } }),
+    });
+    const { prompt } = fillBrief(
+      CI_HEAL_BRIEF_RAW,
+      { ITEM_NUM: '2638', PR_NUM: 743, LANE_REF: 'lane/2638-x', LANE: 6, SESSION_SLUG: 'ci-heal-743', SCOPE: 'we:scripts/operations/', REASON: 'red-ci', ...tokens },
+      BRIEF_REQUIRED_BY_KIND['ci-heal'], undefined, REPO_AWARE_VALUE_PATTERNS,
+    );
+    expect(prompt).toContain('EXAMINED_HEAD="$(gh pr view 743 --repo chalbert/web-everything --json headRefOid --jq .headRefOid)"');
+    expect(prompt.match(/--head="\$EXAMINED_HEAD"/g)).toHaveLength(4);
+  });
+});
+
 // ── #3457/#3460 — the ALREADY-DONE ground-truth check, at both chokepoints ratified by #3457 ────────────────
 
 describe('filterAlreadyDoneCandidates — PURE: which gh pr list rows are real "already done" evidence', () => {

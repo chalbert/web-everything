@@ -83,6 +83,13 @@ FINISHED ci-heal keeps counting as a live holder of its own PR forever, exactly 
 own step 0/step-per-exit shape already prevents for a `review:changes` repair:
 
 ```bash
+# #4269 — capture the head THIS SESSION IS ABOUT TO DIAGNOSE, ONCE, before anything else — every escalation
+# exit below uses THIS captured value, never a fresh `gh pr view` read at escalation time. Reading the head
+# live at escalation time (after diagnosis, possibly minutes later) can return a head a CONCURRENT push swapped
+# in mid-session — a revision this session never actually examined — and permanently stamp the escalation
+# marker against it, silently suppressing healing on a head nobody ever diagnosed.
+EXAMINED_HEAD="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)"
+
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=ci-heal --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
@@ -114,7 +121,7 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
   intervenes or a new push resolves it:
   ```bash
   node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-    --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" \
+    --head="$EXAMINED_HEAD" \
     --outcome=needs-human --reason="lane ref gone — {{LANE_REF}} no longer resolves"
   ```
 - **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
@@ -140,13 +147,16 @@ alone often fixes a BEHIND `test` failure.
 git rebase --abort
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-  --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="conflict with main during rebase"
+  --head="$EXAMINED_HEAD" --outcome=needs-human --reason="conflict with main during rebase"
 ```
 
-(`git rebase --abort` FIRST, so you never leave a half-rebased tree behind. `--head` is ALWAYS the PR's
-PUBLISHED head read off GitHub — never `git rev-parse HEAD`: after a clean rebase that you have not pushed,
-the local `HEAD` is a commit GitHub never saw, the marker would never match `pr.headRefOid`, and the next tick
-would dispatch the same heal again. See the callout right after this arc for what the marker does and why.)
+(`git rebase --abort` FIRST, so you never leave a half-rebased tree behind. `--head` is ALWAYS `$EXAMINED_HEAD`
+— the PR's PUBLISHED head, captured ONCE at step 0 before diagnosis began — never `git rev-parse HEAD` (after a
+clean rebase that you have not pushed, the local `HEAD` is a commit GitHub never saw, the marker would never
+match `pr.headRefOid`, and the next tick would dispatch the same heal again) and never a FRESH `gh pr view` read
+taken here, at escalation time: a concurrent push between step 0 and this exit would hand you a head this
+session never actually diagnosed, and stamping the marker against it would silently suppress healing on a
+revision nobody examined (#4269). See the callout right after this arc for what the marker does and why.)
 
 ### 3. Diagnose + repair the failing required check (repair ONLY the CI break)
 
@@ -183,7 +193,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
+      --head="$EXAMINED_HEAD" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still
     owes a human verdict; a human handles it via `/finish`.
@@ -195,7 +205,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=waiting-on-system-fix --system-fix=<n> \
+      --head="$EXAMINED_HEAD" --outcome=waiting-on-system-fix --system-fix=<n> \
       --reason="<name the tooling bug and the PR fixing it>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal waiting on system fix #<n> (PR #{{PR_NUM}} did nothing wrong)`.
