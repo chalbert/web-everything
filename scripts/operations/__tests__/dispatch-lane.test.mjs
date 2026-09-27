@@ -72,6 +72,8 @@ import {
   forwardableBookkeeping,
   inFlightDispatchesFor,
   isPreSpawnRefusal,
+  // #4174 follow-up (live-caught 2026-09-27) — the "Workspace not trusted" refusal is pre-spawn proof too.
+  isTrustRefusal,
   readTick,
   stampLiveness,
   // #3457/#3460 — the already-done ground-truth check.
@@ -815,6 +817,79 @@ describe('the declared effect is a dispatch', () => {
     defaultSpawnAgent(['--bg'], { cwd: '/some/lane' }, { exec });
     expect(seenOpts.cwd).toBe('/some/lane');
   });
+
+  // #4174 follow-up (live-caught 2026-09-27) — see `isTrustRefusal`'s own header in dispatch-lane-io.mjs for the
+  // full race this closes: a concurrent, uncooperative `claude` process can clobber the trust grant
+  // `ensureDispatchSessionCwd` already made, seconds before this exact spawn. VERIFY/RE-GRANT RIGHT HERE, as
+  // close to the real spawn as this module gets, and retry exactly once.
+  describe('#4174 follow-up — a trust refusal re-grants and retries exactly once', () => {
+    function trustRefusalError(cwd) {
+      return Object.assign(new Error(`Command failed: claude --bg -n x`), {
+        stderr: `Workspace not trusted. Run \`claude\` in ${cwd} once and accept the trust prompt, then retry.\n`,
+      });
+    }
+
+    it('re-grants opts.cwd and retries once, returning the RETRY\'s stdout on success', () => {
+      let calls = 0;
+      const grants = [];
+      const exec = () => {
+        calls += 1;
+        if (calls === 1) throw trustRefusalError('/scratch/dispatch/sess-1');
+        return 'backgrounded · sess-handle · n\n';
+      };
+      const grantTrust = (dir) => grants.push(dir);
+      const out = defaultSpawnAgent(['--bg'], { cwd: '/scratch/dispatch/sess-1' }, { exec, grantTrust });
+      expect(calls).toBe(2);
+      expect(grants).toEqual(['/scratch/dispatch/sess-1']);
+      expect(out).toBe('backgrounded · sess-handle · n\n');
+    });
+
+    it('if the retry ALSO refuses on trust, the final error still carries the trust-refusal text (classified at the call site, not swallowed here)', () => {
+      const exec = () => { throw trustRefusalError('/scratch/dispatch/sess-2'); };
+      const grantTrust = () => {};
+      expect(() => defaultSpawnAgent(['--bg'], { cwd: '/scratch/dispatch/sess-2' }, { exec, grantTrust }))
+        .toThrow(/Workspace not trusted|Command failed/);
+    });
+
+    it('never retries a NON-trust failure — one exec call, no re-grant', () => {
+      let calls = 0;
+      let granted = false;
+      const exec = () => { calls += 1; throw new Error('exit 1'); };
+      expect(() => defaultSpawnAgent(['--bg'], { cwd: '/scratch/dispatch/sess-3' }, { exec, grantTrust: () => { granted = true; } }))
+        .toThrow('exit 1');
+      expect(calls).toBe(1);
+      expect(granted).toBe(false);
+    });
+
+    it('never retries when opts.cwd is absent — nothing to re-grant', () => {
+      let calls = 0;
+      const exec = () => { calls += 1; throw trustRefusalError('/wherever'); };
+      let thrown = null;
+      try {
+        defaultSpawnAgent(['--bg'], {}, { exec, grantTrust: () => { throw new Error('must not be called'); } });
+      } catch (e) { thrown = e; }
+      expect(thrown?.stderr).toMatch(/Workspace not trusted/);
+      expect(calls).toBe(1);
+    });
+  });
+});
+
+describe('#4174 follow-up — isTrustRefusal: proof the CLI refused before any agent existed', () => {
+  it('matches the CLI\'s exact live refusal text on stderr', () => {
+    expect(isTrustRefusal({
+      stderr: 'Workspace not trusted. Run `claude` in /x/dispatch/abc once and accept the trust prompt, then retry.\n',
+    })).toBe(true);
+  });
+
+  it('also matches when the text rides on .message instead (some spawn shapes fold stderr in)', () => {
+    expect(isTrustRefusal({ message: 'Command failed: claude --bg\nWorkspace not trusted. Run `claude` in /x once…' })).toBe(true);
+  });
+
+  it('does not match an unrelated failure', () => {
+    expect(isTrustRefusal({ message: 'Command failed: claude --bg', stderr: 'some other error' })).toBe(false);
+    expect(isTrustRefusal(new Error('exit 1'))).toBe(false);
+    expect(isTrustRefusal(null)).toBe(false);
+  });
 });
 
 // ── 5. the sink's argv IS the contract with the CLI ─────────────────────────────────────────────────────────
@@ -977,6 +1052,28 @@ describe('what the sink actually runs', () => {
     const outcome = await applyPendingEffects(run, { sinks, store });
     expect(isPreSpawnRefusal({ code: 'ENOENT' })).toBe(true);
     expect(outcome.run.effects[0].status).toBe('failed');
+  });
+
+  // #4174 follow-up (live-caught 2026-09-27) — 17 real refusals (`we:backlog/xrv69j6-*.md`, PRs #2766/#2767/
+  // #2800/#2803/#2822) logged "whether an agent started is UNKNOWN" for exactly this error, even though the
+  // CLI's own stderr already proves the answer is "no agent started". FAILING BEFORE THIS FIX: this case would
+  // have landed in the `it('any OTHER failure is INDETERMINATE…')` bucket below — `in-flight` with a null
+  // handle, stuck until a human closed it out. PASSING AFTER: `failed`, retried automatically, same as ENOENT.
+  it('#4174 follow-up — a workspace-not-trusted refusal PROVES nothing started → `failed`, retried — never the UNKNOWN bucket', async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    const cwd = '/Users/nicolasgilbert/workspace/.operations/dispatch/fixture-uuid';
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: () => {
+        throw Object.assign(new Error(`Command failed: claude --bg -n x`), {
+          stderr: `Workspace not trusted. Run \`claude\` in ${cwd} once and accept the trust prompt, then retry.\n`,
+        });
+      },
+    });
+    const outcome = await applyPendingEffects(run, { sinks, store });
+    expect(outcome.run.effects[0].status).toBe('failed');
+    expect(inFlightEntries(outcome.run).unknown).toHaveLength(0);
   });
 
   it('any OTHER failure is INDETERMINATE — in-flight with no handle, refused on replay', async () => {

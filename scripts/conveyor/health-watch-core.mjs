@@ -59,6 +59,13 @@ const PR_FAILED = /^([\w.-]+): (\S+\/\S+)#(\d+) failed \(non-fatal\): (.*)$/;
 const RECONCILE_REFUSED = /^([\w.-]+): reconcile-refused ([\w-]+) (\S+\/\S+) PR #(\d+)/;
 const STARTED = /^([\w.-]+): started on (\S+), tick every (\d+)ms/;
 const AUTH_ERROR = /Bad credentials|HTTP 401\b|401 Unauthorized|status(?:Code)?[=: ]+401\b/i;
+// #4174 follow-up (live-caught 2026-09-27) — `claude --bg`'s own "Workspace not trusted" refusal, the same
+// text `we:scripts/operations/dispatch-lane-io.mjs#isTrustRefusal` classifies at the dispatch call site. Counted
+// here too, mirroring `AUTH_ERROR` above, so the `dispatch-trust-refused` smell can see a STREAK across ticks
+// even though `we:scripts/operations/dispatch-lane-io.mjs`'s own spawn-time retry already resolves most of them
+// silently — this is the backstop for whatever still slips through (both retries losing the same race, or a
+// dispatch path that reaches `claude --bg` without going through that retry at all).
+const TRUST_REFUSAL_ERROR = /Workspace not trusted/;
 
 /** Refusal kinds that mean the daemon WANTED to act and could not — the "refusing everything" signal. Every
  *  other kind (`nothing-owed`, `live-process`, `no-findings`, `cap-exhausted`, …) is a correct no-op. */
@@ -85,13 +92,13 @@ function countField(text, name) {
  * @param {string} text
  * @returns {{ ticks: Array<{owed:number, dispatched:number, refused:number, failed:number, deferred:number,
  *   wholeFailed:boolean, blocking:string[], benign:string[], noLane:Array<{repo:string}>}>,
- *   intervalMs: number|null, restarts: number, authErrors: number, lines: number }}
+ *   intervalMs: number|null, restarts: number, authErrors: number, trustRefusals: number, lines: number }}
  */
 export function parseDaemonLog(text) {
   // `lead` collects detail lines that arrive BEFORE this chunk's first tick summary: an incremental read can end
   // right after a summary line, so its refusal details land at the top of the NEXT chunk. The fold attaches
   // them to the tick it already counted, instead of dropping them.
-  const out = { ticks: [], lead: { blocking: [], benign: [], noLane: [], prs: [] }, intervalMs: null, restarts: 0, authErrors: 0, lines: 0 };
+  const out = { ticks: [], lead: { blocking: [], benign: [], noLane: [], prs: [] }, intervalMs: null, restarts: 0, authErrors: 0, trustRefusals: 0, lines: 0 };
   let cur = null;
   let started = false;
   const close = () => { if (cur) { out.ticks.push(cur); cur = null; } };
@@ -100,6 +107,7 @@ export function parseDaemonLog(text) {
     if (!line) continue;
     out.lines += 1;
     if (AUTH_ERROR.test(line)) out.authErrors += 1;
+    if (TRUST_REFUSAL_ERROR.test(line)) out.trustRefusals += 1;
     let m;
     if ((m = STARTED.exec(line))) { close(); started = true; out.intervalMs = Number(m[3]); out.restarts += 1; continue; }
     if ((m = TICK_SUMMARY.exec(line))) {
@@ -205,7 +213,7 @@ export function foldDaemonMemory(prev, sample, now) {
   const mem = prev ? { ...prev, unproductiveReasons: { ...(prev.unproductiveReasons || {}) } } : {
     name: sample.name, intervalMs: null, lastTickAt: null, lastTickEstimated: false, ticksSeen: 0,
     unproductiveSince: null, unproductiveTicks: 0, unproductiveReasons: {}, lastTick: null,
-    authErrorTimes: [], noLaneTimes: [], recentTicks: [], prRefusals: {}, lastGrowthAt: null, lastSize: 0, restarts: 0,
+    authErrorTimes: [], trustRefusalTimes: [], noLaneTimes: [], recentTicks: [], prRefusals: {}, lastGrowthAt: null, lastSize: 0, restarts: 0,
   };
   mem.recentTicks = [...(mem.recentTicks || [])];
   mem.prRefusals = { ...(mem.prRefusals || {}) };
@@ -269,8 +277,12 @@ export function foldDaemonMemory(prev, sample, now) {
   if (parsed.authErrors > 0) {
     for (let i = 0; i < parsed.authErrors; i += 1) mem.authErrorTimes.push(sample.bootstrap ? sample.mtimeMs : now);
   }
+  if (parsed.trustRefusals > 0) {
+    for (let i = 0; i < parsed.trustRefusals; i += 1) mem.trustRefusalTimes.push(sample.bootstrap ? sample.mtimeMs : now);
+  }
   const keepAfter = now - 2 * HOUR;
   mem.authErrorTimes = mem.authErrorTimes.filter((t) => t >= keepAfter).slice(-200);
+  mem.trustRefusalTimes = (mem.trustRefusalTimes || []).filter((t) => t >= keepAfter).slice(-200);
   mem.noLaneTimes = mem.noLaneTimes.filter((e) => e.at >= keepAfter).slice(-500);
   mem.recentTicks = mem.recentTicks.filter((e) => e.at >= keepAfter).slice(-300);
   mem.prRefusals = Object.fromEntries(Object.entries(mem.prRefusals).sort((a, b) => b[1].at - a[1].at).slice(0, 200));
