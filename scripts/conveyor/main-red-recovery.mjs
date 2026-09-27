@@ -194,6 +194,86 @@ export function isAnyRequiredCheckFailed(pr, requiredChecks = DEFAULT_MAIN_RED_A
   return names.some((n) => isRequiredCheckFailed(pr, n));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// LANDING-FREEZE FIX (2026-09-27) — LIVE INCIDENT: PR #2790 fixed a `daemon-soak` regression that had been
+// sitting on `main` unseen and, in the same change, made the `soak-shard`/`daemon-soak` job run on a PUSH to
+// `main` at all (it was `pull_request`-only before). Every `mainRedWindows` reasoning above — `computeMainRedWindows`,
+// `classifyCiFailureAttribution`, `failingRequiredCheckForAttribution` — is RETROSPECTIVE: it can only attribute
+// a PR's failure to `main` when `main`'s OWN run history shows a completed run that concluded red for the SAME
+// reason. Before #2790, `main`'s `CI`-workflow runs concluded `success` right through the whole regression
+// window (the job that would have failed never ran there at all), so no red window ever opened — every stuck
+// PR (#2748/#2783/#2784/#2788/#2789) read `own-failure`/`unknown` and burned its ci-heal cap repairing code that
+// was never broken (#2748/#2783/#2784 hit `cap-exhausted`; #2788/#2789 were about to be handed yet another
+// heal). A red window that never opens can never retroactively explain a failure that predates it.
+//
+// THE GENERAL RULE this closes: a required check that failed on a PR is ALSO excused, independent of any
+// red-window attribution, when that SAME check is PASSING on `main`'s own LATEST COMPLETED run and the PR's
+// head still predates that run (`aheadBy > 0`, or unresolved) — `main` has since proven the check can pass, so
+// rebasing onto it (never a ci-heal, which would misdiagnose main's own now-fixed regression as this PR's own
+// defect) is what is owed. This is deliberately CHECK-SPECIFIC (never "is `main` green overall"): the same
+// per-check reasoning `failingRequiredCheckForAttribution` already applies to red windows applies here too — a
+// DIFFERENT required check still failing on `main`'s own latest run is caught by `mainStillRed`
+// ({@link isMainCurrentlyRed}) wherever this predicate feeds an ACTING pass ({@link planMainRedRebases}), so a
+// rebase is never dispatched while `main` itself is genuinely still broken for another reason.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#latestCompletedMainRun — the newest `status:'completed'` entry in
+ * `main`'s own run history (by `updatedAt`), or `null` when none has concluded yet. PURE. The ONE fact the
+ * landing-freeze-fix green-check path needs beyond {@link computeMainRedWindows}'s own reduction: not just
+ * WHEN `main` was red, but WHICH commit (`headSha`) its most recent verdict belongs to, so the IO shell can read
+ * that commit's own per-check conclusions.
+ * @param {Array<{status?:string, updatedAt?:string, headSha?:(string|null)}>} mainRuns
+ * @returns {object|null}
+ */
+export function latestCompletedMainRun(mainRuns) {
+  const completed = (Array.isArray(mainRuns) ? mainRuns : [])
+    .filter((r) => r && String(r.status).toLowerCase() === 'completed' && r.updatedAt);
+  if (!completed.length) return null;
+  return completed.slice().sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#collapseMainCheckRunsToLatestPerName — the per-name "latest wins"
+ * collapse `we:scripts/merge-ai-prs.mjs#collapseRollupToLatestPerName` applies to a PR's own `statusCheckRollup`,
+ * applied instead to `main`'s own check-runs (`GET /repos/.../commits/<sha>/check-runs`'s `check_runs` array —
+ * snake_case `name`/`conclusion`/`status`/`completed_at`, NOT a PR rollup row, so the existing collapse cannot
+ * be reused directly). PURE.
+ * @param {Array<object>|null|undefined} checkRuns
+ * @returns {Map<string, object>} one collapsed entry per distinct check name.
+ */
+export function collapseMainCheckRunsToLatestPerName(checkRuns) {
+  const byName = new Map();
+  for (const c of (Array.isArray(checkRuns) ? checkRuns : [])) {
+    const name = c?.name;
+    if (!name) continue; // ungroupable — never seen live, but never crash on it either.
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(c);
+  }
+  const out = new Map();
+  for (const [name, matches] of byName) {
+    const completed = matches.filter((c) => String(c?.status).toLowerCase() === 'completed' && c?.completed_at);
+    const pool = completed.length ? completed : matches;
+    out.set(name, pool.slice().sort((a, b) => Date.parse(b?.completed_at || 0) - Date.parse(a?.completed_at || 0))[0]);
+  }
+  return out;
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#isMainLatestCheckGreen — landing-freeze fix: is `failingCheckName`
+ * concluded `success` on `main`'s own latest completed run? PURE. `false` whenever there is nothing to judge
+ * (`failingCheckName` absent, `mainLatestCheckRuns` absent/empty, or the name simply never reported for that
+ * commit) — never a guess. `mainLatestCheckRuns` omitted entirely (the IO shell never read it, e.g. because
+ * nothing is `ci-red` this tick) means this always reads `false` — byte-identical to before this existed.
+ * @param {{failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null)}} [o]
+ * @returns {boolean}
+ */
+export function isMainLatestCheckGreen({ failingCheckName = null, mainLatestCheckRuns = null } = {}) {
+  if (!failingCheckName || !Array.isArray(mainLatestCheckRuns) || !mainLatestCheckRuns.length) return false;
+  const entry = collapseMainCheckRunsToLatestPerName(mainLatestCheckRuns).get(failingCheckName);
+  return String(entry?.conclusion || '').toLowerCase() === 'success';
+}
+
 /**
  * we:scripts/conveyor/main-red-recovery.mjs#isPrCiFailureOwedRerun — THE gate `reconcile-core.mjs` consults to
  * decide `owed-ci-rerun` (never a `ci-heal`) for a `ci-red` PR. PURE.
@@ -224,14 +304,27 @@ export function isAnyRequiredCheckFailed(pr, requiredChecks = DEFAULT_MAIN_RED_A
  *   direction here is the OPPOSITE of point 1's: misdiagnosing a real main-red artifact as a code defect and
  *   dispatching a fixer to "repair" nonexistent code (the exact harm this whole item exists to prevent) is worse
  *   than deferring one more tick until `aheadBy` is known.
- * @param {{requiredCheckCompletedAt?:(string|null), aheadBy?:(number|null), mainRedWindows?:Array<object>}} o
+ * LANDING-FREEZE FIX (2026-09-27) — a THIRD, independent path now also grants `owed-ci-rerun`, ALONGSIDE point
+ * 1's red-window attribution rather than replacing it: `main`'s own latest completed run may have NEVER RUN the
+ * failing check at all during the regression window (see this file's own "LANDING-FREEZE FIX" section header —
+ * PR #2790's `daemon-soak` job was `pull_request`-only before it), so no red window ever opens for a real
+ * `main`-side regression, and point 1 alone stays permanently blind to it. When {@link isMainLatestCheckGreen}
+ * says `failingCheckName` now passes on `main`'s own latest completed run, that is the SAME "this is not this
+ * PR's own code" proof point 1 already accepts, reached a different way — so it grants the same verdict, gated
+ * by the identical "not yet refreshed" test from point 2. `failingCheckName`/`mainLatestCheckRuns` omitted
+ * (a caller that never reads them) makes this new path always `false` — byte-identical to before it existed.
+ * @param {{requiredCheckCompletedAt?:(string|null), aheadBy?:(number|null), mainRedWindows?:Array<object>,
+ *   failingCheckName?:(string|null), mainLatestCheckRuns?:(Array<object>|null)}} o
  * @returns {boolean}
  */
-export function isPrCiFailureOwedRerun({ requiredCheckCompletedAt, aheadBy, mainRedWindows } = {}) {
-  const attribution = classifyCiFailureAttribution({ failureCompletedAt: requiredCheckCompletedAt, mainRedWindows });
-  if (attribution !== 'main-red') return false;
+export function isPrCiFailureOwedRerun({
+  requiredCheckCompletedAt, aheadBy, mainRedWindows, failingCheckName = null, mainLatestCheckRuns = null,
+} = {}) {
   const behind = Number.isFinite(aheadBy) ? aheadBy : null;
-  return behind == null || behind > 0;
+  if (behind === 0) return false; // already current — neither path below can still owe a rerun (point 2).
+  const attribution = classifyCiFailureAttribution({ failureCompletedAt: requiredCheckCompletedAt, mainRedWindows });
+  if (attribution === 'main-red') return true;
+  return isMainLatestCheckGreen({ failingCheckName, mainLatestCheckRuns });
 }
 
 /**
@@ -254,13 +347,24 @@ export function isPrCiFailureOwedRerun({ requiredCheckCompletedAt, aheadBy, main
  *      operator's own manual refresh from this exact incident, and against `rebaseDropManifest`'s OWN
  *      `action:'current'` short-circuit once this pass has already refreshed a PR once.
  *   5. Otherwise → `rebase-onto-main` dispatch.
+ *
+ * LANDING-FREEZE FIX (2026-09-27) — check 1 now ALSO admits a candidate whose `failingCheckName` is
+ * {@link isMainLatestCheckGreen} on `main`'s own latest completed run, even when `mainRedWindows` attribution
+ * says `own-failure`/`unknown` (see {@link isPrCiFailureOwedRerun}'s own docblock for why: a check that never
+ * ran on `main` during the regression window opens no red window to attribute against, retroactively, however
+ * red it really was). Checked 2 (`main-still-red`) still applies UNCHANGED to this admitted population — a
+ * DIFFERENT required check still failing on `main`'s own latest run means `main` is not actually safe to
+ * rebase onto yet, whatever this ONE check's own conclusion says.
  * @param {object} o
- * @param {Array<{prNumber:number, headRefName?:(string|null), aheadBy?:(number|null), failureCompletedAt?:(string|null)}>} [o.candidates]
+ * @param {Array<{prNumber:number, headRefName?:(string|null), aheadBy?:(number|null), failureCompletedAt?:(string|null), failingCheckName?:(string|null)}>} [o.candidates]
  * @param {Array<{start:string, end:(string|null)}>} [o.mainRedWindows]
+ * @param {Array<object>} [o.mainLatestCheckRuns] - `main`'s own latest completed run's per-check conclusions
+ *   (`GET /repos/.../commits/<sha>/check-runs`'s `check_runs`); defaults to `[]` — a caller that never reads it
+ *   sees byte-identical behaviour to before this param existed.
  * @returns {{dispatch:Array<object>, refusals:Array<object>}}
  */
 export function planMainRedRebases({
-  candidates = [], mainRedWindows = [], maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
+  candidates = [], mainRedWindows = [], mainLatestCheckRuns = [], maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
 } = {}) {
   const dispatch = [];
   const refusals = [];
@@ -275,10 +379,14 @@ export function planMainRedRebases({
       headSha: c?.headSha ?? null,
       aheadBy: Number.isFinite(c?.aheadBy) ? c.aheadBy : null,
       failureCompletedAt: c?.failureCompletedAt ?? null,
+      failingCheckName: c?.failingCheckName ?? null,
     };
     const attribution = classifyCiFailureAttribution({ failureCompletedAt: base.failureCompletedAt, mainRedWindows });
+    // landing-freeze fix — see this function's own docblock and `isMainLatestCheckGreen`'s.
+    const mainGreenForCheck = attribution !== 'main-red'
+      && isMainLatestCheckGreen({ failingCheckName: base.failingCheckName, mainLatestCheckRuns });
 
-    if (attribution !== 'main-red') {
+    if (attribution !== 'main-red' && !mainGreenForCheck) {
       refusals.push({
         ...base, kind: attribution === 'unknown' ? 'unknown-attribution' : 'own-failure',
         why: attribution === 'unknown'
@@ -321,7 +429,9 @@ export function planMainRedRebases({
     }
     dispatch.push({
       ...base, attempts: rebaseAttempts, kind: 'rebase-onto-main',
-      why: `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, inside a window where main's own CI was red; main has recovered and this head is ${base.aheadBy} commit(s) behind it — refreshing onto main`,
+      why: mainGreenForCheck
+        ? `PR #${prNumber}'s \`${base.failingCheckName}\` check failed at ${base.failureCompletedAt}, but is passing on main's own latest completed run and this head is ${base.aheadBy} commit(s) behind it — main has since fixed this, refreshing onto it`
+        : `PR #${prNumber}'s required check failed at ${base.failureCompletedAt}, inside a window where main's own CI was red; main has recovered and this head is ${base.aheadBy} commit(s) behind it — refreshing onto main`,
     });
   }
 

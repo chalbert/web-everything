@@ -70,7 +70,14 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // `we:scripts/merge-ai-prs.mjs` (never re-derived) — the same collapsed-rollup reader every other required-check
 // consumer in this repo already shares.
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
-import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed } from './main-red-recovery.mjs';
+import {
+  computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS,
+  failingRequiredCheckForAttribution, isAnyRequiredCheckFailed,
+  // landing-freeze fix (2026-09-27) — the one extra read `isPrCiFailureOwedRerun`'s new green-check path needs:
+  // `main`'s own latest completed run's headSha, so the IO shell can fetch THAT commit's own per-check
+  // conclusions. See `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header for the incident.
+  latestCompletedMainRun,
+} from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
 
 /**
@@ -265,7 +272,11 @@ export function durableCountsFrom(prs) {
 export function defaultReadMainRuns({
   exec = execFileSyncThrottled, repo = null, branch = 'main', workflowName = DEFAULT_MAIN_WORKFLOW_NAME, limit = 100,
 } = {}) {
-  const argv = ['run', 'list', '--branch', branch, '--limit', String(limit), '--json', 'databaseId,conclusion,status,createdAt,updatedAt,workflowName'];
+  // `headSha` (added landing-freeze fix, 2026-09-27) — the one extra field `latestCompletedMainRun` needs to
+  // name WHICH commit `main`'s own latest verdict belongs to, so `defaultReadMainLatestCheckRuns` below can read
+  // that commit's own per-check conclusions. Purely additive: `computeMainRedWindows` ignores fields it doesn't
+  // read, so every existing caller of this function sees byte-identical behaviour.
+  const argv = ['run', 'list', '--branch', branch, '--limit', String(limit), '--json', 'databaseId,conclusion,status,createdAt,updatedAt,workflowName,headSha'];
   if (repo) argv.push('--repo', repo);
   const out = exec('gh', argv, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
@@ -273,6 +284,40 @@ export function defaultReadMainRuns({
   });
   const parsed = JSON.parse(String(out || '[]'));
   return (Array.isArray(parsed) ? parsed : []).filter((r) => r?.workflowName === workflowName);
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMainLatestCheckRuns — landing-freeze fix (2026-09-27):
+ * `main`'s own latest completed run's per-check conclusions (`GET /repos/.../commits/<sha>/check-runs`'s
+ * `check_runs`), the one read {@link isMainLatestCheckGreen}'s IO-shell callers need — see `main-red-recovery.mjs`'s
+ * own "LANDING-FREEZE FIX" section header for why `mainRedWindows` alone cannot always tell.
+ *
+ * `repo: null` returns `[]` WITHOUT ever calling `exec` — mirrors `ci-red-recovery-watch.mjs
+ * #defaultReadRequiredContexts`'s identical guard: with no repo slug there is no `{owner}/{repo}` to resolve a
+ * commit against, and guessing one would risk reading a DIFFERENT repo's commit history. Best-effort otherwise:
+ * ANY failure (no run has completed yet, no `gh`, a network hiccup) degrades to `[]` — never thrown — so one
+ * bad read cannot break the whole pass; `isMainLatestCheckGreen` already treats an empty/absent list as "no
+ * evidence" (never a guess in either direction).
+ * @param {{exec?:Function, repo?:string|null, branch?:string, workflowName?:string, readMainRuns?:Function}} [o]
+ * @returns {Array<object>}
+ */
+export function defaultReadMainLatestCheckRuns({
+  exec = execFileSyncThrottled, repo = null, branch = 'main', workflowName = DEFAULT_MAIN_WORKFLOW_NAME,
+  readMainRuns = defaultReadMainRuns,
+} = {}) {
+  if (!repo) return [];
+  try {
+    const latest = latestCompletedMainRun(readMainRuns({ exec, repo, branch, workflowName }));
+    if (!latest?.headSha) return [];
+    const out = exec('gh', ['api', `repos/${repo}/commits/${latest.headSha}/check-runs`, '--jq', '.check_runs'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024,
+      timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    const parsed = JSON.parse(String(out || '[]'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -321,19 +366,25 @@ export function defaultReadAheadBy(headSha, { exec = execFileSyncThrottled, repo
  * `daemon-soak` while `main`'s own soak was red is owed a rebase, never a ci-heal. `requiredCheck` (singular,
  * legacy) still narrows to exactly that one check when a caller passes it.
  * @param {Array<object>} prs
- * @param {{readMainRuns?:Function, readAheadBy?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string, repo?:string|null}} [o]
- * @returns {{prs:Array<object>, mainRedWindows:Array<object>}}
+ * landing-freeze fix (2026-09-27): also reads `main`'s own latest completed run's per-check conclusions
+ * (`mainLatestCheckRuns`, {@link defaultReadMainLatestCheckRuns}), gated on the SAME "at least one PR needs it"
+ * condition as `mainRedWindows` — the second, retrospection-independent fact `isPrCiFailureOwedRerun`'s new
+ * green-check path needs. See `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header for the incident.
+ * @param {{readMainRuns?:Function, readAheadBy?:Function, readMainLatestCheckRuns?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string, repo?:string|null}} [o]
+ * @returns {{prs:Array<object>, mainRedWindows:Array<object>, mainLatestCheckRuns:Array<object>}}
  */
 export function enrichPrsWithMainRedFacts(prs, {
   readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
+  readMainLatestCheckRuns = defaultReadMainLatestCheckRuns,
   requiredCheck = null, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, defaultBranch = 'main', repo = null,
 } = {}) {
   const checks = requiredCheck ? [requiredCheck] : requiredChecks;
   const list = Array.isArray(prs) ? prs : [];
   const failing = list.filter((pr) => isAnyRequiredCheckFailed(pr, checks));
-  if (!failing.length) return { prs: list, mainRedWindows: [] };
+  if (!failing.length) return { prs: list, mainRedWindows: [], mainLatestCheckRuns: [] };
 
   const mainRedWindows = computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch }));
+  const mainLatestCheckRuns = readMainLatestCheckRuns({ repo, branch: defaultBranch });
   const failingSet = new Set(failing);
   const enriched = list.map((pr) => {
     if (!failingSet.has(pr)) return pr;
@@ -341,7 +392,7 @@ export function enrichPrsWithMainRedFacts(prs, {
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
     return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckName: check?.name ?? null, aheadByOnMain: aheadBy };
   });
-  return { prs: enriched, mainRedWindows };
+  return { prs: enriched, mainRedWindows, mainLatestCheckRuns };
 }
 
 /**
@@ -402,13 +453,16 @@ export function runReconcilePass({
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  const { prs, mainRedWindows, mainLatestCheckRuns } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
   // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than
   // ever throwing, so this call is safe unconditionally (see that module's own header).
   const { checks: requiredChecks } = readRequiredChecks({ repo: resolvedRepo, branch: defaultBranch });
-  const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows, requiredChecks });
+  const plan = planReconcile({
+    repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows,
+    mainLatestCheckRuns, requiredChecks,
+  });
   return { ...plan, prs: prs.length, agents: agents.length };
 }
 
