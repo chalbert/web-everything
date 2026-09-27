@@ -133,6 +133,7 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 // import" shape `we:scripts/operations/operator-queue.mjs`'s own header warns about (that warning is about
 // importing `lane-pool.mjs` itself elsewhere — the OPPOSITE direction from this import).
 import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, lanePreservedFileChecker } from './lane-whois.mjs';
+import { guessCardIds } from './lib/lane-whois-core.mjs';
 import {
   salvageLane, removeLitterWorktrees, listLitterWorktrees, salvageEligibility, readLiveCwds, pidsWithCwdIn,
   newestContentMtimeMs, resolveSalvageQuietMs, readAgentsStrict, liveAgentInLane,
@@ -3553,7 +3554,21 @@ function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
   try {
     salvage = salvageLane({
       dir, lane: n, pool: basename(repo.poolDir), branchRef: `origin/${repo.branch}`,
-      reason: proof.reason, meta: { lastHolder: g2.last },
+      reason: proof.reason,
+      meta: {
+        lastHolder: g2.last,
+        // The same content-based card guess `lane-whois.mjs` uses (dirty backlog paths, HEAD subject, branch).
+        cards: (() => {
+          try {
+            const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
+            // HEAD's subject only names THIS lane's work when HEAD is not already on origin (else it is main's tip).
+            const ahead = Number(execFileSync('git', ['rev-list', '--count', `origin/${repo.branch}..HEAD`], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()) || 0;
+            const subject = ahead ? execFileSync('git', ['log', '-1', '--format=%s'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() : '';
+            const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+            return guessCardIds({ paths: [...trackedModifiedPaths, ...untrackedPaths], commitSubject: subject, branch });
+          } catch { return []; }
+        })(),
+      },
     });
   } catch (e) {
     giveBack();

@@ -323,11 +323,13 @@ export function buildSalvageRecord({ now, pool, lane, dir, stamp, outDir, bundle
   const lh = meta.lastHolder || {};
   const targets = deriveSalvageTargets({
     purpose: lh.purpose, holder: lh.holder, session: lh.session,
-    branches: [branch, ...(meta.worktreeBranches || [])], cards: meta.cards || [], prs: meta.prs || [],
+    branches: [branch, ...(meta.worktreeBranches || [])],
+    cards: [...(meta.cards || []), ...(lh.item ? [lh.item] : [])],
+    prs: [...(meta.prs || []), ...(lh.pr ? [lh.pr] : [])],
   });
   return {
     ts: now.toISOString(), pool, lane, dir, stamp, outDir, bundle, patches, reason,
-    lastHolder: { purpose: lh.purpose ?? null, holder: lh.holder ?? null, session: lh.session ?? null },
+    lastHolder: { purpose: lh.purpose ?? null, holder: lh.holder ?? null, session: lh.session ?? null, item: lh.item ?? null, pr: lh.pr ?? null },
     branch, head: snapshots[0]?.headSha ?? null, cards: targets.cards, prs: targets.prs,
     changedFiles, refs, localRefs, snapshots, landed: false,
     recover: bundle ? `git fetch ${bundle} 'refs/salvage/*:refs/salvage/*'` : null,
