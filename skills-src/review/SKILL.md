@@ -310,11 +310,16 @@ If you are dispatched against a `convert-advisory` entry, do NOT run a fresh `re
    the same advisory-only shape (no `**Decision:**` line, no `review:*` label touched) `renderAdvisoryNote` posts,
    quoting the prior verdict verbatim — and clear `review:awaiting-advisory` exactly as the `advise` step does.
 
-This wiring (an operation step or CLI a dispatched session runs, rather than hand-composing the note) is the
-next piece of work here — as of this writing the planner recognizes and reports the population
-(`plan.dispatch` entries carry `kind:'convert-advisory'`, `acceptComment`, `escalation`, `targetedCheckQuestion`)
-but no automatic executor consumes it yet. Until it lands, treat a `convert-advisory` entry as this section
-instructs, by hand, rather than running `review-pr` fresh against it.
+The executor exists — `we:scripts/conveyor/convert-advisory-dispatch.mjs` — but the review daemon runs it
+**only when the operator opts in** with `REVIEW_DAEMON_CONVERT_ADVISORY=1` (off by default; it posts real
+comments, applies real `advisory:*` labels, and spends one billed judge call per PR). Before flipping it on,
+preview one PR with `node scripts/conveyor/convert-advisory-dispatch.mjs <pr> --repo=<owner/name> --dry-run`:
+dry-run writes nothing to the PR, but it does run the read-only evidence fetch and the one judge call, so the
+preview shows the real note. Running that CLI without `--dry-run` is the one-PR manual path. Either way the
+targeted check only decides from real evidence (the named test diff for test-gaming, the comment history for
+the mutual-exclusivity heal). A manifest-tamper escalation has no independent evidence to check, so it is
+always `inconclusive`, as is any check with missing evidence or a malformed judge answer. `inconclusive`
+applies no `advisory:*` label. Never run `review-pr` fresh against a `convert-advisory` entry.
 
 ## What still needs you
 

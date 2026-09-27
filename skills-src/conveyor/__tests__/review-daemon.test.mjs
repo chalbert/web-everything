@@ -861,6 +861,13 @@ describe('runConvertAdvisoryTick', () => {
     expect(out.skipped).toEqual([{ prNumber: 2766, reason: 'already-converted' }]);
   });
 
+  it('PR #2781 review — a label repair on an already-converted head is surfaced, never hidden under a bare skip', async () => {
+    const reconcile = vi.fn(() => convertPlan([entry(2766)]));
+    const convertAdvisory = vi.fn(async () => ({ skipped: 'already-converted', repairedLabels: true }));
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory });
+    expect(out.skipped).toEqual([{ prNumber: 2766, reason: 'already-converted', repairedLabels: true }]);
+  });
+
   it('one bad entry never aborts the rest — a convertAdvisory throw lands in `failed`, siblings still run', async () => {
     const reconcile = vi.fn(() => convertPlan([entry(1), entry(2)]));
     const convertAdvisory = vi.fn(async ({ prNumber }) => {
@@ -922,10 +929,42 @@ describe('runConvertAdvisoryTickAllRepos', () => {
 describe('buildCliDaemonEffects.tickOnce — folds the convert-advisory stage onto the tick result (#xconv1)', () => {
   const fakeReview = () => ({ repos: [], reviewsOwed: 0, dispatched: [], failed: [] });
 
+  it('PR #2781 review — OFF BY DEFAULT: with no opt-in, the live daemon never runs the convert-advisory stage (no real gh write, no judge spawn)', async () => {
+    const saved = process.env.REVIEW_DAEMON_CONVERT_ADVISORY;
+    delete process.env.REVIEW_DAEMON_CONVERT_ADVISORY;
+    try {
+      const runConvertAdvisories = vi.fn(async () => ({ posted: [] }));
+      const effects = buildCliDaemonEffects({ owner: 'x', reapSessions: () => null, runReview: fakeReview, runConvertAdvisories });
+      const result = await effects.tickOnce();
+      expect(runConvertAdvisories).not.toHaveBeenCalled();
+      expect(result.convertAdvisory).toBeNull();
+      expect(result).toHaveProperty('repos');
+    } finally {
+      if (saved === undefined) delete process.env.REVIEW_DAEMON_CONVERT_ADVISORY;
+      else process.env.REVIEW_DAEMON_CONVERT_ADVISORY = saved;
+    }
+  });
+
+  it('PR #2781 review — the opt-in is the env flag REVIEW_DAEMON_CONVERT_ADVISORY=1 (anything else stays off)', async () => {
+    const saved = process.env.REVIEW_DAEMON_CONVERT_ADVISORY;
+    try {
+      for (const [value, expected] of [['1', 1], ['0', 0], ['true', 0], ['', 0]]) {
+        process.env.REVIEW_DAEMON_CONVERT_ADVISORY = value;
+        const runConvertAdvisories = vi.fn(async () => ({ posted: [] }));
+        await buildCliDaemonEffects({ owner: 'x', reapSessions: () => null, runReview: fakeReview, runConvertAdvisories }).tickOnce();
+        expect(runConvertAdvisories).toHaveBeenCalledTimes(expected);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.REVIEW_DAEMON_CONVERT_ADVISORY;
+      else process.env.REVIEW_DAEMON_CONVERT_ADVISORY = saved;
+    }
+  });
+
   it('runs runConvertAdvisories AFTER the review stage and folds its result under `convertAdvisory`', async () => {
     const order = [];
     const effects = buildCliDaemonEffects({
       owner: 'x',
+      convertAdvisoryEnabled: true,
       reapSessions: () => null,
       runReview: () => { order.push('review'); return fakeReview(); },
       runConvertAdvisories: async () => { order.push('convert-advisory'); return { convertAdvisoriesOwed: 1, posted: [{ prNumber: 2766, outcome: 'accept', repo: 'chalbert/web-everything' }], skipped: [], failed: [] }; },
@@ -940,7 +979,7 @@ describe('buildCliDaemonEffects.tickOnce — folds the convert-advisory stage on
   it('a convert-advisory tick failure is swallowed (logged, non-fatal) — never breaks the review tick', async () => {
     const log = { error: vi.fn() };
     const effects = buildCliDaemonEffects({
-      owner: 'x', log, reapSessions: () => null, runReview: fakeReview,
+      owner: 'x', log, reapSessions: () => null, runReview: fakeReview, convertAdvisoryEnabled: true,
       runConvertAdvisories: () => { throw new Error('gh unreadable'); },
     });
     const result = await effects.tickOnce();

@@ -524,7 +524,15 @@ export async function runConvertAdvisoryTick({
       const result = await convertAdvisory(d, {
         repo, comments: pr?.comments ?? null, labels: pr?.labels ?? null, dryRun,
       });
-      if (result?.skipped) skipped.push({ prNumber: d.prNumber, reason: result.skipped });
+      if (result?.skipped) {
+        // PR #2781 review — a label repair on an already-converted head IS a write; surface it, never hide it
+        // under a bare `skipped`.
+        skipped.push({
+          prNumber: d.prNumber, reason: result.skipped,
+          ...(result.repairedLabels ? { repairedLabels: true } : {}),
+          ...(result.wouldRepairLabels ? { wouldRepairLabels: true } : {}),
+        });
+      }
       else {
         posted.push({
           prNumber: d.prNumber, outcome: result?.targetedCheckAnswer?.verdict ?? null,
@@ -692,6 +700,11 @@ export function buildCliDaemonEffects({
   runConvertAdvisories = (opts) => runConvertAdvisoryTickAllRepos({
     readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
   }),
+  // PR #2781 review — OPT-IN, OFF BY DEFAULT for its first landing. The stage posts real comments, applies real
+  // `advisory:*` labels and spawns a billed judge on trust-sensitive escalations, so it only runs when the
+  // operator sets REVIEW_DAEMON_CONVERT_ADVISORY=1 on the daemon — flipped on deliberately once live behavior
+  // has been watched (e.g. via `convert-advisory-dispatch.mjs <pr> --dry-run`), never by merely shipping this.
+  convertAdvisoryEnabled = process.env.REVIEW_DAEMON_CONVERT_ADVISORY === '1',
 } = {}) {
   // #3383 follow-up (live-caught 2026-09-26) — carries the LAST tick's own `liveProcessPrs` across the
   // `await`/closure boundary into the NEXT tick's `reapSessions()` call, below. A plain closure variable is
@@ -734,10 +747,12 @@ export function buildCliDaemonEffects({
       // convert-advisory failure (a `gh`/judge hiccup) must never take down the tick's real job (dispatching/
       // tagging reviews), which has already completed by the time this runs.
       let convertAdvisory = null;
-      try {
-        convertAdvisory = await runConvertAdvisories();
-      } catch (e) {
-        log.error(`review-daemon: convert-advisory tick failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
+      if (convertAdvisoryEnabled) {
+        try {
+          convertAdvisory = await runConvertAdvisories();
+        } catch (e) {
+          log.error(`review-daemon: convert-advisory tick failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
+        }
       }
       return { ...result, sessionReap, convertAdvisory };
     },
@@ -783,7 +798,7 @@ export function buildCliDaemonEffects({
       const ca = result.convertAdvisory;
       if (ca) {
         for (const p of (ca.posted ?? [])) log.error(`review-daemon: ${p.repo}#${p.prNumber} convert-advisory posted (targeted check: ${p.outcome ?? '?'})`);
-        for (const s of (ca.skipped ?? [])) log.error(`review-daemon: ${s.repo}#${s.prNumber} convert-advisory skipped — ${s.reason}`);
+        for (const s of (ca.skipped ?? [])) log.error(`review-daemon: ${s.repo}#${s.prNumber} convert-advisory skipped — ${s.reason}${s.repairedLabels ? ' (labels repaired from the recorded outcome)' : ''}`);
         for (const f of (ca.failed ?? [])) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} convert-advisory failed (non-fatal): ${f.error}`);
         for (const rf of (ca.reconcileFailed ?? [])) log.error(`review-daemon: ${rf.repo} convert-advisory reconcile failed (non-fatal, other repos unaffected): ${rf.error}`);
       }

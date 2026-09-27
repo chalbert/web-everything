@@ -1114,6 +1114,19 @@ const TEST_GAMING_REASON_RE = /^test-gaming suspected/;
 const MANIFEST_TAMPER_REASON_RE = /^manifest baseline mismatch/;
 const HEAL_MUTUAL_EXCLUSIVITY_RE = /^\*\*`review:accepted` removed — mutual exclusivity/;
 
+// PR #2781 review — `buildDrainReasonComment` appends `\n\n${auditLine}` after the reason whenever the PR carries
+// a manifest (`we:scripts/readiness/lane-manifest.mjs#manifestAuditLine`, fixed `manifest acted-on:` prefix).
+// Split it off so `reasonText` is ONLY the reason, and carry the audit line separately — it is real evidence for
+// a manifest-tamper check, but it is not the escalation's reason and must never be rendered under that heading.
+const TRAILING_AUDIT_LINE_RE = /\n\s*\n(manifest acted-on: [^\n]*)\s*$/;
+
+/** Split a park reason into `{reasonText, auditLine}` (auditLine `null` when none was appended). */
+function splitParkReason(parkReason) {
+  const m = TRAILING_AUDIT_LINE_RE.exec(parkReason);
+  if (!m) return { reasonText: parkReason, auditLine: null };
+  return { reasonText: parkReason.slice(0, m.index).trim(), auditLine: m[1].trim() };
+}
+
 /**
  * #xconv1 — find the LATEST comment that SUPERSEDES an existing `reviewed-sha` accept marker for the same head:
  * a real, diff-content escalation (test-gaming / manifest-tamper, `we:scripts/merge-ai-prs.mjs`'s
@@ -1148,8 +1161,15 @@ export function findSupersedingEscalation(comments, { afterCreatedAt = null } = 
     }
     const parkIdx = body.indexOf(PARK_REASON_PREFIX);
     const parkReason = parkIdx === -1 ? null : body.slice(parkIdx + PARK_REASON_PREFIX.length).trim();
-    if (parkReason && TEST_GAMING_REASON_RE.test(parkReason)) { substantive = { kind: 'test-gaming', reasonText: parkReason, createdAt }; continue; }
-    if (parkReason && MANIFEST_TAMPER_REASON_RE.test(parkReason)) { substantive = { kind: 'manifest-tamper', reasonText: parkReason, createdAt }; continue; }
+    const kind = !parkReason ? null
+      : TEST_GAMING_REASON_RE.test(parkReason) ? 'test-gaming'
+        : MANIFEST_TAMPER_REASON_RE.test(parkReason) ? 'manifest-tamper' : null;
+    if (kind) {
+      const { reasonText, auditLine } = splitParkReason(parkReason);
+      // `auditLine` only when present, so the no-manifest shape stays exactly `{kind, reasonText, createdAt}`.
+      substantive = auditLine ? { kind, reasonText, auditLine, createdAt } : { kind, reasonText, createdAt };
+      continue;
+    }
     if (HEAL_MUTUAL_EXCLUSIVITY_RE.test(body.trim())) heal = { kind: 'heal-mutual-exclusivity', reasonText: body.trim(), createdAt };
   }
   return substantive || heal;
@@ -1255,13 +1275,14 @@ export const TARGETED_CHECK_OUTCOMES = Object.freeze(['accept', 'changes', 'inco
  *  silently collapsing `inconclusive` into `accept` (the bug `we:scripts/conveyor/convert-advisory-dispatch.mjs
  *  #runTargetedCheck` used to have — its old narrowing was `=== 'changes' ? 'changes' : 'accept'`, which read
  *  ANY non-`changes` value, including a genuine `inconclusive`, as a clean accept). Anything else (missing,
- *  malformed, a stray value) still narrows to `accept` — the same fail-safe direction the original narrowing
- *  chose, preserved here rather than widened.
+ *  malformed, a stray value) narrows to `inconclusive` — FAIL CLOSED (PR #2781 review, security finding): a
+ *  judge glitch on a test-gaming escalation must never read as the clearing `accept`, and must never
+ *  manufacture a `changes` finding either. `inconclusive` applies no `advisory:*` label at all.
  * @param {*} verdict
  * @returns {'accept'|'changes'|'inconclusive'}
  */
 export function narrowTargetedCheckOutcome(verdict) {
-  return verdict === 'changes' || verdict === 'inconclusive' ? verdict : 'accept';
+  return TARGETED_CHECK_OUTCOMES.includes(verdict) ? verdict : 'inconclusive';
 }
 
 /**
@@ -1358,6 +1379,31 @@ export function hasConvertedAdvisoryNote(comments, headSha) {
     if (body.includes(CONVERTED_ADVISORY_NOTE_MARKER) && basisRe.test(body)) return true;
   }
   return false;
+}
+
+const CONVERTED_OUTCOME_RE = /^\*\*Advisory outcome:\*\* `(accept|changes|inconclusive)`/m;
+
+/** PR #2781 review — the outcome the LATEST converted note for this exact head RECORDED (its own
+ *  `**Advisory outcome:**` line), or `null` when there is no such note. Same trusted-author + head match as
+ *  {@link hasConvertedAdvisoryNote}. This is what lets a later tick repair a label write that failed AFTER the
+ *  note was posted — re-applying the recorded outcome, never re-asking the judge or re-posting the note.
+ * @param {Array} comments
+ * @param {string} headSha
+ * @returns {('accept'|'changes'|'inconclusive'|null)}
+ */
+export function readConvertedAdvisoryOutcome(comments, headSha) {
+  const sha = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
+  if (!sha) return null;
+  const basisRe = new RegExp(`^Net basis: \`${sha}\\.\\.${sha}\``, 'im');
+  let outcome = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue;
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body.includes(CONVERTED_ADVISORY_NOTE_MARKER) || !basisRe.test(body)) continue;
+    const m = CONVERTED_OUTCOME_RE.exec(body);
+    if (m) outcome = m[1];
+  }
+  return outcome;
 }
 
 /**

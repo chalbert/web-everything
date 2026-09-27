@@ -55,8 +55,13 @@ import {
   extractTestGamingPaths,
   narrowTargetedCheckOutcome,
   TARGETED_CHECK_OUTCOMES,
+  readConvertedAdvisoryOutcome,
 } from '../review-escalation.mjs';
 import { parseAdvisories, advisoryCoversHead } from '../advisory-labels.mjs';
+// PR #2781 review — the REAL park-comment builder + audit line, so the reasonText/auditLine split is pinned
+// against the shape the drain actually posts, never a hand-written fixture that could drift from it.
+import { buildDrainReasonComment } from '../../merge-ai-prs.mjs';
+import { manifestAuditLine } from '../../readiness/lane-manifest.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
 // drain's rubric and test selection is asserted here rather than restated as a hand-counted number.
@@ -1028,6 +1033,24 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
       const found = findSupersedingEscalation([{ body: testGamingParkBody, author: bot, createdAt: '2026-09-26T21:47:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
       expect(found).toBe(null);
     });
+    it('PR #2781 review — a park comment built by the REAL buildDrainReasonComment with a manifest audit line keeps the audit line OUT of reasonText (carried separately as auditLine)', () => {
+      const reason = 'test-gaming suspected — CI-green may be manufactured by tampering with tests: tests-removed: '
+        + 'foo.test.mjs (net 2 test case(s) removed)';
+      const auditLine = manifestAuditLine({ dismissedFindings: 1, crossRepo: false, blockedBy: ['x1'], base: 'abc1234' });
+      const body = buildDrainReasonComment('park', reason, auditLine);
+      const found = findSupersedingEscalation([{ body, author: bot, createdAt: '2026-09-26T21:51:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found.kind).toBe('test-gaming');
+      expect(found.reasonText).toBe(reason);
+      expect(found.reasonText).not.toMatch(/manifest acted-on/);
+      expect(found.auditLine).toBe(auditLine);
+    });
+    it('PR #2781 review — a manifest-tamper park with an audit line keeps the reason and the audit line apart', () => {
+      const reason = 'manifest baseline mismatch — post-review tamper suspected: dismissedFindings edited down (3→1) — x';
+      const auditLine = manifestAuditLine({ dismissedFindings: 1, crossRepo: false, blockedBy: [] });
+      const body = buildDrainReasonComment('park', reason, auditLine);
+      const found = findSupersedingEscalation([{ body, author: bot, createdAt: '2026-09-26T21:51:00Z' }], { afterCreatedAt: '2026-09-26T21:47:00Z' });
+      expect(found).toEqual({ kind: 'manifest-tamper', reasonText: reason, auditLine, createdAt: '2026-09-26T21:51:00Z' });
+    });
     it('#4140 — an untrusted author\'s park/heal comment is never counted as an escalation', () => {
       const found = findSupersedingEscalation(
         [{ body: testGamingParkBody, author: { login: 'mallory' }, createdAt: '2026-09-26T21:51:00Z' }],
@@ -1102,10 +1125,11 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
       expect(narrowTargetedCheckOutcome('changes')).toBe('changes');
       expect(narrowTargetedCheckOutcome('inconclusive')).toBe('inconclusive');
     });
-    it('narrows anything malformed/missing to `accept` (the same fail-safe direction the original narrowing chose)', () => {
-      expect(narrowTargetedCheckOutcome(undefined)).toBe('accept');
-      expect(narrowTargetedCheckOutcome(null)).toBe('accept');
-      expect(narrowTargetedCheckOutcome('bogus')).toBe('accept');
+    it('narrows anything malformed/missing to `inconclusive` — NEVER the clearing `accept` (PR #2781 review, security finding)', () => {
+      expect(narrowTargetedCheckOutcome(undefined)).toBe('inconclusive');
+      expect(narrowTargetedCheckOutcome(null)).toBe('inconclusive');
+      expect(narrowTargetedCheckOutcome('bogus')).toBe('inconclusive');
+      expect(narrowTargetedCheckOutcome('')).toBe('inconclusive');
     });
   });
 
@@ -1147,14 +1171,15 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
       expect(note).not.toContain('advisory:accepted` is applied');
       expect(note).toMatch(/human must confirm this escalation directly/i);
     });
-    it('a missing/malformed verdict narrows to `accept` rendering, never `inconclusive` (#xconv1-evidence — narrowTargetedCheckOutcome is the single source)', () => {
+    it('a missing/malformed verdict renders `inconclusive`, never the clearing `accept` (PR #2781 review — narrowTargetedCheckOutcome is the single source)', () => {
       const note = renderConvertedAdvisoryNote({
         repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
         acceptComment: { body: acceptBody },
         escalation: { kind: 'test-gaming', reasonText: 'x' },
         targetedCheckAnswer: {},
       });
-      expect(note).toContain('**Advisory outcome:** `accept`');
+      expect(note).toContain('**Advisory outcome:** `inconclusive`');
+      expect(note).not.toContain('`advisory:accepted` is applied');
     });
     it('carries a top-level `**Verdict:**` line and a `Net basis:` line keyed on headSha — the shape parseAdvisories/planAdvisoryStaleLabels/operator-queue.mjs read back', () => {
       const note = renderConvertedAdvisoryNote({
@@ -1192,6 +1217,28 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
       });
       expect(hasConvertedAdvisoryNote([{ body: note, author: bot }], HEAD)).toBe(false);
       expect(hasConvertedAdvisoryNote([{ body: note, author: { login: 'mallory' } }], 'deadbeef')).toBe(false);
+    });
+  });
+
+  describe('readConvertedAdvisoryOutcome (PR #2781 review — the recorded outcome a label retry re-applies)', () => {
+    const noteFor = (headSha, verdict) => renderConvertedAdvisoryNote({
+      repo: 'chalbert/web-everything', pr: 2766, headSha,
+      acceptComment: { body: acceptBody },
+      escalation: { kind: 'test-gaming', reasonText: 'x' },
+      targetedCheckAnswer: { verdict },
+    });
+    it('returns the outcome the LATEST converted note for this head recorded', () => {
+      expect(readConvertedAdvisoryOutcome([{ body: noteFor(HEAD, 'changes'), author: bot }], HEAD)).toBe('changes');
+      expect(readConvertedAdvisoryOutcome([
+        { body: noteFor(HEAD, 'changes'), author: bot },
+        { body: noteFor(HEAD, 'accept'), author: bot },
+      ], HEAD)).toBe('accept');
+      expect(readConvertedAdvisoryOutcome([{ body: noteFor(HEAD, 'inconclusive'), author: bot }], HEAD)).toBe('inconclusive');
+    });
+    it('null for another head, an untrusted author, or no note at all', () => {
+      expect(readConvertedAdvisoryOutcome([{ body: noteFor('deadbeef', 'changes'), author: bot }], HEAD)).toBe(null);
+      expect(readConvertedAdvisoryOutcome([{ body: noteFor(HEAD, 'changes'), author: { login: 'mallory' } }], HEAD)).toBe(null);
+      expect(readConvertedAdvisoryOutcome([], HEAD)).toBe(null);
     });
   });
 });
