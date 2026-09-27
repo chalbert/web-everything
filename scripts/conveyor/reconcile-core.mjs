@@ -111,7 +111,7 @@ import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs'
 import { latestCiHealEscalationForHead, CI_HEAL_ESCALATION_MARKER } from './ci-heal-escalation-mark.mjs';
 import {
   isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
-  CONCURRENT_AUTHOR_PAUSE_MARKER, concurrentAuthorPauses, isConcurrentAuthorStandDownBody,
+  CONCURRENT_AUTHOR_PAUSE_MARKER, concurrentAuthorPauses, isConcurrentAuthorStandDown,
 } from './stand-down.mjs';
 import { FIX_BEGIN_MARKER, FIX_END_MARKER } from './fix-procedure.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
@@ -608,7 +608,7 @@ export function countUnresolvedStandDowns(comments) {
     if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
     // fix procedure — a concurrent-author stand-down (the #2811 shape) is reclassified as a re-armable pause,
     // handled by {@link concurrentAuthorPauseState}, never terminal here.
-    if (isConcurrentAuthorStandDownBody(body)) continue;
+    if (isConcurrentAuthorStandDown(c)) continue;
     if (isStandDownSuperseded(comments, i)) continue;
     if (isAdvisoryMechanismStandDownSuperseded(comments, i)) continue;
     n += 1;

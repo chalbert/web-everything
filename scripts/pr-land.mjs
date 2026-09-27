@@ -837,7 +837,7 @@ function runCli() {
 
   // 1d. fix procedure (operator-approved 2026-09-27, live incident PR #2811) — refuse to push to a lane ref
   //     whose PR another fixer holds the LIVE fix claim on (`we:scripts/conveyor/fix-procedure.mjs`). Only the
-  //     claim holder (same Claude session, or the same `WE_FIX_WHO`) may push until its `fix-end`.
+  //     claim holder (same Claude session, or the same `WE_FIX_WHO` + `WE_FIX_TOKEN`) may push until its `fix-end`.
   {
     // `REPO` is the resolved checkout PATH (never a slug); read the URL of the remote this run actually pushes to.
     const refusal = pushRefusal({ repo: repoKeyForCheckout(REPO, { remote: REMOTE }), branch: REF, ...callerIdentity() });

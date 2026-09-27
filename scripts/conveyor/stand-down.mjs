@@ -69,8 +69,8 @@ export const STAND_DOWN_REASONS = Object.freeze({
   'conflict': 'a genuine same-line conflict with `main` blocked the repair',
   'lane-ref-gone': 'the PR\'s lane ref no longer resolves, so the ~done work could not be reconstituted',
   // fix procedure (2026-09-27) — NOT terminal: the CLI posts {@link CONCURRENT_AUTHOR_PAUSE_MARKER} for this
-  // reason instead of a stand-down. The clause names "concurrent author" so that even a comment built through
-  // {@link buildStandDownComment} with it is reclassified as a pause by {@link isConcurrentAuthorStandDownBody}.
+  // reason instead of a stand-down. Even a comment built through {@link buildStandDownComment} with it is read
+  // as a pause by {@link isConcurrentAuthorStandDownBody}, via the comment's machine trailer.
   'concurrent-author': 'a concurrent author pushed to this PR\'s lane mid-repair; this is a re-armable pause, not a judgment call',
 });
 
@@ -87,23 +87,45 @@ export const CONCURRENT_AUTHOR_PAUSE_MARKER = '⏸ conveyor fix — paused for a
 /** Machine-readable trailer on a pause comment: `<!-- fix-pause head=<sha> alt=<branch> alt-sha=<sha> -->`. */
 const PAUSE_TRAILER_RE = /<!--\s*fix-pause\b([^>]*)-->/;
 
+/** Machine-readable trailer {@link buildStandDownComment} ends every stand-down with:
+ *  `<!-- stand-down reason=<reason> -->`. Anchored to the END of the body, so a `--detail` (free text, written
+ *  earlier in the body) can never supply it. */
+const STAND_DOWN_TRAILER_RE = /<!--\s*stand-down reason=([a-z-]+)\s*-->\s*$/;
+
 /**
- * Does this TERMINAL-marker stand-down body actually describe a concurrent author? Keyed on the REASON slot that
- * {@link buildStandDownComment} writes (`stopped rather than guessing: <reason clause>.`), never on free prose:
- * a `--detail` is free text and may say "concurrent author" for an unrelated reason (e.g. a needs-judgment call
- * about a table "a concurrent author owns") — that stand-down must stay terminal. Two shapes are reclassified:
- *   1. the `concurrent-author` reason clause itself, in the reason slot;
- *   2. the LEGACY shape (before that reason existed): the `conflict` reason clause in the reason slot, a detail
- *      naming a concurrent author, AND a saved `lane/…-alt` branch — PR #2811's stand-down is exactly this.
- * Both are re-armable pauses, never terminal. Pure.
+ * The last moment a TRAILER-LESS stand-down may be read by the legacy prose rule below. Every stand-down built
+ * since this trailer shipped carries it and is classified by it alone; the prose rule exists only for comments
+ * posted by the older builder (PR #2811's, 2026-09-27T15:45:27Z) — and by a stale daemon clone still running it
+ * until this merges. Past the cutoff, or with no timestamp at all, a trailer-less body stays TERMINAL: the safe
+ * direction, since a person then looks at it. Treat as fixed once shipped.
  */
-export function isConcurrentAuthorStandDownBody(body) {
+export const LEGACY_CONCURRENT_AUTHOR_CUTOFF = '2026-10-01T00:00:00Z';
+
+/**
+ * Does this TERMINAL-marker stand-down comment actually describe a concurrent author (a re-armable pause, never
+ * terminal)? Pure.
+ *   1. A body with the machine trailer is classified by the trailer's reason ALONE — `concurrent-author` or not.
+ *      Free prose (the `--detail`) never decides it, whatever it says.
+ *   2. A trailer-less (legacy) body posted BEFORE {@link LEGACY_CONCURRENT_AUTHOR_CUTOFF}: the `conflict` reason
+ *      clause, a detail naming a concurrent author, AND a saved `lane/…-alt` branch — PR #2811's shape. With no
+ *      `createdAt`, or one at/after the cutoff, it stays terminal.
+ * @param {string} body
+ * @param {{createdAt?: ?string}} [opts] - the comment's own `createdAt`.
+ */
+export function isConcurrentAuthorStandDownBody(body, { createdAt = null } = {}) {
   if (typeof body !== 'string') return false;
-  const slot = (reason) => `stopped rather than guessing: ${STAND_DOWN_REASONS[reason]}.`;
-  if (body.includes(slot('concurrent-author'))) return true;
-  return body.includes(slot('conflict'))
+  const trailer = STAND_DOWN_TRAILER_RE.exec(body);
+  if (trailer) return trailer[1] === 'concurrent-author';
+  const at = Date.parse(createdAt ?? '');
+  if (!Number.isFinite(at) || at >= Date.parse(LEGACY_CONCURRENT_AUTHOR_CUTOFF)) return false;
+  return body.includes(`stopped rather than guessing: ${STAND_DOWN_REASONS.conflict}.`)
     && /\bconcurrent[\s-]+author\b/i.test(body)
     && parseAltBranch(body) !== null;
+}
+
+/** {@link isConcurrentAuthorStandDownBody} for one comment as `gh pr view --json comments` returns it. */
+export function isConcurrentAuthorStandDown(c) {
+  return isConcurrentAuthorStandDownBody(typeof c === 'string' ? c : c?.body, { createdAt: typeof c === 'string' ? null : c?.createdAt });
 }
 
 /** Pull `lane/…-alt` (and the sha right after it, if any) out of free text. Pure. */
@@ -134,7 +156,7 @@ export function concurrentAuthorPauses(comments) {
         createdAt, head: kv.head ?? null, legacy: false,
         alt: kv.alt ? { branch: kv.alt, sha: kv['alt-sha'] ?? null } : null,
       });
-    } else if (lead.startsWith(STAND_DOWN_MARKER) && isConcurrentAuthorStandDownBody(body)) {
+    } else if (lead.startsWith(STAND_DOWN_MARKER) && isConcurrentAuthorStandDown(c)) {
       out.push({ createdAt, head: null, legacy: true, alt: parseAltBranch(body) });
     }
   }
@@ -197,7 +219,7 @@ export function standDownComments(comments) {
     const body = typeof c === 'string' ? c : c?.body;
     // fix procedure — a concurrent-author stand-down is a re-armable pause, never a terminal stand-down.
     if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER) && isTrustedMarkerAuthor(c)
-      && !isConcurrentAuthorStandDownBody(body)) {
+      && !isConcurrentAuthorStandDown(c)) {
       out.push({ body, createdAt: (typeof c === 'string' ? null : c?.createdAt) ?? null });
     }
   }
@@ -338,7 +360,7 @@ export function countTerminalStandDowns(comments) {
     const body = bodyOf(c);
     if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
     if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
-    if (isConcurrentAuthorStandDownBody(body)) continue; // fix procedure — reclassified as a re-armable pause.
+    if (isConcurrentAuthorStandDown(c)) continue; // fix procedure — reclassified as a re-armable pause.
     if (!isStandDownSuperseded(comments, i)) n += 1;
   }
   return n;
@@ -387,6 +409,7 @@ export function buildStandDownComment({ actor = 'conveyor fix agent', reason = '
     '**A human is the intended next step.** The automatic fix loop will NOT try this PR again while this comment ' +
       'stands — re-running it would only re-ask the same question. Take it over with `/finish`, or delete this ' +
       'comment once the blocker is resolved to hand the PR back to the loop.',
+    `<!-- stand-down reason=${Object.hasOwn(STAND_DOWN_REASONS, reason) ? reason : 'unknown'} -->`,
   ].join('\n');
 }
 

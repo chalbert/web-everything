@@ -115,7 +115,9 @@ not an unconditional auto-open list.
      chalbert/frontierui> --who=<finisher name> --why="finish: <bucket>"`. `--repo` is required — a PR number is
      only unique within its repo, so a cross-repo couple names each half's own repo. It turns the PR back to draft
      and refuses everyone else's pushes to the branch until you run `fix-procedure.mjs fix-end <pr> --repo=<same>
-     --who=<same>` after your push. If `fix-begin` is refused, another fixer owns
+     --who=<same>` after your push. A finisher without a Claude session exports the `token` that `fix-begin`
+     prints as `WE_FIX_TOKEN` (with `WE_FIX_WHO=<same>`) for its push and `fix-end` — the claim is bound to it,
+     since `--who` alone is public. If `fix-begin` is refused, another fixer owns
      the PR right now — skip this lane this pass and report it; never push around it.
    - `git clone --branch <laneRef> --single-branch … && cd …`; symlink `node_modules` + a sibling
      `../frontierui` if the gate/generators need them.
