@@ -5755,11 +5755,11 @@ incident, shipped ahead of this doc entry, `lane/promote-stale-green`): a `revie
 about one specific head, so a ci-heal re-push or a non-content-preserving mechanical rebase now re-arms it to
 `review:pending` (`we:scripts/review-set-label.mjs#decideSetLabel`'s `rearm` target, widened to accept a live
 `review:accepted` as well as `review:changes`) — a content-*preserving* rebase still restamps the acceptance
-forward instead (`restampAcceptance`, unchanged, #x5e2ldj), so a genuinely-safe rebase is never penalized.
+forward instead (`restampAcceptance`, unchanged, #3200), so a genuinely-safe rebase is never penalized.
 
 **Build status lives on the tracking item, per #2854 — this anchor states only the rule above.**
 `fix-procedure.mjs` (PR #2821, `lane/fix-procedure`) is the fix-begin/fix-end mechanism this rule governs;
-mechanizing the draft-only-on-withdrawal default onto it is filed as backlog `xyfvtfz` (parent epic #4075,
+mechanizing the draft-only-on-withdrawal default onto it is filed as backlog `4302` (parent epic #4075,
 chalbert/web-everything #2811 cross-ref) — read that item for current status, never re-derive it here.
 
 **Lineage:** operator decision, 2026-09-27, live incident PR #2811 (chalbert/web-everything). Grounds the
