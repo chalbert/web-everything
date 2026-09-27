@@ -66,6 +66,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { withSalvageHint } from '../lib/salvage-index.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs';
@@ -818,7 +819,7 @@ export function dispatchFix(planned, {
     const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
     const argv = buildAgentArgv({
       sessionId,
-      payload: { prompt, sessionSlug },
+      payload: { prompt: withSalvageHint(prompt, { cards: [planned.itemNum], prs: [planned.pr] }), sessionSlug },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
       // unfilled template and self-aborts (3/3 live).
       systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
