@@ -16,6 +16,8 @@
  *   node scripts/conveyor/queue.mjs add <NNN> [--json]     # clear an item for the conveyor to pull (idempotent)
  *   node scripts/conveyor/queue.mjs remove <NNN> [--json]  # un-clear it (no-op if it was not cleared)
  *   node scripts/conveyor/queue.mjs list [--json]          # print the current session queue
+ *   node scripts/conveyor/queue.mjs migrate [--dry-run] [--json]  # one-time move of the OLD in-checkout sidecar
+ *                                                          # into the automation's state home (decouple-primary-checkout)
  *
  * The id may be typed with or without a leading `#` (`add 2613` ≡ `add '#2613'`). Clear the id the tooling
  * CURRENTLY shows: a sidecar entry can go stale across JIT-numbering — an item cleared as a `xHASH` won't match
@@ -29,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
   readQueueFile, writeQueueFile, addToQueue, removeFromQueue, queueHas, resolveQueuePath, normNum,
+  resolveQueueSource, migrateLegacyQueue, legacyQueueDivergence,
 } from './queue-store.mjs';
 import { readField } from '../backlog/frontmatter.mjs';
 import { idFromName, normalizeId } from '../backlog/id.mjs';
@@ -132,18 +135,35 @@ function main(argv) {
 
   const path = resolveQueuePath();
 
+  if (action === 'migrate') {
+    const r = migrateLegacyQueue({ dryRun: flags.has('dry-run') });
+    const human = r.reason === 'canonical-exists'
+      ? `${DIM}already in the state home (${r.count} in queue, ${r.path}) — nothing to migrate${RST}`
+      : r.reason === 'no-legacy'
+        ? `${DIM}no legacy queue found — nothing to migrate (${r.path})${RST}`
+        : `${GRN}${r.migrated ? '✓ migrated' : 'would migrate'}${RST} ${r.count} entr${r.count === 1 ? 'y' : 'ies'} ${DIM}${r.from.join(', ')} → ${r.path}${RST}`;
+    return emit({ ok: true, verb: 'queue', action: 'migrate', ...r }, human);
+  }
+
   if (action === 'list') {
     const queue = readQueueFile(path);
-    if (json) return emit({ ok: true, verb: 'queue', action: 'list', queue });
-    if (queue.length === 0) return emit({ ok: true }, `${DIM}conveyor queue is empty${RST}`);
+    const src = resolveQueueSource(path);
+    const div = legacyQueueDivergence();
+    const notes = [
+      src.source === 'legacy' ? `${YEL}⚠${RST} read from the OLD location ${src.legacyPath} — run \`queue.mjs migrate\` to move it to ${path}` : '',
+      div.diverged ? `${YEL}⚠${RST} ${div.legacyPath} changed after the state-home queue — an old-code writer is still clearing work there, and nothing reads it any more` : '',
+    ].filter(Boolean);
+    if (json) return emit({ ok: true, verb: 'queue', action: 'list', queue, path, source: src.source, legacyPath: src.legacyPath, legacyDiverged: div.diverged ? div.legacyPath : null });
+    const tail = notes.length ? `\n${notes.join('\n')}` : '';
+    if (queue.length === 0) return emit({ ok: true }, `${DIM}conveyor queue is empty${RST}${tail}`);
     const lines = queue
       .map((e) => `  ${GRN}✓${RST} #${e.num}${e.addedAt ? ` ${DIM}(cleared ${e.addedAt})${RST}` : ''}`)
       .join('\n');
-    return emit({ ok: true }, `conveyor queue (${queue.length}) ${DIM}— session-local, ${path}${RST}\n${lines}`);
+    return emit({ ok: true }, `conveyor queue (${queue.length}) ${DIM}— ${src.path}${RST}\n${lines}${tail}`);
   }
 
   if (action !== 'add' && action !== 'remove') {
-    fail('usage: queue.mjs {add|remove|list} <NNN> [--json]');
+    fail('usage: queue.mjs {add|remove|list|migrate} <NNN> [--json]');
   }
   if (num == null || !num) fail(`${action} needs an item id — e.g. queue.mjs ${action} 2613`);
 

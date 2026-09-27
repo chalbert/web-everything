@@ -170,14 +170,14 @@ State plainly to the operator, once, at start:
 > shared artifact from this session's conveyor queue — whether the two should reconcile is the open decision
 > filed under #2612.
 >
-> **Not sure which checkout's runner is actually live?** `queue.mjs add` resolves its sidecar purely from
-> THIS session's own checkout and reports success unconditionally, even when a runner is already live
-> elsewhere and never reads it (#3478). If you are not about to start the runner in THIS same checkout —
-> e.g. a runner may already be running from a different clone — use
-> `node scripts/conveyor/queue-work.mjs add <NNN>` instead: it resolves which checkout the live runner is
-> actually rooted in first, writes there, and refuses rather than guessing whenever that resolution is not
-> clean — no live runner, more than one, no pid recorded, the pid's working directory can't be derived, or
-> the pid no longer looks like the runner (a reused pid).
+> **Which checkout you run this from no longer matters.** The queue is ONE machine-wide file in the
+> automation's state home (`~/.claude/daemon-self-sync-state/conveyor-state/.conveyor/queue.json`), not a
+> per-checkout sidecar, so every runner and daemon reads what you clear from any checkout
+> (decouple-primary-checkout, epic #4075). `queue.mjs list` warns if it is still reading the OLD in-checkout
+> file (run `queue.mjs migrate` once) or if an old-code writer is still clearing work into it.
+> `node scripts/conveyor/queue-work.mjs add <NNN>` writes the same file but first refuses when no live runner
+> is resolvable (no live runner, more than one, no pid recorded, the pid's working directory can't be derived,
+> or the pid no longer looks like the runner).
 
 Then start the headless runner (§2).
 

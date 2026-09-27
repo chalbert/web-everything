@@ -87,6 +87,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultCachePath, resolveGithubAppEnvConfig } from './github-app-auth-env.mjs';
 import { primaryCheckout } from '../bootstrap-session.mjs';
+import { controlClonePath } from './automation-home.mjs';
 
 /**
  * #4200-ish (gh-shim-stable-path) — the absolute path to `we:scripts/lib/gh-throttle.mjs`, resolved through
@@ -113,16 +114,25 @@ import { primaryCheckout } from '../bootstrap-session.mjs';
  * call through it looked like a no-op success. Resolving through {@link realpathSync} first means the baked
  * path is always the same one Node's loader will report back, whichever alias `primaryCheckout` happened to
  * probe.
- * @param {{root?:string, exists?:(p:string)=>boolean, realpath?:(p:string)=>string}} [o] — overridable per call
- *   (tests only; production callers accept the defaults, which read the real filesystem).
+ *
+ * DECOUPLE-PRIMARY-CHECKOUT (epic #4075) — THE CONTROL CLONE COMES FIRST. The primary checkout is the operator's
+ * own working copy: routinely a detached HEAD hundreds of commits behind `main` (live 2026-09-27: 449 behind), so
+ * a shim baked with ITS throttle CLI ran months-old pacing code for every bot `gh` call on the machine. The
+ * throttle CLI now resolves, in order: (1) the automation's control clone (`automation-home.mjs#controlClonePath`
+ * — `<workspace>/wev-control`, kept on `origin/main` by the daemon rebuild machinery); (2) the primary checkout,
+ * for ONE release, while the control clone is not yet provisioned; (3) this file's own sibling.
+ * @param {{root?:string, exists?:(p:string)=>boolean, realpath?:(p:string)=>string, env?:NodeJS.ProcessEnv,
+ *   home?:string}} [o] — overridable per call (tests only; production callers accept the defaults, which read
+ *   the real filesystem).
  */
-export function defaultGhThrottleCliPath({ root, exists = existsSync, realpath = realpathSync } = {}) {
+export function defaultGhThrottleCliPath({ root, exists = existsSync, realpath = realpathSync, env = process.env, home } = {}) {
+  const real = (p) => { try { return realpath(p); } catch { return p; } }; // best-effort — a fake `exists` in
+  // tests with no matching real file on disk falls back to the candidate string itself, never throws.
+  const control = join(controlClonePath({ env, ...(home ? { home } : {}) }), 'scripts', 'lib', 'gh-throttle.mjs');
+  if (exists(control)) return real(control);
   const primary = primaryCheckout(root, exists);
   const candidate = join(primary, 'scripts', 'lib', 'gh-throttle.mjs');
-  if (exists(candidate)) {
-    try { return realpath(candidate); } catch { return candidate; } // best-effort — a fake `exists` in tests
-    // with no matching real file on disk falls back to the candidate string itself, never throws.
-  }
+  if (exists(candidate)) return real(candidate);
   return join(dirname(fileURLToPath(import.meta.url)), 'gh-throttle.mjs');
 }
 
