@@ -29,12 +29,49 @@
  * tick — the ONE daemon confirmed live — mirroring that file's own `hungCi`/`mainRedRebase`/`missingRun`
  * precedent exactly. Both callers are safe to keep: `gh pr ready` is idempotent server-side (a PR already
  * non-draft is a silent no-op), so whichever caller's tick reaches a given PR first simply wins.
+ *
+ * STALE-GREEN RE-VERIFICATION (live incident, chalbert/web-everything PR #2811, 2026-09-27): the `entries` this
+ * pass promotes come from `runReconcilePass`'s ONE PR snapshot for the whole tick — `entry.check` (folded into
+ * `withPhase.check` by `planReconcile`) is whatever `statusCheckRollup` looked like at THAT read, seconds to
+ * minutes before this loop actually calls `provider.ready`. #2811 measured the gap directly: the plan read this
+ * draft as green, a required check FAILED 18:48:06Z (while `main`'s own CI was independently red), and this pass
+ * still called `gh pr ready` at 18:48:24Z — 18 SECONDS AFTER the failure the very same tick's review-daemon log
+ * had already recorded. A snapshot is a claim about the past; promoting is an action in the present, and nothing
+ * between the two ever asked whether the claim still held. So every entry is re-verified here, for the EXACT
+ * head sha (never the PR number — a PR's checks can belong to a superseded commit, `we:scripts/operations/
+ * pr-status.mjs`'s own header), immediately before the one write this file makes: every required check must be
+ * `completed`+`success` for that sha RIGHT NOW, no `pending`, no failure. A stale-green entry is refused
+ * (`kind:'stale-check-refused'`) rather than promoted — the draft stays draft and the SAME plan entry recurs
+ * next tick, exactly like every other refusal in this family self-heals with no retry loop of its own.
  */
-import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
+import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
 import { createDraftPromoteProvider } from '../lib/draft-promote-provider.mjs';
 import { runReconcilePass } from '../conveyor/reconcile-pass.mjs';
 import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
+import { runGhSync } from '../lib/gh-throttle.mjs';
+import { checksArgv, parseJsonLines } from './pr-status-io.mjs';
+import { reduceCheckState } from './pr-status.mjs';
+import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
+import { applyReviewStatus } from '../conveyor/review-status-tag.mjs';
+
+/**
+ * THE FRESH RE-READ (#2811). Asks GitHub's own commit-statuses endpoint for `sha`'s check runs RIGHT NOW —
+ * bypassing whatever `statusCheckRollup` the reconcile snapshot carried — and reduces them with the SAME
+ * `reduceCheckState`/`getRequiredStatusChecks` truth every other CI-truth reader in this family uses (never a
+ * re-derived notion of "green"). Injectable so a test asserts the refusal with no `gh` on PATH.
+ * @param {{repoSlug:string, sha:string, runGh?:Function, getRequiredChecks?:Function}} o
+ * @returns {{state:string, why:string, counts:object}}
+ */
+export function defaultReadHeadCheckState({
+  repoSlug, sha, runGh = runGhSync, getRequiredChecks = getRequiredStatusChecks,
+} = {}) {
+  const requiredChecks = getRequiredChecks({ repo: repoSlug }).checks;
+  const raw = runGh(checksArgv({ repo: repoSlug, sha }), {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], throttle: { op: 'pr-status-checks', repo: repoSlug },
+  });
+  return reduceCheckState(parseJsonLines(raw), requiredChecks);
+}
 
 /**
  * Run ONE pass: reconcile, filter `kind:'promote-draft'`, call `gh pr ready` on each. Repo-agnostic, same
@@ -59,20 +96,59 @@ export function runReconcilePromoteDraftDispatch({
   prsFile,
   provider = createDraftPromoteProvider({ cwd: root }),
   checkStaleness,
+  // #2811 — the fresh per-sha re-read, injectable so a test can pin the exact race (plan says green, a fresh
+  // read says red/pending) with no `gh` on PATH. Defaults to the real `gh api commits/<sha>/check-runs` read.
+  readHeadCheckState = defaultReadHeadCheckState,
+  // #2811/#2821 follow-up — clear the now-stale `review-status:awaiting-ci` label the INSTANT a draft promotes,
+  // never waiting on a different daemon's tick to notice `isDraft` flipped (mirrors `applyReviewStatus`'s own
+  // "the daemon that changes the state applies its own tag right at the moment" convention, `review-status-
+  // tag.mjs`'s own docblock). Best-effort: a failed clear never fails the promotion itself, and the periodic
+  // `tagReviewStatus` sweep still corrects it on its own next pass either way.
+  clearAwaitingCi = applyReviewStatus,
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`promote-draft-pr-dispatch: --repo ${repo} is not a constellation repo`);
   // #x1rr9rh (multi-repo slice 2) — guards THIS dispatching checkout's own import path, same as every sibling
   // mechanical pass (`ci-heal-pr-dispatch.mjs`, `reconcile-fix-dispatch.mjs`) — never the target repo.
   assertMainNotStale(root, checkStaleness);
+  const repoSlug = CONSTELLATION_REPOS[repoKey].slug;
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   const entries = (reconciled.dispatch ?? []).filter((entry) => entry.kind === 'promote-draft');
   const dispatched = [];
   const refusals = [];
   for (const entry of entries) {
+    const sha = entry.headRefOid;
+    // #2811 — re-verify EVERY required check for the EXACT head sha immediately before the one write this file
+    // makes. The plan's own `withPhase.check === 'green'` (see `reconcile-core.mjs`'s `promote-draft` branch) is
+    // already stale by the time control reaches here — this is the second, authoritative read.
+    let fresh;
+    try {
+      fresh = readHeadCheckState({ repoSlug, sha });
+    } catch (e) {
+      refusals.push({
+        pr: entry.prNumber, kind: 'stale-check-unreadable', headSha: sha,
+        why: `could not re-verify required checks for ${sha} before promoting — refusing rather than acting on `
+          + `the reconcile plan's own (by-now-stale) read: ${String((e && e.message) || e).split('\n')[0]}`,
+      });
+      continue;
+    }
+    if (fresh.state !== 'green') {
+      refusals.push({
+        pr: entry.prNumber, kind: 'stale-check-refused', headSha: sha, checkState: fresh.state,
+        why: `the reconcile plan read this draft's required checks as green, but a fresh re-read of head ${sha} `
+          + `immediately before promoting shows ${fresh.state} (${fresh.why}) — refusing to promote on a `
+          + 'stale-green read (#2811); the same entry is re-planned next tick once the checks genuinely settle',
+      });
+      continue;
+    }
     try {
       provider.ready(entry.prNumber);
       dispatched.push({ pr: entry.prNumber, kind: 'promote-draft' });
+      try {
+        clearAwaitingCi({ pr: entry.prNumber, repo: repoSlug, state: null });
+      } catch {
+        // Best-effort (see the param's own doc) — the periodic review-status sweep still corrects this.
+      }
     } catch (e) {
       // Best-effort, same as every other label/state write in this family (`pr-land.mjs`'s own `applyLabel`):
       // a `gh` hiccup here never throws the whole pass — the PR stays draft and this same plan entry recurs

@@ -5710,6 +5710,67 @@ never resumed) and [#automated-health-daemon](#automated-health-daemon) clauses 
 
 ---
 
+### A PR under repair stays ready-for-review by default; only a scope-change or a withdrawn-shape miss earns draft, and merge safety never depended on the draft bit {#fix-claim-draft-only-on-withdrawal}
+
+**Ratified 2026-09-27** (operator, in session, live incident chalbert/web-everything PR #2811). PR #2811's
+fix claim (`fix-begin`/`fix-end`, `we:scripts/conveyor/fix-procedure.mjs`, landing via #2821) converted the
+PR to draft on every hold, unconditionally — a ci-heal repairing red CI, a mechanical rebase, an ordinary
+`review:changes` bounce fix, all read to a human glancing at the PR list as "withdrawn". That reading is
+false for every one of those: none of them means the PR no longer does what the card asked, and holding the
+fix claim (a lock other dispatch already refuses under, see below) already prevents a foreign review/fix/
+push race with no need to also hide the PR behind GitHub's own draft bit.
+
+**The rule:**
+- **Normal repair loops stay READY, never draft.** A fixer addressing review findings, a ci-heal repairing a
+  red required check, a mechanical conflict repair, a mechanical rebase/CI-rerun with no agent judgment and
+  no code edit — none of these converts the PR to draft. The fix claim alone holds the lock: while it is
+  live, no review/fix/ci-heal is dispatched for the PR and no push from anyone but the claim holder is
+  accepted (`fix-procedure.mjs`'s own `fix-claimed` reconcile refusal and `pushRefusal`, landing via #2821).
+  The visible signal is a `review-status:*` label naming the reason (`fixing` / `fixing-conflict` /
+  `healing-ci` — see [#2811-verdict-reset](#fix-claim-verdict-reset-on-head-move) below for the paired label
+  fix), never the draft bit.
+- **Draft ONLY when the PR is found genuinely incomplete or effectively withdrawn** — two narrow reasons,
+  both requiring an explicit, stated cause on the SAME `fix-begin` call, default **no draft**:
+  - `scope-change` — a scope-change request reaches the worker (the operator or an orchestrator asks for
+    more/different changes) while the PR is mid-review. The PR is now known-incomplete against a moving
+    target.
+  - `withdrawn` — review finds the PR does not do what the card asked at all (a fundamental miss, not a
+    fixable finding). This is effectively a withdraw-and-resubmit, not a repair.
+  Each carries its own `review-status:draft-scope-change` / `review-status:draft-withdrawn` label so the
+  reason is visible at a glance, mutually exclusive with the ordinary repair labels above and with
+  `awaiting-ci` (a fresh draft-first PR is unaffected by this ruling — different population, different
+  reason, unchanged).
+- **Merge safety never depended on the draft bit, and this ruling changes none of it** — verified, not
+  assumed, against the live gate: `we:scripts/merge-ai-prs.mjs`'s own `decideReviewGate` reads
+  `acceptanceCoversHead` (`we:scripts/lib/review-escalation.mjs`) FIRST, and that check independently
+  re-verifies the recorded `reviewed-sha` (or its content fingerprint) against the PR's LIVE head immediately
+  before a merge — a stale `review:accepted` (the label, whatever it says) never merges an unreviewed head.
+  That file's own comment on the point, quoted verbatim: *"What stops the merge is the GATE'S VERDICT, not
+  the label state."* Draft was never the safety mechanism; it was only ever a visibility signal, and this
+  ruling makes that signal accurate (ready = "in the normal reviewer↔author conversation", draft = "known
+  incomplete or withdrawn") instead of overloading it with every kind of hold.
+
+**Composes with** <a id="fix-claim-verdict-reset-on-head-move"></a>the #2811 **verdict-reset** fix (same
+incident, shipped ahead of this doc entry, `lane/promote-stale-green`): a `review:accepted` verdict is a claim
+about one specific head, so a ci-heal re-push or a non-content-preserving mechanical rebase now re-arms it to
+`review:pending` (`we:scripts/review-set-label.mjs#decideSetLabel`'s `rearm` target, widened to accept a live
+`review:accepted` as well as `review:changes`) — a content-*preserving* rebase still restamps the acceptance
+forward instead (`restampAcceptance`, unchanged, #x5e2ldj), so a genuinely-safe rebase is never penalized.
+
+**Build status lives on the tracking item, per #2854 — this anchor states only the rule above.**
+`fix-procedure.mjs` (PR #2821, `lane/fix-procedure`) is the fix-begin/fix-end mechanism this rule governs;
+mechanizing the draft-only-on-withdrawal default onto it is filed as backlog `xyfvtfz` (parent epic #4075,
+chalbert/web-everything #2811 cross-ref) — read that item for current status, never re-derive it here.
+
+**Lineage:** operator decision, 2026-09-27, live incident PR #2811 (chalbert/web-everything). Grounds the
+draft-first feature `fix-procedure.mjs` (#2821) is expected to ship against; the verdict-reset half already
+shipped in `we:scripts/review-set-label.mjs`, `we:scripts/conveyor/ci-heal-mark.mjs`,
+`we:scripts/conveyor/ci-red-recovery-watch.mjs` (`lane/promote-stale-green`). Composes with
+[#review-pending-clean-verdict-mechanical-accept](#review-pending-clean-verdict-mechanical-accept) (the
+mechanical-accept path this ruling does not touch) and does not amend it.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
