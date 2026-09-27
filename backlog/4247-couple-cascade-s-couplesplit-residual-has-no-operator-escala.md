@@ -2,9 +2,10 @@
 bornAs: x3hwqqb
 kind: task
 parent: "3383"
-status: open
+status: resolved
 scope: ["we:scripts/merge-ai-prs.mjs", "we:scripts/lib/couple-cascade.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
