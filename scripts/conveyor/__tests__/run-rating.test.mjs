@@ -5,13 +5,17 @@ import { tmpdir } from 'node:os';
 
 import { scrubReasons } from '../../lib/secret-scrub.mjs';
 import {
-  RUBRIC_VERSION, GUARD_BLOCKS_TARGET,
+  RUBRIC_VERSION, GUARD_BLOCKS_TARGET, BASELINE_WALL_MS_BY_KIND, REFERENCE_STORY_SIZE,
   isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, pairToolEvents,
   classifyToolCall, computeTimeShares, countGuardBlocks, countErrors, countRepeatedCalls, countTestReruns,
   sumTokens, dominantModel, computeCostUsd, computeCacheHitRatio,
-  classifyOutcome, gradeRun, rateTranscript, rateReviewJobTimings,
+  classifyOutcome, gradeRun, worseGrade, baselineWallMs, outcomeFromTranscriptEvents,
+  gradeReviewJob, resolveReviewGrade, classifyRunWaste, topWasteCauses,
+  rateTranscript, rateReviewJobTimings,
   findTranscriptPath, readTranscriptLines, rateSession, rateReviewJobLog,
   toScorecardRow, rollupKey, phaseForKind, rollupByDemand, flagWaste,
+  scanClaudeProjectsCoverage, scanReviewJurorUsage, scanNonClaudeJudgeTranscripts, buildCoverageReport,
+  orchestratorProjectDirName,
 } from '../run-rating.mjs';
 
 const dirs = [];
@@ -270,24 +274,141 @@ describe('classifyOutcome', () => {
   });
 });
 
-describe('gradeRun', () => {
-  it('is A for a clean run with no guard blocks/errors/repeats and wall time at baseline', () => {
-    expect(gradeRun({ guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix' })).toBe('A');
+describe('gradeRun (rubric v2 — a hard A conjunction + outcome caps)', () => {
+  const clean = { guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0 };
+  it('is A only with within-baseline time AND zero waste AND a good outcome, all three', () => {
+    expect(gradeRun({ ...clean, wallMs: 10 * 60_000, kind: 'fix', outcome: 'pushed' })).toBe('A');
+  });
+  it('is NOT A when every mechanical box is ticked but the outcome is missing/neutral (no "good outcome")', () => {
+    expect(gradeRun({ ...clean, wallMs: 10 * 60_000, kind: 'fix', outcome: null })).not.toBe('A');
   });
   it(`is still A at the report's own guard-block TARGET of ${GUARD_BLOCKS_TARGET}`, () => {
-    expect(gradeRun({ guardBlocks: 1, errors: 1, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix' })).toBe('A');
+    expect(gradeRun({ guardBlocks: 1, errors: 1, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix', outcome: 'pushed' })).toBe('A');
+  });
+  it('is NOT A at 2 guard blocks — one over the declared allowance', () => {
+    expect(gradeRun({ guardBlocks: 2, errors: 2, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix', outcome: 'pushed' })).not.toBe('A');
+  });
+  it('is NOT A with even one test rerun — the allowance is exactly zero', () => {
+    expect(gradeRun({ ...clean, testReruns: 1, wallMs: 10 * 60_000, kind: 'fix', outcome: 'pushed' })).not.toBe('A');
   });
   it(`drops well below A at the report's own "bad" guard-block count of 4`, () => {
-    const grade = gradeRun({ guardBlocks: 4, errors: 4, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix' });
+    const grade = gradeRun({ guardBlocks: 4, errors: 4, repeatedCalls: 0, testReruns: 0, wallMs: 10 * 60_000, kind: 'fix', outcome: 'pushed' });
     expect(['C', 'D']).toContain(grade);
   });
   it('penalises wall time far above the kind baseline even with a clean tool record', () => {
-    const grade = gradeRun({ guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, wallMs: 41 * 60_000, kind: 'fix' });
+    const grade = gradeRun({ ...clean, wallMs: 41 * 60_000, kind: 'fix', outcome: 'pushed' });
     expect(grade).not.toBe('A');
   });
   it('uses the worker baseline for a conveyor (build) session, not the fix baseline', () => {
     // 40 minutes is the WORKER median — should still grade A for a conveyor session though it would not for fix
-    expect(gradeRun({ guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, wallMs: 40 * 60_000, kind: 'conveyor' })).toBe('A');
+    expect(gradeRun({ ...clean, wallMs: 40 * 60_000, kind: 'conveyor', outcome: 'pushed' })).toBe('A');
+  });
+  it('scales a build baseline UP for a larger story size, DOWN for a smaller one', () => {
+    // size 3 = REFERENCE_STORY_SIZE (no scaling); size 9 triples the baseline; size 1 is clamped to 0.5x, not 1/3x
+    expect(gradeRun({ ...clean, wallMs: 100 * 60_000, kind: 'conveyor', size: 9, outcome: 'pushed' })).toBe('A');
+    expect(gradeRun({ ...clean, wallMs: 21 * 60_000, kind: 'conveyor', size: 1, outcome: 'pushed' })).not.toBe('A'); // > 0.5x40min clamp
+  });
+
+  describe('outcome caps (checked before mechanical hygiene)', () => {
+    it('a REWORK (fix/ci-heal) session that found nothing to fix is a hard D, however clean the run was', () => {
+      expect(gradeRun({ ...clean, wallMs: 1000, kind: 'fix', outcome: 'nothing-to-fix' })).toBe('D');
+      expect(gradeRun({ ...clean, wallMs: 1000, kind: 'ci-heal', outcome: 'nothing-to-fix' })).toBe('D');
+    });
+    it('nothing-to-fix is NOT a hard D for a non-rework kind (review/inspect) — it can be the correct verdict', () => {
+      expect(gradeRun({ ...clean, wallMs: 1000, kind: 'inspect', outcome: 'nothing-to-fix' })).toBe('A');
+    });
+    it('a BUILD kind whose PR bounced caps at C, even mechanically spotless', () => {
+      expect(gradeRun({ ...clean, wallMs: 1000, kind: 'conveyor', outcome: 'pushed', prBounced: true })).toBe('C');
+    });
+    it('a BUILD kind whose PR is unknown to have bounced (prBounced: null) applies NO cap', () => {
+      expect(gradeRun({ ...clean, wallMs: 10 * 60_000, kind: 'conveyor', outcome: 'pushed', prBounced: null })).toBe('A');
+    });
+    it('escalated with no decision reached (the default) caps at C', () => {
+      expect(gradeRun({ ...clean, wallMs: 1000, kind: 'fix', outcome: 'escalated' })).toBe('C');
+    });
+    it('escalated WITH decisionReached:true removes the cap', () => {
+      expect(gradeRun({ ...clean, wallMs: 10 * 60_000, kind: 'fix', outcome: 'escalated', decisionReached: true })).not.toBe('C');
+    });
+    it('a cap only ever worsens a grade, never improves a genuinely bad mechanical run', () => {
+      const grade = gradeRun({ guardBlocks: 5, errors: 5, repeatedCalls: 5, testReruns: 5, wallMs: 60 * 60_000, kind: 'conveyor', outcome: 'pushed', prBounced: true });
+      expect(grade).toBe('D'); // mechanical D is already worse than the C cap — worseGrade keeps D
+    });
+  });
+});
+
+describe('worseGrade', () => {
+  it('returns whichever grade is further from A', () => {
+    expect(worseGrade('A', 'C')).toBe('C');
+    expect(worseGrade('D', 'B')).toBe('D');
+  });
+  it('a null/undefined cap never worsens anything', () => {
+    expect(worseGrade('B', null)).toBe('B');
+    expect(worseGrade(null, 'B')).toBe('B');
+  });
+});
+
+describe('baselineWallMs', () => {
+  it('is the flat per-kind baseline for a non-size-scaled kind regardless of size', () => {
+    expect(baselineWallMs('fix', 8)).toBe(BASELINE_WALL_MS_BY_KIND.fix);
+  });
+  it('is the flat baseline for a size-scaled kind with no size given', () => {
+    expect(baselineWallMs('conveyor', null)).toBe(BASELINE_WALL_MS_BY_KIND.conveyor);
+  });
+  it('scales proportionally to size / REFERENCE_STORY_SIZE, clamped to [0.5x, 3x]', () => {
+    const base = BASELINE_WALL_MS_BY_KIND.conveyor;
+    expect(baselineWallMs('conveyor', REFERENCE_STORY_SIZE)).toBe(base);
+    expect(baselineWallMs('conveyor', REFERENCE_STORY_SIZE * 2)).toBe(base * 2);
+    expect(baselineWallMs('conveyor', 100)).toBe(base * 3); // clamped high
+    expect(baselineWallMs('conveyor', 0.01)).toBe(base * 0.5); // clamped low
+  });
+});
+
+describe('outcomeFromTranscriptEvents', () => {
+  it('recovers the outcome from a completion-cli done report inside a Bash tool call', () => {
+    const events = [{ name: 'Bash', input: { command: 'node completion-cli.mjs report --session=fix-1 --status=done --outcome=re-armed' } }];
+    expect(outcomeFromTranscriptEvents(events)).toBe('re-armed');
+  });
+  it('ignores a `started` report (no --status=done in the same command)', () => {
+    const events = [{ name: 'Bash', input: { command: 'node completion-cli.mjs report --session=fix-1 --status=started' } }];
+    expect(outcomeFromTranscriptEvents(events)).toBeNull();
+  });
+  it('takes the LAST done-report when a session reports more than once', () => {
+    const events = [
+      { name: 'Bash', input: { command: 'completion-cli.mjs report --status=done --outcome=gate-red' } },
+      { name: 'Bash', input: { command: 'completion-cli.mjs report --status=done --outcome=re-armed' } },
+    ];
+    expect(outcomeFromTranscriptEvents(events)).toBe('re-armed');
+  });
+  it('is null with no completion-cli call at all', () => {
+    expect(outcomeFromTranscriptEvents([{ name: 'Bash', input: { command: 'ls' } }])).toBeNull();
+  });
+});
+
+describe('gradeReviewJob', () => {
+  it('an accepted review is ALWAYS pending at score time — never a computed A/B/C/D', () => {
+    expect(gradeReviewJob({ wallMs: 1000, outcome: 'accepted' })).toBe('pending');
+  });
+  it('a bounced review grades purely on duration — it already told the truth immediately', () => {
+    expect(gradeReviewJob({ wallMs: BASELINE_WALL_MS_BY_KIND.review, outcome: 'bounced' })).toBe('A');
+  });
+  it('an escalated review caps at C regardless of how fast it was', () => {
+    expect(gradeReviewJob({ wallMs: 1, outcome: 'escalated' })).toBe('C');
+  });
+});
+
+describe('resolveReviewGrade', () => {
+  it('passes through a non-pending grade unchanged', () => {
+    expect(resolveReviewGrade({ grade: 'B' }, [])).toBe('B');
+  });
+  it('stays pending with no later round for the same PR yet', () => {
+    expect(resolveReviewGrade({ grade: 'pending' }, [])).toBe('pending');
+  });
+  it('resolves to D when a later round on the same PR bounced or escalated', () => {
+    expect(resolveReviewGrade({ grade: 'pending' }, [{ outcome: 'bounced' }])).toBe('D');
+    expect(resolveReviewGrade({ grade: 'pending' }, [{ outcome: 'escalated' }])).toBe('D');
+  });
+  it('stays pending when the only later round also accepted (still no PROOF it holds beyond that)', () => {
+    expect(resolveReviewGrade({ grade: 'pending' }, [{ outcome: 'accepted' }])).toBe('pending');
   });
 });
 
@@ -469,5 +590,198 @@ describe('rateReviewJobLog', () => {
     const file = join(root, 'x.log');
     writeFileSync(file, 'just narrative text, no summary\n');
     expect(rateReviewJobLog(file)).toEqual({ ok: false, reason: 'no-summary-line', logPath: file });
+  });
+  it('joins the summary\'s runId to its run record and fills in tokens/cost — reviews stop being tokens:null', () => {
+    const logDir = tmp();
+    const runsDir = tmp();
+    const logFile = join(logDir, 'review-2670.log');
+    writeFileSync(logFile, `${JSON.stringify({ pr: 2670, sessionSlug: 'review-2670', outcome: 'auto-cleared', runId: 'review-pr-xyz', timings: { totalMs: 100_000 } })}\n`);
+    writeFileSync(join(runsDir, 'review-pr-xyz.json'), JSON.stringify({
+      input: { pr: 2670 },
+      telemetry: [{ model: 'sonnet', costUsd: 0.5, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],
+    }));
+    const result = rateReviewJobLog(logFile, { runsDir });
+    expect(result).toMatchObject({ ok: true, dataQuality: 'juror-telemetry', costUsd: 0.5, costUsdPartial: false });
+    expect(result.tokens).toEqual({ in: 10, out: 5, cacheRead: 0, cacheWrite: 0 });
+  });
+  it('flags costUsdPartial when a non-Claude seat rides the same run record', () => {
+    const logDir = tmp();
+    const runsDir = tmp();
+    const logFile = join(logDir, 'review-2671.log');
+    writeFileSync(logFile, `${JSON.stringify({ pr: 2671, sessionSlug: 'review-2671', outcome: 'auto-cleared', runId: 'review-pr-mixed', timings: { totalMs: 100_000 } })}\n`);
+    writeFileSync(join(runsDir, 'review-pr-mixed.json'), JSON.stringify({
+      input: { pr: 2671 },
+      telemetry: [
+        { model: 'sonnet', costUsd: 0.5, usage: { input_tokens: 10, output_tokens: 5 } },
+        { model: 'gpt-6-astra', costUsd: 0, usage: { input_tokens: 20, output_tokens: 10 } },
+      ],
+    }));
+    const result = rateReviewJobLog(logFile, { runsDir });
+    expect(result.costUsdPartial).toBe(true);
+    expect(result.costUsd).toBe(0.5); // only the priced seat
+    expect(result.tokens.in).toBe(30); // both seats' real tokens still counted
+  });
+  it('falls back to job-log-only when no run record joins (missing/old runId)', () => {
+    const logDir = tmp();
+    const logFile = join(logDir, 'review-2672.log');
+    writeFileSync(logFile, `${JSON.stringify({ pr: 2672, sessionSlug: 'review-2672', outcome: 'auto-cleared', runId: 'does-not-exist', timings: { totalMs: 100_000 } })}\n`);
+    const result = rateReviewJobLog(logFile, { runsDir: tmp() });
+    expect(result.dataQuality).toBe('job-log-only');
+    expect(result.tokens).toBeNull();
+  });
+});
+
+// ── waste minutes/tokens attribution ───────────────────────────────────────────────────────────────────────────
+
+describe('classifyRunWaste', () => {
+  it('attributes precise minutes to a test rerun from the repeated call\'s own durationMs', () => {
+    const events = [
+      { name: 'Bash', input: { command: 'npm run test:unit' }, category: 'tests-gates', durationMs: 60_000 },
+      { name: 'Bash', input: { command: 'npm run test:unit' }, category: 'tests-gates', durationMs: 90_000 },
+    ];
+    const rating = { tokens: { in: 100, out: 100, cacheRead: 0, cacheWrite: 0 }, kind: 'fix', outcome: 'pushed' };
+    const waste = classifyRunWaste(events, rating);
+    const testRerun = waste.find((w) => w.cause === 'test-rerun');
+    expect(testRerun.minutes).toBeCloseTo(1.5, 5); // only the SECOND (repeat) occurrence's 90s counts
+  });
+  it('attributes a proportional token share to a non-test repeated call', () => {
+    const events = [
+      { name: 'Bash', input: { command: 'ls' }, category: 'other', durationMs: 1000 },
+      { name: 'Bash', input: { command: 'ls' }, category: 'other', durationMs: 1000 },
+    ];
+    const rating = { tokens: { in: 1000, out: 0, cacheRead: 0, cacheWrite: 0 }, kind: 'fix', outcome: 'pushed' };
+    const waste = classifyRunWaste(events, rating);
+    expect(waste.find((w) => w.cause === 'repeated-call').tokens).toBeCloseTo(500, 5); // 1 of 2 calls repeated
+  });
+  it('counts a REWORK nothing-to-fix dispatch as its full wallMs/tokens wasted', () => {
+    const rating = { wallMs: 600_000, tokens: { in: 10, out: 10, cacheRead: 0, cacheWrite: 0 }, kind: 'ci-heal', outcome: 'nothing-to-fix' };
+    const waste = classifyRunWaste([], rating);
+    expect(waste.find((w) => w.cause === 'nothing-to-fix-dispatch')).toMatchObject({ minutes: 10, tokens: 20 });
+  });
+  it('counts an escalated (no-decision) run as its full wallMs/tokens wasted', () => {
+    const rating = { wallMs: 300_000, tokens: { in: 5, out: 5, cacheRead: 0, cacheWrite: 0 }, kind: 'fix', outcome: 'escalated' };
+    const waste = classifyRunWaste([], rating);
+    expect(waste.find((w) => w.cause === 'escalated-no-decision')).toMatchObject({ minutes: 5, tokens: 10 });
+  });
+  it('reports nothing for a clean run with a good outcome', () => {
+    const rating = { wallMs: 1000, tokens: { in: 1, out: 1, cacheRead: 0, cacheWrite: 0 }, kind: 'fix', outcome: 'pushed' };
+    expect(classifyRunWaste([], rating)).toEqual([]);
+  });
+});
+
+describe('topWasteCauses', () => {
+  it('ranks aggregated causes by minutes or by tokens, and sums guard blocks separately by count', () => {
+    const rows = [
+      { guardBlocks: 2, waste: [{ cause: 'test-rerun', minutes: 10, tokens: 100 }] },
+      { guardBlocks: 1, waste: [{ cause: 'nothing-to-fix-dispatch', minutes: 30, tokens: 50 }] },
+    ];
+    const byMinutes = topWasteCauses(rows, { by: 'minutes' });
+    expect(byMinutes.ranked[0].cause).toBe('nothing-to-fix-dispatch'); // 30 min > 10 min
+    expect(byMinutes.guardBlockCount).toBe(3);
+    const byTokens = topWasteCauses(rows, { by: 'tokens' });
+    expect(byTokens.ranked[0].cause).toBe('test-rerun'); // 100 tok > 50 tok
+  });
+  it('respects the limit', () => {
+    const rows = [{ waste: [
+      { cause: 'test-rerun', minutes: 5, tokens: 1 }, { cause: 'repeated-call', minutes: 4, tokens: 1 },
+      { cause: 'nothing-to-fix-dispatch', minutes: 3, tokens: 1 }, { cause: 'escalated-no-decision', minutes: 2, tokens: 1 },
+      { cause: 'unheld-review-accept', minutes: 1, tokens: 1 },
+    ] }];
+    expect(topWasteCauses(rows, { by: 'minutes', limit: 3 }).ranked).toHaveLength(3);
+  });
+});
+
+// ── coverage (message-2 recalibration: full-fleet token accounting) ────────────────────────────────────────────
+
+describe('orchestratorProjectDirName', () => {
+  it('defaults to the confirmed real directory name', () => {
+    expect(orchestratorProjectDirName({})).toBe('-Users-nicolasgilbert-workspace-webeverything');
+  });
+  it('is overridable via WE_ORCHESTRATOR_PROJECT_DIR for tests', () => {
+    expect(orchestratorProjectDirName({ WE_ORCHESTRATOR_PROJECT_DIR: 'x' })).toBe('x');
+  });
+});
+
+describe('scanClaudeProjectsCoverage', () => {
+  it('buckets an operations-dispatch dir, the orchestrator dir (incl. a nested subagent file), and everything else', () => {
+    const root = tmp();
+    const dispatchDir = join(root, 'x-operations-dispatch-1');
+    const orchDir = join(root, 'the-orch-dir');
+    const otherDir = join(root, 'some-lane-dir');
+    mkdirSync(dispatchDir, { recursive: true });
+    mkdirSync(join(orchDir, 'sess1', 'subagents'), { recursive: true });
+    mkdirSync(otherDir, { recursive: true });
+    const line = (usage) => `${JSON.stringify({ type: 'assistant', timestamp: '2026-09-27T10:00:00.000Z', message: { model: 'claude-sonnet-5', usage } })}\n`;
+    writeFileSync(join(dispatchDir, 'a.jsonl'), line({ input_tokens: 100, output_tokens: 10 }));
+    writeFileSync(join(orchDir, 'sess1.jsonl'), line({ input_tokens: 200, output_tokens: 20 }));
+    writeFileSync(join(orchDir, 'sess1', 'subagents', 'agent-1.jsonl'), line({ input_tokens: 300, output_tokens: 30 }));
+    writeFileSync(join(otherDir, 'b.jsonl'), line({ input_tokens: 400, output_tokens: 40 }));
+    const buckets = scanClaudeProjectsCoverage({ projectsRoot: root, orchestratorDirName: 'the-orch-dir' });
+    expect(buckets['dispatched-daemon'].tokens.in).toBe(100);
+    expect(buckets['orchestration-overhead'].tokens.in).toBe(200 + 300); // top-level orchestrator + its nested subagent
+    expect(buckets['operator-interactive'].tokens.in).toBe(400);
+  });
+  it('respects sinceMs (the FILE\'s own mtime, same convention as findTranscriptPath) — excluded from every bucket', () => {
+    const root = tmp();
+    const dir = join(root, 'x-operations-dispatch-1');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'old.jsonl');
+    writeFileSync(file, `${JSON.stringify({ type: 'assistant', timestamp: '2020-01-01T00:00:00.000Z', message: { model: 'claude-sonnet-5', usage: { input_tokens: 1, output_tokens: 1 } } })}\n`);
+    // an impossibly future cutoff — no real file's mtime can ever satisfy it, proving the filter bites.
+    const buckets = scanClaudeProjectsCoverage({ projectsRoot: root, sinceMs: Date.now() + 3600_000 });
+    expect(buckets['dispatched-daemon'].fileCount).toBe(0);
+  });
+});
+
+describe('scanReviewJurorUsage', () => {
+  it('splits Claude-priced seats from unpriced non-Claude seats in the same run record, attributed by pr', () => {
+    const root = tmp();
+    writeFileSync(join(root, 'review-pr-abc.json'), JSON.stringify({
+      input: { pr: 2670 },
+      telemetry: [
+        { lens: 'correctness', model: 'sonnet', durationMs: 1000, costUsd: 0.5, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+        { lens: 'security', model: 'gpt-6-astra', durationMs: 2000, costUsd: 0, usage: { input_tokens: 20, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+      ],
+    }));
+    const { claudeRows, nonClaudeRows } = scanReviewJurorUsage({ runsDir: root });
+    expect(claudeRows).toHaveLength(1);
+    expect(claudeRows[0]).toMatchObject({ pr: 2670, costUsd: 0.5, dataQuality: 'juror-telemetry' });
+    expect(nonClaudeRows).toHaveLength(1);
+    expect(nonClaudeRows[0]).toMatchObject({ pr: 2670, costUsd: null, dataQuality: 'juror-telemetry-unpriced' });
+  });
+  it('is empty (never throws) when the runs dir does not exist', () => {
+    expect(scanReviewJurorUsage({ runsDir: '/no/such/dir' })).toEqual({ claudeRows: [], nonClaudeRows: [] });
+  });
+});
+
+describe('scanNonClaudeJudgeTranscripts', () => {
+  it('reads the last turn.completed usage line from a codex-judge-transcripts file', () => {
+    const root = tmp();
+    writeFileSync(join(root, 'codex-judge-1.jsonl'), [
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 5, cache_write_input_tokens: 0 } }),
+      '',
+    ].join('\n'));
+    const result = scanNonClaudeJudgeTranscripts({ home: root });
+    // home/.codex-judge-transcripts doesn't exist here (file was written straight into `root`) — expect empty,
+    // proving this reads from the DECLARED subdirectory, not the home dir itself.
+    expect(result.fileCount).toBe(0);
+  });
+  it('finds a file under the real .codex-judge-transcripts subdirectory', () => {
+    const root = tmp();
+    mkdirSync(join(root, '.codex-judge-transcripts'), { recursive: true });
+    writeFileSync(join(root, '.codex-judge-transcripts', 'codex-judge-1.jsonl'), `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 20 } })}\n`);
+    const result = scanNonClaudeJudgeTranscripts({ home: root });
+    expect(result.fileCount).toBe(1);
+    expect(result.tokens.in).toBe(100);
+    expect(result.costUsd).toBeNull();
+  });
+});
+
+describe('buildCoverageReport', () => {
+  it('never claims more than 100% and reports a percentage per bucket that sums to ~100 when files exist', () => {
+    const report = buildCoverageReport({ sinceMs: Date.now() }); // an impossible "since" — every real bucket empty
+    expect(report.totalTokens).toBe(0);
+    expect(report.attributed.pct).toBeNull(); // 0/0 — never a fabricated percentage
   });
 });

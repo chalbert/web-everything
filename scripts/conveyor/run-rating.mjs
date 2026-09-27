@@ -54,6 +54,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,7 +76,7 @@ const REPO_ROOT = resolve(__dirname, '..', '..');
 
 /** Stamped on every row this module writes — bump when the rubric's weights below change (Fork 3 discipline,
  *  same as `run-scorecard-store.mjs`: a rubric change never re-scores old history). */
-export const RUBRIC_VERSION = 'run-rating-mechanical.1';
+export const RUBRIC_VERSION = 'run-rating-mechanical.2';
 
 /** The four mechanical criteria {@link toScorecardRow} always evaluates (guard blocks, non-guard tool errors,
  *  repeated identical calls, test/gate reruns) — `criteriaEvaluated` on every row this module appends. */
@@ -146,6 +147,81 @@ export const GUARD_BLOCKS_TARGET = 1;
 export const BASELINE_TESTS_SHARE_FIX = 0.65;
 
 export const TOOL_CATEGORIES = Object.freeze(['tests-gates', 'gh', 'git', 'edits', 'platform-ops', 'other']);
+
+/**
+ * RECALIBRATION (rubric v2, #4075, operator-directed 2026-09-27): the v1 rubric graded 182/204 backfilled
+ * rows A while independently measured delivery efficiency runs ~35%, review-verdict bounce runs ~47%, and
+ * worker sessions average ~4 guard blocks + ~6 repeated calls — a grade that agrees with almost nothing is not
+ * a signal anyone can act on. v2's fix is two-fold: (1) an A is now a HARD CONJUNCTION, not a soft point total
+ * — within-baseline time AND near-zero waste AND a good outcome, all three, or it is not an A; (2) OUTCOME now
+ * CAPS the grade before mechanical hygiene is even considered — a mechanically spotless run that found nothing
+ * to fix, or whose PR later bounced, or that escalated with nothing resolving it, was never a clean success.
+ *
+ * BASELINE SOURCE for every wall-time number below: the same delivery-time report {@link BASELINE_WALL_MS_BY_KIND}
+ * already cites (https://claude.ai/artifact/UhgARA3ySm91z9aC3tgngd) — fix-session median ~10 min, worker median
+ * ~40 min. The waste-allowance numbers (`aGuardBlocksMax`/`aRepeatedCallsMax`/`aTestRerunsMax`) have no baseline
+ * report to cite — they are first-pass declared constants chosen so "~zero waste" means what it says relative
+ * to the coordinator's own observed fleet averages (~4 guard blocks, ~6 repeated calls per worker session):
+ * anything within noise of zero qualifies, not anything close to the observed average. Revisit once slice (b)'s
+ * judge scores give an independent quality signal to calibrate against.
+ */
+export const GRADE_THRESHOLDS = Object.freeze({
+  // An A requires wallMs <= baseline(kind, size) * aTimeMultiplier — "within-baseline", not "not egregiously over".
+  aTimeMultiplier: 1.0,
+  bTimeMultiplier: 1.5,
+  cTimeMultiplier: 2.5,
+  // "≤1 guard block" (the coordinator's own words) / "0 repeated identical calls beyond N" (N=1: one incidental
+  // repeat — e.g. checking `git status` twice — is noise, not waste) / "no test rerun loops" (exactly zero).
+  aGuardBlocksMax: 1,
+  aRepeatedCallsMax: 1,
+  aTestRerunsMax: 0,
+  // Sub-A point-deduction bands (a run that fails the hard A-gate, but isn't outcome-capped, still lands
+  // somewhere on B/C/D by degree) — unchanged in spirit from rubric v1.
+  bScoreMin: 65,
+  cScoreMin: 40,
+});
+
+/** First-pass declared constant (no baseline report covers size-stratified worker timing): the story size a
+ *  BUILD kind's baseline is defined AT — `we:scripts/backlog/frontmatter.mjs`-tagged `size` fields in this
+ *  backlog skew toward small/medium stories, and 3 is a common one absent a stated median. Revisit once real
+ *  size-stratified timing data exists (this is exactly the kind of thing slice (b)'s judge data will surface). */
+export const REFERENCE_STORY_SIZE = 3;
+
+/** Item-kind (`we:scripts/conveyor/session-slug.mjs#ITEM_KINDS`) dispatches whose baseline scales with the
+ *  backlog item's own `size` — a size-8 build legitimately runs longer than a size-1 one; a size-scaled baseline
+ *  is closer to "true" than one flat median for every size. PR-kind kinds (fix/ci-heal/review/inspect) are NOT
+ *  size-scaled — they are keyed to a PR, not a sized backlog item, and #4075's operator ruling above only asked
+ *  for "kind/size" scaling on the worker family. */
+export const SIZE_SCALED_KINDS = Object.freeze(new Set(['conveyor', 'prepare', 'prepare-decision']));
+
+/** The two dispatch-kind families {@link gradeRun}'s outcome caps apply to. */
+export const BUILD_KINDS = Object.freeze(new Set(['conveyor', 'prepare', 'prepare-decision']));
+export const REWORK_KINDS = Object.freeze(new Set(['fix', 'ci-heal']));
+
+/**
+ * `kind`'s baseline wall time, scaled by `size` when the kind is in {@link SIZE_SCALED_KINDS} and `size` is a
+ * finite positive number — else the flat per-kind median unchanged. The scale is clamped to [0.5x, 3x] the flat
+ * baseline so an extreme size (a mis-tagged size-1 epic slice, a size-13 outlier) can't blow the baseline out to
+ * something no run could plausibly meet or a nearly-infinite one nothing could fail.
+ * @param {string|null} kind
+ * @param {number|null} [size]
+ * @returns {number}
+ */
+export function baselineWallMs(kind, size = null) {
+  const base = BASELINE_WALL_MS_BY_KIND[kind] ?? DEFAULT_BASELINE_WALL_MS;
+  if (!SIZE_SCALED_KINDS.has(kind) || !Number.isFinite(size) || size <= 0) return base;
+  const scaled = base * (size / REFERENCE_STORY_SIZE);
+  return Math.min(Math.max(scaled, base * 0.5), base * 3);
+}
+
+const GRADE_ORDER = ['A', 'B', 'C', 'D'];
+/** The WORSE (further from A) of two grades — used to combine an outcome cap with a mechanical grade, or two
+ *  caps with each other. `null`/`undefined` never worsens anything (an absent cap is not a "no cap" grade). */
+export function worseGrade(a, b) {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return GRADE_ORDER[Math.max(GRADE_ORDER.indexOf(a), GRADE_ORDER.indexOf(b))];
+}
 
 const TEST_GATE_RE = /\b(npm run (?:test\S*|check:standards)|vitest|verify-lane\.mjs|heavy-admission\.mjs|check-standards\.mjs)\b/;
 const GH_RE = /(^|[\s;&|(])gh(\s|$)/;
@@ -456,53 +532,239 @@ export function classifyOutcome(rawOutcome) {
   return rawOutcome.startsWith('escalated') ? 'escalated' : 'unclassified';
 }
 
+/** Matches a `completion-cli.mjs report ... --status=done ... --outcome=<value>` Bash invocation — the exact
+ *  shape every fix/ci-heal/review brief runs to self-report (`we:scripts/operations/completion-cli.mjs`,
+ *  `we:skills-src/conveyor/fix-agent-brief.md`). `--status=done` is required in the SAME command so a `started`
+ *  report (which also carries no `--outcome`) never matches. */
+const COMPLETION_REPORT_DONE_RE = /completion-cli\.mjs\s+report\b[^\n]*--status=done\b[^\n]*--outcome=([^\s'"]+)/;
+
 /**
- * THE MECHANICAL GRADING RUBRIC (A–D), first-pass and explicitly declared here so it can be tuned in one place.
- * Weights are chosen to match the delivery-time report's own stated bads:
- *   • `guardBlocks`: −15/block. 1 block (at the report's own "target <1") costs 15 points — still comfortably
- *     an A (≥85); 4 blocks (the report's own "is bad") costs 60 — well into D territory alone.
- *   • non-guard tool errors (`errors − guardBlocks`, never double-counting a guard block as also a plain
- *     error): −5 each — errors that are not a guard refusal are usually recovered from, but still cost a retry.
- *   • `repeatedCalls` (identical calls beyond the first): −3 each — mild, most repeats are cheap reads.
- *   • `testReruns` (identical test/gate reruns specifically): −5 each — a rerun burns a full gate invocation.
- *   • wall time vs this kind's baseline (`BASELINE_WALL_MS_BY_KIND`): >4x −30, >2x −15, >1.5x −5 — a single
- *     ratio bucket, not a continuous penalty, so a run just over a boundary is not cliff-edged by a rounding
- *     error.
- * A run with none of the above stays at 100 (`A`) regardless of `outcome` — an `escalated`/`bounced` outcome is
- * NOT itself penalised here (escalating correctly, cleanly, with no waste, is a GOOD mechanical run; whether
- * escalation was the right call is a judgment question for slice (b), never this file's).
- * Bands: A ≥85, B ≥65, C ≥40, D otherwise.
+ * FALLBACK outcome recovery, straight from the transcript's OWN tool calls — not the completion-store sidecar.
+ * WHY THIS EXISTS: `we:scripts/operations/completion-store.mjs`'s own header calls its store a "gitignored
+ * SESSION-LOCAL sidecar" — by design, ephemeral, swept by `session-reaper.mjs`'s retention pass well before a
+ * 48h-old backfill runs. Live-caught running rubric v1's own backfill: 63 of 204 rows (31%) read `outcome:
+ * null` purely because the completion record had already been pruned by read time, NOT because nothing was
+ * ever reported — every dispatched agent's OWN Bash history still names its outcome verbatim, in the SAME
+ * transcript this module already reads, and that text outlives the sidecar file. Scans every Bash `tool_use`
+ * for the done-report shape above and returns the LAST match (a retried/re-reported session's most recent
+ * self-report wins) — `null` when no such call appears (a still-running or crashed-before-reporting session;
+ * never guessed).
+ * @param {{name:string|null, input:*}[]} events
+ * @returns {string|null}
  */
-export function gradeRun({ guardBlocks = 0, errors = 0, repeatedCalls = 0, testReruns = 0, wallMs = null, kind = null } = {}) {
-  let score = 100;
-  score -= guardBlocks * 15;
-  score -= Math.max(0, errors - guardBlocks) * 5;
-  score -= repeatedCalls * 3;
-  score -= testReruns * 5;
-  if (typeof wallMs === 'number') {
-    const baseline = BASELINE_WALL_MS_BY_KIND[kind] ?? DEFAULT_BASELINE_WALL_MS;
-    const ratio = baseline > 0 ? wallMs / baseline : null;
-    if (ratio !== null) {
-      if (ratio > 4) score -= 30;
-      else if (ratio > 2) score -= 15;
-      else if (ratio > 1.5) score -= 5;
+export function outcomeFromTranscriptEvents(events) {
+  let found = null;
+  for (const e of Array.isArray(events) ? events : []) {
+    if (e.name !== 'Bash') continue;
+    const cmd = String(e.input?.command ?? '');
+    const m = COMPLETION_REPORT_DONE_RE.exec(cmd);
+    if (m) found = m[1];
+  }
+  return found;
+}
+
+/**
+ * THE MECHANICAL GRADING RUBRIC (rubric v2, A–D — see {@link GRADE_THRESHOLDS}'s own doc for why v1 was
+ * recalibrated and where every number below comes from).
+ *
+ * TWO KINDS OF RULE, applied in this order:
+ *   1. OUTCOME CAPS (checked first — they can only make a grade WORSE than the mechanical one, never better):
+ *      · a REWORK kind (`fix`/`ci-heal`) whose outcome is `nothing-to-fix` is graded `D` outright — a wasted
+ *        dispatch, full stop, regardless of how clean the tool-call hygiene was (mechanical cleanliness was
+ *        never the question; the dispatch itself should not have been needed).
+ *      · a BUILD kind (`conveyor`/`prepare`/`prepare-decision`) whose produced PR later bounced (`prBounced:
+ *        true`, an injected fact — this module does not itself decide "bounced", the caller supplies it) caps
+ *        at `C` — the build might have been fast and clean, but its actual output needed rework.
+ *      · an `escalated` outcome with no real decision behind it (`decisionReached: false`, the DEFAULT — see
+ *        the param doc) caps at `C` — escalating is sometimes the right call, but slice 1 has no mechanical way
+ *        to confirm a decision actually resolved it, so it conservatively never rewards an unresolved escalation
+ *        with an A/B.
+ *   2. MECHANICAL GRADE — an A is a HARD CONJUNCTION (`we:reports/` operator ruling, 2026-09-27): wallMs within
+ *      baseline (`baselineWallMs(kind, size) * GRADE_THRESHOLDS.aTimeMultiplier`) AND guard blocks/repeated
+ *      calls/test reruns all at or under their `GRADE_THRESHOLDS` allowances AND the outcome itself is one this
+ *      dispatch kind counts as "good" (`accepted`/`pushed`, or `nothing-to-fix` for a kind where finding nothing
+ *      IS the correct verdict — never for a REWORK kind, which already returned `D` above). Failing ANY of
+ *      those, the run falls to the same point-deduction scoring rubric v1 used (still declared here, weights
+ *      unchanged) to land on B/C/D by degree.
+ * The final grade is the WORSE of the outcome cap (if any) and the mechanical grade — a cap can only pull a
+ * grade down, never up (a mechanically messy run with a `nothing-to-fix` REWORK outcome is still the hard `D`
+ * from rule 1, not "D capped to something worse than D", which doesn't exist).
+ *
+ * @param {{guardBlocks?:number, errors?:number, repeatedCalls?:number, testReruns?:number, wallMs?:number|null,
+ *   kind?:string|null, size?:number|null, outcome?:string|null,
+ *   prBounced?:boolean|null, decisionReached?:boolean}} o
+ * @param {boolean|null} [o.prBounced] - ONLY meaningful for a {@link BUILD_KINDS} row: did the PR this build
+ *   produced later carry a bounce (a `review:changes` round, or worse)? `null` = unknown/not checked (no cap
+ *   applied — this module never assumes a bounce without evidence the caller supplies).
+ * @param {boolean} [o.decisionReached] - did a REAL decision resolve this escalation? Always `false` unless a
+ *   caller explicitly supplies otherwise — slice 1 has no mechanical way to confirm this (that confirmation is
+ *   follow-up card #4075(c)'s own job), so the conservative default is "no decision", which is the common case.
+ * @returns {'A'|'B'|'C'|'D'}
+ */
+export function gradeRun({
+  guardBlocks = 0, errors = 0, repeatedCalls = 0, testReruns = 0, wallMs = null, kind = null, size = null,
+  outcome = null, prBounced = null, decisionReached = false,
+} = {}) {
+  if (REWORK_KINDS.has(kind) && outcome === 'nothing-to-fix') return 'D';
+
+  let cap = null;
+  if (BUILD_KINDS.has(kind) && prBounced === true) cap = worseGrade(cap, 'C');
+  if (outcome === 'escalated' && !decisionReached) cap = worseGrade(cap, 'C');
+
+  const baseline = baselineWallMs(kind, size);
+  const withinBaselineForA = typeof wallMs !== 'number' || baseline <= 0 || wallMs <= baseline * GRADE_THRESHOLDS.aTimeMultiplier;
+  const zeroWasteForA = guardBlocks <= GRADE_THRESHOLDS.aGuardBlocksMax
+    && repeatedCalls <= GRADE_THRESHOLDS.aRepeatedCallsMax
+    && testReruns <= GRADE_THRESHOLDS.aTestRerunsMax;
+  // `nothing-to-fix` is only a GOOD outcome for a kind where "nothing needed doing" is itself the correct
+  // verdict (review/inspect) — a REWORK kind already returned the hard `D` above and never reaches this line.
+  const goodOutcomeForA = outcome === 'accepted' || outcome === 'pushed' || outcome === 'nothing-to-fix';
+
+  let mechanicalGrade;
+  if (withinBaselineForA && zeroWasteForA && goodOutcomeForA) {
+    mechanicalGrade = 'A';
+  } else {
+    let score = 100;
+    score -= guardBlocks * 15;
+    score -= Math.max(0, errors - guardBlocks) * 5;
+    score -= repeatedCalls * 3;
+    score -= testReruns * 5;
+    if (typeof wallMs === 'number' && baseline > 0) {
+      const ratio = wallMs / baseline;
+      if (ratio > GRADE_THRESHOLDS.cTimeMultiplier) score -= 30;
+      else if (ratio > GRADE_THRESHOLDS.bTimeMultiplier) score -= 15;
+      else if (ratio > GRADE_THRESHOLDS.aTimeMultiplier) score -= 5;
+    }
+    score = Math.max(0, Math.min(100, score));
+    mechanicalGrade = score >= GRADE_THRESHOLDS.bScoreMin ? 'B' : (score >= GRADE_THRESHOLDS.cScoreMin ? 'C' : 'D');
+  }
+  return worseGrade(mechanicalGrade, cap);
+}
+
+/**
+ * THE REVIEW-JOB GRADE — deliberately separate from {@link gradeRun}: a job-mode review has no tool-call
+ * hygiene to measure (no transcript — see this file's header), so it is graded on duration vs baseline plus
+ * whether its verdict later held, per the operator's 2026-09-27 ruling.
+ *
+ * `verdictHeld` is NEVER computed here, and NEVER at score/append time at all — see {@link resolveReviewGrade}'s
+ * own doc for why: at the moment a review is scored, "did the accept hold" is category­ically unknowable (no
+ * FUTURE round can exist yet), so an `accepted` outcome ALWAYS stores `grade: 'pending'` — an honest fact about
+ * what was knowable when this row was written, not a placeholder to be silently overwritten later (the
+ * scorecard store's own Fork 3: a historical row is never re-normalised). `resolveReviewGrade` derives the
+ * EFFECTIVE grade at REPORT time instead, from whatever later rounds the store has accumulated since.
+ * @returns {'A'|'B'|'C'|'D'|'pending'}
+ */
+export function gradeReviewJob({ wallMs = null, outcome = null } = {}) {
+  if (outcome === 'accepted') return 'pending';
+  const baseline = BASELINE_WALL_MS_BY_KIND.review;
+  let grade = 'B';
+  if (typeof wallMs === 'number' && baseline > 0) {
+    const ratio = wallMs / baseline;
+    if (ratio <= GRADE_THRESHOLDS.aTimeMultiplier) grade = 'A';
+    else if (ratio <= GRADE_THRESHOLDS.bTimeMultiplier) grade = 'B';
+    else if (ratio <= GRADE_THRESHOLDS.cTimeMultiplier) grade = 'C';
+    else grade = 'D';
+  }
+  if (outcome === 'escalated') grade = worseGrade(grade, 'C');
+  // `bounced` needs no further adjustment — the review already told the truth immediately, nothing to "hold".
+  return grade;
+}
+
+/**
+ * REPORT-TIME resolution of a `pending` review row: does the CURRENT store (which may hold rounds scored well
+ * after this one) show a later round on the same PR that bounced or escalated? If so, the accept did not
+ * hold — report it as the effective `D` it always should have been. If this is still the most recent round for
+ * its PR, it stays `pending` (genuinely not yet knowable). Every non-`pending` row passes through unchanged.
+ * PURE: `laterSameyPr` is handed in by the caller (the `report` CLI queries the store and does the grouping/
+ * ordering — see {@link ourRows}) — this function has no store access of its own.
+ * @param {{grade:string, pr?:number|string|null}} row
+ * @param {{outcome:string, scoredAt:string}[]} laterRowsSamePr - every OTHER review row for the same PR scored
+ *   strictly after `row`, in any order.
+ * @returns {'A'|'B'|'C'|'D'|'pending'}
+ */
+export function resolveReviewGrade(row, laterRowsSamePr = []) {
+  if (row?.grade !== 'pending') return row?.grade ?? 'pending';
+  const contradicted = laterRowsSamePr.some((l) => l.outcome === 'bounced' || l.outcome === 'escalated');
+  return contradicted ? 'D' : 'pending';
+}
+
+// ── PURE: waste-minutes/tokens attribution ─────────────────────────────────────────────────────────────────────
+
+/** The closed set of waste causes {@link classifyRunWaste} reports — the per-demand rollup's "top waste causes
+ *  by minutes/by tokens" ranks over exactly these. `guard-block` carries a COUNT only (no minutes/tokens are
+ *  mechanically attributable to a single refused call), so it never appears in a by-minutes/by-tokens ranking —
+ *  it is still reported separately, by count, so it is never silently dropped from the picture. */
+export const WASTE_CAUSES = Object.freeze([
+  'nothing-to-fix-dispatch', 'test-rerun', 'repeated-call', 'escalated-no-decision', 'unheld-review-accept', 'guard-block',
+]);
+
+/**
+ * Per-run waste attribution, in minutes and tokens, over the closed {@link WASTE_CAUSES} set. Two precise
+ * causes (measured directly from paired tool-call durations, never estimated): `test-rerun` sums the
+ * `durationMs` of every test/gate call beyond the first identical one; `repeated-call` does the same for every
+ * OTHER repeated identical call. Two whole-run causes (the entire dispatch was the waste, not one call inside
+ * it): `nothing-to-fix-dispatch` (a REWORK kind that found nothing) and `escalated-no-decision` (an unresolved
+ * escalation) count the run's FULL wallMs/tokens/cost. Token amounts for the two precise causes are a
+ * PROPORTIONAL ESTIMATE (repeat-call count share of all paired calls × total session tokens) — documented as
+ * approximate, since no per-tool-call token cost is directly observable from a transcript's turn-level usage.
+ * @param {object} events - {@link pairToolEvents}'s own output (needed for per-call durationMs; not stored on
+ *   the scorecard row, so this must run at rating time, not report time).
+ * @param {{wallMs:number|null, tokens:{in:number,out:number,cacheRead:number,cacheWrite:number}|null,
+ *   costUsd:number|null, kind:string|null, outcome:string|null}} rating
+ * @returns {{cause:string, minutes:number, tokens:number}[]}
+ */
+export function classifyRunWaste(events, rating) {
+  const list = Array.isArray(events) ? events : [];
+  const out = [];
+  const totalTokens = rating.tokens ? (rating.tokens.in + rating.tokens.out + rating.tokens.cacheRead + rating.tokens.cacheWrite) : 0;
+  const totalCalls = list.length;
+
+  const bySig = new Map();
+  for (const e of list) {
+    const sig = callSignature(e.name, e.input);
+    if (!bySig.has(sig)) bySig.set(sig, []);
+    bySig.get(sig).push(e);
+  }
+  let testRerunCalls = 0;
+  let testRerunMinutes = 0;
+  let repeatedCallCalls = 0;
+  let repeatedCallMinutes = 0;
+  for (const group of bySig.values()) {
+    if (group.length <= 1) continue;
+    for (const e of group.slice(1)) {
+      const minutes = typeof e.durationMs === 'number' ? e.durationMs / 60000 : 0;
+      if (e.category === 'tests-gates') { testRerunCalls += 1; testRerunMinutes += minutes; }
+      else { repeatedCallCalls += 1; repeatedCallMinutes += minutes; }
     }
   }
-  score = Math.max(0, Math.min(100, score));
-  if (score >= 85) return 'A';
-  if (score >= 65) return 'B';
-  if (score >= 40) return 'C';
-  return 'D';
+  if (testRerunCalls > 0) {
+    out.push({ cause: 'test-rerun', minutes: testRerunMinutes, tokens: totalCalls > 0 ? totalTokens * (testRerunCalls / totalCalls) : 0 });
+  }
+  if (repeatedCallCalls > 0) {
+    out.push({ cause: 'repeated-call', minutes: repeatedCallMinutes, tokens: totalCalls > 0 ? totalTokens * (repeatedCallCalls / totalCalls) : 0 });
+  }
+  if (REWORK_KINDS.has(rating.kind) && rating.outcome === 'nothing-to-fix') {
+    out.push({ cause: 'nothing-to-fix-dispatch', minutes: (rating.wallMs ?? 0) / 60000, tokens: totalTokens });
+  }
+  if (rating.outcome === 'escalated') {
+    out.push({ cause: 'escalated-no-decision', minutes: (rating.wallMs ?? 0) / 60000, tokens: totalTokens });
+  }
+  return out;
 }
 
 // ── PURE: orchestrator ──────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * Combine every pure piece above into one rating record. `rawOutcome` is INJECTED (read from the completion
- * record by the IO shell) — this function never scrapes an outcome out of the transcript text itself.
+ * record by the IO shell) when available; when it is `null` (the completion sidecar has already been pruned —
+ * the common case for anything more than a few hours old, see {@link outcomeFromTranscriptEvents}'s own doc)
+ * this function falls back to recovering it from the transcript's own self-report, still never scraping
+ * anything OTHER than that one declared shape.
  * @returns {object} the full per-run rating shape the operator asked for.
  */
-export function rateTranscript(lines, { kind, pr = null, item = null, sessionName = null, rawOutcome = null } = {}) {
+export function rateTranscript(lines, {
+  kind, pr = null, item = null, sessionName = null, rawOutcome = null, size = null, prBounced = null, decisionReached = false,
+} = {}) {
   const turns = extractTurns(lines);
   const events = pairToolEvents(lines);
   const wallMs = computeWallMs(lines);
@@ -515,31 +777,35 @@ export function rateTranscript(lines, { kind, pr = null, item = null, sessionNam
   const model = dominantModel(turns);
   const costUsd = computeCostUsd(tokenSums, model);
   const cacheHitRatio = computeCacheHitRatio(tokenSums);
-  const outcome = classifyOutcome(rawOutcome);
-  const grade = gradeRun({ guardBlocks, errors, repeatedCalls, testReruns, wallMs, kind });
-  return {
+  const resolvedRawOutcome = rawOutcome ?? outcomeFromTranscriptEvents(events);
+  const outcome = classifyOutcome(resolvedRawOutcome);
+  const grade = gradeRun({ guardBlocks, errors, repeatedCalls, testReruns, wallMs, kind, size, outcome, prBounced, decisionReached });
+  const tokens = { in: tokenSums.in, out: tokenSums.out, cacheRead: tokenSums.cacheRead, cacheWrite: tokenSums.cacheWrite5m + tokenSums.cacheWrite1h };
+  const rating = {
     kind: kind ?? null, pr, item, sessionName: sessionName ?? sessionNameFromLines(lines), model,
     wallMs,
     testsMs: time.testsMs, ghMs: time.ghMs, gitMs: time.gitMs, editsMs: time.editsMs, opsMs: time.opsMs,
     otherMs: time.otherMs, reasoningMs: time.reasoningMs, idleMs: time.idleMs, shares: time.shares,
     guardBlocks, errors, repeatedCalls, testReruns,
-    outcome, rawOutcome: rawOutcome ?? null,
-    tokens: { in: tokenSums.in, out: tokenSums.out, cacheRead: tokenSums.cacheRead, cacheWrite: tokenSums.cacheWrite5m + tokenSums.cacheWrite1h },
-    costUsd, cacheHitRatio, grade,
+    outcome, rawOutcome: resolvedRawOutcome ?? null,
+    tokens, costUsd, cacheHitRatio, grade,
     dataQuality: 'transcript',
   };
+  rating.waste = classifyRunWaste(events, rating);
+  return rating;
 }
 
 /**
  * A review-job (job-mode dispatch, no transcript of its own — see this file's header) rated from its parsed
  * log summary alone. Tokens/cost/guard-blocks are NOT observable at this layer — reported `null`/`0` with
- * `dataQuality: 'job-log-only'` so a reader never mistakes an absence for a real zero.
+ * `dataQuality: 'job-log-only'` so a reader never mistakes an absence for a real zero. Grade comes from
+ * {@link gradeReviewJob} (duration + pending-verdict), never {@link gradeRun} — see that function's own doc.
  */
 export function rateReviewJobTimings({ pr = null, outcome = null, timings = {} } = {}) {
   const wallMs = Number.isFinite(timings?.totalMs) ? timings.totalMs : null;
   const classified = classifyOutcome(outcome);
-  const grade = gradeRun({ guardBlocks: 0, errors: 0, repeatedCalls: 0, testReruns: 0, wallMs, kind: 'review' });
-  return {
+  const grade = gradeReviewJob({ wallMs, outcome: classified });
+  const rating = {
     kind: 'review', pr, item: null, sessionName: null, model: null,
     wallMs,
     testsMs: 0, ghMs: 0, gitMs: 0, editsMs: 0, opsMs: 0, otherMs: 0, reasoningMs: 0, idleMs: 0,
@@ -549,6 +815,8 @@ export function rateReviewJobTimings({ pr = null, outcome = null, timings = {} }
     tokens: null, costUsd: null, cacheHitRatio: null, grade,
     dataQuality: 'job-log-only',
   };
+  rating.waste = classified === 'escalated' ? [{ cause: 'escalated-no-decision', minutes: (wallMs ?? 0) / 60000, tokens: 0 }] : [];
+  return rating;
 }
 
 // ── IO SHELL: locating and reading real transcripts / logs ─────────────────────────────────────────────────────
@@ -622,14 +890,19 @@ export function readTranscriptLines(path) {
  * real outcome, and combine via {@link rateTranscript}. Returns `{ok:false, reason}` rather than throwing when
  * evidence is missing (a session whose transcript has already been pruned, or was never a real dispatch).
  */
-export function rateSession({ sessionName, sessionId = null, kind, pr = null, item = null, sinceMs = null, transcriptPath = null } = {}) {
+export function rateSession({
+  sessionName, sessionId = null, kind, pr = null, item = null, sinceMs = null, transcriptPath = null,
+  size = null, prBounced = null, decisionReached = false,
+} = {}) {
   const path = transcriptPath ?? findTranscriptPath(sessionName, { sessionId, sinceMs });
   if (!path) return { ok: false, reason: 'transcript-not-found', sessionName, kind, pr, item };
   const lines = readTranscriptLines(path);
   if (!lines.length) return { ok: false, reason: 'transcript-unreadable-or-empty', sessionName, kind, pr, item, transcriptPath: path };
   let record = null;
   try { record = tryReadCompletion(sessionName); } catch { record = null; }
-  const rating = rateTranscript(lines, { kind, pr, item, sessionName, rawOutcome: record?.outcome ?? null });
+  const rating = rateTranscript(lines, {
+    kind, pr, item, sessionName, rawOutcome: record?.outcome ?? null, size, prBounced, decisionReached,
+  });
   return { ok: true, transcriptPath: path, ...rating };
 }
 
@@ -638,7 +911,46 @@ export function rateSession({ sessionName, sessionId = null, kind, pr = null, it
  * (the job's own structured summary, written once at exit — see `we:scripts/operations/review-job.mjs`'s
  * `finally` block) rather than the whole log, since every earlier line is plain narrative text.
  */
-export function rateReviewJobLog(logPath) {
+/**
+ * The one run record a review-job's own `runId` names (`.operations/runs/<runId>.json`, `we:scripts/operations/
+ * run-store.mjs`) — read directly by id, never scanned, since the log already told us exactly which one.
+ * Returns `null` on anything (missing file, unparseable JSON, no `telemetry`) — never guessed. Sums EVERY seat's
+ * REAL token count (accurate regardless of provider) but only a Claude-priced seat's own `costUsd` (a
+ * Codex/antigravity seat's `costUsd` is always reported `0` upstream — folding that in would UNDERSTATE this
+ * review's true cost, not accurately report zero; `costUsdPartial: true` flags when this happened).
+ */
+function readReviewRunTelemetry(runId, { runsDir = resolve(REPO_ROOT, '.operations', 'runs') } = {}) {
+  if (!runId) return null;
+  let record;
+  try { record = JSON.parse(readFileSync(join(runsDir, `${runId}.json`), 'utf8')); } catch { return null; }
+  const seats = Array.isArray(record?.telemetry) ? record.telemetry : [];
+  if (seats.length === 0) return null;
+  let tokens = zeroTokenBag();
+  let costUsd = 0;
+  let costUsdPartial = false;
+  for (const seat of seats) {
+    const usage = seat?.usage ?? {};
+    tokens = addTokenBag(tokens, {
+      in: Number(usage.input_tokens) || 0, out: Number(usage.output_tokens) || 0,
+      cacheRead: Number(usage.cache_read_input_tokens) || 0, cacheWrite: Number(usage.cache_creation_input_tokens) || 0,
+    });
+    if (rateFor(seat?.model ?? '') !== null) costUsd += Number(seat?.costUsd) || 0;
+    else costUsdPartial = true;
+  }
+  return { tokens, costUsd, costUsdPartial };
+}
+
+/**
+ * Rate ONE review-job log file (`.operations/review-jobs/<slug>.log`). Parses the LAST line that is valid JSON
+ * (the job's own structured summary, written once at exit — see `we:scripts/operations/review-job.mjs`'s
+ * `finally` block) rather than the whole log, since every earlier line is plain narrative text. Then, best
+ * effort, JOINS the summary's own `runId` back to that judge run's telemetry record ({@link
+ * readReviewRunTelemetry}) so this row's tokens/cost are filled in from the ACTUAL juror seats this review ran
+ * — the fix for the operator's own 2026-09-27 finding ("reviews stop being tokens=null"). Falls back to
+ * `dataQuality: 'job-log-only'`/`tokens: null` unchanged when no run record joins (an old log predating the run
+ * record's own retention, or a `--mode=session` review that never had one).
+ */
+export function rateReviewJobLog(logPath, io = {}) {
   let text;
   try { text = readFileSync(logPath, 'utf8'); } catch { return { ok: false, reason: 'log-unreadable', logPath }; }
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -649,7 +961,37 @@ export function rateReviewJobLog(logPath) {
   }
   if (!summary) return { ok: false, reason: 'no-summary-line', logPath };
   const rating = rateReviewJobTimings({ pr: summary.pr ?? null, outcome: summary.outcome ?? null, timings: summary.timings ?? {} });
+  const telemetry = readReviewRunTelemetry(summary.runId, io);
+  if (telemetry) {
+    rating.tokens = telemetry.tokens;
+    rating.costUsd = telemetry.costUsd;
+    rating.costUsdPartial = telemetry.costUsdPartial;
+    rating.dataQuality = 'juror-telemetry';
+  }
   return { ok: true, logPath, ...rating, sessionName: summary.sessionSlug ?? null, verdict: summary.verdict ?? null };
+}
+
+/**
+ * BEST-EFFORT live `gh` lookup: did the PR built from backlog item `item` (branch `lane/<item>-*`, `we:scripts/
+ * conveyor/lease-reaper.mjs#laneRefItemNum`'s own grammar) ever carry a bounce? Returns `true`/`false` only on a
+ * confident read (a matching PR was found); `null` on ANYTHING else (no matching PR, `gh` unavailable, a parse
+ * failure) — {@link gradeRun}'s own doc: a `null` `prBounced` applies NO cap, never assumed bounced without
+ * evidence. Never called from the live per-session hook (one more `gh` call per reaped build session is a cost
+ * a caller opts into deliberately, e.g. the backfill script) — `rateAndRecordSession`'s default leaves this off.
+ * @param {string|number} item
+ * @param {{exec?: typeof execFileSync}} [io]
+ * @returns {boolean|null}
+ */
+export function resolvePrBouncedViaGh(item, { exec = execFileSync } = {}) {
+  if (!item) return null;
+  let out;
+  try {
+    out = exec('gh', ['pr', 'list', '--search', `head:lane/${item}-`, '--state', 'all', '--json', 'number,labels', '--limit', '5'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { return null; }
+  let list;
+  try { list = JSON.parse(out); } catch { return null; }
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return list.some((pr) => Array.isArray(pr.labels) && pr.labels.some((l) => l?.name === 'review:changes'));
 }
 
 // ── IO SHELL: recording a rating onto the scorecard store ───────────────────────────────────────────────────────
@@ -698,6 +1040,8 @@ export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
     cacheHitRatio: rating.cacheHitRatio ?? null,
     shares: rating.shares ?? null,
     dataQuality: rating.dataQuality ?? 'transcript',
+    waste: Array.isArray(rating.waste) ? rating.waste : [],
+    costUsdPartial: rating.costUsdPartial ?? false,
   };
 }
 
@@ -845,6 +1189,280 @@ export function flagWaste(rows) {
   return waste;
 }
 
+/**
+ * Aggregate every row's `waste[]` (see {@link classifyRunWaste}) into totals per {@link WASTE_CAUSES} cause,
+ * ranked by `by` (`'minutes'` or `'tokens'`), top `limit`. `guard-block` is reported by COUNT alongside the
+ * ranked list (see {@link WASTE_CAUSES}'s own doc for why it never joins the minutes/tokens ranking itself).
+ * @param {object[]} rows - scorecard rows (each carrying its own `waste[]` and `guardBlocks`).
+ * @param {{by?:'minutes'|'tokens', limit?:number}} [o]
+ * @returns {{ranked:{cause:string, minutes:number, tokens:number, instances:number}[], guardBlockCount:number}}
+ */
+export function topWasteCauses(rows, { by = 'minutes', limit = 5 } = {}) {
+  const totals = new Map();
+  let guardBlockCount = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    guardBlockCount += row.guardBlocks ?? 0;
+    for (const w of Array.isArray(row.waste) ? row.waste : []) {
+      if (!totals.has(w.cause)) totals.set(w.cause, { cause: w.cause, minutes: 0, tokens: 0, instances: 0 });
+      const t = totals.get(w.cause);
+      t.minutes += w.minutes ?? 0;
+      t.tokens += w.tokens ?? 0;
+      t.instances += 1;
+    }
+  }
+  const ranked = [...totals.values()].sort((a, b) => b[by] - a[by]).slice(0, limit);
+  return { ranked, guardBlockCount };
+}
+
+// ── PURE + IO: full-fleet token COVERAGE (message-2 recalibration, #4075, operator-directed 2026-09-27) ──────────
+//
+// THE GAP THIS CLOSES: slice 1's own backfill counted only ~193M of the operator's independently measured ~431M
+// tokens across DISPATCHED DAEMON sessions alone in the same window — before even counting the orchestrator
+// session itself (~1.0B), its Agent-tool subagent workers (~8.5B), or every other Claude session on the box
+// (~2.0B: review jurors, health checks, interactive work). A rating tool whose own rollup silently covers a
+// fraction of total spend is not a token-EFFICIENCY tool, it is a dispatched-daemon-efficiency tool wearing the
+// wrong name. This section makes the coverage EXPLICIT rather than papering over it: every source is scanned,
+// summed, and bucketed, and the report states what fraction of the observed total lands in each bucket —
+// including "unattributed" when a source can't be read at all — so a reader never mistakes partial coverage for
+// complete coverage again.
+//
+// THE FIVE COVERAGE BUCKETS:
+//   • `dispatched-daemon`  — already the whole of the rest of this file; a session's tokens are ATTRIBUTED (a
+//     PR or item is known).
+//   • `review-juror`       — a review's judge-panel seats. THESE HAVE NO TRANSCRIPT OF THEIR OWN: `claude
+//     --no-session-persistence` (`we:scripts/lib/judge-spawn.mjs`) means nothing is ever written to
+//     `~/.claude/projects`. The durable record is instead each judge run's OWN run record
+//     (`we:scripts/operations/run-store.mjs`, `.operations/runs/review-pr-<runId>.json`), whose `telemetry[]`
+//     array already carries `{lens, model, usage, costUsd}` per seat and whose `input.pr` names the PR — so
+//     these rows ARE attributed, same as dispatched-daemon.
+//   • `orchestration-overhead` — the interactive orchestrator session's own top-level transcript PLUS every
+//     Agent-tool subagent it spawned (`~/.claude/projects/<the orchestrator project dir>/<sessionId>.jsonl` and
+//     `.../<sessionId>/subagents/agent-*.jsonl` — same line shape as any other transcript). Attributing a
+//     SPECIFIC subagent's tokens to a SPECIFIC PR/item would need unreliable content-sniffing across a
+//     free-text task description; this module takes the coordinator's own offered alternative instead and
+//     buckets ALL of it as overhead — honest, not a guess.
+//   • `operator-interactive` — every OTHER `~/.claude/projects/*/*.jsonl` this machine has (lane-clone sessions,
+//     health checks, ad hoc interactive work) — never a demand's cost, never overhead from a delivery run either.
+//   • `non-claude-judge`    — Codex/antigravity judge-panel seats. ALSO no transcript under `~/.claude/projects`
+//     (a different provider's CLI entirely) — read instead from `~/.codex-judge-transcripts/*.jsonl` /
+//     `~/.antigravity-judge-transcripts/*.jsonl` (`we:scripts/lib/codex-judge-spawn.mjs` /
+//     `antigravity-judge-spawn.mjs`), each file's LAST `type:'turn.completed'` line. These providers report
+//     `costUsd: 0` always (confirmed: no USD figure exists anywhere in either CLI's own output) and this module
+//     has no declared non-Anthropic price table (unlike `cost-rates.mjs` for Claude) — tokens are real, `costUsd`
+//     is honestly `null`, NEVER guessed at an invented GPT/Gemini rate. `we:scripts/codex-direct-task.mjs` /
+//     `gemini-direct-task.mjs` (the PERSONAL escape hatches, distinct from the judge-panel seats above) keep no
+//     durable usage log at all (their own log file is truncated at the start of every run) — genuinely nothing
+//     to read there, not a gap this module failed to close.
+
+export const COVERAGE_BUCKETS = Object.freeze([
+  'dispatched-daemon', 'review-juror', 'orchestration-overhead', 'operator-interactive', 'non-claude-judge',
+]);
+
+function zeroTokenBag() { return { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 }; }
+function addTokenBag(a, b) { return { in: a.in + b.in, out: a.out + b.out, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite }; }
+function tokenBagTotal(b) { return b.in + b.out + b.cacheRead + b.cacheWrite; }
+
+/** The orchestrator's OWN `~/.claude/projects` directory name on this machine (`WE_ORCHESTRATOR_PROJECT_DIR` for
+ *  a test/alternate layout) — confirmed live: `-Users-nicolasgilbert-workspace-webeverything`, one directory
+ *  per checkout path, never per session. */
+export function orchestratorProjectDirName(env = process.env) {
+  return env?.WE_ORCHESTRATOR_PROJECT_DIR || '-Users-nicolasgilbert-workspace-webeverything';
+}
+
+/**
+ * Scan every `~/.claude/projects/*` transcript (recursing into the orchestrator's own project dir to also pick
+ * up its `<sessionId>/subagents/agent-*.jsonl` files) and bucket each file's token sum into `dispatched-daemon`
+ * / `orchestration-overhead` / `operator-interactive` (see this section's own header for the bucket definitions).
+ * Reuses {@link extractTurns}/{@link sumTokens}/{@link dominantModel}/{@link computeCostUsd} unchanged — a
+ * coverage file is priced exactly like a rated one.
+ * @returns {Record<string, {tokens: {in,out,cacheRead,cacheWrite}, costUsd: number, knownCostFiles: number,
+ *   unpricedFiles: number, fileCount: number}>}
+ */
+export function scanClaudeProjectsCoverage({ projectsRoot = defaultProjectsRoot(), sinceMs = null, orchestratorDirName = orchestratorProjectDirName() } = {}) {
+  const buckets = {};
+  for (const b of ['dispatched-daemon', 'orchestration-overhead', 'operator-interactive']) {
+    buckets[b] = { tokens: zeroTokenBag(), costUsd: 0, knownCostFiles: 0, unpricedFiles: 0, fileCount: 0, unreadableFiles: 0 };
+  }
+  let dirEntries;
+  try { dirEntries = readdirSync(projectsRoot, { withFileTypes: true }); } catch { return buckets; }
+  for (const d of dirEntries) {
+    if (!d.isDirectory()) continue;
+    const bucket = d.name.includes('operations-dispatch') ? 'dispatched-daemon'
+      : d.name === orchestratorDirName ? 'orchestration-overhead'
+        : 'operator-interactive';
+    const dirPath = join(projectsRoot, d.name);
+    // Only the orchestrator dir is recursed (for its `<sessionId>/subagents/agent-*.jsonl`) — every OTHER
+    // project dir's own jsonl files sit flat, one level, same as `findTranscriptPath` already assumes.
+    const files = bucket === 'orchestration-overhead' ? listJsonlRecursive(dirPath) : listJsonlFlat(dirPath);
+    for (const path of files) {
+      if (sinceMs !== null) {
+        try { if (statSync(path).mtimeMs < sinceMs) continue; } catch { continue; }
+      }
+      const lines = readTranscriptLines(path);
+      if (!lines.length) { buckets[bucket].unreadableFiles += 1; continue; }
+      // File MTIME only bounds WHICH FILES are read (a still-being-written file was "modified recently" even
+      // if most of its content is old) — a long-lived orchestrator/interactive session can span weeks in one
+      // file. Filter to turns whose OWN timestamp falls in the window too, so a file touched today doesn't
+      // pull in tokens from three weeks ago; a turn with no parseable timestamp is kept (never silently
+      // dropped for lacking one).
+      const allTurns = extractTurns(lines);
+      const turns = sinceMs === null ? allTurns : allTurns.filter((t) => t.ts === null || t.ts >= sinceMs);
+      const sums = sumTokens(turns);
+      const model = dominantModel(turns);
+      const cost = computeCostUsd(sums, model);
+      buckets[bucket].tokens = addTokenBag(buckets[bucket].tokens, { in: sums.in, out: sums.out, cacheRead: sums.cacheRead, cacheWrite: sums.cacheWrite5m + sums.cacheWrite1h });
+      if (cost !== null) { buckets[bucket].costUsd += cost; buckets[bucket].knownCostFiles += 1; } else buckets[bucket].unpricedFiles += 1;
+      buckets[bucket].fileCount += 1;
+    }
+  }
+  return buckets;
+}
+
+function listJsonlFlat(dirPath) {
+  let names;
+  try { names = readdirSync(dirPath); } catch { return []; }
+  return names.filter((n) => n.endsWith('.jsonl')).map((n) => join(dirPath, n));
+}
+
+function listJsonlRecursive(dirPath, depth = 0) {
+  if (depth > 3) return []; // bounded — this tree is at most `<session>/subagents/agent-*.jsonl` deep
+  let entries;
+  try { entries = readdirSync(dirPath, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    const p = join(dirPath, e.name);
+    if (e.isDirectory()) out.push(...listJsonlRecursive(p, depth + 1));
+    else if (e.name.endsWith('.jsonl')) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Read every `.operations/runs/review-pr-*.json` judge-panel run record modified since `sinceMs` and sum its
+ * `telemetry[]` seats' usage, split by whether the seat's own `model` prices under `we:scripts/backlog/
+ * cost-rates.mjs` (a Claude-family model — bucket `review-juror`, cost computed) or not (a Codex/antigravity
+ * seat riding the SAME run record — bucket `non-claude-judge`, tokens only, `costUsd` stays `null`). Rows are
+ * ATTRIBUTED — each run record's own `input.pr` names the PR — returned per-PR so a caller can fold them
+ * straight into {@link rollupByDemand}'s `review` phase.
+ * @returns {{claudeRows: object[], nonClaudeRows: object[]}}
+ */
+export function scanReviewJurorUsage({ runsDir = resolve(REPO_ROOT, '.operations', 'runs'), sinceMs = null } = {}) {
+  let names;
+  try { names = readdirSync(runsDir); } catch { return { claudeRows: [], nonClaudeRows: [] }; }
+  const claudeRows = [];
+  const nonClaudeRows = [];
+  for (const name of names) {
+    if (!name.startsWith('review-pr-') || !name.endsWith('.json')) continue;
+    const path = join(runsDir, name);
+    if (sinceMs !== null) {
+      try { if (statSync(path).mtimeMs < sinceMs) continue; } catch { continue; }
+    }
+    let record;
+    try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { continue; }
+    const pr = record?.input?.pr ?? null;
+    for (const seat of Array.isArray(record?.telemetry) ? record.telemetry : []) {
+      const usage = seat?.usage ?? {};
+      const tokens = {
+        in: Number(usage.input_tokens) || 0, out: Number(usage.output_tokens) || 0,
+        cacheRead: Number(usage.cache_read_input_tokens) || 0, cacheWrite: Number(usage.cache_creation_input_tokens) || 0,
+      };
+      const priced = rateFor(seat?.model ?? '') !== null;
+      const row = {
+        pr, kind: 'review', dispatchKind: 'review', lens: seat?.lens ?? null, model: seat?.model ?? null,
+        wallMs: Number.isFinite(seat?.durationMs) ? seat.durationMs : null,
+        tokens, costUsd: priced ? (Number(seat?.costUsd) || 0) : null,
+        dataQuality: priced ? 'juror-telemetry' : 'juror-telemetry-unpriced',
+      };
+      (priced ? claudeRows : nonClaudeRows).push(row);
+    }
+  }
+  return { claudeRows, nonClaudeRows };
+}
+
+/**
+ * Read every `~/.codex-judge-transcripts/*.jsonl` / `~/.antigravity-judge-transcripts/*.jsonl` file modified
+ * since `sinceMs` and pull the LAST `type:'turn.completed'` line's `usage` — the durable per-seat record for a
+ * non-Claude judge seat that isn't already folded into a run record's own `telemetry[]` (a defensive belt: if a
+ * future caller stops writing seat usage into the run record, this still finds it). Tokens only, `costUsd`
+ * always `null` — see this section's own header for why. NOT attributed to a PR (the transcript filename is
+ * only a session id) — reported as its own `non-claude-judge` total, not folded into a demand.
+ */
+export function scanNonClaudeJudgeTranscripts({ home = homedir(), sinceMs = null } = {}) {
+  const dirs = [join(home, '.codex-judge-transcripts'), join(home, '.antigravity-judge-transcripts')];
+  let tokens = zeroTokenBag();
+  let fileCount = 0;
+  for (const dir of dirs) {
+    let names;
+    try { names = readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (!name.endsWith('.jsonl')) continue;
+      const path = join(dir, name);
+      if (sinceMs !== null) {
+        try { if (statSync(path).mtimeMs < sinceMs) continue; } catch { continue; }
+      }
+      let text;
+      try { text = readFileSync(path, 'utf8'); } catch { continue; }
+      let usage = null;
+      for (const raw of text.split('\n').reverse()) {
+        const line = raw.trim();
+        if (!line) continue;
+        let parsed;
+        try { parsed = JSON.parse(line); } catch { continue; }
+        if (parsed?.type === 'turn.completed' && parsed?.usage) { usage = parsed.usage; break; }
+      }
+      if (!usage) continue;
+      tokens = addTokenBag(tokens, {
+        in: Number(usage.input_tokens) || 0, out: Number(usage.output_tokens) || 0,
+        cacheRead: Number(usage.cached_input_tokens) || 0, cacheWrite: Number(usage.cache_write_input_tokens) || 0,
+      });
+      fileCount += 1;
+    }
+  }
+  return { tokens, costUsd: null, fileCount };
+}
+
+/**
+ * THE COVERAGE REPORT: every bucket's tokens/cost, plus a single coverage line — what fraction of the observed
+ * total is ATTRIBUTED to a demand (`dispatched-daemon` + `review-juror`) vs `orchestration-overhead` vs
+ * `operator-interactive` vs `non-claude-judge` (tokens known, not attributed to a PR). Never claims 100%: a
+ * file that failed to parse counts in `unattributedTokens`, not silently dropped from the denominator.
+ */
+export function buildCoverageReport({ sinceMs = null } = {}) {
+  const claudeBuckets = scanClaudeProjectsCoverage({ sinceMs });
+  const juror = scanReviewJurorUsage({ sinceMs });
+  const nonClaudeJudge = scanNonClaudeJudgeTranscripts({ sinceMs });
+
+  const jurorTokens = juror.claudeRows.reduce((s, r) => addTokenBag(s, r.tokens), zeroTokenBag());
+  const jurorCost = juror.claudeRows.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+  const nonClaudeJurorTokens = juror.nonClaudeRows.reduce((s, r) => addTokenBag(s, r.tokens), zeroTokenBag());
+
+  const attributedTokens = tokenBagTotal(claudeBuckets['dispatched-daemon'].tokens) + tokenBagTotal(jurorTokens);
+  const attributedCostUsd = claudeBuckets['dispatched-daemon'].costUsd + jurorCost;
+  const overheadTokens = tokenBagTotal(claudeBuckets['orchestration-overhead'].tokens);
+  const interactiveTokens = tokenBagTotal(claudeBuckets['operator-interactive'].tokens);
+  const nonClaudeTokens = tokenBagTotal(nonClaudeJurorTokens) + tokenBagTotal(nonClaudeJudge.tokens);
+  const unattributedFiles = claudeBuckets['dispatched-daemon'].unreadableFiles + claudeBuckets['orchestration-overhead'].unreadableFiles + claudeBuckets['operator-interactive'].unreadableFiles;
+
+  const total = attributedTokens + overheadTokens + interactiveTokens + nonClaudeTokens;
+  const pct = (n) => (total > 0 ? (n / total) * 100 : null);
+
+  return {
+    totalTokens: total,
+    attributed: { tokens: attributedTokens, costUsd: attributedCostUsd, pct: pct(attributedTokens) },
+    orchestrationOverhead: { tokens: overheadTokens, costUsd: claudeBuckets['orchestration-overhead'].costUsd, pct: pct(overheadTokens) },
+    operatorInteractive: { tokens: interactiveTokens, costUsd: claudeBuckets['operator-interactive'].costUsd, pct: pct(interactiveTokens) },
+    nonClaudeJudge: { tokens: nonClaudeTokens, costUsd: null, pct: pct(nonClaudeTokens) },
+    unattributedFileCount: unattributedFiles,
+    fileCounts: {
+      dispatchedDaemon: claudeBuckets['dispatched-daemon'].fileCount,
+      orchestrationOverhead: claudeBuckets['orchestration-overhead'].fileCount,
+      operatorInteractive: claudeBuckets['operator-interactive'].fileCount,
+      reviewJurorRuns: juror.claudeRows.length + juror.nonClaudeRows.length,
+      nonClaudeJudgeTranscripts: nonClaudeJudge.fileCount,
+    },
+  };
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
@@ -870,15 +1488,41 @@ function resolveSince(flag) {
   return Number.isFinite(t) ? t : null;
 }
 
+/**
+ * Every review row's EFFECTIVE grade for THIS report: unchanged for a non-review row, or a non-`pending`
+ * review row; for a `pending` one, resolved against every OTHER review row for the same PR anywhere in the
+ * store (not just the `--since` window — a contradicting later round can land after the window's own cutoff
+ * for an EARLIER round still being reported). See {@link resolveReviewGrade}'s own doc.
+ */
+function effectiveGrade(row, allRowsByPr) {
+  if (row.dispatchKind !== 'review' || !row.pr) return row.grade;
+  const group = allRowsByPr.get(row.pr) ?? [];
+  const later = group.filter((g) => Date.parse(g.scoredAt ?? '') > Date.parse(row.scoredAt ?? ''));
+  return resolveReviewGrade(row, later);
+}
+
 function buildReport(sinceMs) {
   const rows = ourRows(sinceMs);
-  const gradeCounts = { A: 0, B: 0, C: 0, D: 0 };
-  for (const r of rows) if (gradeCounts[r.grade] !== undefined) gradeCounts[r.grade] += 1;
+  const allRows = sinceMs === null ? rows : ourRows(null);
+  const allRowsByPr = new Map();
+  for (const r of allRows) {
+    if (r.dispatchKind !== 'review' || !r.pr) continue;
+    if (!allRowsByPr.has(r.pr)) allRowsByPr.set(r.pr, []);
+    allRowsByPr.get(r.pr).push(r);
+  }
+  const gradeCounts = { A: 0, B: 0, C: 0, D: 0, pending: 0 };
+  for (const r of rows) {
+    const g = effectiveGrade(r, allRowsByPr);
+    if (gradeCounts[g] !== undefined) gradeCounts[g] += 1;
+  }
   const waste = flagWaste(rows);
   const wasteByType = {};
   for (const w of waste) wasteByType[w.type] = (wasteByType[w.type] ?? 0) + 1;
   const demand = rollupByDemand(rows, { sizeForItem: backlogSizeForItem });
-  return { rowCount: rows.length, gradeCounts, wasteByType, wasteTotal: waste.length, demand };
+  const wasteByMinutes = topWasteCauses(rows, { by: 'minutes', limit: 5 });
+  const wasteByTokens = topWasteCauses(rows, { by: 'tokens', limit: 5 });
+  const coverage = buildCoverageReport({ sinceMs });
+  return { rowCount: rows.length, gradeCounts, wasteByType, wasteTotal: waste.length, demand, wasteByMinutes, wasteByTokens, coverage };
 }
 
 async function main() {
@@ -897,8 +1541,14 @@ async function main() {
   }
   process.stdout.write(`run-rating report${sinceMs ? ` (since ${new Date(sinceMs).toISOString()})` : ''}\n`);
   process.stdout.write(`  rows scored: ${report.rowCount}\n`);
-  process.stdout.write(`  grade distribution: A=${report.gradeCounts.A} B=${report.gradeCounts.B} C=${report.gradeCounts.C} D=${report.gradeCounts.D}\n`);
+  process.stdout.write(`  grade distribution: A=${report.gradeCounts.A} B=${report.gradeCounts.B} C=${report.gradeCounts.C} D=${report.gradeCounts.D} pending=${report.gradeCounts.pending}\n`);
   process.stdout.write(`  waste flags: ${report.wasteTotal} (${Object.entries(report.wasteByType).map(([k, v]) => `${k}=${v}`).join(', ') || 'none'})\n`);
+  process.stdout.write(`  top waste causes by minutes (guard blocks tracked separately by count: ${report.wasteByMinutes.guardBlockCount}):\n`);
+  for (const w of report.wasteByMinutes.ranked) process.stdout.write(`    ${w.cause}: ${w.minutes.toFixed(1)} min across ${w.instances} instance(s)\n`);
+  process.stdout.write('  top waste causes by tokens:\n');
+  for (const w of report.wasteByTokens.ranked) process.stdout.write(`    ${w.cause}: ${Math.round(w.tokens)} tok across ${w.instances} instance(s)\n`);
+  const c = report.coverage;
+  process.stdout.write(`  coverage: ${c.totalTokens} tok observed fleet-wide — attributed ${c.attributed.pct?.toFixed(1) ?? 'n/a'}%, orchestration-overhead ${c.orchestrationOverhead.pct?.toFixed(1) ?? 'n/a'}%, operator/interactive ${c.operatorInteractive.pct?.toFixed(1) ?? 'n/a'}%, non-claude-judge ${c.nonClaudeJudge.pct?.toFixed(1) ?? 'n/a'}% (${c.unattributedFileCount} file(s) unreadable)\n`);
   process.stdout.write('  per-demand tokens:\n');
   for (const d of report.demand) {
     const sp = d.tokensPerStoryPoint !== null ? d.tokensPerStoryPoint.toFixed(0) : 'n/a';

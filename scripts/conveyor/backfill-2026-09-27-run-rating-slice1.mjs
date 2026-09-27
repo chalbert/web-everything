@@ -21,8 +21,8 @@ import { join } from 'node:path';
 
 import { parseSessionSlug } from './session-slug.mjs';
 import {
-  RUBRIC_VERSION, defaultProjectsRoot, readTranscriptLines, sessionNameFromLines,
-  rateSession, rateReviewJobLog, appendRunRating,
+  RUBRIC_VERSION, BUILD_KINDS, defaultProjectsRoot, readTranscriptLines, sessionNameFromLines,
+  rateSession, rateReviewJobLog, appendRunRating, backlogSizeForItem, resolvePrBouncedViaGh,
 } from './run-rating.mjs';
 import { readStore } from './run-scorecard-store.mjs';
 
@@ -94,9 +94,15 @@ function main() {
     if (!parsed) { skippedNoEvidence++; continue; }
     if (done.has(name)) { skippedAlready++; continue; }
     const id = /^\d+$/.test(parsed.id) ? Number(parsed.id) : parsed.id;
+    // Rubric v2 (#4075 recalibration): a BUILD-kind session's grade is capped when its PR bounced, and its
+    // baseline scales with the backlog item's own `size` — both looked up here (best-effort, never guessed
+    // when absent) since only the backfill's own IO shell can afford the extra `gh`/frontmatter read per row.
+    const isBuild = parsed.itemKind && BUILD_KINDS.has(parsed.kind);
+    const size = isBuild ? backlogSizeForItem(id) : null;
+    const prBounced = isBuild ? resolvePrBouncedViaGh(id) : null;
     const rating = rateSession({
       sessionName: name, kind: parsed.kind, pr: parsed.itemKind ? null : id, item: parsed.itemKind ? id : null,
-      transcriptPath: path,
+      transcriptPath: path, size, prBounced,
     });
     if (!rating.ok) { skippedNoEvidence++; continue; }
     if (!dryRun) appendRunRating(rating);
