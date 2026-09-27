@@ -163,7 +163,8 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
@@ -279,11 +280,53 @@ function resolveRetryTuning(env = process.env) {
   };
 }
 
-/** The host-shared lock root for `gh`-call admission — a SIBLING of heavy-admission.mjs's own `.admission/heavy`
- *  root (same `defaultPoolRoot` derivation), never inside it: the two pools are independent caps over the same
- *  proven mechanism, not one cap wearing two names. */
-export function ghThrottleLockRoot(checkoutRoot = process.cwd(), env = process.env) {
-  return join(defaultPoolRoot(checkoutRoot, env), SUBDIR);
+/** Env override for {@link ghThrottleLockRoot} — an absolute path (a leading `~` expands to `$HOME`). */
+export const GH_THROTTLE_LOCK_ROOT_ENV = 'WE_GH_THROTTLE_LOCK_ROOT';
+
+/** The host-shared lock root for `gh`-call admission — `.admission/gh`, never inside heavy-admission.mjs's own
+ *  `.admission/heavy` root: the two pools are independent caps over the same proven mechanism.
+ *
+ *  CWD-INDEPENDENT (live 2026-09-27 ~04:10Z landing freeze): this used to be `defaultPoolRoot(process.cwd())`,
+ *  i.e. derived from whatever directory the CALLER happened to be in. Every `gh` call runs through this module
+ *  (via the gh App shim), so a call made from `/tmp` (a smoke candidate worktree, a scratch dir) derived
+ *  `/private/.lanes/.admission/gh`, hit EACCES on mkdir, and crashed instead of running `gh`. Resolution order:
+ *    1. `WE_GH_THROTTLE_LOCK_ROOT` — explicit host override;
+ *    2. `LANE_POOL_ROOT` — the existing pool override (tests isolate the throttle with it) → `<pool>/.admission/gh`;
+ *    3. `$HOME/workspace/.lanes/.admission/gh` — a fixed host path, the same place the old derivation produced
+ *       for every caller already inside the workspace, so live callers on older code share the SAME semaphore.
+ *  `_checkoutRoot` is accepted for signature compatibility and deliberately ignored. */
+export function ghThrottleLockRoot(_checkoutRoot, env = process.env) {
+  const home = env.HOME || homedir();
+  const expand = (p) => (p && p.startsWith('~') ? join(home, p.slice(1)) : p);
+  const override = expand(String(env[GH_THROTTLE_LOCK_ROOT_ENV] || '').trim());
+  if (override) return resolve(override);
+  if (env.LANE_POOL_ROOT) return join(defaultPoolRoot(home, env), SUBDIR);
+  return join(home, 'workspace', '.lanes', SUBDIR);
+}
+
+let failOpenWarned = false;
+/** Test seam: re-arm the once-per-process fail-open warning. @test-only-export-ok */
+export function resetGhThrottleFailOpenWarning() { failOpenWarned = false; }
+
+/**
+ * FAIL OPEN: run one throttle SETUP step (`mkdir` of the lock root, a points/slot acquire, a slot release). If
+ * it throws, warn once on stderr, best-effort log a `fail_open` line (the `gh-call-failures` health smell reads
+ * it), and return `fallback` — the caller then runs `gh` ungated. A throttle is a courtesy to GitHub's rate
+ * limits; it must never be the reason a `gh` call does not run at all.
+ */
+export function failOpenGate(stage, fn, { fallback, warn, logPath, op } = {}) {
+  try {
+    return fn();
+  } catch (e) {
+    const reason = String((e && e.message) || e).split('\n')[0];
+    if (warn) warn(stage, reason);
+    else if (!failOpenWarned) {
+      failOpenWarned = true;
+      try { process.stderr.write(`⚠ gh-throttle: ${stage} failed (${reason}) — running gh unthrottled (fail-open)\n`); } catch { /* ignore */ }
+    }
+    if (logPath) recordGhCallLogEntry(logPath, { op: op || 'unknown', outcome: 'fail_open', stage, reason });
+    return fallback;
+  }
 }
 
 /** Where the points-budget window state lives — a sibling of the concurrency semaphore's own slot dirs, under
@@ -588,7 +631,7 @@ export function recordGhCallLogEntry(logPath, entry) {
  * @param {object} [opts]           execFileSync options, passed through verbatim, PLUS:
  * @param {object} [opts.throttle]  wrapper-only config, stripped before the real call reaches `execFileSync`:
  *   @param {string} [opts.throttle.owner]           slot-holder identity (default: a fresh random id per call)
- *   @param {string} [opts.throttle.repo]             checkout root used to derive the lock root (default: cwd)
+ *   @param {string} [opts.throttle.repo]             IGNORED for the lock root (now cwd-independent — see ghThrottleLockRoot)
  *   @param {object} [opts.throttle.env]               env bag for the `resolve*` tuning reads (default: process.env)
  *   @param {string} [opts.throttle.lockRoot]         override the derived lock root (tests)
  *   @param {number} [opts.throttle.cap]              override the concurrency cap (tests)
@@ -635,8 +678,10 @@ export function runGhSync(args, opts = {}) {
   const calibrateHeaders = !!throttle.calibrateHeaders;
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(args) ? args.slice(0, 2).join(' ') : 'unknown');
+  const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
 
-  mkdirSync(lockRoot, { recursive: true });
+  // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
+  const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
   let attempt = 0;
   for (;;) {
@@ -644,8 +689,10 @@ export function runGhSync(args, opts = {}) {
     // The points-budget gate runs BEFORE the concurrency slot — a call waiting out its budget must not hold a
     // scarce concurrency slot idle while it waits (same reasoning as releasing the slot before a backoff sleep,
     // below).
-    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
-    const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    const acq = gated ? failOpenGate('acquire', () => {
+      acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     // Fail OPEN on an acquire timeout too — proceeding unslotted rather than stranding this `gh` call forever
     // (the residual-risk policy heavy-admission.mjs itself names: a fixed cap bounds concurrency and makes the
     // wait observable, it does not claim to eliminate contention).
@@ -661,7 +708,7 @@ export function runGhSync(args, opts = {}) {
     } catch (e) {
       failure = e;
     } finally {
-      if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
+      if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
     recordGhCallLogEntry(logPath, { op: opLabel, attempt, points, outcome: 'call', ok: !failure });
     if (!failure) return result;
@@ -753,14 +800,18 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
   const logPath = throttle.logPath || ghThrottleLogPath(lockRoot);
   const headerCapMs = throttle.headerCapMs != null ? throttle.headerCapMs : resolveHeaderWaitCapMs(env);
   const opLabel = throttle.op || (Array.isArray(argv) ? argv.slice(0, 2).join(' ') : 'unknown');
+  const gateOpts = { warn: throttle.warn, logPath, op: opLabel };
 
-  mkdirSync(lockRoot, { recursive: true });
+  // FAIL OPEN (see `failOpenGate`): an unusable lock root means this call runs ungated, never not at all.
+  const gated = failOpenGate('lock-root setup', () => { mkdirSync(lockRoot, { recursive: true }); return true; }, { ...gateOpts, fallback: false, logPath: null });
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
-    acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
-    const acq = acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    const acq = gated ? failOpenGate('acquire', () => {
+      acquireGhPointsSync({ lockRoot, points, budgetPerMin, owner, pid, now, sleep, pollMs, timeoutMs: acquireTimeoutMs, windowMs: pointsWindowMs });
+      return acquireGhSlotSync({ lockRoot, cap, owner, pid, pollMs, timeoutMs: acquireTimeoutMs, now, sleep });
+    }, { ...gateOpts, fallback: { ok: false } }) : { ok: false };
     let r;
     try {
       // This front door NEVER adds `GH_DEBUG` itself (unlike `runGhSync`'s opt-in) — its documented contract
@@ -770,7 +821,7 @@ export function runGhCliPassthrough(argv, { throttle = {}, spawn = spawnSync, bi
       // nothing here suppresses that; it is simply never the one turning it on.
       r = spawn(bin, argv, { stdio: ['inherit', 'pipe', 'pipe'], maxBuffer });
     } finally {
-      if (acq.ok) releaseGhSlotSync({ lockRoot, cap, owner });
+      if (acq.ok) failOpenGate('release', () => releaseGhSlotSync({ lockRoot, cap, owner }), gateOpts);
     }
     if (r.error) throw r.error; // e.g. `gh` not on PATH — not a `gh`-level failure to retry
     const stderrText = r.stderr ? r.stderr.toString('utf8') : '';
