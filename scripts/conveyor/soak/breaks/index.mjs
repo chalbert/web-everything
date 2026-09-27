@@ -45,6 +45,7 @@ import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
 import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
 import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
 import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
+import ghShimLanePath from './gh-shim-lane-path.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -73,6 +74,7 @@ export const BREAKS = Object.freeze([
   ciHealLoopStaleLabelReviewGate,
   alreadyLandedPrGetsFixer,
   largeReapBacklogStarvesDispatch,
+  ghShimLanePath,
 ]);
 
 export function breakById(id) {
