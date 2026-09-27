@@ -3825,10 +3825,13 @@ order and has no notion of an open PR still in review.
    from being dispatched at all, this rule decides land order for whatever overlaps still occur — including
    work dispatched outside the daemons' claim stores, which x3bt7x7 never sees.
 3. **Configurable by SETTINGS, not only a CLI flag.** Both the on/off switch and the window length live in
-   the repo's normal settings/config mechanism — a git-ignored, defaults-in-code JSON config file beside the
-   affected script, the same pattern `we:scripts/build-queue-config.json` already uses for the build queue's
-   scoring weights (edited only through a sanctioned CLI verb, mirroring `we:scripts/backlog.mjs weights`;
-   never hand-edited). A `--overlap-yield-window`/env-var override may exist *on top of* the settings file for
+   the repo's normal settings/config mechanism — a **tracked, committed**, defaults-in-code JSON config file
+   beside the affected script (`we:scripts/drain-overlap-yield-config.json`), edited only through a sanctioned
+   CLI verb mirroring `we:scripts/backlog.mjs weights`, never hand-edited, and landed via lane→PR like any
+   other repo change. It copies the CLI-verb/write-guard shape of `we:scripts/build-queue-config.json` but
+   **not** its git-ignored status: the resident drain daemon self-updates from `main` and never sees a local
+   uncommitted file ([resident-daemon-reload-lifecycle](#resident-daemon-reload-lifecycle)), so a git-ignored
+   copy would silently strand an operator's edit. A `--overlap-yield-window`/env-var override may exist *on top of* the settings file for
    a one-off run, but the settings file is the durable, discoverable knob — a flag nobody remembers to pass is
    not "configurable."
 4. **Activated (on) by default, for now, as a trial.** Shipped defaults: `enabled: true`,
