@@ -43,6 +43,7 @@
  *
  * USAGE:
  *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--pinned|--unpinned] [--reason=..] [--by=..] [--json]
+ *                                          [--check] [--allow-conflict --reason=..]
  *   node scripts/daemon-overlay.mjs remove --clone=<path> --ref=<branch> [--reason=..] [--by=..] [--json]
  *   node scripts/daemon-overlay.mjs list   --clone=<path> [--json]
  *
@@ -50,13 +51,35 @@
  * actually present). `--no-lock` is still accepted (a no-op) so any older caller/script that still passes it
  * keeps working unchanged. Exit codes: 2 on bad usage (unknown command, missing `--clone`, `add`/`remove`
  * missing `--ref`, non-integer `--pr`); 1 on a fatal error (e.g. a corrupt overlay state file — `addOverlay`/
- * `removeOverlay` refuse to overwrite one); 0 otherwise — including a `remove` of a ref that was never present,
- * which is not a usage error.
+ * `removeOverlay` refuse to overwrite one, or the conflict guard below could not itself determine safety); 0
+ * otherwise — including a `remove` of a ref that was never present, which is not a usage error.
+ *
+ * THE OVERLAY-CONFLICT GUARD (epic #3383/#4075, live incident 2026-09-27: `lane/promote-stale-green`/#2826 was
+ * registered while KNOWINGLY conflicting with `lane/fix-procedure`/#2821 in `review-status-tag.mjs` — nothing
+ * refused it, so the next rebuild silently dropped #2826 and its own fix never went live). `add` now checks,
+ * BEFORE registering, whether `--ref` merges clean against `origin/main` plus every ALREADY-registered overlay
+ * in apply order (`git merge-tree --write-tree`, via `scripts/lib/daemon-rebuild.mjs#previewOverlayConflict` —
+ * read-only, the same scratch-repo-with-alternates isolation `dryRunRebuild` already uses; `root`'s own refs,
+ * index, working tree are never touched). A conflict REFUSES the add (exit 3, naming the conflicting overlay(s)
+ * and file(s)) unless the caller passes `--allow-conflict --reason=<why registering it anyway is safe>`, which
+ * still prints the conflict before registering. `--check` runs ONLY this guard and reports the verdict —
+ * `addOverlay`/`appendOverlayEvent` are never called — so a preview against a live clone's real overlay config
+ * never mutates anything (exit 3 on a would-be-refused conflict, exit 1 if the guard itself could not resolve
+ * something — a corrupt store included — 0 otherwise; `--json` gives the full `{check, wouldRegister}` shape).
+ * Only merge-tree's own conflict status counts as a conflict; any other merge-tree failure is "could not verify"
+ * (exit 1), which `--allow-conflict` does not override. A registered PINNED overlay that no longer folds onto
+ * main is set aside and named in a warning, so it never blocks an unrelated add. A real `add` runs the check and
+ * the registration under a per-clone add-guard lock, so two concurrent adds cannot both pass against a list that
+ * holds neither (PR #2827 review).
  */
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { addOverlay, removeOverlay, readOverlayState, appendOverlayEvent } from './lib/daemon-overlays.mjs';
+import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync, renameSync } from 'node:fs';
+import {
+  addOverlay, removeOverlay, readOverlayState, appendOverlayEvent, overlayFilePath,
+} from './lib/daemon-overlays.mjs';
+import { previewOverlayConflict } from './lib/daemon-rebuild.mjs';
 import { edgeEnabled, registerPr } from './lib/daemon-edge.mjs';
 
 function parseFlags(argv) {
@@ -73,6 +96,86 @@ function parseFlags(argv) {
 function fail(msg) {
   process.stderr.write(`daemon-overlay: ${msg}\n`);
   process.exitCode = 2;
+}
+
+/** One line naming WHY the guard could not run — the reason plus whatever `detail` pins it down, so an operator
+ *  never has to read source to learn that (say) an unrelated overlay is what broke the check. */
+function describeFailure(check) {
+  const d = check.detail;
+  const extra = d && (d.detail?.ref ? `${d.reason}: ${d.detail.ref}` : d.reason || d.stderr);
+  return extra ? `${check.reason} — ${extra}` : check.reason;
+}
+
+/** Name every registered PINNED overlay the guard had to leave out because it no longer folds onto main — a
+ *  real rebuild refuses until it is fixed, so it must never be swallowed silently. */
+function warnSetAside(check) {
+  for (const s of check.setAside || []) {
+    process.stderr.write(`daemon-overlay: warning — registered pinned overlay ${s.ref}${s.pr != null ? ` (PR #${s.pr})` : ''} `
+      + `no longer folds onto main (${s.reason}${s.dropReason ? `: ${s.dropReason}` : ''}); checked without it. `
+      + 'The daemon rebuild refuses until it is rebased or removed.\n');
+  }
+}
+
+// ── the add-guard lock — serializes check-then-register across concurrent `add`s (PR #2827 review) ──────────
+// A `mkdir` mutex next to the overlay state file, SEPARATE from the list's own millisecond mutex
+// (`daemon-overlays.mjs#withListLock`): it is held across a git fetch, so it must never block a rebuild's
+// auto-remove, which only takes the list mutex. The holder writes its pid; a dead holder (or one older than
+// ADD_GUARD_STALE_MS) is broken by renaming the dir aside first, so two waiters cannot both remove a live lock.
+const ADD_GUARD_STALE_MS = 10 * 60_000;
+const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+
+function readAddGuardOwner(lockDir) {
+  try { return readFileSync(join(lockDir, 'owner'), 'utf8').trim(); } catch { return ''; /* not written yet, or gone */ }
+}
+
+/** The owner string of a holder that is gone (dead pid, or stale), or `null` while it is live. */
+function addGuardGoneOwner(lockDir) {
+  const owner = readAddGuardOwner(lockDir);
+  const pid = Number(owner);
+  let ageMs;
+  try { ageMs = Date.now() - statSync(lockDir).mtimeMs; } catch { return null; /* already released */ }
+  if (ageMs > ADD_GUARD_STALE_MS) return owner;
+  if (!owner || !Number.isInteger(pid) || pid <= 0) return ageMs > 5_000 ? owner : null; // crashed before writing its pid
+  try { process.kill(pid, 0); return null; } catch (e) { return e.code === 'ESRCH' ? owner : null; }
+}
+
+async function withAddGuardLock(root, env, fn) {
+  const lockDir = `${overlayFilePath(root, env)}.add-guard.lock`;
+  mkdirSync(dirname(lockDir), { recursive: true });
+  const waitMs = Number(env.WE_DAEMON_OVERLAY_ADD_GUARD_WAIT_MS) > 0 ? Number(env.WE_DAEMON_OVERLAY_ADD_GUARD_WAIT_MS) : 180_000;
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, 'owner'), String(process.pid));
+      break;
+    } catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      const goneOwner = addGuardGoneOwner(lockDir);
+      if (goneOwner !== null) {
+        const aside = `${lockDir}.stale-${process.pid}-${Date.now()}`;
+        try { renameSync(lockDir, aside); } catch { continue; /* someone else broke it first */ }
+        // Another waiter may have broken the dead lock and taken a fresh one between our check and our rename —
+        // then what we moved aside is a LIVE lock: put it back rather than delete it.
+        if (readAddGuardOwner(aside) !== goneOwner) {
+          try { renameSync(aside, lockDir); } catch { /* lockDir re-taken meanwhile — leave the moved one */ }
+        } else {
+          rmSync(aside, { recursive: true, force: true });
+        }
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`add-guard lock ${lockDir} still held after ${waitMs}ms — another \`add\` is checking; retry`);
+      }
+      await sleep(100);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    // Release only our own lock — if it was broken as stale meanwhile, the dir now belongs to someone else.
+    if (readAddGuardOwner(lockDir) === String(process.pid)) rmSync(lockDir, { recursive: true, force: true });
+  }
 }
 
 async function main() {
@@ -115,16 +218,95 @@ async function main() {
       process.exitCode = 1;
     }
   } else if (cmd === 'add') {
-    // Register-only: `addOverlay` (Module B) does its own atomic read-modify-write under the list's own tiny
-    // mutex and returns immediately — this never touches the clone's tree or its reader/writer lock. See the
-    // file header for why that lock was dropped here.
-    const list = addOverlay(root, {
-      ref: flags.ref, pr, addedBy: by, reason, pinned,
-    }, { env });
-    appendOverlayEvent(root, {
-      kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
-    }, { env });
-    output = { list };
+    // THE CONFLICT GUARD (epic #3383/#4075 — live incident: `lane/promote-stale-green`/#2826 was registered
+    // while KNOWINGLY conflicting with `lane/fix-procedure`/#2821 in `review-status-tag.mjs`; nothing refused
+    // it, so the next rebuild silently DROPPED #2826 and its fix never went live). Read-only (see
+    // `previewOverlayConflict`'s own header) — runs BEFORE any state-file mutation, never after.
+    const allowConflict = !!flags['allow-conflict'];
+    if (allowConflict && !reason) {
+      return fail('--allow-conflict requires --reason=<why registering it anyway is safe>');
+    }
+    // A corrupt store gets no guard run (it would waste a real git fetch): `--check` reports it as a failure
+    // (exit 1, `wouldRegister:false` — never a false "would register", PR #2827 review), and a real add falls
+    // straight through to `addOverlay`, whose own refusal throws rather than overwrite a damaged file.
+    const runGuard = async () => {
+      const overlayState = readOverlayState(root, { env });
+      if (overlayState.corrupt) return { ok: false, reason: 'overlay-store-corrupt', corruptStore: true };
+      return previewOverlayConflict({ root, ref: flags.ref, pr, existingOverlays: overlayState.overlays, env });
+    };
+
+    // `--check`: report the SAME guard result and stop — never calls `addOverlay`/`appendOverlayEvent`, so a
+    // preview against a live clone's real overlay config never registers or removes anything (the exact
+    // "dry-run/check mode" this guard was built to be provable with).
+    if (flags.check) {
+      const check = await runGuard();
+      warnSetAside(check);
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify({ check, wouldRegister: check.ok && (check.clean || allowConflict) })}\n`);
+      } else if (!check.ok) {
+        process.stdout.write(`daemon-overlay --check: could not verify — ${describeFailure(check)}\n`);
+      } else if (check.clean) {
+        process.stdout.write(`daemon-overlay --check: ${flags.ref} merges clean against origin/main + every registered overlay — would register.\n`);
+      } else {
+        const against = check.conflicting.map((o) => `${o.ref}${o.pr != null ? ` (PR #${o.pr})` : ''}`).join(', ') || '(none named)';
+        process.stdout.write(`daemon-overlay --check: ${flags.ref} CONFLICTS in ${check.files.join(', ')} with: ${against} — `
+          + `would be REFUSED${allowConflict ? ' (but --allow-conflict is set, so it would register anyway)' : ''}.\n`);
+      }
+      if (check.ok && !check.clean && !allowConflict) process.exitCode = 3;
+      else if (!check.ok) process.exitCode = 1;
+      return;
+    }
+
+    // Check-then-register runs under the per-clone ADD-GUARD lock, and the guard re-reads the overlay list INSIDE
+    // it: without that, two concurrent adds of mutually-conflicting refs each checked a list that did not yet
+    // hold the other, and BOTH registered — the exact incident this guard exists to stop (PR #2827 review).
+    // Only guarded adds take this lock; the list's own millisecond mutex (and so a rebuild's auto-remove) never
+    // waits on it.
+    const registered = await withAddGuardLock(root, env, async () => {
+      const check = await runGuard();
+      if (check.corruptStore) {
+        throw new Error(`overlay state file ${overlayFilePath(root, env)} is corrupt — refusing to overwrite it; fix or remove it by hand`);
+      }
+      warnSetAside(check);
+      if (!check.ok) {
+        // The guard itself could not determine safety (no network, unresolved ref, a merge-tree error, …) — fail
+        // CLOSED: refuse rather than register on an unproven merge. `--allow-conflict` names a KNOWN conflict it
+        // is safe to override; it does not cover "the check itself could not run".
+        process.stderr.write(`daemon-overlay: could not verify ${flags.ref} merges clean (${describeFailure(check)}) — refusing to register. Pass --allow-conflict --reason=... only for a CONFIRMED conflict this guard itself reported.\n`);
+        process.exitCode = 1;
+        return null;
+      }
+      if (!check.clean) {
+        const against = check.conflicting.length
+          ? check.conflicting.map((o) => `${o.ref}${o.pr != null ? ` (PR #${o.pr})` : ''}`).join(', ')
+          : '(no already-registered overlay diff names the file — check main itself, or a ref this guard could not resolve)';
+        const detail = `${flags.ref}${pr != null ? ` (PR #${pr})` : ''} does not merge clean against origin/main + `
+          + `the already-registered overlay(s) in apply order. Conflicting file(s): ${check.files.join(', ')}. `
+          + `Conflicts with: ${against}.`;
+        if (!allowConflict) {
+          process.stderr.write(`daemon-overlay: REFUSED — ${detail}\n`
+            + 'Rebase the branch onto the conflicting overlay (or main) first, or override with '
+            + '--allow-conflict --reason=<why>.\n');
+          process.exitCode = 3;
+          return null;
+        }
+        process.stderr.write(`daemon-overlay: registering DESPITE a known conflict (--allow-conflict) — ${detail}\n`);
+      }
+
+      // Register-only: `addOverlay` (Module B) does its own atomic read-modify-write under the list's own tiny
+      // mutex and returns immediately — this never touches the clone's tree or its reader/writer lock. See the
+      // file header for why that lock was dropped here.
+      const list = addOverlay(root, {
+        ref: flags.ref, pr, addedBy: by, reason, pinned,
+      }, { env });
+      appendOverlayEvent(root, {
+        kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
+        ...(!check.clean ? { conflictOverride: { files: check.files, conflicting: check.conflicting } } : {}),
+      }, { env });
+      return { list, check };
+    });
+    if (!registered) return;
+    output = { list: registered.list, conflictCheck: registered.check };
     // daemon-edge slice 1 (epic x59tqsg): ONLY with WE_DAEMON_EDGE=1 (default off) is the PR also registered
     // for the kept `daemon-edge` branch (admission check vs main + edge). Flag off ⇒ this block never runs.
     if (edgeEnabled(env) && pr != null) {
