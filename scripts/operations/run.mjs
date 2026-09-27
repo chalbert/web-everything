@@ -60,6 +60,9 @@ import { daemonStatusOperation, DAEMON_STATUS_OP } from './daemon-status.mjs';
 import { collectDaemonStatus } from './daemon-status-io.mjs';
 import { heavyQueueOperation, HEAVY_QUEUE_OP } from './heavy-queue.mjs';
 import { collectHeavyQueue } from './heavy-queue-io.mjs';
+import { reviewSeatCapsOperation, REVIEW_SEAT_CAPS_OP } from './review-seat-caps.mjs';
+import { reviewSeatCapUsage } from './review-extra-seats.mjs';
+import { readStore } from '../conveyor/run-scorecard-store.mjs';
 import { liveStateOperation, LIVE_STATE_OP } from './live-state.mjs';
 import { collectLiveState } from './live-state-io.mjs';
 import { liveWorkOperation, LIVE_WORK_OP } from './live-work.mjs';
@@ -276,6 +279,13 @@ export const OPERATIONS = Object.freeze({
   // `ps`/`git` reads are bound here, and ONLY here.
   [HEAVY_QUEUE_OP]: () => ({
     declaration: heavyQueueOperation({ collect: collectHeavyQueue }),
+    sinks: {},
+  }),
+  // Card xn2wf9t (#3383 follow-up) — the operator's "how close is each non-Claude review seat provider to its
+  // own daily call cap" one-liner, `heavy-queue`-style. Read-only, same no-sinks reasoning: every step is
+  // `compute`. `reviewSeatCapUsage`'s real scorecard-store read is bound here, and ONLY here.
+  [REVIEW_SEAT_CAPS_OP]: () => ({
+    declaration: reviewSeatCapsOperation({ collect: () => reviewSeatCapUsage(readStore().records, Date.now()) }),
     sinks: {},
   }),
   [GATE_HEALTH_OP]: () => ({

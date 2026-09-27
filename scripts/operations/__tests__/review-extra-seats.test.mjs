@@ -12,10 +12,11 @@ import {
   reviewSeatRoutes, ROUTED_ADVISORY_LENSES, EXTRA_JUROR_MANDATE, REVIEW_SEAT_MODELS,
 } from '../review-dispatch.mjs';
 import {
-  runExtraSeats, extraSeatsEnabled, resolveDailyCap, callsUsedToday, quotaHold, claudeFindingsFromLoop,
-  buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay, renderSeatSummary,
-  EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, toIsoInstant, extractAnswerJson, reserveSeatCalls,
-  createExtraSeatsIo, withLedgerLock, isPinnedRev, repoRelativeFindings,
+  runExtraSeats, extraSeatsEnabled, resolveDailyCap, callsUsedToday, callsUsedTodayForProvider, quotaHold,
+  claudeFindingsFromLoop, buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay,
+  renderSeatSummary, EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, PROVIDER_CAP_ENV, PROVIDER_CAP_DEFAULT,
+  resolveProviderCap, reviewSeatCapUsage, toIsoInstant, extractAnswerJson, reserveSeatCalls, createExtraSeatsIo,
+  withLedgerLock, isPinnedRev, repoRelativeFindings,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeExtraSeats } from '../review-job.mjs';
 import { ADVISORY_JUDGE_LENS, JUDGE_SEATS } from '../review-pr.mjs';
@@ -48,8 +49,10 @@ const LOOP_PAYLOAD = {
 
 const answer = (lenses) => `I reviewed it.\n\n\`\`\`json\n${JSON.stringify({ lenses })}\n\`\`\``;
 
-/** A fake seat io recording every effect. */
-function fakeSeatIo(over = {}, ledgerBox = { value: null }) {
+/** A fake seat io recording every effect. Reservations are kept in ONE ledger PER PROVIDER inside `ledgerBox`
+ *  (an object keyed by provider), matching the real io's per-provider ledger files — pass one `ledgerBox` to
+ *  several fakes to model concurrent review jobs contending for the SAME provider's budget. */
+function fakeSeatIo(over = {}, ledgerBox = {}) {
   const calls = [];
   const rows = [];
   const io = {
@@ -57,11 +60,10 @@ function fakeSeatIo(over = {}, ledgerBox = { value: null }) {
     newId: (() => { let n = 0; return () => `call-${++n}`; })(),
     log: (l) => calls.push(['log', l]),
     readRecords: () => [],
-    // The shared reservation ledger; pass one `ledgerBox` to several fakes to model concurrent review jobs.
-    reserveCalls: ({ want, dailyCap, now }) => {
-      const r = reserveSeatCalls({ ledger: ledgerBox.value, records: io.readRecords(), want, dailyCap, now, newId: io.newId });
-      ledgerBox.value = r.ledger;
-      calls.push(['reserve', want, r.callIds.length]);
+    reserveCalls: ({ provider, want, dailyCap, now }) => {
+      const r = reserveSeatCalls({ ledger: ledgerBox[provider] ?? null, records: io.readRecords(), want, dailyCap, now, newId: io.newId, provider });
+      ledgerBox[provider] = r.ledger;
+      calls.push(['reserve', provider, want, r.callIds.length]);
       return r;
     },
     append: (row) => { const v = validateScorecard({ v: 1, scoredAt: new Date(NOW).toISOString(), ...row }); if (!v.ok) throw new Error(v.errors.join('; ')); rows.push(row); },
@@ -74,8 +76,10 @@ function fakeSeatIo(over = {}, ledgerBox = { value: null }) {
       if (o.provider === 'codex') {
         return { exitCode: 0, report: { lastMessage: answer({
           'extra-juror:correctness': { verdict: 'changes', findings: [{ summary: 'a forged merge headline bypasses isMechanicalMergeCommit', file: 'scripts/lib/ai-pr-authorship.mjs', line: 44, impactIfUnfixed: 'broken' }] },
-          'claim-accuracy': { verdict: 'changes', findings: [{ summary: 'PR body says tests were added; none were', file: null, impactIfUnfixed: 'cosmetic' }] },
         }), quotaUsedPercent: 12, quotaResetsAt: null } };
+      }
+      if (o.provider === 'agy-claude') {
+        return { exitCode: 0, report: { events: { finalResponse: answer({ 'claim-accuracy': { verdict: 'changes', findings: [{ summary: 'PR body says tests were added; none were', file: null, impactIfUnfixed: 'cosmetic' }] } }) } } };
       }
       return { exitCode: 0, report: { events: { finalResponse: answer({ 'standards-conformance': { verdict: 'accept', findings: [] } }) } } };
     },
@@ -85,20 +89,20 @@ function fakeSeatIo(over = {}, ledgerBox = { value: null }) {
 }
 
 describe('#4194 reviewSeatRoutes — which seats, on which provider', () => {
-  it('routes the ADVISORY lenses and ONE extra juror to codex/gemini, and never a mandatory lens\'s own seat', () => {
+  it('routes the ADVISORY lenses and ONE extra juror to codex/agy-claude/agy-gemini, and never a mandatory lens\'s own seat', () => {
     const { routes, skipped } = reviewSeatRoutes({});
     expect(skipped).toEqual([]);
     expect(routes.map((r) => r.seat)).toEqual(['extra-juror', 'advisory-lens', 'advisory-lens']);
     expect(routes.filter((r) => r.seat === 'extra-juror')).toHaveLength(1);
     for (const r of routes) {
-      expect(['codex', 'gemini']).toContain(r.provider);
+      expect(['codex', 'agy-claude', 'agy-gemini']).toContain(r.provider);
       expect(r.model).toBe(REVIEW_SEAT_MODELS[r.provider].model);
       if (r.seat === 'advisory-lens') expect(MANDATORY_LENSES).not.toContain(r.lens);
     }
-    // spread across both providers when both are usable
-    expect(new Set(routes.map((r) => r.provider)).size).toBe(2);
+    // spread across all three providers when all are usable (3 seats, 3 providers, no prior history)
+    expect(new Set(routes.map((r) => r.provider)).size).toBe(3);
     // live-caught: agy refuses gemini-3.1-pro at `medium` ("available: low, high")
-    expect(['low', 'high']).toContain(REVIEW_SEAT_MODELS.gemini.effort);
+    expect(['low', 'high']).toContain(REVIEW_SEAT_MODELS['agy-gemini'].effort);
   });
 
   it('routes every advisory lens review-pr does not already seat off-Claude, and leaves Claude\'s mandatory seats alone', () => {
@@ -119,7 +123,7 @@ describe('#4194 reviewSeatRoutes — which seats, on which provider', () => {
   });
 
   it('only available providers are picked; none available → named skips', () => {
-    expect(reviewSeatRoutes({ available: ['gemini'] }).routes.every((r) => r.provider === 'gemini')).toBe(true);
+    expect(reviewSeatRoutes({ available: ['agy-gemini'] }).routes.every((r) => r.provider === 'agy-gemini')).toBe(true);
     const none = reviewSeatRoutes({ available: [] });
     expect(none.routes).toEqual([]);
     expect(none.skipped).toHaveLength(3);
@@ -128,18 +132,21 @@ describe('#4194 reviewSeatRoutes — which seats, on which provider', () => {
 
 describe('#4194 provider-routing selectReviewSeatProvider', () => {
   const row = (provider, status, scoredAt, lens = 'claim-accuracy') => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, status, scoredAt, taskType: reviewSeatTaskType(lens) });
+  // These two tests are about the TIE-BREAK logic between two providers' histories, not about the full
+  // three-provider set — `available` pins the comparison to exactly the two the scorecards below are about.
+  const TWO = ['codex', 'agy-gemini'];
 
   it('ranks a provider whose last seat row for the lens failed after a clean one', () => {
-    const scorecards = [row('codex', 'timeout', '2026-09-26T10:00:00Z'), row('gemini', 'ok', '2026-09-26T09:00:00Z'), row('gemini', 'ok', '2026-09-26T08:00:00Z')];
-    expect(selectReviewSeatProvider({ lens: 'claim-accuracy', scorecards }).provider).toBe('gemini');
+    const scorecards = [row('codex', 'timeout', '2026-09-26T10:00:00Z'), row('agy-gemini', 'ok', '2026-09-26T09:00:00Z'), row('agy-gemini', 'ok', '2026-09-26T08:00:00Z')];
+    expect(selectReviewSeatProvider({ lens: 'claim-accuracy', available: TWO, scorecards }).provider).toBe('agy-gemini');
     // a LATER clean codex row lifts the penalty; then fewer rows (explore evenly) wins
-    const recovered = [...scorecards, row('gemini', 'ok', '2026-09-26T07:00:00Z'), row('codex', 'ok', '2026-09-26T11:00:00Z')];
-    expect(selectReviewSeatProvider({ lens: 'claim-accuracy', scorecards: recovered }).provider).toBe('codex');
+    const recovered = [...scorecards, row('agy-gemini', 'ok', '2026-09-26T07:00:00Z'), row('codex', 'ok', '2026-09-26T11:00:00Z')];
+    expect(selectReviewSeatProvider({ lens: 'claim-accuracy', available: TWO, scorecards: recovered }).provider).toBe('codex');
   });
 
   it('a different lens\'s rows never count, and planned load spreads seats', () => {
     const scorecards = [row('codex', 'error', '2026-09-26T10:00:00Z', 'standards-conformance')];
-    const pick = selectReviewSeatProvider({ lens: 'claim-accuracy', scorecards, plannedLoad: { gemini: 1 } });
+    const pick = selectReviewSeatProvider({ lens: 'claim-accuracy', available: TWO, scorecards, plannedLoad: { 'agy-gemini': 1 } });
     expect(pick.provider).toBe('codex');
     expect(pick.auditTrail.length).toBeGreaterThan(1);
   });
@@ -178,6 +185,26 @@ describe('#4194 cost controls — kill switch, cap, quota', () => {
     expect(toIsoInstant(1790430415)).toBe(new Date(1790430415 * 1000).toISOString());
     expect(toIsoInstant('2026-09-26T18:00:00Z')).toBe('2026-09-26T18:00:00.000Z');
     expect(toIsoInstant(null)).toBeNull();
+  });
+
+  it('card xn2wf9t — per-provider caps are resolved and counted separately, with codex\'s own legacy fallback', () => {
+    expect(resolveProviderCap('codex', {})).toBe(PROVIDER_CAP_DEFAULT.codex);
+    expect(resolveProviderCap('agy-claude', {})).toBe(PROVIDER_CAP_DEFAULT['agy-claude']);
+    expect(resolveProviderCap('agy-gemini', {})).toBe(PROVIDER_CAP_DEFAULT['agy-gemini']);
+    expect(resolveProviderCap('codex', { [PROVIDER_CAP_ENV.codex]: '5' })).toBe(5);
+    // codex alone falls back to the OLD shared env for one release; the antigravity backends never do.
+    expect(resolveProviderCap('codex', { [DAILY_CAP_ENV]: '7' })).toBe(7);
+    expect(resolveProviderCap('agy-claude', { [DAILY_CAP_ENV]: '7' })).toBe(PROVIDER_CAP_DEFAULT['agy-claude']);
+    // the provider's own env wins over the legacy shared one when both are set
+    expect(resolveProviderCap('codex', { [PROVIDER_CAP_ENV.codex]: '9', [DAILY_CAP_ENV]: '7' })).toBe(9);
+
+    const rows = (provider, n) => Array.from({ length: n }, (_, i) => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, callId: `${provider}-${i}`, scoredAt: '2026-09-26T14:00:00Z' }));
+    const records = [...rows('codex', 2), ...rows('agy-claude', 1)];
+    const usage = reviewSeatCapUsage(records, NOW, { [PROVIDER_CAP_ENV.codex]: '2' });
+    expect(usage.codex).toEqual({ usedToday: 2, cap: 2, fraction: 1 });
+    expect(usage['agy-claude']).toEqual({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-claude'], fraction: expect.any(Number) });
+    expect(usage['agy-gemini']).toEqual({ usedToday: 0, cap: PROVIDER_CAP_DEFAULT['agy-gemini'], fraction: 0 });
+    expect(callsUsedTodayForProvider(records, NOW, 'codex')).toBe(2);
   });
 });
 
@@ -232,9 +259,11 @@ describe('#4194 the direct-task scripts in --review mode', () => {
     const c = seatCallArgv({ provider: 'codex', taskFile: '/t', dir: '/d', model: 'm', effort: 'medium', timeoutMs: 600000, root: '/r' });
     expect(c[0]).toBe('/r/scripts/codex-direct-task.mjs');
     expect(c).toEqual(expect.arrayContaining(['--review', '--json', '--no-stream', '--timeout-ms=600000']));
-    const g = seatCallArgv({ provider: 'gemini', taskFile: '/t', dir: '/d', model: 'm', effort: 'medium', timeoutMs: 600000, root: '/r' });
-    expect(g[0]).toBe('/r/scripts/gemini-direct-task.mjs');
-    expect(g).toEqual(expect.arrayContaining(['--review', '--json', '--timeout-ms=300000']));
+    for (const provider of ['agy-claude', 'agy-gemini']) {
+      const g = seatCallArgv({ provider, taskFile: '/t', dir: '/d', model: 'm', effort: 'medium', timeoutMs: 600000, root: '/r' });
+      expect(g[0]).toBe('/r/scripts/gemini-direct-task.mjs');
+      expect(g).toEqual(expect.arrayContaining(['--review', '--json', '--timeout-ms=300000']));
+    }
   });
 });
 
@@ -343,36 +372,43 @@ describe('#4194 prompt, answer parsing, confirmation, rows', () => {
 });
 
 describe('#4194 runExtraSeats — the arc, with fakes', () => {
-  it('runs both providers in parallel, writes one evidence row per seat, stamps Claude confirmation, cleans up', async () => {
+  it('runs all three providers in parallel, writes one evidence row per seat, stamps Claude confirmation, cleans up', async () => {
     const { io, calls, rows } = fakeSeatIo();
     const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
     expect(r.status).toBe('ran');
     expect(r.rowsWritten).toBe(3);
     expect(rows.map((x) => `${x.seat}:${x.lens}@${x.provider}`).sort()).toEqual([
-      'advisory-lens:claim-accuracy@codex', 'advisory-lens:standards-conformance@gemini', 'extra-juror:correctness@codex',
+      'advisory-lens:claim-accuracy@agy-claude', 'advisory-lens:standards-conformance@agy-gemini', 'extra-juror:correctness@codex',
     ]);
     const juror = rows.find((x) => x.seat === 'extra-juror');
     expect(juror.findings[0]).toMatchObject({ confirmedByClaude: true });
+    expect(juror.quotaUsedPercent).toBe(12);
     // #4034 follow-up (card 4034b) — every row stamps the same read.netChangedFiles the loop already computed.
     for (const row of rows) expect(row.changedFiles).toEqual(LOOP_PAYLOAD.findings.read.netChangedFiles);
     const claim = rows.find((x) => x.lens === 'claim-accuracy');
     expect(claim.findings[0]).toMatchObject({ confirmedByClaude: false });
-    expect(claim.quotaUsedPercent).toBe(12);
-    expect(calls.filter((c) => c[0] === 'seat')).toHaveLength(2);
+    expect(calls.filter((c) => c[0] === 'seat')).toHaveLength(3);
     expect(calls.find((c) => c[0] === 'scratch')[1]).toMatchObject({ lanePath: '/lane', rev: 'a'.repeat(40) });
     expect(calls.at(-1)).toEqual(['rm', '/tmp/seat-scratch']);
     expect(renderSeatSummary(r).join('\n')).toMatch(/also raised by Claude/);
+    // Card xn2wf9t — per-provider usage is reported, not just a shared total.
+    expect(r.providerUsage.codex).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT.codex });
+    expect(r.providerUsage['agy-claude']).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-claude'] });
+    expect(r.providerUsage['agy-gemini']).toMatchObject({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-gemini'] });
   });
 
-  it('the gemini seat gets an inline brief; the codex seat (OS read-only sandbox) reads the checkout', async () => {
+  it('each antigravity seat gets an inline brief; the codex seat (OS read-only sandbox) reads the checkout', async () => {
     const written = new Map();
     const { io } = fakeSeatIo({ writeFile: (p, text) => written.set(p, text) });
     const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
     expect(r.status).toBe('ran');
-    const gem = [...written].find(([p]) => p.endsWith('task-gemini.md'))[1];
+    const claude = [...written].find(([p]) => p.endsWith('task-agy-claude.md'))[1];
+    const gemini = [...written].find(([p]) => p.endsWith('task-agy-gemini.md'))[1];
     const cod = [...written].find(([p]) => p.endsWith('task-codex.md'))[1];
-    expect(gem).toContain(LOOP_PAYLOAD.findings.read.diffText.trim());
-    expect(gem).not.toContain('/tmp/seat-scratch');
+    expect(claude).toContain(LOOP_PAYLOAD.findings.read.diffText.trim());
+    expect(claude).not.toContain('/tmp/seat-scratch');
+    expect(gemini).toContain(LOOP_PAYLOAD.findings.read.diffText.trim());
+    expect(gemini).not.toContain('/tmp/seat-scratch');
     expect(cod).toContain('/tmp/seat-scratch');
   });
 
@@ -395,7 +431,8 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: {} }, io);
     expect(r.status).toBe('ran');
     expect(rows.find((x) => x.provider === 'codex').status).toBe('error');
-    expect(rows.find((x) => x.provider === 'gemini').status).toBe('timeout');
+    expect(rows.find((x) => x.provider === 'agy-claude').status).toBe('timeout');
+    expect(rows.find((x) => x.provider === 'agy-gemini').status).toBe('timeout');
     expect(rows.every((x) => x.findingsCount === 0)).toBe(true);
   });
 
@@ -415,50 +452,52 @@ describe('#4194 runExtraSeats — the arc, with fakes', () => {
     expect(calls.filter((c) => c[0] === 'log').map((c) => c[1]).join('\n')).toMatch(/skipping codex/);
   });
 
-  it('daily cap reached → skipped without spawning', async () => {
-    const used = Array.from({ length: 3 }, (_, i) => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, callId: `k${i}`, scoredAt: '2026-09-26T14:00:00Z' }));
-    const { io, calls } = fakeSeatIo({ readRecords: () => used });
-    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [DAILY_CAP_ENV]: '3' } }, io);
+  it('every provider at its own cap → skipped without spawning', async () => {
+    const used = (provider) => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, callId: `k-${provider}`, scoredAt: '2026-09-26T14:00:00Z' });
+    const { io, calls } = fakeSeatIo({ readRecords: () => ['codex', 'agy-claude', 'agy-gemini'].map(used) });
+    const env = { [PROVIDER_CAP_ENV.codex]: '1', [PROVIDER_CAP_ENV['agy-claude']]: '1', [PROVIDER_CAP_ENV['agy-gemini']]: '1' };
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, io);
     expect(r.status).toBe('skipped');
     expect(r.reason).toMatch(/daily-cap/);
     expect(calls.some((c) => c[0] === 'seat')).toBe(false);
   });
 
-  it('concurrent reviews cannot reserve more than the remaining daily budget', async () => {
+  it('a provider AT ITS OWN CAP never blocks the others — the seat falls back rather than going unrun (never "no seat")', async () => {
+    // codex is already at its (tiny) cap; the extra-juror seat would normally land there (see the empirical
+    // routing above) — with codex excluded it must land on agy-claude or agy-gemini instead of being skipped.
+    const used = { dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', callId: 'k-codex', scoredAt: '2026-09-26T14:00:00Z' };
+    const { io, rows } = fakeSeatIo({ readRecords: () => [used] });
+    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [PROVIDER_CAP_ENV.codex]: '1' } }, io);
+    expect(r.status).toBe('ran');
+    expect(rows.some((x) => x.provider === 'codex')).toBe(false);
+    const juror = rows.find((x) => x.seat === 'extra-juror');
+    expect(juror).toBeTruthy();
+    expect(['agy-claude', 'agy-gemini']).toContain(juror.provider);
+    expect(r.providerUsage.codex).toMatchObject({ usedToday: 1, cap: 1 });
+  });
+
+  it('concurrent reviews cannot together overspend ONE provider\'s own cap; the loser falls back to a still-budgeted provider', async () => {
     // Both jobs read the same store snapshot (0 used) before either has written a row — the race the cap must
-    // survive. Each wants 2 calls (codex + gemini); the cap is 2, so together they may launch 2, not 4.
-    const ledgerBox = { value: null };
+    // survive. Codex's cap is 1, so of the two jobs wanting it, only one may actually launch a codex call — the
+    // other's seat falls back to agy-claude/agy-gemini rather than being skipped outright.
+    const ledgerBox = {};
     let release;
     const gate = new Promise((r) => { release = r; });
-    let launched = 0;
-    const runSeat = async (o) => { launched += 1; await gate; return fakeSeatIo().io.runSeat(o); };
+    let codexLaunched = 0;
+    const runSeat = async (o) => { if (o.provider === 'codex') { codexLaunched += 1; await gate; } return fakeSeatIo().io.runSeat(o); };
     const a = fakeSeatIo({ runSeat }, ledgerBox);
     const b = fakeSeatIo({ runSeat, newId: (() => { let n = 0; return () => `b-call-${++n}`; })() }, ledgerBox);
-    const env = { [DAILY_CAP_ENV]: '2' };
+    const env = { [PROVIDER_CAP_ENV.codex]: '1' };
     const pa = runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, a.io);
     const pb = runExtraSeats({ pr: 6, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env }, b.io);
     release();
     const [ra, rb] = await Promise.all([pa, pb]);
-    expect(launched).toBe(2);
+    expect(codexLaunched).toBe(1);
     expect(ra.status).toBe('ran');
-    expect(rb.status).toBe('skipped');
-    expect(rb.reason).toMatch(/daily-cap/);
-    expect(ledgerBox.value.reservations).toHaveLength(2);
-  });
-
-  it('a short grant (a concurrent review took one) re-plans every seat onto the one granted call', async () => {
-    // The snapshot says 2 left; the ledger already holds a reservation the store has not seen, so 1 is granted.
-    const ledgerBox = { value: { version: 1, reservations: [{ callId: 'other', at: new Date(NOW).toISOString() }] } };
-    const { io, calls, rows } = fakeSeatIo({}, ledgerBox);
-    const r = await runExtraSeats({ pr: 5, repo: REPO, lanePath: '/lane', loopPayload: LOOP_PAYLOAD, env: { [DAILY_CAP_ENV]: '2' } }, io);
-    expect(r.status).toBe('ran');
-    expect(calls.find((c) => c[0] === 'reserve')).toEqual(['reserve', 2, 1]);
-    expect(calls.filter((c) => c[0] === 'seat')).toHaveLength(1);
-    expect(rows).toHaveLength(3);
-    expect(new Set(rows.map((x) => x.provider)).size).toBe(1);
-    expect(r.callsUsedToday).toBe(2);
-    // the row carries the RESERVED call id, so the store and the ledger count it once
-    expect(ledgerBox.value.reservations.map((x) => x.callId)).toContain(rows[0].callId);
+    expect(rb.status).toBe('ran'); // never "no seat" — rb's extra-juror seat fell back to the other backend
+    const codexRuns = [ra, rb].filter((r) => r.seats.some((s) => s.provider === 'codex'));
+    expect(codexRuns).toHaveLength(1);
+    expect(ledgerBox.codex.reservations).toHaveLength(1);
   });
 
   it('a reservation that cannot be made fails closed — nothing spawned', async () => {
