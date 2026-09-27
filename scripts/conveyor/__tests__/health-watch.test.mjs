@@ -351,9 +351,9 @@ describe('tick() — machine-overload: normal snapshot never opens, the incident
     const second = await tick(flags);
     const opens = second.transitions.filter((t) => t.type === 'opened' && t.key.startsWith('machine-overload'));
     expect(opens.length).toBe(1);
-    // Per the Sun 2026-09-27 operator decision (health-smells-notify-list.mjs), machine-overload is not among
-    // the eight approved notify-in-shadow signs today — it opens an episode but stays record-only (shadow).
-    expect(second.plan.find((p) => p.kind === 'notify' && p.key === opens[0].key)?.suppressed).toBe('shadow mode');
+    // Notified even in shadow mode — approved by an earlier operator decision; the Sun 2026-09-27
+    // notify-list.mjs addition is additive and never demotes a sign already approved.
+    expect(second.plan.find((p) => p.kind === 'notify' && p.key === opens[0].key)?.suppressed).toBeFalsy();
 
     const episodesDir = join(healthDir(stateRoot), 'episodes');
     const report = readdirSync(episodesDir).find((f) => f.includes('machine-overload') && f.endsWith('.md'));

@@ -14,10 +14,9 @@
  * lastGood, target, mainSha, updatedAt}`). Any later adoption clears `held` back to `null`, closing this
  * episode the very next tick.
  *
- * Notify scope: the Sun 2026-09-27 ~7:40 AM ET operator decision
- * (`we:scripts/conveyor/health-smells-notify-list.mjs`) reset the notify surface to the eight signs that fired
- * real episodes that night; this sign is not among them today, so it stays record-only (shadow) like most
- * signs — see that file's header for how to re-add it.
+ * Notify scope: still notifies even in shadow mode — a PREVIOUSLY approved sign, carried forward unchanged by
+ * the Sun 2026-09-27 ~7:40 AM ET operator decision (`we:scripts/conveyor/health-smells-notify-list.mjs`),
+ * which ADDED eight more signs to the notify surface without demoting any sign already approved.
  */
 import { MINUTE, HOUR, fmtAge } from '../health-watch-core.mjs';
 

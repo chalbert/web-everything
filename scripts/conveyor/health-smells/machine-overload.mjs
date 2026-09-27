@@ -4,10 +4,9 @@
  * itself, each spawning `node -e 1` in a loop. Machine load hit 293 with 0% idle, the drain's pass took 19 min
  * (normally ~1), and nothing flagged it — a human had to notice "drain slow" and go looking by hand.
  *
- * Notify scope: the Sun 2026-09-27 ~7:40 AM ET operator decision
- * (`we:scripts/conveyor/health-smells-notify-list.mjs`) reset the notify surface to the eight signs that fired
- * real episodes that night; this sign is not among them today, so it stays record-only (shadow) like most
- * signs — see that file's header for how to re-add it.
+ * Notify scope: still notifies even in shadow mode — a PREVIOUSLY approved sign, carried forward unchanged by
+ * the Sun 2026-09-27 ~7:40 AM ET operator decision (`we:scripts/conveyor/health-smells-notify-list.mjs`),
+ * which ADDED eight more signs to the notify surface without demoting any sign already approved.
  *
  * `probes: ['processes', 'machineLoad']` — a `ps -Ao pid,ppid,pcpu,etime,command` snapshot
  * ({@link parsePsOutput}, `we:scripts/conveyor/health-watch-core.mjs`) plus `os.loadavg()`/`os.cpus().length`

@@ -1,8 +1,12 @@
 /**
  * @file scripts/conveyor/health-smells/__tests__/notify-list.test.mjs
- * @description The ONE declared place for "which signs notify even in shadow mode" (the Sun 2026-09-27
- *   ~7:40 AM ET operator decision). Pins the exact approved set, that every id in it names a real registered
- *   smell (no typo drift), and that `planActions` actually reads THIS list by default (not a stale copy).
+ * @description The ONE declared place for "which signs notify even in shadow mode" — the PREVIOUSLY approved
+ *   set (five signs, approved by earlier operator decisions, from the old scattered `notifyEvenInShadow: true`
+ *   field) UNION the Sun 2026-09-27 ~7:40 AM ET operator decision's eight ADDED signs (two of which,
+ *   `dispatch-refused-stale-clone` and `duplicate-live-sessions`, were already in the previous set). Pins the
+ *   exact 13-entry union, that every id in it names a real registered smell (no typo drift), that this is an
+ *   ADDITION (no previously-approved sign was demoted), and that `planActions` actually reads THIS list by
+ *   default (not a stale copy).
  */
 import { describe, it, expect } from 'vitest';
 import { NOTIFY_EVEN_IN_SHADOW } from '../../health-smells-notify-list.mjs';
@@ -11,20 +15,39 @@ import {
   emptyHealthState, stepEpisodes, planActions,
 } from '../../health-watch-core.mjs';
 
-const APPROVED = [
-  'drain-failing-repeatedly',
+// Approved by an earlier operator decision (the old scattered `notifyEvenInShadow: true` field) — never demoted.
+const PREVIOUSLY_APPROVED = [
+  'claude-auth-expired',
+  'daemon-held-on-last-good',
+  'dispatch-permission-stall',
+  'machine-overload',
+  'bg-isolation-stall',
   'dispatch-refused-stale-clone',
+  'duplicate-live-sessions',
+];
+
+// Added by the Sun 2026-09-27 ~7:40 AM ET operator decision.
+const ADDED_2026_09_27 = [
+  'drain-failing-repeatedly',
+  'dispatch-refused-stale-clone', // already in PREVIOUSLY_APPROVED — the union has 13 entries, not 15
   'lane-starvation',
   'gh-call-failures',
   'gh-graphql-budget',
-  'duplicate-live-sessions',
+  'duplicate-live-sessions',      // already in PREVIOUSLY_APPROVED
   'pr-no-owner',
   'daemon-silent',
 ];
 
+const APPROVED = [...new Set([...PREVIOUSLY_APPROVED, ...ADDED_2026_09_27])];
+
 describe('NOTIFY_EVEN_IN_SHADOW', () => {
-  it('is exactly the eight operator-approved signs — no more, no fewer', () => {
+  it('is exactly the union of the previously-approved set and the Sun 2026-09-27 additions — 13 entries', () => {
+    expect(APPROVED).toHaveLength(13);
     expect([...NOTIFY_EVEN_IN_SHADOW].sort()).toEqual([...APPROVED].sort());
+  });
+
+  it('demotes nothing — every previously-approved sign is still in the list', () => {
+    for (const id of PREVIOUSLY_APPROVED) expect(NOTIFY_EVEN_IN_SHADOW.has(id)).toBe(true);
   });
 
   it('every listed id names a real, currently-registered smell (no typo/stale drift)', () => {
