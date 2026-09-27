@@ -4891,6 +4891,26 @@ real trial-count data exists per role, never a separate ceremony:
 `we:model-probation.mjs` by this ruling — it rules on the shape of the bar; wiring a concrete threshold
 is separately-scoped future work, proposed only once a real trial-count distribution exists per role.
 
+**Finding, Sun 2026-09-27 (operator decision) — the numbers.** This ordinary finding supplies the numbers
+the four clauses above left open, for the `delivery` role. They apply per task type × provider, and the
+trust unit stays the exact `{provider, model, taskType}` triple. A triple becomes **eligible for a
+promotion review** only when all four hold:
+
+- **Volume:** at least **20** independently verified trials (`claude-subagent` or `independent-claude`).
+- **Mix:** at least **1** informative trial — a confirmed catch, or a documented cross-reviewer severity
+  disagreement. It is read only from the row's own `informative` field, never inferred (clause 1).
+- **Veto:** **0** confirmed critical misses (`we:scripts/lib/critical-work.mjs#criticalMissesFor`; a miss
+  row with no recorded scope counts as critical, failing closed). This is the independent veto of clause 2.
+- **Quality:** a run rating no worse than Claude's on the same task type. With no rating on either side
+  the criterion is unmet, never assumed.
+
+Eligibility is not promotion: **promotion remains an explicit human decision**, as clause 4 and PR #2182
+already say. `node scripts/lib/model-probation.mjs report` prints each triple's progress against these
+numbers (`GRADUATION_NUMBERS` in `we:scripts/lib/model-probation.mjs`). The evidence when the numbers
+were set (work rows, 2026-09-15 → 2026-09-19): Codex `gpt-6-astra` 26 trials (bugfix 10: 8 landed, 2
+reworked; other 10; doc-fix 3; conflict-resolution 2; self-fix 1), Antigravity 15 (conflict-resolution
+10 landed; other 5: 3 landed, 2 rejected), `ci-heal` 0. No triple is near the bar yet.
+
 **Lineage:** ratified via `#3654` (2026-09-13), filed under the background mechanical dispatcher epic
 `#3383`, grounded in `we:reports/2026-09-12-run-quality-benchmark-for-dispatched-agent-runs.md` and
 composing with (not duplicating)

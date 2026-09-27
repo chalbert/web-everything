@@ -149,7 +149,7 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
   // build/fix/ci-heal dispatch could derive. The critical-work gate must keep them on Claude regardless.
   describe('with CLEAN VERIFIED Codex trials on record for bugfix/build-new-feature/doc-fix', () => {
     it('build/fix/ci-heal STILL route to Claude — the critical-work gate ignores the trial history entirely', () => {
-      for (const launchKind of ['build', 'fix', 'ci-heal']) {
+      for (const launchKind of ['build', 'fix']) {
         const read = runReadTick(launchKind, { scorecards: CODEX_TRIALS });
         expect(read.routing.outcome, launchKind).toBe('routed');
         expect(read.routing.routed, launchKind).toBe('claude');
@@ -161,6 +161,16 @@ describe('(a) the no-op proof — critical-work gate keeps build/fix/ci-heal on 
         expect(gateEntry, launchKind).toBeTruthy();
         expect(gateEntry.result, launchKind).toBe('claude-only');
       }
+      // agy-launcher-probation — `ci-heal` is its own taskType now, opened on probation: the gate opens for this
+      // non-critical scope, but the RECOMMENDATION stays Claude (the fallback, so the tier table still applies)
+      // and the probation pick rides beside it. The Codex bugfix/doc-fix history above is not ci-heal history.
+      const heal = runReadTick('ci-heal', { scorecards: CODEX_TRIALS });
+      expect(heal.routing.taskType).toBe('ci-heal');
+      expect(heal.routing.routed).toBe('claude');
+      expect(heal.routing.executed).toBe('claude');
+      expect(heal.plannedWorkerModel).toMatchObject({ tier: 'sonnet', model: 'sonnet' });
+      expect(heal.routing.auditTrail.find((e) => e.criterion === 'critical-work-gate').result).toBe('open-non-critical');
+      expect(heal.routing.probationWorker).toMatchObject({ id: 'antigravity-claude', executor: 'antigravity', supervision: 'full' });
     });
 
     it('role kinds are unaffected by scorecards either way — they never reach the provider cascade', () => {

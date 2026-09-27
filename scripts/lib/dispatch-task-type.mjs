@@ -40,7 +40,7 @@
  *   | `build`                               | `build-new-feature` | `BRIEF_REQUIRED_BY_KIND.build`           |
  *   | `fix`, cause `conflict`               | `conflict-resolution` | a CAUSE, not a kind (#3717)            |
  *   | `fix`                                 | `bugfix`            | derivable                                |
- *   | `ci-heal`                             | `bugfix`            | derivable                                |
+ *   | `ci-heal`                             | `ci-heal`           | its own taskType since 2026-09-27        |
  *   | `prepare`, `prepare-decision`         | (role)              | authoring, changes no product code       |
  *   | `investigate`                         | (role)              | triage-research, changes no product code |
  *   | `review`                              | (role)              | judging, changes no product code         |
@@ -166,7 +166,12 @@ export function taskTypeFor({ kind, cause, scopePaths } = {}) {
   if (k === 'fix' && rawCause === CONFLICT_CAUSE) {
     return derived('conflict-resolution', 'a `fix` dispatched because a bounce was conflict-caused — the CAUSE, not the kind, produces this taskType');
   }
-  if (k === 'fix' || k === 'ci-heal') {
+  // agy-launcher-probation (operator, 2026-09-27) — a CI heal is its own taskType, not `bugfix`: it repairs a red
+  // or BEHIND PR's CI, not a reviewer's finding, and it is opened on probation while `bugfix` stays closed.
+  if (k === 'ci-heal') {
+    return derived('ci-heal', 'a `ci-heal` repairs a red or BEHIND PR\'s CI, which is its own task type');
+  }
+  if (k === 'fix') {
     return derived('bugfix', `\`${k}\` repairs code an earlier build already wrote`);
   }
   if (k === 'build') {
@@ -236,8 +241,8 @@ export const DISPATCH_TASK_TYPE_TABLE = Object.freeze([
   }),
   Object.freeze({
     example: Object.freeze({ kind: 'ci-heal', cause: null, scopePaths: Object.freeze(['we:scripts/lib/foo.mjs']) }),
-    outcome: 'task-type', taskType: 'bugfix',
-    note: 'a CI-heal repair',
+    outcome: 'task-type', taskType: 'ci-heal',
+    note: 'a CI-heal repair — its own taskType (opened on probation 2026-09-27)',
   }),
   Object.freeze({
     example: Object.freeze({ kind: 'prepare', cause: null, scopePaths: Object.freeze(['we:backlog/1.md']) }),
