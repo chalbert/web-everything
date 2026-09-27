@@ -67,6 +67,8 @@ describe('merge-ai-prs CLI — #3383 gh-error exit code split from the dup-id tr
     expect(payload).toMatchObject({ ok: false, reason: 'gh-error' });
     expect(payload.detail).toMatch(/gh pr list/);
     expect(payload.detail).toMatch(/is gh authenticated\?/);
+    // gh's own stderr cause reaches the detail (2026-09-27 freeze: a bare "Command failed" hid a rate-limit storm).
+    expect(payload.detail).toMatch(/gh: gh: rate limit exceeded/);
   });
 
   it('a clean gh listing (no error) exits 0 when the backlog carries no duplicate ids', () => {
