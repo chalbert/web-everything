@@ -52,6 +52,31 @@ describe('ci-red-recovery-watch — buildCandidates', () => {
   });
 });
 
+describe('ci-red-recovery-watch — a daemon-soak-only red PR (soak-main-red)', () => {
+  const soakRed = {
+    number: 2783, headRefName: 'lane/x', headRefOid: 'cec3090b', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: '2026-09-25T01:20:00Z' },
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-25T01:57:47Z' },
+    ],
+  };
+  it('is a candidate, judged on its daemon-soak failure, and is refreshed onto main once main recovers', () => {
+    const result = sweepCiRedRecovery({
+      readOpenPrs: () => [soakRed], readMainRuns: () => MAIN_RUNS, readAheadBy: () => 5, readComments: () => [],
+      readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], refresh: vi.fn(),
+    });
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2783, kind: 'rebase-onto-main', aheadBy: 5 })]);
+  });
+  it('uses the live required-context list: a check branch protection does not require is ignored', () => {
+    const readRequiredContexts = vi.fn(() => ['test']);
+    const result = sweepCiRedRecovery({
+      readOpenPrs: () => [soakRed], readMainRuns: () => MAIN_RUNS, readAheadBy: () => 5, readComments: () => [],
+      readRequiredContexts, refresh: vi.fn(),
+    });
+    expect(readRequiredContexts).toHaveBeenCalledTimes(1);
+    expect(result.dispatch).toEqual([]);
+  });
+});
+
 describe('ci-red-recovery-watch — sweepCiRedRecovery (dry run, apply: false by default)', () => {
   it('plans a real rebase-onto-main for PR #2635 (never yet refreshed, inside the real red window) and never touches git without --apply', () => {
     const readOpenPrs = () => [PR_2635, PR_QUIET];

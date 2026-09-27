@@ -22,7 +22,8 @@
  * several-second bound on its own), `CALLERS` concurrent REAL `node <simClone>/scripts/lane-pool.mjs acquire
  * --wait-ms=<WAIT_MS> --json` child processes (as review/fix sessions do — real dispatched sessions acquire
  * concurrently, `we:scripts/conveyor/__tests__/sim/agent-actions.mjs#acquireLane`), with exactly ONE lane
- * un-dirtied (freed) `FREE_AFTER_MS` into the wait so there is a legitimate winner. `api.violation('bounded',
+ * un-dirtied (freed) once the callers' first shared scan has provably read it dirty (soak-main-red — see
+ * perRound), so there is a legitimate winner the pool must notice mid-wait. `api.violation('bounded',
  * ...)` fires when any call takes longer than `WAIT_MS + BOUND_MARGIN_MS`, or fails with a scan-timeout message
  * while a lane was, at some point, genuinely free (the OTHER shape the pinned unit test's third case pins).
  *
@@ -51,25 +52,31 @@
  * `acquirableListCached` appears inside `cmdAcquire`'s body). See this task's final report for the exact
  * command/output evidence.
  */
-import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { spawn, execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { runSoak } from '../soak.mjs';
 
 const LANES = Number(process.env.SOAK_LOAD_LANES) || 14;
 const CALLERS = Number(process.env.SOAK_LOAD_CALLERS) || 5;
 // Numbers picked empirically against THIS scenario's own slow-git shim (see `SLOW_GIT_S`): one full 6-lane
-// scan measured ~5.7s (6 lanes x ~5 git calls x 0.2s). `lane-1` frees at `FREE_AFTER_MS` (2s in), before the
-// FIRST scan's own check of lane-1 completes, so the winner needs a SECOND full scan (~2 scan-widths, ~11-12s)
-// before it can claim it — `WAIT_MS`/`BOUND_MARGIN_MS` leave real headroom above that measured cost so GREEN
-// is comfortably inside the bound rather than riding its edge.
+// scan measured ~5.7s (6 lanes x ~5 git calls x 0.2s). `lane-1` frees right after the FIRST scan publishes, so
+// the winner needs a SECOND scan (cheap: the per-lane verdict memo skips the 13 still-dirty lanes) before it can
+// claim it — `WAIT_MS`/`BOUND_MARGIN_MS` leave real headroom above that measured cost so GREEN is comfortably
+// inside the bound rather than riding its edge.
 const WAIT_MS = 20_000;
 // A REFUSED caller can legitimately run past `WAIT_MS` by up to one more in-flight scan's width (the scan's
 // own budget is never shrunk to a caller's remaining wait — `cmdAcquire`'s own comment on this) — measured
 // ~5.7s/scan plus real machine jitter, so the margin below is generous, not tight, to keep GREEN comfortably
 // (not marginally) inside the bound.
 const BOUND_MARGIN_MS = 20_000; // total bound = WAIT_MS + BOUND_MARGIN_MS = 40s
-const FREE_AFTER_MS = 2_000; // frees lane-1 this far into the concurrent acquire window
+// Lane-1 frees at whichever comes first: the first scan publishing, or this many ms in. Lane-1 is the FIRST lane
+// every scan probes (~1s in, after lane-pool's own startup), so by 4s the cold scan has already read it dirty
+// even when it has not finished — freeing then is the mid-scan case (a clean landing after its lane was probed),
+// which the pool must also notice. Early enough to leave the second, cheap scan well inside WAIT_MS.
+const FREE_AFTER_MS = 4_000;
+const FREE_POLL_MS = 50;
+const LIST_CACHE_BASENAME = '.list-acquirable-cache.json'; // lane-pool.mjs's LIST_CACHE_FILE
 const SLOW_GIT_S = 0.2; // extra seconds every `git` child call costs under the slow shim (see header)
 const SCAN_TIMEOUT_MS = 60_000; // generous vs. the ~5.7s measured single-scan cost — never the thing under test
 
@@ -118,10 +125,36 @@ async function perRound(w, round, ctx, api) {
   const slowEnv = { ...w.env, PATH: `${shimDir}:${w.env.PATH}`, GIT_SHIM_SLEEP: String(SLOW_GIT_S) };
 
   // 4. Fire CALLERS concurrent real acquire callers, free lane-1 partway through, measure wall time.
+  // soak-main-red — lane-1 is freed (its tracked edit written back — no git command, so `.git` never changes,
+  // like an agent/editor reverting a file or deleting its scratch) only ONCE the callers' first shared scan has
+  // provably read it dirty: when that scan publishes its answer (the list cache file appears), or at
+  // `FREE_AFTER_MS`, by which point the cold scan has long since probed lane-1 (its first lane). That is the case
+  // this break exists for — the pool must notice a lane freed AFTER it was scanned, inside the callers' wait.
+  // It used to free at a fixed 2s, making the verdict a race on scan speed: whenever the first probe of lane-1
+  // came AFTER 2s the scenario was trivially green (the old unsharded soak's load), and once sharding made that
+  // probe land BEFORE 2s it went red on every daemon PR — lane-pool's per-lane verdict memo (#2778) pinned
+  // lane-1 as "holds work" for its 10-minute max age because its fingerprint saw only `.git` state. Fixed in
+  // lane-pool.mjs (`dirtSignature`); this trigger makes the scenario red on that bug EVERY run, not by luck.
+  const poolDir = dirname(lanePaths[0]);
+  // Cold start: no answer (or per-lane verdict) from before the saturation may exist, or "the first scan
+  // published" would fire on a stale file and free lane-1 before anything had read it dirty.
+  for (const f of [LIST_CACHE_BASENAME, '.acquirable-verdict-memo.json']) rmSync(join(poolDir, f), { force: true });
+  const freeStartedAt = Date.now();
   let freed = false;
-  const freeTimer = setTimeout(() => {
-    try { writeFileSync(gitignorePaths[0], originals[0]); freed = true; } catch { /* best effort */ }
-  }, FREE_AFTER_MS);
+  let freedAtMs = null;
+  let freedWhy = null;
+  const freeLane1 = (why) => {
+    if (freed) return;
+    freed = true;
+    freedAtMs = Date.now() - freeStartedAt;
+    freedWhy = why;
+    try { writeFileSync(gitignorePaths[0], originals[0]); } catch { /* best effort */ }
+  };
+  const freeTimer = setInterval(() => {
+    if (existsSync(join(poolDir, LIST_CACHE_BASENAME))) freeLane1('after the first scan published');
+    else if (Date.now() - freeStartedAt >= FREE_AFTER_MS) freeLane1('fallback timer');
+    if (freed) clearInterval(freeTimer);
+  }, FREE_POLL_MS);
   let results;
   try {
     results = await Promise.all(Array.from({ length: CALLERS }, (_, i) => runCli(
@@ -134,8 +167,8 @@ async function perRound(w, round, ctx, api) {
       scriptPath, ['acquire', `--session=soak-caller-${i + 1}`, `--wait-ms=${WAIT_MS}`, `--scan-timeout-ms=${SCAN_TIMEOUT_MS}`, '--json'], w.simCloneRoot, { ...slowEnv, LANE_POOL_HARD_MAX: String(LANES) },
     )));
   } finally {
-    clearTimeout(freeTimer);
-    if (!freed) { try { writeFileSync(gitignorePaths[0], originals[0]); } catch { /* best effort */ } }
+    clearInterval(freeTimer);
+    if (!freed) freeLane1('after the callers returned');
     restoreAll(); // hygiene — the world is torn down after this scenario regardless
   }
 
@@ -144,7 +177,7 @@ async function perRound(w, round, ctx, api) {
   const bound = WAIT_MS + BOUND_MARGIN_MS;
   api.say(
     `r00 lane-acquire-under-load: ${CALLERS} concurrent acquire --wait-ms=${WAIT_MS} callers on a saturated `
-    + `${LANES}-lane pool (1 freed after ${FREE_AFTER_MS}ms, slow-git +${SLOW_GIT_S}s/call, bound ${bound}ms) -> `
+    + `${LANES}-lane pool (lane-1 freed ${freedAtMs}ms in, ${freedWhy}; slow-git +${SLOW_GIT_S}s/call, bound ${bound}ms) -> `
     + results.map((r, i) => `caller-${i + 1}:${r.code === 0 ? 'ok' : 'refused'}(${r.ms}ms)`).join(' '),
   );
   for (const [i, r] of results.entries()) {
@@ -158,7 +191,7 @@ async function perRound(w, round, ctx, api) {
   // giving up means the freed lane was never handed out (live: every review session failing "no free lane").
   if (!results.some((r) => r.code === 0)) {
     const why = results.map((r, i) => `caller-${i + 1} after ${r.ms}ms: ${(r.err || '').split('\n').find((l) => l.trim()) ?? '(no output)'}`).join('; ');
-    api.violation('bounded', `acquire --wait-ms=${WAIT_MS}: a lane was freed ${FREE_AFTER_MS}ms in, yet no caller acquired it — ${why}`);
+    api.violation('bounded', `acquire --wait-ms=${WAIT_MS}: a lane was freed ${freedAtMs}ms in (${freedWhy}), yet no caller acquired it — ${why}`);
   }
 }
 
@@ -166,7 +199,7 @@ export default {
   id: 'lane-acquire-under-load',
   title: 'lane acquire --wait-ms is no bound under concurrent load (live: 6-minute acquires; main today: last of 5 waiters at 3.4x its wait)',
   card: 'we:backlog/xj2k2pp (first fix b6c6dee34 / #4069 was partial; epic #4075)',
-  fixedBy: { sha: '(this worker\'s PR)', where: 'cmdAcquire / acquirableListCached', paths: ['scripts/lane-pool.mjs'] },
+  fixedBy: { sha: '(this worker\'s PR) + soak-main-red', where: 'cmdAcquire / acquirableListCached; verdict memo dirtSignature', paths: ['scripts/lane-pool.mjs'] },
   // xj2k2pp fix: `acquirableListCached`'s "wait for a DIFFERENT caller's in-flight shared-scan lock" branch now
   // takes a `callerDeadlineMs` (this acquire call's own --wait-ms deadline) and gives up with a distinguishable
   // `{ lockContention: true }` once it elapses, instead of sitting out the lock/scan's own (far larger, and
@@ -175,9 +208,13 @@ export default {
   // single-flight lock, over and over, never getting to check its OWN deadline until each such wait finished.
   // `lockContention` is a marker string unique to this fix (absent from the pre-fix tree, including the earlier
   // partial b6c6dee34/#4069 fix `firstFixPresent` below still probes for).
+  // soak-main-red (2026-09-26): ALSO requires `dirtSignature` — the per-lane verdict memo (#2778) pinned a lane
+  // freed without touching `.git` as "holds work" for up to 10 min, so no caller ever got it (red on every daemon
+  // PR once the sharded soak's first scan reached lane-1 before the free). Both fixes are needed for GREEN.
   fixPresent(root) {
     try {
-      return readFileSync(join(root, 'scripts/lane-pool.mjs'), 'utf8').includes('lockContention');
+      const src = readFileSync(join(root, 'scripts/lane-pool.mjs'), 'utf8');
+      return src.includes('lockContention') && src.includes('dirtSignature');
     } catch { return false; }
   },
   firstFixPresent(root) {
