@@ -28,4 +28,4 @@ The `--skip-pass`/self-sync/plist work above landed, but a resident we:skills-sr
 - **Kill switch:** `WE_BUILD_DAEMON_KILL=1` or `<coordination root>/build-dispatch-daemon.kill`; dispatch also requires `--live`. `--dry-run` is read-only.
 - **State pins:** `CONVEYOR_STATE_ROOT` (queue, #4052) and `OPERATION_RUNS_DIR` (dispatch-lane run records) point outside the self-syncing clone.
 
-**Slice 1 (this PR):** the daemon, policy, claim, plist template (not installed), unit tests + soak break. **Later slices:** health integration + claim inside dispatch-lane + brief scratch prefix (#xw24bu0), per-demand token budget from run rating (#xik3fkr), Codex/Claude routing learned from the scorebook (#xicxbh4).
+**Slice 1 (this PR):** the daemon, policy, claim, plist template (not installed), unit tests + soak break. **Later slices:** health integration + claim inside dispatch-lane + brief scratch prefix (#4287), per-demand token budget from run rating (#4286), Codex/Claude routing learned from the scorebook (#4285).
