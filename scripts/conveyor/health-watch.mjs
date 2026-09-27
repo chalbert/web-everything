@@ -366,13 +366,22 @@ export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
     // #gh-graphql-budget — the host-shared open-PR snapshot when this is the real `run` (never a test's fake exec).
-    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt' }) : null;
-    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']));
+    // `isDraft` (draft-first PRs, operator-approved 2026-09-27) — already part of `SNAPSHOT_FIELDS`, added here
+    // so the `draft-not-promoted` smell can read it; the shared-cache path costs nothing extra for it.
+    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft' }) : null;
+    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt,isDraft']));
     for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
+        isDraft: !!pr.isDraft,
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
-        statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, completedAt: c.completedAt })),
+        // `status` (draft-first PRs, operator-approved 2026-09-27) — carried alongside `state`/`conclusion` so
+        // `we:scripts/operations/pr-status.mjs#reduceCheckState` (the `draft-not-promoted` smell's own green
+        // check) reads the SAME completion signal every other CI-truth consumer in this repo does off a raw
+        // `gh pr view --json statusCheckRollup` CheckRun entry (`status`+`conclusion`) — omitting it here would
+        // have every real GitHub-Actions check (CheckRun-shaped, no `.state` at all) read as perpetually
+        // "running" through that function, since it never looks at `.state`.
+        statusCheckRollup: (pr.statusCheckRollup || []).map((c) => ({ name: c.name || c.context, conclusion: c.conclusion, state: c.state, status: c.status, completedAt: c.completedAt })),
       });
     }
   }

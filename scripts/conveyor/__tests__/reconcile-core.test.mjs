@@ -2912,3 +2912,57 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — CONVERT inste
     expect(DISPATCH_KINDS).toContain('convert-advisory');
   });
 });
+
+// ── draft-first PRs (operator-approved 2026-09-27) ──────────────────────────────────────────────────────────
+// `--park` now opens a PR as a GitHub draft by default (`scripts/pr-land.mjs`); this pass is what closes the
+// loop back: never dispatch a review for a draft, whatever label it carries, and promote (`gh pr ready`, via
+// `kind:'promote-draft'`) the moment its required checks are all green.
+describe('draft-first PRs — reconcile-core.mjs (operator-approved 2026-09-27)', () => {
+  it('`promote-draft` is on the frozen DISPATCH_KINDS list, `draft` is on the frozen REFUSAL_KINDS list', () => {
+    expect(DISPATCH_KINDS).toContain('promote-draft');
+    expect(REFUSAL_KINDS).toContain('draft');
+  });
+
+  it('a draft PR with ALL required checks green is dispatched `promote-draft`, never `review`', () => {
+    const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'promote-draft', prNumber: 1563 })]);
+    expect(plan.dispatch.some((d) => d.kind === 'review')).toBe(false);
+  });
+
+  it('a draft PR whose checks are still pending is refused `draft` — no review, no promotion, nothing owed yet', () => {
+    const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: pendingRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'draft', prNumber: 1563 })]);
+  });
+
+  it('a draft PR with a RED required check is STILL dispatched `ci-heal` — CI healing is never withheld from a draft', () => {
+    const pr = pr1563({ isDraft: true, labels: [], statusCheckRollup: redRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 1563 })]);
+    expect(plan.dispatch.some((d) => d.kind === 'review' || d.kind === 'promote-draft')).toBe(false);
+  });
+
+  it('a NON-draft PR with the exact same shape dispatches `review` as normal — the gate is `isDraft` alone', () => {
+    const pr = pr1563({ isDraft: false, labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563 })]);
+  });
+
+  it('an `isDraft`-absent PR (a fixture predating this field) behaves exactly as `isDraft: false` — no accidental universal gate', () => {
+    const pr = pr1563({ labels: lbl('review:pending'), statusCheckRollup: greenRollup, comments: [] });
+    delete pr.isDraft;
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 1563 })]);
+  });
+
+  it('every kind this pass ever emits for a draft PR is in the frozen lists (the same exhaustiveness check the file already holds itself to)', () => {
+    for (const rollup of [greenRollup, pendingRollup, redRollup]) {
+      const pr = pr1563({ isDraft: true, labels: lbl('review:pending'), statusCheckRollup: rollup, comments: [] });
+      const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+      for (const r of plan.refusals) expect(REFUSAL_KINDS).toContain(r.kind);
+      for (const d of plan.dispatch) expect(DISPATCH_KINDS).toContain(d.kind);
+    }
+  });
+});

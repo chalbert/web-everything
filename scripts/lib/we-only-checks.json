@@ -26,5 +26,9 @@
   {
     "file": "scripts/lib/required-status-checks.mjs",
     "reason": "The branch-protection reader uses the caller's `repo` slug when given; only when a caller has no slug to pass does it fall back to gh's `{owner}/{repo}` placeholder, resolved from the current checkout's git remote (the same convention `reconcile-pass.mjs#defaultReadAheadBy` uses), so it never hard-codes or silently assumes a repo."
+  },
+  {
+    "file": "scripts/lib/draft-promote-provider.mjs",
+    "reason": "Draft-first PRs (operator-approved 2026-09-27) — mirrors `scripts/lib/forge-land-provider.mjs`'s own exemption exactly: `gh pr ready` runs with `cwd` bound to the checkout, so gh infers the repo from that checkout's git remote (any repo, not a hard-coded one), the same reason that sibling port carries no `--repo` flag."
   }
 ]
