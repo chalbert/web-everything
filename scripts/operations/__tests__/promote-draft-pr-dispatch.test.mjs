@@ -27,7 +27,7 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       checkStaleness: FRESH,
     });
     expect(readyCalls).toEqual([101, 104]);
-    expect(result.promoted).toEqual([{ pr: 101 }, { pr: 104 }]);
+    expect(result.dispatched).toEqual([{ pr: 101, kind: 'promote-draft' }, { pr: 104, kind: 'promote-draft' }]);
     expect(result.refusals).toEqual([]);
   });
 
@@ -37,7 +37,7 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       provider: { ready: () => { throw new Error('must not be called'); } },
       checkStaleness: FRESH,
     });
-    expect(result).toEqual({ promoted: [], refusals: [], reconcileRefusals: 0, reconcileRefusalDetails: [] });
+    expect(result).toEqual({ dispatched: [], refusals: [], reconcileRefusals: 0, reconcileRefusalDetails: [] });
   });
 
   it('a gh failure on one PR is reported as a refusal and does not stop the rest of the batch', () => {
@@ -57,7 +57,7 @@ describe('runReconcilePromoteDraftDispatch (draft-first PRs)', () => {
       checkStaleness: FRESH,
     });
     expect(readyCalls).toEqual([55, 56]);
-    expect(result.promoted).toEqual([{ pr: 56 }]);
+    expect(result.dispatched).toEqual([{ pr: 56, kind: 'promote-draft' }]);
     expect(result.refusals).toEqual([{ pr: 55, kind: 'ready-failed', why: 'gh pr ready failed: HTTP 502' }]);
   });
 

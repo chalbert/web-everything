@@ -17,9 +17,18 @@
  * green-CI draft and that ordinary path.
  *
  * MIRRORS `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s own shape (`runReconcile<X>Dispatch` reading the
- * SAME `runReconcilePass` plan, filtering its own `kind`, and being the reconcile daemon's OWN durable pass —
- * `skills-src/conveyor/runner.mjs` calls this on every tick, right where it calls that file) — never a second
- * reconciliation of its own.
+ * SAME `runReconcilePass` plan, filtering its own `kind`, and being the reconcile daemon's OWN durable pass) —
+ * never a second reconciliation of its own.
+ *
+ * TWO CALLERS, DELIBERATELY (draft-first PRs follow-up, operator-approved 2026-09-27): this was originally
+ * wired ONLY into `skills-src/conveyor/runner.mjs` (the headless conveyor runner, calling this CLI on every
+ * tick right alongside `ci-heal-pr-dispatch.mjs`) — but that runner has NO LIVE SINGLETON LEASE on this host
+ * today (confirmed by a separate trial worker the same day this shipped). `skills-src/conveyor/
+ * reconcile-fix-dispatch-daemon.mjs#runPromoteDraftDispatchAllRepos` now ALSO calls
+ * {@link runReconcilePromoteDraftDispatch} directly (in-process, not via this CLI) from that daemon's own
+ * tick — the ONE daemon confirmed live — mirroring that file's own `hungCi`/`mainRedRebase`/`missingRun`
+ * precedent exactly. Both callers are safe to keep: `gh pr ready` is idempotent server-side (a PR already
+ * non-draft is a silent no-op), so whichever caller's tick reaches a given PR first simply wins.
  */
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { armSelfReexecOnFastForward, assertMainNotStale } from '../lib/main-staleness.mjs';
@@ -36,7 +45,12 @@ import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
  * @param {string} [o.prsFile] - when given, `reconcile` reads this tick's shared PR listing instead of a fresh `gh pr list`.
  * @param {object} [o.provider] - injectable `gh` seam (`createDraftPromoteProvider`'s shape); a test passes a fake.
  * @param {Function} [o.checkStaleness] - threaded straight to `assertMainNotStale`, mirroring every sibling dispatcher's own seam.
- * @returns {{promoted:Array<{pr:number}>, refusals:Array<{pr:number, kind:string, why:string}>, reconcileRefusals:number}}
+ * @returns {{dispatched:Array<{pr:number, kind:'promote-draft'}>, refusals:Array<{pr:number, kind:string, why:string}>, reconcileRefusals:number, reconcileRefusalDetails:Array<object>}}
+ *   `dispatched` (not `promoted` — RENAMED, epic #4075/#3383 follow-up) so this shape matches every sibling
+ *   `runReconcile<X>Dispatch`'s own `{dispatched, refusals, reconcileRefusalDetails}` contract byte-for-byte:
+ *   `skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs`'s `runXAllRepos` wrappers all read `result.dispatched`
+ *   off whatever tick they wrap (see e.g. `runReconcileCiHealDispatchAllRepos`) — a differently-named field
+ *   here would have silently produced an empty `dispatched` array for the daemon composing this pass in.
  */
 export function runReconcilePromoteDraftDispatch({
   root = process.cwd(),
@@ -53,12 +67,12 @@ export function runReconcilePromoteDraftDispatch({
   assertMainNotStale(root, checkStaleness);
   const reconciled = reconcile({ repo, ...(prsFile ? { readPrs: () => readPrsFromFile(prsFile) } : {}) });
   const entries = (reconciled.dispatch ?? []).filter((entry) => entry.kind === 'promote-draft');
-  const promoted = [];
+  const dispatched = [];
   const refusals = [];
   for (const entry of entries) {
     try {
       provider.ready(entry.prNumber);
-      promoted.push({ pr: entry.prNumber });
+      dispatched.push({ pr: entry.prNumber, kind: 'promote-draft' });
     } catch (e) {
       // Best-effort, same as every other label/state write in this family (`pr-land.mjs`'s own `applyLabel`):
       // a `gh` hiccup here never throws the whole pass — the PR stays draft and this same plan entry recurs
@@ -66,7 +80,7 @@ export function runReconcilePromoteDraftDispatch({
       refusals.push({ pr: entry.prNumber, kind: 'ready-failed', why: String((e && e.message) || e).split('\n')[0] });
     }
   }
-  return { promoted, refusals, reconcileRefusals: reconciled.refusals?.length ?? 0, reconcileRefusalDetails: reconciled.refusals };
+  return { dispatched, refusals, reconcileRefusals: reconciled.refusals?.length ?? 0, reconcileRefusalDetails: reconciled.refusals };
 }
 
 const IS_CLI = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];
@@ -89,8 +103,8 @@ if (IS_CLI) {
     if (flags.json) {
       process.stdout.write(`${JSON.stringify(result)}\n`);
     } else {
-      const lines = [`promote-draft-pr-dispatch — ${result.promoted.length} promoted, ${result.refusals.length} refusal(s)`];
-      for (const p of result.promoted) lines.push(`  → promoted PR #${p.pr} to ready-for-review (required checks green)`);
+      const lines = [`promote-draft-pr-dispatch — ${result.dispatched.length} promoted, ${result.refusals.length} refusal(s)`];
+      for (const p of result.dispatched) lines.push(`  → promoted PR #${p.pr} to ready-for-review (required checks green)`);
       for (const r of result.refusals) lines.push(`  ✗ ${r.kind} PR #${r.pr} — ${r.why}`);
       process.stdout.write(`${lines.join('\n')}\n`);
     }
