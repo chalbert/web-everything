@@ -145,7 +145,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
       '-n', 'review-1234',
-      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), // xgqz204 — the worker marker, always
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '# brief for 1234 in chalbert/web-everything\n'
@@ -181,7 +181,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
     // #4174 — the session's OWN cwd (a scratch dir, never `root` any more).
     expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('11111111-1111-4111-8111-111111111111', { root: '/repo' }));
     expect(calls[0].argv).toContain('--settings');
-    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
+    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }));
   });
 
   it('#x8mpubm follow-up — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', () => {
@@ -196,7 +196,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       checkStaleness: FRESH,
       resolveSettingsEnv: () => null,
     });
-    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } })); // xgqz204
+    expect(calls[0].argv[calls[0].argv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } })); // xgqz204
   });
 
   it('refuses to dispatch from inside a lane checkout, same guard dispatch-lane-io.mjs uses', () => {
@@ -238,7 +238,7 @@ describe('dispatchReview — the composition: plan → fill → mint → spawn',
       // #3331 — no `--session-id`: `claude --bg` discards it and assigns its own id.
       '--bg',
       '-n', 'review-1234',
-      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }), // xgqz204 — the worker marker, always
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }), // xgqz204 — the worker marker, always
       '--append-system-prompt-file', REVIEW_DISPATCH_SYSTEM_PROMPT_FILE,
       ...DISALLOWED_TOOLS_ARGV,
       '--permission-mode', 'plan',

@@ -480,7 +480,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
       '--bg',
       '-n', 'fix-1764',
       // xgqz204 — the worker marker always rides `--settings` (a `--bg` session never sees ambient env).
-      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }),
+      '--settings', JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }),
       // #3606 — the standing-identity system prompt, without which a correctly-filled brief reads as an
       // unfilled template and the agent self-aborts (live 3/3: fix-2127/fix-2130/fix-2003).
       '--append-system-prompt-file', DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
@@ -515,7 +515,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
     // targets the SAME directory this dispatch actually starts in.
     expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('sid', { root: '/repo' }));
     expect(calls[0]).toContain('--settings');
-    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
+    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }));
   });
 
   it('#x8mpubm — the REAL default resolveSettingsEnv (unconfigured host) adds nothing beyond the worker marker (xgqz204)', () => {
@@ -529,7 +529,7 @@ describe('dispatchFix — the composition: plan → fill → mint → spawn', ()
         // opt-in gated on WE_GITHUB_APP_* and must stay a safe no-op on this (unconfigured) test host.
       },
     );
-    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } }));
+    expect(calls[0][calls[0].indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }));
   });
 
   it('attaches a carried-forward `resumeAttempt` (from a prior tryResumeFix call) to the reported result, without re-attempting anything itself', () => {

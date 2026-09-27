@@ -145,3 +145,17 @@ export function defaultSpawnDetached(argv, { cwd, logPath, settingsEnv = null } 
   if (typeof child.unref === 'function') child.unref();
   return child;
 }
+
+/**
+ * The vendor a detached wrapper runs for a given `--provider=<name>` (or none). PURE. `claude-restricted` is the
+ * wrappers' Claude provider, so it reports as `claude`; any other name is the vendor itself (`codex`).
+ * @param {string|null|undefined} deliveryAgent
+ * @returns {string}
+ */
+// build-path-codex-isolation — lives here (not dispatch-lane-io.mjs) so the per-kind providers can import it
+// without a cycle through the registry.
+export function wrapperExecutorFor(deliveryAgent) {
+  const name = String(deliveryAgent ?? '').trim();
+  if (!name || name === 'claude-restricted') return 'claude';
+  return name;
+}

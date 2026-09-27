@@ -42,6 +42,7 @@ import {
   REPO_ROOT,
   defaultSpawnDetached,
   deliveryDispatchLogPath,
+  wrapperExecutorFor,
 } from '../detached-dispatch.mjs';
 // mechanical-dispatcher (epic #3383) Part 2 — the per-item `deliveryAgent:` frontmatter opt-in. See that
 // module's own header for why this is read here (an explicit human marker), never decided by this provider.
@@ -119,6 +120,9 @@ export function deliverItemDetachedProvider(request, {
   // `delivery-agent-marker.mjs`'s own header for why that is a separate, later decision from this plumbing.
   const deliveryAgent = readDeliveryAgentMarker(num);
   if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
+  // build-path-codex-isolation — the run record's ONE executor field comes from here: the vendor this wrapper
+  // is actually told to run, never the router's recommendation (see dispatch-lane-io.mjs#dispatchExecutorFor).
+  request?.reportExecutor?.(wrapperExecutorFor(deliveryAgent));
   // #landing-freeze-2779 — forward the request's already-computed gh-App-shim env (fresh-cache PATH override,
   // never a static token) into the wrapper's OWN process env, so every child IT later spawns (which all build
   // their env off `process.env`) inherits it too. See `detached-dispatch.mjs#defaultSpawnDetached`'s own
