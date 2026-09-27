@@ -92,6 +92,13 @@ import { tagReviewStatus } from '../../scripts/conveyor/review-status-tag.mjs';
 // exact gap this wiring closes.
 import { sweepReviewHoldLabels } from '../../scripts/conveyor/review-hold-reconcile.mjs';
 import { selectStatusCandidates } from '../../scripts/conveyor/reconcile-core.mjs';
+// #xconv1 (chalbert/web-everything#2766/#2767 unblock) — the mechanical, no-session executor for a
+// `kind:'convert-advisory'` dispatch entry. Wired as its OWN additive pipeline stage below
+// (`runConvertAdvisoryTick`/`runConvertAdvisoryTickAllRepos`), never folded into `runReviewTick`'s existing
+// `reviews`/`fixes` dispatch loop: that loop is gated on `acquirableLanes` (a convert-advisory entry needs no
+// lane) and is fully SYNCHRONOUS (posting the note + running the targeted-check judge seat are both async IO,
+// and `runReviewTick`'s own return shape is pinned byte-for-byte by many existing exact-equality tests).
+import { dispatchConvertAdvisory } from '../../scripts/conveyor/convert-advisory-dispatch.mjs';
 import { planClaudeAuthDispatchGate } from '../../scripts/conveyor/claude-auth-health.mjs'; // card x5kagse
 import { runSessionReaperPass, makeReapedLedger, REPO_ROOT as SESSION_REAPER_REPO_ROOT, DEFAULT_IDLE_REAP_THRESHOLD_MS } from '../../scripts/conveyor/session-reaper.mjs';
 import { mintSessionSlug } from '../../scripts/conveyor/session-slug.mjs';
@@ -449,6 +456,122 @@ export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runR
 }
 
 /**
+ * #xconv1 (chalbert/web-everything#2766/#2767 unblock) — ONE repo's worth of `kind:'convert-advisory'`
+ * dispatch entries, posted mechanically. A SEPARATE, ADDITIVE stage from {@link runReviewTick}: a
+ * convert-advisory entry needs no lane and no session (see `convert-advisory-dispatch.mjs`'s own header for
+ * why the targeted-check judge seat needs neither either), so gating it behind `acquirableLanes` — the cap
+ * that exists because a REVIEW session's own `lane-pool.mjs acquire` can starve a pool — would be a wrong,
+ * unrelated cap on a population that was never going to touch a lane at all. Async (posting the note + the
+ * judge seat are both async IO), which is exactly why this is NOT folded into `runReviewTick` itself: that
+ * function stays fully synchronous, unchanged, its return shape pinned byte-for-byte by many pre-existing
+ * exact-equality tests.
+ *
+ * MIRRORS `runReviewTick`'s OWN #4133 shared-reads shape exactly: `readPrs`/`readAgents`, when both supplied,
+ * are injected into `reconcile` so its internal fetch is a reuse of data the CALLER (the IO shell) already
+ * read once for `runReviewTick` — never a second `gh pr list`. `null` (the default) is unaffected — every
+ * pre-existing test of this function that fakes `reconcile` directly never pays for real IO either way.
+ * `dryRun` (default `false`, forwarded straight to `convertAdvisory`) — computes and returns the exact plan
+ * (comment body, label diff, the REAL targeted-check judge's real answer) for every owed entry with NO `gh`
+ * write at all; a production tick never sets it. The one thing it does NOT skip is the judge seat itself —
+ * "don't post" means never writing to the PR, not never asking the one narrow question the whole mechanism
+ * exists to answer, so a dry-run still shows the ACTUAL content it would post, off a real (bounded-cost)
+ * answer, never a placeholder.
+ * @param {{reconcile?:Function, convertAdvisory?:Function, repo?:string, readPrs?:(Function|null),
+ *   readAgents?:(Function|null), dryRun?:boolean}} [o]
+ * @returns {Promise<{convertAdvisoriesOwed:number, posted:Array<{prNumber:number, outcome:(string|null)}>,
+ *   skipped:Array<{prNumber:number, reason:string}>, failed:Array<{prNumber:number, error:string}>,
+ *   reconcileError:(string|null)}>}
+ */
+export async function runConvertAdvisoryTick({
+  reconcile = runReconcilePass, convertAdvisory = dispatchConvertAdvisory, repo = WE_SLUG,
+  readPrs = null, readAgents = null, dryRun = false,
+} = {}) {
+  const sharedReads = typeof readPrs === 'function' && typeof readAgents === 'function';
+  let plan;
+  let rawPrs = null;
+  try {
+    if (sharedReads) {
+      rawPrs = readPrs({ repo });
+      const rawAgents = readAgents({});
+      plan = reconcile({ repo, readPrs: () => rawPrs, readAgents: () => rawAgents });
+    } else {
+      plan = reconcile({ repo });
+    }
+  } catch (e) {
+    return {
+      convertAdvisoriesOwed: 0, posted: [], skipped: [], failed: [],
+      reconcileError: String((e && e.message) || e).split('\n')[0],
+    };
+  }
+  // Keyed by PR number so a fresh `gh` read is never needed when the tick already has this PR's comments/
+  // labels in hand (the SAME shared-read reuse `tagRound`/`tagStatus` already get in `runReviewTick`).
+  const prsByNumber = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), p]));
+  const entries = (plan.dispatch ?? []).filter((d) => d && d.kind === 'convert-advisory');
+  const posted = [];
+  const skipped = [];
+  const failed = [];
+  for (const d of entries) {
+    // One bad entry never aborts the rest — the SAME per-PR isolation `runReviewTick`'s own dispatch loop uses.
+    try {
+      const pr = prsByNumber.get(Number(d.prNumber));
+      const result = await convertAdvisory(d, {
+        repo, comments: pr?.comments ?? null, labels: pr?.labels ?? null, dryRun,
+      });
+      if (result?.skipped) skipped.push({ prNumber: d.prNumber, reason: result.skipped });
+      else {
+        posted.push({
+          prNumber: d.prNumber, outcome: result?.targetedCheckAnswer?.verdict ?? null,
+          // dryRun carries the FULL plan (what it WOULD post) — a production tick never reads these three,
+          // so they are simply absent (never `undefined`-valued keys) rather than always-present-but-null.
+          ...(dryRun ? { body: result?.body, addLabel: result?.addLabel, removeLabels: result?.removeLabels } : {}),
+        });
+      }
+    } catch (e) {
+      failed.push({ prNumber: d.prNumber, error: String((e && e.message) || e).split('\n')[0] });
+    }
+  }
+  return { convertAdvisoriesOwed: entries.length, posted, skipped, failed, reconcileError: null };
+}
+
+/**
+ * {@link runConvertAdvisoryTick}, once per watched repo — the SAME per-repo isolation
+ * {@link runReviewTickAllRepos} gives `runReviewTick` (a plateau-app outage must never stop WE's own converts),
+ * just its own tiny async loop rather than a reuse of `forEachRepo` (that helper is deliberately synchronous —
+ * `fn(repo)`'s return value is captured inline, so an async `fn`'s REJECTION would surface after the loop's own
+ * try/catch already returned, as an unhandled rejection rather than a captured `{repo, error}` entry).
+ * @param {{repos?:string[], tick?:Function}} [o] - every other option forwards to `tick` for every repo.
+ * @returns {Promise<{repos:Array<{repo:string, result?:object, error?:string}>, convertAdvisoriesOwed:number,
+ *   posted:Array<object>, skipped:Array<object>, failed:Array<object>, reconcileFailed:Array<{repo:string, error:string}>}>}
+ */
+export async function runConvertAdvisoryTickAllRepos({
+  repos = REVIEW_DAEMON_REPOS, tick = runConvertAdvisoryTick, ...tickOpts
+} = {}) {
+  const perRepo = [];
+  for (const repo of repos) {
+    try {
+      perRepo.push({ repo, result: await tick({ ...tickOpts, repo }) });
+    } catch (e) {
+      perRepo.push({ repo, error: String((e && e.message) || e).split('\n')[0] });
+    }
+  }
+  let convertAdvisoriesOwed = 0;
+  const posted = [];
+  const skipped = [];
+  const failed = [];
+  const reconcileFailed = [];
+  for (const entry of perRepo) {
+    if (entry.error) { failed.push({ prNumber: null, repo: entry.repo, error: entry.error }); continue; }
+    const { repo, result } = entry;
+    if (result?.reconcileError) { reconcileFailed.push({ repo, error: result.reconcileError }); continue; }
+    convertAdvisoriesOwed += result.convertAdvisoriesOwed ?? 0;
+    for (const p of (result.posted ?? [])) posted.push({ ...p, repo });
+    for (const s of (result.skipped ?? [])) skipped.push({ ...s, repo });
+    for (const f of (result.failed ?? [])) failed.push({ ...f, repo });
+  }
+  return { repos: perRepo, convertAdvisoriesOwed, posted, skipped, failed, reconcileFailed };
+}
+
+/**
  * #3383 bug 1 — did this tick's own result show it hit `assertMainNotStale`'s refusal for at least one PR or
  * repo? Two shapes both carry it: a per-PR `dispatchReview` throw (`runReviewTick`'s own `failed.push({
  * prNumber, error })` loop) and a whole-repo tick failure (`forEachRepo`'s own `{repo, error}` capture, surfaced
@@ -556,6 +679,12 @@ export function buildCliDaemonEffects({
   runReview = (opts) => runReviewTickAllRepos({
     acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
   }),
+  // #xconv1 — the SAME shared-reads optimization `runReview` above opts into, wired the same way for its own
+  // separate, additive async stage (see `runConvertAdvisoryTick`'s own doc for why this is not folded into
+  // `runReview`/`runReviewTick`).
+  runConvertAdvisories = (opts) => runConvertAdvisoryTickAllRepos({
+    readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
+  }),
 } = {}) {
   // #3383 follow-up (live-caught 2026-09-26) — carries the LAST tick's own `liveProcessPrs` across the
   // `await`/closure boundary into the NEXT tick's `reapSessions()` call, below. A plain closure variable is
@@ -594,7 +723,16 @@ export function buildCliDaemonEffects({
       // discovery, never accumulated, so a PR that frees up (or a new one that blocks) is reflected within
       // one 120s cycle either way.
       priorityNames = priorityNamesForLiveProcessPrs(result?.liveProcessPrs);
-      return { ...result, sessionReap };
+      // #xconv1 — its OWN best-effort try/catch, mirroring the session-reap discipline immediately above: a
+      // convert-advisory failure (a `gh`/judge hiccup) must never take down the tick's real job (dispatching/
+      // tagging reviews), which has already completed by the time this runs.
+      let convertAdvisory = null;
+      try {
+        convertAdvisory = await runConvertAdvisories();
+      } catch (e) {
+        log.error(`review-daemon: convert-advisory tick failed (non-fatal): ${String((e && e.message) || e).split('\n')[0]}`);
+      }
+      return { ...result, sessionReap, convertAdvisory };
     },
     sleep: realSleep,
     heartbeat: () => heartbeatRunnerLease(RUNNER_LOCK_ROOT, owner, { key: REVIEW_DAEMON_LEASE_KEY }),
@@ -630,6 +768,17 @@ export function buildCliDaemonEffects({
       if (result.sessionReap && !result.sessionReap.unreadable) {
         const sr = result.sessionReap;
         log.error(`review-daemon: session-reap — ${sr.scanned} scanned, ${sr.stopped} stopped${sr.alreadyGone ? `, ${sr.alreadyGone} already gone` : ''}${sr.failures ? `, ${sr.failures} failed` : ''}${sr.anomalies ? `, ${sr.anomalies} anomalies` : ''}${sr.previouslyReaped ? `, ${sr.previouslyReaped} already reaped earlier (skipped)` : ''}, ${sr.kept} kept${sr.deferred ? `, ${sr.deferred} deferred to next tick (reap budget: ${sr.reapBudget?.maxStops} stops / ${sr.reapBudget?.maxDurationMs}ms, #3383)` : ''}`);
+      }
+      // #xconv1 (chalbert/web-everything#2766/#2767 unblock) — the mechanical, no-session convert-advisory
+      // stage's own report: `posted` names the targeted check's own verdict, `skipped` is the idempotency
+      // no-op (a head already carrying the converted note), `failed`/`reconcileFailed` mirror the review
+      // stage's own non-fatal reporting one level up.
+      const ca = result.convertAdvisory;
+      if (ca) {
+        for (const p of (ca.posted ?? [])) log.error(`review-daemon: ${p.repo}#${p.prNumber} convert-advisory posted (targeted check: ${p.outcome ?? '?'})`);
+        for (const s of (ca.skipped ?? [])) log.error(`review-daemon: ${s.repo}#${s.prNumber} convert-advisory skipped — ${s.reason}`);
+        for (const f of (ca.failed ?? [])) log.error(`review-daemon: ${f.repo}#${f.prNumber ?? '?'} convert-advisory failed (non-fatal): ${f.error}`);
+        for (const rf of (ca.reconcileFailed ?? [])) log.error(`review-daemon: ${rf.repo} convert-advisory reconcile failed (non-fatal, other repos unaffected): ${rf.error}`);
       }
     },
     onTickError: (error) => {

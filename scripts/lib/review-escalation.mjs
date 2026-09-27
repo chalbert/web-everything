@@ -1074,6 +1074,233 @@ export function parseReviewedSha(comments) {
 }
 
 /**
+ * #xconv1 (chalbert/web-everything#2766/#2767 unblock, epic #3383/#4075) — locate the COMMENT that carries the
+ * LATEST `reviewed-sha` marker matching a given head — the exact comment {@link parseReviewedSha} derived its
+ * answer from — so a caller that needs to QUOTE the verdict, not just confirm its sha, has the comment body and
+ * timestamp in hand. Mirrors `parseReviewedSha`'s own trusted-author gate (#4140) and "latest wins" rule
+ * exactly, so the two can never disagree on WHICH marker is "the" one.
+ * @param {Array} comments
+ * @param {string} headSha - lowercase hex, the sha to match
+ * @returns {{body:string, createdAt:(string|null)}|null}
+ */
+export function findAcceptVerdictComment(comments, headSha) {
+  const target = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
+  if (!target) return null;
+  let found = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue;
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    REVIEWED_SHA_RE.lastIndex = 0;
+    let m;
+    let hit = false;
+    while ((m = REVIEWED_SHA_RE.exec(body)) !== null) { if (m[1].toLowerCase() === target) hit = true; }
+    if (hit) found = { body, createdAt: (c && c.createdAt) || null };
+  }
+  return found;
+}
+
+// #xconv1 — the park comment's own fixed heading (`buildDrainReasonComment`, `we:scripts/merge-ai-prs.mjs`,
+// kind `'park'`), matched here so `findSupersedingEscalation` can read the REASON TEXT that follows it rather
+// than the whole comment. Duplicated as a literal (not imported) — importing `merge-ai-prs.mjs` from this leaf
+// module would pull a `gh`-shelling CLI into a pure library; the two are pinned together by
+// `review-escalation.test.mjs` and `merge-ai-prs.test.mjs` so a drift fails loud in CI.
+const PARK_REASON_PREFIX = '⏸ **Parked for review by the drain**\n\n';
+
+/** #xconv1 — the two SUPERSEDING escalation shapes {@link findSupersedingEscalation} recognizes, matched on
+ *  their own STABLE reason text (never on the shared park marker/heading, which an ORDINARY `held —`
+ *  re-statement of an existing hold — #2832 — also carries, and that is NOT an escalation). */
+const TEST_GAMING_REASON_RE = /^test-gaming suspected/;
+const MANIFEST_TAMPER_REASON_RE = /^manifest baseline mismatch/;
+const HEAL_MUTUAL_EXCLUSIVITY_RE = /^\*\*`review:accepted` removed — mutual exclusivity/;
+
+/**
+ * #xconv1 — find the LATEST comment that SUPERSEDES an existing `reviewed-sha` accept marker for the same head:
+ * a real, diff-content escalation (test-gaming / manifest-tamper, `we:scripts/merge-ai-prs.mjs`'s
+ * `decideParkToHuman` sites) or the #2773 mutual-exclusivity HEAL
+ * (`decideContradictoryVerdictHeal`/`buildContradictoryVerdictHealComment`) that removed a stale
+ * `review:accepted` beside `review:human`. Only a comment posted STRICTLY AFTER `afterCreatedAt` (the accept
+ * comment's own timestamp) counts — an escalation reason that predates the accept it supposedly supersedes is
+ * not a supersession at all.
+ *
+ * Trusted-author gated (#4140), same as every other durable-marker reader in this file. When more than one
+ * qualifying comment is present, the MOST SUBSTANTIVE reason wins — test-gaming/manifest-tamper explain WHY
+ * `review:human` is warranted; the heal only explains why a stale `review:accepted` came OFF, which is not
+ * itself a reason the diff needs a second look — falling back to the heal only when no substantive reason was
+ * ever posted.
+ * @param {Array} comments
+ * @param {{afterCreatedAt?: (string|null)}} [o]
+ * @returns {{kind:('test-gaming'|'manifest-tamper'|'heal-mutual-exclusivity'), reasonText:string,
+ *   createdAt:(string|null)}|null}
+ */
+export function findSupersedingEscalation(comments, { afterCreatedAt = null } = {}) {
+  const afterMs = afterCreatedAt ? Date.parse(afterCreatedAt) : NaN;
+  let substantive = null;
+  let heal = null;
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue;
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (!body) continue;
+    const createdAt = (c && c.createdAt) || null;
+    if (Number.isFinite(afterMs)) {
+      const ms = createdAt ? Date.parse(createdAt) : NaN;
+      if (!Number.isFinite(ms) || ms <= afterMs) continue; // not after the accept it would supersede
+    }
+    const parkIdx = body.indexOf(PARK_REASON_PREFIX);
+    const parkReason = parkIdx === -1 ? null : body.slice(parkIdx + PARK_REASON_PREFIX.length).trim();
+    if (parkReason && TEST_GAMING_REASON_RE.test(parkReason)) { substantive = { kind: 'test-gaming', reasonText: parkReason, createdAt }; continue; }
+    if (parkReason && MANIFEST_TAMPER_REASON_RE.test(parkReason)) { substantive = { kind: 'manifest-tamper', reasonText: parkReason, createdAt }; continue; }
+    if (HEAL_MUTUAL_EXCLUSIVITY_RE.test(body.trim())) heal = { kind: 'heal-mutual-exclusivity', reasonText: body.trim(), createdAt };
+  }
+  return substantive || heal;
+}
+
+/**
+ * #xconv1 — THE COMBINATOR: does head `headSha`, already carrying `reviewedSha === headSha` (the
+ * `already-reviewed-head` shape `we:scripts/conveyor/reconcile-core.mjs`'s ONE-REVIEW-PER-HEAD guard used to
+ * unconditionally refuse, #2588), also carry a LATER escalation that supersedes the accept it refused to
+ * re-review? When it does, the guard's own protection — never post a second, contradicting ACCEPT-shaped
+ * verdict — is moot: the `review:human` gate already makes a second ACCEPT impossible
+ * (`we:scripts/operations/review-pr.mjs`'s `confirm` step refuses `--answer=accept` on a `review:human` PR; see
+ * `we:skills-src/review/SKILL.md`, "A `review:human` PR is never agent-cleared"). What IS owed is CONVERTING
+ * the superseded verdict into the standing advisory note, plus one targeted check on the escalation's own
+ * reason — never re-running the whole panel.
+ * @param {{headSha?: (string|null), reviewedSha?: (string|null), comments?: Array}} [o]
+ * @returns {{convert: false}|{convert: true, acceptComment: object, escalation: object}}
+ */
+export function planConvertSupersededVerdict({ headSha = null, reviewedSha = null, comments = [] } = {}) {
+  if (!headSha || !reviewedSha || reviewedSha !== headSha) return { convert: false };
+  const acceptComment = findAcceptVerdictComment(comments, headSha);
+  if (!acceptComment) return { convert: false };
+  const escalation = findSupersedingEscalation(comments, { afterCreatedAt: acceptComment.createdAt });
+  if (!escalation) return { convert: false };
+  return { convert: true, acceptComment, escalation };
+}
+
+/**
+ * #xconv1 — the ONE targeted question a cheap judge seat answers instead of re-running the whole panel, scoped
+ * to the escalation's OWN reason (never the whole diff again). Pure string, per escalation kind.
+ * @param {{kind?: string}|null} escalation
+ * @returns {string}
+ */
+export function targetedCheckQuestion(escalation) {
+  const kind = escalation && escalation.kind;
+  if (kind === 'test-gaming') {
+    return 'Were the removed/skipped test case(s) named in the escalation reason genuinely OBSOLETE or replaced '
+      + 'by equivalent coverage, or were they weakened/deleted to manufacture a green required check? Answer '
+      + '`accept` (legitimate removal) or `changes` (test-gaming confirmed), citing the specific test file(s).';
+  }
+  if (kind === 'manifest-tamper') {
+    return 'Does the manifest edit named in the escalation reason genuinely STRENGTHEN or leave unchanged the '
+      + "PR's escalation-sensitive values (dismissedFindings/crossRepo/blockedBy), or does it WEAKEN them "
+      + 'relative to the reviewed baseline? Answer `accept` (strengthening/neutral) or `changes` (weakening '
+      + 'confirmed), citing the specific field(s).';
+  }
+  // 'heal-mutual-exclusivity' — the escalation here is a LABEL bookkeeping fix, not a diff-content finding; the
+  // one open question is whether the heal's own comment-history check (no `--to=clear-human` ceremony found)
+  // missed a genuine clearance.
+  return 'The `review:accepted` label was removed as stale because no genuine `--to=clear-human` ceremony was '
+    + "found for this head. Re-check this PR's comment history: is there in fact a `clear-human` ceremony "
+    + 'covering the CURRENT head that the heal missed? Answer `accept` (no clearance missed — prior verdict '
+    + 'still stands) or `changes` (a missed clearance, or another reason the prior verdict should not stand).';
+}
+
+/** #xconv1 — the marker a CONVERTED advisory note carries, distinct from `review-pr.mjs`'s own
+ *  `ADVISORY_NOTE_MARKER` so a reader — or a later sweep — can tell "advised fresh" from "converted from a
+ *  superseded verdict" at a glance, without diffing prose. */
+export const CONVERTED_ADVISORY_NOTE_MARKER = '<!-- converted-advisory-note -->';
+
+/**
+ * #xconv1 — render the CONVERTED advisory note: the prior jury verdict this head already earned, superseded by
+ * a later escalation, turned into the SAME advisory-only shape `review-pr.mjs`'s `advise` step posts (no
+ * `**Decision:**` line, no `review:*` label ever touched, an explicit "advisory only — the human ceremony is
+ * still required" statement) — never a second full review. Quotes the prior verdict VERBATIM (a blockquote, so
+ * it reads as quoted rather than restated) and the escalation's own reason, then the ONE targeted check's
+ * answer. Pure string-building; the caller supplies the targeted check's own verdict/note — this function
+ * never invents one.
+ *
+ * CARRIES THE SAME MACHINE-READABLE SHAPE `we:scripts/lib/advisory-labels.mjs#parseAdvisories` reads back — a
+ * top-level (never quoted) `**Verdict:**` line and a `Net basis: \`<base>..<head>\`` line — so the staleness
+ * sweep (`planAdvisoryStaleLabels`) and `operator-queue.mjs`'s cross-check see this note exactly like a fresh
+ * `renderAdvisoryNote` one; without them a converted note would be invisible to both and its `advisory:*` label
+ * would look unbacked. `headSha` fills BOTH halves of the basis — no fresh diff was computed (the prior
+ * verdict's own diff already covered this content), so there is no separate "base" to name, and
+ * `advisoryCoversHead` only ever reads the second (head) half regardless.
+ * @param {{repo?: string, pr?: number, headSha?: string, acceptComment?: {body?: string, createdAt?: (string|null)},
+ *   escalation?: {kind?: string, reasonText?: string}, targetedCheckAnswer?: {verdict?: string, note?: string}}} o
+ * @returns {string}
+ */
+export function renderConvertedAdvisoryNote({
+  repo = '', pr = null, headSha = '', acceptComment = {}, escalation = {}, targetedCheckAnswer = {},
+} = {}) {
+  const quoted = String(acceptComment?.body ?? '').split('\n').map((l) => `> ${l}`).join('\n');
+  const outcome = targetedCheckAnswer?.verdict === 'changes' ? 'changes' : 'accept';
+  const sha = String(headSha || '').toLowerCase();
+  return [
+    `${CONVERTED_ADVISORY_NOTE_MARKER} This PR carries \`review:human\` (${repo}#${pr}). This head ALREADY`,
+    'completed an independent jury review, quoted verbatim below — that verdict was superseded by a later',
+    'escalation, not by any defect the panel found, so it is CONVERTED into this advisory note rather than',
+    're-run. It has neither accepted nor bounced this PR. No `review:*` label was changed and no decision was',
+    'recorded.',
+    '',
+    `**Verdict:** ${outcome === 'accept' ? '✅ pass — no blocking findings' : '⚠️ blocking findings'} — `
+      + 'converted from a prior jury verdict plus one targeted check (never a re-run of the whole panel).',
+    '',
+    `**Escalation reason (${escalation.kind}):**`,
+    '',
+    escalation.reasonText ?? '',
+    '',
+    '**Prior jury verdict (quoted, not re-run):**',
+    '',
+    quoted,
+    '',
+    '**Targeted check on the escalation reason:**',
+    '',
+    targetedCheckQuestion(escalation),
+    '',
+    `_Answer:_ \`${outcome}\`${targetedCheckAnswer?.note ? ` — ${targetedCheckAnswer.note}` : ''}`,
+    '',
+    `**Advisory outcome:** \`${outcome}\` — ${outcome === 'accept'
+      ? 'no blocking findings on this head; `advisory:accepted` is applied'
+      : 'blocking findings on this head; `advisory:changes` is applied'}.`,
+    '',
+    '---',
+    '',
+    `Net basis: \`${sha}..${sha}\` (this head; no fresh diff computed — the prior verdict quoted above already `
+      + 'covered this content).',
+    '',
+    '**This PR still needs the human ceremony.** Clearing `review:human` requires the operator to run '
+      + `\`/review ${pr}\` or \`we:scripts/review-set-label.mjs --to=clear-human --actor=… `
+      + '--reason="<the operator instruction>"` — nothing above this line performs, substitutes for, or '
+      + 'shortcuts that ceremony.',
+    '',
+    '_Posted automatically — converted from the completed jury verdict at this head, plus one targeted check '
+      + 'on the escalation reason (#xconv1), never a full re-review of a head no push has touched._',
+  ].join('\n');
+}
+
+/** #xconv1 — has a CONVERTED advisory note already been posted for this exact head? Mirrors
+ *  `findAcceptVerdictComment`'s trusted-author gate; matches on {@link CONVERTED_ADVISORY_NOTE_MARKER} plus the
+ *  `Net basis` head half this renderer stamps, so a re-tick never reposts a duplicate note for a head nobody
+ *  has touched since (the daemon's own idempotency check — no session/round-cap machinery needed for a
+ *  mechanical, one-shot post).
+ * @param {Array} comments
+ * @param {string} headSha
+ * @returns {boolean}
+ */
+export function hasConvertedAdvisoryNote(comments, headSha) {
+  const sha = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
+  if (!sha) return false;
+  const basisRe = new RegExp(`^Net basis: \`${sha}\\.\\.${sha}\``, 'im');
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue;
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (body.includes(CONVERTED_ADVISORY_NOTE_MARKER) && basisRe.test(body)) return true;
+  }
+  return false;
+}
+
+/**
  * #x9xqexm (round-2 review, major 3) — WHICH `index <old>..<new>` LINES MAY NOT BE DROPPED. Both fingerprints
  * below drop blob-pair headers on the stated grounds that they "restate the hashes of content that is ALREADY in
  * the diff body". For a BINARY file that premise is provably false: `computeNetDiffText` runs `git diff` without
