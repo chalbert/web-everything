@@ -224,8 +224,15 @@ jobs:
   # rebuild/self-sync + live smoke gate, a real bare remote with main moving, fake GitHub + fake sessions, the
   # invariants (clone clean, <=1 main move behind, tick bounded, no onTick crash, owed work dispatched) checked
   # after EVERY tick — plus one regression scenario per live daemon break (scripts/conveyor/soak/breaks/). Minutes,
-  # not seconds, so it runs ONLY on PRs that touch daemon code (the path check below; a PR outside it passes this
-  # job in seconds) and on a manual dispatch. WE-only: no FUI sibling needed. `daemon-soak` (the aggregator job
+  # not seconds, so on a PR it runs ONLY when the PR touches daemon code (the path check below; a PR outside it
+  # passes this job in seconds), and ALWAYS on a push to main and on a manual dispatch. WHY on main (soak-main-red,
+  # 2026-09-26): it used to run on PRs only, so a soak regression that landed on main (the lane-pool verdict memo
+  # that pinned a freed lane as "holds work", surfaced by the soak sharding) was invisible there — no red main,
+  # no main-red window — and instead read as a red `daemon-soak` on EVERY unrelated daemon PR, each of which then
+  # looked like its own failure. Running on main makes that regression a red `main` the moment it lands, so
+  # `scripts/conveyor/main-red-recovery.mjs` opens a red window and `reconcile-core`'s `owed-ci-rerun` /
+  # `ci-red-recovery-watch.mjs` treat those PRs' `daemon-soak` reds as main's, not theirs. WE-only: no FUI
+  # sibling needed. `daemon-soak` (the aggregator job
   # below) IS a required branch-protection check today — `gh api repos/.../branches/main/protection --jq
   # .required_status_checks.contexts` → `["test","smoke","daemon-soak"]` — and the drain's own required-context
   # reads (`scripts/conveyor/ci-red-recovery-watch.mjs`, `scripts/conveyor/main-red-recovery.mjs`) read that same
@@ -249,7 +256,7 @@ jobs:
   #                 scope job itself failed (fail closed), otherwise red unless EVERY shard succeeded. Full coverage is preserved — sharding only changes WHERE
   #                 each scenario runs, never WHETHER it runs; every scenario still runs on every daemon PR.
   daemon-soak-scope:
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -310,7 +317,7 @@ jobs:
   # silently read as satisfied, same guard the `test` aggregator above uses for `test-shard`.
   daemon-soak:
     needs: [daemon-soak-scope, soak-shard]
-    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && !cancelled() }}
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

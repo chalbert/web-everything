@@ -64,7 +64,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // `we:scripts/merge-ai-prs.mjs` (never re-derived) — the same collapsed-rollup reader every other required-check
 // consumer in this repo already shares.
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
-import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK } from './main-red-recovery.mjs';
+import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
 
 /**
@@ -310,24 +310,30 @@ export function defaultReadAheadBy(headSha, { exec = execFileSyncThrottled, repo
  * only `aheadByOnMain` needs a fresh `gh api .../compare` read per failing PR, keyed off `headRefOid`
  * (already fetched by `defaultReadPrs`'s own `PR_LIST_JSON_FIELDS`).
  * @param {Array<object>} prs
- * @param {{readMainRuns?:Function, readAheadBy?:Function, requiredCheck?:string, defaultBranch?:string, repo?:string|null}} [o]
+ * soak-main-red (2026-09-26): judged across EVERY required check (`requiredChecks`, default
+ * `DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS` = test/smoke/daemon-soak), not `test` alone — a PR red only on
+ * `daemon-soak` while `main`'s own soak was red is owed a rebase, never a ci-heal. `requiredCheck` (singular,
+ * legacy) still narrows to exactly that one check when a caller passes it.
+ * @param {Array<object>} prs
+ * @param {{readMainRuns?:Function, readAheadBy?:Function, requiredCheck?:string, requiredChecks?:string[], defaultBranch?:string, repo?:string|null}} [o]
  * @returns {{prs:Array<object>, mainRedWindows:Array<object>}}
  */
 export function enrichPrsWithMainRedFacts(prs, {
   readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
-  requiredCheck = DEFAULT_REQUIRED_CHECK, defaultBranch = 'main', repo = null,
+  requiredCheck = null, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, defaultBranch = 'main', repo = null,
 } = {}) {
+  const checks = requiredCheck ? [requiredCheck] : requiredChecks;
   const list = Array.isArray(prs) ? prs : [];
-  const failing = list.filter((pr) => isRequiredCheckFailed(pr, requiredCheck));
+  const failing = list.filter((pr) => isAnyRequiredCheckFailed(pr, checks));
   if (!failing.length) return { prs: list, mainRedWindows: [] };
 
   const mainRedWindows = computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch }));
   const failingSet = new Set(failing);
   const enriched = list.map((pr) => {
     if (!failingSet.has(pr)) return pr;
-    const check = latestRequiredCheck(pr, requiredCheck);
+    const check = failingRequiredCheckForAttribution(pr, { requiredChecks: checks, mainRedWindows });
     const aheadBy = pr?.headRefOid ? readAheadBy(pr.headRefOid, { repo, base: defaultBranch }) : null;
-    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, aheadByOnMain: aheadBy };
+    return { ...pr, requiredCheckCompletedAt: check?.completedAt ?? null, requiredCheckName: check?.name ?? null, aheadByOnMain: aheadBy };
   });
   return { prs: enriched, mainRedWindows };
 }

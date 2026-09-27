@@ -48,6 +48,7 @@
  * @see we:docs/agent/platform-decisions.md#deterministic-core-thin-judgment
  */
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
+import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 
 /**
  * we:scripts/conveyor/main-red-recovery.mjs#MAIN_RED_CONCLUSIONS — which of `main`'s own `CI` run conclusions
@@ -150,6 +151,47 @@ export function classifyCiFailureAttribution({ failureCompletedAt, mainRedWindow
   const ts = Date.parse(failureCompletedAt);
   if (!Number.isFinite(ts)) return 'unknown';
   return isWithinRedWindow(ts, mainRedWindows) ? 'main-red' : 'own-failure';
+}
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS — soak-main-red (2026-09-26): the
+ * required checks whose failure a red-`main` window can explain, when the caller has no live branch-protection
+ * list (`ci-red-recovery-watch.mjs#defaultReadRequiredContexts` — preferred whenever a repo slug is known). It
+ * used to be `test` ALONE, so a PR red only on `daemon-soak` (the soak regression that sat on `main` unseen
+ * because the soak never ran there) was never attributed to `main`: `reconcile-core` planned a `ci-heal` for it
+ * and `ci-red-recovery-watch` never rebased it. Mirrors today's required contexts (`test`, `smoke`,
+ * `daemon-soak`); a name a repo does not report is simply never failing, so the list is safe for any repo.
+ */
+export const DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS = Object.freeze([DEFAULT_REQUIRED_CHECK, 'smoke', 'daemon-soak']);
+
+/**
+ * we:scripts/conveyor/main-red-recovery.mjs#failingRequiredCheckForAttribution — soak-main-red: across EVERY
+ * required check (not just `test`), the ONE failing check a red-`main` attribution must be judged on. PURE.
+ * `null` when none of `requiredChecks` is failing. With several failing, a check whose completion falls OUTSIDE
+ * every red window (or is unreadable) wins — one failure `main` cannot explain means the PR owns at least that
+ * one, so it must read `own-failure`/`unknown`, never be excused by a sibling that did fail inside the window.
+ * Otherwise the latest-completing one (all inside a window ⇒ attributed to `main`).
+ * @param {object} pr - a `gh pr list` row with `statusCheckRollup`
+ * @param {{requiredChecks?:string[], mainRedWindows?:Array<object>}} [o]
+ * @returns {{name:string, completedAt:(string|null)}|null}
+ */
+export function failingRequiredCheckForAttribution(pr, { requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, mainRedWindows = [] } = {}) {
+  const names = Array.isArray(requiredChecks) ? requiredChecks : DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS; // [] = none required
+  const failing = [];
+  for (const name of new Set(names)) {
+    if (!isRequiredCheckFailed(pr, name)) continue;
+    failing.push({ name, completedAt: latestRequiredCheck(pr, name)?.completedAt ?? null });
+  }
+  if (!failing.length) return null;
+  const unexplained = failing.find((f) => classifyCiFailureAttribution({ failureCompletedAt: f.completedAt, mainRedWindows }) !== 'main-red');
+  if (unexplained) return unexplained;
+  return failing.reduce((a, b) => (Date.parse(b.completedAt) > Date.parse(a.completedAt) ? b : a));
+}
+
+/** soak-main-red — is ANY of `requiredChecks` concluded red on this PR? PURE. */
+export function isAnyRequiredCheckFailed(pr, requiredChecks = DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS) {
+  const names = Array.isArray(requiredChecks) ? requiredChecks : DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS; // [] = none required
+  return names.some((n) => isRequiredCheckFailed(pr, n));
 }
 
 /**
