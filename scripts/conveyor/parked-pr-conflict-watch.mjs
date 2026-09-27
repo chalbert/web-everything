@@ -276,31 +276,22 @@ export function defaultConflictLabelRemovedAtMs({ pr, repo, exec = execFileSyncT
 }
 
 /**
- * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultComputeConflictDisposition — #xngv3vn (the queued-
- * conflict grace was wasted on a conflict the drain can never heal). A LOCAL, git-level classification of what
- * is ACTUALLY conflicting, reusing the EXACT plumbing the drain itself uses to decide whether it can heal a
- * conflict at all — `we:scripts/lib/rebase-drop-manifest.mjs`'s {@link parseMergeTree}/
- * {@link manifestConflictDisposition} — never a second, independently-drifting opinion of "drain-resolvable".
- * `git fetch` both refs (best-effort — mirrors `we:scripts/conveyor/branch-drift.mjs#computeDrift`'s own
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#gitMergeTreeParsed — the shared fetch + WORKING-TREE-FREE
+ * `git merge-tree --write-tree` probe both {@link defaultComputeConflictDisposition} and
+ * {@link defaultConflictingFilePaths} run — factored out (#xconflres1) so the two can never drift on the
+ * fetch/exec shape, and so a conflicting PR's OWN path list ({@link parseMergeTree}'s `conflictPaths`) is
+ * available to a caller that needs the paths themselves, not just the manifest-vs-real disposition string.
+ * `git fetch` both refs is best-effort (mirrors `we:scripts/conveyor/branch-drift.mjs#computeDrift`'s own
  * fetch-then-probe shape exactly: a stale local ref still answers; a genuinely unresolvable one fails the
- * probe closed, below) then a WORKING-TREE-FREE `git merge-tree --write-tree` between them.
- *
- * WHY THIS MATTERS: `we:scripts/conveyor/parked-pr-conflict-watch.mjs#QUEUED_CONFLICT_GRACE_MS` gives the
- * drain 30 minutes before bouncing an approved/queued conflicting PR to a fix agent — reasonable ONLY for the
- * one conflict shape the drain can actually rebase-drop on its own (`.lane-manifest.json` alone,
- * `we:scripts/lib/rebase-drop-manifest.mjs`'s whole reason to exist). A PR conflicting on real content has NO
- * chance of resolving in that window no matter how long it waits — the drain has no code path that touches
- * anything but the manifest — so waiting out the full grace on it is pure delay with no upside. This function
- * is what lets the caller tell the two shapes apart BEFORE the wait, not just after it expires.
+ * probe closed, below).
  *
  * Returns `null` on ANY failure to resolve/fetch/probe (no `headRefName`, both `git` calls throwing with no
- * parseable output, an unparseable `merge-tree` result) — the caller reads `null` as "cannot tell" and keeps
- * the EXISTING wait unchanged (the safe direction: a probe hiccup costs at most the pre-#xngv3vn wait, never a
- * wrongly-skipped grace on a conflict that might in fact be manifest-only).
+ * parseable output, an unparseable `merge-tree` result) — every caller reads `null` as "cannot tell" and keeps
+ * its own existing safe-direction fallback (an unnarrowed wait, or the full changed-file list) unchanged.
  * @param {{pr:{headRefName?:string, baseRefName?:string}, cwd?:string, exec?:Function}} o
- * @returns {?('clean'|'manifest-only'|'real')}
+ * @returns {?{tree:string, clean:boolean, conflictPaths:string[]}}
  */
-export function defaultComputeConflictDisposition({ pr, cwd = REPO_ROOT, exec = execFileSyncThrottled } = {}) {
+function gitMergeTreeParsed({ pr, cwd = REPO_ROOT, exec = execFileSyncThrottled } = {}) {
   const head = pr?.headRefName;
   if (typeof head !== 'string' || head === '') return null;
   const base = (typeof pr?.baseRefName === 'string' && pr.baseRefName) || 'main';
@@ -325,7 +316,67 @@ export function defaultComputeConflictDisposition({ pr, cwd = REPO_ROOT, exec = 
   }
   const parsed = parseMergeTree(stdout, exitCode);
   if (!parsed.tree) return null;
+  return parsed;
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultComputeConflictDisposition — #xngv3vn (the queued-
+ * conflict grace was wasted on a conflict the drain can never heal). A LOCAL, git-level classification of what
+ * is ACTUALLY conflicting, reusing the EXACT plumbing the drain itself uses to decide whether it can heal a
+ * conflict at all — `we:scripts/lib/rebase-drop-manifest.mjs`'s {@link parseMergeTree}/
+ * {@link manifestConflictDisposition}, via the shared {@link gitMergeTreeParsed} probe — never a second,
+ * independently-drifting opinion of "drain-resolvable".
+ *
+ * WHY THIS MATTERS: `we:scripts/conveyor/parked-pr-conflict-watch.mjs#QUEUED_CONFLICT_GRACE_MS` gives the
+ * drain 30 minutes before bouncing an approved/queued conflicting PR to a fix agent — reasonable ONLY for the
+ * one conflict shape the drain can actually rebase-drop on its own (`.lane-manifest.json` alone,
+ * `we:scripts/lib/rebase-drop-manifest.mjs`'s whole reason to exist). A PR conflicting on real content has NO
+ * chance of resolving in that window no matter how long it waits — the drain has no code path that touches
+ * anything but the manifest — so waiting out the full grace on it is pure delay with no upside. This function
+ * is what lets the caller tell the two shapes apart BEFORE the wait, not just after it expires.
+ *
+ * Returns `null` on ANY failure to resolve/fetch/probe — the caller reads `null` as "cannot tell" and keeps
+ * the EXISTING wait unchanged (the safe direction: a probe hiccup costs at most the pre-#xngv3vn wait, never a
+ * wrongly-skipped grace on a conflict that might in fact be manifest-only).
+ * @param {{pr:{headRefName?:string, baseRefName?:string}, cwd?:string, exec?:Function}} o
+ * @returns {?('clean'|'manifest-only'|'real')}
+ */
+export function defaultComputeConflictDisposition({ pr, cwd = REPO_ROOT, exec = execFileSyncThrottled } = {}) {
+  const parsed = gitMergeTreeParsed({ pr, cwd, exec });
+  if (!parsed) return null;
   return manifestConflictDisposition(parsed);
+}
+
+/**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#defaultConflictingFilePaths — #xconflres1 (live incident,
+ * `chalbert/web-everything#2772` — see {@link isStatuteTierConflict}'s own docblock for the full incident this
+ * closes). The CONTENT-BASED, PRECISE alternative {@link isStatuteTierConflict}'s own docblock already named as
+ * future work: rather than reading the PR's WHOLE changed-file set (an over-cautious approximation that routes a
+ * PR to a human whenever a leash/statute file merely SITS IN the diff, whether or not it is any part of the
+ * actual same-line conflict), this reads the git-level `git merge-tree` conflict-path list — the SAME probe
+ * {@link defaultComputeConflictDisposition} runs, via the shared {@link gitMergeTreeParsed} — so a caller can
+ * narrow the statute-tier check to the file(s) ACTUALLY in conflict.
+ *
+ * CONFIRMED LIVE 2026-09-27: PR #2772 (`fix(gh-shim): resolve GH_THROTTLE_CLI through primaryCheckout, never a
+ * lane`) touched `scripts/lib/__tests__/gate-invariants.test.mjs` (a `POLICY_SPEC` / declarative-leash basename)
+ * ELSEWHERE in its diff, with NO conflict there at all — a real `git merge-tree --write-tree origin/main
+ * origin/lane/fix-gh-shim-stable-path` (no writes) resolves the ONE actually-conflicting path as
+ * `scripts/conveyor/health-smells/index.mjs`, an ordinary ENGINE-tier file. The whole-diff heuristic stood the
+ * PR down as a "genuine same-line conflict" needing a human, when the real conflict was a purely mechanical
+ * rebase/resolve a fix agent could (and, once this fix landed, did) run.
+ *
+ * Returns `null` on ANY failure to resolve/fetch/probe (the same {@link gitMergeTreeParsed} cases) — the caller
+ * reads `null` as "cannot tell which files conflict" and falls back to its OWN existing whole-file-set check,
+ * the safe direction (over-cautious never under-cautious). Returns `[]` when the probe ran clean (`disposition`
+ * would read `'clean'`/no parseable conflict path at all) — a caller that narrows on an empty list would wrongly
+ * clear a PR that GitHub itself still reports `CONFLICTING`, so every call site here treats an EMPTY array
+ * exactly like `null` (fall back to the full file set), never as "definitely nothing statute-tier conflicts".
+ * @param {{pr:{headRefName?:string, baseRefName?:string}, cwd?:string, exec?:Function}} o
+ * @returns {?string[]}
+ */
+export function defaultConflictingFilePaths({ pr, cwd = REPO_ROOT, exec = execFileSyncThrottled } = {}) {
+  const parsed = gitMergeTreeParsed({ pr, cwd, exec });
+  return parsed ? parsed.conflictPaths : null;
 }
 
 /**
@@ -1183,6 +1234,13 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false, review
  * `files` MUST already be the verified-complete list ({@link defaultListPrFiles}'s pagination, never the
  * possibly gh-capped `pr.files`) — the caller owns that check ({@link GH_FILES_GRAPHQL_CAP}); this trusts what
  * it is given.
+ *
+ * #xconflres1 — `conflictingPaths`, when given as a NON-EMPTY array ({@link defaultConflictingFilePaths}'s own
+ * output), narrows `files` down to ONLY the paths actually in the same-line git conflict BEFORE ever computing
+ * `isStatuteTierConflict` — the precise alternative to reading the PR's whole changed-file set (see that
+ * function's own docblock for the live incident, `chalbert/web-everything#2772`, this closes). `null`/`undefined`/
+ * an EMPTY array (the probe could not tell, or found no parseable conflict path) leaves `files` UNNARROWED —
+ * today's whole-diff behaviour, the safe/over-cautious fallback direction.
  * `#xu2krte` Fork 2 (review-human statute amendment) EXTENDS this: when the conflict is statute-tier, NOT
  * append-only, and the caller says the PR already carries `review:human` (`hasReviewHuman`), it is worth the
  * extra `listMainStatutePatches` round trip (`main`'s own patch for the same files, since the SAME merge base) to
@@ -1191,15 +1249,20 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false, review
  * `hasReviewHuman` and `!appendOnlyStatute` so the common non-`review:human` / already-mechanical tick never pays
  * for the extra fetch, and any fetch/parse failure fails CLOSED (`reviewHumanFixable` stays `false` — stand down).
  * @param {Array<{path?:string}|string>} files
- * @param {{number:number|string, repo?:string|null, listPrPatches:Function, hasReviewHuman?:boolean, listMainStatutePatches?:Function}} o
+ * @param {{number:number|string, repo?:string|null, listPrPatches:Function, hasReviewHuman?:boolean, listMainStatutePatches?:Function, conflictingPaths?:?string[]}} o
  * @returns {{isStatuteTier:boolean, appendOnlyStatute:boolean, reviewHumanFixable:boolean}}
  */
-function classifyStatuteConflict(files, { number, repo, listPrPatches, hasReviewHuman = false, listMainStatutePatches }) {
-  const isStatuteTier = isStatuteTierConflict(files);
+function classifyStatuteConflict(files, {
+  number, repo, listPrPatches, hasReviewHuman = false, listMainStatutePatches, conflictingPaths = null,
+}) {
+  const filesToCheck = Array.isArray(conflictingPaths) && conflictingPaths.length > 0
+    ? (Array.isArray(files) ? files : []).filter((f) => conflictingPaths.includes(typeof f === 'string' ? f : f?.path))
+    : files;
+  const isStatuteTier = isStatuteTierConflict(filesToCheck);
   let appendOnlyStatute = false;
   let reviewHumanFixable = false;
   if (isStatuteTier) {
-    const statuteTierFiles = (Array.isArray(files) ? files : [])
+    const statuteTierFiles = (Array.isArray(filesToCheck) ? filesToCheck : [])
       .map((f) => (typeof f === 'string' ? f : f?.path))
       .filter((p) => p && (isDeclarativeLeashPath(p) || isStatutePath(p)));
     let patches = null;
@@ -1316,7 +1379,7 @@ export function defaultPostConflictRearm({ pr, repo, exec = execFileSync }) {
  * #4118 — on a fresh detection, the CONFLICT_LABEL is now applied LAST, only once the alert comment and the
  * dispatch/stand-down have each either just succeeded or were already found (via the `CONFLICT_RETRY_WINDOW_MS`
  * marker checks) on the PR's own thread. See the section above `CONFLICT_RETRY_WINDOW_MS` for the full reasoning.
- * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, postSupersedeComment?:Function, listPrFiles?:Function, listPrPatches?:Function, listMainStatutePatches?:Function, listAgents?:Function, now?:number, queueScope?:object}} [o]
+ * @param {{repo?:string|null, listPrs?:Function, provider?:object, dryRun?:boolean, postFinding?:Function, postStandDown?:Function, postRearm?:Function, postSupersedeComment?:Function, listPrFiles?:Function, listPrPatches?:Function, listMainStatutePatches?:Function, computeConflictingPaths?:Function, listAgents?:Function, now?:number, queueScope?:object}} [o]
  * @returns {Array<{num:number, isConflicting:boolean, add:string|null, remove:string[], newlyDetected:boolean, newlyResolved?:boolean, commented:boolean, error?:string, routedTo?:string, supersededStandDown?:boolean, conflictDisposition?:string}>}
  */
 export function watchParkedPrConflicts({
@@ -1331,6 +1394,10 @@ export function watchParkedPrConflicts({
   labelAgeMs = defaultConflictLabelAgeMs,
   labelRemovedAtMs = defaultConflictLabelRemovedAtMs,
   computeConflictDisposition = defaultComputeConflictDisposition,
+  // #xconflres1 — the precise, content-based narrowing {@link classifyStatuteConflict} uses in place of the
+  // PR's whole changed-file set wherever it can tell which file(s) actually conflict. Best-effort at every call
+  // site below (a probe failure/`null`/empty result falls back to the existing whole-file check, unchanged).
+  computeConflictingPaths = defaultConflictingFilePaths,
   attemptMechanicalRebase = defaultAttemptUnownedConflictRebase,
   listAgents = defaultListAgents,
   now = Date.now(),
@@ -1392,28 +1459,36 @@ export function watchParkedPrConflicts({
         if (resolvedRepo == null) resolvedRepo = provider.currentRepo();
         let filesForCheck = null;
         try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
+        // #xconflres1 — best-effort; a probe failure/null/empty result leaves `classifyStatuteConflict` unnarrowed.
+        let conflictingPaths = null;
+        try { conflictingPaths = computeConflictingPaths({ pr, repo: resolvedRepo }); } catch { conflictingPaths = null; }
         const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = filesForCheck == null
           ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false } // fetch failure → over-cautious
           : classifyStatuteConflict(filesForCheck, {
-              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman: true, listMainStatutePatches,
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman: true, listMainStatutePatches, conflictingPaths,
             });
-        if (!isStatuteTier || (!appendOnlyStatute && !reviewHumanFixable)) {
-          // Still a genuine judgment call (or no longer statute-tier at all, an edge case) — the earlier
-          // stand-down stands; never re-post, never duplicate the marker.
+        if (isStatuteTier && !appendOnlyStatute && !reviewHumanFixable) {
+          // Still a genuine judgment call — the earlier stand-down stands; never re-post, never duplicate the marker.
           entry.routedTo = 'stand-down (unchanged)';
           results.push(entry);
           continue;
         }
+        // #xconflres1 — `!isStatuteTier` (the narrower conflict-path check found the real same-line conflict sits
+        // OUTSIDE any leash/statute file entirely) is now ALSO dispatchable here, not just the append-only/
+        // review-human-fixable sub-cases: the earlier stand-down was a false positive from the whole-diff
+        // heuristic, exactly like the live #2772 incident {@link isStatuteTierConflict}'s own docblock records.
         if (!dryRun) {
           // Finding FIRST, supersede SECOND. The supersede comment is what the next sweep's idempotency read
           // (`isWatcherMarkerAlreadySuperseded`) and the dispatch gate (`isStandDownSuperseded`) key on, so it must
           // only exist once the finding really went out. If `postFinding` throws, no supersede is posted and the
           // next sweep retries — instead of a "routed to a fix agent" note with no fix request behind it.
-          postFinding({ pr, repo: resolvedRepo, appendOnlyStatute, reviewHumanFixable: !appendOnlyStatute });
+          postFinding({ pr, repo: resolvedRepo, appendOnlyStatute, reviewHumanFixable: isStatuteTier && !appendOnlyStatute });
           try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort: a missing supersede only leaves the gate terminal and the next sweep retries */ }
         }
         entry.supersededStandDown = true;
-        entry.routedTo = appendOnlyStatute
+        entry.routedTo = !isStatuteTier
+          ? 'reconcile-finding (no longer statute-tier — #xconflres1, marker superseded)'
+          : appendOnlyStatute
           ? 'reconcile-finding (append-only statute, marker superseded)'
           : 'reconcile-finding (review-human statute amendment, marker superseded)';
         results.push(entry);
@@ -1487,12 +1562,33 @@ export function watchParkedPrConflicts({
         // — this path never reads `pr.files` at all, so it always pays for the paginated, uncapped read.
         let filesForCheck = null;
         try { filesForCheck = listPrFiles({ number: pr?.number, repo: resolvedRepo }); } catch { /* handled below */ }
+        // #xconflres1 — best-effort narrowing to the actually-conflicting path(s); `disposition` already told us
+        // this is a REAL (non-manifest) conflict, so a second, independent merge-tree probe is worth its cost
+        // here specifically (an infrequent, already-git-bound branch) to avoid trusting the whole diff.
+        let conflictingPaths = null;
+        try { conflictingPaths = computeConflictingPaths({ pr, repo: resolvedRepo }); } catch { conflictingPaths = null; }
         const hasReviewHuman = hasReviewLabel(pr?.labels, REVIEW_LABELS.human);
         const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = filesForCheck == null
           ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false } // fetch failure → over-cautious, the safe direction
           : classifyStatuteConflict(filesForCheck, {
-              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches,
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches, conflictingPaths,
             });
+
+        // #xconflres1 (live incident `chalbert/web-everything#2772`) — a QUEUED PR re-evaluated here every sweep
+        // may already carry a stand-down THIS WATCH posted on an EARLIER sweep, back when it was still `parked`
+        // and the whole-diff heuristic over-fired. If the narrower check above now says the conflict is
+        // dispatchable, that earlier marker must be explicitly SUPERSEDED (never silently left to contradict a
+        // fresh finding, and never re-derived a second time — reuses {@link findWatcherStandDownComment}/
+        // {@link isWatcherMarkerAlreadySuperseded}, the SAME watcher-authored, not-yet-superseded check the
+        // `recheckCandidate` branch above already runs) — this is what mechanically picks the PR back up with no
+        // separate re-arm step. Read once, best-effort: a failure here just means no supersede is attempted (the
+        // dispatch below still happens; `reconcile-core.mjs`'s stood-down refusal then keeps the PR terminal
+        // until a later sweep's read succeeds).
+        let priorWatcherStandDown = false;
+        try {
+          const threadComments = listPrComments({ number: pr?.number, repo: resolvedRepo });
+          priorWatcherStandDown = Boolean(findWatcherStandDownComment(threadComments)) && !isWatcherMarkerAlreadySuperseded(threadComments);
+        } catch { priorWatcherStandDown = false; }
 
         if (isStatuteTier && !appendOnlyStatute && !reviewHumanFixable) {
           // #3383 fix — this is NO LONGER assumed to have already reached a human at detection: the fresh path
@@ -1527,15 +1623,32 @@ export function watchParkedPrConflicts({
           if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
           entry.routedTo = 'stand-down (after drain grace)';
         } else if (isStatuteTier && appendOnlyStatute) { // dispatch to the fixer, exactly like the fresh-detection exception
-          if (!dryRun) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+          if (!dryRun) {
+            postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
+          }
           entry.routedTo = 'reconcile-finding (append-only statute, after drain grace)';
+          if (priorWatcherStandDown) entry.supersededStandDown = true;
         } else if (isStatuteTier && reviewHumanFixable) {
-          if (!dryRun) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+          if (!dryRun) {
+            postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
+          }
           entry.routedTo = 'reconcile-finding (review-human statute amendment, after drain grace)';
+          if (priorWatcherStandDown) entry.supersededStandDown = true;
         } else {
           // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
-          if (!dryRun) postFinding({ pr, repo: resolvedRepo });
-          entry.routedTo = 'reconcile-finding (after drain grace)';
+          // #xconflres1 — includes the "no longer statute-tier at all" outcome (the false-positive stand-down this
+          // whole card exists to unblock, e.g. `chalbert/web-everything#2772`): superseding here is what mechanically
+          // re-arms a PR the whole-diff heuristic wrongly stood down on an earlier sweep.
+          if (!dryRun) {
+            postFinding({ pr, repo: resolvedRepo });
+            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
+          }
+          entry.routedTo = priorWatcherStandDown
+            ? 'reconcile-finding (no longer statute-tier — #xconflres1, marker superseded, after drain grace)'
+            : 'reconcile-finding (after drain grace)';
+          if (priorWatcherStandDown) entry.supersededStandDown = true;
         }
         results.push(entry);
       } catch (e) {
@@ -1672,10 +1785,14 @@ export function watchParkedPrConflicts({
         // declarative-leash file anywhere in that subset, a non-`.md` statute path, or any patch-fetch failure
         // all fail this closed (stand-down), the safe direction.
         const hasReviewHuman = hasReviewLabel(pr?.labels, REVIEW_LABELS.human);
+        // #xconflres1 — best-effort narrowing to the actually-conflicting path(s), the same probe used at the
+        // `graceDue`/`recheckCandidate` call sites above; a failure/null/empty result leaves the check unnarrowed.
+        let conflictingPaths = null;
+        try { conflictingPaths = computeConflictingPaths({ pr, repo: resolvedRepo }); } catch { conflictingPaths = null; }
         const { isStatuteTier, appendOnlyStatute, reviewHumanFixable } = statuteCheckFailed
           ? { isStatuteTier: true, appendOnlyStatute: false, reviewHumanFixable: false }
           : classifyStatuteConflict(filesForCheck, {
-              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches,
+              number: pr?.number, repo: resolvedRepo, listPrPatches, hasReviewHuman, listMainStatutePatches, conflictingPaths,
             });
         const standDown = isStatuteTier && !appendOnlyStatute && !reviewHumanFixable;
 

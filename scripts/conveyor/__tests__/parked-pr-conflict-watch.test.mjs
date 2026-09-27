@@ -2946,3 +2946,170 @@ describe('watchParkedPrConflicts — the append-only statute exception (#3383)',
     expect(called).toBe(false);
   });
 });
+
+// #xconflres1 — LIVE INCIDENT, chalbert/web-everything#2772, 2026-09-27: the whole-diff `isStatuteTierConflict`
+// heuristic stood a QUEUED, `ready-to-merge`/`review:accepted` PR down as a "genuine same-line conflict, human
+// judgment needed" solely because its diff ALSO touched `scripts/lib/__tests__/gate-invariants.test.mjs` (a
+// POLICY_SPEC/declarative-leash basename) — a file with NO conflict at all. A real, read-only
+// `git merge-tree --write-tree origin/main origin/lane/fix-gh-shim-stable-path` against the PR's own real refs
+// (no writes) resolved the ONE actually-conflicting path as `scripts/conveyor/health-smells/index.mjs`, an
+// ordinary ENGINE-tier file — a purely mechanical rebase/resolve, never a principle-drafting judgment call. These
+// tests pin the fix: `classifyStatuteConflict` now narrows to {@link defaultConflictingFilePaths}'s own
+// git-level conflict-path list wherever the probe succeeds, at every one of its three call sites, and a queued
+// PR the (now-corrected) narrower check re-classifies as dispatchable has its EARLIER, watcher-authored
+// stand-down explicitly superseded — mechanically picking a false-positive stand-down like #2772's back up, with
+// no separate re-arm step.
+describe('#xconflres1 — statute-tier classification narrows to the ACTUALLY-conflicting file(s)', () => {
+  const L = (...n) => n.map((name) => ({ name }));
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      postComment: (repo, pr, body) => { calls.push(['postComment', repo, pr, body]); },
+    };
+  };
+  // The exact live shape: BOTH a statute-tier basename (present, unconflicted) and an ordinary engine-tier file
+  // (the real conflict) in the same diff.
+  const mixedFiles = () => [
+    { path: 'scripts/lib/__tests__/gate-invariants.test.mjs' },
+    { path: 'scripts/conveyor/health-smells/index.mjs' },
+  ];
+  const onlyRealConflictPath = ['scripts/conveyor/health-smells/index.mjs'];
+
+  it('graceDue (queued PR, real conflict): a statute-tier file present but NOT conflicting is no longer stood down', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([['finding', 2772]]); // dispatched to the fixer — never stood down
+  });
+
+  it('graceDue: WITHOUT the narrowing (computeConflictingPaths → null, probe failed) the SAME PR still stands down — pins the safe fallback', () => {
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => null, // unreadable — the pre-#xconflres1 behaviour
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('graceDue: an EMPTY conflictingPaths result is treated exactly like null (never narrows to "nothing conflicts")', () => {
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => [],
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('graceDue: a PRIOR watcher stand-down (the false-positive #2772 already posted) is SUPERSEDED, not left contradicting the new dispatch', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-27T01:44:54Z', author: { login: 'web-everything' } };
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [priorStandDown],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (no longer statute-tier — #xconflres1, marker superseded, after drain grace)');
+    expect(r.supersededStandDown).toBe(true);
+    expect(routed).toEqual([['finding', 2772]]); // never re-stood-down
+    const superseded = provider.calls.find((c) => c[0] === 'postComment');
+    expect(superseded?.[3]).toContain(SUPERSEDE_STAND_DOWN_MARKER);
+  });
+
+  it('graceDue: with NO prior stand-down on the thread, nothing is superseded (no spurious comment)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2773, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(r.supersededStandDown).toBeUndefined();
+    expect(provider.calls.find((c) => c[0] === 'postComment')).toBeUndefined();
+  });
+
+  it('fresh detection (first sighting): a statute-tier file present but not conflicting is dispatched, not stood down', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2768, mergeable: 'CONFLICTING', labels: L('review:pending'), files: mixedFiles(),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([['finding', 2768]]);
+  });
+
+  it('recheckCandidate (a review:human parked PR, previously stood down): narrowing to "no longer statute-tier" now supersedes and dispatches too', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-20T00:00:00Z', author: { login: 'web-everything' } };
+    const listPrs = () => [{
+      number: 2549, mergeable: 'CONFLICTING', labels: L('review:human', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [priorStandDown],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (no longer statute-tier — #xconflres1, marker superseded)');
+    expect(r.supersededStandDown).toBe(true);
+    expect(routed).toEqual([['finding', 2549]]);
+  });
+});
