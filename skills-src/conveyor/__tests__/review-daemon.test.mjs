@@ -31,7 +31,7 @@ vi.mock('../../../scripts/conveyor/review-hold-reconcile.mjs', async (importOrig
 import {
   runDaemonLoop, runReviewTick, runReviewTickAllRepos, REVIEW_DAEMON_REPOS, buildCliDaemonEffects, realSleep,
   REVIEW_DAEMON_LEASE_KEY, DEFAULT_INTERVAL_MS, defaultReapSessions, hasStaleMainRefusal, defaultAcquirableLaneCount,
-  explainPendingNotDispatched,
+  explainPendingNotDispatched, runConvertAdvisoryTick, runConvertAdvisoryTickAllRepos,
 } from '../review-daemon.mjs';
 import { planReviewDispatch } from '../../../scripts/operations/review-dispatch.mjs';
 import { tagReviewStatus } from '../../../scripts/conveyor/review-status-tag.mjs';
@@ -757,6 +757,147 @@ describe('runReviewTickAllRepos — one runReviewTick call per watched repo', ()
   });
 });
 
+// #xconv1 (chalbert/web-everything#2766/#2767 unblock, epic #3383/#4075) — the mechanical, no-session
+// convert-advisory stage: posts the converted advisory note + runs ONE targeted-check judge seat for a
+// `kind:'convert-advisory'` dispatch entry. A SEPARATE, ADDITIVE async pipeline from `runReviewTick` (see that
+// function's own doc above for why) — every test here injects `convertAdvisory`/`tick`, never the real
+// `dispatchConvertAdvisory`/`judgeSpawn`.
+describe('runConvertAdvisoryTick', () => {
+  const convertPlan = (entries, refusals = []) => ({ dispatch: entries, refusals });
+  const entry = (prNumber) => ({ kind: 'convert-advisory', prNumber, headSha: 'a'.repeat(40), escalation: { kind: 'test-gaming' } });
+
+  it('runs the injected convertAdvisory effect for every convert-advisory entry, ignoring other kinds', async () => {
+    const reconcile = vi.fn(() => convertPlan([entry(2766), { kind: 'review', prNumber: 10 }, { kind: 'fix', prNumber: 11 }]));
+    const convertAdvisory = vi.fn(async () => ({ posted: true, targetedCheckAnswer: { verdict: 'accept' } }));
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory });
+    expect(convertAdvisory).toHaveBeenCalledTimes(1);
+    expect(convertAdvisory).toHaveBeenCalledWith(expect.objectContaining({ prNumber: 2766 }), expect.objectContaining({ repo: expect.any(String) }));
+    expect(out).toEqual({ convertAdvisoriesOwed: 1, posted: [{ prNumber: 2766, outcome: 'accept' }], skipped: [], failed: [], reconcileError: null });
+  });
+
+  it('a skipped (already-converted) entry lands in `skipped`, not `posted`', async () => {
+    const reconcile = vi.fn(() => convertPlan([entry(2766)]));
+    const convertAdvisory = vi.fn(async () => ({ skipped: 'already-converted' }));
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory });
+    expect(out.posted).toEqual([]);
+    expect(out.skipped).toEqual([{ prNumber: 2766, reason: 'already-converted' }]);
+  });
+
+  it('one bad entry never aborts the rest — a convertAdvisory throw lands in `failed`, siblings still run', async () => {
+    const reconcile = vi.fn(() => convertPlan([entry(1), entry(2)]));
+    const convertAdvisory = vi.fn(async ({ prNumber }) => {
+      if (prNumber === 1) throw new Error('gh comment failed');
+      return { posted: true, targetedCheckAnswer: { verdict: 'changes' } };
+    });
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory });
+    expect(out.failed).toEqual([{ prNumber: 1, error: 'gh comment failed' }]);
+    expect(out.posted).toEqual([{ prNumber: 2, outcome: 'changes' }]);
+  });
+
+  it('a reconcile failure is caught and reported as `reconcileError`, never thrown', async () => {
+    const reconcile = () => { throw new Error('claude agents ENOENT'); };
+    const out = await runConvertAdvisoryTick({ reconcile, convertAdvisory: vi.fn() });
+    expect(out).toEqual({ convertAdvisoriesOwed: 0, posted: [], skipped: [], failed: [], reconcileError: 'claude agents ENOENT' });
+  });
+
+  it('#4133-style shared reads — comments/labels ride the SAME `readPrs` closure into `convertAdvisory`, no second fetch', async () => {
+    const rawPrs = [{ number: 2766, comments: ['c1'], labels: ['l1'] }];
+    const readPrs = vi.fn(() => rawPrs);
+    const readAgents = vi.fn(() => []);
+    const reconcile = vi.fn(() => convertPlan([entry(2766)]));
+    const convertAdvisory = vi.fn(async () => ({ posted: true, targetedCheckAnswer: { verdict: 'accept' } }));
+    await runConvertAdvisoryTick({ reconcile, convertAdvisory, readPrs, readAgents });
+    expect(readPrs).toHaveBeenCalledTimes(1);
+    expect(convertAdvisory).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ comments: ['c1'], labels: ['l1'] }));
+  });
+});
+
+describe('runConvertAdvisoryTickAllRepos', () => {
+  it('calls `tick` once per watched repo and aggregates posted/skipped/failed across them', async () => {
+    const tick = vi.fn(async ({ repo }) => (repo === REVIEW_DAEMON_REPOS[0]
+      ? { convertAdvisoriesOwed: 1, posted: [{ prNumber: 1, outcome: 'accept' }], skipped: [], failed: [] }
+      : { convertAdvisoriesOwed: 0, posted: [], skipped: [], failed: [] }));
+    const out = await runConvertAdvisoryTickAllRepos({ tick });
+    expect(tick).toHaveBeenCalledTimes(REVIEW_DAEMON_REPOS.length);
+    expect(out.convertAdvisoriesOwed).toBe(1);
+    expect(out.posted).toEqual([{ prNumber: 1, outcome: 'accept', repo: REVIEW_DAEMON_REPOS[0] }]);
+  });
+
+  it('one repo throwing never aborts the rest — its own `{repo, error}` entry, siblings unaffected', async () => {
+    const tick = vi.fn(async ({ repo }) => {
+      if (repo === REVIEW_DAEMON_REPOS[0]) throw new Error('gh outage');
+      return { convertAdvisoriesOwed: 0, posted: [], skipped: [], failed: [] };
+    });
+    const out = await runConvertAdvisoryTickAllRepos({ tick });
+    expect(out.failed).toEqual([{ prNumber: null, repo: REVIEW_DAEMON_REPOS[0], error: 'gh outage' }]);
+    expect(out.repos.find((r) => r.repo === REVIEW_DAEMON_REPOS[0]).error).toBe('gh outage');
+  });
+
+  it('a repo whose reconcile itself failed reports through `reconcileFailed`, not `failed`', async () => {
+    const tick = vi.fn(async () => ({ convertAdvisoriesOwed: 0, posted: [], skipped: [], failed: [], reconcileError: 'claude agents ENOENT' }));
+    const out = await runConvertAdvisoryTickAllRepos({ tick });
+    expect(out.reconcileFailed).toHaveLength(REVIEW_DAEMON_REPOS.length);
+    expect(out.failed).toEqual([]);
+  });
+});
+
+describe('buildCliDaemonEffects.tickOnce — folds the convert-advisory stage onto the tick result (#xconv1)', () => {
+  const fakeReview = () => ({ repos: [], reviewsOwed: 0, dispatched: [], failed: [] });
+
+  it('runs runConvertAdvisories AFTER the review stage and folds its result under `convertAdvisory`', async () => {
+    const order = [];
+    const effects = buildCliDaemonEffects({
+      owner: 'x',
+      reapSessions: () => null,
+      runReview: () => { order.push('review'); return fakeReview(); },
+      runConvertAdvisories: async () => { order.push('convert-advisory'); return { convertAdvisoriesOwed: 1, posted: [{ prNumber: 2766, outcome: 'accept', repo: 'chalbert/web-everything' }], skipped: [], failed: [] }; },
+    });
+    const result = await effects.tickOnce();
+    expect(order).toEqual(['review', 'convert-advisory']);
+    expect(result.convertAdvisory).toEqual({ convertAdvisoriesOwed: 1, posted: [{ prNumber: 2766, outcome: 'accept', repo: 'chalbert/web-everything' }], skipped: [], failed: [] });
+    // The review tick's own fields are still present — folding convertAdvisory on never replaces them.
+    expect(result).toHaveProperty('repos');
+  });
+
+  it('a convert-advisory tick failure is swallowed (logged, non-fatal) — never breaks the review tick', async () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({
+      owner: 'x', log, reapSessions: () => null, runReview: fakeReview,
+      runConvertAdvisories: () => { throw new Error('gh unreadable'); },
+    });
+    const result = await effects.tickOnce();
+    expect(result.convertAdvisory).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/convert-advisory tick failed \(non-fatal\)/));
+    expect(result).toHaveProperty('repos');
+  });
+
+  it('onTick logs posted/skipped/failed/reconcileFailed lines, and is silent when `convertAdvisory` is absent (an older tick shape)', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    effects.onTick({
+      repos: [], reviewsOwed: 0, dispatched: [], failed: [],
+      convertAdvisory: {
+        posted: [{ prNumber: 2766, outcome: 'accept', repo: 'chalbert/web-everything' }],
+        skipped: [{ prNumber: 2767, reason: 'already-converted', repo: 'chalbert/web-everything' }],
+        failed: [{ prNumber: 9, error: 'boom', repo: 'chalbert/web-everything' }],
+        reconcileFailed: [{ repo: 'chalbert/frontierui', error: 'ENOENT' }],
+      },
+    });
+    expect(log.error.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining([
+      expect.stringMatching(/chalbert\/web-everything#2766 convert-advisory posted \(targeted check: accept\)/),
+      expect.stringMatching(/chalbert\/web-everything#2767 convert-advisory skipped — already-converted/),
+      expect.stringMatching(/chalbert\/web-everything#9 convert-advisory failed \(non-fatal\): boom/),
+      expect.stringMatching(/chalbert\/frontierui convert-advisory reconcile failed \(non-fatal, other repos unaffected\): ENOENT/),
+    ]));
+
+    log.error.mockClear();
+    // No `convertAdvisory` field at all (a tick shape from before this stage existed, or the daemon's own
+    // whole-tick skip shape) — must be silent, never throw on `result.convertAdvisory.posted`.
+    expect(() => effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [] })).not.toThrow();
+    expect(log.error.mock.calls.some((c) => /convert-advisory/.test(c[0]))).toBe(false);
+  });
+});
+
 describe('REVIEW_DAEMON_LEASE_KEY / DEFAULT_INTERVAL_MS', () => {
   it('is a distinct key, never the Dispatcher default or #3870\'s own key', () => {
     expect(REVIEW_DAEMON_LEASE_KEY).toBe('<conveyor:review-daemon-lease>');
@@ -790,10 +931,13 @@ describe('buildCliDaemonEffects.tickOnce — now also runs a session-reap pass e
   // proves the FOLD of `reapSessions()` onto the tick result, not the review tick itself (that is
   // `runReviewTickAllRepos`'s own describe block, above), and must never shell a real `gh`/`claude` call.
   const fakeReview = () => ({ repos: [], reviewsOwed: 1, dispatched: [], failed: [] });
+  // #xconv1 — likewise: `runConvertAdvisories` defaults to the real `runConvertAdvisoryTickAllRepos` (real
+  // `gh`/judge IO), same discipline as `runReview` above.
+  const fakeConvertAdvisories = () => null;
 
   it('folds the injected reapSessions() result onto the review tick result, under `sessionReap`', async () => {
     const reapSessions = vi.fn(() => ({ scanned: 3, stopped: 1, alreadyGone: 0, failures: 0, anomalies: 0, kept: 2 }));
-    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview });
+    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview, runConvertAdvisories: fakeConvertAdvisories });
     const result = await effects.tickOnce();
     expect(reapSessions).toHaveBeenCalledTimes(1);
     expect(result.sessionReap).toEqual({ scanned: 3, stopped: 1, alreadyGone: 0, failures: 0, anomalies: 0, kept: 2 });
@@ -805,7 +949,7 @@ describe('buildCliDaemonEffects.tickOnce — now also runs a session-reap pass e
   it('a session-reap failure is swallowed (logged, non-fatal) — never breaks the review tick', async () => {
     const reapSessions = () => { throw new Error('claude agents unreadable'); };
     const log = { error: vi.fn() };
-    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview, log });
+    const effects = buildCliDaemonEffects({ owner: 'x', reapSessions, runReview: fakeReview, runConvertAdvisories: fakeConvertAdvisories, log });
     const result = await effects.tickOnce();
     expect(result.sessionReap).toBeNull();
     expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/session-reap failed \(non-fatal\)/));
@@ -972,6 +1116,8 @@ describe('review:pending PRs the tick did not dispatch — the daemon prints why
       owner: 'o', log: { error: () => {} },
       reapSessions: () => { order.push('reap'); return null; },
       runReview: () => { order.push('review'); return { repos: [], reviewsOwed: 0, dispatched: [], failed: [] }; },
+      // #xconv1 — never the real `runConvertAdvisoryTickAllRepos` (real gh/judge IO) in a unit test.
+      runConvertAdvisories: () => null,
     });
     await fx.tickOnce();
     expect(order).toEqual(['reap', 'review']);

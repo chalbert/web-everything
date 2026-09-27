@@ -1216,23 +1216,35 @@ export const CONVERTED_ADVISORY_NOTE_MARKER = '<!-- converted-advisory-note -->'
  * `**Decision:**` line, no `review:*` label ever touched, an explicit "advisory only — the human ceremony is
  * still required" statement) — never a second full review. Quotes the prior verdict VERBATIM (a blockquote, so
  * it reads as quoted rather than restated) and the escalation's own reason, then the ONE targeted check's
- * answer. Pure string-building; the caller (a dispatched review session) supplies the targeted check's own
- * verdict/note — this function never invents one.
- * @param {{repo?: string, pr?: number, acceptComment?: {body?: string, createdAt?: (string|null)},
+ * answer. Pure string-building; the caller supplies the targeted check's own verdict/note — this function
+ * never invents one.
+ *
+ * CARRIES THE SAME MACHINE-READABLE SHAPE `we:scripts/lib/advisory-labels.mjs#parseAdvisories` reads back — a
+ * top-level (never quoted) `**Verdict:**` line and a `Net basis: \`<base>..<head>\`` line — so the staleness
+ * sweep (`planAdvisoryStaleLabels`) and `operator-queue.mjs`'s cross-check see this note exactly like a fresh
+ * `renderAdvisoryNote` one; without them a converted note would be invisible to both and its `advisory:*` label
+ * would look unbacked. `headSha` fills BOTH halves of the basis — no fresh diff was computed (the prior
+ * verdict's own diff already covered this content), so there is no separate "base" to name, and
+ * `advisoryCoversHead` only ever reads the second (head) half regardless.
+ * @param {{repo?: string, pr?: number, headSha?: string, acceptComment?: {body?: string, createdAt?: (string|null)},
  *   escalation?: {kind?: string, reasonText?: string}, targetedCheckAnswer?: {verdict?: string, note?: string}}} o
  * @returns {string}
  */
 export function renderConvertedAdvisoryNote({
-  repo = '', pr = null, acceptComment = {}, escalation = {}, targetedCheckAnswer = {},
+  repo = '', pr = null, headSha = '', acceptComment = {}, escalation = {}, targetedCheckAnswer = {},
 } = {}) {
   const quoted = String(acceptComment?.body ?? '').split('\n').map((l) => `> ${l}`).join('\n');
   const outcome = targetedCheckAnswer?.verdict === 'changes' ? 'changes' : 'accept';
+  const sha = String(headSha || '').toLowerCase();
   return [
     `${CONVERTED_ADVISORY_NOTE_MARKER} This PR carries \`review:human\` (${repo}#${pr}). This head ALREADY`,
     'completed an independent jury review, quoted verbatim below — that verdict was superseded by a later',
     'escalation, not by any defect the panel found, so it is CONVERTED into this advisory note rather than',
     're-run. It has neither accepted nor bounced this PR. No `review:*` label was changed and no decision was',
     'recorded.',
+    '',
+    `**Verdict:** ${outcome === 'accept' ? '✅ pass — no blocking findings' : '⚠️ blocking findings'} — `
+      + 'converted from a prior jury verdict plus one targeted check (never a re-run of the whole panel).',
     '',
     `**Escalation reason (${escalation.kind}):**`,
     '',
@@ -1254,6 +1266,9 @@ export function renderConvertedAdvisoryNote({
     '',
     '---',
     '',
+    `Net basis: \`${sha}..${sha}\` (this head; no fresh diff computed — the prior verdict quoted above already `
+      + 'covered this content).',
+    '',
     '**This PR still needs the human ceremony.** Clearing `review:human` requires the operator to run '
       + `\`/review ${pr}\` or \`we:scripts/review-set-label.mjs --to=clear-human --actor=… `
       + '--reason="<the operator instruction>"` — nothing above this line performs, substitutes for, or '
@@ -1262,6 +1277,27 @@ export function renderConvertedAdvisoryNote({
     '_Posted automatically — converted from the completed jury verdict at this head, plus one targeted check '
       + 'on the escalation reason (#xconv1), never a full re-review of a head no push has touched._',
   ].join('\n');
+}
+
+/** #xconv1 — has a CONVERTED advisory note already been posted for this exact head? Mirrors
+ *  `findAcceptVerdictComment`'s trusted-author gate; matches on {@link CONVERTED_ADVISORY_NOTE_MARKER} plus the
+ *  `Net basis` head half this renderer stamps, so a re-tick never reposts a duplicate note for a head nobody
+ *  has touched since (the daemon's own idempotency check — no session/round-cap machinery needed for a
+ *  mechanical, one-shot post).
+ * @param {Array} comments
+ * @param {string} headSha
+ * @returns {boolean}
+ */
+export function hasConvertedAdvisoryNote(comments, headSha) {
+  const sha = typeof headSha === 'string' ? headSha.trim().toLowerCase() : '';
+  if (!sha) return false;
+  const basisRe = new RegExp(`^Net basis: \`${sha}\\.\\.${sha}\``, 'im');
+  for (const c of Array.isArray(comments) ? comments : []) {
+    if (!isTrustedMarkerAuthor(c)) continue;
+    const body = c && typeof c.body === 'string' ? c.body : '';
+    if (body.includes(CONVERTED_ADVISORY_NOTE_MARKER) && basisRe.test(body)) return true;
+  }
+  return false;
 }
 
 /**

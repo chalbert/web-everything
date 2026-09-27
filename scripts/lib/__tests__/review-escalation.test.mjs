@@ -51,7 +51,9 @@ import {
   targetedCheckQuestion,
   renderConvertedAdvisoryNote,
   CONVERTED_ADVISORY_NOTE_MARKER,
+  hasConvertedAdvisoryNote,
 } from '../review-escalation.mjs';
+import { parseAdvisories, advisoryCoversHead } from '../advisory-labels.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
 // The SECOND consumer of `isBlastRadiusPath` (#1162 review N2). Imported so the superset relation between the
 // drain's rubric and test selection is asserted here rather than restated as a hand-counted number.
@@ -1074,7 +1076,7 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
   describe('renderConvertedAdvisoryNote', () => {
     it('quotes the prior verdict verbatim as a blockquote, states the escalation reason, and never emits a Decision line', () => {
       const note = renderConvertedAdvisoryNote({
-        repo: 'chalbert/web-everything', pr: 2766,
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
         acceptComment: { body: acceptBody, createdAt: '2026-09-26T21:47:00Z' },
         escalation: { kind: 'test-gaming', reasonText: 'test-gaming suspected — …' },
         targetedCheckAnswer: { verdict: 'accept', note: 'legitimate removal' },
@@ -1088,13 +1090,50 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
     });
     it('a `changes` targeted-check answer renders a `changes` advisory outcome', () => {
       const note = renderConvertedAdvisoryNote({
-        repo: 'chalbert/web-everything', pr: 2766,
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
         acceptComment: { body: acceptBody },
         escalation: { kind: 'test-gaming', reasonText: 'x' },
         targetedCheckAnswer: { verdict: 'changes', note: 'tests were weakened' },
       });
       expect(note).toContain('**Advisory outcome:** `changes`');
       expect(note).toContain('tests were weakened');
+    });
+    it('carries a top-level `**Verdict:**` line and a `Net basis:` line keyed on headSha — the shape parseAdvisories/planAdvisoryStaleLabels/operator-queue.mjs read back', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: { verdict: 'accept' },
+      });
+      expect(note).toMatch(/^\*\*Verdict:\*\*/m);
+      expect(note).toMatch(new RegExp(`^Net basis: \`${HEAD}\\.\\.${HEAD}\``, 'im'));
+      const advisories = parseAdvisories([{ body: note, author: bot, createdAt: '2026-09-27T00:00:00Z' }]);
+      expect(advisories).toHaveLength(1);
+      expect(advisories[0].outcome).toBe('accept');
+      expect(advisoryCoversHead(advisories[0], HEAD)).toBe(true);
+    });
+  });
+
+  describe('hasConvertedAdvisoryNote', () => {
+    it('true once a converted note for this exact head has been posted', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: { verdict: 'accept' },
+      });
+      expect(hasConvertedAdvisoryNote([{ body: note, author: bot }], HEAD)).toBe(true);
+    });
+    it('false with no matching comment, a different head, or an untrusted author', () => {
+      expect(hasConvertedAdvisoryNote([], HEAD)).toBe(false);
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766, headSha: 'deadbeef',
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: { verdict: 'accept' },
+      });
+      expect(hasConvertedAdvisoryNote([{ body: note, author: bot }], HEAD)).toBe(false);
+      expect(hasConvertedAdvisoryNote([{ body: note, author: { login: 'mallory' } }], 'deadbeef')).toBe(false);
     });
   });
 });
