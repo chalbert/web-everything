@@ -43,6 +43,47 @@ function env() {
   return { WE_DAEMON_OVERLAY_DIR: overlayDir };
 }
 
+// ── real-git fixture (epic #3383/#4075 overlay-conflict guard) ─────────────────────────────────────────────
+// The CLI's `add` now resolves `--ref` for real (`previewOverlayConflict`) before registering it, so any test
+// that exercises `add` through the CLI needs a REAL git clone with a REAL origin and, for a specific `--ref`,
+// a REAL branch of that name — a plain empty directory (the bare `cloneRoot` above, still used by every OTHER
+// describe block that never touches the CLI's `add`) no longer suffices. All-local (bare `origin.git` + a
+// working clone, no network), so this stays fast and hermetic.
+function git(cwd, args) {
+  return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+    cwd, encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL',
+  });
+}
+function gitOk(cwd, args) {
+  const r = git(cwd, args);
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} in ${cwd} failed: ${r.stderr || r.stdout}`);
+  return r.stdout;
+}
+function makeGitClone() {
+  const base = mkdtempSync(join(tmpdir(), 'we-daemon-overlays-git-'));
+  const originDir = join(base, 'origin.git');
+  const cloneDir = join(base, 'clone');
+  gitOk(base, ['init', '--bare', '-q', originDir]);
+  gitOk(base, ['init', '-q', '-b', 'main', cloneDir]);
+  writeFileSync(join(cloneDir, 'README.md'), 'init\n');
+  gitOk(cloneDir, ['add', 'README.md']);
+  gitOk(cloneDir, ['commit', '-q', '-m', 'init']);
+  gitOk(cloneDir, ['remote', 'add', 'origin', originDir]);
+  gitOk(cloneDir, ['push', '-q', '-u', 'origin', 'main']);
+  return { base, originDir, cloneDir };
+}
+/** Push one throwaway commit onto `ref` (branched from origin/main), via a throwaway clone of `originDir` —
+ *  never through `cloneDir`, so the clone under test stays clean. */
+function pushRef(originDir, ref) {
+  const dir = join(mkdtempSync(join(tmpdir(), 'we-daemon-overlays-author-')), 'w');
+  gitOk(dirname(dir), ['clone', '-q', originDir, dir]);
+  gitOk(dir, ['checkout', '-q', '-b', ref]);
+  writeFileSync(join(dir, `${ref.replace(/\//g, '-')}.txt`), 'x\n');
+  gitOk(dir, ['add', '.']);
+  gitOk(dir, ['commit', '-q', '-m', `overlay: ${ref}`]);
+  gitOk(dir, ['push', '-q', 'origin', `HEAD:refs/heads/${ref}`]);
+}
+
 describe('cloneKey / overlayFilePath', () => {
   it('is deterministic and filesystem-safe', () => {
     const k1 = cloneKey(cloneRoot);
@@ -166,29 +207,35 @@ describe('CLI (spawnSync, --no-lock — never imports daemon-clone-lock.mjs)', (
   }
 
   it('add --no-lock --json registers the ref and appends an event', () => {
-    const r = run(['add', `--clone=${cloneRoot}`, '--ref=lane/cli-test', '--pr=7', '--by=tester', '--no-lock', '--json']);
-    expect(r.status).toBe(0);
+    const { originDir, cloneDir } = makeGitClone();
+    pushRef(originDir, 'lane/cli-test');
+    const r = run(['add', `--clone=${cloneDir}`, '--ref=lane/cli-test', '--pr=7', '--by=tester', '--no-lock', '--json']);
+    expect(r.status, r.stderr).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.list).toEqual([{ ref: 'lane/cli-test', pr: 7, addedAt: expect.any(String), addedBy: 'tester', reason: null }]);
-    const events = readFileSync(join(overlayDir, `${cloneKey(cloneRoot)}.events.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const events = readFileSync(join(overlayDir, `${cloneKey(cloneDir)}.events.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ kind: 'added', ref: 'lane/cli-test', pr: 7 });
   });
 
   it('list --json reflects what add wrote', () => {
-    run(['add', `--clone=${cloneRoot}`, '--ref=lane/cli-test', '--no-lock']);
-    const r = run(['list', `--clone=${cloneRoot}`, '--json']);
+    const { originDir, cloneDir } = makeGitClone();
+    pushRef(originDir, 'lane/cli-test');
+    run(['add', `--clone=${cloneDir}`, '--ref=lane/cli-test', '--no-lock']);
+    const r = run(['list', `--clone=${cloneDir}`, '--json']);
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).list.map((o) => o.ref)).toEqual(['lane/cli-test']);
   });
 
   it('remove --no-lock --json drops the ref and appends a removed event', () => {
-    run(['add', `--clone=${cloneRoot}`, '--ref=lane/cli-test', '--no-lock']);
-    const r = run(['remove', `--clone=${cloneRoot}`, '--ref=lane/cli-test', '--no-lock', '--json']);
+    const { originDir, cloneDir } = makeGitClone();
+    pushRef(originDir, 'lane/cli-test');
+    run(['add', `--clone=${cloneDir}`, '--ref=lane/cli-test', '--no-lock']);
+    const r = run(['remove', `--clone=${cloneDir}`, '--ref=lane/cli-test', '--no-lock', '--json']);
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out).toEqual({ removed: true, list: [] });
-    const events = readFileSync(join(overlayDir, `${cloneKey(cloneRoot)}.events.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const events = readFileSync(join(overlayDir, `${cloneKey(cloneDir)}.events.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     expect(events.map((e) => e.kind)).toEqual(['added', 'removed']);
   });
 
@@ -225,15 +272,17 @@ describe('CLI (spawnSync, --no-lock — never imports daemon-clone-lock.mjs)', (
 // once regardless of what (if anything) holds it.
 describe('register-only: never contends for the clone write lock (#4229/#2760 follow-up)', () => {
   it('add succeeds near-instantly and registers the ref while a REAL writer lock is held on the clone', async () => {
+    const { originDir, cloneDir } = makeGitClone();
+    pushRef(originDir, 'lane/4229-pr-2760');
     const { acquireWrite, releaseWrite } = await import('../daemon-clone-lock.mjs');
     const lockRoot = mkdtempSync(join(tmpdir(), 'we-daemon-clone-lock-'));
     try {
-      const acquired = await acquireWrite(cloneRoot, { lockRoot, owner: 'test-rebuild:1' });
+      const acquired = await acquireWrite(cloneDir, { lockRoot, owner: 'test-rebuild:1' });
       expect(acquired.ok).toBe(true);
       try {
         const startedAt = Date.now();
         const r = spawnSync(process.execPath, [
-          CLI_PATH, 'add', `--clone=${cloneRoot}`, '--ref=lane/4229-pr-2760', '--pr=2760', '--json',
+          CLI_PATH, 'add', `--clone=${cloneDir}`, '--ref=lane/4229-pr-2760', '--pr=2760', '--json',
         ], {
           encoding: 'utf8',
           env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir, WE_DAEMON_CLONE_LOCK_ROOT: lockRoot },
@@ -244,7 +293,7 @@ describe('register-only: never contends for the clone write lock (#4229/#2760 fo
         expect(elapsed).toBeLessThan(5_000);
         expect(JSON.parse(r.stdout).list.map((o) => o.ref)).toEqual(['lane/4229-pr-2760']);
       } finally {
-        releaseWrite(cloneRoot, { lockRoot, owner: 'test-rebuild:1' });
+        releaseWrite(cloneDir, { lockRoot, owner: 'test-rebuild:1' });
       }
     } finally {
       rmSync(lockRoot, { recursive: true, force: true });
@@ -269,10 +318,12 @@ describe('pinned overlays (self-destruct guard, 2026-09-25)', () => {
   });
 
   it('CLI add --pinned writes pinned:true', () => {
-    const r = spawnSync(process.execPath, [CLI_PATH, 'add', `--clone=${cloneRoot}`, '--ref=lane/mech', '--pinned', '--no-lock', '--json'], {
+    const { originDir, cloneDir } = makeGitClone();
+    pushRef(originDir, 'lane/mech');
+    const r = spawnSync(process.execPath, [CLI_PATH, 'add', `--clone=${cloneDir}`, '--ref=lane/mech', '--pinned', '--no-lock', '--json'], {
       encoding: 'utf8', env: { ...process.env, WE_DAEMON_OVERLAY_DIR: overlayDir },
     });
-    expect(r.status).toBe(0);
+    expect(r.status, r.stderr).toBe(0);
     expect(JSON.parse(r.stdout).list[0]).toMatchObject({ ref: 'lane/mech', pinned: true });
   });
 });

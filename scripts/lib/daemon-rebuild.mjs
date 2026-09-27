@@ -2196,6 +2196,130 @@ export async function dryRunRebuild({
   };
 }
 
+// ── overlay-conflict guard (`scripts/daemon-overlay.mjs add`, epic #3383/#4075) ─────────────────────────────
+
+/** Best-effort extraction of the file path(s) a `git merge-tree` conflict names, from TWO independent sources
+ *  in its own stdout so neither shape's absence loses the path: the `CONFLICT (<kind>): ... in <path>` message
+ *  line, and the raw numbered-stage index lines (`<mode> <oid> <stage>\t<path>`) `--write-tree` always emits
+ *  for a conflicted path regardless of message wording. A rename/delete conflict's message can name two paths
+ *  on one line ("deleted in HEAD and renamed ... in <path>") — the stage lines still pin the single path that
+ *  actually landed in the index, which is what matters for "which file", so they are the more reliable source;
+ *  the message regex is the friendlier fallback when a message shape this doesn't anticipate still appears. */
+function parseMergeTreeConflictFiles(output) {
+  const files = new Set();
+  for (const line of String(output ?? '').split('\n')) {
+    const stage = /^\d+\s+[0-9a-f]{7,40}\s+[123]\t(.+)$/.exec(line);
+    if (stage) { files.add(stage[1].trim()); continue; }
+    const msg = /^CONFLICT \([^)]*\):.* in (\S.*)$/.exec(line.trim());
+    if (msg) files.add(msg[1].trim());
+  }
+  return [...files];
+}
+
+/**
+ * TASK — `scripts/daemon-overlay.mjs add`'s pre-registration GUARD (live incident: `lane/promote-stale-green`
+ * / #2826 was registered at 19:53Z while KNOWINGLY conflicting with `lane/fix-procedure` / #2821 in
+ * `scripts/conveyor/review-status-tag.mjs` — nothing refused it, so the next rebuild silently drops #2826 and
+ * the fix it carries never goes live). Answers one narrow, register-time question: does `ref` (the candidate
+ * overlay) merge cleanly against `origin/main` PLUS every ALREADY-registered overlay, applied in the SAME list
+ * order {@link planRebuild} itself uses for a real rebuild — and if not, which file(s) and which registered
+ * overlay(s) it conflicts with.
+ *
+ * READ-ONLY, exactly like {@link dryRunRebuild}: every command against `root` is read-only, and the actual
+ * merge-tree/commit-tree computation happens in a disposable scratch bare repo that borrows `root`'s objects
+ * via `objects/info/alternates` and does its OWN fresh fetch — `root`'s remote-tracking refs, working tree,
+ * index and refs are never touched, so this needs no lock (same posture `daemon-overlay.mjs`'s own file header
+ * already documents for `add`/`remove`).
+ *
+ * DISTINCT FROM {@link dryRunRebuild}'s own `extraOverlays` preview, which asks the WHOLE-REBUILD question
+ * ("what would the clone actually build with this ref folded in" — a conflicting entry is silently DROPPED
+ * there, `ok:true` either way, because a real rebuild must never let one bad overlay refuse the whole clone).
+ * This function asks the narrower, REGISTRATION-time question and surfaces the conflict as the primary
+ * result precisely because the caller (`add`) has a THIRD option `dryRunRebuild`'s own caller does not:
+ * refuse to register at all.
+ * @param {{root:string, ref:string, pr?:number|null, existingOverlays:Array<{ref:string,pr?:number|null}>,
+ *   env?:NodeJS.ProcessEnv, originUrl?:string, run?:typeof gitRun}} o
+ * @returns {Promise<{ok:true, clean:true, mainSha:string, cur:string, candSha:string}
+ *   |{ok:true, clean:false, mainSha:string, cur:string, candSha:string, files:string[],
+ *      conflicting:Array<{ref:string,pr:number|null}>}
+ *   |{ok:false, reason:string, detail?:object}>}
+ */
+export async function previewOverlayConflict({
+  root, ref, pr = null, existingOverlays, env = process.env, originUrl, run = gitRun,
+} = {}) {
+  if (!isSafeBranchName(ref)) return { ok: false, reason: 'unsafe-ref' };
+  const rootGit = makeGit({ run, cwd: root, env, extraEnv: { GIT_OPTIONAL_LOCKS: '0' } });
+
+  let url = originUrl;
+  if (!url) {
+    const urlRes = rootGit(['remote', 'get-url', 'origin']);
+    url = urlRes.status === 0 ? String(urlRes.stdout ?? '').trim() : null;
+  }
+  if (!url) return { ok: false, reason: 'no-origin-url' };
+
+  const scratchDir = mkdtempSync(join(tmpdir(), 'we-daemon-overlay-guard-'));
+  try {
+    const init = spawnSync('git', ['init', '--bare', '-q', scratchDir], {
+      encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL',
+    });
+    if (init.status !== 0) return { ok: false, reason: 'scratch-init-failed' };
+
+    const gitCommonRes = rootGit(['rev-parse', '--git-common-dir']);
+    const gitCommonRaw = gitCommonRes.status === 0 ? String(gitCommonRes.stdout ?? '').trim() : null;
+    const gitCommonDir = gitCommonRaw ? (isAbsolute(gitCommonRaw) ? gitCommonRaw : resolvePath(root, gitCommonRaw)) : null;
+    if (!gitCommonDir) return { ok: false, reason: 'git-common-dir-failed' };
+
+    const alternatesFile = join(scratchDir, 'objects', 'info', 'alternates');
+    mkdirSync(dirname(alternatesFile), { recursive: true });
+    writeFileSync(alternatesFile, `${join(gitCommonDir, 'objects')}\n`, 'utf8');
+
+    const scratchGit = makeGit({ run, cwd: scratchDir, env });
+    scratchGit(['remote', 'add', 'origin', url]);
+    const allRefs = existingOverlays.concat([{ ref, pr }]);
+    const fetched = fetchMainAndOverlays({ git: scratchGit, overlays: allRefs });
+    if (!fetched.ok) return { ok: false, reason: 'fetch-failed' };
+
+    const mainSha = verifyRev(scratchGit, 'origin/main^{commit}');
+    if (!mainSha) return { ok: false, reason: 'main-unresolved' };
+
+    // 1. Fold every ALREADY-registered overlay, in list order — the SAME `planRebuild` a real rebuild runs —
+    // to compute `cur`, the exact tree the candidate would land on top of (never re-derived by hand here).
+    const planExisting = await planRebuild({
+      git: scratchGit, headSha: mainSha, mainRef: 'origin/main', overlays: existingOverlays,
+      prState: (p) => defaultPrState({ pr: p, root }),
+    });
+    if (!planExisting.ok) return { ok: false, reason: 'existing-overlays-unresolved', detail: planExisting };
+    const cur = planExisting.finalSha;
+
+    // 2. The candidate's own tip (already fetched above).
+    const candSha = fetched.goneRefs.includes(ref) ? null : verifyRev(scratchGit, `origin/${ref}^{commit}`);
+    if (!candSha) return { ok: false, reason: 'ref-unresolved' };
+
+    // 3. THE CHECK — deliberately WITH messages (unlike planRebuild's own internal folds), so a real conflict
+    // names its file(s) for the refusal/`--allow-conflict` print.
+    const mt = scratchGit(['merge-tree', '--write-tree', cur, candSha]);
+    if (mt.status === 0) return { ok: true, clean: true, mainSha, cur, candSha };
+
+    const files = parseMergeTreeConflictFiles(mt.stdout);
+
+    // 4. Attribute: which already-registered overlay(s) ALSO touch one of the conflicting files, off the SAME
+    // object data (a `git diff --name-only` against main), never a guess at intent.
+    const conflicting = [];
+    for (const o of existingOverlays) {
+      const ovSha = verifyRev(scratchGit, `origin/${o.ref}^{commit}`);
+      if (!ovSha) continue;
+      const d = scratchGit(['diff', '--name-only', mainSha, ovSha]);
+      if (d.status !== 0) continue;
+      const touched = new Set(String(d.stdout ?? '').split('\n').filter(Boolean));
+      if (files.some((f) => touched.has(f))) conflicting.push({ ref: o.ref, pr: o.pr ?? null });
+    }
+
+    return { ok: true, clean: false, mainSha, cur, candSha, files, conflicting };
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────
 // `node scripts/lib/daemon-rebuild.mjs --clone=<path> [--dry-run] [--json]`
 

@@ -21,7 +21,7 @@ import { pathToFileURL } from 'node:url';
 
 import {
   planRebuild, findUnsafeLocalState, rebuildClone, dryRunRebuild, readRebuildState, rebuildStatePath,
-  isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate,
+  isDaemonManagedClone, daemonConveyorStateRoot, materializeCandidate, removeCandidate, previewOverlayConflict,
 } from '../daemon-rebuild.mjs';
 import { addOverlay, readOverlays, overlayFilePath } from '../daemon-overlays.mjs';
 import { gitRun } from '../main-staleness.mjs';
@@ -1137,6 +1137,75 @@ describe('dryRunRebuild', () => {
   });
 });
 
+// ── previewOverlayConflict — the overlay-conflict guard (`scripts/daemon-overlay.mjs add`, epic #3383/#4075) ──
+// Live incident 2026-09-27: `lane/promote-stale-green` was registered while KNOWINGLY conflicting with
+// `lane/fix-procedure` in a shared file — nothing refused it, so the next rebuild silently DROPPED it and its
+// own fix never went live. These tests replay that shape with real git: two overlay branches that edit the
+// SAME line of the SAME file (must report `clean:false`, naming the file and the conflicting overlay), and the
+// control case (different files/lines — must report `clean:true`).
+describe('previewOverlayConflict — the overlay-conflict guard', () => {
+  it('reports clean:false, naming the file AND the already-registered overlay, when the candidate conflicts', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    // Seed a shared file on main so both overlays' edits are to the SAME pre-existing line (a real conflict,
+    // not two independent additions git could auto-merge).
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/fix-procedure', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    pushBranch(originDir, 'lane/promote-stale-green', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 3;\n'));
+
+    const check = await previewOverlayConflict({
+      root: cloneDir, ref: 'lane/promote-stale-green', pr: 2826,
+      existingOverlays: [{ ref: 'lane/fix-procedure', pr: 2821 }], env,
+    });
+
+    expect(check.ok).toBe(true);
+    expect(check.clean).toBe(false);
+    expect(check.files).toEqual(['shared.mjs']);
+    expect(check.conflicting).toEqual([{ ref: 'lane/fix-procedure', pr: 2821 }]);
+  });
+
+  it('reports clean:true when the candidate merges fine against main + every registered overlay', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/fix-procedure', (dir) => writeFile(dir, 'a.mjs', 'a\n'));
+    pushBranch(originDir, 'lane/other', (dir) => writeFile(dir, 'b.mjs', 'b\n'));
+
+    const check = await previewOverlayConflict({
+      root: cloneDir, ref: 'lane/other', pr: null, existingOverlays: [{ ref: 'lane/fix-procedure', pr: 2821 }], env,
+    });
+
+    expect(check).toMatchObject({ ok: true, clean: true });
+  });
+
+  it('reports clean:true against an empty existing-overlay list (candidate vs. main alone)', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    pushBranch(originDir, 'lane/solo', (dir) => writeFile(dir, 'c.mjs', 'c\n'));
+
+    const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/solo', existingOverlays: [], env });
+    expect(check).toMatchObject({ ok: true, clean: true });
+  });
+
+  it('never mutates the clone: no ref, index, working-tree or overlay-list change', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    advanceMain(originDir, (dir) => writeFile(dir, 'shared.mjs', 'export const X = 1;\n'));
+    pushBranch(originDir, 'lane/fix-procedure', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 2;\n'));
+    pushBranch(originDir, 'lane/promote-stale-green', (dir) => writeFile(dir, 'shared.mjs', 'export const X = 3;\n'));
+    const before = { head: gitOk(cloneDir, ['rev-parse', 'HEAD']).trim(), refs: gitOk(cloneDir, ['for-each-ref']) };
+
+    await previewOverlayConflict({
+      root: cloneDir, ref: 'lane/promote-stale-green', existingOverlays: [{ ref: 'lane/fix-procedure' }], env,
+    });
+
+    const after = { head: gitOk(cloneDir, ['rev-parse', 'HEAD']).trim(), refs: gitOk(cloneDir, ['for-each-ref']) };
+    expect(after).toEqual(before);
+    expect(readOverlays(cloneDir, { env })).toEqual([]);
+  });
+
+  it('refuses a ref that does not resolve (typo / deleted branch), never a false "clean"', async () => {
+    const { cloneDir, env } = makeFixture();
+    const check = await previewOverlayConflict({ root: cloneDir, ref: 'lane/does-not-exist', existingOverlays: [], env });
+    expect(check).toEqual({ ok: false, reason: 'ref-unresolved' });
+  });
+});
+
 describe('findUnsafeLocalState / planRebuild (pure core)', () => {
   function gitFor(cwd) {
     return (args) => {
@@ -1430,6 +1499,9 @@ describe('overlay list — concurrent add vs. a rebuild auto-remove (two real pr
     const { originDir, cloneDir, env, base } = makeFixture();
     pushBranch(originDir, 'lane/merged', (dir) => writeFile(dir, 'm.txt', 'm\n'));
     addOverlay(cloneDir, { ref: 'lane/merged', pr: 42 }, { env });
+    // The overlay-conflict guard (epic #3383/#4075) now resolves `--ref` for real before registering it — a
+    // real branch, even an empty-diff one, so `add` has something to verify against.
+    pushBranch(originDir, 'lane/new', (dir) => writeFile(dir, 'n.txt', 'n\n'));
     const marker = join(base, 'rmw-window-open');
 
     const script = `

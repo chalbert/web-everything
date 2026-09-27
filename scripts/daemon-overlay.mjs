@@ -43,6 +43,7 @@
  *
  * USAGE:
  *   node scripts/daemon-overlay.mjs add    --clone=<path> --ref=<branch> [--pr=N] [--pinned|--unpinned] [--reason=..] [--by=..] [--json]
+ *                                          [--check] [--allow-conflict --reason=..]
  *   node scripts/daemon-overlay.mjs remove --clone=<path> --ref=<branch> [--reason=..] [--by=..] [--json]
  *   node scripts/daemon-overlay.mjs list   --clone=<path> [--json]
  *
@@ -50,13 +51,27 @@
  * actually present). `--no-lock` is still accepted (a no-op) so any older caller/script that still passes it
  * keeps working unchanged. Exit codes: 2 on bad usage (unknown command, missing `--clone`, `add`/`remove`
  * missing `--ref`, non-integer `--pr`); 1 on a fatal error (e.g. a corrupt overlay state file — `addOverlay`/
- * `removeOverlay` refuse to overwrite one); 0 otherwise — including a `remove` of a ref that was never present,
- * which is not a usage error.
+ * `removeOverlay` refuse to overwrite one, or the conflict guard below could not itself determine safety); 0
+ * otherwise — including a `remove` of a ref that was never present, which is not a usage error.
+ *
+ * THE OVERLAY-CONFLICT GUARD (epic #3383/#4075, live incident 2026-09-27: `lane/promote-stale-green`/#2826 was
+ * registered while KNOWINGLY conflicting with `lane/fix-procedure`/#2821 in `review-status-tag.mjs` — nothing
+ * refused it, so the next rebuild silently dropped #2826 and its own fix never went live). `add` now checks,
+ * BEFORE registering, whether `--ref` merges clean against `origin/main` plus every ALREADY-registered overlay
+ * in apply order (`git merge-tree --write-tree`, via `scripts/lib/daemon-rebuild.mjs#previewOverlayConflict` —
+ * read-only, the same scratch-repo-with-alternates isolation `dryRunRebuild` already uses; `root`'s own refs,
+ * index, working tree are never touched). A conflict REFUSES the add (exit 3, naming the conflicting overlay(s)
+ * and file(s)) unless the caller passes `--allow-conflict --reason=<why registering it anyway is safe>`, which
+ * still prints the conflict before registering. `--check` runs ONLY this guard and reports the verdict —
+ * `addOverlay`/`appendOverlayEvent` are never called — so a preview against a live clone's real overlay config
+ * never mutates anything (exit 3 on a would-be-refused conflict, exit 1 if the guard itself could not resolve
+ * something, 0 otherwise; `--json` gives the full `{check, wouldRegister}` shape).
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { addOverlay, removeOverlay, readOverlayState, appendOverlayEvent } from './lib/daemon-overlays.mjs';
+import { previewOverlayConflict } from './lib/daemon-rebuild.mjs';
 import { edgeEnabled, registerPr } from './lib/daemon-edge.mjs';
 
 function parseFlags(argv) {
@@ -115,6 +130,68 @@ async function main() {
       process.exitCode = 1;
     }
   } else if (cmd === 'add') {
+    // THE CONFLICT GUARD (epic #3383/#4075 — live incident: `lane/promote-stale-green`/#2826 was registered
+    // while KNOWINGLY conflicting with `lane/fix-procedure`/#2821 in `review-status-tag.mjs`; nothing refused
+    // it, so the next rebuild silently DROPPED #2826 and its fix never went live). Read-only (see
+    // `previewOverlayConflict`'s own header) — runs BEFORE any state-file mutation, never after.
+    const allowConflict = !!flags['allow-conflict'];
+    if (allowConflict && !reason) {
+      return fail('--allow-conflict requires --reason=<why registering it anyway is safe>');
+    }
+    // A corrupt store is `addOverlay`'s own refusal (it throws rather than overwrite a damaged file, caught by
+    // this module's outer `main().catch`) — the guard needs no opinion on that, and runs a real git fetch it
+    // would otherwise waste, so it is skipped entirely and control falls straight through to `addOverlay` below.
+    const overlayState = readOverlayState(root, { env });
+    const check = overlayState.corrupt
+      ? { ok: true, clean: true, skippedCorruptStore: true }
+      : await previewOverlayConflict({ root, ref: flags.ref, pr, existingOverlays: overlayState.overlays, env });
+
+    // `--check`: report the SAME guard result and stop — never calls `addOverlay`/`appendOverlayEvent`, so a
+    // preview against a live clone's real overlay config never registers or removes anything (the exact
+    // "dry-run/check mode" this guard was built to be provable with).
+    if (flags.check) {
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify({ check, wouldRegister: check.ok && (check.clean || allowConflict) })}\n`);
+      } else if (!check.ok) {
+        process.stdout.write(`daemon-overlay --check: could not verify — ${check.reason}\n`);
+      } else if (check.clean) {
+        process.stdout.write(`daemon-overlay --check: ${flags.ref} merges clean against origin/main + every registered overlay — would register.\n`);
+      } else {
+        const against = check.conflicting.map((o) => `${o.ref}${o.pr != null ? ` (PR #${o.pr})` : ''}`).join(', ') || '(none named)';
+        process.stdout.write(`daemon-overlay --check: ${flags.ref} CONFLICTS in ${check.files.join(', ')} with: ${against} — `
+          + `would be REFUSED${allowConflict ? ' (but --allow-conflict is set, so it would register anyway)' : ''}.\n`);
+      }
+      if (check.ok && !check.clean && !allowConflict) process.exitCode = 3;
+      else if (!check.ok) process.exitCode = 1;
+      return;
+    }
+
+    if (!check.ok) {
+      // The guard itself could not determine safety (no network, unresolved ref, a pre-existing overlay
+      // already broken, …) — fail CLOSED: refuse rather than register on an unproven merge, same as any other
+      // refusal this CLI already returns via exit 1/2. `--allow-conflict` names a KNOWN conflict it is safe to
+      // override; it does not cover "the check itself could not run".
+      process.stderr.write(`daemon-overlay: could not verify ${flags.ref} merges clean (${check.reason}) — refusing to register. Pass --allow-conflict --reason=... only for a CONFIRMED conflict this guard itself reported.\n`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!check.clean) {
+      const against = check.conflicting.length
+        ? check.conflicting.map((o) => `${o.ref}${o.pr != null ? ` (PR #${o.pr})` : ''}`).join(', ')
+        : '(no already-registered overlay diff names the file — check main itself, or a ref this guard could not resolve)';
+      const detail = `${flags.ref}${pr != null ? ` (PR #${pr})` : ''} does not merge clean against origin/main + `
+        + `the already-registered overlay(s) in apply order. Conflicting file(s): ${check.files.join(', ')}. `
+        + `Conflicts with: ${against}.`;
+      if (!allowConflict) {
+        process.stderr.write(`daemon-overlay: REFUSED — ${detail}\n`
+          + 'Rebase the branch onto the conflicting overlay (or main) first, or override with '
+          + '--allow-conflict --reason=<why>.\n');
+        process.exitCode = 3;
+        return;
+      }
+      process.stderr.write(`daemon-overlay: registering DESPITE a known conflict (--allow-conflict) — ${detail}\n`);
+    }
+
     // Register-only: `addOverlay` (Module B) does its own atomic read-modify-write under the list's own tiny
     // mutex and returns immediately — this never touches the clone's tree or its reader/writer lock. See the
     // file header for why that lock was dropped here.
@@ -123,8 +200,9 @@ async function main() {
     }, { env });
     appendOverlayEvent(root, {
       kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
+      ...(check.ok && !check.clean ? { conflictOverride: { files: check.files, conflicting: check.conflicting } } : {}),
     }, { env });
-    output = { list };
+    output = { list, conflictCheck: check };
     // daemon-edge slice 1 (epic x59tqsg): ONLY with WE_DAEMON_EDGE=1 (default off) is the PR also registered
     // for the kept `daemon-edge` branch (admission check vs main + edge). Flag off ⇒ this block never runs.
     if (edgeEnabled(env) && pr != null) {
