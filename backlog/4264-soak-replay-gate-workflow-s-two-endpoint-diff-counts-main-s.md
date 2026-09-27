@@ -2,9 +2,11 @@
 bornAs: xei9oen
 kind: task
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:.github/workflows/soak-replay-gate.yml"]
 dateOpened: "2026-09-27"
+dateStarted: "2026-09-27"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
@@ -22,4 +24,7 @@ Priority: not HIGH (a gate-accuracy gap that can wrongly pass or wrongly flag on
 
 ## Done when
 
-1. **Executable** — TODO: a command that fails before this item lands and passes after.
+1. **Executable** — `npx vitest run we:scripts/lib/__tests__/soak-gate-merge-base-diff.test.mjs` — the real-git-fixture case ("main advances a daemon-soak-scope file after the branch's fork point") fails against the old two-endpoint diff and passes against the merge-base diff `we:scripts/lib/soak-gate-merge-base-diff.mjs` computes.
+2. **Executable** — `npx vitest run we:scripts/__tests__/soak-replay-gate-cli.test.mjs` — the `--base-sha`/`--head-sha` case replays PR #2822's real shape end to end: `--files-status` (the old two-endpoint diff) reads `applicable:true` (the live misfire), `--base-sha`/`--head-sha` (the fix, via `we:scripts/soak-replay-gate-cli.mjs`) reads `applicable:false`.
+3. **Observable** — `we:.github/workflows/soak-replay-gate.yml` now fetches the PR head's full ancestry and calls the CLI with `--base-sha`/`--head-sha` instead of hand-computing a two-endpoint `git diff` in the workflow itself.
+4. **Executable** — `npm run check:standards` green.

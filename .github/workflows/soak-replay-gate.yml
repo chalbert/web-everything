@@ -9,8 +9,11 @@
 # comment and `we:scripts/lib/__tests__/soak-replay-gate.test.mjs` for the full rationale, including frozen
 # real-PR proof), reached here through `we:scripts/soak-replay-gate-cli.mjs`. This workflow is a thin transport:
 # it reads the PR's title/body straight from the trusted event payload (no extra `gh` call, no
-# `pull-requests: read` permission needed — same reasoning as `review-gate.yml`'s own note on this) and the
-# changed-file list via a local `git diff --name-status` against the PR's base sha.
+# `pull-requests: read` permission needed — same reasoning as `review-gate.yml`'s own note on this) and hands
+# the CLI the base/head shas directly (`--base-sha`/`--head-sha`) so IT computes the changed-file list from
+# their MERGE-BASE (`we:scripts/lib/soak-gate-merge-base-diff.mjs`) — never a plain two-endpoint `base..head`
+# diff, which misattributes anything `main` changed since the PR's branch diverged to the PR itself (backlog
+# #4264 — live misfire on PR #2822, a backlog-only PR that went red on this exact gap).
 #
 # A SEPARATE TOP-LEVEL WORKFLOW, deliberately NOT a step inside `.github/workflows/ci.yml`'s `daemon-soak` job:
 # PR #2770 was open and restructuring that exact job (into `daemon-soak-scope` / `soak-shard` / `daemon-soak`)
@@ -65,8 +68,10 @@ jobs:
             echo "scripts/soak-replay-gate-cli.mjs not present on main yet — soak-replay gate not bootstrapped; reporting clear."
             exit 0
           fi
-          # Fetch ONLY the PR's own head sha to compute the file diff (read as DATA by `git diff --name-status`,
-          # never executed) — the gate script itself still runs from the trusted `main` checkout above.
-          git fetch origin "$HEAD_SHA" --depth=1
-          status="$(git diff --name-status -M "$BASE_SHA" "$HEAD_SHA")"
-          node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --files-status="$status"
+          # Fetch the PR's own head sha's FULL ancestry (no --depth) — the checkout above already unshallowed
+          # `main` completely (fetch-depth: 0), so this only pulls the commits unique to the PR branch itself,
+          # and a `git merge-base` can then find the true fork point rather than the two endpoints directly
+          # (backlog/4264 — a shallow `--depth=1` head fetch left no shared history for `merge-base` to walk
+          # back to, which is exactly why the old two-endpoint diff was the only thing that could run before).
+          git fetch origin "$HEAD_SHA"
+          node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --base-sha="$BASE_SHA" --head-sha="$HEAD_SHA"

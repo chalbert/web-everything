@@ -11,6 +11,7 @@
  * Usage:
  *   node scripts/soak-replay-gate-cli.mjs --title=<t> --body=<b> --files-json='["a.mjs","b.mjs"]'
  *   node scripts/soak-replay-gate-cli.mjs --title=<t> --body=<b> --files-status=$'M\ta.mjs\nA\tb.mjs'
+ *   node scripts/soak-replay-gate-cli.mjs --title=<t> --body=<b> --base-sha=<sha> --head-sha=<sha>
  *   node scripts/soak-replay-gate-cli.mjs --pr=1234 [--repo=owner/name]   # fetched live via gh (manual/local)
  *   node scripts/soak-replay-gate-cli.mjs --pr=1234 --json               # machine-readable result
  *
@@ -19,11 +20,19 @@
  * --name-status` output (`<letter>\t<path>` per line, `git diff -M --name-status` for rename detection) — the
  * cheap form CI already has on hand without another API call; letters are mapped to the same changeType names.
  *
+ * `--base-sha`/`--head-sha` (backlog/4264) compute the changed-file list THEMSELVES, from the MERGE-BASE of the
+ * two shas to head — never a plain two-endpoint `base..head` diff, which misattributes anything `main` changed
+ * since the PR's branch diverged to the PR itself (live misfire: PR #2822, see
+ * `we:scripts/lib/soak-gate-merge-base-diff.mjs`'s own header for the full incident). This is now the mode
+ * `.github/workflows/soak-replay-gate.yml` actually calls; `--files-status`/`--files-json` stay for direct/manual
+ * use and existing tests.
+ *
  * Exit codes: 0 = clear (rule doesn't apply, or it's satisfied — see `reason`); 1 = a live daemon fix with no
  * break scenario and no waiver; 3 = usage error.
  */
 import { execFileSync } from 'node:child_process';
 import { evaluateSoakReplayGate } from './lib/soak-replay-gate.mjs';
+import { computeSoakGateNameStatus, defaultExec } from './lib/soak-gate-merge-base-diff.mjs';
 
 const NAME_STATUS_LETTER = { A: 'ADDED', M: 'MODIFIED', D: 'DELETED', C: 'ADDED' };
 
@@ -101,9 +110,17 @@ export function main(argv = process.argv.slice(2)) {
       }
     } else if (typeof flags['files-status'] === 'string') {
       files = parseNameStatus(flags['files-status']);
+    } else if (typeof flags['base-sha'] === 'string' && typeof flags['head-sha'] === 'string') {
+      try {
+        const diff = computeSoakGateNameStatus({ exec: defaultExec, baseSha: flags['base-sha'], headSha: flags['head-sha'] });
+        files = parseNameStatus(diff.nameStatus);
+      } catch (e) {
+        usageError(`could not compute the merge-base diff for --base-sha/--head-sha: ${String(e.message || e).split('\n')[0]}`, AS_JSON);
+        return;
+      }
     } else {
       usageError(
-        'pass --files-json=<JSON array>, --files-status=<git diff --name-status text>, or --pr=<number> [--repo=<owner/name>]',
+        'pass --files-json=<JSON array>, --files-status=<git diff --name-status text>, --base-sha=<sha> --head-sha=<sha>, or --pr=<number> [--repo=<owner/name>]',
         AS_JSON,
       );
       return;
