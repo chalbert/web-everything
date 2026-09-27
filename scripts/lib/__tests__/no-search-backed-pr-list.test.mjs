@@ -68,6 +68,11 @@ describe('no-search-backed-pr-list (#no-label-search)', () => {
     expect(findSearchBackedGhListCalls(`['pr', 'list', '--labels-json']`)).toEqual([]);
   });
 
+  it('flags gh short aliases -l / -S / -A, but not -L (the --limit alias)', () => {
+    const src = `['pr', 'list', '-l', 'x', '-S', q, '-A', me, '-L', '500']`;
+    expect(findSearchBackedGhListCalls(src).map((f) => f.flag)).toEqual(['-l', '-S', '-A']);
+  });
+
   it('every tracked scripts/ + skills-src/ source file is free of an unallowlisted --label/--search/--author on a pr|issue list call', () => {
     const offenders = [];
     for (const file of trackedSourceFiles()) {

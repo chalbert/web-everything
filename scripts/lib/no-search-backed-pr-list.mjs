@@ -57,8 +57,9 @@ export function filterOpenPrsByLabel(rows, label, limit = OPEN_PR_LIST_LIMIT) {
 const BACKWARD_WINDOW = 400;
 
 // The flag as its own quoted argv element (`'--label'`), or the single-element assignment form
-// (`'--label=ready-to-merge'`); any of the three JS quote styles. `--labels-json` is NOT a hit.
-const FLAG_RE = /(['"`])(--label|--search|--author)(?:=[^'"`\n]*)?\1/g;
+// (`'--label=ready-to-merge'`), or gh's short aliases (`-l`/`-S`/`-A`); any of the three JS quote styles.
+// `--labels-json` and `-L` (gh's `--limit` alias) are NOT hits.
+const FLAG_RE = /(['"`])(--label|--search|--author|-l|-S|-A)(?:=[^'"`\n]*)?\1/g;
 const LIST_CMD_RE = /(['"])(pr|issue)\1\s*,\s*(['"])list\3/;
 
 /**
