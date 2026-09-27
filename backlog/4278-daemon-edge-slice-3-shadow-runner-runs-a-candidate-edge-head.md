@@ -1,9 +1,10 @@
 ---
+bornAs: xkyto3n
 kind: story
 size: 8
-parent: "x59tqsg"
+parent: "4276"
 status: open
-blockedBy: ["xk0v6oi"]
+blockedBy: ["4277"]
 scope: ["we:scripts/lib/daemon-edge-shadow.mjs", "we:scripts/lib/daemon-rebuild.mjs"]
 dateOpened: "2026-09-27"
 tags: []

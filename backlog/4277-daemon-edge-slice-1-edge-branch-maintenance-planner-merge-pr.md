@@ -1,7 +1,8 @@
 ---
+bornAs: xk0v6oi
 kind: story
 size: 5
-parent: "x59tqsg"
+parent: "4276"
 status: resolved
 scaffoldedBy: "daemon-edge-slice1"
 dateScaffolded: "2026-09-27"

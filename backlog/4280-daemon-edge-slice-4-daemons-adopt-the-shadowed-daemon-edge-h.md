@@ -1,9 +1,10 @@
 ---
+bornAs: xwlhk3e
 kind: story
 size: 5
-parent: "x59tqsg"
+parent: "4276"
 status: open
-blockedBy: ["xni0dwx", "xkyto3n"]
+blockedBy: ["4279", "4278"]
 scope: ["we:scripts/lib/daemon-rebuild.mjs", "we:scripts/daemon-overlay.mjs", "we:scripts/lib/daemon-overlays.mjs"]
 dateOpened: "2026-09-27"
 tags: []

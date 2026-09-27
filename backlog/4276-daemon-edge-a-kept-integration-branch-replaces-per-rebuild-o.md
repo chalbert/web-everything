@@ -1,4 +1,5 @@
 ---
+bornAs: x59tqsg
 kind: epic
 parent: "4075"
 status: open
@@ -100,10 +101,10 @@ it at main).
 
 | Card | What | State |
 | --- | --- | --- |
-| xk0v6oi | Slice 1 — edge maintenance planner + IO shell + CLI, flag default off | this PR |
-| xni0dwx | Slice 2 — resolver dispatch for owed resolutions | open, blocked by slice 1 |
-| xkyto3n | Slice 3 — shadow runner (dry-run ticks, plan diff, divergence flags) | open, blocked by slice 1 |
-| xwlhk3e | Slice 4 — adoption switch + overlay migration + wire into rebuild tick | open, blocked by 2 and 3 |
+| 4277 | Slice 1 — edge maintenance planner + IO shell + CLI, flag default off | this PR |
+| 4279 | Slice 2 — resolver dispatch for owed resolutions | open, blocked by slice 1 |
+| 4278 | Slice 3 — shadow runner (dry-run ticks, plan diff, divergence flags) | open, blocked by slice 1 |
+| 4280 | Slice 4 — adoption switch + overlay migration + wire into rebuild tick | open, blocked by 2 and 3 |
 
 ## Done when
 
