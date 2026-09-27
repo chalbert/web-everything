@@ -185,6 +185,10 @@ export function tickIsUnproductive(t) {
   return !!t.wholeFailed || (t.blocking?.length ?? 0) > 0;
 }
 
+/** xpinskip — does a blocking reason say the dispatching clone was refused as behind origin/main? Marks the
+ *  tick `s: 1` in `recentTicks` so `dispatch-refused-stale-clone` can measure how long the streak has run. */
+export function isStaleRefusal(reason) { return /stale-checkout/.test(String(reason ?? '')); }
+
 // ── 2. Per-daemon memory ─────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -217,6 +221,11 @@ export function foldDaemonMemory(prev, sample, now) {
     mem.lastTick = { ...mem.lastTick, blocking: [...mem.lastTick.blocking, ...lead.blocking].slice(0, 5), noLane: [...(mem.lastTick.noLane || []), ...lead.noLane.map((x) => x.repo)] };
     for (const nl of lead.noLane) mem.noLaneTimes.push({ at, repo: nl.repo });
     for (const r of lead.prs) mem.prRefusals[r.pr] = { reason: r.reason, at };
+    // xpinskip — a stale-clone refusal that arrived as a late detail still marks its tick (`s`).
+    if (lead.blocking.some(isStaleRefusal)) {
+      const last = mem.recentTicks.at(-1);
+      if (last && last.at === at) mem.recentTicks[mem.recentTicks.length - 1] = { ...last, s: 1 };
+    }
     const nowUnproductive = tickIsUnproductive({ ...mem.lastTick, blocking: mem.lastTick.blocking });
     if (nowUnproductive) {
       if (!wasUnproductive) {
@@ -242,7 +251,10 @@ export function foldDaemonMemory(prev, sample, now) {
     mem.lastTick = { at, dispatched: t.dispatched, owed: t.owed, refused: t.refused, wholeFailed: t.wholeFailed, blocking: t.blocking.slice(0, 5), noLane: t.noLane.map((x) => x.repo), unproductive: tickIsUnproductive(t) };
     for (const nl of t.noLane) mem.noLaneTimes.push({ at, repo: nl.repo });
     for (const r of t.prs || []) mem.prRefusals[r.pr] = { reason: r.reason, at };
-    mem.recentTicks.push({ at, u: tickIsUnproductive(t) ? 1 : 0, f: t.wholeFailed ? 1 : 0, why: t.blocking[0] ?? null });
+    mem.recentTicks.push({
+      at, u: tickIsUnproductive(t) ? 1 : 0, f: t.wholeFailed ? 1 : 0, why: t.blocking[0] ?? null,
+      ...(t.blocking.some(isStaleRefusal) ? { s: 1 } : {}),
+    });
     if (tickIsUnproductive(t)) {
       if (mem.unproductiveSince == null) { mem.unproductiveSince = at; mem.unproductiveReasons = {}; mem.unproductiveTicks = 0; }
       mem.unproductiveTicks += 1;

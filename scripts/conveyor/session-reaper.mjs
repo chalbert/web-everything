@@ -1772,6 +1772,61 @@ export function runDispatchScratchSweepPass({
 export const DEFAULT_IDLE_REAP_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 
 /**
+ * PER-TICK REAP BUDGET (#3383 follow-up, live-caught 2026-09-26 — review-daemon restart at 18:02 ET: the
+ * first tick's session-reap swept ~1,500 accumulated finished sessions one `claude stop` at a time (~95/min,
+ * a real observed rate), taking 15+ minutes with NOTHING else in this single-threaded daemon able to run —
+ * no review dispatched, no status tag refreshed, for the whole stall. `runSessionReaperPass` had no notion of
+ * "enough for this tick" at all: a resident daemon calling it on every 120s tick must never let a backlog of
+ * reap candidates turn one tick into a 15-minute outage of its OWN real job (dispatch + tagging).
+ *
+ * Both bounds are checked in the stop loop below (whichever is hit first ends the tick's reaping); either can
+ * be raised for a one-off catch-up sweep (a CLI invocation, or a deliberately generous daemon override) via
+ * the matching env var. `count` is the primary, predictable bound (95/min real-world rate × 45s ≈ 70, so 150
+ * gives headroom while still comfortably finishing well inside one 120s tick); `durationMs` is the backstop
+ * for a slower host or a run of retried failures. NEITHER bound loses work: any candidate this tick's budget
+ * doesn't reach stays a reap candidate on the NEXT tick's fresh listing (recomputed from scratch every time,
+ * never a saved-and-resumed cursor) — see {@link runSessionReaperPass}'s own `deferred` return field.
+ */
+export const DEFAULT_REAP_MAX_STOPS_PER_PASS = 150;
+export const DEFAULT_REAP_MAX_DURATION_MS = 45_000;
+
+/** `WE_SESSION_REAP_MAX_STOPS` — env override for {@link DEFAULT_REAP_MAX_STOPS_PER_PASS}. Any non-finite or
+ *  non-positive value (unset, blank, `0`, garbage) falls back to the default rather than disabling the cap —
+ *  this budget exists specifically so a caller CANNOT accidentally run unbounded again by a bad env value. */
+export function resolveReapMaxStops(env = process.env) {
+  const n = Number(env?.WE_SESSION_REAP_MAX_STOPS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_REAP_MAX_STOPS_PER_PASS;
+}
+
+/** `WE_SESSION_REAP_MAX_DURATION_MS` — env override for {@link DEFAULT_REAP_MAX_DURATION_MS}. Same
+ *  fail-to-default discipline as {@link resolveReapMaxStops} above. */
+export function resolveReapMaxDurationMs(env = process.env) {
+  const n = Number(env?.WE_SESSION_REAP_MAX_DURATION_MS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_REAP_MAX_DURATION_MS;
+}
+
+/**
+ * PURE: stably partitions `reap` so every candidate whose session `name` is in `priorityNames` sorts first,
+ * preserving `reap`'s own relative order within each partition. Used to make a BUDGET-BOUNDED pass (see
+ * {@link DEFAULT_REAP_MAX_STOPS_PER_PASS} above) spend its limited stops on the sessions most worth reaping
+ * first: a PR this SAME tick found owed work for, but refused to dispatch because a bound session reads as
+ * still live/blocked (`we:scripts/conveyor/reconcile-core.mjs#assessLiveness`'s `live-process`/`liveness-
+ * unknown` verdicts) — reaping THAT specific session promptly is what actually frees the PR for the very next
+ * tick's dispatch, rather than leaving it starved behind 1,500 unrelated, lower-stakes stale rows.
+ * @param {Array<{session:object, reason:string}>} reap
+ * @param {Set<string>|null|undefined} priorityNames
+ * @returns {Array<{session:object, reason:string}>}
+ */
+export function prioritizeReapCandidates(reap, priorityNames) {
+  const list = Array.isArray(reap) ? reap : [];
+  if (!(priorityNames instanceof Set) || priorityNames.size === 0) return list;
+  const prio = [];
+  const rest = [];
+  for (const r of list) (priorityNames.has(r?.session?.name) ? prio : rest).push(r);
+  return [...prio, ...rest];
+}
+
+/**
  * How many total attempts (1 initial + retries) the stop loop below makes for ONE candidate before counting it
  * a real failure — found live 2026-09-04 (WE #3435/#3383 epic): a live tick's `runQuiet` (`we:skills-src/
  * conveyor/runner.mjs`) logged exactly one mechanical-pass failure for this file over 190+ ticks of a live
@@ -1904,10 +1959,15 @@ export function makeReapedLedger({
  *   readCompletionRecord?: (session:string) => object|null,
  *   writeCompletionRecord?: (record:object) => unknown,
  *   blockedOnInfraFor?: ((session:object) => boolean)|null,
+ *   maxStops?: number,
+ *   maxDurationMs?: number,
+ *   clockNow?: () => number,
+ *   priorityNames?: Set<string>|null,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
  *   backstopWritten: number, wouldStop: Array|undefined, collected: Array|undefined, kept: number,
+ *   deferred: number, reapBudget: {maxStops:number, maxDurationMs:number, exhausted:boolean},
  * }}
  */
 export function runSessionReaperPass({
@@ -1946,6 +2006,18 @@ export function runSessionReaperPass({
   blockedOnInfraFor = transcriptShowsIntendedBlockedOnInfra,
   // See {@link makeReapedLedger}. `null` (the default) is byte-identical to the pre-ledger behavior.
   reapedLedger = null,
+  // #3383 follow-up (live-caught 2026-09-26) — see {@link DEFAULT_REAP_MAX_STOPS_PER_PASS}'s own doc for the
+  // incident. Defaults ON (env-resolved), unlike most axes' `null` rollback hatches, because an UNBOUNDED pass
+  // is the bug this exists to close — a caller that genuinely wants one back (a deliberate one-off catch-up
+  // sweep) passes `Infinity` explicitly for either.
+  maxStops = resolveReapMaxStops(),
+  maxDurationMs = resolveReapMaxDurationMs(),
+  // Wall-clock budget clock — separate from `now` above (which freezes IDLE-axis age comparisons and is often
+  // fixed in tests), so a test can fake elapsed time without also faking every age computation in this file.
+  clockNow = Date.now,
+  // See {@link prioritizeReapCandidates}. `null` (the default) processes `reap` in its own existing order —
+  // byte-identical to before this option existed for every caller that doesn't supply one.
+  priorityNames = null,
 } = {}) {
   let sessions;
   try {
@@ -1990,6 +2062,16 @@ export function runSessionReaperPass({
     });
   }
 
+  // #3383 follow-up — priority FIRST, so a bounded budget (below) spends its limited stops on the sessions
+  // most worth reaping (see {@link prioritizeReapCandidates}'s own doc), then the budget itself: whichever of
+  // `maxStops`/`maxDurationMs` is hit first ends this PASS's reaping — never a hard failure, just "the rest
+  // waits for the next tick's fresh listing" (see {@link DEFAULT_REAP_MAX_STOPS_PER_PASS}'s own doc for why
+  // that costs nothing: the plan is recomputed from scratch every tick, never a saved cursor).
+  const orderedReap = prioritizeReapCandidates(reap, priorityNames);
+  const passStartedAt = clockNow();
+  let budgetExhausted = false;
+  let deferred = 0;
+
   let stopped = 0;
   let alreadyGone = 0;
   let failures = 0;
@@ -1997,7 +2079,18 @@ export function runSessionReaperPass({
   let backstopWritten = 0;
   const done = [];
   const wouldBackstop = [];
-  for (const { session, reason } of reap) {
+  for (const { session, reason } of orderedReap) {
+    // Budget check BEFORE any work for this candidate — dry runs are diagnostic-only (no `claude stop` spawn,
+    // no daemon-tick timing at stake) and are deliberately exempt, so `--dry-run`/a planning read always shows
+    // the FULL candidate set regardless of the production budget.
+    if (!dryRun && !budgetExhausted) {
+      const stopsSoFar = stopped + alreadyGone + failures;
+      if (stopsSoFar >= maxStops || (clockNow() - passStartedAt) >= maxDurationMs) budgetExhausted = true;
+    }
+    if (budgetExhausted && !dryRun) {
+      deferred++;
+      continue; // left for the next tick's fresh listing — still a genuine reap candidate, not lost
+    }
     // xbv32pg follow-up (epic #3383) — computed for EVERY reap candidate, before the `id`/`dryRun` branches
     // below: a session already independently confirmed done by one of the axes above deserves a durable
     // completion record whether or not `claude stop` itself later succeeds (this is about the SESSION's own
@@ -2085,11 +2178,21 @@ export function runSessionReaperPass({
     anomalies,
     backstopWritten: dryRun ? 0 : backstopWritten,
     wouldWriteBackstop: dryRun ? wouldBackstop : undefined,
+    // `orderedReap`, NOT the raw `reap` — a `--dry-run` plan is a preview of what a real pass WOULD do,
+    // including the ORDER a budget-bounded pass would spend its stops in (see `prioritizeReapCandidates`'s own
+    // doc); reporting the plan's own pre-priority order here would silently lie about which candidates a
+    // budgeted real pass reaches first.
     wouldStop: dryRun
-      ? reap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
+      ? orderedReap.map((r) => ({ id: normalizeHandle(r.session.id) || null, sessionId: normalizeHandle(r.session.sessionId) || null, name: r.session.name ?? null, reason: r.reason }))
       : undefined,
     collected: dryRun ? undefined : done,
     kept: keep.length,
+    // #3383 follow-up — how many reap candidates this PASS's budget didn't reach (0 whenever the whole `reap`
+    // list fit inside it, the common case outside a real backlog). Never counted in `stopped`/`failures`/
+    // `kept` — they are still-pending reap candidates, not classified `keep`, so a caller must not read a
+    // non-zero `deferred` as "nothing left to do".
+    deferred: dryRun ? 0 : deferred,
+    reapBudget: { maxStops, maxDurationMs, exhausted: budgetExhausted },
     ...(reapedLedger ? { previouslyReaped } : {}),
   };
 }

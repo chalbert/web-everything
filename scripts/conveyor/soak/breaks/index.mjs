@@ -22,6 +22,7 @@
 import unsupportedRepoDirt from './unsupported-repo-dirt.mjs';
 import scorecardDirt from './scorecard-dirt.mjs';
 import ghShimMidRebuild from './gh-shim-mid-rebuild.mjs';
+import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
 import ciHealEmptyScope from './ci-heal-empty-scope.mjs';
 import laneAcquireUnderLoad from './lane-acquire-under-load.mjs';
 import fixDaemonLockWait from './fix-daemon-lock-wait.mjs';
@@ -43,11 +44,13 @@ import reaperRestopsFinishedSessions from './reaper-restops-finished-sessions.mj
 import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
 import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
 import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
+import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
   scorecardDirt,
   ghShimMidRebuild,
+  pinnedOverlayConflictSkipped,
   ciHealEmptyScope,
   laneAcquireUnderLoad,
   fixDaemonLockWait,
@@ -69,6 +72,7 @@ export const BREAKS = Object.freeze([
   coupleSplitByUnrelatedMerge,
   ciHealLoopStaleLabelReviewGate,
   alreadyLandedPrGetsFixer,
+  largeReapBacklogStarvesDispatch,
 ]);
 
 export function breakById(id) {

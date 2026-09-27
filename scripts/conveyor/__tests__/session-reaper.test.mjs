@@ -26,6 +26,11 @@ import {
   STOP_RETRY_BACKOFF_MS,
   runSessionReaperPass,
   makeReapedLedger,
+  resolveReapMaxStops,
+  resolveReapMaxDurationMs,
+  prioritizeReapCandidates,
+  DEFAULT_REAP_MAX_STOPS_PER_PASS,
+  DEFAULT_REAP_MAX_DURATION_MS,
   makeHungResolver,
   makeAuthExpiredResolver,
   makeIdleFinishedResolver,
@@ -888,6 +893,135 @@ describe('runSessionReaperPass — the reusable IO-shell pass a daemon calls dir
     });
     expect(result.wouldStop).toEqual([{ id: 'w2', sessionId: 'w2-full', name: 'review-2582', reason: 'hung-transcript:stale-no-activity' }]);
     expect(result.kept).toBe(0);
+  });
+});
+
+describe('runSessionReaperPass — per-tick reap budget (#3383 follow-up, live-caught 2026-09-26: the review-daemon restart at 18:02 ET spent 15+ minutes stopping ~1,500 sessions one tick, with no review dispatched and no status tag updated the whole time)', () => {
+  const sessions = (n) => Array.from({ length: n }, (_, i) => ({
+    id: `s${i}`, sessionId: `s${i}-full`, kind: 'background', state: 'done', name: `review-${1000 + i}`,
+  }));
+
+  it('an unbounded (no-budget) pass stops every candidate — the pre-budget baseline', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => sessions(10),
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      backstopCompletion: false,
+      maxStops: Infinity,
+      maxDurationMs: Infinity,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      log: () => {},
+    });
+    expect(result.stopped).toBe(10);
+    expect(result.deferred).toBe(0);
+  });
+
+  it('a count budget stops only `maxStops` sessions this pass and reports the rest as `deferred`, never as `kept`', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => sessions(10),
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      backstopCompletion: false,
+      maxStops: 3,
+      maxDurationMs: Infinity,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      log: () => {},
+    });
+    expect(result.stopped).toBe(3);
+    expect(result.deferred).toBe(7);
+    expect(result.kept).toBe(0); // deferred candidates are still reap-worthy, not reclassified as "keep"
+    expect(result.reapBudget).toEqual({ maxStops: 3, maxDurationMs: Infinity, exhausted: true });
+  });
+
+  it('a duration budget ends the pass once elapsed time crosses it, using the injected clock — never wall-clock flakiness in a test', () => {
+    let calls = 0;
+    const clockNow = () => { calls += 1; return calls <= 2 ? 0 : 100_000; }; // budget check runs before EACH candidate
+    const result = runSessionReaperPass({
+      listAgents: () => sessions(10),
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      backstopCompletion: false,
+      maxStops: Infinity,
+      maxDurationMs: 1000,
+      clockNow,
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      log: () => {},
+    });
+    expect(result.stopped).toBe(1);
+    expect(result.deferred).toBe(9);
+  });
+
+  it('a dry-run pass is exempt from the budget — it still LISTS every candidate (diagnostic only, no real stop, no daemon-tick timing at stake)', () => {
+    const result = runSessionReaperPass({
+      listAgents: () => sessions(10),
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      backstopCompletion: false,
+      dryRun: true,
+      maxStops: 2,
+      maxDurationMs: 10,
+      stop: () => { throw new Error('must never be called in dry-run'); },
+      log: () => {},
+    });
+    expect(result.wouldStop).toHaveLength(10);
+    expect(result.deferred).toBe(0);
+  });
+
+  it('`resolveReapMaxStops`/`resolveReapMaxDurationMs` read WE_SESSION_REAP_MAX_STOPS/WE_SESSION_REAP_MAX_DURATION_MS, falling back to the default on anything non-positive (never silently unbounded)', () => {
+    expect(resolveReapMaxStops({ WE_SESSION_REAP_MAX_STOPS: '7' })).toBe(7);
+    expect(resolveReapMaxStops({ WE_SESSION_REAP_MAX_STOPS: '0' })).toBe(DEFAULT_REAP_MAX_STOPS_PER_PASS);
+    expect(resolveReapMaxStops({ WE_SESSION_REAP_MAX_STOPS: 'nope' })).toBe(DEFAULT_REAP_MAX_STOPS_PER_PASS);
+    expect(resolveReapMaxStops({})).toBe(DEFAULT_REAP_MAX_STOPS_PER_PASS);
+    expect(resolveReapMaxDurationMs({ WE_SESSION_REAP_MAX_DURATION_MS: '9000' })).toBe(9000);
+    expect(resolveReapMaxDurationMs({ WE_SESSION_REAP_MAX_DURATION_MS: '-5' })).toBe(DEFAULT_REAP_MAX_DURATION_MS);
+  });
+
+  it('prioritizeReapCandidates sorts matching-name candidates first, preserving relative order within each partition', () => {
+    const reap = [
+      { session: { name: 'review-1' }, reason: 'done' },
+      { session: { name: 'fix-2771' }, reason: 'done' },
+      { session: { name: 'review-3' }, reason: 'done' },
+      { session: { name: 'ci-heal-2771' }, reason: 'done' },
+    ];
+    const priorityNames = new Set(['fix-2771', 'ci-heal-2771']);
+    expect(prioritizeReapCandidates(reap, priorityNames).map((r) => r.session.name))
+      .toEqual(['fix-2771', 'ci-heal-2771', 'review-1', 'review-3']);
+    // no priority set (or an empty one) — the list comes back unchanged, not reordered
+    expect(prioritizeReapCandidates(reap, null)).toBe(reap);
+    expect(prioritizeReapCandidates(reap, new Set())).toBe(reap);
+  });
+
+  it('a budget-bounded pass spends its stops on priority-named candidates first — a PR owed work this tick is freed before an unrelated backlog of 1,500', () => {
+    const listAgents = () => [
+      ...sessions(5), // review-1000..1004, unrelated backlog
+      { id: 'blocker', sessionId: 'blocker-full', kind: 'background', state: 'done', name: 'fix-2771' },
+    ];
+    const result = runSessionReaperPass({
+      listAgents,
+      groundTruthFor: () => ({ resolved: false }),
+      completionFor: () => null,
+      backstopCompletion: false,
+      maxStops: 1, // budget for only ONE stop this tick — the unrelated backlog must not win the slot
+      maxDurationMs: Infinity,
+      priorityNames: new Set(['fix-2771']),
+      stop: ({ handle }) => ({ stopped: true, alreadyGone: false, output: `stopped ${handle}` }),
+      log: () => {},
+    });
+    expect(result.stopped).toBe(1);
+    expect(result.collected).toEqual([{ id: 'blocker', sessionId: 'blocker-full', name: 'fix-2771', reason: 'done', alreadyGone: false }]);
+    expect(result.deferred).toBe(5);
+  });
+
+  it('a dry-run plan (`wouldStop`) reports the SAME priority order a real budgeted pass would spend its stops in — never the plan\'s own pre-priority order', () => {
+    const listAgents = () => [
+      ...sessions(3), // review-1000..1002, unrelated backlog
+      { id: 'blocker', sessionId: 'blocker-full', kind: 'background', state: 'done', name: 'fix-2771' },
+    ];
+    const result = runSessionReaperPass({
+      listAgents, groundTruthFor: () => ({ resolved: false }), completionFor: () => null,
+      backstopCompletion: false, dryRun: true, priorityNames: new Set(['fix-2771']), log: () => {},
+    });
+    expect(result.wouldStop.map((w) => w.name)).toEqual(['fix-2771', 'review-1000', 'review-1001', 'review-1002']);
   });
 });
 

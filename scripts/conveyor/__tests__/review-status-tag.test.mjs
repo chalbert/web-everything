@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { deriveReviewStatus, planStatusLabelChange, tagReviewStatus } from '../review-status-tag.mjs';
+import { deriveReviewStatus, planStatusLabelChange, tagReviewStatus, applyReviewStatus } from '../review-status-tag.mjs';
 
 describe('deriveReviewStatus', () => {
   it('null when no agent is bound to this PR by name', () => {
@@ -164,6 +164,53 @@ describe('tagReviewStatus — IO shell over injected fakes (no claude/gh process
       tagReviewStatus({ pr: 42, repo: 'chalbert/web-everything', listAgents, provider });
       expect(provider.calls[0]).toEqual(['readLabels', 'chalbert/web-everything', 42]);
     });
+  });
+});
+
+describe('applyReviewStatus — dispatch-time variant, NO claude agents --json read at all (#3383 follow-up, live-caught 2026-09-26: a ci-heal for PR #2771 raced the exact listing-lag window this function exists to skip)', () => {
+  const fakeProvider = (labels) => {
+    const calls = [];
+    return {
+      calls,
+      readLabels: (repo, pr) => { calls.push(['readLabels', repo, pr]); return labels; },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+    };
+  };
+
+  it('applies a KNOWN state directly — no listAgents call exists on this function at all', () => {
+    const provider = fakeProvider([]);
+    const result = applyReviewStatus({ pr: 2771, repo: 'chalbert/web-everything', state: 'fixing', provider });
+    expect(result).toEqual({ changed: true, label: 'review-status:fixing', removed: [] });
+    expect(provider.calls).toEqual([
+      ['readLabels', 'chalbert/web-everything', 2771],
+      ['ensureLabel', 'chalbert/web-everything', 'review-status:fixing'],
+      ['setLabels', 'chalbert/web-everything', 2771, { add: 'review-status:fixing', remove: [] }],
+    ]);
+  });
+
+  it('is idempotent — no write call when the label already matches the known state', () => {
+    const provider = fakeProvider([{ name: 'review-status:fixing' }]);
+    const result = applyReviewStatus({ pr: 2771, repo: 'chalbert/web-everything', state: 'fixing', provider });
+    expect(result).toEqual({ changed: false, label: 'review-status:fixing', removed: [] });
+    expect(provider.calls).toEqual([['readLabels', 'chalbert/web-everything', 2771]]);
+  });
+
+  it('swaps a stale status for the new known one, same label home as tagReviewStatus', () => {
+    const provider = fakeProvider([{ name: 'review-status:reviewing' }]);
+    const result = applyReviewStatus({ pr: 2771, repo: 'chalbert/web-everything', state: 'fixing', provider });
+    expect(result).toEqual({ changed: true, label: 'review-status:fixing', removed: ['review-status:reviewing'] });
+  });
+
+  it('currentLabels, when supplied, skips provider.readLabels entirely', () => {
+    const provider = fakeProvider([{ name: 'should-never-be-read' }]);
+    const result = applyReviewStatus({ pr: 2771, repo: 'chalbert/web-everything', state: 'fixing', provider, currentLabels: [] });
+    expect(result).toEqual({ changed: true, label: 'review-status:fixing', removed: [] });
+    expect(provider.calls.map((c) => c[0])).toEqual(['ensureLabel', 'setLabels']); // no 'readLabels' call
+  });
+
+  it('rejects a non-constellation repo, same guard as tagReviewStatus', () => {
+    expect(() => applyReviewStatus({ pr: 2771, repo: 'other/repo', state: 'fixing' })).toThrow(/not a constellation repo/);
   });
 });
 
