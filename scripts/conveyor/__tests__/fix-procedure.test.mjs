@@ -21,12 +21,13 @@ import { fileURLToPath } from 'node:url';
 import {
   acquireFixClaim, releaseFixClaim, heartbeatFixClaim, readLiveFixClaim, pushRefusal, isClaimHolder,
   fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, repoKeyForCheckout, DEFAULT_FIX_CLAIM_TTL_MINUTES,
-  FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL,
+  FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL, parseGitPush, resolvePushDestination,
 } from '../fix-procedure.mjs';
 import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims } from '../fix-dispatch-claim.mjs';
 import {
   STAND_DOWN_MARKER, CONCURRENT_AUTHOR_PAUSE_MARKER, buildConcurrentAuthorPauseComment, concurrentAuthorPauses,
   countTerminalStandDowns, countStandDownComments, parseAltBranch, buildStandDownComment,
+  isConcurrentAuthorStandDownBody, LEGACY_CONCURRENT_AUTHOR_CUTOFF,
 } from '../stand-down.mjs';
 import { planReconcile, countUnresolvedStandDowns, CONCURRENT_AUTHOR_QUIET_MS } from '../reconcile-core.mjs';
 import { enrichPrsWithFixClaims } from '../reconcile-pass.mjs';
@@ -60,7 +61,7 @@ describe('the fix claim', () => {
     expect(a).toMatchObject({ ok: true });
     const b = acquireFixClaim({ repo: 'chalbert/web-everything', pr: 2811, who: 'rubric-worker', lockRoot: root, nowMs: T0 + MIN });
     expect(b).toMatchObject({ ok: false, reason: 'held', heldBy: 'fixer:fix-2811' });
-    expect(acquireFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', lockRoot: root, nowMs: T0 + 2 * MIN })).toMatchObject({ ok: true, reason: 'own' });
+    expect(acquireFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', token: a.token, lockRoot: root, nowMs: T0 + 2 * MIN })).toMatchObject({ ok: true, reason: 'own' });
     // the reentrant re-begin kept the branch it was first given
     expect(readLiveFixClaim({ repo: 'we', pr: 2811, lockRoot: root, nowMs: T0 + 2 * MIN }).meta.branch).toBe(BRANCH);
   });
@@ -69,11 +70,11 @@ describe('the fix claim', () => {
     acquireFixClaim({ repo: 'we', pr: 7, who: 'w', lockRoot: root, nowMs: T0 });
     const late = T0 + (DEFAULT_FIX_CLAIM_TTL_MINUTES + 1) * MIN;
     expect(readLiveFixClaim({ repo: 'we', pr: 7, lockRoot: root, nowMs: late })).toBeNull();
-    acquireFixClaim({ repo: 'we', pr: 8, who: 'w', lockRoot: root, nowMs: T0 });
-    expect(heartbeatFixClaim({ repo: 'we', pr: 8, who: 'w', lockRoot: root, nowMs: late - MIN })).toEqual({ refreshed: true });
+    const { token } = acquireFixClaim({ repo: 'we', pr: 8, who: 'w', lockRoot: root, nowMs: T0 });
+    expect(heartbeatFixClaim({ repo: 'we', pr: 8, who: 'w', token, lockRoot: root, nowMs: late - MIN })).toEqual({ refreshed: true });
     expect(readLiveFixClaim({ repo: 'we', pr: 8, lockRoot: root, nowMs: late })).not.toBeNull();
-    expect(releaseFixClaim({ repo: 'we', pr: 8, who: 'someone-else', lockRoot: root })).toMatchObject({ released: false, reason: 'not-owner' });
-    expect(releaseFixClaim({ repo: 'we', pr: 8, who: 'w', lockRoot: root })).toMatchObject({ released: true });
+    expect(releaseFixClaim({ repo: 'we', pr: 8, who: 'someone-else', token, lockRoot: root })).toMatchObject({ released: false, reason: 'not-owner' });
+    expect(releaseFixClaim({ repo: 'we', pr: 8, who: 'w', token, lockRoot: root })).toMatchObject({ released: true });
   });
 
   it('a worker is refused while the daemon\'s own dispatched fixer (fix-<pr>) holds the spawn claim — that fixer itself is not', () => {
@@ -98,10 +99,32 @@ describe('pushes while a claim is live', () => {
     expect(pushRefusal({ repo: 'we', branch: BRANCH, sessionId: 'sess-fixer', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
     expect(pushRefusal({ repo: 'we', branch: 'lane/other', sessionId: 'sess-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
     expect(pushRefusal({ repo: 'frontierui', branch: BRANCH, sessionId: 'sess-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
-    // A claim taken with no session id (a non-Claude worker) is held by its `who` alone.
-    acquireFixClaim({ repo: 'we', pr: 2900, who: 'rubric-worker', branch: 'lane/worker-owned', lockRoot: root, nowMs: T0 });
-    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'rubric-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
-    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'someone-else', lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+    // A claim taken with no session id (a non-Claude worker) is held by its `who` PLUS the token fix-begin minted.
+    const w = acquireFixClaim({ repo: 'we', pr: 2900, who: 'rubric-worker', branch: 'lane/worker-owned', lockRoot: root, nowMs: T0 });
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'rubric-worker', token: w.token, lockRoot: root, nowMs: T0 + MIN })).toBeNull();
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'someone-else', token: w.token, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+  });
+
+  // Review finding round 2 (PR #2821): a session-less claim was held by the public `who` alone, so a SECOND worker
+  // passing the same conventional `--who` was treated as the holder. fix-begin now mints a per-claim token.
+  it('a session-less claim is bound to the token fix-begin minted: a second worker with the same `who` is refused', () => {
+    const first = acquireFixClaim({ repo: 'we', pr: 2900, who: 'finisher', branch: 'lane/worker-owned', lockRoot: root, nowMs: T0 });
+    expect(first).toMatchObject({ ok: true });
+    expect(first.token).toMatch(/^[0-9a-f]{32,}$/);
+    // The token never lands in the claim store in the clear (the store is readable by every local process).
+    expect(JSON.stringify(readLiveFixClaim({ repo: 'we', pr: 2900, lockRoot: root, nowMs: T0 }))).not.toContain(first.token);
+    const second = { who: 'finisher' }; // same public who, no token (or a wrong one)
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', ...second, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', ...second, token: 'f'.repeat(32), lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+    expect(acquireFixClaim({ repo: 'we', pr: 2900, ...second, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ ok: false, reason: 'token-mismatch' });
+    expect(heartbeatFixClaim({ repo: 'we', pr: 2900, ...second, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refreshed: false, reason: 'token-mismatch' });
+    expect(releaseFixClaim({ repo: 'we', pr: 2900, ...second, lockRoot: root })).toMatchObject({ released: false, reason: 'token-mismatch' });
+    // The first worker keeps every right with its token.
+    const mine = { who: 'finisher', token: first.token };
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', ...mine, lockRoot: root, nowMs: T0 + MIN })).toBeNull();
+    expect(acquireFixClaim({ repo: 'we', pr: 2900, ...mine, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ ok: true, reason: 'own' });
+    expect(heartbeatFixClaim({ repo: 'we', pr: 2900, ...mine, lockRoot: root, nowMs: T0 + MIN })).toEqual({ refreshed: true });
+    expect(releaseFixClaim({ repo: 'we', pr: 2900, ...mine, lockRoot: root })).toMatchObject({ released: true });
   });
 
   it('a session-bound claim is never rebound, pushed, heartbeat or released by a caller that only knows the public `who`', () => {
@@ -138,6 +161,79 @@ describe('pushes while a claim is live', () => {
     expect(guardReason(`git push --force-with-lease origin HEAD:${BRANCH}`, { fixClaimedBranches })).toMatch(/fix-2811/);
     expect(guardReason('git push origin HEAD:refs/heads/lane/unrelated', { fixClaimedBranches })).toBeNull();
     expect(guardReason(`git push origin HEAD:refs/heads/${BRANCH}`)).toBeNull(); // inert without the IO shell's list
+    // Review finding round 2: a bare `git push` names no lane ref. Plain, it is already denied by the #2203
+    // main-push rule; with that rule's `MAIN_PUSH_OK=1` override it reached the fix-claim arm with NO target.
+    // The IO shell now resolves the implicit target (`pushTargets`).
+    expect(guardReason('git push', { fixClaimedBranches, pushTargets: [BRANCH] })).toMatch(/direct push to `main` is blocked/);
+    expect(guardReason('MAIN_PUSH_OK=1 git push', { fixClaimedBranches, pushTargets: [BRANCH] })).toMatch(/fix-2811/);
+    expect(guardReason('MAIN_PUSH_OK=1 git push --force-with-lease origin', { fixClaimedBranches, pushTargets: [BRANCH] })).toMatch(/fix-2811/);
+    expect(guardReason('MAIN_PUSH_OK=1 git push', { fixClaimedBranches, pushTargets: ['lane/unrelated'] })).toBeNull();
+  });
+
+  it('parseGitPush reads the remote and refspecs of a push, whatever its options', () => {
+    expect(parseGitPush('git push')).toEqual({ remote: null, refspecs: [], all: false, dir: null });
+    expect(parseGitPush(`git push origin HEAD:refs/heads/${BRANCH}`)).toEqual({ remote: 'origin', refspecs: [`HEAD:refs/heads/${BRANCH}`], all: false, dir: null });
+    expect(parseGitPush('git push -u --force-with-lease=x -o ci.skip upstream +main:lane/a lane/b')).toEqual({ remote: 'upstream', refspecs: ['+main:lane/a', 'lane/b'], all: false, dir: null });
+    expect(parseGitPush('cd /x && git -C /y push --repo=we-remote && echo ok')).toEqual({ remote: 'we-remote', refspecs: [], all: false, dir: '/y' });
+    expect(parseGitPush('git -c a=b -C "/my lanes/l5" push --all origin')).toEqual({ remote: 'origin', refspecs: [], all: true, dir: '/my lanes/l5' });
+    expect(parseGitPush('git status')).toBeNull();
+  });
+
+  // Self-review (round-2 repair): `git -C <dir> push` / `git -c k=v push` skipped the arm entirely, and `--all` /
+  // `--mirror` / a glob refspec pushed every branch while resolving to the current one only.
+  it('guard-bash reads `git -C <dir> push` and `git -c k=v push`, and a `*` target matches every claimed branch', () => {
+    const fixClaimedBranches = [{ branch: BRANCH, message: 'push refused: fix-2811 holds the fix claim' }];
+    expect(guardReason(`git -C /tmp/lane push origin HEAD:refs/heads/${BRANCH}`, { fixClaimedBranches })).toMatch(/fix-2811/);
+    expect(guardReason(`git -c a=b push origin HEAD:${BRANCH}`, { fixClaimedBranches })).toMatch(/fix-2811/);
+    expect(guardReason('MAIN_PUSH_OK=1 git -C ../l5 push', { fixClaimedBranches, pushTargets: [BRANCH] })).toMatch(/fix-2811/);
+    expect(guardReason('MAIN_PUSH_OK=1 git push --all origin', { fixClaimedBranches, pushTargets: ['*'] })).toMatch(/fix-2811/);
+    expect(guardReason('git -C /tmp/lane push origin HEAD:refs/heads/lane/unrelated', { fixClaimedBranches })).toBeNull();
+  });
+
+  // Review findings round 2 (PR #2821): the raw-push hook used `origin` for the repo (not the remote pushed to),
+  // and missed a bare `git push` whose target is implicit. resolvePushDestination answers both from the command.
+  it('resolvePushDestination: the repo of the remote actually pushed to, and the implicit target of a bare push', () => {
+    const git = (map) => (cmd, args) => {
+      const k = args.join(' ');
+      if (k in map) return map[k];
+      throw new Error(`no ${k}`);
+    };
+    const urls = {
+      'remote get-url origin': 'git@github.com:chalbert/frontierui.git\n',
+      'remote get-url we': 'https://github.com/chalbert/web-everything.git\n',
+    };
+    // A frontierui checkout pushing an explicit lane ref to its `we` remote is a WE push.
+    expect(resolvePushDestination(`git push we HEAD:refs/heads/${BRANCH}`, { cwd: '/lane', exec: git(urls) }))
+      .toEqual({ repoKey: 'we', branches: [BRANCH] });
+    // A URL remote is read directly.
+    expect(resolvePushDestination(`git push https://github.com/chalbert/web-everything.git HEAD:${BRANCH}`, { cwd: '/lane', exec: git(urls) }))
+      .toEqual({ repoKey: 'we', branches: [BRANCH] });
+    // A bare push: the branch's push remote and its push/upstream ref are the target (fail-closed: all candidates).
+    const bare = git({
+      ...urls,
+      'symbolic-ref -q --short HEAD': `${BRANCH}\n`,
+      [`config --get branch.${BRANCH}.pushRemote`]: 'we\n',
+      'rev-parse --abbrev-ref --symbolic-full-name @{push}': `we/${BRANCH}\n`,
+    });
+    expect(resolvePushDestination('git push', { cwd: '/lane', exec: bare })).toEqual({ repoKey: 'we', branches: [BRANCH] });
+    // A lane clone's local `main` tracking a lane ref: the upstream ref is the target, not `main`'s own name only.
+    const tracking = git({
+      ...urls,
+      'symbolic-ref -q --short HEAD': 'main\n',
+      'config --get branch.main.remote': 'we\n',
+      'config --get branch.main.merge': `refs/heads/${BRANCH}\n`,
+    });
+    expect(resolvePushDestination('git push', { cwd: '/lane', exec: tracking })).toEqual({ repoKey: 'we', branches: ['main', BRANCH] });
+    expect(resolvePushDestination('git push we HEAD', { cwd: '/lane', exec: tracking })).toEqual({ repoKey: 'we', branches: ['main', BRANCH] });
+    expect(resolvePushDestination('git log', { cwd: '/lane', exec: tracking })).toBeNull();
+    // --all / --mirror / a glob refspec: every branch (fail-closed).
+    expect(resolvePushDestination('git push --all we', { cwd: '/lane', exec: tracking })).toEqual({ repoKey: 'we', branches: ['*'] });
+    expect(resolvePushDestination('git push we refs/heads/lane/*:refs/heads/lane/*', { cwd: '/lane', exec: tracking })).toEqual({ repoKey: 'we', branches: ['*'] });
+    // `git -C <dir>`: resolved in THAT checkout, not the hook's cwd.
+    const seen = [];
+    const inDir = (cmd, args, opts) => { seen.push(opts.cwd); return tracking(cmd, args); };
+    expect(resolvePushDestination('git -C ../other push', { cwd: '/w/lane', exec: inDir })).toEqual({ repoKey: 'we', branches: ['main', BRANCH] });
+    expect(new Set(seen)).toEqual(new Set(['/w/other']));
   });
 
   it('the dispatcher refuses to spawn a fixer while any fix claim is live', () => {
@@ -211,6 +307,18 @@ describe('stand-down semantics — a concurrent author is a pause, not a burial'
     ]);
   });
 
+  // Review finding round 2 (PR #2821): the legacy prose rule is bounded — only a trailer-less body POSTED BEFORE the
+  // cutoff is read that way. The same text with no timestamp, or posted after the cutoff, stays terminal.
+  it('the legacy reclassification is bounded to pre-cutoff, trailer-less bodies', () => {
+    const at = (createdAt) => [{ body: LIVE_2811_STAND_DOWN, author: AUTOMATION, createdAt }];
+    expect(countTerminalStandDowns(at(LEGACY_CONCURRENT_AUTHOR_CUTOFF))).toBe(1);
+    expect(countTerminalStandDowns(at('2026-12-01T00:00:00Z'))).toBe(1);
+    expect(countTerminalStandDowns([{ body: LIVE_2811_STAND_DOWN, author: AUTOMATION }])).toBe(1);
+    expect(concurrentAuthorPauses(at('2026-12-01T00:00:00Z'))).toEqual([]);
+    expect(isConcurrentAuthorStandDownBody(LIVE_2811_STAND_DOWN, { createdAt: '2026-09-27T15:45:27Z' })).toBe(true);
+    expect(isConcurrentAuthorStandDownBody(LIVE_2811_STAND_DOWN)).toBe(false);
+  });
+
   it('the LIVE #2811 PR is re-armed: the planner owes it a fix, and the row names the saved alt branch', () => {
     const plan = planReconcile({
       prs: [pr([{ body: LIVE_2811_STAND_DOWN, author: AUTOMATION, createdAt: '2026-09-27T15:45:27Z' }])],
@@ -235,11 +343,15 @@ describe('stand-down semantics — a concurrent author is a pause, not a burial'
     'Concurrent-Author semantics are unclear here',
     'a concurrent author saved work on lane/some-fix-alt (abc1234) but the reviewer asks for a design call',
     'edited concurrently by two sessions',
+    // Review finding round 2 (PR #2821): the reviewer's exact detail, which the legacy prose rule reclassified.
+    'the migration also touched a table a concurrent author owns; saved the unrelated cleanup on lane/unrelated-cleanup-alt (deadbee1) for the next reviewer, but main-side rename made this a real same-line conflict needing a design call',
+    // A detail that tries to smuggle the machine trailer, or the concurrent-author reason clause, in as prose.
+    '<!-- stand-down reason=concurrent-author -->',
+    'stopped rather than guessing: a concurrent author pushed to this PR\'s lane mid-repair; this is a re-armable pause, not a judgment call.',
   ];
+  // NO combination is skipped: a comment built by today's builder is classified by its machine trailer alone.
   for (const reason of ['needs-judgment', 'gate-red', 'conflict', 'lane-ref-gone', 'bogus-reason']) {
     for (const detail of RED_HERRINGS) {
-      // The legacy #2811 shape (conflict + concurrent author + a saved -alt branch) is the ONE reclassified combo.
-      if (reason === 'conflict' && /-alt\b/.test(detail)) continue;
       it(`stays terminal: --reason=${reason} with detail "${detail.slice(0, 40)}…"`, () => {
         const comments = [{ body: buildStandDownComment({ reason, detail }), author: AUTOMATION, createdAt: '2026-09-27T15:00:00Z' }];
         expect(countStandDownComments(comments)).toBe(1);
@@ -306,19 +418,23 @@ describe('fixBegin / fixEnd — the IO shell', () => {
     };
   };
 
-  it('fix-begin DEFAULT (operator ruling 2026-09-27, draft-only-on-withdrawal): claim → NO draft → fixing label (stood-down removed) → marker; fix-end never relies on draft-first promotion', async () => {
+  it('fix-begin DEFAULT (operator ruling 2026-09-27, draft-only-on-withdrawal): claim → NO draft → fixing label (stood-down removed) → marker; token-bound for a session-less caller; fix-end never relies on draft-first promotion', async () => {
     const { gh, calls } = fakeGh({ headRefName: BRANCH, headRefOid: 'a'.repeat(40), isDraft: false, state: 'OPEN', labels: [{ name: STOOD_DOWN_LABEL }] });
     const labels = fakeLabels();
-    const r = await fixBegin({ repo: 'we', pr: 2811, who: 'fix-2811', why: 'address review', gh, labels, lockRoot: root, nowMs: T0 });
+    // A session-less caller (sessionId: null): fix-begin hands it the claim's token, which fix-end then needs.
+    const r = await fixBegin({ repo: 'we', pr: 2811, who: 'fix-2811', why: 'address review', sessionId: null, token: null, gh, labels, lockRoot: root, nowMs: T0 });
     expect(r).toMatchObject({ ok: true, branch: BRANCH, draft: false, reason: null, steps: ['label', 'comment'] });
     expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(0); // default never drafts
+    expect(r.token).toMatch(/^[0-9a-f]{48}$/);
+    expect(await fixEnd({ repo: 'we', pr: 2811, who: 'fix-2811', sessionId: null, token: null, gh, labels: fakeLabels(), lockRoot: root }))
+      .toMatchObject({ ok: false, reason: 'token-mismatch' });
     expect(labels.log).toContainEqual(['set', { add: FIXING_LABEL, remove: [STOOD_DOWN_LABEL] }]);
     expect(labels.log).toContainEqual(['comment', FIX_BEGIN_MARKER]);
 
-    const other = await fixBegin({ repo: 'we', pr: 2811, who: 'rubric-worker', gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 + MIN });
+    const other = await fixBegin({ repo: 'we', pr: 2811, who: 'rubric-worker', sessionId: null, token: null, gh, labels: fakeLabels(), lockRoot: root, nowMs: T0 + MIN });
     expect(other).toMatchObject({ ok: false, reason: 'held' });
 
-    const end = await fixEnd({ repo: 'we', pr: 2811, who: 'fix-2811', gh, labels, lockRoot: root });
+    const end = await fixEnd({ repo: 'we', pr: 2811, who: 'fix-2811', sessionId: null, token: r.token, gh, labels, lockRoot: root });
     expect(end).toMatchObject({ ok: true, draft: false });
     expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(0); // never drafted, so fix-end has nothing to un-draft
     expect(labels.log).toContainEqual(['set', { remove: [FIXING_LABEL] }]);
@@ -329,12 +445,12 @@ describe('fixBegin / fixEnd — the IO shell', () => {
   it('fix-begin --draft --reason=scope-change: claim → `gh pr ready --undo` → draft-scope-change label → marker; fix-end leaves it draft (relies on draft-first promotion)', async () => {
     const { gh, calls } = fakeGh({ headRefName: BRANCH, headRefOid: 'a'.repeat(40), isDraft: false, state: 'OPEN', labels: [] });
     const labels = fakeLabels();
-    const r = await fixBegin({ repo: 'we', pr: 2812, who: 'fix-2812', why: 'scope changed mid-review', draft: true, reason: 'scope-change', gh, labels, lockRoot: root, nowMs: T0 });
+    const r = await fixBegin({ repo: 'we', pr: 2812, who: 'fix-2812', why: 'scope changed mid-review', sessionId: 'sess-2812', draft: true, reason: 'scope-change', gh, labels, lockRoot: root, nowMs: T0 });
     expect(r).toMatchObject({ ok: true, draft: true, reason: 'scope-change', steps: ['draft', 'label', 'comment'] });
     expect(calls).toContainEqual(['pr', 'ready', '2812', '--repo', 'chalbert/web-everything', '--undo']);
     expect(labels.log).toContainEqual(['set', { add: 'review-status:draft-scope-change', remove: [] }]);
 
-    const end = await fixEnd({ repo: 'we', pr: 2812, who: 'fix-2812', gh, labels, lockRoot: root });
+    const end = await fixEnd({ repo: 'we', pr: 2812, who: 'fix-2812', sessionId: 'sess-2812', gh, labels, lockRoot: root });
     expect(end).toMatchObject({ ok: true, draft: true, reason: 'scope-change' });
     expect(calls.filter((a) => a[1] === 'ready')).toHaveLength(1); // fix-end never un-drafts
     expect(labels.log).toContainEqual(['set', { remove: ['review-status:draft-scope-change'] }]);

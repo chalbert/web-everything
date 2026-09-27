@@ -46,10 +46,13 @@
  * WHO IS "THE HOLDER" AT PUSH TIME. When `fix-begin` recorded a Claude session id (`CLAUDE_CODE_SESSION_ID`, the
  * same durable identity `lane-pool.mjs` stamps on a lease), the claim is BOUND to it: only that session id holds
  * it — for a push, a re-take, a heartbeat, or a release. `who` is printed on the PR thread, so knowing it proves
- * nothing and never rebinds a session-bound claim. Only a claim taken with NO session id (a non-Claude worker)
- * is held by `who` (`WE_FIX_WHO`) alone. Anything else is "anyone else" and is refused.
+ * nothing and never rebinds a session-bound claim. A claim taken with NO session id (a non-Claude worker) is
+ * bound to a random TOKEN that `fix-begin` mints and prints to its caller alone (only its hash is stored): the
+ * holder is `who` (`WE_FIX_WHO`) PLUS that token (`WE_FIX_TOKEN`). Two workers passing the same conventional
+ * `--who` are therefore still two authors. Anything else is "anyone else" and is refused.
  */
 import { execFileSync } from 'node:child_process';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -126,20 +129,37 @@ export function readLiveFixClaim({ repo, pr, lockRoot = fixDispatchClaimRoot(), 
  * (`**Who:** \`fix-<pr>\``), so it is not a secret and must never be the only proof when a session id was
  * recorded. `who` alone is enough only for a claim taken with no session id (a non-Claude worker, `WE_FIX_WHO`).
  */
-export function isClaimHolder(entry, { sessionId = null, who = null } = {}) {
+export function isClaimHolder(entry, { sessionId = null, who = null, token = null } = {}) {
   if (!entry) return false;
   const bound = entry.meta?.sessionId ?? null;
   if (bound) return Boolean(sessionId) && sessionId === bound;
-  return Boolean(who) && Boolean(entry.meta?.who) && entry.meta.who === who;
+  return Boolean(who) && Boolean(entry.meta?.who) && entry.meta.who === who && tokenMatches(entry, token);
+}
+
+/** A per-claim secret for a claim taken with NO session id. `who` is public (the PR thread prints it, and two
+ *  workers may pass the same conventional name), so a session-less claim is bound to this token instead: only
+ *  its SHA-256 is stored, and `fix-begin` hands the token to its caller alone (`WE_FIX_TOKEN`). */
+export function mintFixToken() { return randomBytes(24).toString('hex'); }
+export function hashFixToken(token) { return createHash('sha256').update(String(token)).digest('hex'); }
+/** Does `token` match the claim's stored hash? A claim written with no hash (none is, since the token shipped)
+ *  needs none. Constant-time compare. */
+function tokenMatches(entry, token) {
+  const want = entry.meta?.tokenHash ?? null;
+  if (!want) return true;
+  if (!token) return false;
+  const a = Buffer.from(hashFixToken(token), 'hex');
+  const b = Buffer.from(String(want), 'hex');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** Owner check for a MUTATION of an existing claim (re-take, heartbeat, release): same `who` AND, when the claim
- *  is session-bound, the same session id. Returns `null` when the caller may mutate it, else the refusal reason. */
-function mutationRefusal(entry, { who, sessionId }) {
+ *  is session-bound, the same session id — else, the token `fix-begin` minted. Returns `null` when the caller may
+ *  mutate it, else the refusal reason. */
+function mutationRefusal(entry, { who, sessionId, token }) {
   if (entry.owner !== fixClaimOwner(who)) return 'not-owner';
   const bound = entry.meta?.sessionId ?? null;
-  if (bound && bound !== sessionId) return 'session-mismatch';
-  return null;
+  if (bound) return bound === sessionId ? null : 'session-mismatch';
+  return tokenMatches(entry, token) ? null : 'token-mismatch';
 }
 
 /**
@@ -163,7 +183,7 @@ function liveForeignDispatch({ repo, pr, who, lockRoot, nowMs }) {
  * @returns {{ok:boolean, reason:string, heldBy?:string|null, entry?:object, resource:string}}
  */
 export function acquireFixClaim({
-  repo, pr, who, why = '', sessionId = null, branch = null, headSha = null, draft = false, reason = null,
+  repo, pr, who, why = '', sessionId = null, token = null, branch = null, headSha = null, draft = false, reason = null,
   lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(), ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES, host = hostname(),
 } = {}) {
   const repoKey = repoKeyOf(repo);
@@ -176,14 +196,17 @@ export function acquireFixClaim({
   }
   const prior = readLockEntry(lockRoot, resource);
   const own = prior && prior.owner === owner && isLiveFixClaim(prior, nowMs);
-  // A live claim bound to a session is never re-bound to another caller that merely knows the (public) `who`.
-  if (own && mutationRefusal(prior, { who, sessionId })) {
-    return { ok: false, reason: 'session-mismatch', heldBy: prior.owner, resource };
-  }
+  // A live claim is never re-bound to another caller that merely knows the (public) `who`: it needs the bound
+  // session id, or — for a session-less claim — the token its `fix-begin` minted.
+  const refused = own ? mutationRefusal(prior, { who, sessionId, token }) : null;
+  if (refused) return { ok: false, reason: refused, heldBy: prior.owner, resource };
+  const boundSession = own ? prior.meta?.sessionId ?? null : sessionId || null;
+  const newToken = !own && !boundSession ? mintFixToken() : null;
   const nowIso = new Date(nowMs).toISOString();
   const meta = {
     repo: repoKey, pr: prNum, kind: FIXING_KIND, who: String(who), why: String(why ?? ''),
-    sessionId: own ? prior.meta?.sessionId ?? sessionId ?? null : sessionId || null,
+    sessionId: boundSession,
+    tokenHash: own ? prior.meta?.tokenHash ?? null : (newToken ? hashFixToken(newToken) : null),
     branch: branch ? normalizeBranch(branch) : (own ? prior.meta?.branch ?? null : null),
     headSha: headSha ?? (own ? prior.meta?.headSha ?? null : null),
     claimedAt: own ? prior.meta?.claimedAt ?? nowIso : nowIso,
@@ -195,28 +218,32 @@ export function acquireFixClaim({
   };
   const result = reserve(lockRoot, resource, owner, nowMs, nowIso, null, 'unknown', ttlMinutes, meta);
   if (!result.ok) return { ok: false, reason: result.reason, heldBy: result.heldBy, resource };
-  return { ok: true, reason: own ? 'own' : result.reason, heldBy: owner, entry: readLockEntry(lockRoot, resource), resource };
+  return {
+    ok: true, reason: own ? 'own' : result.reason, heldBy: owner, entry: readLockEntry(lockRoot, resource), resource,
+    // The one place the token is ever returned: to the worker that took the claim. It exports it as WE_FIX_TOKEN.
+    ...(newToken ? { token: newToken } : {}),
+  };
 }
 
 /** Heartbeat-refresh the caller's own claim. */
-export function heartbeatFixClaim({ repo, pr, who, sessionId = null, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now() } = {}) {
+export function heartbeatFixClaim({ repo, pr, who, sessionId = null, token = null, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now() } = {}) {
   const repoKey = repoKeyOf(repo);
   const resource = fixDispatchResource({ repo: repoKey, pr: Number(pr), kind: FIXING_KIND });
   const current = readLockEntry(lockRoot, resource);
   if (!current) return { refreshed: false, reason: 'absent' };
-  const refused = mutationRefusal(current, { who, sessionId });
+  const refused = mutationRefusal(current, { who, sessionId, token });
   if (refused) return { refreshed: false, reason: refused, heldBy: current.owner };
   heartbeat(lockRoot, resource, current.owner, new Date(nowMs).toISOString(), null, current.meta);
   return { refreshed: true };
 }
 
 /** Release the caller's own claim. Never touches a claim someone else holds. */
-export function releaseFixClaim({ repo, pr, who, sessionId = null, lockRoot = fixDispatchClaimRoot() } = {}) {
+export function releaseFixClaim({ repo, pr, who, sessionId = null, token = null, lockRoot = fixDispatchClaimRoot() } = {}) {
   const repoKey = repoKeyOf(repo);
   const resource = fixDispatchResource({ repo: repoKey, pr: Number(pr), kind: FIXING_KIND });
   const current = readLockEntry(lockRoot, resource);
   if (!current) return { released: false, reason: 'absent' };
-  const refused = mutationRefusal(current, { who, sessionId });
+  const refused = mutationRefusal(current, { who, sessionId, token });
   if (refused) return { released: false, reason: refused, heldBy: current.owner };
   releaseLockDir(lockRoot, resource);
   return { released: true, entry: current };
@@ -237,7 +264,7 @@ export function listLiveFixClaims({ repo = null, lockRoot = fixDispatchClaimRoot
  * @returns {null | {refused:true, pr:number, repo:string, holder:string, why:string, message:string}}
  */
 export function pushRefusal({
-  repo = null, branch, sessionId = null, who = null, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(),
+  repo = null, branch, sessionId = null, who = null, token = null, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(),
 } = {}) {
   const b = normalizeBranch(branch);
   if (!b) return null;
@@ -246,7 +273,7 @@ export function pushRefusal({
   const claims = listLiveFixClaims({ lockRoot, nowMs })
     .filter((e) => e.meta?.branch === b && (repoKey == null || e.meta.repo === repoKey));
   for (const entry of claims) {
-    if (isClaimHolder(entry, { sessionId, who })) continue;
+    if (isClaimHolder(entry, { sessionId, who, token })) continue;
     const holder = entry.meta.who;
     // Draft is no longer a given (operator ruling 2026-09-27, draft-only-on-withdrawal): only say "the PR is
     // draft" when this held claim actually drafted it.
@@ -265,7 +292,7 @@ export function pushRefusal({
 
 /** The caller identity a push/claim check uses: the Claude session id, then the `WE_FIX_WHO` worker name. */
 export function callerIdentity(env = process.env) {
-  return { sessionId: env.CLAUDE_CODE_SESSION_ID || null, who: env.WE_FIX_WHO || null };
+  return { sessionId: env.CLAUDE_CODE_SESSION_ID || null, who: env.WE_FIX_WHO || null, token: env.WE_FIX_TOKEN || null };
 }
 
 /** Map a git remote URL to a constellation repo key, or `null`. Pure. */
@@ -281,6 +308,84 @@ export function repoKeyForCheckout(cwd, { remote = 'origin', exec = execFileSync
     const url = exec('git', ['remote', 'get-url', remote], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
     return repoKeyFromRemoteUrl(url);
   } catch { return null; }
+}
+
+/**
+ * Read the remote and refspecs of the first `git push` in a shell command. Pure. `null` when there is no push.
+ * Options are skipped (`-o`/`--push-option`/`--receive-pack`/`--exec` take a separate value); `--repo=<r>` names
+ * the remote. `all` is set for `--all` / `--mirror` (every branch). `dir` is the last `git -C <dir>` (quoted or
+ * not), so the push is resolved in the checkout it actually runs in. Stops at the first shell separator.
+ * @returns {null | {remote: ?string, refspecs: string[], all: boolean, dir: ?string}}
+ */
+export function parseGitPush(cmd) {
+  const ARG = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
+  const m = new RegExp(String.raw`\bgit\b((?:\s+-[Cc]\s+${ARG})*)\s+push\b([^;&|\n]*)`).exec(String(cmd ?? ''));
+  if (!m) return null;
+  const unq = (t) => t.replace(/^['"]|['"]$/g, '');
+  const dirs = [...m[1].matchAll(new RegExp(String.raw`-C\s+(${ARG})`, 'g'))].map((d) => unq(d[1]));
+  const toks = m[2].trim().split(/\s+/).filter(Boolean).map(unq);
+  const VALUED = new Set(['-o', '--push-option', '--receive-pack', '--exec', '--repo']);
+  let remote = null;
+  let all = false;
+  const pos = [];
+  for (let i = 0; i < toks.length; i += 1) {
+    const t = toks[i];
+    if (t.startsWith('--repo=')) { remote = t.slice('--repo='.length) || null; continue; }
+    if (VALUED.has(t)) { if (t === '--repo') remote = toks[i + 1] ?? null; i += 1; continue; }
+    if (t === '--all' || t === '--mirror' || t === '--branches') { all = true; continue; }
+    if (t.startsWith('-')) continue;
+    pos.push(t);
+  }
+  if (!remote && pos.length) remote = pos.shift();
+  return { remote, refspecs: pos, all, dir: dirs.length ? dirs[dirs.length - 1] : null };
+}
+
+/**
+ * Where does this `git push` actually go? The repo KEY of the remote pushed to (never assumed `origin`), and every
+ * branch it may update — including the IMPLICIT target of a bare `git push` / `git push <remote>` / `git push
+ * <remote> HEAD`, which names no ref at all. Fail-closed: when the target is implicit, every candidate git could
+ * pick (the `@{push}` ref, the upstream `merge` ref, the current branch's own name) is returned. `--all` /
+ * `--mirror` / a glob refspec returns `*` (every branch). Resolved in the `git -C <dir>` checkout when given.
+ * `null` when the command has no push. `exec` is injectable for tests.
+ * @returns {null | {repoKey: ?string, branches: string[]}}
+ */
+export function resolvePushDestination(cmd, { cwd: baseCwd = process.cwd(), exec = execFileSync } = {}) {
+  const push = parseGitPush(cmd);
+  if (!push) return null;
+  const cwd = push.dir ? resolve(baseCwd, push.dir) : baseCwd;
+  const git = (args) => {
+    try { return String(exec('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }) ?? '').trim() || null; } catch { return null; }
+  };
+  let current;
+  const currentBranch = () => (current === undefined ? (current = git(['symbolic-ref', '-q', '--short', 'HEAD'])) : current);
+  let remote = push.remote;
+  if (!remote) {
+    const b = currentBranch();
+    remote = (b && git(['config', '--get', `branch.${b}.pushRemote`])) || git(['config', '--get', 'remote.pushDefault'])
+      || (b && git(['config', '--get', `branch.${b}.remote`])) || 'origin';
+  }
+  const repoKey = /[:/]/.test(remote) ? repoKeyFromRemoteUrl(remote) : repoKeyForCheckout(cwd, { remote, exec });
+  const implicit = () => {
+    const b = currentBranch();
+    const out = [];
+    if (b) out.push(b);
+    const pushRef = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}']);
+    if (pushRef) out.push(pushRef.startsWith(`${remote}/`) ? pushRef.slice(remote.length + 1) : pushRef);
+    const merge = b && git(['config', '--get', `branch.${b}.merge`]);
+    if (merge) out.push(normalizeBranch(merge));
+    return out;
+  };
+  const branches = [];
+  if (push.all) branches.push('*');
+  else if (!push.refspecs.length) branches.push(...implicit());
+  for (const spec of push.refspecs) {
+    const s = spec.replace(/^\+/, '');
+    if (s.includes('*')) { branches.push('*'); continue; }
+    const dst = s.includes(':') ? s.slice(s.indexOf(':') + 1) : s;
+    if (!dst || dst === 'HEAD' || dst === '@') branches.push(...implicit());
+    else branches.push(normalizeBranch(dst));
+  }
+  return { repoKey, branches: [...new Set(branches)] };
 }
 
 // ── marker comments (pure) ────────────────────────────────────────────────────────────────────────────────────
@@ -364,7 +469,7 @@ async function labelProviderDefault() {
  * `reason`, and `reason` requires `draft: true` — anything else is refused before any IO happens.
  */
 export async function fixBegin({
-  repo, pr, who, why = '', sessionId = callerIdentity().sessionId, gh = ghDefault, labels = null,
+  repo, pr, who, why = '', sessionId = callerIdentity().sessionId, token = callerIdentity().token, gh = ghDefault, labels = null,
   lockRoot = fixDispatchClaimRoot(), nowMs = Date.now(), ttlMinutes = DEFAULT_FIX_CLAIM_TTL_MINUTES,
   draft = false, reason = null,
 } = {}) {
@@ -379,15 +484,16 @@ export async function fixBegin({
   const view = JSON.parse(String(await gh(['pr', 'view', String(pr), '--repo', slug, '--json', 'headRefName,headRefOid,isDraft,state,labels'])));
   if (view.state && view.state !== 'OPEN') return { ok: false, reason: 'not-open', pr: Number(pr) };
   const claim = acquireFixClaim({
-    repo: repoKey, pr, who, why, sessionId, branch: view.headRefName, headSha: view.headRefOid, lockRoot, nowMs, ttlMinutes,
+    repo: repoKey, pr, who, why, sessionId, token, branch: view.headRefName, headSha: view.headRefOid, lockRoot, nowMs, ttlMinutes,
     draft, reason,
   });
   if (!claim.ok) return { ok: false, reason: claim.reason, heldBy: claim.heldBy, pr: Number(pr) };
+  const heldToken = claim.token ?? token;
   const steps = [];
   try {
     if (draft && !view.isDraft) { await gh(['pr', 'ready', String(pr), '--repo', slug, '--undo']); steps.push('draft'); }
   } catch (e) {
-    releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
+    releaseFixClaim({ repo: repoKey, pr, who, sessionId, token: heldToken, lockRoot });
     return { ok: false, reason: 'draft-failed', detail: String(e?.message ?? e).split('\n')[0], pr: Number(pr) };
   }
   // Label + comment are the human-visible half: best-effort, reported, never a reason to drop the claim.
@@ -408,7 +514,12 @@ export async function fixBegin({
       steps.push('comment');
     } catch (e) { steps.push(`comment-failed: ${String(e?.message ?? e).split('\n')[0]}`); }
   }
-  return { ok: true, pr: Number(pr), repo: repoKey, who, branch: view.headRefName, headSha: view.headRefOid, draft, reason: draft ? reason : null, reentrant: claim.reason === 'own', steps };
+  return {
+    ok: true, pr: Number(pr), repo: repoKey, who, branch: view.headRefName, headSha: view.headRefOid,
+    draft, reason: draft ? reason : null, reentrant: claim.reason === 'own', steps,
+    // A session-less claim's token, returned to its caller only: export it as WE_FIX_TOKEN for push / fix-end.
+    ...(claim.token ? { token: claim.token } : {}),
+  };
 }
 
 /**
@@ -420,11 +531,11 @@ export async function fixBegin({
  * required CI is green.
  */
 export async function fixEnd({
-  repo, pr, who, sessionId = callerIdentity().sessionId, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
+  repo, pr, who, sessionId = callerIdentity().sessionId, token = callerIdentity().token, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
 } = {}) {
   const repoKey = repoKeyOf(repo);
   const slug = CONSTELLATION_REPOS[repoKey].slug;
-  const rel = releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
+  const rel = releaseFixClaim({ repo: repoKey, pr, who, sessionId, token, lockRoot });
   if (!rel.released) return { ok: false, reason: rel.reason, heldBy: rel.heldBy ?? null, pr: Number(pr) };
   const wasDraft = Boolean(rel.entry?.meta?.draft);
   const draftReason = rel.entry?.meta?.reason ?? null;
@@ -481,8 +592,8 @@ if (IS_CLI) {
         const r = await fixBegin({ repo, pr, who, why: typeof flags.why === 'string' ? flags.why : '', draft, reason: draftReason });
         out(r, r.ok ? 0 : 3);
       }
-      if (cmd === 'fix-end') { const r = await fixEnd({ repo, pr, who, sessionId: id.sessionId }); out(r, r.ok ? 0 : 3); }
-      const r = heartbeatFixClaim({ repo, pr, who, sessionId: id.sessionId });
+      if (cmd === 'fix-end') { const r = await fixEnd({ repo, pr, who, sessionId: id.sessionId, token: id.token }); out(r, r.ok ? 0 : 3); }
+      const r = heartbeatFixClaim({ repo, pr, who, sessionId: id.sessionId, token: id.token });
       out(r, r.refreshed ? 0 : 3);
     }
     if (cmd === 'push-check' || cmd === 'push') {
@@ -491,7 +602,7 @@ if (IS_CLI) {
       const remote = typeof flags.remote === 'string' ? flags.remote : 'origin';
       // The repo is the one this push actually goes to: `--repo`, else the URL of the `--remote` pushed to.
       const repoKey = typeof flags.repo === 'string' ? repoKeyOf(flags.repo) : repoKeyForCheckout(process.cwd(), { remote });
-      const refusal = pushRefusal({ repo: repoKey, branch, sessionId: id.sessionId, who });
+      const refusal = pushRefusal({ repo: repoKey, branch, sessionId: id.sessionId, who, token: id.token });
       if (refusal) { writeLineSync(2, `✗ ${refusal.message}`); out({ ok: false, ...refusal }, 3); }
       if (cmd === 'push-check') out({ ok: true, branch, repo: repoKey });
       const src = typeof flags.src === 'string' ? flags.src : 'HEAD';

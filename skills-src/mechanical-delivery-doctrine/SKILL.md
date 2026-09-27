@@ -185,7 +185,8 @@ history. If a rule itself changes, edit it here first, then note the change on t
     `review-status:draft-withdrawn`) — only then does the PR stay draft until the fix daemon promotes it on
     green required CI and review re-runs. If `fix-begin` is REFUSED, another fixer owns the PR
     right now — wait for its `fix-end` or coordinate; never push around it. A worker without a Claude session
-    sets `WE_FIX_WHO=<name>` so its pushes are recognized as the holder's. Grounded 2026-09-27, PR #2811: a
+    sets `WE_FIX_WHO=<name>` and `WE_FIX_TOKEN=<the token fix-begin printed>` so its pushes are recognized as
+    the holder's (the claim is bound to the token: `--who` is public, and two workers may share a name). Grounded 2026-09-27, PR #2811: a
     worker pushed rubric commits onto a branch the daemon fixer `fix-2811` was mid-repair on; the fixer stood
     down and the planner held the PR forever.
 
