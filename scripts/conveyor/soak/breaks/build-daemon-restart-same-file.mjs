@@ -26,7 +26,7 @@ export default {
   id: 'build-daemon-restart-same-file',
   title: 'a restarted build dispatcher forgot its in-memory guards and re-dispatched a cleared card (and its same-file sibling)',
   card: 'we:backlog/3984 (build-dispatch daemon slice 1; claim shape from PR #2789)',
-  fixedBy: { sha: 'lane/build-daemon-slice1', where: 'lane/build-daemon-slice1', paths: ['scripts/conveyor/build-dispatch-claim.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
+  fixedBy: { sha: '2aa2058ee', where: 'lane/build-daemon-slice1', paths: ['scripts/conveyor/build-dispatch-claim.mjs', 'skills-src/conveyor/build-dispatch-daemon.mjs'] },
   fixPresent(root) {
     const p = join(root, 'skills-src/conveyor/build-dispatch-daemon.mjs');
     return existsSync(p) && /BUILD_DAEMON_DURABLE_CLAIM/.test(readFileSync(p, 'utf8'));
