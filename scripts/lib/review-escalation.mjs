@@ -1205,10 +1205,64 @@ export function targetedCheckQuestion(escalation) {
     + 'still stands) or `changes` (a missed clearance, or another reason the prior verdict should not stand).';
 }
 
+// #xconv1-evidence (chalbert/web-everything#2766/#2767 misfire, epic #3383/#4075) — the targeted-check judge
+// answered `changes` for both PRs with NO diff evidence in front of it: `buildTargetedCheckInput` (below, in
+// `we:scripts/conveyor/convert-advisory-dispatch.mjs`) used to pass only the escalation REASON TEXT plus the
+// prior verdict, on the theory that "the reason already names the specific evidence". It names the FILE, never
+// the file's own CONTENT, so a `test-gaming` judge with nothing but a filename and a case count had no way to
+// tell a legitimate consolidation from a real tamper — its own note said so verbatim ("no diff evidence to
+// confirm the removed tests were legitimate"). This regex recovers the exact path(s) a `test-gaming` reason
+// names (`we:scripts/lib/pr-merge-gate.mjs#scanTestTampering`'s own `${kind}: ${path} (${detail})` shape,
+// joined `'; '` by `we:scripts/merge-ai-prs.mjs`'s park-reason builder) so the dispatcher can fetch THOSE
+// files' own net diff and hand the judge real evidence instead of a bare claim.
+const TEST_GAMING_FINDING_RE = /(?:tests-removed|test-file-removed|test-skipped):\s*(\S+)\s*\(/g;
+
+/**
+ * #xconv1-evidence — pure: every distinct test-file path a `kind:'test-gaming'` escalation reason names (in
+ * first-seen order, deduplicated). Returns `[]` for a reason with no recognizable finding — the caller reads
+ * that as "no evidence is fetchable", never as "no path exists to check".
+ * @param {string|null|undefined} reasonText
+ * @returns {string[]}
+ */
+export function extractTestGamingPaths(reasonText) {
+  const text = String(reasonText || '');
+  const paths = [];
+  TEST_GAMING_FINDING_RE.lastIndex = 0;
+  let m;
+  // eslint-disable-next-line no-cond-assign
+  while ((m = TEST_GAMING_FINDING_RE.exec(text))) {
+    const p = m[1];
+    if (p && !paths.includes(p)) paths.push(p);
+  }
+  return paths;
+}
+
 /** #xconv1 — the marker a CONVERTED advisory note carries, distinct from `review-pr.mjs`'s own
  *  `ADVISORY_NOTE_MARKER` so a reader — or a later sweep — can tell "advised fresh" from "converted from a
  *  superseded verdict" at a glance, without diffing prose. */
 export const CONVERTED_ADVISORY_NOTE_MARKER = '<!-- converted-advisory-note -->';
+
+/** #xconv1-evidence — the three shapes a converted note's own targeted check can land on. `inconclusive` is
+ *  deliberately NEITHER `accept` NOR `changes`: {@link labelForOutcome} (`we:scripts/lib/advisory-labels.mjs`)
+ *  returns `null` for it, so `planAdvisoryLabels` applies NO `advisory:*` label at all — an inconclusive check
+ *  must never read as a cleared advisory (a false `accept`) NOR burn `we:scripts/conveyor/reconcile-core.mjs`'s
+ *  `advisory-fix` cap on a manufactured `changes` finding nothing can actually repair (the #2766/#2767 incident
+ *  this constant exists to close: 3 advisory-fix rounds, each correctly finding nothing to fix, cap-exhausted).
+ */
+export const TARGETED_CHECK_OUTCOMES = Object.freeze(['accept', 'changes', 'inconclusive']);
+
+/** #xconv1-evidence — pure: narrow a raw judge/verdict value to one of {@link TARGETED_CHECK_OUTCOMES}, never
+ *  silently collapsing `inconclusive` into `accept` (the bug `we:scripts/conveyor/convert-advisory-dispatch.mjs
+ *  #runTargetedCheck` used to have — its old narrowing was `=== 'changes' ? 'changes' : 'accept'`, which read
+ *  ANY non-`changes` value, including a genuine `inconclusive`, as a clean accept). Anything else (missing,
+ *  malformed, a stray value) still narrows to `accept` — the same fail-safe direction the original narrowing
+ *  chose, preserved here rather than widened.
+ * @param {*} verdict
+ * @returns {'accept'|'changes'|'inconclusive'}
+ */
+export function narrowTargetedCheckOutcome(verdict) {
+  return verdict === 'changes' || verdict === 'inconclusive' ? verdict : 'accept';
+}
 
 /**
  * #xconv1 — render the CONVERTED advisory note: the prior jury verdict this head already earned, superseded by
@@ -1234,8 +1288,16 @@ export function renderConvertedAdvisoryNote({
   repo = '', pr = null, headSha = '', acceptComment = {}, escalation = {}, targetedCheckAnswer = {},
 } = {}) {
   const quoted = String(acceptComment?.body ?? '').split('\n').map((l) => `> ${l}`).join('\n');
-  const outcome = targetedCheckAnswer?.verdict === 'changes' ? 'changes' : 'accept';
+  const outcome = narrowTargetedCheckOutcome(targetedCheckAnswer?.verdict);
   const sha = String(headSha || '').toLowerCase();
+  const verdictLine = outcome === 'accept' ? '✅ pass — no blocking findings'
+    : outcome === 'changes' ? '⚠️ blocking findings'
+      : '❓ inconclusive — the targeted check could not be answered from the material available';
+  const advisoryOutcomeLine = outcome === 'accept' ? 'no blocking findings on this head; `advisory:accepted` is applied'
+    : outcome === 'changes' ? 'blocking findings on this head; `advisory:changes` is applied'
+      : 'NEITHER cleared nor blocking — no `advisory:*` label is applied, and no automatic advisory-fix is '
+        + 'owed for it. A human must confirm this escalation directly (or a later re-run with real evidence '
+        + 'may supersede this note)';
   return [
     `${CONVERTED_ADVISORY_NOTE_MARKER} This PR carries \`review:human\` (${repo}#${pr}). This head ALREADY`,
     'completed an independent jury review, quoted verbatim below — that verdict was superseded by a later',
@@ -1243,7 +1305,7 @@ export function renderConvertedAdvisoryNote({
     're-run. It has neither accepted nor bounced this PR. No `review:*` label was changed and no decision was',
     'recorded.',
     '',
-    `**Verdict:** ${outcome === 'accept' ? '✅ pass — no blocking findings' : '⚠️ blocking findings'} — `
+    `**Verdict:** ${verdictLine} — `
       + 'converted from a prior jury verdict plus one targeted check (never a re-run of the whole panel).',
     '',
     `**Escalation reason (${escalation.kind}):**`,
@@ -1260,9 +1322,7 @@ export function renderConvertedAdvisoryNote({
     '',
     `_Answer:_ \`${outcome}\`${targetedCheckAnswer?.note ? ` — ${targetedCheckAnswer.note}` : ''}`,
     '',
-    `**Advisory outcome:** \`${outcome}\` — ${outcome === 'accept'
-      ? 'no blocking findings on this head; `advisory:accepted` is applied'
-      : 'blocking findings on this head; `advisory:changes` is applied'}.`,
+    `**Advisory outcome:** \`${outcome}\` — ${advisoryOutcomeLine}.`,
     '',
     '---',
     '',

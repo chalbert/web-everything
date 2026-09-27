@@ -52,6 +52,9 @@ import {
   renderConvertedAdvisoryNote,
   CONVERTED_ADVISORY_NOTE_MARKER,
   hasConvertedAdvisoryNote,
+  extractTestGamingPaths,
+  narrowTargetedCheckOutcome,
+  TARGETED_CHECK_OUTCOMES,
 } from '../review-escalation.mjs';
 import { parseAdvisories, advisoryCoversHead } from '../advisory-labels.mjs';
 import { deriveReviewDisposition, REVIEW_DISPOSITIONS } from '../review-core.mjs';
@@ -1073,6 +1076,39 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
     });
   });
 
+  describe('#xconv1-evidence — extractTestGamingPaths', () => {
+    it('recovers the single path from THE LIVE #2766/#2767 reason text', () => {
+      const reason = 'test-gaming suspected — CI-green may be manufactured by tampering with tests: '
+        + 'tests-removed: scripts/operations/__tests__/review-loop-cli.test.mjs (net 2 test case(s) removed)';
+      expect(extractTestGamingPaths(reason)).toEqual(['scripts/operations/__tests__/review-loop-cli.test.mjs']);
+    });
+    it('recovers every distinct path across multiple `; `-joined findings, deduplicated', () => {
+      const reason = 'test-gaming suspected — CI-green may be manufactured by tampering with tests: '
+        + 'tests-removed: a.test.mjs (net 1 test case(s) removed); test-file-removed: b.test.mjs (a test file was deleted); '
+        + 'test-skipped: a.test.mjs (1 skip/only marker(s) added)';
+      expect(extractTestGamingPaths(reason)).toEqual(['a.test.mjs', 'b.test.mjs']);
+    });
+    it('returns [] for a reason with no recognizable finding, null, or undefined', () => {
+      expect(extractTestGamingPaths('test-gaming suspected — something else entirely')).toEqual([]);
+      expect(extractTestGamingPaths(null)).toEqual([]);
+      expect(extractTestGamingPaths(undefined)).toEqual([]);
+    });
+  });
+
+  describe('#xconv1-evidence — narrowTargetedCheckOutcome', () => {
+    it('preserves all three real outcomes', () => {
+      expect(TARGETED_CHECK_OUTCOMES).toEqual(['accept', 'changes', 'inconclusive']);
+      expect(narrowTargetedCheckOutcome('accept')).toBe('accept');
+      expect(narrowTargetedCheckOutcome('changes')).toBe('changes');
+      expect(narrowTargetedCheckOutcome('inconclusive')).toBe('inconclusive');
+    });
+    it('narrows anything malformed/missing to `accept` (the same fail-safe direction the original narrowing chose)', () => {
+      expect(narrowTargetedCheckOutcome(undefined)).toBe('accept');
+      expect(narrowTargetedCheckOutcome(null)).toBe('accept');
+      expect(narrowTargetedCheckOutcome('bogus')).toBe('accept');
+    });
+  });
+
   describe('renderConvertedAdvisoryNote', () => {
     it('quotes the prior verdict verbatim as a blockquote, states the escalation reason, and never emits a Decision line', () => {
       const note = renderConvertedAdvisoryNote({
@@ -1097,6 +1133,28 @@ describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — convert a sup
       });
       expect(note).toContain('**Advisory outcome:** `changes`');
       expect(note).toContain('tests were weakened');
+    });
+    it('an `inconclusive` targeted-check answer applies NO advisory label and says a human must confirm directly (#xconv1-evidence)', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: { verdict: 'inconclusive', note: 'no diff evidence could be fetched' },
+      });
+      expect(note).toContain('**Advisory outcome:** `inconclusive`');
+      expect(note).toContain('no diff evidence could be fetched');
+      expect(note).not.toContain('advisory:changes` is applied');
+      expect(note).not.toContain('advisory:accepted` is applied');
+      expect(note).toMatch(/human must confirm this escalation directly/i);
+    });
+    it('a missing/malformed verdict narrows to `accept` rendering, never `inconclusive` (#xconv1-evidence — narrowTargetedCheckOutcome is the single source)', () => {
+      const note = renderConvertedAdvisoryNote({
+        repo: 'chalbert/web-everything', pr: 2766, headSha: HEAD,
+        acceptComment: { body: acceptBody },
+        escalation: { kind: 'test-gaming', reasonText: 'x' },
+        targetedCheckAnswer: {},
+      });
+      expect(note).toContain('**Advisory outcome:** `accept`');
     });
     it('carries a top-level `**Verdict:**` line and a `Net basis:` line keyed on headSha — the shape parseAdvisories/planAdvisoryStaleLabels/operator-queue.mjs read back', () => {
       const note = renderConvertedAdvisoryNote({
