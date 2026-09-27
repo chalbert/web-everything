@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readQueueFile, writeQueueFile, addToQueue, queuePath, normNum } from '../conveyor/queue-store.mjs';
+import { readQueueFile, writeQueueFile, addToQueue, resolveQueuePath, normNum } from '../conveyor/queue-store.mjs';
 import { pauseStorePath } from '../readiness/dispatch-pause.mjs';
 import { parsePriorityRows } from '../lib/prototype-tracker-compact.mjs';
 import { REFUSAL_KINDS } from '../conveyor/reconcile-core.mjs';
@@ -48,9 +48,11 @@ const runDefault = (program, args, { env } = {}) => String(execFileSync(program,
 export function createItemReader({ run = runDefault, root, trackerRef = TRACKER_REF, io = fs } = {}) {
   if (!root) throw new TypeError('land-advance item reader needs the canonical checkout root');
   return function readItems() {
-    const env = { ...process.env, WE_DISPATCH_PAUSE_FILE: pauseStorePath(root), CONVEYOR_QUEUE_FILE: queuePath(root) };
+    // The cleared queue is the ONE state-home file (decouple-primary-checkout, epic #4075), not `root`'s own
+    // `.conveyor/queue.json`; only the pause marker is still read under the canonical checkout.
+    const env = { ...process.env, WE_DISPATCH_PAUSE_FILE: pauseStorePath(root), CONVEYOR_QUEUE_FILE: resolveQueuePath() };
     const state = JSON.parse(run('node', ['scripts/readiness/conveyor-state.mjs', '--json'], { env }));
-    const queued = readQueueFile(queuePath(root)).map((e) => normNum(e.num));
+    const queued = readQueueFile(resolveQueuePath()).map((e) => normNum(e.num));
     const inFlight = [...new Set([...(state.lanes ?? []).map((l) => l.num), ...(state.prs ?? []).map((p) => p.num), ...queued]
       .filter((n) => n != null && n !== '').map(String))];
     const { queue, skipped } = priorityQueue(run('git', ['show', `${trackerRef}:${TRACKER_PATH}`]), { inFlight });
@@ -63,7 +65,10 @@ export function createItemReader({ run = runDefault, root, trackerRef = TRACKER_
     } finally { io.rmSync(dir, { recursive: true, force: true }); }
   };
 }
+/** Queue `num` for build. `root` is kept for the caller's contract (and its "no canonical checkout" guard) but
+ *  the write lands in the ONE state-home queue every dispatcher reads (decouple-primary-checkout, epic #4075). */
 export function queueItemInto(root, num, now = Date.now) {
-  const path = queuePath(root);
+  void root;
+  const path = resolveQueuePath();
   writeQueueFile(addToQueue(readQueueFile(path), String(num), new Date(now()).toISOString()), path);
 }

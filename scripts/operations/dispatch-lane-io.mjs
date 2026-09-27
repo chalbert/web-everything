@@ -1157,7 +1157,8 @@ export function assertNotALaneCheckout(root) {
   if (/^lane-\d+$/.test(String(root).split('/').filter(Boolean).pop() || '')) {
     throw notApplied(
       `dispatch-lane: refusing to start a delivery agent from the lane checkout ${root} — the brief's first step `
-      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the primary checkout.',
+      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the control clone '
+        + '(<workspace>/wev-control, we:scripts/lib/automation-home.mjs), never the operator\'s primary checkout.',
     );
   }
 }

@@ -6,11 +6,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createItemReader, queueItemInto, TRACKER_REF, TRACKER_PATH } from '../land-advance-items-io.mjs';
 import { createLandAdvanceApplier } from '../land-advance-io.mjs';
-import { readQueueFile, queuePath } from '../../conveyor/queue-store.mjs';
+import { readQueueFile, resolveQueuePath } from '../../conveyor/queue-store.mjs';
 import { pauseStorePath } from '../../readiness/dispatch-pause.mjs';
 let root;
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'la-items-')); });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+let prevQueueFile;
+// The cleared queue is the one state-home file now (decouple-primary-checkout) — pin it into the fixture root so
+// no test here can ever touch the machine's real queue.
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'la-items-'));
+  prevQueueFile = process.env.CONVEYOR_QUEUE_FILE;
+  process.env.CONVEYOR_QUEUE_FILE = join(root, 'state-home', '.conveyor', 'queue.json');
+});
+afterEach(() => {
+  if (prevQueueFile === undefined) delete process.env.CONVEYOR_QUEUE_FILE; else process.env.CONVEYOR_QUEUE_FILE = prevQueueFile;
+  rmSync(root, { recursive: true, force: true });
+});
 const TRACKER = ['## Priority order', '', '1. #3653 · 3 · A · Clears: CI.', '2. #3674 · 3 · A · Clears: more CI.', '3. #3486 · 3 · A · Graduation slice.', ''].join('\n');
 it('reads the Priority order at the tracker ref, drops in-flight items, and plans them through dispatch-plan against the canonical sidecars', () => {
   const calls = [];
@@ -30,7 +40,7 @@ it('reads the Priority order at the tracker ref, drops in-flight items, and plan
   expect(out.inFlight.sort()).toEqual(['3486', '3674']);
   expect(out.queue).toEqual([{ num: '3653', rank: 1 }]);
   expect(out.itemPlan.launch).toEqual([{ num: '3653', lane: 30 }]);
-  for (const c of [calls[0], calls[2]]) expect(c.env).toMatchObject({ WE_DISPATCH_PAUSE_FILE: pauseStorePath(root), CONVEYOR_QUEUE_FILE: queuePath(root) });
+  for (const c of [calls[0], calls[2]]) expect(c.env).toMatchObject({ WE_DISPATCH_PAUSE_FILE: pauseStorePath(root), CONVEYOR_QUEUE_FILE: resolveQueuePath() });
 });
 it('already-queued items in the canonical sidecar count as in flight', () => {
   queueItemInto(root, '3653', () => 0);
@@ -43,10 +53,10 @@ it('applies items by queueing them into the canonical conveyor sidecar, idempote
   const plan = { errors: [], rows: [], proposed: [], escalations: [], capacity: { budget: 2 }, items: { proposed: [{ num: '3653', lane: 30 }] } };
   const apply = createLandAdvanceApplier({ canonicalRoot: root, now: () => Date.parse('2026-09-21T00:00:00Z') });
   expect((await apply(plan, { prs: true, items: false })).queued).toEqual([]);
-  expect(readQueueFile(queuePath(root))).toEqual([]);
+  expect(readQueueFile(resolveQueuePath())).toEqual([]);
   expect((await apply(plan, { prs: false, items: true })).queued).toEqual(['3653']);
   await apply(plan, { prs: false, items: true });
-  expect(readQueueFile(queuePath(root)).map((e) => e.num)).toEqual(['3653']);
+  expect(readQueueFile(resolveQueuePath()).map((e) => e.num)).toEqual(['3653']);
 });
 // THE REAL MECHANISM (#2949 fidelity): the tracker is read with a real `git show <ref>:<path>` in a real clone, and the
 // in-flight read and the queue sink use a real sidecar file. Only the two node children are answered by the wrapper.

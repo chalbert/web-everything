@@ -59,7 +59,7 @@
         "kind": "state-root",
         "name": "<state-root>",
         "cite": "scripts/conveyor/queue-store.mjs:132-154",
-        "note": "CONVEYOR_STATE_ROOT (#4052) pins every daemon clone's .conveyor/queue.json to one physical file; unset defaults to script-location root."
+        "note": "CONVEYOR_STATE_ROOT (#4052) pins the .conveyor/queue.json root; unset it defaults to the automation state home (~/.claude/daemon-self-sync-state/conveyor-state), outside every checkout (decouple-primary-checkout)."
       },
       {
         "kind": "path-tool",

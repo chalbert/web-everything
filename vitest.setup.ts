@@ -105,6 +105,18 @@ if (process.env.WE_GH_THROTTLE_LOCK_ROOT === undefined) {
   process.env.WE_GH_THROTTLE_LOCK_ROOT = mkdtempSync(join(tmpdir(), 'we-gh-throttle-test-'));
 }
 
+// decouple-primary-checkout (epic #4075): the conveyor build queue's DEFAULT path is now the machine-wide
+// automation state home (`<WE_DAEMON_STATE_DIR || ~/.claude/daemon-self-sync-state>/conveyor-state`), not the
+// checkout's own `.conveyor/`. A test that reads/writes the queue through the defaults would otherwise touch the
+// host's REAL queue (the one the live build-dispatch daemon reads). Same both-tiers default as the throttle root
+// above; tests of the resolution itself pass an explicit `env`, so this never reaches them.
+if (process.env.WE_DAEMON_STATE_DIR === undefined) {
+  process.env.WE_DAEMON_STATE_DIR = mkdtempSync(join(tmpdir(), 'we-daemon-state-test-'));
+}
+// ...and its one-release fallback read of the OLD in-checkout queue (which, on the operator's laptop, is the
+// primary checkout's real `.conveyor/queue.json`) is switched off for the same reason.
+if (process.env.CONVEYOR_NO_LEGACY_QUEUE === undefined) process.env.CONVEYOR_NO_LEGACY_QUEUE = '1';
+
 // #3383 bugfix: default the delivery-telemetry recorder OFF for the whole unit/integration test run, so
 // wrapper tests (`deliver-item-wrapper.test.mjs` and siblings, plus the real-subprocess integration suite)
 // that exercise the real dispatch wrappers through `createTelemetryRecorder()`/`recorderFor()` — with

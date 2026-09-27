@@ -8,19 +8,26 @@
 	copies it to ~/Library/LaunchAgents/com.we.build-dispatch-daemon.plist themselves — no session installs it.
 
 	BEFORE INSTALLING:
-	  1. Create the daemon's OWN dedicated clone (never the primary checkout, never a lane):
-	       git clone https://github.com/chalbert/web-everything /Users/nicolasgilbert/workspace/wev-build-dispatch-daemon
-	     then `npm ci` in it. --self-sync keeps it on origin/main between ticks (same machinery as the review daemon).
-	  2. Dry run first, from that clone:
-	       CONVEYOR_STATE_ROOT=/Users/nicolasgilbert/workspace/webeverything node skills-src/conveyor/build-dispatch-daemon.mjs --dry-run
-	  3. Fill the GitHub App placeholders (never commit real values).
-	  4. CONVEYOR_STATE_ROOT pins the cleared queue to the operator's primary checkout (#4052), where /conveyor
-	     writes it. OPERATION_RUNS_DIR pins dispatch-lane's run records OUTSIDE the clone, so a self-sync rebuild
-	     cannot wipe the in-flight records (and the durable claims already live under the coordination root).
-	  5. Kill switch: `touch ~/workspace/.operations/coordination/build-dispatch-daemon.kill` freezes new
+	  1. Create the automation's CONTROL CLONE (never the primary checkout, never a lane) — the one clone the
+	     automation executes code from (we:scripts/lib/automation-home.mjs#controlClonePath; the gh shim's throttle
+	     CLI resolves here too). This daemon runs FROM it with --self-sync, so the daemon rebuild machinery keeps it
+	     on origin/main between ticks (same machinery as the review daemon):
+	       git clone https://github.com/chalbert/web-everything /Users/nicolasgilbert/workspace/wev-control
+	     then `npm ci` in it.
+	  2. Move the cleared queue out of the primary checkout, once (the old file is left untouched):
+	       node scripts/conveyor/queue.mjs migrate --dry-run   # then without --dry-run
+	  3. Dry run first, from that clone:
+	       node skills-src/conveyor/build-dispatch-daemon.mjs --dry-run
+	  4. Fill the GitHub App placeholders (never commit real values).
+	  5. CONVEYOR_STATE_ROOT is the automation's state home (~/.claude/daemon-self-sync-state/conveyor-state) —
+	     the queue's DEFAULT location now (decouple-primary-checkout, epic #4075), pinned here only so it is visible.
+	     NEVER point it at the primary checkout again. OPERATION_RUNS_DIR pins dispatch-lane's run records OUTSIDE
+	     the clone, so a self-sync rebuild cannot wipe the in-flight records (and the durable claims already live
+	     under the coordination root).
+	  6. Kill switch: `touch ~/workspace/.operations/coordination/build-dispatch-daemon.kill` freezes new
 	     dispatches on the next tick without unloading the job; `rm` it to resume. `--live` is what allows
 	     dispatch at all; drop it (or unload) to stop for good.
-	  6. While this daemon runs, do NOT also execute the runner's surfaced `spawnBuilds` by hand — the durable
+	  7. While this daemon runs, do NOT also execute the runner's surfaced `spawnBuilds` by hand — the durable
 	     claim only fences dispatchers that take it (a later slice moves the claim into dispatch-lane itself).
 	-->
 	<key>Label</key>
@@ -28,7 +35,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/Users/nicolasgilbert/.nvm/versions/node/v22.1.0/bin/node</string>
-		<string>/Users/nicolasgilbert/workspace/wev-build-dispatch-daemon/skills-src/conveyor/build-dispatch-daemon.mjs</string>
+		<string>/Users/nicolasgilbert/workspace/wev-control/skills-src/conveyor/build-dispatch-daemon.mjs</string>
 		<string>--live</string>
 		<string>--self-sync</string>
 		<string>--max-concurrent=3</string>
@@ -41,7 +48,7 @@
 		<key>WE_BUILD_DISPATCH_MODE</key>
 		<string>mechanical</string>
 		<key>CONVEYOR_STATE_ROOT</key>
-		<string>/Users/nicolasgilbert/workspace/webeverything</string>
+		<string>/Users/nicolasgilbert/.claude/daemon-self-sync-state/conveyor-state</string>
 		<key>OPERATION_RUNS_DIR</key>
 		<string>/Users/nicolasgilbert/workspace/.operations/coordination/build-dispatch-runs</string>
 		<key>WE_GITHUB_APP_ID</key>
@@ -52,7 +59,7 @@
 		<string>&lt;path-to-private-key.pem&gt;</string>
 	</dict>
 	<key>WorkingDirectory</key>
-	<string>/Users/nicolasgilbert/workspace/wev-build-dispatch-daemon</string>
+	<string>/Users/nicolasgilbert/workspace/wev-control</string>
 	<key>StandardOutPath</key>
 	<string>/Users/nicolasgilbert/workspace/.operations/coordination/build-dispatch-daemon.log</string>
 	<key>StandardErrorPath</key>
