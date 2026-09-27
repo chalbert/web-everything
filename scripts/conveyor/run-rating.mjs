@@ -658,14 +658,17 @@ export function rateReviewJobLog(logPath) {
  */
 export function toScorecardRow(rating, { provider = 'anthropic' } = {}) {
   const gradeScore = { A: 95, B: 80, C: 55, D: 25 }[rating.grade] ?? null;
+  // Evidence strings are deliberately plain plural, never `(s)` — that reads to the append-time secret scrub
+  // as call-syntax (`name(...)`) and gets refused outright (Fork 2's amendment: deny on a hit, never redact —
+  // found live running this module's own backfill against real production rows).
   const deductions = [];
   if (rating.guardBlocks > 0) {
-    deductions.push({ criterion: 'guard-blocks', evidence: `${rating.guardBlocks} hook-error:Blocked tool result(s) (target <${GUARD_BLOCKS_TARGET})` });
+    deductions.push({ criterion: 'guard-blocks', evidence: `${rating.guardBlocks} hook-error:Blocked tool results, target under ${GUARD_BLOCKS_TARGET}` });
   }
   const nonGuardErrors = Math.max(0, (rating.errors ?? 0) - (rating.guardBlocks ?? 0));
-  if (nonGuardErrors > 0) deductions.push({ criterion: 'tool-errors', evidence: `${nonGuardErrors} non-guard tool error(s)` });
-  if (rating.repeatedCalls > 0) deductions.push({ criterion: 'repeated-calls', evidence: `${rating.repeatedCalls} identical repeated tool call(s)` });
-  if (rating.testReruns > 0) deductions.push({ criterion: 'test-reruns', evidence: `${rating.testReruns} identical test/gate rerun(s)` });
+  if (nonGuardErrors > 0) deductions.push({ criterion: 'tool-errors', evidence: `${nonGuardErrors} non-guard tool errors` });
+  if (rating.repeatedCalls > 0) deductions.push({ criterion: 'repeated-calls', evidence: `${rating.repeatedCalls} identical repeated tool calls` });
+  if (rating.testReruns > 0) deductions.push({ criterion: 'test-reruns', evidence: `${rating.testReruns} identical test/gate reruns` });
   return {
     rubricVersion: RUBRIC_VERSION,
     provider,

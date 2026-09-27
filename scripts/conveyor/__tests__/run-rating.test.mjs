@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
+import { scrubReasons } from '../../lib/secret-scrub.mjs';
 import {
   RUBRIC_VERSION, GUARD_BLOCKS_TARGET,
   isSyntheticModel, extractTurns, sessionNameFromLines, computeWallMs, pairToolEvents,
@@ -325,6 +326,16 @@ describe('toScorecardRow', () => {
     const rating = { kind: 'fix', pr: 1, item: null, sessionName: 's', model: 'm', grade: 'C', guardBlocks: 2, errors: 3, repeatedCalls: 1, testReruns: 1, outcome: 'escalated', rawOutcome: 'blocked', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
     const row = toScorecardRow(rating);
     expect(row.deductions.map((d) => d.criterion).sort()).toEqual(['guard-blocks', 'repeated-calls', 'test-reruns', 'tool-errors']);
+  });
+  // Regression: an earlier `(s)` plural in these evidence strings (e.g. "tool error(s)") read to the
+  // append-time secret scrub as call-syntax (`name(...)`) and made `appendScorecard` refuse EVERY row that
+  // carried one — found live running this module's own production backfill. Every deduction template must
+  // stay scrub-clean.
+  it('every deduction evidence string passes the append-time secret scrub', () => {
+    const rating = { kind: 'fix', pr: 1, item: null, sessionName: 's', model: 'm', grade: 'D', guardBlocks: 5, errors: 7, repeatedCalls: 3, testReruns: 2, outcome: 'escalated', rawOutcome: 'blocked', tokens: null, costUsd: null, cacheHitRatio: null, shares: null, dataQuality: 'transcript' };
+    const row = toScorecardRow(rating);
+    expect(row.deductions.length).toBeGreaterThan(0);
+    for (const d of row.deductions) expect(scrubReasons(d.evidence)).toEqual([]);
   });
 });
 
