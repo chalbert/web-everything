@@ -26,7 +26,6 @@ export default {
   closeAfter: 1,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   recommendationHint: 'A dispatched session is stuck on Claude Code\'s own EnterWorktree/bgIsolation guard — '
     + 'its lane clone already IS its isolation. See we:scripts/lib/dispatch-bg-isolation.mjs.',
   evaluate({ bgIsolationStalls }) {

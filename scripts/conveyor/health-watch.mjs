@@ -170,6 +170,21 @@ export function daemonNameForLabel(label) {
  * lease heartbeat, and each daemon's own last-tick record — instead of re-deriving it. Mapped to the `leases`
  * shape the smells read. `lastActivityAt` carries daemon-status's own timestamp for a daemon whose log this
  * watch does not read (the plateau drain daemon). Every launchctl/plutil child call gets a hard timeout.
+ *
+ * `intervalMs` — the SAME `DAEMON_MANIFEST[name]?.intervalMs` the `daemonLogs` probe already attaches to a
+ * sample as `defaultIntervalMs` (see `probeDaemonLogs` above), looked up here too and carried on the lease.
+ * Root cause (2026-09-27, live `daemon-silent` false-positive FLAPPING on `merge-orphan-sweep`, open 36h+):
+ * that pass now runs from its OWN dedicated clone (`wev-merge-daemon`, #3383's daemon split — a daemon that
+ * writes to `main` gets its own clone), so its log never appears under this watch's single `defaultLogsDir()`
+ * (`wev-review-daemon/.conveyor`) and `daemon-silent.mjs`'s primary `daemons[lease.log]` memory is never built
+ * for it. It falls back to a synthetic memory built ONLY from this lease — and that fallback used to hardcode
+ * `intervalMs: 120_000` (2 minutes) regardless of the daemon's REAL configured cadence, so a perfectly healthy
+ * daemon on a slower cadence (merge-orphan-sweep's is 15 minutes — `MERGE_ORPHAN_SWEEP_INTERVAL_MS` in
+ * `daemon-manifest.mjs`) tripped the fallback's fixed 10-minute silence threshold on every ordinary tick gap,
+ * flapping open/closed forever. Carrying the real interval here lets `daemon-silent.mjs`'s fallback scale its
+ * threshold the same way the primary path already does — `null` for a daemon `DAEMON_MANIFEST` does not cover
+ * (every resident daemon that is not a `pass-daemon.mjs` watcher), which the smell already treats as "use the
+ * generic default".
  */
 export function probeDaemonStatus({ collect = collectDaemonStatus, assess = assessDaemonStatus, timeoutMs = 15_000 } = {}) {
   const exec = (cmd, args, opts = {}) => execFileSync(cmd, args, { ...opts, timeout: timeoutMs });
@@ -178,8 +193,9 @@ export function probeDaemonStatus({ collect = collectDaemonStatus, assess = asse
     const ms = (v) => (v == null ? null : typeof v === 'number' ? v : Date.parse(v) || null);
     const entry = d.lease?.entry ?? null;
     const activity = [ms(d.tick?.lastActivityAt), ms(d.tick?.at), ms(d.tick?.logMtimeMs)].filter(Number.isFinite);
+    const log = daemonNameForLabel(d.name);
     return {
-      log: daemonNameForLabel(d.name),
+      log,
       role: d.kind ?? null,
       pid: entry?.pid ?? null,
       pidAlive: !!d.running,
@@ -187,6 +203,7 @@ export function probeDaemonStatus({ collect = collectDaemonStatus, assess = asse
       lastActivityAt: activity.length ? Math.max(...activity) : null,
       daemonState: d.state,
       headline: d.headline,
+      intervalMs: DAEMON_MANIFEST[log]?.intervalMs ?? null,
     };
   });
 }
@@ -582,11 +599,10 @@ export async function tick(flags = {}) {
   // entry was only ever reported as "Held back" in a report, never actually sent, in ANY mode — see
   // `health-watch-core.mjs#planActions`'s own doc). Only entries `planActions` did NOT mark `suppressed` reach
   // here: every pre-existing smell stays exactly as silent as before in shadow mode (nothing here changes for
-  // them), and the ONLY smell that can produce a non-suppressed entry while `mode: 'shadow'` is one that opts
-  // in via `notifyEvenInShadow` (`grep -l notifyEvenInShadow scripts/conveyor/health-smells/*.mjs` for the
-  // live list — deliberately not hand-enumerated here, since that list drifts every time a smell opts in and
-  // a stale copy here would read as authoritative; see each smell's own doc for why it is urgent enough to
-  // break the "shadow mode notifies nothing" rule). Best-effort:
+  // them), and the ONLY smells that can produce a non-suppressed entry while `mode: 'shadow'` are the ones
+  // listed in `health-smells/notify-list.mjs`'s `NOTIFY_EVEN_IN_SHADOW` — the ONE declared place for this list
+  // (deliberately not hand-enumerated here, since a stale copy here would read as authoritative; see that
+  // file's own header for the operator decision behind its current contents). Best-effort:
   // `notifyDesktopChecked` already reports its own failure rather than throwing; a delivery failure here must
   // never fail the tick.
   const notifications = [];

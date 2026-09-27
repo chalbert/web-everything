@@ -2,7 +2,8 @@
  * @file scripts/conveyor/health-smells/__tests__/daemon-held-on-last-good.test.mjs
  * @description x5wbsbc (epic #4075) — the PURE `evaluate()` of the `daemon-held-on-last-good` smell (a daemon
  *   clone the rebuild has frozen on its last-good build after a failed live smoke, per the 2026-09-26 operator
- *   ruling to fall back rather than block delivery), its `notifyEvenInShadow` wiring through `planActions`, and
+ *   ruling to fall back rather than block delivery), its notify-scope wiring through `planActions` (record-only
+ *   in shadow mode since the Sun 2026-09-27 `notify-list.mjs` reset — see that file's header), and
  *   `health-watch.mjs#probeSelfSync`'s pass-through of `state.held` from a real `<cloneKey>.rebuild.json` file.
  */
 import { describe, it, expect } from 'vitest';
@@ -14,6 +15,7 @@ import {
   MINUTE, HOUR, emptyHealthState, stepEpisodes, planActions,
 } from '../../health-watch-core.mjs';
 import { probeSelfSync } from '../../health-watch.mjs';
+import { NOTIFY_EVEN_IN_SHADOW } from '../notify-list.mjs';
 
 const NOW = Date.parse('2026-09-26T20:00:00Z');
 
@@ -81,14 +83,28 @@ describe('daemon-held-on-last-good — evaluate', () => {
   });
 });
 
-describe('daemon-held-on-last-good — notifyEvenInShadow', () => {
-  it('an "opened" transition in shadow mode yields a notify with suppressed:null', () => {
+describe('daemon-held-on-last-good — notify scope', () => {
+  it('is NOT in NOTIFY_EVEN_IN_SHADOW (record-only per the Sun 2026-09-27 notify-list reset)', () => {
+    expect(NOTIFY_EVEN_IN_SHADOW.has(daemonHeldOnLastGood.id)).toBe(false);
+  });
+
+  it('an "opened" transition in shadow mode yields a notify with suppressed: "shadow mode" (record-only)', () => {
     const r = stepEpisodes(emptyHealthState(), [
       { smell: daemonHeldOnLastGood, results: [{ subject: 'clone:x', breach: true }] },
     ], 0);
     const plan = planActions(r.transitions, { [daemonHeldOnLastGood.id]: daemonHeldOnLastGood }, { mode: 'shadow' });
     const notify = plan.find((p) => p.kind === 'notify' && p.key === `${daemonHeldOnLastGood.id}::clone:x`);
     expect(notify).toBeDefined();
+    expect(notify.suppressed).toBe('shadow mode');
+  });
+
+  it('opting a smell in via an injected notifySet still un-suppresses it (the mechanism planActions uses)', () => {
+    const r = stepEpisodes(emptyHealthState(), [
+      { smell: daemonHeldOnLastGood, results: [{ subject: 'clone:x', breach: true }] },
+    ], 0);
+    const plan = planActions(r.transitions, { [daemonHeldOnLastGood.id]: daemonHeldOnLastGood },
+      { mode: 'shadow', notifySet: new Set([daemonHeldOnLastGood.id]) });
+    const notify = plan.find((p) => p.kind === 'notify' && p.key === `${daemonHeldOnLastGood.id}::clone:x`);
     expect(notify.suppressed).toBeNull();
   });
 });

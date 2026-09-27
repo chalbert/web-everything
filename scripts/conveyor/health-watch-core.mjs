@@ -19,17 +19,19 @@
  *      expire, and a high-severity reminder.
  *   4. {@link planActions} — what the shell would do (diagnose, notify, investigate, file). In `shadow` mode
  *      (slice 1 ships in shadow) only deterministic diagnoses and reports run; notify/investigate/file are
- *      planned but suppressed, so the operator can see what WOULD have happened — EXCEPT a smell that opts in
- *      via `notifyEvenInShadow` (#4077 continuation: `claude-auth-expired`, `daemon-held-on-last-good`), whose
- *      `notify` entries are never suppressed, in any mode. See {@link ../health-watch.mjs}'s own "THE MINIMAL
- *      NOTIFY PATH" doc for the execution side — before this, `notify` was planned but never actually SENT, in
- *      any mode, for any smell.
+ *      planned but suppressed, so the operator can see what WOULD have happened — EXCEPT a smell whose `id` is
+ *      in {@link ./health-smells/notify-list.mjs}'s `NOTIFY_EVEN_IN_SHADOW` (#4077 continuation; that file is
+ *      the ONE declared place for this list and names the operator decision behind it), whose `notify` entries
+ *      are never suppressed, in any mode. See {@link ../health-watch.mjs}'s own "THE MINIMAL NOTIFY PATH" doc
+ *      for the execution side — before this, `notify` was planned but never actually SENT, in any mode, for
+ *      any smell.
  *   5. {@link renderEpisodeReport} / {@link renderHealthSection} — the recommendation channel (4065 Fork 4):
  *      a durable per-episode report, and the HEALTH section the operator queue prints, whose first line is the
  *      health watch's own last-tick-completed age.
  */
 
 import { isHighEntropyToken } from '../lib/secret-scrub.mjs';
+import { NOTIFY_EVEN_IN_SHADOW } from './health-smells/notify-list.mjs';
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -395,20 +397,22 @@ export function stepEpisodes(state, evaluations, now, { config = DEFAULT_HEALTH_
  * notify / investigate / file are SUPPRESSED in shadow mode — listed with `suppressed` so the report shows
  * what would have happened.
  *
- * `smell.notifyEvenInShadow: true` is the ONE opt-in exception to that shadow-mode suppression (added for the
- * `claude-auth-expired` sign, #4077 continuation — an expired operator login left every daemon-dispatched
- * session dead all night with no alert, because `notify` was never actually wired to send anything in ANY
- * mode; see `health-watch.mjs`'s own "THE MINIMAL NOTIFY PATH" doc for the execution side). A smell that does
- * NOT set this flag is completely unaffected — its `notify` entries stay suppressed in shadow exactly as
- * before this flag existed. Never applies to `investigate`/`file` (still slice-2/slice-5 work, not shipped).
+ * `notifySet` — a smell whose `id` is a member is the ONE opt-in exception to that shadow-mode suppression.
+ * Defaults to {@link ./health-smells/notify-list.mjs}'s `NOTIFY_EVEN_IN_SHADOW`, the single declared place for
+ * this list (#4077 continuation — see that file's own header for the operator decision behind its contents;
+ * before it existed, notify scope was scattered per-smell `notifyEvenInShadow: true` fields with no one place
+ * that named the whole surface). Injectable so a caller (a test, a future per-operator override) never has to
+ * mutate the real registry to see a different notify surface. A smell whose id is NOT in the set is completely
+ * unaffected — its `notify` entries stay suppressed in shadow exactly as before this mechanism existed. Never
+ * applies to `investigate`/`file` (still slice-2/slice-5 work, not shipped).
  */
-export function planActions(transitions, smellsById, { mode = 'shadow' } = {}) {
+export function planActions(transitions, smellsById, { mode = 'shadow', notifySet = NOTIFY_EVEN_IN_SHADOW } = {}) {
   const plan = [];
   for (const t of transitions) {
     const ep = t.episode;
     const smell = smellsById[ep?.smell];
     if (!ep || !smell) continue;
-    const shadowSuppressed = mode === 'shadow' && !smell.notifyEvenInShadow;
+    const shadowSuppressed = mode === 'shadow' && !notifySet.has(smell.id);
     if (t.type === 'opened' || t.type === 'flapping') {
       if (smell.diagnose) plan.push({ kind: 'diagnose', key: t.key, diagnose: smell.diagnose });
       if (ep.severity === 'high' && !ep.tracked) plan.push({ kind: 'notify', key: t.key, suppressed: shadowSuppressed ? 'shadow mode' : null });

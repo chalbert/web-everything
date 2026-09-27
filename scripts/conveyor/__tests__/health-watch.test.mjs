@@ -351,8 +351,9 @@ describe('tick() — machine-overload: normal snapshot never opens, the incident
     const second = await tick(flags);
     const opens = second.transitions.filter((t) => t.type === 'opened' && t.key.startsWith('machine-overload'));
     expect(opens.length).toBe(1);
-    // Notified even in shadow mode (the one opt-in exception, same as claude-auth-expired).
-    expect(second.plan.find((p) => p.kind === 'notify' && p.key === opens[0].key)?.suppressed).toBeFalsy();
+    // Per the Sun 2026-09-27 operator decision (health-smells/notify-list.mjs), machine-overload is not among
+    // the eight approved notify-in-shadow signs today — it opens an episode but stays record-only (shadow).
+    expect(second.plan.find((p) => p.kind === 'notify' && p.key === opens[0].key)?.suppressed).toBe('shadow mode');
 
     const episodesDir = join(healthDir(stateRoot), 'episodes');
     const report = readdirSync(episodesDir).find((f) => f.includes('machine-overload') && f.endsWith('.md'));
@@ -441,6 +442,33 @@ describe('probeDaemonStatus', () => {
     expect(rows[0]).toMatchObject({ pid: 42, pidAlive: true, heartbeatAt: Date.parse('2026-09-25T15:00:00.000Z') });
     expect(rows[1].lastActivityAt).toBe(Date.parse('2026-09-25T15:37:21.553Z'));
     expect(rows[1].heartbeatAt).toBeNull();
+  });
+
+  // 2026-09-27 — root cause of the live `daemon-silent` false-positive FLAPPING on `merge-orphan-sweep` (open
+  // 36h+): that pass's log lives in its own dedicated clone (`wev-merge-daemon`, #3383's daemon split), never
+  // under this watch's single `defaultLogsDir()`, so `daemon-silent.mjs` always fell back to a synthetic memory
+  // that hardcoded a 2-minute interval regardless of the daemon's real (15-minute) cadence. Carrying
+  // `DAEMON_MANIFEST`'s own interval on the lease lets that fallback scale its threshold correctly — see
+  // `daemon-silent.mjs`'s own use of `lease.intervalMs`.
+  it('carries DAEMON_MANIFEST\'s own intervalMs for a pass-daemon watcher (merge-orphan-sweep\'s real 15-minute cadence, not a hardcoded default)', () => {
+    const collect = () => ({ observedAt: 'x', daemons: [] });
+    const assess = () => ({ daemons: [
+      { name: 'com.we.conveyor-pass-daemon.merge-orphan-sweep', readable: true, running: true, kind: 'pass-daemon', state: 'alive',
+        lease: { entry: { pid: 967, heartbeatAt: '2026-09-27T07:26:00.000Z' } }, tick: { found: false, logMtimeMs: Date.parse('2026-09-27T07:26:00.000Z') } },
+    ] });
+    const rows = probeDaemonStatus({ collect, assess });
+    expect(rows[0].log).toBe('merge-orphan-sweep');
+    expect(rows[0].intervalMs).toBe(15 * 60 * 1000);
+  });
+
+  it('is null for a daemon DAEMON_MANIFEST does not cover (every resident, non-pass-daemon daemon)', () => {
+    const collect = () => ({ observedAt: 'x', daemons: [] });
+    const assess = () => ({ daemons: [
+      { name: 'com.we.review-daemon', readable: true, running: true, kind: 'review-daemon', state: 'alive',
+        lease: { entry: { pid: 1, heartbeatAt: '2026-09-27T07:26:00.000Z' } }, tick: { found: true, logMtimeMs: Date.parse('2026-09-27T07:26:00.000Z') } },
+    ] });
+    const rows = probeDaemonStatus({ collect, assess });
+    expect(rows[0].intervalMs).toBeNull();
   });
 });
 

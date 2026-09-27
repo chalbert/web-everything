@@ -29,10 +29,15 @@ export default {
   evaluate({ leases }, { now, daemons }) {
     const out = [];
     for (const lease of leases) {
-      // A daemon whose log this watch does not read (the plateau drain daemon) is judged on daemon-status's own
-      // last-activity timestamp; one with neither is skipped.
+      // A daemon whose log this watch does not read (the plateau drain daemon, or — live 2026-09-27 — any
+      // `pass-daemon.mjs` watcher split into its own dedicated clone, e.g. `merge-orphan-sweep` — see
+      // `health-watch.mjs#probeDaemonStatus`'s own doc for the root cause this fallback used to hide) is
+      // judged on daemon-status's own last-activity timestamp; one with neither is skipped. `lease.intervalMs`
+      // (that daemon's REAL configured cadence, when known) replaces a hardcoded 2-minute guess here — the
+      // same number the PRIMARY path already derives from `DAEMON_MANIFEST` — so a daemon on a slower cadence
+      // does not read as silent on every ordinary tick gap.
       const mem = daemons[lease.log] ?? (lease.lastActivityAt != null
-        ? { ticksSeen: 0, lastGrowthAt: lease.lastActivityAt, intervalMs: 120_000, recentTicks: [] } : null);
+        ? { ticksSeen: 0, lastGrowthAt: lease.lastActivityAt, intervalMs: lease.intervalMs ?? 120_000, recentTicks: [] } : null);
       if (!mem) continue;
       const lastActivity = mem.ticksSeen > 0 && mem.lastTickAt != null ? mem.lastTickAt : mem.lastGrowthAt;
       const lastHour = (mem.recentTicks || []).filter((t) => now - t.at <= 60 * MINUTE).length;

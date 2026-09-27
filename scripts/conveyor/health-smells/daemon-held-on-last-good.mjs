@@ -14,9 +14,10 @@
  * lastGood, target, mainSha, updatedAt}`). Any later adoption clears `held` back to `null`, closing this
  * episode the very next tick.
  *
- * `notifyEvenInShadow: true` — same posture as `claude-auth-expired` (#4077 continuation): a clone silently
- * stuck dispatching from stale code is exactly the class of thing shadow mode's blanket notify-suppression
- * must not swallow.
+ * Notify scope: the Sun 2026-09-27 ~7:40 AM ET operator decision
+ * (`we:scripts/conveyor/health-smells/notify-list.mjs`) reset the notify surface to the eight signs that fired
+ * real episodes that night; this sign is not among them today, so it stays record-only (shadow) like most
+ * signs — see that file's header for how to re-add it.
  */
 import { MINUTE, HOUR, fmtAge } from '../health-watch-core.mjs';
 
@@ -32,7 +33,6 @@ export default {
   closeAfter: 1,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   heldForMs: 15 * MINUTE,
   recommendationHint: 'A daemon clone is held on its last-good build after a failed live smoke — its alerts file names the failing check(s); fix the tree (or, if the harness itself is broken, the tool the check exercises) — never the clone by hand.',
   evaluate({ selfSync }, { now }) {

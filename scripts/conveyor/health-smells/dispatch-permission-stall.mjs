@@ -51,7 +51,6 @@ export default {
   closeAfter: 1,
   severity: 'high',
   action: 'alert',
-  notifyEvenInShadow: true,
   thresholdMs: 10 * MINUTE,
   recommendationHint: 'A dispatched background session is stuck on an unanswerable permission prompt — '
     + 'nobody is there to click yes. Grant its lane rather than waiting it out; see we:backlog/xrv69j6-*.md.',
