@@ -103,6 +103,7 @@
  */
 
 import { parseSessionSlug } from './session-slug.mjs';
+import { rateAndRecordSession } from './run-rating.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -2027,6 +2028,7 @@ export function makeReapedLedger({
  *   maxDurationMs?: number,
  *   clockNow?: () => number,
  *   priorityNames?: Set<string>|null,
+ *   rateSession?: ((session:object, extra:{reason:string}) => unknown)|null,
  * }} [o]
  * @returns {{
  *   scanned: number, stopped: number, alreadyGone: number, failures: number, anomalies: number,
@@ -2098,6 +2100,13 @@ export function runSessionReaperPass({
   // See {@link prioritizeReapCandidates}. `null` (the default) processes `reap` in its own existing order —
   // byte-identical to before this option existed for every caller that doesn't supply one.
   priorityNames = null,
+  // #4075/run-rating slice 1 — mechanical per-run grading (`we:scripts/conveyor/run-rating.mjs
+  // #rateAndRecordSession`) hooked in HERE, the moment a session is confirmed stopped/already-gone below, so
+  // every daemon session gets rated automatically with no separate sweep. `null` (the default) is the rollback
+  // hatch, same convention as every other axis in this file — a caller that doesn't pass one gets byte-identical
+  // pre-existing behavior. Never allowed to affect the reap outcome itself: called best-effort, inside its own
+  // try/catch, strictly AFTER `stop()` has already succeeded.
+  rateSession = null,
 } = {}) {
   let sessions;
   try {
@@ -2237,6 +2246,11 @@ export function runSessionReaperPass({
       logFn(`  ${res.alreadyGone ? 'already gone' : 'stopped'} ${handle} (${reason}; ${session.name ?? 'unnamed'})`);
       done.push({ id: handle, sessionId: normalizeHandle(session.sessionId) || null, name: session.name ?? null, reason, alreadyGone: res.alreadyGone });
       if (reapedLedger) reapedLedger.add(handle);
+      // Rate this now-finished session — best-effort, and NEVER lets a rating failure look like a reap failure
+      // (the reap above already succeeded; this is pure bookkeeping on top of it).
+      if (typeof rateSession === 'function') {
+        try { rateSession(session, { reason }); } catch (e) { logFn(`  ⚠ ${session.name}: run-rating skipped — ${String(e?.message || e).split('\n')[0]}`); }
+      }
     } catch (e) {
       // ONE session's stop failing never blocks the rest of the pass (Done-when #3) — the same
       // "couldn't confirm, background service may be restarting" flakiness lease-reaper.mjs already treats
@@ -2336,8 +2350,23 @@ function main(argv) {
   // `--retention-sweep` immediately above (it deletes directories and edits `~/.claude.json`). A resident
   // daemon calls {@link runDispatchScratchSweepPass} directly. Shares this CLI's own `--dry-run`.
   const runDispatchScratchSweep = !!flags['dispatch-scratch-sweep'];
+  // `--no-run-rating` is the same rollback escape hatch, for #4075/run-rating slice 1's mechanical per-run
+  // grading — default ON, same convention as every other axis this epic ships. Never touches the reap decision
+  // itself (see the call site inside `runSessionReaperPass`) — only whether a rated row also gets appended to
+  // the scorecard store. Rates both PR-kind (`fix`/`ci-heal`/`review`/`inspect`) and item-kind (`conveyor`/
+  // `prepare`/`prepare-decision`) sessions alike; a session name this grammar doesn't recognize is skipped,
+  // never guessed at.
+  const rateSession = flags['no-run-rating'] ? null : (session) => {
+    const parsed = parseSessionSlug(session?.name);
+    if (!parsed) return;
+    const id = /^\d+$/.test(parsed.id) ? Number(parsed.id) : parsed.id;
+    rateAndRecordSession({
+      sessionName: session.name, sessionId: normalizeHandle(session.sessionId) || null,
+      kind: parsed.kind, pr: parsed.itemKind ? null : id, item: parsed.itemKind ? id : null,
+    });
+  };
 
-  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor, pidDeadFor });
+  const result = runSessionReaperPass({ groundTruthFor, completionFor, allowedCwd, neverReapWorking, idleThresholdMs, dryRun, hungFor, backstopCompletion, noOutcomeFor, chatSpawnGuardFor, authExpiredFor, idleFinishedFor, pidDeadFor, rateSession });
   const retentionResult = runRetention ? runRetentionSweepPass({ dryRun }) : null;
   const dispatchScratchResult = runDispatchScratchSweep ? runDispatchScratchSweepPass({ dryRun }) : null;
 
