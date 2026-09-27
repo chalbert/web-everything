@@ -109,7 +109,11 @@ import { countRearmComments, REARM_COMMENT_MARKER } from './rearm-review.mjs';
 import { countAdvisoryComments } from './advisory-round-count.mjs';
 import { countCiHealComments, CI_HEAL_COMMENT_MARKER } from './ci-heal-mark.mjs';
 import { latestCiHealEscalationForHead, CI_HEAL_ESCALATION_MARKER } from './ci-heal-escalation-mark.mjs';
-import { isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER } from './stand-down.mjs';
+import {
+  isStandDownSuperseded, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
+  CONCURRENT_AUTHOR_PAUSE_MARKER, concurrentAuthorPauses, isConcurrentAuthorStandDownBody,
+} from './stand-down.mjs';
+import { FIX_BEGIN_MARKER, FIX_END_MARKER } from './fix-procedure.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
 import { reviewSessionSlug } from './review-session-slug.mjs';
 // Both dispatcher wrappers delegate to the pure session-slug module.
@@ -260,7 +264,41 @@ export const REFUSAL_KINDS = Object.freeze([
   // dispatched, whatever `review:*` label it carries, until the `promote-draft` DISPATCH_KIND (above) has
   // un-drafted it. See {@link dispatchReviewRow}'s own gate.
   'draft',
+  // fix procedure (operator-approved 2026-09-27, live incident PR #2811) — `fix-claimed`: a fixer holds the PR's
+  // live fix claim (`we:scripts/conveyor/fix-procedure.mjs`); NOTHING is dispatched for it (review, advisory,
+  // fix, ci-heal, promote-draft) until `fix-end` or the claim's TTL. `concurrent-author-paused`: a fixer paused
+  // because another author was pushing; NOT terminal — re-arms on the next head or after
+  // {@link CONCURRENT_AUTHOR_QUIET_MS} of quiet.
+  'fix-claimed', 'concurrent-author-paused',
 ]);
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#CONCURRENT_AUTHOR_QUIET_MS — how long a PR's head must stay put after a
+ * concurrent-author pause before the fix loop re-arms on that SAME head (the other author is done). A new head
+ * re-arms at once. 20 minutes: longer than a typical push-fix-push burst, far shorter than "forever".
+ */
+export const CONCURRENT_AUTHOR_QUIET_MS = 20 * 60 * 1000;
+
+/**
+ * we:scripts/conveyor/reconcile-core.mjs#concurrentAuthorPauseState — is this PR still held by its latest
+ * concurrent-author pause, or re-armed? PURE. `null` when the PR carries no pause at all.
+ *   - held:     the head is the one the pause recorded (or the pause recorded none — a legacy stand-down) AND
+ *               the pause is younger than `quietMs`.
+ *   - re-armed: the head moved past the recorded head, or the quiet window elapsed. A pause with no parseable
+ *               time is treated as old (re-armed) — an unreadable timestamp must not bury a PR.
+ * @returns {null | {held:boolean, pause:object, why:string}}
+ */
+export function concurrentAuthorPauseState({ comments, headRefOid = null, now = 0, quietMs = CONCURRENT_AUTHOR_QUIET_MS }) {
+  const pauses = concurrentAuthorPauses(comments);
+  if (!pauses.length) return null;
+  const pause = pauses[pauses.length - 1];
+  const headMoved = Boolean(pause.head && headRefOid && pause.head !== headRefOid);
+  const at = Date.parse(pause.createdAt ?? '');
+  const quiet = !Number.isFinite(at) || !now || now - at >= quietMs;
+  if (headMoved) return { held: false, pause, why: 're-armed: the PR head moved past the paused head' };
+  if (quiet) return { held: false, pause, why: `re-armed: the head has been quiet for ${Math.round(quietMs / 60000)}+ minutes since the pause` };
+  return { held: true, pause, why: 'a fixer paused for a concurrent author on this head — re-arms on the next head or after the quiet window' };
+}
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#BOOKKEEPING_MARKERS — the durable conveyor marker comments, which are
@@ -280,6 +318,9 @@ export const BOOKKEEPING_MARKERS = Object.freeze([
   // has since moved past a ci-red phase but still carries an old escalation comment in its history must not
   // have that comment misread as a fresh reviewer finding.
   CI_HEAL_ESCALATION_MARKER,
+  // fix procedure (operator-approved 2026-09-27) — the fix claim's begin/end markers and the non-terminal
+  // concurrent-author pause are the loop's own bookkeeping, never a reviewer's finding.
+  FIX_BEGIN_MARKER, FIX_END_MARKER, CONCURRENT_AUTHOR_PAUSE_MARKER,
 ]);
 
 /**
@@ -565,6 +606,9 @@ export function countUnresolvedStandDowns(comments) {
     const body = typeof c === 'string' ? c : c?.body;
     if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
     if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
+    // fix procedure — a concurrent-author stand-down (the #2811 shape) is reclassified as a re-armable pause,
+    // handled by {@link concurrentAuthorPauseState}, never terminal here.
+    if (isConcurrentAuthorStandDownBody(body)) continue;
     if (isStandDownSuperseded(comments, i)) continue;
     if (isAdvisoryMechanismStandDownSuperseded(comments, i)) continue;
     n += 1;
@@ -1302,6 +1346,34 @@ export function planReconcile({
         why: 'a fix agent already stopped here to ask a question — re-dispatching would re-ask it forever. Terminal for this pass; a human clears the marker.',
       });
       continue;
+    }
+
+    // ── REFUSAL 1b — fix procedure (operator-approved 2026-09-27, live incident PR #2811): a LIVE fix claim
+    // (`we:scripts/conveyor/fix-procedure.mjs`) means one author owns this PR's repair right now. NOTHING is
+    // dispatched — not a review or advisory (the head is about to change), not a second fixer or ci-heal (two
+    // authors on one lane is the incident), not `promote-draft` (the green CI belongs to the head being
+    // replaced). EVIDENCE ONLY in `pr.fixClaim`, attached by the IO shell (`reconcile-pass.mjs
+    // #enrichPrsWithFixClaims`) from the claim store; a crashed holder's claim expires on its TTL and this
+    // refusal simply stops firing.
+    if (pr?.fixClaim && pr.fixClaim.who) {
+      refuse('fix-claimed', {
+        who: pr.fixClaim.who, since: pr.fixClaim.claimedAt ?? null,
+        why: `${pr.fixClaim.who} holds the fix claim${pr.fixClaim.why ? ` (${pr.fixClaim.why})` : ''} — nothing is dispatched until its fix-end`,
+      });
+      continue;
+    }
+
+    // ── REFUSAL 1c — a concurrent-author PAUSE (new-style, or a legacy stand-down reclassified by
+    // `countUnresolvedStandDowns` above). Held only until the head moves or goes quiet; after that the PR
+    // falls through as re-armed, and every row carries the saved alt branch so the next fixer starts from it.
+    const pauseState = concurrentAuthorPauseState({ comments: pr?.comments, headRefOid: pr?.headRefOid ?? null, now });
+    if (pauseState?.held) {
+      refuse('concurrent-author-paused', { altBranch: pauseState.pause.alt ?? null, why: pauseState.why });
+      continue;
+    }
+    if (pauseState?.pause?.alt) {
+      base.altBranch = pauseState.pause.alt;
+      base.rearmed = pauseState.why;
     }
 
     // ── REFUSAL 4 — liveness, from a live process. The binding is derived and its evidence travels with the

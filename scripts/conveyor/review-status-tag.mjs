@@ -25,6 +25,7 @@
  * `we:scripts/operations/dispatch-lane.mjs`'s own `fix-${id}` mint), rather than sharing that binding.
  */
 import { mintSessionSlug } from './session-slug.mjs';
+import { readLiveFixClaim } from './fix-procedure.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,7 +73,7 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean}} o
  * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, fixClaim = null } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -86,6 +87,10 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
   };
   const review = liveFor(reviewName);
   if (review) return { role: 'review', state: review.state === 'working' ? 'reviewing' : 'review-stalled' };
+  // fix procedure (operator-approved 2026-09-27) — a LIVE fix claim (`fix-procedure.mjs`) is `fixing` whoever
+  // holds it: an orchestrator worker is not a `fix-<pr>` session, and without this the tagger would strip the
+  // `review-status:fixing` label `fix-begin` just set on the very next tick.
+  if (fixClaim) return { role: 'fix', state: 'fixing' };
   const fix = liveFor(fixName);
   if (fix) return { role: 'fix', state: fix.state === 'working' ? 'fixing' : 'fix-stalled' };
   const ciHeal = liveFor(ciHealName);
@@ -139,11 +144,15 @@ export function tagReviewStatus({
   // draft-first PRs (operator-approved 2026-09-27) — threaded straight to `deriveReviewStatus`; `false` by
   // default so every pre-existing caller/test of this function (none of which pass it) is unaffected.
   isDraft = false,
+  // fix procedure — the live fix-claim read (a local file read, no `gh`); injectable so a test stays hermetic.
+  readFixClaim = ({ repo: r, pr: p }) => readLiveFixClaim({ repo: r, pr: p }),
 } = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = suppliedAgents ?? listAgents();
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft });
+  let fixClaim = null;
+  try { fixClaim = readFixClaim({ repo: repoKey, pr: Number(pr) }); } catch { fixClaim = null; }
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, fixClaim });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

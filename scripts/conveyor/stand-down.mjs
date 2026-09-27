@@ -29,7 +29,10 @@
  *
  * NO PARALLEL STATE STORE (#2612 invariant). The stand-down record lives on the PR's own comment thread, read
  * back by {@link countStandDownComments} — exactly as `countRearmComments` / `countCiHealComments` already work.
- * No new label is minted and no label's meaning changes.
+ * No label's meaning changes. (Fix procedure, 2026-09-27: the CLI now ALSO adds the purely informative
+ * {@link STAND_DOWN_LABEL} on a terminal stand-down so it is visible without opening the thread — nothing reads
+ * that label back to decide anything; the comment stays the one durable record. And a concurrent-author stop is
+ * no longer a stand-down at all — see {@link CONCURRENT_AUTHOR_PAUSE_MARKER}.)
  */
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -47,6 +50,11 @@ import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
  */
 export const STAND_DOWN_MARKER = '🛑 conveyor fix — stood down, human judgment needed';
 
+/** fix procedure — the visible label every TERMINAL stand-down applies (single-sourced with
+ *  `fix-procedure.mjs#STOOD_DOWN_LABEL`, which removes it again on the next `fix-begin`). Not in
+ *  `review-status-tag.mjs#STATUS_LABEL_RE`, so the periodic status tagger never strips it. */
+export const STAND_DOWN_LABEL = 'review-status:stood-down';
+
 /**
  * we:scripts/conveyor/stand-down.mjs#STAND_DOWN_REASONS — the escalation exits the fix-agent brief actually has,
  * named once so the brief's two call sites and this file's comment body cannot drift apart. Keyed by the flag
@@ -61,6 +69,80 @@ export const STAND_DOWN_REASONS = Object.freeze({
   'conflict': 'a genuine same-line conflict with `main` blocked the repair',
   'lane-ref-gone': 'the PR\'s lane ref no longer resolves, so the ~done work could not be reconstituted',
 });
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#CONCURRENT_AUTHOR_PAUSE_MARKER — fix procedure (operator-approved
+ * 2026-09-27, live incident PR #2811). A fixer that finds ANOTHER author pushing to the PR's lane mid-repair
+ * does not need a human: it needs the other author to finish. So `--reason=concurrent-author` posts THIS
+ * marker, never {@link STAND_DOWN_MARKER}: it is NOT terminal. The planner holds the PR only until the head
+ * moves past the one recorded here, or the head has been quiet for `reconcile-core.mjs#CONCURRENT_AUTHOR_QUIET_MS`
+ * — then it re-arms, and the next fixer starts from the saved alt branch. Treat this line as fixed.
+ */
+export const CONCURRENT_AUTHOR_PAUSE_MARKER = '⏸ conveyor fix — paused for a concurrent author, re-arms on the next head';
+
+/** Machine-readable trailer on a pause comment: `<!-- fix-pause head=<sha> alt=<branch> alt-sha=<sha> -->`. */
+const PAUSE_TRAILER_RE = /<!--\s*fix-pause\b([^>]*)-->/;
+
+/**
+ * Does this TERMINAL-marker stand-down body actually describe a concurrent author? Legacy stand-downs (before the
+ * `concurrent-author` reason existed) were posted with `--reason=conflict` and a detail naming the concurrent
+ * author — PR #2811's is exactly this shape. They are RECLASSIFIED as re-armable pauses, never terminal. Pure.
+ */
+export function isConcurrentAuthorStandDownBody(body) {
+  return typeof body === 'string' && /\bconcurrent[\s-]+author\b/i.test(body);
+}
+
+/** Pull `lane/…-alt` (and the sha right after it, if any) out of free text. Pure. */
+export function parseAltBranch(text) {
+  const m = /\b(lane\/[A-Za-z0-9._/-]*?-alt)\b(?:[^\n(]*?\(`?([0-9a-f]{7,40})\b)?/.exec(String(text ?? ''));
+  return m ? { branch: m[1], sha: m[2] ?? null } : null;
+}
+
+/**
+ * we:scripts/conveyor/stand-down.mjs#concurrentAuthorPauses — every re-armable concurrent-author pause on a PR,
+ * oldest first: new-style {@link CONCURRENT_AUTHOR_PAUSE_MARKER} comments AND legacy terminal-marker stand-downs
+ * reclassified by {@link isConcurrentAuthorStandDownBody}. Trusted authors only (same #3383 rule as the
+ * stand-down count). Pure.
+ * @returns {Array<{createdAt:?string, head:?string, alt:?{branch:string, sha:?string}, legacy:boolean}>}
+ */
+export function concurrentAuthorPauses(comments) {
+  if (!Array.isArray(comments)) return [];
+  const out = [];
+  for (const c of comments) {
+    const body = typeof c === 'string' ? c : c?.body;
+    if (typeof body !== 'string' || !isTrustedMarkerAuthor(c)) continue;
+    const lead = body.trimStart();
+    const createdAt = (typeof c === 'string' ? null : c?.createdAt) ?? null;
+    if (lead.startsWith(CONCURRENT_AUTHOR_PAUSE_MARKER)) {
+      const t = PAUSE_TRAILER_RE.exec(body)?.[1] ?? '';
+      const kv = Object.fromEntries([...t.matchAll(/([a-z-]+)=(\S+)/g)].map((m) => [m[1], m[2]]));
+      out.push({
+        createdAt, head: kv.head ?? null, legacy: false,
+        alt: kv.alt ? { branch: kv.alt, sha: kv['alt-sha'] ?? null } : null,
+      });
+    } else if (lead.startsWith(STAND_DOWN_MARKER) && isConcurrentAuthorStandDownBody(body)) {
+      out.push({ createdAt, head: null, legacy: true, alt: parseAltBranch(body) });
+    }
+  }
+  return out;
+}
+
+/** Build the non-terminal pause comment. Pure. */
+export function buildConcurrentAuthorPauseComment({ actor = 'conveyor fix agent', head = null, alt = null, altSha = null, detail = '' } = {}) {
+  const trailer = ['fix-pause', head ? `head=${head}` : null, alt ? `alt=${alt}` : null, altSha ? `alt-sha=${altSha}` : null]
+    .filter(Boolean).join(' ');
+  return [
+    CONCURRENT_AUTHOR_PAUSE_MARKER,
+    '',
+    `${actor} paused: another author pushed to this PR's lane while the repair was in progress.${detail ? ` ${detail}` : ''}`,
+    '',
+    alt ? `**The repair is saved** on \`${alt}\`${altSha ? ` (\`${String(altSha).slice(0, 9)}\`)` : ''}. The next fixer starts from it.` : '**No repair was saved.**',
+    '',
+    '**This is not terminal and needs no person.** The fix loop re-arms on its own once the PR head moves past '
+      + `${head ? `\`${String(head).slice(0, 9)}\`` : 'the head recorded here'}, or once the head has been quiet long enough that the other author is done.`,
+    `<!-- ${trailer} -->`,
+  ].join('\n');
+}
 
 /**
  * DELIBERATELY NOT A REASON HERE: a permission / tool-use denial while applying an otherwise-clear fix (live
@@ -99,7 +181,9 @@ export function standDownComments(comments) {
   const out = [];
   for (const c of comments) {
     const body = typeof c === 'string' ? c : c?.body;
-    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER) && isTrustedMarkerAuthor(c)) {
+    // fix procedure — a concurrent-author stand-down is a re-armable pause, never a terminal stand-down.
+    if (typeof body === 'string' && body.trimStart().startsWith(STAND_DOWN_MARKER) && isTrustedMarkerAuthor(c)
+      && !isConcurrentAuthorStandDownBody(body)) {
       out.push({ body, createdAt: (typeof c === 'string' ? null : c?.createdAt) ?? null });
     }
   }
@@ -240,6 +324,7 @@ export function countTerminalStandDowns(comments) {
     const body = bodyOf(c);
     if (typeof body !== 'string' || !body.trimStart().startsWith(STAND_DOWN_MARKER)) continue;
     if (!isTrustedMarkerAuthor(c)) continue; // #3383 — a forged stand-down from an untrusted login is never terminal.
+    if (isConcurrentAuthorStandDownBody(body)) continue; // fix procedure — reclassified as a re-armable pause.
     if (!isStandDownSuperseded(comments, i)) n += 1;
   }
   return n;
@@ -310,20 +395,42 @@ if (IS_CLI) {
   };
   const pr = Number(positionals[0]);
   if (!Number.isInteger(pr) || pr <= 0) {
-    fail(`usage: stand-down.mjs <pr> [--repo=<owner/name>] [--reason=<${Object.keys(STAND_DOWN_REASONS).join('|')}>] [--actor=<name>] [--detail=<text>]  (pr must be a positive integer)`);
+    fail(`usage: stand-down.mjs <pr> [--repo=<owner/name>] [--reason=<${[...Object.keys(STAND_DOWN_REASONS), 'concurrent-author'].join('|')}>] [--actor=<name>] [--detail=<text>] [--head=<sha> --alt=<lane/…-alt> --alt-sha=<sha>]  (pr must be a positive integer)`);
   }
-  const body = buildStandDownComment({
-    actor: typeof flags.actor === 'string' ? flags.actor : undefined,
-    reason: typeof flags.reason === 'string' ? flags.reason : undefined,
-    detail: typeof flags.detail === 'string' ? flags.detail : undefined,
-  });
-  const args = ['pr', 'comment', String(pr), '--body', body];
-  if (typeof flags.repo === 'string') args.push(`--repo=${flags.repo}`); // the fix agent runs in its WE lane clone; a missing --repo derives from cwd.
+  const actor = typeof flags.actor === 'string' ? flags.actor : undefined;
+  const detail = typeof flags.detail === 'string' ? flags.detail : undefined;
+  // fix procedure — a concurrent author is a PAUSE, never a terminal stand-down. Also caught when a caller still
+  // passes another reason but the detail names a concurrent author (the #2811 shape), so the misclassification
+  // cannot recur by habit.
+  const concurrent = flags.reason === 'concurrent-author' || isConcurrentAuthorStandDownBody(detail ?? '');
+  const body = concurrent
+    ? buildConcurrentAuthorPauseComment({
+      actor, detail,
+      head: typeof flags.head === 'string' ? flags.head : null,
+      alt: typeof flags.alt === 'string' ? flags.alt : (parseAltBranch(detail)?.branch ?? null),
+      altSha: typeof flags['alt-sha'] === 'string' ? flags['alt-sha'] : (parseAltBranch(detail)?.sha ?? null),
+    })
+    : buildStandDownComment({ actor, reason: typeof flags.reason === 'string' ? flags.reason : undefined, detail });
+  const repoArgs = typeof flags.repo === 'string' ? [`--repo=${flags.repo}`] : []; // a missing --repo derives from cwd.
+  const gh = (args) => execFileSync('gh', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
   try {
     // #x5n4zn3 — was bare (no timeout).
-    execFileSync('gh', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    gh(['pr', 'comment', String(pr), '--body', body, ...repoArgs]);
   } catch (e) {
     fail(`could not post stand-down comment on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, stoodDown: true }) + '\n');
+  // fix procedure — a TERMINAL stand-down is VISIBLE: `review-status:stood-down` goes on the PR, so a person
+  // scanning labels sees it without reading the thread (PR #2811 had no label at all). Best-effort: the comment
+  // above is the durable record the planner reads; a failed label write is reported, never fatal.
+  let labeled = false;
+  if (!concurrent) {
+    try {
+      gh(['label', 'create', STAND_DOWN_LABEL, ...repoArgs, '--color', 'b60205', '--description', 'a fixer stood down; a person is the next step (auto-managed)', '--force']);
+      gh(['pr', 'edit', String(pr), ...repoArgs, '--add-label', STAND_DOWN_LABEL]);
+      labeled = true;
+    } catch (e) {
+      process.stderr.write(`⚠ stand-down: comment posted but the ${STAND_DOWN_LABEL} label failed: ${String(e.message || e).split('\n')[0]}\n`);
+    }
+  }
+  process.stdout.write(JSON.stringify({ ok: true, pr, stoodDown: !concurrent, paused: concurrent, labeled }) + '\n');
 }

@@ -76,6 +76,27 @@ already applies to a fixer's own escalation marker.
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --kind=fix --pr={{PR_NUM}} --item={{ITEM_NUM}} --status=started
 ```
 
+### 0b. Take the fix claim — `fix-begin` (the fix procedure, operator-approved 2026-09-27)
+
+One author repairs a PR at a time. Take the PR's durable fix claim before touching anything:
+
+```bash
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-begin {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}} \
+  --why="conveyor fix: address review on PR #{{PR_NUM}}"
+```
+
+It turns the PR back to **draft**, labels it `review-status:fixing`, and posts a marker naming you. While you hold
+it, no review or other fixer is dispatched for this PR and **pushes to its branch by anyone else are refused** —
+yours are allowed. If it is **refused** (exit 3, `reason` names who holds it), another fixer owns this PR right
+now: report `--status=done --outcome=not-applicable` and RETURN `#{{ITEM_NUM}} → fix not-applicable (fix claim held
+by <holder>)`. Do not work around it.
+
+**Every exit from here on — hand-back, stand-down, not-applicable — releases the claim with `fix-end`** (the
+blocks below carry the line). During a long gate run, refresh it now and then with
+`node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-heartbeat {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}`
+(the fix daemon also refreshes it while your session is live). `fix-end` leaves the PR **draft**: the fix daemon
+marks it ready once required CI is green on your new head, and review re-runs from there.
+
 ### 1. Reconstitute the bounced PR's work in a lane clone (reuse the ref — never rebuild from scratch)
 
 The work is intact on the `{{LANE_REF}}` ref (the pushed PR head). Acquire a free lane reset **to that ref**
@@ -99,6 +120,7 @@ LANE=$(node "{{WE_ROOT}}/scripts/lane-pool.mjs" acquire --repo={{LANE_REPO}} --l
   and stop and report `#{{ITEM_NUM}} → fix not-applicable (lane ref gone)`:
   ```bash
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+  node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
   ```
 - **`cd "$LANE"` just left WE's own checkout.** `{{LANE_REF}}` can belong to any constellation repo, so from
   here on your cwd may hold no `scripts/` directory at all — every remaining tool call in this brief is
@@ -134,6 +156,7 @@ judgment you cannot safely make, do **NOT** guess. **Record the stand-down on th
 node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=needs-judgment \
   --detail="<one line — what you could not decide>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-judgment
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 A human handles it via `/finish`.
@@ -202,6 +225,7 @@ never `stand-down.mjs`, which is terminal and reserved for a genuine judgment ca
 
 ```bash
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=blocked-on-infra
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 Then report `#{{ITEM_NUM}} → blocked-on-infra (tool/permission denial applying an otherwise-clear fix on PR
@@ -232,6 +256,7 @@ different ref.)
 node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=conflict \
   --detail="<one line — what made the overlap unsafe to resolve automatically>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
@@ -277,6 +302,7 @@ Then report `#{{ITEM_NUM}} → fix escalated (conflict with main)`.
 > ```bash
 > node "{{WE_ROOT}}/scripts/conveyor/conflict-fix-mark.mjs" {{PR_NUM}} --repo={{REPO}} --base-ref=<the baseRefName you resolved against> && \
 >   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=re-armed
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 > ```
 >
 > If the overlap is a genuine same-line conflict you cannot safely resolve, the same stand-down escalation above
@@ -326,6 +352,7 @@ RETURN `#{{ITEM_NUM}} → fix gate-red`. Do not re-push a red diff.
 node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=gate-red \
   --detail="<one line — which check stayed red>"
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=gate-red
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 Same reason as the exit in step 2 (#3296): without the durable marker the reconcile pass cannot tell your
@@ -353,6 +380,23 @@ git commit -F <msgfile> <explicit-paths>
 git push origin HEAD:refs/heads/{{LANE_REF}}
 ```
 
+**If the push is rejected because the branch moved** (someone else pushed while you worked — rare now that
+the fix claim refuses other pushes, but a push from outside the guarded paths can still land), do not force and
+do not merge two designs. Save your repair on a side branch, record a **pause** (not a stand-down — it is not
+terminal and needs no person), release the claim, and return:
+
+```bash
+git push origin HEAD:refs/heads/{{LANE_REF}}-fix-{{PR_NUM}}-alt
+node "{{WE_ROOT}}/scripts/conveyor/stand-down.mjs" {{PR_NUM}} --repo={{REPO}} --reason=concurrent-author \
+  --head="$(git ls-remote origin refs/heads/{{LANE_REF}} | cut -f1)" --alt={{LANE_REF}}-fix-{{PR_NUM}}-alt \
+  --alt-sha="$(git rev-parse HEAD)" --detail="<one line — what the other author changed>"
+node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=not-applicable
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
+```
+
+The planner re-arms the PR on its own once the head moves again or goes quiet, and the next fixer is told to
+start from your saved branch. Never use `--reason=conflict` for this — that is a same-line conflict with `main`.
+
 Write the commit message to a file and `commit -F` it — a heredoc runs backticks (e.g. `` `scope:` ``) as a
 subshell (`bad substitution`); a message file has no such footgun. Pushing to `lane/*` is allowed by the
 single-branch guard; pushing to `main` is not.
@@ -377,6 +421,7 @@ a script, so you cannot route around the invariant:
 ```bash
 node "{{WE_ROOT}}/scripts/conveyor/rearm-review.mjs" {{PR_NUM}} --repo={{REPO}} && \
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=re-armed
+  node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 `rearm-review.mjs` swaps `review:changes → review:pending` (an independent re-review is owed) and posts a
@@ -389,6 +434,7 @@ do not force a label:
 
 ```bash
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-rearm-refused
+node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 ### 7a. Advisory-fix hand-back (#xkmu3gv — use instead of step 7 in ADVISORY-FIX MODE only)
@@ -399,6 +445,7 @@ advisory-fix marker instead:
 ```bash
 node "{{WE_ROOT}}/scripts/conveyor/advisory-fix-mark.mjs" {{PR_NUM}} --repo={{REPO}} && \
   node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=re-armed
+  node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-end {{PR_NUM}} --repo={{REPO}} --who={{SESSION_SLUG}}
 ```
 
 `advisory-fix-mark.mjs` posts one comment recording that the advisory finding was addressed. It **NEVER**
@@ -445,6 +492,9 @@ that surfaces it, so always report it.
 The auto path above and a human repairing a bounce by hand are **one procedure**, so a human doesn't reinvent
 it. When a human takes over a `review:changes` bounce (the `/finish` `review-changes` bucket, or directly):
 
+0. **Take the fix claim first** — `node "{{WE_ROOT}}/scripts/conveyor/fix-procedure.mjs" fix-begin {{PR_NUM}}
+   --repo={{REPO}} --who=<you> --why="<one line>"` (step 0b above), and `fix-end` after the push. A human or
+   orchestrator worker is no exception: the #2811 incident was exactly an unclaimed second author.
 1. **Reconstitute the ref, don't rebuild.** Clone / acquire on `{{LANE_REF}}` (`/finish` clones the ref;
    `acquire --base=<ref>` does the same for a pool lane). Reuse the ~done work.
 2. **Read the reviewer's finding** off the PR's latest changes-requested comment (step 2 above).

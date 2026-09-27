@@ -87,6 +87,7 @@ import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 // comments HERE with the SAME function, never a re-derived copy, is what lets this enrich step find exactly the
 // `systemFixRef` PRs reconcile-core.mjs's own escalation branch will independently re-derive from the same data.
 import { latestCiHealEscalationForHead } from './ci-heal-escalation-mark.mjs';
+import { readLiveFixClaim } from './fix-procedure.mjs';
 // #4263 — the SAME terminal-state classifier `pr-watch.mjs`'s own drain-lane watcher uses (merged/closed/
 // parked/pending), reused rather than re-invented so "has this PR landed" can never drift between the two
 // call sites. Aliased: this file never reconciles a PR's PHASE (that word means something else here — see
@@ -910,6 +911,24 @@ export function enrichPrsWithSystemFixFacts(prs, { readSystemFixState = defaultR
 }
 
 /**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithFixClaims — fix procedure (operator-approved 2026-09-27):
+ * attach each PR's LIVE fix claim (`we:scripts/conveyor/fix-procedure.mjs`) as `pr.fixClaim = {who, why,
+ * claimedAt}` so `planReconcile`'s `fix-claimed` refusal can see it. A local file read per PR — no `gh`, no
+ * network. A read failure leaves the PR untouched (fail-open: the claim store is advisory for the planner; the
+ * push guards are where it is enforced).
+ * @param {Array<object>} prs
+ * @param {{repo?:string, readClaim?:Function}} [o]
+ */
+export function enrichPrsWithFixClaims(prs, { repo = 'we', readClaim = readLiveFixClaim } = {}) {
+  return (Array.isArray(prs) ? prs : []).map((pr) => {
+    let entry = null;
+    try { entry = readClaim({ repo, pr: Number(pr?.number) }); } catch { entry = null; }
+    if (!entry?.meta?.who) return pr;
+    return { ...pr, fixClaim: { who: entry.meta.who, why: entry.meta.why ?? '', claimedAt: entry.meta.claimedAt ?? null } };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-pass.mjs#formatReport — the human half of the output, and it is not decoration.
  *
  * A PASS THAT REFUSES FOUR PRs AND PRINTS ONE LINE HAS REPRODUCED THE ORIGINAL DEFECT ONE LEVEL UP. So every
@@ -960,6 +979,8 @@ export function runReconcilePass({
   // #4263 — re-arms a `waiting-on-system-fix` ci-heal escalation once its named fix PR lands (see
   // {@link enrichPrsWithSystemFixFacts}'s own docblock). Injectable exactly like every other enrich step above.
   enrichSystemFix = enrichPrsWithSystemFixFacts,
+  // fix procedure — attaches each PR's live fix claim (see {@link enrichPrsWithFixClaims}). Injectable like the rest.
+  enrichFixClaims = enrichPrsWithFixClaims,
   now = Date.now(), repo = null, defaultBranch = 'main',
   // #2748 false-red follow-up — injectable so a test can supply a fixture with no network, matching every
   // other reader in this file. Defaults to the live, cached branch-protection read.
@@ -990,7 +1011,7 @@ export function runReconcilePass({
   // #4265 — attach each stacked PR's own base ref's current tip, purely locally, no `gh` cost.
   const baseRefPrs = enrichBaseRef(alreadyLandedPrs, { defaultBranch });
   // #4263 — re-check any `waiting-on-system-fix` escalation's named fix PR for having since landed.
-  const prs = enrichSystemFix(baseRefPrs, { repo: resolvedRepo });
+  const prs = enrichFixClaims(enrichSystemFix(baseRefPrs, { repo: resolvedRepo }), { repo: repoKey });
   const agents = enrich(readAgents({}));
   // A repo this constellation does not know the gh slug for (`resolvedRepo` stays `null`, `gh` infers from cwd)
   // still gets a required set: `getRequiredStatusChecks` degrades to its own cache/fallback chain rather than

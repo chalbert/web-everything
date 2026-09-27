@@ -47,7 +47,9 @@
  *   - Fields produced with GitHub's real shape (camelCase for `--json`, snake_case for `api`'s REST JSON) —
  *     see `fake-gh.mjs`'s `buildPrGraphqlView` / `restEvent` / `listChangedFilesRest`.
  *
- * NOT SUPPORTED, ON PURPOSE (a fixture gap, loud, per this task's brief): anything else — e.g. `pr ready`,
+ *   - `pr ready <n> [--repo R] [--undo]`                                     (draft-first promotion / fix-begin)
+ *
+ * NOT SUPPORTED, ON PURPOSE (a fixture gap, loud, per this task's brief): anything else — e.g.
  * `pr edit --add-reviewer`, `run list` (ci-queue-watch's own call site is a DIFFERENT fake in that file's own
  * test, not this one), `issue` commands. An unmatched verb/field/path prints `fake-gh: unsupported …` to
  * stderr and exits 1 rather than guessing — see this file's own `unsupported` responses below.
@@ -336,6 +338,20 @@ function handlePrClose(store, rest) {
   });
 }
 
+// fix procedure (2026-09-27) — `pr ready <n> [--repo R] [--undo]`: the draft-first promotion (`gh pr ready`) and
+// the fix claim's back-to-draft (`gh pr ready --undo`). Flips the stored `isDraft`, which every PR view already
+// serves; a closed PR is refused like real `gh`.
+function handlePrReady(store, rest) {
+  return guarded(() => {
+    const number = Number(rest.find((a) => /^\d+$/.test(a)));
+    const slug = resolveRepoSlug(store, flagValue(rest, '--repo'));
+    const pr = requirePr(requireRepo(store, slug), number);
+    if (pr.state !== 'OPEN') return { stderr: `fake-gh: PR #${number} is not open\n`, exitCode: 1 };
+    pr.isDraft = rest.includes('--undo');
+    return { stdout: `${pr.isDraft ? 'converted to draft' : 'marked ready'} #${number}\n` };
+  });
+}
+
 function handlePrReopen(store, rest) {
   return guarded(() => {
     const number = Number(rest[0]);
@@ -516,6 +532,7 @@ function dispatch(store) {
     if (sub === 'merge') return handlePrMerge(store, rest);
     if (sub === 'close') return handlePrClose(store, rest);
     if (sub === 'reopen') return handlePrReopen(store, rest);
+    if (sub === 'ready') return handlePrReady(store, rest);
     if (sub === 'checks') return handlePrChecks(store, rest);
   }
   if (argv[0] === 'run' && argv[1] === 'list') return handleRunList(store, argv.slice(2));

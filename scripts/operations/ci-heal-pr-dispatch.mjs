@@ -53,6 +53,7 @@ import { readPrsFromFile } from '../conveyor/open-pr-fetch.mjs';
 import {
   acquireFixDispatchClaim, releaseFixDispatchClaim, fixDispatchClaimOwner,
 } from '../conveyor/fix-dispatch-claim.mjs';
+import { readLiveFixClaim, withAltBranchHint } from '../conveyor/fix-procedure.mjs';
 
 /**
  * @param {{itemNum:(string|null), pr:number, laneRef:string, scope:string[], lane:number, reason?:string, repo?:string, headRefOid?:string|null}} planned - a `planFixesFromReconcile`
@@ -78,7 +79,13 @@ export async function dispatchCiHeal(planned, {
   acquireClaim = acquireFixDispatchClaim,
   releaseClaim = releaseFixDispatchClaim,
   claimRoot,
+  // fix procedure — injectable live fix-claim read (`fix-procedure.mjs#readLiveFixClaim`); a test stubs it.
+  readFixClaim = ({ repo: r, pr }) => readLiveFixClaim({ repo: r, pr, ...(claimRoot ? { lockRoot: claimRoot } : {}) }),
 } = {}) {
+  // fix procedure (operator-approved 2026-09-27) — a live FIX CLAIM means another fixer owns this PR's repair;
+  // never spawn a ci-heal beside it (the planner already refuses `fix-claimed`; this re-checks at spawn time).
+  const fixClaim = readFixClaim({ repo, pr: planned.pr });
+  if (fixClaim) return { held: true, reason: 'fix-claimed', heldBy: fixClaim.meta?.who ?? fixClaim.owner ?? null };
   // #x0jphk5 — acquire BEFORE building anything below; refuse loud (never throw) when another dispatcher
   // already holds this exact `(repo, kind, pr)` — `kind: 'ci-heal'` explicit, so a `fix` claim and a
   // `ci-heal` claim for the same PR never share one slot (dup-heal-dispatch: `headSha` no longer part of the
@@ -123,7 +130,7 @@ export async function dispatchCiHeal(planned, {
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
     const out = await sinks[DISPATCH_EFFECT]({
-      launchKind: 'ci-heal', prompt, sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
+      launchKind: 'ci-heal', prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
       pr: planned.pr, reason, repo,
     });
     if (out?.held) {
@@ -257,6 +264,7 @@ export async function runReconcileCiHealDispatch({
       // entry (see this function's own docblock — "a CI-heal entry carries neither on `reconcile-core.mjs`'s
       // own `dispatch` row" was true of item/scope, never of `headRefOid`).
       headRefOid: entry.headRefOid ?? null,
+      altBranch: entry.altBranch ?? null, // fix procedure — saved repair of a re-armed concurrent-author pause.
     };
 
     if (lanes.length === 0) {

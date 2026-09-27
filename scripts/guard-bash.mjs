@@ -2759,7 +2759,7 @@ function globMatch(tokens, s) {
   return t === tokens.length;
 }
 
-export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [] } = {}) {
+export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLiveLease = false, markedLeaseSlug = null, contestedHolderSlug = null, dispatchKind = null, cwd = null, daemonCloneRoots = [], fixClaimedBranches = [] } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -2981,6 +2981,17 @@ export function reason(segment, { primaryCwd = false, staleBehind = 0, foreignLi
     const targetsLane = /lane\//.test(rest);
     if (targetsMain || !targetsLane)
       return 'direct push to `main` is blocked (strict lane-only enforcement, #2203). Push to a `lane/*` ref and land via a PR so CI gates it: `git push origin HEAD:refs/heads/lane/<name>` then `pr-land`. Sanctioned override (rare): prefix `MAIN_PUSH_OK=1`.';
+  }
+
+  // fix procedure (operator-approved 2026-09-27, live incident PR #2811) — a push to a `lane/*` ref whose PR
+  // someone ELSE holds the live fix claim on (`we:scripts/conveyor/fix-procedure.mjs`). `fixClaimedBranches` is
+  // computed by the IO shell (claims NOT held by this session, in this checkout's repo) — empty everywhere else,
+  // so this arm is inert for every caller that does not pass it. No override: wait for the holder's `fix-end`.
+  if (fixClaimedBranches.length && atCommand(/^git\s+push\b/)) {
+    const pushHead = heads.find((h) => /^git\s+push\b/.test(h)) || '';
+    const targets = [...pushHead.matchAll(/(?:refs\/heads\/)?(lane\/[^\s:'"]+)/g)].map((m) => m[1]);
+    const hit = fixClaimedBranches.find((c) => targets.includes(c.branch));
+    if (hit) return hit.message;
   }
 
   // A raw `gh pr merge` or its REST equivalent bypasses `pr-merge-gate.mjs`'s `assertMayMerge` — the ONE
@@ -3668,6 +3679,8 @@ if (IS_CLI) {
   let agentSession = false;
   let effectiveCwd = null;
   let daemonRoots = [];
+  let fixClaimedBranches = [];
+  let hookSessionId = null;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -3693,6 +3706,7 @@ if (IS_CLI) {
     // due to a string-source mismatch (r2 correctness fix). The hook payload's `session_id` is only a secondary
     // cross-check/fallback for the rare call where the env is unset. Used to tell my own lease from a peer's.
     const mySessionId = process.env.CLAUDE_CODE_SESSION_ID || ev.session_id || null;
+    hookSessionId = mySessionId;
     // #2302 — the Bash cwd decides primary-vs-lane. Derive the constellation primary roots from THIS script's
     // location (<workspace>/<repo>/scripts/guard-bash.mjs) and realpath both sides so a symlinked workspace
     // still matches. Fail-OPEN (leave primaryCwd=false) on any error — a guard bug must never wedge the agent.
@@ -3716,7 +3730,23 @@ if (IS_CLI) {
     // something that LOOKS like a destructive git op. Every other Bash call skips it entirely.
     if (!primaryCwd && isLaneCwd(cwd) && hasDestructiveLaneOp(cmd)) ({ markedLeaseSlug, contestedHolderSlug, foreignLiveLease } = laneLeaseGuardCtx(cwd, mySessionId));
   } catch { process.exit(0); }
-  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots };
+  // fix procedure — only pay for the claim-store read when the command could be a push to a lane ref. Loaded
+  // lazily so every other Bash call keeps this hook's import graph unchanged. Fail-OPEN on any error.
+  if (/\bpush\b/.test(cmd) && /lane\//.test(cmd)) {
+    try {
+      const fp = await import('./conveyor/fix-procedure.mjs');
+      const live = fp.listLiveFixClaims().filter((e) => !fp.isClaimHolder(e, { sessionId: hookSessionId, who: process.env.WE_FIX_WHO || null }));
+      if (live.length) {
+        const repoKey = fp.repoKeyForCheckout(effectiveCwd || process.cwd());
+        fixClaimedBranches = live.filter((e) => e.meta?.branch && (repoKey == null || e.meta.repo === repoKey)).map((e) => ({
+          branch: e.meta.branch,
+          message: fp.pushRefusal({ repo: e.meta.repo, branch: e.meta.branch, sessionId: hookSessionId, who: process.env.WE_FIX_WHO || null })?.message
+            ?? `push to ${e.meta.branch} refused: another fixer holds the fix claim on PR #${e.meta.pr}`,
+        }));
+      }
+    } catch { fixClaimedBranches = []; }
+  }
+  const guardCtx = { primaryCwd, staleBehind, foreignLiveLease, markedLeaseSlug, contestedHolderSlug, runInBackground, dispatchKind, agentSession, cwd: effectiveCwd, daemonCloneRoots: daemonRoots, fixClaimedBranches };
   const r = decide(cmd, guardCtx);
   if (r) {
     // #3311 — the deny is ALL-OR-NOTHING, so name the state-producing steps it takes down with it. Computed
