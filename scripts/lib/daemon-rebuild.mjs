@@ -121,8 +121,7 @@ import {
 import { runLiveSmokeWithRetry } from './daemon-live-smoke.mjs';
 import { isSafeBranchName } from './daemon-self-sync.mjs';
 import { gitRun } from './main-staleness.mjs';
-import { pinnedStateRoot } from '../conveyor/queue-store.mjs';
-import { daemonStateDir } from './daemon-last-good.mjs';
+import { daemonStateDir, daemonConveyorStateRoot } from './daemon-last-good.mjs';
 import { defaultPoolRoot, workspaceFor } from './lane-pool-paths.mjs';
 
 // ── Fixed rebuild identity (see file header — DETERMINISM) ─────────────────────────────────────────────────
@@ -479,17 +478,13 @@ export function findUnsafeLocalState({ git, knownInputs = [] }) {
 
 // ── daemon runtime state that lands in TRACKED files — carried out of the tree, never a freeze ─────────────
 
-/**
- * Where a daemon clone's conveyor runtime state lives: the operator's `CONVEYOR_STATE_ROOT` pin when set
- * (#4052), else `<rebuild state dir>/conveyor-state` — OUTSIDE every git tree, next to the rebuild's own state.
- * The layout under it matches `CONVEYOR_STATE_ROOT`'s (`<root>/.conveyor/<file>`), so pinning the env var to
- * this same directory later changes nothing on disk.
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {string}
- */
-export function daemonConveyorStateRoot(env = process.env) {
-  return pinnedStateRoot(env) ?? join(stateDir(env), 'conveyor-state');
-}
+// {@link daemonConveyorStateRoot} now lives in `./daemon-last-good.mjs` (imported above, import-light — see
+// that file's own header) and is re-exported here UNCHANGED, so every existing importer of it from THIS file
+// (`run-scorecard-store.mjs`, this file's own use below) sees no change; `health-watch-section.mjs` imports it
+// straight from `daemon-last-good.mjs` instead, so pulling in the health watch's state-root resolution never
+// drags in this file's much heavier build/smoke/child_process import graph (#4077 live regression: it broke
+// the operator-queue CLI entry guard's symlink tests — see that fix's own commit).
+export { daemonConveyorStateRoot };
 
 /**
  * Is `root` a daemon-managed clone — one the rebuild moves with `reset --hard`? True once it has a rebuild

@@ -32,6 +32,11 @@ import { createHash } from 'node:crypto';
 /** Env var pinning the rebuild-state root (same one `daemon-rebuild.mjs` uses). */
 export const WE_DAEMON_STATE_DIR_ENV = 'WE_DAEMON_STATE_DIR';
 
+/** Same env var as `queue-store.mjs#STATE_ROOT_ENV` / `pinnedStateRoot` (re-stated, not imported — see this
+ *  file's own "import-light" header note; a unit test pins the two names to the same value, same convention
+ *  as {@link cloneKeyOf} below). */
+export const CONVEYOR_STATE_ROOT_ENV = 'CONVEYOR_STATE_ROOT';
+
 /** Env override for how long a clone may be held on its last-good build before the staleness guard ALERTS
  *  (it keeps dispatching either way — the operator's ruling). */
 export const LAST_GOOD_MAX_AGE_ENV = 'WE_DAEMON_LAST_GOOD_MAX_AGE_MS';
@@ -45,6 +50,24 @@ export const REBUILD_LEASE_STALE_MS_DEFAULT = 20 * 60_000;
 /** `<WE_DAEMON_STATE_DIR || ~/.claude/daemon-self-sync-state>`. */
 export function daemonStateDir(env = process.env) {
   return (env && env[WE_DAEMON_STATE_DIR_ENV]) || join(homedir(), '.claude', 'daemon-self-sync-state');
+}
+
+/**
+ * Where a daemon clone's conveyor runtime state lives (#4052): the operator's `CONVEYOR_STATE_ROOT` pin when
+ * set, else `<daemonStateDir>/conveyor-state` — OUTSIDE every git tree, next to the rebuild's own state. THE
+ * ONE definition every #4052 daemon-state-root reader shares (`we:scripts/lib/daemon-rebuild.mjs` re-exports
+ * this exact function rather than redefining it; `we:scripts/conveyor/run-scorecard-store.mjs` and
+ * `we:scripts/conveyor/health-watch-section.mjs` both import it — the latter directly from HERE, not from
+ * `daemon-rebuild.mjs`, so pulling in the health watch's state-root resolution never drags in
+ * `daemon-rebuild.mjs`'s much heavier build/smoke/child_process import graph; see this file's own "import-light"
+ * header note — the same reason `daemon-rebuild.mjs` itself was kept out of `main-staleness.mjs`'s reach).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function daemonConveyorStateRoot(env = process.env) {
+  const v = env?.[CONVEYOR_STATE_ROOT_ENV];
+  const pinned = v && String(v).trim() ? resolvePath(String(v).trim()) : null;
+  return pinned ?? join(daemonStateDir(env), 'conveyor-state');
 }
 
 /** Same value as `daemon-overlays.mjs#cloneKey` (sha256 of the realpath, 16 hex) — see the file header. */

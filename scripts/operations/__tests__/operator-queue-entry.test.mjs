@@ -40,12 +40,17 @@ const stage = (root) => {
   // `main()` silently never runs (the exact failure mode this file's own header names).
   copyFileSync(join(dirname(LEAF), 'marker-authorship.mjs'), join(root, 'lib/marker-authorship.mjs'));
   // #4077 — the HEALTH section (`--with-health`) reads the health store via `../conveyor/health-watch-section.mjs`,
-  // which renders through the pure core (+ its `../lib/secret-scrub.mjs` leaf) and finds the pinned state root
-  // via `./queue-store.mjs` — stage all four, same reason as above.
-  for (const f of ['health-watch-section.mjs', 'health-watch-core.mjs', 'queue-store.mjs']) {
+  // which renders through the pure core (+ its `../lib/secret-scrub.mjs` leaf) — stage all three, same reason as
+  // above.
+  for (const f of ['health-watch-section.mjs', 'health-watch-core.mjs']) {
     copyFileSync(join(dirname(LEAF), '../conveyor', f), join(root, 'conveyor', f));
   }
   copyFileSync(join(dirname(LEAF), 'secret-scrub.mjs'), join(root, 'lib/secret-scrub.mjs'));
+  // health-watch-section.mjs finds the pinned state root via `../lib/daemon-last-good.mjs#daemonConveyorStateRoot`
+  // (the SAME shared #4052 helper `run-scorecard-store.mjs` uses — picked deliberately over the much heavier
+  // `daemon-rebuild.mjs`, which would drag its whole build/smoke/child_process graph into this leaf; that file
+  // is itself node-builtins-only — "import-light", see its own header — so no further leaf needs staging).
+  copyFileSync(join(dirname(LEAF), 'daemon-last-good.mjs'), join(root, 'lib/daemon-last-good.mjs'));
 };
 
 let dir;

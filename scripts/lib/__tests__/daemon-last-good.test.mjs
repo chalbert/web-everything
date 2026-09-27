@@ -17,9 +17,11 @@ import { spawnSync } from 'node:child_process';
 
 import {
   cloneKeyOf, decideLastGood, lastGoodMaxAgeMs, LAST_GOOD_MAX_AGE_ENV, DEFAULT_LAST_GOOD_MAX_AGE_MS,
+  daemonConveyorStateRoot, daemonStateDir, CONVEYOR_STATE_ROOT_ENV,
 } from '../daemon-last-good.mjs';
 import { cloneKey } from '../daemon-overlays.mjs';
 import { assertMainNotStale, STALE_MAIN_REFUSAL_MARKER } from '../main-staleness.mjs';
+import { STATE_ROOT_ENV } from '../../conveyor/queue-store.mjs';
 
 // ── fixture helpers ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -88,6 +90,33 @@ describe('cloneKeyOf matches daemon-overlays.mjs#cloneKey (the two per-clone sta
     expect(cloneKeyOf(link)).toBe(cloneKey(link));
     expect(cloneKeyOf(link)).toBe(cloneKeyOf(real));
     expect(cloneKey(link)).toBe(cloneKey(real));
+  });
+});
+
+// ── a2. daemonConveyorStateRoot — the ONE #4052 state-root resolver every reader shares ────────────────────
+
+describe('CONVEYOR_STATE_ROOT_ENV matches queue-store.mjs#STATE_ROOT_ENV (re-stated, not imported — same '
+  + 'convention as cloneKeyOf above)', () => {
+  it('is the identical string', () => { expect(CONVEYOR_STATE_ROOT_ENV).toBe(STATE_ROOT_ENV); });
+});
+
+describe('daemonConveyorStateRoot — #4052 pinned daemon state root', () => {
+  it('CONVEYOR_STATE_ROOT, when set, wins over the out-of-tree default', () => {
+    expect(daemonConveyorStateRoot({ CONVEYOR_STATE_ROOT: '  /pinned/root  ' })).toBe(join('/pinned/root'));
+  });
+
+  it('unset: falls back to <daemonStateDir>/conveyor-state — never a checkout-relative path', () => {
+    const env = {};
+    expect(daemonConveyorStateRoot(env)).toBe(join(daemonStateDir(env), 'conveyor-state'));
+  });
+
+  it('WE_DAEMON_STATE_DIR moves the same default daemonStateDir moves', () => {
+    const env = { WE_DAEMON_STATE_DIR: '/alt/state' };
+    expect(daemonConveyorStateRoot(env)).toBe(join('/alt/state', 'conveyor-state'));
+  });
+
+  it('an empty/whitespace-only CONVEYOR_STATE_ROOT is treated as unset', () => {
+    expect(daemonConveyorStateRoot({ CONVEYOR_STATE_ROOT: '   ' })).toBe(join(daemonStateDir({}), 'conveyor-state'));
   });
 });
 
