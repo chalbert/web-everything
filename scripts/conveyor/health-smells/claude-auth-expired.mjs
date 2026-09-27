@@ -7,10 +7,9 @@
  * never a Claude-CLI-side login failure, and (before this card) `notify` was never actually wired to send
  * anything in ANY mode (`we:scripts/conveyor/health-watch.mjs`'s "THE MINIMAL NOTIFY PATH" doc).
  *
- * Notify scope: the Sun 2026-09-27 ~7:40 AM ET operator decision
- * (`we:scripts/conveyor/health-smells/notify-list.mjs`) reset the notify surface to the eight signs that fired
- * real episodes that night; this sign is not among them today, so it stays record-only (shadow) like most
- * signs — see that file's header for how to re-add it.
+ * Notify scope: still notifies even in shadow mode — a PREVIOUSLY approved sign, carried forward unchanged by
+ * the Sun 2026-09-27 ~7:40 AM ET operator decision (`we:scripts/conveyor/health-smells/notify-list.mjs`),
+ * which ADDED eight more signs to the notify surface without demoting any sign already approved.
  *
  * `probes: ['authExpired']` — `we:scripts/conveyor/health-watch.mjs#probeAuthExpiredSessions`, which reads
  * every BACKGROUND `claude agents --json` row's own transcript via the shared detector

@@ -73,8 +73,8 @@ describe('dispatch-permission-stall.evaluate', () => {
     expect(dispatchPermissionStall.evaluate({}, { now: NOW })).toEqual([]);
   });
 
-  it('is scoped to the host (not gh-cadenced) and, per the Sun 2026-09-27 notify-list reset, is record-only (not in NOTIFY_EVEN_IN_SHADOW)', () => {
-    expect(NOTIFY_EVEN_IN_SHADOW.has(dispatchPermissionStall.id)).toBe(false);
+  it('is scoped to the host (not gh-cadenced) and, approved by an earlier operator decision, is wired to notify even in shadow mode (the Sun 2026-09-27 notify-list.mjs addition is additive and carries it forward unchanged)', () => {
+    expect(NOTIFY_EVEN_IN_SHADOW.has(dispatchPermissionStall.id)).toBe(true);
     expect(dispatchPermissionStall.scope).toBe('host');
     expect(dispatchPermissionStall.cadence).toBe('every-tick');
     expect(dispatchPermissionStall.probes).toEqual(['agents']);

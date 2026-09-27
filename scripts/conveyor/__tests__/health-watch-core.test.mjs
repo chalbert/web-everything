@@ -311,10 +311,10 @@ describe('smell: claude-auth-expired (live incident, night of 2026-09-25/26 ET)'
     expect(r.transitions.some((t) => t.type === 'opened')).toBe(false);
   });
 
-  // Per the Sun 2026-09-27 ~7:40 AM ET operator decision (`health-smells/notify-list.mjs`), `claude-auth-expired`
-  // is not among the eight approved notify-in-shadow signs today — it opens an episode like any other sign, but
-  // stays record-only (shadow) unless a caller passes a `notifySet` that includes it (see `notify-list.test.mjs`).
-  it('opens with a `notify` action that stays record-only (suppressed) in shadow mode, per the current notify-list', () => {
+  // `claude-auth-expired` was approved to notify by an earlier operator decision and the Sun 2026-09-27
+  // `notify-list.mjs` addition (`health-smells/notify-list.mjs`) is additive — it never demotes a sign already
+  // approved, so this stays a real, un-suppressed notify.
+  it('THE URGENT NOTIFY EXCEPTION: opens with a `notify` action that is NEVER suppressed, even in shadow mode', () => {
     const state = emptyHealthState();
     const r = runHealthTick(state, { authExpired: [
       { name: 'ci-heal-2711', startedAt: 0 }, { name: 'ci-heal-2712', startedAt: 0 },
@@ -322,7 +322,7 @@ describe('smell: claude-auth-expired (live incident, night of 2026-09-25/26 ET)'
     expect(r.transitions.some((t) => t.type === 'opened')).toBe(true);
     const notify = r.plan.find((p) => p.kind === 'notify' && p.key === 'claude-auth-expired::claude-auth');
     expect(notify).toBeDefined();
-    expect(notify.suppressed).toBe('shadow mode');
+    expect(notify.suppressed).toBeNull();
   });
 
   it('closes after `closeAfter` (1) clean sample once the auth-expired count drops below minCount', () => {

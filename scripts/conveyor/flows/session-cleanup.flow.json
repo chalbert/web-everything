@@ -131,7 +131,7 @@
       },
       "retries": null,
       "escalation": null,
-      "notes": "A SEPARATE, daemon-log-level detector for the SAME root cause also exists (health-watch-core.mjs's AUTH_ERROR regex over review-daemon/fix-dispatch-daemon's own log lines) — see daemon-level-unproductive-signal below. The two never talk to each other; they just happen to usually fire around the same real incident. Which smells notify even in shadow mode is now declared in ONE place, health-smells/notify-list.mjs's NOTIFY_EVEN_IN_SHADOW (Sun 2026-09-27 operator decision) — this smell is not on that list today.",
+      "notes": "A SEPARATE, daemon-log-level detector for the SAME root cause also exists (health-watch-core.mjs's AUTH_ERROR regex over review-daemon/fix-dispatch-daemon's own log lines) — see daemon-level-unproductive-signal below. The two never talk to each other; they just happen to usually fire around the same real incident. Which smells notify even in shadow mode is now declared in ONE place, health-smells/notify-list.mjs's NOTIFY_EVEN_IN_SHADOW — this smell (claude-auth-expired) was approved to notify by an earlier operator decision and stays on that list unchanged by the later Sun 2026-09-27 addition.",
       "ack": {}
     },
     {
@@ -321,7 +321,7 @@
       "retries": null,
       "escalation": {
         "to": "operator",
-        "how": "a real macOS desktop notification (notifyDesktopChecked) — but default mode is 'shadow', where EVERY notify is suppressed EXCEPT the signs listed in health-smells/notify-list.mjs's NOTIFY_EVEN_IN_SHADOW (the Sun 2026-09-27 operator decision: drain-failing-repeatedly, dispatch-refused-stale-clone, lane-starvation, gh-call-failures, gh-graphql-budget, duplicate-live-sessions, pr-no-owner, daemon-silent); every other high-severity episode is only written to a durable per-episode report file, never actually sent, until an operator flips mode out of shadow",
+        "how": "a real macOS desktop notification (notifyDesktopChecked) — but default mode is 'shadow', where EVERY notify is suppressed EXCEPT the signs listed in health-smells/notify-list.mjs's NOTIFY_EVEN_IN_SHADOW: claude-auth-expired, daemon-held-on-last-good, dispatch-permission-stall, machine-overload, bg-isolation-stall (earlier operator decisions) plus drain-failing-repeatedly, dispatch-refused-stale-clone, lane-starvation, gh-call-failures, gh-graphql-budget, duplicate-live-sessions, pr-no-owner, daemon-silent (added Sun 2026-09-27); every other high-severity episode is only written to a durable per-episode report file, never actually sent, until an operator flips mode out of shadow",
         "cite": "scripts/conveyor/health-watch-core.mjs:385-392; scripts/conveyor/health-watch.mjs:454-474"
       },
       "notes": "A separate, coarser signal from everything else in this flow: it watches the DAEMON's log, not any one session's transcript, and its own claude-auth-expired smell (an AUTH_ERROR regex over log text) is INDEPENDENT of hung-session.mjs's own transcript-level claude-auth-expired axis (axis-claude-auth-expired) — two different code paths, same real-world incident, never cross-checked against each other. Timing is episode-based (openAfter/closeAfter sample counts, a flap cap of 3 re-opens/24h collapsing to one flapping episode, a 4-hour high-severity reminder) rather than a single wait/timeout pair — see health-watch-core.mjs:29-42.",
