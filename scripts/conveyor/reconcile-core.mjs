@@ -134,6 +134,12 @@ import { isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
 import { parseReviewedSha } from '../lib/review-escalation.mjs';
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — a PR whose own content is ALREADY on `main`,
+// carried there by a different PR that stacked on its branch and merged first, never owes a fix or a review.
+// The verdict itself (`pr.alreadyLandedInMain`, per-file blob-identity evidence) is computed by the IO shell
+// (`we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts`, `we:scripts/lib/
+// already-landed-content.mjs`); this file only reads the already-decided fact off the PR record, exactly like
+// `requiredCheckCompletedAt`/`aheadByOnMain` above.
 
 /**
  * we:scripts/conveyor/reconcile-core.mjs#DISPATCH_KINDS — the three things this pass ever asks for. Frozen,
@@ -203,11 +209,20 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          contradicting verdict landing on a commit nobody has touched since (the live #2588
  *                          incident this refusal closes: 3 review sessions in 16 minutes on one head, "changes"
  *                          then "accepted" 5 minutes apart).
+ *   `already-landed`     — live incident, chalbert/web-everything PR #2752 (#4034/#2748): every file this PR
+ *                          touches is byte-identical to some commit already on `main` — its own content was
+ *                          carried there by a DIFFERENT PR (often one stacked on its branch that merged first)
+ *                          while THIS PR's ref was separately rebased and drifted into an apparent conflict.
+ *                          Nothing is owed here — not a fix (there is nothing left to change), not a review
+ *                          (there is nothing new to judge) — and dispatching a fix risks it "resolving" the
+ *                          apparent conflict by reverting the carrier PR's later work. This PR should be closed
+ *                          and its backlog card resolved, never dispatched; see
+ *                          `we:scripts/conveyor/already-landed-watch.mjs` for the pass that acts on it.
  */
 export const REFUSAL_KINDS = Object.freeze([
   'stood-down', 'no-findings', 'cap-exhausted',
   'live-process', 'awaiting-permission', 'liveness-unknown',
-  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head',
+  'owed-elsewhere', 'owed-ci-rerun', 'nothing-owed', 'already-reviewed-head', 'already-landed',
 ]);
 
 /**
@@ -938,6 +953,9 @@ function dispatchReviewRow({
  *   labels,statusCheckRollup,mergeStateStatus,comments` returns them, each optionally carrying `transcriptMtimeMs`
  *   (EVIDENCE ONLY — no decision reads it). `baseRefName` is what the STACKED-BASE CONFLICT branch keys on
  *   (#3383); its absence just means every `conflicted` PR falls through to the pre-#3383 `owed-elsewhere` path.
+ *   `alreadyLandedInMain` (optional, `{carrierPr:(number|null)}`) is the ALREADY-LANDED verdict (live incident
+ *   PR #2752) computed by the IO shell's per-file blob-identity check against `main`'s own history; its absence
+ *   means every PR falls through unaffected, exactly as before this branch existed.
  * @param {Array<object>} [o.agents] - `claude agents --json` entries, each optionally carrying the two facts the
  *   listing cannot supply and the IO shell resolves: `laneHeadOid` (the `HEAD` of the lane at `cwd`) and
  *   `pidAlive` (`process.kill(pid, 0)` → `true`/`false`; absent = not probed = UNKNOWN).
@@ -1150,6 +1168,34 @@ export function planReconcile({
     }, requiredChecks);
     const check = reduceCheckState(pr?.statusCheckRollup, requiredChecks);
     const withPhase = { phase, check: check.state, labels: labelNames(pr?.labels) };
+
+    // ── ALREADY-LANDED — its OWN branch, AHEAD OF EVERY OTHER CHECK IN THIS LOOP (`ci-red`, the advisory-fix
+    // branch, STACKED-BASE, the generic `OWED` table — every one of them would otherwise dispatch a fixer or a
+    // reviewer at a PR with nothing left to change). Live incident, chalbert/web-everything PR #2752: bounced
+    // (`review:changes`) AND `merge-status:conflicting`, which — unchecked — hits `isConflictBounce` below and
+    // dispatches a mechanical conflict-fix. But every file it touches is already, byte-for-byte, on `main`
+    // (carried there by PR #2759, which stacked on #2752's branch and merged first); a fixer would find nothing
+    // to repair, and one asked to "resolve the conflict" could revert the carrier PR's later work instead. The
+    // verdict (`pr.alreadyLandedInMain`) is computed by the IO shell from PER-FILE BLOB IDENTITY against `main`'s
+    // own commit history — see `we:scripts/lib/already-landed-content.mjs`'s own header for why that signal, and
+    // not a plain `merge-tree`/current-content diff, is what survives a rebase plus later refinement on `main`.
+    // Checked ahead of liveness-derived phase branching but AFTER `stood-down`/liveness themselves (REFUSALS 1
+    // and 4 above) — a PR a human has already stood down on, or one a live session is genuinely working, still
+    // takes priority over this one; this only pre-empts dispatching FRESH work at an already-landed PR.
+    if (pr?.alreadyLandedInMain) {
+      const carrierPr = pr.alreadyLandedInMain.carrierPr ?? null;
+      refuse('already-landed', {
+        ...withPhase, carrierPr,
+        why: carrierPr
+          ? `every file this PR touches is already byte-identical to a commit on \`${defaultBranch}\` — carried` +
+            ` there by #${carrierPr}, which merged first while this PR's own branch was separately rebased.` +
+            ' Nothing to fix or review; it should be closed and its backlog card resolved, never dispatched.'
+          : `every file this PR touches is already byte-identical to a commit on \`${defaultBranch}\`, though the` +
+            ' PR that carried it there could not be attributed with confidence. Nothing to fix or review; it' +
+            ' should be closed and its backlog card resolved, never dispatched.',
+      });
+      continue;
+    }
 
     // ── `ci-red` (multi-repo slice 7) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table,
     // because it needs neither of that table's two remaining checks: REFUSAL 2 ("no findings, no fixer") does

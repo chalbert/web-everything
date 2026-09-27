@@ -1252,6 +1252,79 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
   });
 });
 
+describe('case 5f-2 — ALREADY-LANDED pre-empts the conflict-fix dispatch (live incident, chalbert/web-everything PR #2752, #4034/#2748)', () => {
+  // Real shape, measured live 2026-09-26: `review:changes` + `merge-status:conflicting`, `mergeStateStatus:
+  // DIRTY` — exactly `case 5f`'s `isConflictBounce` population, which would otherwise dispatch a mechanical
+  // conflict-fix here. `we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts` is the IO shell
+  // that computes `alreadyLandedInMain` off per-file blob identity against `main`'s own history; this pass only
+  // reads the already-decided fact.
+  const prAlreadyLanded = (over = {}) => pr1563({
+    number: 2752,
+    headRefName: 'lane/4034-critical-work-gate',
+    labels: lbl('review:changes', 'merge-status:conflicting'),
+    mergeStateStatus: 'DIRTY',
+    comments: [finding()],
+    ...over,
+  });
+
+  it('refuses `already-landed`, naming the carrier PR, instead of dispatching the mechanical conflict-fix', () => {
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'already-landed', prNumber: 2752, carrierPr: 2759,
+      why: expect.stringContaining('#2759'),
+    })]);
+  });
+
+  it('carries the PR\'s own `headRefName` on the refusal — the one fact `already-landed-watch.mjs` resolves the backlog card from (PR #2769 review)', async () => {
+    const { planAlreadyLandedCloses } = await import('../already-landed-watch.mjs');
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    expect(plan.refusals[0].headRefName).toBe('lane/4034-critical-work-gate');
+    // Wiring, not just shape: the watch's own planner, fed this real plan, derives the item to resolve.
+    expect(planAlreadyLandedCloses(plan)).toEqual([expect.objectContaining({ prNumber: 2752, itemNum: '4034' })]);
+  });
+
+  it('still refuses `already-landed` (carrierPr null) when the carrier could not be attributed with confidence — the containment fact never depends on attribution', () => {
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: null } })], agents: [], now: NOW,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-landed', prNumber: 2752, carrierPr: null })]);
+    expect(plan.refusals[0].why).not.toMatch(/#null/);
+  });
+
+  it('takes priority over `stacked-rebase`/other conflict handling regardless of round counts already spent', () => {
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP + 5 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }))];
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ comments, alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    // Not `cap-exhausted` (that would mean it fell through to the ordinary conflict-fix branch) — `already-landed`
+    // pre-empts it outright, whatever the durable attempt count already reads.
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-landed' })]);
+  });
+
+  it('a PR with NO `alreadyLandedInMain` fact is completely unaffected — falls straight through to the ordinary conflict-fix dispatch', () => {
+    const plan = planReconcile({ prs: [prAlreadyLanded()], agents: [], now: NOW });
+    expect(plan.refusals).toHaveLength(0);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', isConflict: true, prNumber: 2752 })]);
+  });
+
+  it('still yields to a genuinely LIVE session (liveness outranks already-landed, exactly like every other phase)', () => {
+    const agents = [{ name: 'fix-2752', pid: 555, state: 'working', pidAlive: true, cwd: '/lane' }];
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents, now: NOW,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'live-process', prNumber: 2752 })]);
+  });
+
+  it('`already-landed` is listed in REFUSAL_KINDS, so `formatReport` groups it like every other refusal', () => {
+    expect(REFUSAL_KINDS).toContain('already-landed');
+  });
+});
+
 describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advisory:changes` (#xkmu3gv)', () => {
   // A `needs-human` PR (review:human, no review:changes) that already carries an admitted `advisory:changes`
   // finding from `we:scripts/operations/review-pr.mjs`'s `advise` step — the population no daemon ever acted on
