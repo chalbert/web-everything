@@ -88,6 +88,51 @@ describe('fileApprovalPreventionCard — the real (injectable) file-item subproc
     expect(result).toMatchObject({ ok: false, num: null, rel: null });
     expect(result.error).toMatch(/no parseable JSON/);
   });
+
+  // chalbert/web-everything#2766's OWN approval (2026-09-27, ~09:00 ET) FAILED live with this exact reported
+  // stderr: "…FAILED (the approval above already landed and is UNAFFECTED) — Idempotency key (do not edit):
+  // approval-prevention-key:chalbert/web-everything#2766@d2453a58216d6cc4b14a4e1f30c673451ca93485
+  // --scope=we:scripts/lib/revi…" — a fragment of THIS CALL'S OWN argv (the multi-line digest running straight
+  // into the next `--scope=` flag), not the real reason `file-item` refused. Reproduced here exactly:
+  // `execFileSync` throws on file-item's real non-zero exit, `e.stderr` is empty (an ordinary `effect-halted`
+  // refusal prints nothing to stderr), and the old code's `ghErr(e, …)` fell back to `e.message` — Node's own
+  // "Command failed: <cmd> <args…>" reconstruction, whose last "line" (split on the digest's embedded newlines)
+  // is that meaningless argv fragment. The REAL reason (`file-item`'s own `.error`, e.g. the #883 locus-prefix
+  // write refusal) was sitting right there in `e.stdout`, unread.
+  it('#2766 live repro: on a real file-item refusal (empty stderr, a real payload on stdout), reports the '
+    + 'REAL `.error` — never a leaked fragment of this call\'s own argv', () => {
+    const digest = 'Filed mechanically ON APPROVAL (operator rule, 2026-09-27 — "prevention outstanding should '
+      + 'be filed by default on approval") — this PR\'s latest advisory review named the guard(s) below as owed. '
+      + 'None of them blocked the approval; the debt is tracked here instead:\n\n'
+      + '1. `we:scripts/lib/review-loop-policy.mjs:454` — some guard text\n'
+      + '2. `we:scripts/operations/review-loop-cli.mjs:368` — some other guard text\n\n'
+      + 'Idempotency key (do not edit): approval-prevention-key:chalbert/web-everything#2766'
+      + '@d2453a58216d6cc4b14a4e1f30c673451ca93485';
+    const realError = 'locus-prefix: 1 bare code-path ref(s) in backlog/x41qokn-file-the-prevention-guard-s-'
+      + 'owed-by-chalbert-web-everything.md lack a <repo>: prefix (#883; e.g. '
+      + '"scripts/lib/__tests__/review-loop-policy.test.mjs" → "we:scripts/lib/__tests__/review-loop-policy.'
+      + 'test.mjs"). Prefix them now — don\'t leave it for the gate.';
+    const stdout = JSON.stringify({
+      runId: 'file-item-x', op: 'file-item', stopped: 'effect-halted', applied: [], inFlight: [],
+      pending: { kind: 'effect', step: 'write', stepIndex: 3, count: 1 }, error: realError,
+    });
+    const exec = () => {
+      const e = new Error(
+        `Command failed: node scripts/operations/run.mjs file-item --digest=${digest} --scope=we:x --json`,
+      );
+      e.status = 1;
+      e.stdout = stdout;
+      e.stderr = '';
+      throw e;
+    };
+    const result = fileApprovalPreventionCard({ ...input, digest }, { exec });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(realError);
+    // RED before the fix: the old code reported a fragment of the digest/idempotency text plus the next flag,
+    // never the real reason.
+    expect(result.error).not.toContain('Idempotency key (do not edit)');
+    expect(result.error).not.toContain('--scope=');
+  });
 });
 
 describe('findApprovalPreventionCardOnDisk — the durable, card-side idempotency lookup', () => {

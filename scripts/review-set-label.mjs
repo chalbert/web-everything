@@ -632,6 +632,30 @@ export function derivePreventionParent(findings) {
  *   backlog write; production always uses the real one.
  * @returns {{ok:boolean, num:(number|null), rel:(string|null), error:(string|null)}}
  */
+/**
+ * Best-effort parse of a `file-item --json` invocation's stdout into its payload object — the SAME shape both
+ * a clean run (`stopped: 'complete'`) and a refused one (`stopped: 'effect-halted'`, `.error` set — e.g. the
+ * write-time #883 locus-prefix gate) print. `null` when `out` carries no parseable `{…}` at all (a crash before
+ * any JSON was printed). Shared by both the success path and {@link fileApprovalPreventionCard}'s own catch
+ * below, so a REFUSAL surfaces the SAME real reason on either path — `execFileSync` throws on ANY non-zero
+ * exit, and `file-item` exits non-zero for both a genuine crash AND an ordinary, diagnostic `effect-halted`
+ * refusal that still prints valid JSON to stdout.
+ *
+ * @param {unknown} out
+ * @returns {object|null}
+ */
+function parseFileItemPayload(out) {
+  const text = String(out ?? '');
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+  if (start === -1) return null;
+  try {
+    return JSON.parse(lines.slice(start).join('\n'));
+  } catch {
+    return null;
+  }
+}
+
 export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled } = {}) {
   const argv = [
     'scripts/operations/run.mjs', 'file-item',
@@ -646,15 +670,25 @@ export function fileApprovalPreventionCard(input, { exec = execFileSyncThrottled
   ];
   try {
     const out = String(exec('node', argv, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
-    const lines = out.split('\n');
-    const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
-    const payload = start === -1 ? null : JSON.parse(lines.slice(start).join('\n'));
+    const payload = parseFileItemPayload(out);
     if (!payload) {
       return { ok: false, num: null, rel: null, error: `file-item produced no parseable JSON: ${out.slice(0, 500)}` };
     }
     return { ok: true, num: payload?.verdict?.num ?? null, rel: payload?.verdict?.rel ?? null, error: null };
   } catch (e) {
-    return { ok: false, num: null, rel: null, error: ghErr(e, 'file-item failed') };
+    // chalbert/web-everything#2766's OWN approval (2026-09-27) FAILED live with a stderr that read like part of
+    // this call's OWN argv (the multi-line digest + the idempotency-key text, running straight into the next
+    // `--scope=…` flag) — because `ghErr` blindly takes the LAST non-blank line of `e.stderr || e.message`, and
+    // `execFileSync`'s thrown error has NO real `stderr` for an ordinary `file-item` refusal (it exits non-zero
+    // with a clean JSON payload on STDOUT, `e.stderr` empty), so `ghErr` fell back to `e.message` — Node's own
+    // "Command failed: <cmd> <args…>" reconstruction of THIS CALL's argv, whose last "line" (split on the
+    // digest's own embedded newlines) is a meaningless fragment of that argv, never the real reason. `e.stdout`
+    // is a real, structured `file-item` payload on EXACTLY this path (an `effect-halted` refusal, e.g. the #883
+    // locus-prefix gate) — parsed the same way the success branch above already does, so the real `.error` wins
+    // whenever it is there, and only an unparseable stdout (a genuine crash before any JSON prints) falls back
+    // to `ghErr`.
+    const payload = parseFileItemPayload(e?.stdout);
+    return { ok: false, num: null, rel: null, error: payload?.error ?? ghErr(e, 'file-item failed') };
   }
 }
 
