@@ -87,6 +87,15 @@ describe('runBuildDispatchTick', () => {
     expect(r.dispatched.map((d) => d.num)).toEqual(['2662']);
   });
 
+  it('an empty queue read never retires claims', async () => {
+    const dispatches = [];
+    await runBuildDispatchTick({ live: true, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });
+    const empty = { ...effectsFor({ lockRoot, pid: 2, dispatches }), planTick: () => ({ decisions: { admission: { queue: [], cleared: [] } }, nextState: {} }) };
+    const r = await runBuildDispatchTick({ live: true, effects: empty });
+    expect(r.retired).toEqual([]);
+    expect(listBuildDispatchClaims({ lockRoot }).map((c) => c.meta.num)).toEqual(['3827']);
+  });
+
   it('dry run claims and dispatches nothing', async () => {
     const dispatches = [];
     const r = await runBuildDispatchTick({ live: false, effects: effectsFor({ lockRoot, pid: 1, dispatches }) });

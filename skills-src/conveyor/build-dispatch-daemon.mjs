@@ -124,7 +124,9 @@ export async function runBuildDispatchTick({ bookkeeping = {}, live = false, pol
   const doneWhy = (num) => {
     const pr = openPrs.find((p) => prDeliversNum(p, num));
     if (pr) return `${pr.repo}#${pr.number} delivers it`;
-    if (!clearedNums.has(normNum(num))) return 'left the cleared queue';
+    // Only trust "left the queue" when the tick actually read a queue — an empty/failed read must never retire
+    // every claim at once (that would reopen the restart double-dispatch this claim exists to close).
+    if (clearedNums.size > 0 && !clearedNums.has(normNum(num))) return 'left the cleared queue';
     return null;
   };
   const retired = [];
