@@ -36,7 +36,7 @@
  * same "piggyback on a pass the headless runner already ticks" shape, so pool litter is reclaimed every tick
  * with no new cron/daemon.
  */
-import { resolve, join, dirname } from 'node:path';
+import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -55,6 +55,13 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // --acquirable` scan the list is built from (`defaultListAcquirable` below) — publishing it here is additive,
 // no extra git/gh calls.
 import { buildFreeLaneList, resolveFreeLaneListPath, writeFreeLaneListAtomic } from '../lib/free-lane-list.mjs';
+// Salvage retention + pool leftovers (2026-09-27): the salvage index is refreshed (landed / 14-day expiry), hand-made
+// salvage dirs are backfilled into it, and non-lane litter in the pool dir is classified and cleaned every tick.
+import { refreshSalvageIndex, backfillSalvageDir } from '../lib/salvage-index.mjs';
+import { sweepPoolLeftovers } from '../lib/pool-leftovers.mjs';
+import { resolveSalvageRoot, readAgentsStrict } from '../lib/lane-salvage.mjs';
+import { readLaneHistory, lastLaneHistoryEntry } from '../lib/lane-history.mjs';
+import { readdirSync as readdirSyncFs } from 'node:fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -385,13 +392,17 @@ export function defaultListWhois({ exec = execFileSync, repo = null, root = REPO
  * @param {{exec?:Function, repo?:string|null, root?:string, lane:number, dryRun?:boolean}} o
  * @returns {{reclaimed:boolean, wouldReclaim?:boolean, preserved:boolean, reason:string}|null}
  */
-export function defaultReclaimLane({ exec = execFileSync, repo = null, root = REPO_ROOT, lane, dryRun = false }) {
+export function defaultReclaimLane({ exec = execFileSync, repo = null, root = REPO_ROOT, lane, dryRun = false, salvage = false }) {
   const argv = [join(root, 'scripts', 'lane-pool.mjs'), 'reclaim', `--lane=${lane}`, '--json'];
   const repoPath = resolveLanePoolRepoPath(repo);
   if (repoPath) argv.push(`--repo=${repoPath}`);
   if (dryRun) argv.push('--dry-run');
+  if (salvage) argv.push('--salvage');
   try {
-    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    // A salvage writes + verifies a git bundle first — give it a real budget (a kill mid-salvage leaves the lane
+    // untouched: the reset only ever runs after the bundle verified).
+    const timeout = salvage ? Math.max(resolveChildTimeoutMs(), 5 * 60_000) : resolveChildTimeoutMs();
+    const out = exec('node', argv, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 4 * 1024 * 1024, timeout, killSignal: 'SIGKILL' });
     const parsed = JSON.parse(String(out || 'null'));
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
@@ -410,7 +421,7 @@ export function defaultReclaimLane({ exec = execFileSync, repo = null, root = RE
  * @param {{whois:{lanes:Array<object>}|null, reclaimLane:Function, dryRun:boolean}} o
  * @returns {Array<{lane:number, reclaimed:boolean, wouldReclaim?:boolean, reason?:string}>}
  */
-export function reclaimFinishedLanes({ whois, reclaimLane, dryRun }) {
+export function reclaimFinishedLanes({ whois, reclaimLane, dryRun, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK }) {
   if (!whois || !Array.isArray(whois.lanes)) return [];
   const candidates = whois.lanes.filter((row) => row && row.exists && row.verdict === 'finished-reclaimable');
   const outcomes = [];
@@ -420,7 +431,45 @@ export function reclaimFinishedLanes({ whois, reclaimLane, dryRun }) {
       ? { lane: row.lane, ...result }
       : { lane: row.lane, reclaimed: false, reason: 'reclaim call unavailable this tick' });
   }
+  // SNAPSHOT-THEN-RECLAIM (2026-09-27 pool starvation: 74 of 90 lanes unleased-but-dirty, 0 acquirable). A
+  // `finished-needs-review` / `unknown-work` lane with no lease, no live owner and no operator `keep` is
+  // handed to `reclaim --salvage`, which re-checks liveness itself (live agent/process in the lane, quiet
+  // period), saves every unpreserved change durably (verified bundle + patch + index) and only then resets.
+  if (salvageEnabled) {
+    const salvageCandidates = planSalvageCandidates(whois.lanes).slice(0, Math.max(0, salvageMax));
+    for (const row of salvageCandidates) {
+      const result = reclaimLane({ lane: row.lane, dryRun, salvage: true });
+      outcomes.push(result
+        ? { lane: row.lane, salvageCandidate: true, ...result }
+        : { lane: row.lane, salvageCandidate: true, reclaimed: false, reason: 'salvage-reclaim call unavailable this tick' });
+    }
+  }
   return outcomes;
+}
+
+/** Env knobs for the salvage sub-pass: presence-disables, and a per-tick cap (each salvage writes a bundle). */
+export const SALVAGE_DISABLE_ENV_VAR = 'WE_LANE_POOL_SALVAGE_DISABLED';
+export const SALVAGE_MAX_ENV_VAR = 'WE_LANE_POOL_SALVAGE_MAX_PER_TICK';
+export const DEFAULT_SALVAGE_MAX_PER_TICK = 20;
+/** Below this many acquirable lanes, the tick raises a low-pool ALERT line (env override). */
+export const LOW_WATER_ENV_VAR = 'WE_LANE_POOL_LOW_WATER';
+export const DEFAULT_LOW_WATER = 5;
+
+/** PURE: which whois rows the salvage sub-pass may try — unleased, not live-owned, not operator-kept, and
+ *  carrying content the plain reclaim path refuses. Oldest-numbered first (deterministic). */
+export function planSalvageCandidates(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((row) => row && row.exists && !row.lease && !row.liveOwner && !row.holderAlive && !row.kept
+      && !(row.lastHolder && row.lastHolder.liveOwner)
+      && (row.verdict === 'finished-needs-review' || row.verdict === 'unknown-work'))
+    .sort((a, b) => a.lane - b.lane);
+}
+
+/** PURE: the low-pool alert line, or `null` when the pool has at least `lowWater` acquirable lanes. */
+export function lowPoolAlert(health, lowWater = DEFAULT_LOW_WATER) {
+  if (!health || !(health.acquirable < lowWater)) return null;
+  return `ALERT: lane pool low — ${health.acquirable} acquirable (< ${lowWater}) of ${health.total}: ` +
+    `${health.leased} leased, ${health.dirtyUnleased} dirty unleased`;
 }
 
 /**
@@ -452,7 +501,8 @@ export function watchLanePoolHealth({
   reap = cleanLaneLitter, isLeasedNow = defaultIsLeasedNow, dryRun = false,
   trimPool = defaultTrimPool, trimMax = null, listAcquirable = defaultListAcquirable,
   listWhois = defaultListWhois, reclaimLane = defaultReclaimLane, reclaimEnabled = true,
-  writeFreeLaneList = defaultWriteFreeLaneList,
+  writeFreeLaneList = defaultWriteFreeLaneList, salvageEnabled = false, salvageMax = DEFAULT_SALVAGE_MAX_PER_TICK,
+  lowWater = DEFAULT_LOW_WATER, retention = null,
 } = {}) {
   const status = listStatus({ repo, root });
   const lanes = status.lanes.map((l) => (
@@ -500,10 +550,46 @@ export function watchLanePoolHealth({
   let reclaim = null;
   if (reclaimEnabled) {
     const whois = listWhois({ repo, root });
-    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun });
+    const outcomes = reclaimFinishedLanes({ whois, reclaimLane: (o) => reclaimLane({ repo, root, dryRun, ...o }), dryRun, salvageEnabled, salvageMax });
     reclaim = { verdicts: whois, outcomes };
   }
-  return { health: summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers), plan, reaped, dryRun, trim, reclaim, freeLaneList };
+  const health = summarizeHealth(lanes, plan, reaped, acquirableLaneNumbers);
+  const retained = typeof retention === 'function' && status.root
+    ? retention({ poolDir: status.root, pool: basename(status.root), dryRun })
+    : null;
+  return { health, alert: lowPoolAlert(health, lowWater), plan, reaped, dryRun, trim, reclaim, freeLaneList, retention: retained };
+}
+
+/** Presence-checked env knob that turns OFF the retention sub-pass (salvage-index refresh/expiry, backfill,
+ *  pool-leftover sweep). */
+export const RETENTION_DISABLE_ENV_VAR = 'WE_LANE_POOL_RETENTION_DISABLED';
+
+/**
+ * The retention sub-pass. Best-effort: never throws (one bad step never stops the others or the tick).
+ * @returns {{backfilled:number, salvage:object|null, leftovers:object|null, errors:string[]}}
+ */
+export function defaultRetention({ poolDir, pool, dryRun = false, salvageRoot = resolveSalvageRoot(), dispatchRoot = null } = {}) {
+  const errors = [];
+  let backfilled = 0;
+  // Hand-made salvage dirs sit directly under the salvage root as `<YYYYMMDD-HHMM[SS]>/lane-N.bundle`.
+  if (!dryRun && pool === 'web-everything') {
+    try {
+      for (const d of readdirSyncFs(salvageRoot).filter((x) => /^\d{8}-\d{4,6}$/.test(x))) {
+        backfilled += backfillSalvageDir({
+          dir: join(salvageRoot, d), pool, root: salvageRoot,
+          laneDirFor: (n) => join(poolDir, `lane-${n}`),
+          readLastHolder: (n) => { try { return lastLaneHistoryEntry(readLaneHistory(join(poolDir, `lane-${n}`))); } catch { return null; } },
+        }).length;
+      }
+    } catch (e) { if (e?.code !== 'ENOENT') errors.push(`backfill: ${String(e?.message || e).split('\n')[0]}`); }
+  }
+  let salvage = null;
+  try { salvage = refreshSalvageIndex({ root: salvageRoot, dryRun }); } catch (e) { errors.push(`salvage-index: ${String(e?.message || e).split('\n')[0]}`); }
+  let leftovers = null;
+  try {
+    leftovers = sweepPoolLeftovers({ poolDir, pool, dryRun, salvageRoot, dispatchRoot, liveAgents: dispatchRoot ? readAgentsStrict() : null });
+  } catch (e) { errors.push(`leftovers: ${String(e?.message || e).split('\n')[0]}`); }
+  return { backfilled, salvage, leftovers, errors };
 }
 
 /**
@@ -519,7 +605,14 @@ export function runLanePoolHealthWatch({ env = process.env, ...opts } = {}) {
   // silently run anyway, contradicting the "any value" contract documented on `DISABLE_ENV_VAR` above.
   if (env[DISABLE_ENV_VAR] !== undefined) return { disabled: true };
   const reclaimEnabled = env[RECLAIM_DISABLE_ENV_VAR] === undefined && opts.reclaimEnabled !== false;
-  return watchLanePoolHealth({ ...opts, reclaimEnabled });
+  const salvageEnabled = reclaimEnabled && env[SALVAGE_DISABLE_ENV_VAR] === undefined && opts.salvageEnabled !== false;
+  const maxN = Number(env[SALVAGE_MAX_ENV_VAR]);
+  const salvageMax = Number.isInteger(maxN) && maxN >= 0 ? maxN : DEFAULT_SALVAGE_MAX_PER_TICK;
+  const lw = Number(env[LOW_WATER_ENV_VAR]);
+  const lowWater = Number.isInteger(lw) && lw >= 0 ? lw : DEFAULT_LOW_WATER;
+  // Retention is opt-in per caller (the CLI below wires the real one) so no test ever touches the real salvage store.
+  const retention = env[RETENTION_DISABLE_ENV_VAR] === undefined && typeof opts.retention === 'function' ? opts.retention : null;
+  return watchLanePoolHealth({ salvageMax, lowWater, ...opts, reclaimEnabled, salvageEnabled, retention });
 }
 
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
@@ -531,15 +624,17 @@ if (IS_CLI) {
   const maxFlag = flag('max');
   const trimMax = maxFlag !== undefined && Number.isInteger(Number(maxFlag)) ? Number(maxFlag) : null;
   try {
-    const result = runLanePoolHealthWatch({ repo, dryRun, trimMax });
+    const retention = (o) => defaultRetention({ ...o, dispatchRoot: join(dirname(REPO_ROOT), '.operations', 'dispatch') });
+    const result = runLanePoolHealthWatch({ repo, dryRun, trimMax, retention });
     if (result.disabled) {
       process.stderr.write(`  lane-pool-health-watch: disabled (${DISABLE_ENV_VAR} set)\n`);
     } else {
-      const { health, plan, reaped, trim, reclaim, freeLaneList } = result;
+      const { health, plan, reaped, trim, reclaim, freeLaneList, alert } = result;
       process.stderr.write(
         `  pool health: ${health.acquirable} acquirable · ${health.dirtyUnleased} dirty(unleased) · ` +
           `${health.leased} leased · ${health.total} total\n`,
       );
+      if (alert) process.stderr.write(`  ${alert}\n`);
       // #4122 — `null` covers three different ticks (dry-run, real-read-unavailable, a write failure); this
       // report line does not need to tell them apart (each already logs its own signal above/below), only
       // whether `acquire` has a fresh list to read after this tick.
@@ -576,18 +671,43 @@ if (IS_CLI) {
       } else if (!reclaim.verdicts) {
         process.stderr.write('  lane reclaim: whois scan unavailable this tick (best-effort — see any error above)\n');
       } else {
-        const done = reclaim.outcomes.filter((o) => o.reclaimed);
-        const would = reclaim.outcomes.filter((o) => o.wouldReclaim);
-        const refused = reclaim.outcomes.filter((o) => !o.reclaimed && !o.wouldReclaim);
+        const plain = reclaim.outcomes.filter((o) => !o.salvageCandidate);
+        const done = plain.filter((o) => o.reclaimed);
+        const would = plain.filter((o) => o.wouldReclaim);
+        const refused = plain.filter((o) => !o.reclaimed && !o.wouldReclaim);
         process.stderr.write(
-          `  lane reclaim: ${reclaim.outcomes.length} finished-reclaimable candidate(s) → ` +
+          `  lane reclaim: ${plain.length} finished-reclaimable candidate(s) → ` +
             `${dryRun ? `${would.length} would reclaim` : `${done.length} reclaimed`}` +
             `${refused.length ? `, ${refused.length} refused (preservation re-check failed)` : ''}\n`,
         );
-        for (const o of reclaim.outcomes) {
+        for (const o of plain) {
           if (o.reclaimed || o.wouldReclaim) continue;
           process.stderr.write(`    lane-${o.lane}: NOT reclaimed — ${o.reason}\n`);
         }
+        const salv = reclaim.outcomes.filter((o) => o.salvageCandidate);
+        if (salv.length) {
+          const ok = salv.filter((o) => (dryRun ? o.wouldSalvage || o.wouldReclaim : o.reclaimed));
+          process.stderr.write(`  lane salvage: ${salv.length} candidate(s) → ${ok.length} ${dryRun ? 'would be salvaged+reset' : 'salvaged+reset'}, ${salv.length - ok.length} kept\n`);
+          for (const o of salv) {
+            if (o.salvaged) process.stderr.write(`    lane-${o.lane}: salvaged-to ${o.salvage?.bundle || o.salvage?.outDir || '?'} → reset\n`);
+            else if (o.reclaimed) process.stderr.write(`    lane-${o.lane}: reset — content already on a remote ref, nothing to salvage (${o.reason || ''})\n`);
+            else if (o.wouldSalvage) process.stderr.write(`    lane-${o.lane}: would salvage → reset (${o.reason || ''})\n`);
+            else if (dryRun && o.wouldReclaim) process.stderr.write(`    lane-${o.lane}: would reset — content already on a remote ref (${o.reason || ''})\n`);
+            else process.stderr.write(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
+          }
+        }
+      }
+    }
+    if (!result.disabled && result.retention) {
+      const { backfilled, salvage, leftovers, errors } = result.retention;
+      const mb = (b) => `${(b / 1024 / 1024).toFixed(1)} MB`;
+      process.stderr.write(
+        `  retention: ${backfilled} manual salvage(s) backfilled; salvage index ${salvage ? `${salvage.landed.length} newly landed, ${salvage.expired.length} ${dryRun ? 'would expire' : 'expired'} (${mb(salvage.bytesFreed)})` : 'unavailable'}; ` +
+          `pool leftovers ${leftovers ? `${leftovers.actions.filter((a) => a.action !== 'keep').length} ${dryRun ? 'would be cleaned' : 'cleaned'} (${mb(leftovers.bytesFreed)}), ${leftovers.actions.filter((a) => a.action === 'keep').length} kept, ${leftovers.prunedLanes} lane(s) worktree-pruned, ${leftovers.dispatchRemoved} dispatch scratch dir(s)` : 'unavailable'}` +
+          `${errors.length ? ` — errors: ${errors.join('; ')}` : ''}\n`,
+      );
+      for (const a of leftovers?.actions ?? []) {
+        process.stderr.write(`    ${a.name}: ${a.action}${a.error ? ` FAILED (${a.error})` : ''} — ${a.reason}${a.bytes ? ` [${mb(a.bytes)}]` : ''}\n`);
       }
     }
     process.stdout.write(`${JSON.stringify({ checked: true, ...result })}\n`);

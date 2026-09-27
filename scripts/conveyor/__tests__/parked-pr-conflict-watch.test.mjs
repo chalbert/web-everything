@@ -47,6 +47,8 @@ import {
   REARM_DEFERRED_MARKER,
   REARM_DEFERRED_MARKER_RE,
   firstRearmDeferredCreatedAtMs,
+  narrowToConflictingFiles,
+  isWatcherMarkerAlreadySuperseded,
 } from '../parked-pr-conflict-watch.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -2944,5 +2946,313 @@ describe('watchParkedPrConflicts — the append-only statute exception (#3383)',
       listPrPatches: () => { called = true; return {}; },
     });
     expect(called).toBe(false);
+  });
+});
+
+// #xconflres1 — LIVE INCIDENT, chalbert/web-everything#2772, 2026-09-27: the whole-diff `isStatuteTierConflict`
+// heuristic stood a QUEUED, `ready-to-merge`/`review:accepted` PR down as a "genuine same-line conflict, human
+// judgment needed" solely because its diff ALSO touched `scripts/lib/__tests__/gate-invariants.test.mjs` (a
+// POLICY_SPEC/declarative-leash basename) — a file with NO conflict at all. A real, read-only
+// `git merge-tree --write-tree origin/main origin/lane/fix-gh-shim-stable-path` against the PR's own real refs
+// (no writes) resolved the ONE actually-conflicting path as `scripts/conveyor/health-smells/index.mjs`, an
+// ordinary ENGINE-tier file — a purely mechanical rebase/resolve, never a principle-drafting judgment call. These
+// tests pin the fix: `classifyStatuteConflict` now narrows to {@link defaultConflictingFilePaths}'s own
+// git-level conflict-path list wherever the probe succeeds, at every one of its three call sites, and a queued
+// PR the (now-corrected) narrower check re-classifies as dispatchable has its EARLIER, watcher-authored
+// stand-down explicitly superseded — mechanically picking a false-positive stand-down like #2772's back up, with
+// no separate re-arm step.
+describe('#xconflres1 — statute-tier classification narrows to the ACTUALLY-conflicting file(s)', () => {
+  const L = (...n) => n.map((name) => ({ name }));
+  const fakeProvider = () => {
+    const calls = [];
+    return {
+      calls,
+      ensureLabel: (repo, name) => { calls.push(['ensureLabel', repo, name]); },
+      setLabels: (repo, pr, spec) => { calls.push(['setLabels', repo, pr, spec]); },
+      postComment: (repo, pr, body) => { calls.push(['postComment', repo, pr, body]); },
+    };
+  };
+  // The exact live shape: BOTH a statute-tier basename (present, unconflicted) and an ordinary engine-tier file
+  // (the real conflict) in the same diff.
+  const mixedFiles = () => [
+    { path: 'scripts/lib/__tests__/gate-invariants.test.mjs' },
+    { path: 'scripts/conveyor/health-smells/index.mjs' },
+  ];
+  const onlyRealConflictPath = ['scripts/conveyor/health-smells/index.mjs'];
+
+  it('graceDue (queued PR, real conflict): a statute-tier file present but NOT conflicting is no longer stood down', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(routed).toEqual([['finding', 2772]]); // dispatched to the fixer — never stood down
+  });
+
+  it('graceDue: WITHOUT the narrowing (computeConflictingPaths → null, probe failed) the SAME PR still stands down — pins the safe fallback', () => {
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => null, // unreadable — the pre-#xconflres1 behaviour
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('graceDue: an EMPTY conflictingPaths result is treated exactly like null (never narrows to "nothing conflicts")', () => {
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => [],
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('graceDue: a PRIOR watcher stand-down (the false-positive #2772 already posted) is SUPERSEDED, not left contradicting the new dispatch', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-27T01:44:54Z', author: { login: 'web-everything' } };
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [priorStandDown],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (no longer statute-tier — #xconflres1, marker superseded, after drain grace)');
+    expect(r.supersededStandDown).toBe(true);
+    expect(routed).toEqual([['finding', 2772]]); // never re-stood-down
+    const superseded = provider.calls.find((c) => c[0] === 'postComment');
+    expect(superseded?.[3]).toContain(SUPERSEDE_STAND_DOWN_MARKER);
+  });
+
+  it('graceDue: with NO prior stand-down on the thread, nothing is superseded (no spurious comment)', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2773, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (after drain grace)');
+    expect(r.supersededStandDown).toBeUndefined();
+    expect(provider.calls.find((c) => c[0] === 'postComment')).toBeUndefined();
+  });
+
+  it('fresh detection (first sighting): a statute-tier file present but not conflicting is dispatched, not stood down', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const listPrs = () => [{
+      number: 2768, mergeable: 'CONFLICTING', labels: L('review:pending'), files: mixedFiles(),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('reconcile-finding');
+    expect(routed).toEqual([['finding', 2768]]);
+  });
+
+  it('recheckCandidate (a review:human parked PR, previously stood down): narrowing to "no longer statute-tier" now supersedes and dispatches too', () => {
+    const provider = fakeProvider();
+    const routed = [];
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-20T00:00:00Z', author: { login: 'web-everything' } };
+    const listPrs = () => [{
+      number: 2549, mergeable: 'CONFLICTING', labels: L('review:human', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider,
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: () => routed.push(['stand-down']),
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [priorStandDown],
+    });
+    expect(r.routedTo).toBe('reconcile-finding (no longer statute-tier — #xconflres1, marker superseded)');
+    expect(r.supersededStandDown).toBe(true);
+    expect(routed).toEqual([['finding', 2549]]);
+  });
+
+  // Review round 1 (PR #2791): a conflict path that does not literally match any changed file must fall back to
+  // the whole-diff check, never narrow to "nothing statute-tier conflicts".
+  it('graceDue: a conflict path that matches NO changed file (a rename reported under its OLD path) falls back to the whole diff and stands down', () => {
+    const routed = [];
+    const listPrs = () => [{
+      number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL),
+    }];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n', listPrs, provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      // merge-tree names the statute file's pre-rename path; GitHub lists only the new one.
+      computeConflictingPaths: () => ['scripts/lib/__tests__/gate-invariants-old.test.mjs'],
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('narrowToConflictingFiles: a C-quoted merge-tree path (non-ASCII) never silently narrows to a smaller set', () => {
+    const files = [{ path: 'docs/wëird name.md' }, { path: 'scripts/conveyor/health-smells/index.mjs' }];
+    // What real `git merge-tree` prints for that path, verbatim.
+    const quoted = ['"docs/w\\303\\253ird name.md"', 'scripts/conveyor/health-smells/index.mjs'];
+    expect(narrowToConflictingFiles(files, quoted)).toBe(files);
+    expect(narrowToConflictingFiles(files, ['"docs/w\\303\\253ird name.md"'])).toBe(files);
+    // The exact-match case still narrows.
+    expect(narrowToConflictingFiles(files, ['scripts/conveyor/health-smells/index.mjs']))
+      .toEqual([{ path: 'scripts/conveyor/health-smells/index.mjs' }]);
+    // null / empty / non-array never narrow.
+    expect(narrowToConflictingFiles(files, null)).toBe(files);
+    expect(narrowToConflictingFiles(files, [])).toBe(files);
+  });
+
+  // Review round 1 (PR #2791, codex-correctness): a failed supersede must leave a retry path. The finding strips
+  // the queued labels, so a finding posted before a failed supersede would strand the PR behind its old
+  // stand-down with nothing ever picking it up again.
+  it('graceDue retries superseding across sweeps when the supersede post fails (two-sweep fault injection)', () => {
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-27T01:44:54Z', author: { login: 'web-everything' } };
+    const thread = [priorStandDown];
+    let labels = L('review:accepted', 'ready-to-merge', CONFLICT_LABEL);
+    const routed = [];
+    let failSupersede = true;
+    const sweep = () => watchParkedPrConflicts({
+      repo: 'o/n',
+      listPrs: () => [{ number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels }],
+      provider: fakeProvider(),
+      postFinding: (o) => {
+        routed.push(['finding', o.pr.number]);
+        labels = L('review:changes', CONFLICT_LABEL); // what the real bounce does: the PR stops being queued
+      },
+      postStandDown: () => routed.push(['stand-down']),
+      postSupersedeComment: () => {
+        if (failSupersede) throw new Error('gh: 502');
+        thread.push({ body: buildSupersedeStandDownComment({ number: 2772 }), author: { login: 'web-everything' } });
+      },
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [...thread],
+    });
+
+    const [first] = sweep();
+    expect(first.error).toMatch(/502/);
+    expect(first.supersededStandDown).toBeUndefined();
+    expect(routed).toEqual([]); // no finding went out, so the PR is still queued and the next sweep retries
+    expect(labels.map((l) => l.name)).toContain('review:accepted');
+
+    failSupersede = false;
+    const [second] = sweep();
+    expect(second.supersededStandDown).toBe(true);
+    expect(routed).toEqual([['finding', 2772]]);
+    expect(isWatcherMarkerAlreadySuperseded(thread)).toBe(true);
+  });
+
+  it('graceDue: a finding that fails AFTER a good supersede is retried alone next sweep (no second supersede)', () => {
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-27T01:44:54Z', author: { login: 'web-everything' } };
+    const thread = [priorStandDown];
+    let supersedes = 0;
+    const routed = [];
+    let failFinding = true;
+    const sweep = () => watchParkedPrConflicts({
+      repo: 'o/n',
+      listPrs: () => [{ number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL) }],
+      provider: fakeProvider(),
+      postFinding: (o) => { if (failFinding) throw new Error('gh: 502'); routed.push(['finding', o.pr.number]); },
+      postStandDown: () => routed.push(['stand-down']),
+      postSupersedeComment: () => { supersedes += 1; thread.push({ body: buildSupersedeStandDownComment({ number: 2772 }) }); },
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [...thread],
+    });
+    const [first] = sweep();
+    expect(first.error).toMatch(/502/);
+    failFinding = false;
+    const [second] = sweep();
+    expect(second.error).toBeUndefined();
+    expect(routed).toEqual([['finding', 2772]]);
+    expect(supersedes).toBe(1);
+  });
+
+  it('graceDue: a SUPERSEDED watcher stand-down does not silence a fresh one when the conflict turns human-only again', () => {
+    const thread = [
+      { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-27T01:44:54Z', viewerDidAuthor: true, author: { login: 'web-everything' } },
+      { body: buildSupersedeStandDownComment({ number: 2772 }), createdAt: '2026-09-27T02:00:00Z', viewerDidAuthor: true, author: { login: 'web-everything' } },
+    ];
+    const routed = [];
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n',
+      listPrs: () => [{ number: 2772, mergeable: 'CONFLICTING', baseRefName: 'main', labels: L('review:accepted', 'ready-to-merge', CONFLICT_LABEL) }],
+      provider: fakeProvider(),
+      postFinding: (o) => routed.push(['finding', o.pr.number]),
+      postStandDown: (o) => routed.push(['stand-down', o.pr.number]),
+      computeConflictDisposition: () => 'real',
+      computeConflictingPaths: () => ['scripts/lib/__tests__/gate-invariants.test.mjs'], // the statute file now conflicts
+      listPrFiles: () => mixedFiles(),
+      listPrPatches: () => ({}),
+      listPrComments: () => [...thread],
+    });
+    expect(r.routedTo).toBe('stand-down (after drain grace)');
+    expect(routed).toEqual([['stand-down', 2772]]);
+  });
+
+  it('recheckCandidate: a failed supersede is not reported as superseded', () => {
+    const priorStandDown = { body: buildStandDownComment({ reason: 'conflict', actor: WATCHER_STAND_DOWN_ACTOR }), createdAt: '2026-09-20T00:00:00Z', author: { login: 'web-everything' } };
+    const [r] = watchParkedPrConflicts({
+      repo: 'o/n',
+      listPrs: () => [{ number: 2549, mergeable: 'CONFLICTING', labels: L('review:human', CONFLICT_LABEL) }],
+      provider: fakeProvider(),
+      postFinding: () => {},
+      postStandDown: () => {},
+      postSupersedeComment: () => { throw new Error('gh: 502'); },
+      computeConflictingPaths: () => onlyRealConflictPath,
+      listPrFiles: () => mixedFiles(),
+      listPrComments: () => [priorStandDown],
+    });
+    expect(r.supersededStandDown).toBeUndefined();
   });
 });

@@ -486,6 +486,15 @@ export function refOid(originPath, ref) {
   return res.status === 0 ? res.stdout.trim() : null;
 }
 
+/** Mirror real GitHub's `refs/pull/<n>/head` on the origin, so a daemon that fetches a PR by NUMBER
+ *  (`we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef`) resolves it here as it does live. Best-effort;
+ *  only re-written when the head moved since the last publish. */
+export function publishPullRef(originPath, pr, oid) {
+  if (!oid || pr.pullRefOid === oid) return;
+  const res = spawnSync('git', ['update-ref', `refs/pull/${pr.number}/head`, oid], { cwd: originPath, encoding: 'utf8' });
+  if (res.status === 0) pr.pullRefOid = oid;
+}
+
 /** `git merge-tree --write-tree <base> <head>` — exit 0 = clean merge (stdout's first line is the resulting
  *  tree oid), exit 1 = CONFLICTING, anything else = an error this fixture did not expect. See the design doc
  *  ("mergeable via `git merge-tree --write-tree`") — measured against git 2.50 to confirm this exit-code
@@ -632,6 +641,7 @@ export function buildPrGraphqlView(repoState, pr, { originPath, callerActor, fie
   if (needHeadOid) {
     const liveHeadOid = refOid(originPath, pr.headRefName);
     if (liveHeadOid) pr.lastKnownHeadRefOid = liveHeadOid; // best-effort remember-last, see design doc point 3
+    publishPullRef(originPath, pr, liveHeadOid);
     headOid = liveHeadOid || pr.lastKnownHeadRefOid;
   }
   const baseOid = needBaseOid ? refOid(originPath, pr.baseRefName) : null;
@@ -765,6 +775,7 @@ export function createFakeGithub({ root, repos, actor = 'we-daemon-bot' }) {
         }
         const headOid = refOid(repoState.originPath, head);
         const pr = openPrPure(repoState, { head, base, title, body, labels, author, isDraft, checks, headRefOid: headOid });
+        publishPullRef(repoState.originPath, pr, headOid);
         return pr.number;
       });
     },

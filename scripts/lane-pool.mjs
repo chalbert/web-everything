@@ -117,7 +117,7 @@ import { readField } from './backlog/frontmatter.mjs';
 // so a lane can be traced back to the session/card/PR that used it AFTER its lease is released (today nothing
 // records that — see `scripts/lane-whois.mjs`, the reader). Lives in its OWN module (another worker owns this
 // file for PR #2606 concurrently) — the four call sites below are the only hook points.
-import { appendLaneHistory, laneHistoryEntry } from './lib/lane-history.mjs';
+import { appendLaneHistory, laneHistoryEntry, readLaneHistory, lastLaneHistoryEntry } from './lib/lane-history.mjs';
 // #3568 — the shared known-safe-scratch-litter allowlist + cleanup core, reused verbatim by the periodic
 // `we:scripts/conveyor/lane-pool-health-watch.mjs` pass so the two never diverge into two separately-maintained
 // lists. Side-effect-free at import (no top-level dispatch), like every other `./lib/*.mjs` import above.
@@ -133,6 +133,11 @@ import { cleanLaneLitter, planLitterCleanup } from './lib/lane-litter.mjs';
 // import" shape `we:scripts/operations/operator-queue.mjs`'s own header warns about (that warning is about
 // importing `lane-pool.mjs` itself elsewhere — the OPPOSITE direction from this import).
 import { gitStatusSummary, aheadCommits, aheadCommitsPreserved, lanePreservedFileChecker } from './lane-whois.mjs';
+import { guessCardIds } from './lib/lane-whois-core.mjs';
+import {
+  salvageLane, removeLitterWorktrees, listLitterWorktrees, salvageEligibility, readLiveCwds, pidsWithCwdIn,
+  newestContentMtimeMs, resolveSalvageQuietMs, readAgentsStrict, liveAgentInLane,
+} from './lib/lane-salvage.mjs';
 // #x5n4zn3 — the SAME shared budget policy `we:scripts/lib/bounded-child.mjs`'s async `runBounded` rollout
 // uses elsewhere (dispatch-plan.mjs's collectors), reused here for its CONSTANTS only (`resolveChildTimeoutMs`
 // / the `WE_CHILD_TIMEOUT_MS` env knob), NOT its async primitive — see the `git`/`gitQuiet` header comment
@@ -3417,6 +3422,15 @@ function cmdReclaim(repo) {
   }
 
   const proof = laneReclaimPreservationProof(dir, repo.branch);
+  // SNAPSHOT-THEN-RECLAIM (`--salvage`): content that is NOT provably on a remote ref is saved durably first
+  // (bundle + patch + refs/salvage/*, indexed) and only then reset — see `we:scripts/lib/lane-salvage.mjs`.
+  // Its own liveness gate (no live owner session, no process cwd inside the lane, quiet period) runs here,
+  // fresh, on every call. `--override` stays the separate human-only escape hatch and is never combined.
+  const hasLitterWorktrees = (() => { try { return listLitterWorktrees(dir).length > 0; } catch { return false; } })();
+  if ((!proof.preserved || hasLitterWorktrees) && flags.salvage && !override) {
+    cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof });
+    return;
+  }
   if (!proof.preserved && !override) {
     log(`  lane-${n}: NOT reclaimed — ${proof.reason}`);
     if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: false, ...proof }, null, 2)}\n`);
@@ -3479,6 +3493,96 @@ function cmdReclaim(repo) {
   rmSync(file, { force: true }); // back to the free-pool state — the same end state a normal `release` leaves
   log(`  lane-${n}: reclaimed${overriding ? ' (OVERRIDE, #4139 — operator call)' : ''} — reset to origin/${repo.branch} (${reproof.reason})`);
   if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, reclaimed: true, override: overriding, ...reproof }, null, 2)}\n`);
+}
+
+/**
+ * `reclaim --lane=N --salvage [--dry-run]` — the snapshot-then-reclaim path for a lane whose content is NOT
+ * provably preserved (`finished-needs-review` / `unknown-work`). Order: liveness gate → claim the lease
+ * marker → re-check the gate under the hold → salvage (bundle verified to carry every salvage ref) → remove
+ * litter worktrees → reset + clean → release. Any failure before the reset hands the lane back untouched.
+ */
+function cmdReclaimSalvage(repo, { n, dir, dryRun, lease, proof }) {
+  const out = (obj) => { if (flags.json) process.stdout.write(`${JSON.stringify({ lane: n, path: dir, dryRun, ...obj }, null, 2)}\n`); };
+  const gate = () => {
+    const last = lastLaneHistoryEntry(readLaneHistory(dir)) || {};
+    const agents = readAgentsStrict();
+    const cwds = readLiveCwds();
+    if (agents === null || cwds === null) {
+      return { eligible: false, last, reason: `cannot read ${agents === null ? '`claude agents`' : 'live process cwds (lsof)'} — never salvaging blind` };
+    }
+    const liveOwner = liveAgentInLane(agents, dir, [last.ownerSession, last.workerSession, last.session]);
+    const livePids = pidsWithCwdIn(cwds, dir);
+    let newestMtimeMs = null;
+    try { newestMtimeMs = newestContentMtimeMs(dir); } catch { newestMtimeMs = Date.now(); }
+    const verdict = salvageEligibility({
+      leased: false, liveOwner, livePids, newestMtimeMs, nowMs: Date.now(), quietMs: resolveSalvageQuietMs(),
+    });
+    return { ...verdict, last };
+  };
+  const g = gate();
+  if (!g.eligible) {
+    log(`  lane-${n}: KEPT (not salvaged) — ${g.reason}`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: g.reason, ...proof });
+    return;
+  }
+  if (dryRun) {
+    log(`  lane-${n}: WOULD salvage then reclaim — ${proof.reason}`);
+    out({ reclaimed: false, wouldReclaim: true, wouldSalvage: true, ...proof });
+    return;
+  }
+  const file = LEASE_MARKER(dir);
+  const session = `lane-pool-salvage-${process.pid}-${randomBytes(4).toString('hex')}`;
+  const body = `${JSON.stringify(leaseBody({
+    session, purpose: 'lane-pool-salvage', acquiredAt: new Date().toISOString(),
+    host: hostname(), pid: process.pid, ownerSession: process.env.CLAUDE_CODE_SESSION_ID || null,
+  }), null, 2)}\n`;
+  if (lease && !takeMarkerIf(dir, (moved) => sameLease(moved, lease), n)) {
+    fail(`lane-${n}: its lease changed between the read above and the claim attempt — not reclaimed, safe to retry`);
+  }
+  try { writeFileSync(file, body, { flag: 'wx' }); } catch {
+    fail(`lane-${n}: a lease appeared between the read above and the claim attempt — not reclaimed, safe to retry`);
+  }
+  const giveBack = () => takeMarkerIf(dir, (moved) => moved?.session === session, n);
+  const g2 = gate();
+  if (!g2.eligible) {
+    giveBack();
+    log(`  lane-${n}: KEPT (not salvaged) — ${g2.reason} (re-checked under the hold)`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: g2.reason });
+    return;
+  }
+  let salvage;
+  try {
+    salvage = salvageLane({
+      dir, lane: n, pool: basename(repo.poolDir), branchRef: `origin/${repo.branch}`,
+      reason: proof.reason,
+      meta: {
+        lastHolder: g2.last,
+        // The same content-based card guess `lane-whois.mjs` uses (dirty backlog paths, HEAD subject, branch).
+        cards: (() => {
+          try {
+            const { trackedModifiedPaths, untrackedPaths } = gitStatusSummary(dir);
+            // HEAD's subject only names THIS lane's work when HEAD is not already on origin (else it is main's tip).
+            const ahead = Number(execFileSync('git', ['rev-list', '--count', `origin/${repo.branch}..HEAD`], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()) || 0;
+            const subject = ahead ? execFileSync('git', ['log', '-1', '--format=%s'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() : '';
+            const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+            return guessCardIds({ paths: [...trackedModifiedPaths, ...untrackedPaths], commitSubject: subject, branch });
+          } catch { return []; }
+        })(),
+      },
+    });
+  } catch (e) {
+    giveBack();
+    log(`  lane-${n}: KEPT — salvage failed, lane untouched (${String(e?.message || e).split('\n')[0]})`);
+    out({ reclaimed: false, salvaged: false, kept: true, keptReason: `salvage failed: ${String(e?.message || e).split('\n')[0]}` });
+    return;
+  }
+  const removedWorktrees = removeLitterWorktrees(dir, salvage.worktrees);
+  execFileSync('git', ['reset', '--hard', `origin/${repo.branch}`], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
+  execFileSync('git', ['clean', '-fd'], { cwd: dir, stdio: 'ignore', ...defaultGitTimeoutOpt() });
+  rmSync(file, { force: true });
+  log(`  lane-${n}: salvaged-to ${salvage.bundle || '(nothing unique — patch/index only)'} [${salvage.refs.join(', ') || 'no refs'}]` +
+    `${removedWorktrees.length ? `, removed worktree(s) ${removedWorktrees.join(', ')}` : ''} — reset to origin/${repo.branch}`);
+  out({ reclaimed: true, salvaged: true, salvage: { bundle: salvage.bundle, outDir: salvage.outDir, refs: salvage.refs, cards: salvage.cards, prs: salvage.prs }, removedWorktrees });
 }
 
 // ── keep (#4139) — record "I looked at this queued lane, leave it" so it stops resurfacing ─────────
@@ -3617,7 +3721,7 @@ const KNOWN_FLAGS = new Set([
   'owner-session',
   // #4139 — reclaim's operator override (explicit, logged, never automatic — see cmdReclaim's own docblock),
   // and keep's free-text reason.
-  'override', 'reason',
+  'override', 'reason', 'salvage',
   // #4122 — acquire's free-lane-list fast-path knobs (see `we:scripts/lib/free-lane-list.mjs`'s own header).
   'no-free-list', 'free-list-max-age-ms',
 ]);
@@ -3654,7 +3758,9 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
       '  # reclaim --lane=N [--dry-run] [--override] [--json]: reset ONE unleased lane to origin/<branch>, only once this call\'s ' +
       'OWN re-check proves every uncommitted/ahead change is still provably preserved (#3383 gap 2 — the mutation ' +
       'half of lane-whois.mjs\'s finished-reclaimable verdict); --override (#4139) forces past that gate for a ' +
-      'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic\n' +
+      'finished-needs-review lane the operator reviewed by eye — explicit, logged, never automatic; --salvage snapshots ' +
+      'unpreserved content (bundle + patch + refs/salvage/*, indexed under ~/.claude/lane-salvage) THEN resets, only ' +
+      'when no live owner/process is in the lane and it has been quiet (WE_LANE_SALVAGE_QUIET_MIN, default 30)\n' +
       '  # keep --lane=N [--reason=<text>] [--json]: record "I looked at this lane, leave it" so operator-queue\'s ' +
       'LANE RECLAIM section excludes it until its content changes (#4139)\n',
   );

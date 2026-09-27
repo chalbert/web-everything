@@ -108,6 +108,7 @@ import { CONSTELLATION_REPOS, repoKeyForSlug } from '../../scripts/lib/constella
 import { forEachRepo } from '../../scripts/lib/for-each-repo.mjs';
 import { withGithubAppAuth } from '../../scripts/lib/github-app-auth-env.mjs';
 import { withSelfSync } from '../../scripts/lib/daemon-self-sync.mjs';
+import { makePoolExhaustionLogger } from '../../scripts/conveyor/pool-exhaustion.mjs';
 import { isStaleMainRefusalMessage } from '../../scripts/lib/main-staleness.mjs';
 import {
   RUNNER_LOCK_ROOT, makeOwner,
@@ -216,6 +217,10 @@ export function runReviewTick({
   statusCandidates = selectStatusCandidates,
   holdReconcile = sweepReviewHoldLabels,
   acquirableLanes = () => Infinity,
+  // Pool-exhaustion reporting: `{exhausted({repo, deferred}), recovered(repo)}` (see
+  // `we:scripts/conveyor/pool-exhaustion.mjs`). `null` (the default) keeps every existing test byte-identical;
+  // the real daemon wires a logger that says WHY the pool is empty once per episode, never a silent skip.
+  poolExhaustion = null,
   repo = WE_SLUG,
   // #4133 (epic #3383/#4075) — audit `we:reports/2026-09-24-daemon-blocking-antipatterns.md` finding R2: the
   // tick's OWN single `gh pr list` / `claude agents --json` reads, taken ONCE here and reused two ways —
@@ -323,6 +328,12 @@ export function runReviewTick({
   const dispatchable = reviews.slice(0, Math.min(reviews.length, acquirable));
   const deferredForLanes = paused ? 0 : reviews.length - dispatchable.length;
   const deferredForAuth = paused ? reviews.length - dispatchable.length : 0;
+  if (poolExhaustion && !paused) {
+    try {
+      if (acquirable === 0 && deferredForLanes > 0) poolExhaustion.exhausted({ repo, lanePoolRepo: poolExhaustionLanePoolRepo(repo), deferred: deferredForLanes });
+      else if (acquirable > 0) poolExhaustion.recovered(repo);
+    } catch { /* reporting only — never fails the tick */ }
+  }
   const dispatched = [];
   const failed = [];
   // x26lw6u — NOT named `skipped`: `withSelfSync` already returns `{skipped: true}` for a whole skipped tick,
@@ -617,6 +628,14 @@ export function defaultAcquirableLaneCount({ repo }) {
   return freeLaneNumbers({ lanePoolRepo: repoProfile(repo).lanePoolRepo }).length;
 }
 
+/** The lane-pool repo path for `repo` (the same derivation {@link defaultAcquirableLaneCount} uses). */
+function poolExhaustionLanePoolRepo(repo) {
+  try { return repoProfile(repo).lanePoolRepo ?? null; } catch { return null; }
+}
+
+/** One logger per daemon process — its once-per-episode memory must survive across ticks. */
+const DAEMON_POOL_EXHAUSTION = makePoolExhaustionLogger({ log: (line) => console.error(`review-daemon: ${line}`) });
+
 // ── IO SHELL (runs only as a CLI — owns the real lease + the real reconcile/dispatch/tag calls) ─────────────
 
 // Live-caught bug (this daemon's own first launchd-managed run, and the sibling #3870/pass-daemon.mjs
@@ -692,7 +711,8 @@ export function buildCliDaemonEffects({
   // `defaultReadPrs`/`defaultReadAgents` through; `runReviewTick`'s own default stays `null` (see that
   // function's own doc for why) so every pre-existing test of it is unaffected here too.
   runReview = (opts) => runReviewTickAllRepos({
-    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents, ...opts,
+    acquirableLanes: defaultAcquirableLaneCount, readPrs: defaultReadPrs, readAgents: defaultReadAgents,
+    poolExhaustion: DAEMON_POOL_EXHAUSTION, ...opts,
   }),
   // #xconv1 — the SAME shared-reads optimization `runReview` above opts into, wired the same way for its own
   // separate, additive async stage (see `runConvertAdvisoryTick`'s own doc for why this is not folded into

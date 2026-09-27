@@ -66,6 +66,7 @@
  * infra-blocked recovery / the lease-reaper / the session-reaper / the hiccup sink — best-effort, never gating
  * the tick.
  */
+import { withSalvageHint } from '../lib/salvage-index.mjs';
 import { repoKeyForSlug, CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { repoProfile, briefTokensForRepo } from '../lib/repo-profile.mjs';
 import { resolvePrWorkUnit, isSafeFallbackScopeEntry } from './pr-work-unit.mjs';
@@ -631,8 +632,11 @@ export function tryResumeFix(planned, {
   // outcome below (this attempt is bounded and synchronous — see hardening (2)'s own retry budget — so the
   // claim only needs to outlive THIS call, unlike `dispatchFix`'s claim, which protects a freshly spawned
   // session across the 26+s listing-lag window a fresh dispatch is actually exposed to).
+  // #x0jphk5 / dup-heal-dispatch — `kind: 'fix'` explicit: the claim key is `(repo, kind, pr)`, no longer
+  // `headSha` (see `fix-dispatch-claim.mjs`'s own header for the live incident that made keying on the head
+  // sha wrong — a still-live session's OWN push used to rotate its claim out from under it).
   const claim = acquireClaim({
-    repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -645,7 +649,7 @@ export function tryResumeFix(planned, {
       },
     };
   }
-  const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+  const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot });
 
   const resumeArgv = buildAgentArgv({
     payload: { prompt: buildResumePrompt({ pr: planned.pr, itemNum: planned.itemNum, cwd: candidateCwd }) },
@@ -781,9 +785,10 @@ export function dispatchFix(planned, {
   assertNotALaneCheckout(root);
 
   // #x0jphk5 — see this function's own docblock: acquire BEFORE building anything, refuse loud (never throw)
-  // when another dispatcher already holds this exact `(repo, pr, headRefOid)`.
+  // when another dispatcher already holds this exact `(repo, kind, pr)` — `kind: 'fix'` explicit (dup-heal-
+  // dispatch: `headSha` no longer part of the claim's identity, only carried as diagnostic `meta`).
   const claim = acquireClaim({
-    repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+    repo, pr: planned.pr, kind: 'fix', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
   });
   if (!claim.ok) {
     return {
@@ -818,7 +823,7 @@ export function dispatchFix(planned, {
     const sessionCwd = ensureSessionCwd(sessionCwdFor(sessionId));
     const argv = buildAgentArgv({
       sessionId,
-      payload: { prompt, sessionSlug },
+      payload: { prompt: withSalvageHint(prompt, { cards: [planned.itemNum], prs: [planned.pr] }), sessionSlug },
       // #3606 — see this function's own docblock: without this the fix agent reads a correctly-filled brief as an
       // unfilled template and self-aborts (3/3 live).
       systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
@@ -845,7 +850,7 @@ export function dispatchFix(planned, {
   } catch (e) {
     // #x0jphk5 — nothing was actually spawned: release so a legitimate retry for this same PR is never blocked
     // by our own failed attempt.
-    releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+    releaseClaim({ repo, pr: planned.pr, kind: 'fix', owner: claimOwner, lockRoot: claimRoot });
     throw e;
   }
 }
