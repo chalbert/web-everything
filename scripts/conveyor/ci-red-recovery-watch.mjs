@@ -63,7 +63,9 @@ import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { countTrustedLeadingMarker } from '../lib/marker-authorship.mjs';
-import { latestRequiredCheck, isRequiredCheckFailed, collapseRollupToLatestPerName, CI_LIFECYCLE_LABELS } from '../merge-ai-prs.mjs';
+import { latestRequiredCheck, isRequiredCheckFailed, collapseRollupToLatestPerName, CI_LIFECYCLE_LABELS, restampAcceptance } from '../merge-ai-prs.mjs';
+import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
+import { spawnCiHealRearm } from './ci-heal-mark.mjs';
 import {
   computeMainRedWindows, planMainRedRebases, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK,
   buildHungCandidates, planHungCiRecoveries, DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
@@ -158,7 +160,11 @@ export function refreshOntoMain(laneRef, { root = REPO_ROOT, base = 'origin/main
   const result = rebase({ laneRef, base, cwd: root });
   if (result.action === 'error') return { ok: false, action: 'error', error: result.reason };
   if (result.action === 'skip') return { ok: false, action: 'skip', error: result.reason };
-  return { ok: true, action: result.action }; // 'rebased' or 'current'
+  // #2811 — `newCommit` threaded through (never dropped): `sweepCiRedRecovery`'s own apply loop needs the
+  // AUTHORITATIVE post-rebase head to re-verify/re-arm a live `review:accepted` against, the same "this
+  // process already knows the value it just minted, never re-derive it" reasoning `restampAcceptance`'s own
+  // `--new-head` override already documents.
+  return { ok: true, action: result.action, newCommit: result.newCommit ?? null }; // 'rebased' or 'current'
 }
 
 /**
@@ -200,6 +206,8 @@ export function sweepCiRedRecovery({
   readMainLatestCheckRuns = defaultReadMainLatestCheckRuns, readMainGreenFixFacts = defaultReadMainGreenFixFacts,
   readComments = defaultReadPrComments, refresh = refreshOntoMain, postComment = defaultPostRebaseComment,
   maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
+  // #2811 — injectable so a test can pin the restamp-first/rearm-fallback chain with no `gh`/child-process.
+  reconcileAcceptance = reconcileAcceptanceAfterRebase,
 } = {}) {
   const prs = readOpenPrs({ repo });
   // soak-main-red — judge every REQUIRED check (live branch-protection list when readable, else
@@ -266,7 +274,15 @@ export function sweepCiRedRecovery({
       postComment(d.prNumber, {
         repo, headRefName: d.headRefName, headSha: d.headSha, ok: result.ok, action: result.action, error: result.error ?? null,
       });
-      applied.push({ prNumber: d.prNumber, headRefName: d.headRefName, ...result });
+      // #2811 — the ONE new step: this rebase just moved the head (`action === 'rebased'` — never on
+      // `'current'`, which minted nothing new to re-verify against). Best-effort, never throws (see the
+      // function's own docblock); a `review:accepted` PR gets carried forward (content-preserving) or
+      // reverted to pending (genuinely stale) before the next tick's reconcile pass ever reads this PR again.
+      let acceptance = { attempted: false, restamped: false, rearmed: false };
+      if (result.ok && result.action === 'rebased' && result.newCommit) {
+        acceptance = reconcileAcceptance({ prNumber: d.prNumber, newHead: result.newCommit, repo, root: repoRoot });
+      }
+      applied.push({ prNumber: d.prNumber, headRefName: d.headRefName, ...result, acceptance });
     }
   }
   return { ...plan, applied, mainRedWindows, mainLatestCheckRuns };
@@ -406,6 +422,61 @@ export function defaultReadPrComments(prNumber, { exec = execFileSyncThrottled, 
   });
   const parsed = JSON.parse(String(out || '{}'));
   return Array.isArray(parsed?.comments) ? parsed.comments : [];
+}
+
+/** we:scripts/conveyor/ci-red-recovery-watch.mjs#defaultReadPrLabels — #2811. The one extra read the rebase
+ *  applied loop pays, and ONLY for a PR it just successfully rebased: does this head-moving mechanical rebase
+ *  need to say anything about a live `review:accepted`? Mirrors `defaultReadPrComments`'s own shape exactly. */
+export function defaultReadPrLabels(prNumber, { exec = execFileSyncThrottled, repo = null } = {}) {
+  const argv = ['pr', 'view', String(prNumber), '--json', 'labels'];
+  if (repo) argv.push('--repo', repo);
+  const out = exec('gh', argv, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 32 * 1024 * 1024,
+    timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(String(out || '{}'));
+  return Array.isArray(parsed?.labels) ? parsed.labels : [];
+}
+
+/**
+ * we:scripts/conveyor/ci-red-recovery-watch.mjs#reconcileAcceptanceAfterRebase — #2811 (chalbert/web-everything
+ * PR #2811 live incident). This watcher's OWN rebase (`refreshOntoMain`, a MECHANICAL `rebaseDropManifest` —
+ * never a code edit) moves the head exactly like a ci-heal's re-push does, and a live `review:accepted` it
+ * leaves behind is stale for the same reason (`ci-heal-mark.mjs`'s own header: an acceptance is a claim about a
+ * SPECIFIC head). Two DIFFERENT outcomes are both legitimate, so BOTH existing swaps are tried, in order, never
+ * a THIRD hand-rolled label write:
+ *   1. `restampAcceptance` FIRST — if the rebase was genuinely content-preserving (the reviewed diff/contribution
+ *      fingerprint still matches, `acceptanceCoversHead`'s own content-equivalence escape), the acceptance
+ *      legitimately still covers this tree and should be CARRIED FORWARD, not thrown away — that is exactly what
+ *      `we:scripts/lib/review-escalation.mjs#decideSetLabel`'s `restamp` target exists for (#x5e2ldj).
+ *   2. Only when restamp REFUSES (no accepted label to carry at all — the common case — OR the content genuinely
+ *      changed, so the fingerprint no longer matches) does this fall back to the WIDENED `rearm` swap (#2811),
+ *      reverting a truly-stale acceptance to `review:pending` so a fresh review is owed.
+ * Never both: a successful restamp already leaves `review:accepted` live, so a SUBSEQUENT rearm call would
+ * immediately undo it — the `if (!restamped.ok)` gate is load-bearing, not an optimisation.
+ * Best-effort throughout (mirrors `postComment`'s own "never let a write failure sink the pass" discipline) —
+ * this NEVER re-throws; a failure here leaves the label exactly as it was, next tick's pass gets another try.
+ * @param {{prNumber:number, newHead:string, repo?:string|null, root?:string, readLabels?:Function,
+ *   restamp?:Function, rearm?:Function}} o
+ * @returns {{attempted:boolean, restamped:boolean, rearmed:boolean}}
+ */
+export function reconcileAcceptanceAfterRebase({
+  prNumber, newHead, repo = null, root = REPO_ROOT,
+  readLabels = defaultReadPrLabels, restamp = restampAcceptance, rearm = spawnCiHealRearm,
+} = {}) {
+  try {
+    const labels = readLabels(prNumber, { repo });
+    if (!hasReviewLabel(labels, REVIEW_LABELS.accepted)) return { attempted: false, restamped: false, rearmed: false };
+    const restamped = restamp({ pr: prNumber, repo, newHead, cwd: root });
+    if (restamped.ok) return { attempted: true, restamped: true, rearmed: false };
+    const rearmed = rearm({
+      pr: prNumber, repo, cwd: root,
+      actor: 'conveyor mechanical rebase (ci-red-recovery-watch)',
+    });
+    return { attempted: true, restamped: false, rearmed: rearmed.ok };
+  } catch {
+    return { attempted: false, restamped: false, rearmed: false };
+  }
 }
 
 /**

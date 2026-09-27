@@ -298,19 +298,43 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
     };
   }
 
-  // we:scripts/review-set-label.mjs#decideSetLabel — rearm (#2644, folded in from the old conveyor decideRearm).
-  // The conveyor fix agent hands a repaired review:changes bounce back for re-review. ONLY a live review:changes
-  // is re-armable (idempotent no-op otherwise — what makes a second call after the swap safe). The swap is ALWAYS
-  // changes→pending, NEVER adds review:accepted, and NEVER removes review:human — the #2630 invariant, enforced
-  // HERE in the pure core so the CLI cannot route around it.
+  // we:scripts/review-set-label.mjs#decideSetLabel — rearm (#2644, folded in from the old conveyor decideRearm;
+  // widened #2811 to also cover a STALE ACCEPTANCE, see below). The conveyor fix agent (a bounce repair) or a
+  // ci-heal/mechanical-rebase hand-back (a re-pushed head) hands the PR back for re-review. Re-armable from
+  // EITHER a live `review:changes` (the original #2630 shape) OR a live `review:accepted` (#2811) — idempotent
+  // no-op otherwise, what makes a second call after the swap safe. The swap is ALWAYS →pending, NEVER adds
+  // review:accepted, and NEVER removes review:human — the #2630 invariant, enforced HERE so the CLI cannot
+  // route around it.
+  //
+  // #2811 (chalbert/web-everything PR #2811) — WHY `review:accepted` IS ALSO RE-ARMABLE NOW. A `review:accepted`
+  // verdict is a claim about a SPECIFIC head; it stops being true the moment a ci-heal or a mechanical rebase
+  // moves the head without anyone re-reviewing it. Before this, nothing ever un-accepted a PR whose head moved
+  // that way (`ci-heal-mark.mjs`'s own header used to say, correctly for the OTHER cases: "a CI-heal repairs
+  // only the CI axis — it must NEVER touch review:*"). #2811 lived through the gap that leaves: the review
+  // ran (legitimately, on the `owed-ci-rerun` parallel-dispatch path — see `reconcile-core.mjs`'s own docblock)
+  // and accepted a head that a LATER ci-heal push then invalidated, and the visible `review:accepted` label
+  // survived onto a commit the reviewer never saw. `classifyPr` (`we:scripts/progress-board.mjs`) reads
+  // `review:accepted` as phase `queued` — nothing further owed — so a stale acceptance does not just mislead a
+  // human, it stops the reconcile pass from ever re-dispatching a review for the new head at all.
+  //
+  // THIS DOES NOT WEAKEN THE DRAIN'S OWN MERGE GATE (the residual risk to rule out, and it was already ruled
+  // out before this item): `acceptanceCoversHead` (`we:scripts/lib/review-escalation.mjs`) independently
+  // re-verifies the recorded `reviewed-sha` (or its content fingerprint) against the LIVE head immediately
+  // before a merge, whatever the label says — `we:scripts/merge-ai-prs.mjs`'s own `decideReviewGate` comment:
+  // "What stops the merge is the GATE'S VERDICT, not the label state". This rearm-widening closes the DISPATCH
+  // gap (a stale-accepted PR was never re-planned for review); it is not what was standing between a stale
+  // acceptance and a bad merge — that gate already held.
   if (to === 'rearm') {
-    if (!hasReviewLabel(currentLabels, REVIEW_LABELS.changes)) {
+    const wasChanges = hasReviewLabel(currentLabels, REVIEW_LABELS.changes);
+    const wasAccepted = hasReviewLabel(currentLabels, REVIEW_LABELS.accepted);
+    if (!wasChanges && !wasAccepted) {
       return {
         allowed: false,
         addLabel: '',
         removeLabels: [],
         keepsHuman: isHuman,
-        reason: 'no review:changes label — nothing to re-arm (the PR is not a bounce awaiting repair)',
+        reason: 'neither review:changes nor review:accepted is live — nothing to re-arm (the PR carries no '
+          + 'verdict a re-push could make stale)',
       };
     }
     return {
@@ -323,20 +347,26 @@ export function decideSetLabel({ to, currentLabels = [], findingCount = null, re
       // ALREADY held; adding `review:pending` on top asserts a second, redundant hold and reads as "still
       // pending" to anything that doesn't know to check both. Only add `review:pending` when the PR is NOT
       // gate-self — the human hold on its own already says "an independent review is owed", so a rearm on a
-      // `review:human` PR adds nothing.
+      // `review:human` PR adds nothing. (`review:accepted` and `review:human` never coexist — `accepted` is
+      // unconditionally refused on a `review:human` PR above — so `isHuman` here only ever pairs with the
+      // `wasChanges` shape; kept as one condition rather than two so the two entry shapes share one rule.)
       addLabel: isHuman ? '' : REVIEW_LABELS.pending,
       // #2832 — re-arm applies a review-hold (review:pending, or review:human alone), so it must atomically
       // strip ready-to-merge: a held PR may never carry the go-ahead. `presentRemoveLabels` narrows this to the
-      // labels the PR actually carries, so naming ready-to-merge here is a no-op when it is absent.
+      // labels the PR actually carries, so naming a label the PR does not carry (e.g. `changes` when this call
+      // re-armed a stale `accepted`, or vice versa) is a no-op.
       // #2412 review-fix — a re-arm hands a repaired bounce back for a fresh, independent re-review (the #2630
       // invariant this function enforces); same reasoning as the `changes` branch below applies to any stale
       // `redteam:accepted` the PR still carries from before the fix.
-      removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
+      removeLabels: [REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL],
       keepsHuman: isHuman,
       reason: isHuman
         ? 're-armed — review:human KEPT as the sole hold (gate-self stays human-ceremony-only); review:pending '
           + 'NOT added — the human hold already says an independent review is owed (#x01u7az)'
-        : 're-armed — review:changes→review:pending; drain AI-review (or a human) re-verdicts',
+        : wasAccepted && !wasChanges
+          ? 're-armed — review:accepted→review:pending; the head moved since that acceptance and it no longer '
+            + 'covers what is on the PR now (#2811); drain AI-review (or a human) re-verdicts the new head'
+          : 're-armed — review:changes→review:pending; drain AI-review (or a human) re-verdicts',
     };
   }
 

@@ -41,8 +41,17 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
  *  reconcile-core.mjs`'s `promote-draft` effect un-drafts it on green CI. Deterministic off the SAME PR
  *  record this module already reads (`pr.isDraft`), never off a fabricated "idle" guess — the exact bar
  *  `planStatusLabelChange`'s own docblock already holds every OTHER state here to. This is the operator-
- *  visible answer to "why hasn't this been reviewed yet" the feature's own build brief asked for. */
-export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|healing-ci|ci-heal-stalled|awaiting-ci)$/;
+ *  visible answer to "why hasn't this been reviewed yet" the feature's own build brief asked for.
+ *
+ *  `fixing-conflict` / `fixing-conflict-stalled` (draft reason at a glance, operator ask 2026-09-27, #2811
+ *  follow-up) — a live `fix-<pr>` session is not always the SAME repair: `we:scripts/conveyor/rearm-review.mjs`
+ *  already distinguishes a MECHANICAL conflict-resolution round (`--round=conflict`) from an ordinary
+ *  review:changes bounce fix at the marker-comment layer, but nothing said so on the label a human glances at —
+ *  both read as the same generic `fixing`. Deterministic off the SAME PR record every other state here already
+ *  reads (`pr.mergeStateStatus === 'DIRTY'`, the identical field `reconcile-core.mjs#classifyPr`'s `conflicted`
+ *  phase reads), never a fabricated guess: a live fixer working a PR GitHub itself reports as conflicting IS
+ *  resolving that conflict, whatever else it might also be doing. */
+export const STATUS_LABEL_RE = /^review-status:(reviewing|review-stalled|fixing|fix-stalled|fixing-conflict|fixing-conflict-stalled|healing-ci|ci-heal-stalled|awaiting-ci)$/;
 
 /**
  * `claude agents --json` states this module treats as LIVE — something is currently actioned, or stuck trying
@@ -69,10 +78,10 @@ const LIVE_STATES = Object.freeze({ working: 'reviewing', blocked: 'stalled' });
  * (`we:scripts/conveyor/reconcile-core.mjs#classifyPr`'s `ci-red` phase is its own branch ahead of the
  * `OWED`/`OWED_ELSEWHERE` table), so the ordering is precedence-in-name-only — it never actually shadows a
  * real ci-heal for a PR that also has a stale review/fix session row sitting in `claude agents --json`.
- * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean}} o
- * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
+ * @param {{pr:number|string, agents?:Array<{name?:string, state?:string}>, isDraft?:boolean, mergeConflicted?:boolean}} o
+ * @returns {{role:'review'|'fix'|'ci-heal'|'draft', state:'reviewing'|'review-stalled'|'fixing'|'fix-stalled'|'fixing-conflict'|'fixing-conflict-stalled'|'healing-ci'|'ci-heal-stalled'|'awaiting-ci'}|null}
  */
-export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false } = {}) {
+export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = false, mergeConflicted = false } = {}) {
   const reviewName = mintSessionSlug({ kind: 'review', id: pr, repo });
   const fixName = mintSessionSlug({ kind: 'fix', id: pr, repo });
   const ciHealName = mintSessionSlug({ kind: 'ci-heal', id: pr, repo });
@@ -87,7 +96,12 @@ export function deriveReviewStatus({ pr, agents = [], repo = 'we', isDraft = fal
   const review = liveFor(reviewName);
   if (review) return { role: 'review', state: review.state === 'working' ? 'reviewing' : 'review-stalled' };
   const fix = liveFor(fixName);
-  if (fix) return { role: 'fix', state: fix.state === 'working' ? 'fixing' : 'fix-stalled' };
+  if (fix) {
+    // `fixing-conflict` (see STATUS_LABEL_RE's own doc) — the ONE case a `fix-<pr>` session's generic label
+    // gets a more specific name, and only from a fact already on the PR record, never a guess at intent.
+    const base = mergeConflicted ? 'fixing-conflict' : 'fixing';
+    return { role: 'fix', state: fix.state === 'working' ? base : (mergeConflicted ? 'fixing-conflict-stalled' : 'fix-stalled') };
+  }
   const ciHeal = liveFor(ciHealName);
   if (ciHeal) return { role: 'ci-heal', state: ciHeal.state === 'working' ? 'healing-ci' : 'ci-heal-stalled' };
   // draft-first PRs (operator-approved 2026-09-27) — checked LAST, after every live-agent match above: a
@@ -127,7 +141,7 @@ export function planStatusLabelChange({ status, currentLabels = [] } = {}) {
  * (`we:skills-src/conveyor/review-daemon.mjs#runReviewTick`, wired to reuse it) passes it straight through.
  * Omitting either (the default, and every pre-existing caller/test) reads fresh, byte-identical to before
  * these options existed.
- * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean}} o
+ * @param {{pr:number|string, repo:string, listAgents?:Function, provider?:object, agents?:Array<object>, currentLabels?:Array<{name?:string}|string>, isDraft?:boolean, mergeConflicted?:boolean}} o
  * @returns {{changed:boolean, label:string|null, removed:string[]}}
  */
 // x26lw6u — the default listing includes live review JOBS (`we:scripts/operations/review-job.mjs`): a review no
@@ -139,11 +153,14 @@ export function tagReviewStatus({
   // draft-first PRs (operator-approved 2026-09-27) — threaded straight to `deriveReviewStatus`; `false` by
   // default so every pre-existing caller/test of this function (none of which pass it) is unaffected.
   isDraft = false,
+  // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27) — same "false by default, no existing
+  // caller affected" convention as `isDraft` above.
+  mergeConflicted = false,
 } = {}) {
   const repoKey = repo === undefined ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`review-status-tag: --repo ${repo} is not a constellation repo`);
   const agents = suppliedAgents ?? listAgents();
-  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft });
+  const status = deriveReviewStatus({ pr, agents, repo: repoKey, isDraft, mergeConflicted });
   const currentLabels = suppliedLabels ?? provider.readLabels(repo, pr);
   const plan = planStatusLabelChange({ status, currentLabels });
   if (!plan.add && plan.remove.length === 0) {

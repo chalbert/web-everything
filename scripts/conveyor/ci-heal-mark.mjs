@@ -1,9 +1,23 @@
 /**
  * ci-heal-mark.mjs — post the durable CI-HEAL comment on a conveyor PR that a CI-heal agent has rebased + repaired
  * (#2666). This is the CI-half sibling of `rearm-review.mjs`, with ONE deliberate difference: it posts a durable
- * marker comment but makes NO LABEL SWAP. A CI-heal repairs only the CI axis — it must NEVER touch `review:human` /
- * `review:pending` / `review:changes` (the human review gate stays exactly as it was). So unlike the re-arm swap,
- * the strongest thing a CI-heal records on the PR is a comment.
+ * marker comment but makes NO LABEL SWAP on the ORDINARY path — a CI-heal repairs only the CI axis, so it must
+ * NEVER touch a live `review:human` / `review:pending` / `review:changes` (the human review gate stays exactly as
+ * it was).
+ *
+ * THE ONE EXCEPTION (#2811, chalbert/web-everything PR #2811 live incident): `review:accepted`. A CI-heal
+ * REBASES AND RE-PUSHES the head (this file's own `buildCiHealComment` says so verbatim: "rebased onto current
+ * `main`, repaired the failing check, and re-pushed HEAD") — so if the PR was `review:accepted` when the heal
+ * started, that acceptance is now a claim about a commit that no longer exists. #2811 lived through exactly this:
+ * a review ran and accepted while `main`'s own CI was red (the legitimate `owed-ci-rerun` parallel-dispatch path,
+ * `reconcile-core.mjs`'s own docblock), then a LATER ci-heal (`ci-heal-2811`, 19:09:25Z) rebased + re-pushed onto
+ * a fresh required-check failure — and `review:accepted` simply stayed on the PR, because nothing here ever
+ * re-armed a stale acceptance the way `rearm-review.mjs` already re-arms a stale `review:changes` bounce. So the
+ * hand-back below ALSO re-arms — through the identical, already-invariant-guarded `rearm-review.mjs` swap — but
+ * ONLY when `review:accepted` is what it finds; `review:pending`/`review:changes`/`review:human` are still never
+ * touched here, unchanged from before this item. This is best-effort, exactly like the comment post above: a
+ * failed re-arm never fails the heal, and the SAME stale acceptance is caught by any later push through this
+ * same path, or by a human's own `/review`.
  *
  * WHY A DURABLE COMMENT (the whole point — mirrors #2643). The conveyor bounds auto CI-heal at N attempts per PR so
  * a genuinely-broken diff can't flap forever. That cap must survive a conveyor RESTART, which wipes the in-session
@@ -19,9 +33,10 @@
  * function the tick core shells, never a rule the conveyor SKILL re-derives in prose.
  */
 import { resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { isTrustedMarkerAuthor } from '../lib/marker-authorship.mjs';
+import { REVIEW_LABELS, hasReviewLabel } from '../lib/review-escalation.mjs';
 
 /**
  * we:scripts/conveyor/ci-heal-mark.mjs#CI_HEAL_COMMENT_MARKER — the stable FIRST LINE of the durable CI-heal comment.
@@ -72,6 +87,32 @@ export function buildCiHealComment({ actor = 'conveyor CI-heal agent', reason = 
   ].join('\n');
 }
 
+/**
+ * we:scripts/conveyor/ci-heal-mark.mjs#spawnCiHealRearm — #2811. Hand a STALE `review:accepted` back for
+ * re-review through the EXISTING, invariant-guarded `rearm-review.mjs` swap (never a second, hand-rolled label
+ * write here) — mirrors `we:scripts/merge-ai-prs.mjs#restampAcceptance`'s own child-process shape exactly. The
+ * child does its own fresh `gh pr view` and its own idempotent refusal (`decideSetLabel`'s `rearm` branch, #2811
+ * follow-up: also re-armable from `review:accepted` alone, never just `review:changes`) — so this is safe to call
+ * whenever the caller already knows (or merely suspects) an acceptance might be live; a PR with nothing to
+ * re-arm just reports `{ok:false}` and changes nothing.
+ * @param {{pr:number|string, repo?:string, cwd?:string, actor?:string, spawn?:Function}} o
+ * @returns {{ok:boolean, reason?:string}}
+ */
+export function spawnCiHealRearm({ pr, repo, cwd, actor = 'conveyor CI-heal agent', spawn = spawnSync } = {}) {
+  const args = [new URL('./rearm-review.mjs', import.meta.url).pathname, String(pr), `--actor=${actor}`];
+  if (repo) args.push(`--repo=${repo}`);
+  try {
+    // `spawnSync`-shaped (mirrors `restampAcceptance`'s own seam exactly) — NEVER throws on a non-zero exit, so
+    // a refused re-arm (nothing to re-arm — the common case, no `review:accepted` live) is a plain `{ok:false}`
+    // result, never a reason to fail the heal that already succeeded.
+    const r = spawn(process.execPath, args, { encoding: 'utf8', cwd });
+    if (r.status === 0) return { ok: true };
+    return { ok: false, reason: String(r.stdout || r.stderr || `exit ${r.status}`).trim().split('\n').pop() };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message ? e.message : e) };
+  }
+}
+
 // ── IO SHELL (runs only as a CLI — the pure exports above stay side-effect-free on import) ────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) {
@@ -105,5 +146,25 @@ if (IS_CLI) {
   } catch (e) {
     fail(`could not post CI-heal comment on PR #${pr}: ${String(e.message || e).split('\n')[0]}`);
   }
-  process.stdout.write(JSON.stringify({ ok: true, pr, commented: true }) + '\n');
+  // #2811 — THE ONE EXCEPTION (see this file's own header): a rebase+re-push just moved the head, so a live
+  // `review:accepted` is now stale. Best-effort, never fatal to a heal that already succeeded — a read miss or
+  // a refused re-arm both fall through to `rearmed: false` and the heal still reports `ok: true`.
+  let rearmed = false;
+  try {
+    const viewArgs = ['pr', 'view', String(pr), '--json', 'labels'];
+    if (typeof flags.repo === 'string') viewArgs.push(`--repo=${flags.repo}`);
+    const raw = execFileSync('gh', viewArgs, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL' });
+    const labels = JSON.parse(raw || '{}').labels;
+    if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) {
+      const result = spawnCiHealRearm({
+        pr, repo: typeof flags.repo === 'string' ? flags.repo : undefined,
+        actor: typeof flags.actor === 'string' ? flags.actor : undefined,
+      });
+      rearmed = result.ok;
+    }
+  } catch {
+    // Best-effort (see the header) — an unreadable label state or a failed rearm never fails this CLI's own
+    // exit code; the stale acceptance (if any) is caught by the next push through this same path, or by a human.
+  }
+  process.stdout.write(JSON.stringify({ ok: true, pr, commented: true, rearmed }) + '\n');
 }

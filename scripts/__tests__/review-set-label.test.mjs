@@ -219,8 +219,10 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     const d = decideSetLabel({ to: 'rearm', currentLabels: changes });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).toBe(REVIEW_LABELS.pending);
-    // #2832 — re-arm applies review:pending (a hold), so ready-to-merge is stripped in the same swap.
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
+    // #2832 — re-arm applies review:pending (a hold), so ready-to-merge is stripped in the same swap. #2811 —
+    // the remove set now unconditionally names `accepted` too (narrowed to what the PR actually carries by
+    // `presentRemoveLabels`), so the SAME swap also covers a stale-accepted re-arm with no second code path.
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
     expect(d.keepsHuman).toBe(false);
   });
 
@@ -228,7 +230,7 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     const d = decideSetLabel({ to: 'rearm', currentLabels: humanChanges });
     expect(d.allowed).toBe(true);
     expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
-    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
     expect(d.removeLabels).not.toContain(REVIEW_LABELS.human);
     expect(d.keepsHuman).toBe(true);
   });
@@ -267,6 +269,29 @@ describe('decideSetLabel — rearm (#2644, folded in from the conveyor decideRea
     const d = decideSetLabel({ to: 'rearm', currentLabels: [...changes, { name: REVIEW_LABELS.redteamAccepted }] });
     expect(d.allowed).toBe(true);
     expect(d.removeLabels).toContain(REVIEW_LABELS.redteamAccepted);
+  });
+
+  // #2811 (chalbert/web-everything PR #2811 live incident) — a `review:accepted` PR whose head then moved
+  // (a ci-heal push, a non-content-preserving rebase) is re-armable too: the acceptance is a claim about a
+  // SPECIFIC head, and it stops being true once that head is gone. Before this widening, `decideSetLabel`
+  // refused a rearm on an accepted-only PR, and nothing else in this file ever reverted a stale acceptance.
+  const accepted = [{ name: REVIEW_LABELS.accepted }, { name: 'ready-to-merge' }];
+
+  it('re-arms a STALE review:accepted (no review:changes present) → review:pending, dropping review:accepted', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: accepted });
+    expect(d.allowed).toBe(true);
+    expect(d.addLabel).toBe(REVIEW_LABELS.pending);
+    expect(d.removeLabels).toEqual([REVIEW_LABELS.changes, REVIEW_LABELS.accepted, REVIEW_LABELS.redteamAccepted, READY_TO_MERGE_LABEL]);
+    expect(presentRemoveLabels(d.removeLabels, accepted)).toEqual(
+      expect.arrayContaining([REVIEW_LABELS.accepted, READY_TO_MERGE_LABEL]),
+    );
+    expect(d.keepsHuman).toBe(false);
+    expect(d.reason).toMatch(/accepted.*pending/i);
+  });
+
+  it('never emits review:accepted while re-arming a stale acceptance either (the #2630 invariant still holds)', () => {
+    const d = decideSetLabel({ to: 'rearm', currentLabels: accepted });
+    expect(d.addLabel).not.toBe(REVIEW_LABELS.accepted);
   });
 });
 
