@@ -146,6 +146,11 @@ leftover work as new backlog items (`scaffold` with `blockedBy` + a digest) rath
   red-then-green evidence in the PR body you write at step 8 — a reviewer must be able to SEE the fix work, not
   just infer it from `check:standards` passing. If you genuinely cannot reproduce the bug, say so explicitly,
   with the reason, in that PR body — never claim "fixed" without one.
+- **Fixing a live daemon break specifically?** Add its real-world case to the daemon soak harness
+  (`we:scripts/conveyor/soak/breaks/`, one module + its `.soak.test.mjs`, registered in that directory's
+  `index.mjs` — [`SKILL.md#daemon-soak-harness`](SKILL.md)) or add `soak-waiver: <reason>` to the PR body. This
+  is now mechanically gated (`soak-replay-gate`, #4075), not just written here — the CI check goes red if
+  neither is present on a PR that touches daemon-soak scope and reads as a bug fix.
 - **Any scaffolded item must itself pass build-brief discipline** (statute:
   [we:docs/agent/platform-decisions.md#build-brief-discipline](../../../docs/agent/platform-decisions.md#build-brief-discipline),
   #2819): name the edge-cases the new item's build should handle or reject, require an

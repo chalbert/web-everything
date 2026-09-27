@@ -3,7 +3,7 @@
   "title": "Review (job model)",
   "summary": "The review daemon ticks every 120s, discovers PRs owed an independent review (or re-armed after a fix), and dispatches each as a detached, deterministic job (not a Claude wrapper session): claim a job slot, acquire a lane, run one review-loop-cli.mjs round under a hard 45-minute timeout, classify the outcome, swap the PR's review:* label, release the lane, and — only after that arc fully finishes — run advisory non-Claude extra seats. Round-cap exhaustion, a review:human park, an infra timeout, and a hard-killed job are real states with weak or missing ownership; see the notes on round-cap-exhausted, human-hold, blocked-on-infra and job-died-silently.",
   "derivedFrom": {
-    "commit": "00413a56c",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
@@ -32,6 +32,7 @@
     "scripts/conveyor/review-status-tag.mjs",
     "scripts/conveyor/claude-auth-health.mjs",
     "scripts/conveyor/hung-session.mjs",
+    "scripts/conveyor/session-reaper.mjs",
     "scripts/review-runner.mjs",
     "scripts/lib/review-runner-core.mjs",
     "scripts/conveyor/health-smells/daemon-owed-no-dispatch.mjs",
@@ -114,7 +115,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "Not a wait state — every 120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/review-daemon.mjs:114) re-runs reconcile-pass.mjs's runReconcilePass (scripts/conveyor/reconcile-pass.mjs:368-386) through reconcile-core.mjs's planReconcile (scripts/conveyor/reconcile-core.mjs:781-1271), which re-derives the whole plan fresh from PR labels + live sessions/jobs each time. A PR can sit here indefinitely if lanes are starved (deferredForLanes) or Claude auth is broken (deferredForAuth) — both are 'stays owed, retried next tick', never a distinct backlog."
+      "notes": "Not a wait state — every 120s tick (DEFAULT_INTERVAL_MS, skills-src/conveyor/review-daemon.mjs:114) re-runs reconcile-pass.mjs's runReconcilePass (scripts/conveyor/reconcile-pass.mjs:368-386) through reconcile-core.mjs's planReconcile (scripts/conveyor/reconcile-core.mjs:781-1271), which re-derives the whole plan fresh from PR labels + live sessions/jobs each time. A PR can sit here indefinitely if lanes are starved (deferredForLanes) or Claude auth is broken (deferredForAuth) — both are 'stays owed, retried next tick', never a distinct backlog. Live-caught 2026-09-26: the tick's `reap-finished-sessions` step now runs BEFORE `discover-owed-prs` (previously after) — see that step's own notes. Since the same day, every review:pending/ci:failed PR this tick does NOT hand to dispatch also gets a per-PR reason logged (explainPendingNotDispatched, skills-src/conveyor/review-daemon.mjs:145-177,341-344), drawn straight from THIS tick's own reconcile plan (dispatch/refusals) — pure observability, no new fact/state; a PR previously silent behind the tick's aggregate 'N owed' count now gets its own `<repo>#<pr> held, no review dispatched — <reasons>` log line (skills-src/conveyor/review-daemon.mjs:546)."
     },
     {
       "id": "claude-auth-paused",
@@ -136,7 +137,7 @@
       },
       "notes": "No timeout at all: the gate stays closed until either the health-watch episode closes or the direct transcript scan of the most recently dispatched session stops seeing the auth-failure text (scripts/conveyor/claude-auth-health.mjs:82-125). Every review this tick is deferred, not lost (deferredForAuth, skills-src/conveyor/review-daemon.mjs:261-268,303).",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     },
     {
@@ -209,7 +210,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the x00g3tt post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
+      "notes": "For an agent-addressed (review:pending) PR, reviewLoopAutoConfirm answers 'accept' unattended the moment the panel verdict is ACCEPT or PREVENTION_OUTSTANDING (scripts/lib/review-loop-policy.mjs:112-116). Two advisory branches follow, both strictly AFTER this label is already live and both incapable of ever re-opening this verdict or the label: the non-blocking extra-seats-advisory branch (every accepted/bounced/parked review), and — only when the loop's own verdict is exactly `accept` (redTeamRequired, scripts/lib/jury-core.mjs:1116-1118) — the 4195 post-accept RED TEAM (red-team-advisory), added by PR #2735 (commit 5dcc90a11): a non-Claude call tries to break the change and a confirmed break is recorded as a miss, never a label flip."
     },
     {
       "id": "changes-requested",
@@ -265,7 +266,7 @@
         "how": "round-cap-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:940-948,1422-1426"
       },
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:1103-1122): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1422-1426) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
+      "notes": "4227 (epic #4075/#3383) — FIXED. Mirrors the ci-red branch's OWN cap, which already pushed an operator-facing note when exhausted ('ci-heal-exhausted', scripts/conveyor/reconcile-core.mjs:1103-1122): the GENERIC review/fix round-cap exhaustion (reconcile-core.mjs:1422-1426) now ALSO pushes a `kind:'round-cap-exhausted'` note (reconcile-core.mjs#refuseCapExhausted, :895-903), carrying `capKind:'review'` for THIS phase (a `fix`-owed phase's identical cap names `capKind:'fix'` instead). Surfaced via reconcile-note-comment.mjs as a durable PR comment and listed by `scripts/operations/operator-queue.mjs --with-reconcile-notes` — no longer only a refusal line in the daemon's own log (skills-src/conveyor/review-daemon.mjs:491). `retries.onCap` self-loops (this state IS the cap-exhausted landing point; nothing retries FROM here — a person clears it).",
       "ack": {}
     },
     {
@@ -287,7 +288,7 @@
         "cite": "scripts/conveyor/reconcile-core.mjs:504,553-584; scripts/operations/completion-store.mjs#writeCompletion"
       },
       "escalation": null,
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. The 15-minute cool-off bounds ONE cycle; the completion STORE now persists a durable per-SESSION `infraStreak`/`infraStreakSince` ACROSS dispatch generations (a session name is reused every re-dispatch), so a persistently-unhealthy PR is counted rather than retrying silently forever. At INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — cool-off lengthens, a person is notified, and the retry continues (never stopped outright, since infra may still recover).",
+      "notes": "4227 (epic #4075/#3383) — FIXED. The 15-minute cool-off bounds ONE cycle; the completion STORE now persists a durable per-SESSION `infraStreak`/`infraStreakSince` ACROSS dispatch generations (a session name is reused every re-dispatch), so a persistently-unhealthy PR is counted rather than retrying silently forever. At INFRA_RETRY_CAP (4) the cycle moves to `infra-retry-escalated` — cool-off lengthens, a person is notified, and the retry continues (never stopped outright, since infra may still recover).",
       "ack": {}
     },
     {
@@ -308,7 +309,7 @@
         "how": "infra-retry-exhausted note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:989-996; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
-      "notes": "xilx617 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
+      "notes": "4227 (epic #4075/#3383) — the retry is NEVER stopped outright (infra may still recover); it is only slowed and surfaced. The note's episode key is `kind + prNumber + since` (the streak's own first timestamp), so a streak that keeps growing past the cap posts as ONE episode, not a fresh comment every tick."
     },
     {
       "id": "job-died-silently",
@@ -349,7 +350,7 @@
     },
     {
       "id": "red-team-advisory",
-      "label": "x00g3tt post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
+      "label": "4195 post-accept red team — Codex/Gemini try to break the accepted PR; a confirmed break is recorded as a miss, never a label change",
       "terminal": true,
       "outcome": "success",
       "owner": "review-job",
@@ -576,6 +577,24 @@
     }
   ],
   "steps": [
+    {
+      "id": "reap-finished-sessions",
+      "state": "review-owed",
+      "actor": "review-daemon",
+      "does": "runSessionReaperPass over `claude agents --json`: `claude stop` every terminal-state session not already recorded in the on-disk reaped ledger, skipping anything whose state is already `stopped`",
+      "cite": "skills-src/conveyor/review-daemon.mjs:518-527; scripts/conveyor/session-reaper.mjs:1944-1948,1979-1987,2066,2077-2093",
+      "canFail": true,
+      "onFailure": "review-owed",
+      "assumes": [
+        {
+          "kind": "path-tool",
+          "name": "claude"
+        }
+      ],
+      "provides": [],
+      "notes": "Live-caught 2026-09-26 (skills-src/conveyor/review-daemon.mjs:518-521): moved to run BEFORE discover-owed-prs (previously the tick ran discovery first, reaping only after) so a hung fix/ci-heal session bound to a review:pending PR that THIS reap just stopped is seen as free by THIS SAME tick's own discovery, not ~120s later on the next one. Best-effort/non-fatal — a reap failure is logged and swallowed, never blocks discovery (onFailure loops back into the same review-owed state the next step already runs in). The on-disk reaped-session ledger (scripts/conveyor/session-reaper.mjs#makeReapedLedger/resolveReapedLedgerFile, ~/.claude/we-session-reaper/reaped.json, machine-wide) fixes a SEPARATE incident found the same day: a terminal (`done`/`failed`) session's state never changes after `claude stop`, so without a memory of what was already stopped, every tick re-issued `claude stop` against every already-finished session it could still see listed (measured live: 1,228 of 1,501 scanned, ~0.7s each — a 2-minute tick). ALREADY_STOPPED_STATES (session-reaper.mjs:161) plus the ledger now skip both re-classifying and re-stopping a session an earlier tick already finished; the ledger is pruned each pass to the ids the listing still shows (retainOnly), so it stays bounded by the listing's own size, never growing unbounded.",
+      "ack": {}
+    },
     {
       "id": "discover-owed-prs",
       "state": "review-owed",

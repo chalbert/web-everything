@@ -3,10 +3,12 @@
   "title": "CI-heal (rebase-onto-main, hung-run recovery, and the fix-agent repair)",
   "summary": "What happens once a conveyor-landed PR's required check stops being simply green: a real code regression (ci-heal dispatch), main having been red at the moment the check failed (mechanical rebase-onto-main), a CI run stuck IN_PROGRESS/QUEUED (hung-run cancel+rerun), or a stacked PR whose base GitHub silently retargeted onto main with no fresh check run. All four are read off the SAME PR listing (scripts/conveyor/reconcile-pass.mjs) and reasoned about by scripts/conveyor/reconcile-core.mjs / scripts/conveyor/main-red-recovery.mjs, but only two of the four (rebase-onto-main and hung-run recovery) currently ride a resident, launchd-installed process; the pass-daemon.mjs entries daemon-manifest.mjs registers for them are wired to no launchd job at all today (confirmed live 2026-09-26: `ls ~/Library/LaunchAgents/com.we.*.plist` lists no ci-red-recovery-watch-*, ci-queue-watch-*, or stuck-pr-watch-* entry). Both live mechanisms actually ride skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs, installed as com.we.fix-dispatch-daemon.plist.",
   "derivedFrom": {
-    "commit": "91cc453e4",
+    "commit": "f264b7f81",
     "date": "2026-09-26"
   },
   "sources": [
+    "scripts/operator/dispatch.mjs",
+    "scripts/merge-ai-prs.mjs",
     "scripts/conveyor/reconcile-core.mjs",
     "scripts/conveyor/reconcile-pass.mjs",
     "scripts/conveyor/main-red-recovery.mjs",
@@ -112,8 +114,8 @@
       "escalation": null,
       "notes": "retargetStackedPrs (scripts/lib/pr-merge-gate.mjs:218) runs `gh pr edit --base <default>` the moment a PR's stacked base merges (scripts/merge-ai-prs.mjs:4888-4898), so the branch isn't deleted out from under it — but a base retarget is NOT a new commit event, so GitHub never enqueues a fresh CI run for it. Nothing anywhere re-checks that the PR's statusCheckRollup was ever computed against `main` at all; the PR just carries forward whatever check state it had before. KEY QUESTION (b) answered: no step anywhere provides `ci:required checks ran on head` on this path (see the assumes on pr-check-state-read's downstream consumers) — this is a genuine, unacknowledged gap, not merely a slow path.",
       "ack": {
-        "no-owner": "xi4od2p",
-        "unbounded-wait": "xi4od2p"
+        "no-owner": "4239",
+        "unbounded-wait": "4239"
       }
     },
     {
@@ -125,7 +127,7 @@
       "wait": null,
       "retries": null,
       "escalation": null,
-      "notes": "classifyPr's ciFailed (scripts/progress-board.mjs:466-472) requires a CONCLUDED failing check in the rollup; reduceCheckState's own empty-rollup case reads 'unchecked', not 'red' (scripts/operations/pr-status.mjs:140-147) — so a PR reaching this state via base-retargeted only does so if the STALE, pre-retarget rollup happened to already be red. If it was green, the PR reads as classifyPr:'queued' (scripts/progress-board.mjs:513) and skips this whole flow, landing in @drain-land's accepted-unchecked-no-ci gap instead with no CI ever run against main."
+      "notes": "classifyPr's ciFailed (scripts/progress-board.mjs:466-472) requires a CONCLUDED failing check in the rollup; reduceCheckState's own empty-rollup case reads 'unchecked', not 'red' (scripts/operations/pr-status.mjs:140-147) — so a PR reaching this state via base-retargeted only does so if the STALE, pre-retarget rollup happened to already be red. If it was green, the PR reads as classifyPr:'queued' (scripts/progress-board.mjs:513) and skips this whole flow, landing in @drain-land's accepted-unchecked-no-ci gap instead with no CI ever run against main. FIXED (PR #2764, 2026-09-26, live incident PRs #2748/#2749/#2753): before this, classifyPr's SECOND arm — `labels.has('ci:failed')` — fired UNCONDITIONALLY whenever the label was present, so a PR whose required check had already gone green (only `review-gate`, a by-design hold while review:pending stands, was still red) kept reading `ci-red` off a stale label alone, and reconcile-core kept dispatching another ci-heal session even though six in a row had already found nothing to repair and stood down. The fix (scripts/progress-board.mjs:543) adds `&& !isRequiredCheckGreen(pr)` — a rollup that POSITIVELY proves the required check's LATEST run green now overrides the stale label; a rollup merely silent/in-flight on it (isRequiredCheckGreen reads false) still falls through to trust the label exactly as before (this is why the empty-rollup case above is unaffected). The SAME incident's other half — clearing the STALE `ci:failed` LABEL itself once green, independent of whether a ci-heal session ever ran — is scripts/merge-ai-prs.mjs's own per-pass ci-lifecycle reconcile (scripts/merge-ai-prs.mjs:3819-3829: `if (isRequiredCheckGreen(p, REQUIRED))` strips any CI_LIFECYCLE_OWNED label still present), which this flow does not otherwise model (it runs inside @drain-land's child pass, once per PR per sweep, independent of the merge decision). A THIRD, narrower instance of the same 'review-gate reads FAILURE but is by design' confusion lives in scripts/operator/dispatch.mjs#healCi — a manual/operator-invoked CLI this flow does not otherwise model (no resident daemon calls it) — whose own required-check scan now excludes CI_TRUTH_EXCLUDED_CHECKS (scripts/operator/dispatch.mjs:39,544), the SAME declared list scripts/progress-board.mjs#ciFailed already uses, so all three call sites agree on what 'really red' means."
     },
     {
       "id": "hung-ci-run",
@@ -164,7 +166,7 @@
       "escalation": null,
       "notes": "KEY QUESTION (a), part 1: this state answers 'who performs the owed rerun' honestly — scripts/conveyor/reconcile-core.mjs:926-931 only REFUSES ('owed-ci-rerun') and names the file that should act; the actual mechanical rebase is scripts/conveyor/ci-red-recovery-watch.mjs#sweepCiRedRecovery, and the ONLY thing that ever calls it with apply:true in production is reconcile-fix-dispatch-daemon.mjs (confirmed live via its own installed plist) — its own daemon-manifest.mjs entry (skills-src/conveyor/daemon-manifest.mjs:161) has NO launchd job. If main stays red indefinitely, this refusal re-fires every ~120s tick forever with no cap on how long — an honest unbounded wait, by the mechanism's own design (rebasing against a still-broken main proves nothing), but unbounded all the same.",
       "ack": {
-        "unbounded-wait": "xwo3j0l"
+        "unbounded-wait": "4237"
       }
     },
     {
@@ -214,7 +216,7 @@
       },
       "retries": null,
       "escalation": null,
-      "notes": "xilx617 (epic #4075/#3383) — FIXED. assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:978-1029) still have no INTRINSIC time bound in the sense of ever killing the session — this NEVER kills or reaps it — but a 'live-process' verdict past LIVE_SESSION_OVERRUN_MS (90 minutes, default; overridable via planReconcile's own `liveSessionOverrunMs` option, no env read) now ALSO gets a surfaced `kind:'session-overrun'` note (reconcile-core.mjs:1023-1029), mirroring 'awaiting-permission''s own long-standing 'refuse AND surface' treatment. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) still tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all — so this note is, for now, the only mechanical signal a hung or silently-exited ci-heal session produces.",
+      "notes": "4227 (epic #4075/#3383) — FIXED. assessLiveness's 'live-process'/'awaiting-permission'/'liveness-unknown' refusals (reconcile-core.mjs:978-1029) still have no INTRINSIC time bound in the sense of ever killing the session — this NEVER kills or reaps it — but a 'live-process' verdict past LIVE_SESSION_OVERRUN_MS (90 minutes, default; overridable via planReconcile's own `liveSessionOverrunMs` option, no env read) now ALSO gets a surfaced `kind:'session-overrun'` note (reconcile-core.mjs:1023-1029), mirroring 'awaiting-permission''s own long-standing 'refuse AND surface' treatment. The 4-stage stuck-PR safety net (scripts/conveyor/stuck-pr-watch-core.mjs:68-73 STUCK_STAGES, :138-148 classifyStuckStage) still tracks review/fix/approved/conflict ONLY — it has no 'ci-red'/'ci-heal' stage at all — so this note is, for now, the only mechanical signal a hung or silently-exited ci-heal session produces.",
       "ack": {}
     },
     {
@@ -230,7 +232,7 @@
         "how": "session-overrun note → PR comment + operator-queue",
         "cite": "scripts/conveyor/reconcile-core.mjs:1023-1029; scripts/conveyor/reconcile-note-comment.mjs#noteEpisodeKey"
       },
-      "notes": "xilx617 (epic #4075/#3383) — STILL REFUSES, never kills: the underlying wait for the session to exit is the SAME ongoing one `ci-heal-session-running` already describes. This state is the one-tick note event, then monitoring resumes as before. The note's text states the BOUND (90 minutes), never the elapsed time, and its episode key is `kind + sessionId` (falling back to `pid`), so the SAME overrunning session posts exactly once."
+      "notes": "4227 (epic #4075/#3383) — STILL REFUSES, never kills: the underlying wait for the session to exit is the SAME ongoing one `ci-heal-session-running` already describes. This state is the one-tick note event, then monitoring resumes as before. The note's text states the BOUND (90 minutes), never the elapsed time, and its episode key is `kind + sessionId` (falling back to `pid`), so the SAME overrunning session posts exactly once."
     },
     {
       "id": "ci-heal-completed",
@@ -258,9 +260,9 @@
     {
       "from": "pr-check-state-read",
       "to": "ci-red",
-      "on": "required check concluded failing",
+      "on": "required check concluded failing (ciFailed), OR the PR still carries a `ci:failed` label AND this read's OWN rollup does not yet positively prove the required check green",
       "kind": "normal",
-      "cite": "scripts/progress-board.mjs:466,510",
+      "cite": "scripts/progress-board.mjs:531,543",
       "provides": [
         {
           "kind": "ci",
@@ -442,14 +444,14 @@
       "provides": [],
       "notes": "Neither this read nor GitHub's own API distinguishes a check run computed against the CURRENT base from one carried over from before a base retarget — this assumption is never actually confirmed on the base-retargeted path (nothing there provides the fact), and on the ordinary direct-push path it holds only because GitHub's own push-triggered CI happens to run against the current tree, never because anything here checks it.",
       "ack": {
-        "unprovided-assumption": "xi4od2p"
+        "unprovided-assumption": "4239"
       }
     },
     {
       "id": "claude-auth-gate",
       "state": "ci-heal-dispatch",
       "actor": "reconcile-fix-dispatch-daemon",
-      "does": "cheap `claude auth status` probe once per tick (card x5kagse); a broken login skips all fix/ci-heal dispatch this tick",
+      "does": "cheap `claude auth status` probe once per tick (card 4212); a broken login skips all fix/ci-heal dispatch this tick",
       "cite": "skills-src/conveyor/reconcile-fix-dispatch-daemon.mjs:512",
       "canFail": true,
       "onFailure": "ci-heal-dispatch",
@@ -559,7 +561,7 @@
       ],
       "notes": "onFailure here models the brief's own instruction to stop and report 'ci-heal not-applicable (lane ref gone)' (fix-agent-ci-brief.md:74-75) — a stand-down comment, not an automatic repair; the PR falls back to being re-evaluated fresh next tick since the session is then no longer live.",
       "ack": {
-        "unprovided-assumption": "xrv69j6"
+        "unprovided-assumption": "4238"
       }
     }
   ]

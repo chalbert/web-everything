@@ -380,7 +380,8 @@ export const REVIEW_DAEMON_REPOS = Object.values(CONSTELLATION_REPOS).map((r) =>
  * @returns {{repos:Array<{repo:string, result?:object, error?:string}>, reviewsOwed:number,
  *   dispatched:Array<object>, failed:Array<object>, refusals:number, reconcileFailed:Array<{repo:string, error:string}>,
  *   deferredForLanes:number, deferredForAuth:number, authPaused:boolean, authPauseReason:(string|null),
- *   holdReconcile:Array<{num:number, remove:string[], repo:string}>,
+ *   holdReconcile:Array<{num:number, remove?:string[], healed?:string[], commentPosted?:boolean,
+ *     flagged?:string[], flagReason?:string, error?:string, fetchError?:string, repo:string}>,
  *   holdReconcileFailed:Array<{repo:string, error:string}>}}
  */
 export function runReviewTickAllRepos({ repos = REVIEW_DAEMON_REPOS, tick = runReviewTick, authGateOverride, ...tickOpts } = {}) {
@@ -615,9 +616,16 @@ export function buildCliDaemonEffects({
       for (const rf of (result.reconcileFailed ?? [])) log.error(`review-daemon: ${rf.repo} reconcile failed (non-fatal, other repos unaffected): ${rf.error}`);
       for (const r of result.repos) if (r.error) log.error(`review-daemon: ${r.repo} tick failed unexpectedly (non-fatal, other repos unaffected): ${r.error}`);
       // #x01u7az — the review-hold reconcile sweep's own findings: a stray review:pending beside a live
-      // review:human, or a stray advisory:* once review:human is cleared (see review-hold-reconcile.mjs's
-      // header for the live PRs — #2549, #2578 — this cleans up).
-      for (const h of (result.holdReconcile ?? [])) log.error(`review-daemon: ${h.repo}#${h.num} hold-reconcile removed ${h.remove.join(',')}${h.error ? ` (FAILED: ${h.error})` : ''}`);
+      // review:human, a stray advisory:* once review:human is cleared (#2549, #2578), or — #2766/#2767 —
+      // an EXISTING contradictory review:accepted + review:human pair, either HEALED (comment posted,
+      // review:accepted removed) or FLAGGED (comment history proved a genuine clearance, or the fetch failed).
+      // `h.remove`/`h.healed`/`h.flagged` are INDEPENDENT optional fields on one entry (see
+      // `sweepReviewHoldLabels`'s own return doc) — never assume any one of them is present.
+      for (const h of (result.holdReconcile ?? [])) {
+        if (h.remove?.length) log.error(`review-daemon: ${h.repo}#${h.num} hold-reconcile removed ${h.remove.join(',')}${h.error ? ` (FAILED: ${h.error})` : ''}`);
+        if (h.healed?.length) log.error(`review-daemon: ${h.repo}#${h.num} hold-reconcile HEALED — removed ${h.healed.join(',')}${h.commentPosted ? ', comment posted' : ''}${h.error ? ` (FAILED: ${h.error})` : ''}`);
+        if (h.flagged?.length) log.error(`review-daemon: ${h.repo}#${h.num} hold-reconcile FLAGGED contradictory ${h.flagged.join(',')} — not auto-resolved (${h.flagReason || 'unresolved'}${h.fetchError ? `, fetch error: ${h.fetchError}` : ''})`);
+      }
       for (const hf of (result.holdReconcileFailed ?? [])) log.error(`review-daemon: ${hf.repo} hold-reconcile failed (non-fatal, other repos unaffected): ${hf.error}`);
       if (result.sessionReap && !result.sessionReap.unreadable) {
         const sr = result.sessionReap;

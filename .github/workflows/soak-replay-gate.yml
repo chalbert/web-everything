@@ -1,0 +1,72 @@
+# Enforces: every PR that fixes a live daemon break adds a soak break scenario
+# (scripts/conveyor/soak/breaks/*.mjs + its *.soak.test.mjs, registered in that directory's index.mjs the way
+# existing ones are — e.g. daemon-overlay-lock-wait, rebuild-finalize-starved), or carries an explicit
+# `soak-waiver: <reason>` line in its PR body. Operator-approved (#4075): today only 2 of ~12 daemon fixes
+# added one; the standing prose rule (`we:skills-src/conveyor/SKILL.md#daemon-soak-harness`,
+# `we:skills-src/conveyor/fix-agent-brief.md`) evidently was not enough on its own.
+#
+# THE DECISION LOGIC lives in `we:scripts/lib/soak-replay-gate.mjs` (pure, unit-tested — see its own header
+# comment and `we:scripts/lib/__tests__/soak-replay-gate.test.mjs` for the full rationale, including frozen
+# real-PR proof), reached here through `we:scripts/soak-replay-gate-cli.mjs`. This workflow is a thin transport:
+# it reads the PR's title/body straight from the trusted event payload (no extra `gh` call, no
+# `pull-requests: read` permission needed — same reasoning as `review-gate.yml`'s own note on this) and the
+# changed-file list via a local `git diff --name-status` against the PR's base sha.
+#
+# A SEPARATE TOP-LEVEL WORKFLOW, deliberately NOT a step inside `.github/workflows/ci.yml`'s `daemon-soak` job:
+# PR #2770 was open and restructuring that exact job (into `daemon-soak-scope` / `soak-shard` / `daemon-soak`)
+# when this workflow was added, so touching ci.yml here would have conflicted with that in-flight change for no
+# reason — this check is fully independent of whether the soak itself ran, and mirrors `review-gate.yml`'s own
+# shape (a same-named sibling required check, not a nested step).
+#
+# BOOTSTRAP + THE SAME "run scripts FROM main, never the PR's own ref" RULE `review-gate.yml` documents at
+# length (see that file's own header for the full reasoning): `ref: main` so a PR cannot neuter this gate by
+# editing `soak-replay-gate.mjs`/`soak-replay-gate-cli.mjs` within its own diff, and the script-presence check
+# below so THIS VERY PR (which adds those files to main for the first time) does not fail on a module that does
+# not exist on main yet.
+#
+# BECOMING A REQUIRED CHECK IS A REPO-ADMIN ACTION, NOT A CODE CHANGE (same note as `review-gate` and `smoke` in
+# ci.yml): this job runs and reports on every PR already; adding `soak-replay-gate` to branch protection's
+# required list is separate.
+name: Soak replay gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  soak-replay-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Does this PR fix a live daemon break without a soak replay or a waiver?
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ ! -f scripts/soak-replay-gate-cli.mjs ]; then
+            echo "scripts/soak-replay-gate-cli.mjs not present on main yet — soak-replay gate not bootstrapped; reporting clear."
+            exit 0
+          fi
+          # Fetch ONLY the PR's own head sha to compute the file diff (read as DATA by `git diff --name-status`,
+          # never executed) — the gate script itself still runs from the trusted `main` checkout above.
+          git fetch origin "$HEAD_SHA" --depth=1
+          status="$(git diff --name-status -M "$BASE_SHA" "$HEAD_SHA")"
+          node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --files-status="$status"

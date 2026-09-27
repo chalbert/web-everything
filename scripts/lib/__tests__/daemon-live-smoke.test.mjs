@@ -33,6 +33,7 @@ import {
   smokeStatePath, gateMergedCommit, ghDispatchedSessionEnv,
   TRANSIENT_FAILURE_PATTERNS, classifySmokeFailure, runLiveSmokeWithRetry,
   SMOKE_TRANSIENT_RETRIES_ENV, SMOKE_RETRY_BACKOFF_MS_ENV,
+  refreshSmokeGithubEnv, probeGithubAuth, hasGithubAuthSignature,
   DISPATCH_DRY_RUN_SCRIPT, DISPATCH_DRY_RUN_CODE_ENTRIES,
 } from '../daemon-live-smoke.mjs';
 
@@ -650,7 +651,8 @@ describe('gateMergedCommit — the one entry point daemon-self-sync.mjs and daem
     });
     const verdict = await gateMergedCommit({ root: '/x', preMergeSha: 'pre-sha-3', mergedIdentitySha: 'transient-sha', env, runChild, run });
     expect(verdict.adopt).toBe(false);
-    expect(verdict.reason).toBe('smoke-transient');
+    // live 2026-09-26: a 401 the external probe confirms is now NAMED (github-auth-broken), still never cached
+    expect(verdict.reason).toBe('github-auth-broken');
     expect(resetCalls).toContainEqual(['reset', '--hard', 'pre-sha-3']);
     expect(readRejectedSha('/x', env)).toBeNull(); // NEVER cached — an env fault must not poison the reject-cache
   });
@@ -1027,4 +1029,125 @@ describe('DISPATCH_DRY_RUN_SCRIPT — real child, proves it catches the pre-fix 
       rmSync(realRoot, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+// ── live 2026-09-26 21:22Z (wev-review-daemon): a stale GH_TOKEN in the rebuild's env read as a code regression ──
+// The rebuild runs before the tick's own token refresh, so the smoke inherited an expired App token. The tree
+// checks that read GitHub through the RAW env (`reconcile-dry-run`, `dispatch-dry-run`) got HTTP 401 and — being
+// `mayBeTransient:false` — classified as 'code'; last-good failed the same way ⇒ `smoke-harness-broken`, nothing
+// adopted. These tests pin the fix: a fresh token per attempt, and an externally-probed 401 is ENVIRONMENT.
+describe('GitHub auth in the smoke — fresh token per attempt; a probed 401 is environment, never code', () => {
+  const STALE = 'stale-token-value';
+  const FRESH = 'fresh-token-value';
+  // A fake GitHub: any gh read (direct, or inside a tree child) fails 401 unless the child's env carries FRESH.
+  const authAwareRunChild = (seen = []) => withNewCheckDefaults(async (cmd, args, opts = {}) => {
+    // No GH_TOKEN at all = the sanitized+shim env the gh-api/gh-pr-list checks use (the shim reads the cache fresh).
+    const ok = !opts.env?.GH_TOKEN || opts.env.GH_TOKEN === FRESH;
+    if (cmd === 'gh' || args[0] === 'scripts/conveyor/reconcile-pass.mjs') {
+      seen.push({ cmd, arg: args[0], token: opts.env?.GH_TOKEN ?? null });
+      if (!ok) throw new Error('exited 1: HTTP 401: Bad credentials (https://api.github.com/graphql)');
+      return '[]';
+    }
+    if (args[1] === 'list') return '[]';
+    if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+    return '';
+  });
+
+  it('a stale inherited token (no refresh) is classified auth-broken — pre-fix it was code, then smoke-harness-broken', async () => {
+    const identity = async ({ env }) => ({ env: { ...env }, refresh: null }); // the pre-fix behavior: no refresh
+    const r = await runLiveSmokeWithRetry({
+      root: '/x', env: { GH_TOKEN: STALE }, runChild: authAwareRunChild(), sleep: async () => {}, refreshAuth: identity,
+    });
+    expect(r.verdict).not.toBe('pass');
+    expect(r.verdict).not.toBe('code'); // the probe proves it is the environment's credential, not the tree
+    expect(r.verdict).toBe('auth-broken');
+  });
+
+  it('every attempt gets a fresh token the way the daemon tick does — the stale inherited one never reaches a child', async () => {
+    const seen = [];
+    const refreshAuth = vi.fn(async ({ env }) => ({ env: { ...env, GH_TOKEN: FRESH }, refresh: { applied: true, reason: 'ok' } }));
+    const r = await runLiveSmokeWithRetry({
+      root: '/x', env: { GH_TOKEN: STALE }, runChild: authAwareRunChild(seen), sleep: async () => {}, refreshAuth,
+    });
+    expect(r.verdict).toBe('pass');
+    expect(refreshAuth).toHaveBeenCalledTimes(1);
+    expect(seen.filter((c) => c.arg === 'scripts/conveyor/reconcile-pass.mjs').every((c) => c.token === FRESH)).toBe(true);
+  });
+
+  it('a 401 the probe confirms forces a re-mint and retries ONCE, without sleeping — passes when the re-mint works', async () => {
+    const calls = [];
+    const refreshAuth = vi.fn(async ({ env, force }) => {
+      calls.push(!!force);
+      // the shared cache hands out the rejected token until a forced re-mint replaces it
+      return { env: { ...env, GH_TOKEN: force ? FRESH : STALE }, refresh: { applied: true, reason: 'ok' } };
+    });
+    const sleep = vi.fn(async () => {});
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild: authAwareRunChild(), sleep, refreshAuth, retries: 0 });
+    expect(r.verdict).toBe('pass');
+    expect(calls).toEqual([false, true]);
+    expect(r.attempts).toBe(2);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('still 401 after the forced re-mint → verdict auth-broken with the probe detail (never code, never a 3rd try)', async () => {
+    const refreshAuth = vi.fn(async ({ env }) => ({ env: { ...env, GH_TOKEN: STALE }, refresh: { applied: false, reason: 'mint-failed' } }));
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild: authAwareRunChild(), sleep: async () => {}, refreshAuth, retries: 2 });
+    expect(r.verdict).toBe('auth-broken');
+    expect(refreshAuth).toHaveBeenCalledTimes(2);
+    expect(r.auth).toMatchObject({ refresh: 'mint-failed', retried: true });
+    expect(r.auth.probe).toMatch(/401/);
+  });
+
+  it('a tree child that merely PRINTS a 401 while the probe authenticates stays a CODE verdict (no laundering)', async () => {
+    const runChild = withNewCheckDefaults(async (cmd, args) => {
+      if (args[0] === 'scripts/conveyor/reconcile-pass.mjs') throw new Error('exited 1: HTTP 401: Bad credentials');
+      if (args[1] === 'list') return '[]';
+      if (args[1] === 'acquire') return JSON.stringify({ lane: 1 });
+      return ''; // gh (incl. the probe) authenticates fine
+    });
+    const refreshAuth = vi.fn(async ({ env }) => ({ env: { ...env }, refresh: null }));
+    const r = await runLiveSmokeWithRetry({ root: '/x', env: {}, runChild, sleep: async () => {}, refreshAuth });
+    expect(r.verdict).toBe('code');
+    expect(refreshAuth).toHaveBeenCalledTimes(1); // no forced re-mint
+    expect(r.auth.probe).toMatch(/ok/);
+  });
+
+  it('hasGithubAuthSignature only looks at FAILED rows', () => {
+    expect(hasGithubAuthSignature([{ ok: true, detail: 'HTTP 401' }])).toBe(false);
+    expect(hasGithubAuthSignature([{ ok: false, detail: 'x\nHTTP 401: Bad credentials' }])).toBe(true);
+    expect(hasGithubAuthSignature([{ ok: false, detail: 'SyntaxError' }])).toBe(false);
+  });
+
+  it('probeGithubAuth: 401 in the message or stderr → authFailed; a network error is not an auth failure', async () => {
+    const env = {};
+    const a = await probeGithubAuth({ env, runChild: async () => { throw Object.assign(new Error('exited 1'), { stderr: 'HTTP 401: Bad credentials' }); } });
+    expect(a.authFailed).toBe(true);
+    const b = await probeGithubAuth({ env, runChild: async () => { throw new Error('dial tcp: i/o timeout'); } });
+    expect(b.authFailed).toBe(false);
+    const c = await probeGithubAuth({ env, runChild: async () => '{}' });
+    expect(c.authFailed).toBe(false);
+  });
+
+  it('refreshSmokeGithubEnv writes the token into a COPY (never process.env); force bypasses the cache; a throw is contained', async () => {
+    const before = process.env.GH_TOKEN;
+    const seenOpts = [];
+    const ensureFresh = async (o) => { seenOpts.push(o); o.setEnv(FRESH); return { applied: true, reason: 'ok' }; };
+    const src = { GH_TOKEN: STALE, KEEP: '1' };
+    const r = await refreshSmokeGithubEnv({ env: src, ensureFresh });
+    expect(r.env).toEqual({ GH_TOKEN: FRESH, KEEP: '1' });
+    expect(src.GH_TOKEN).toBe(STALE);
+    expect(process.env.GH_TOKEN).toBe(before);
+    expect(seenOpts[0].readCache).toBeUndefined();
+    await refreshSmokeGithubEnv({ env: src, ensureFresh, force: true });
+    expect(seenOpts[1].readCache()).toBeNull();
+    const t = await refreshSmokeGithubEnv({ env: src, ensureFresh: async () => { throw new Error('boom'); } });
+    expect(t.env.GH_TOKEN).toBe(STALE);
+    expect(t.refresh.reason).toMatch(/refresh-threw/);
+  });
+
+  it('App auth not configured → env passes through unchanged (real ensureFreshGithubAppEnv, no IO)', async () => {
+    const r = await refreshSmokeGithubEnv({ env: { GH_TOKEN: STALE } });
+    expect(r.env.GH_TOKEN).toBe(STALE);
+    expect(r.refresh.reason).toBe('not-configured');
+  });
 });

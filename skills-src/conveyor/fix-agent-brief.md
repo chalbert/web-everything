@@ -497,7 +497,12 @@ re-push, re-arm-never-clear shape is identical — which is the point (#2630).
   post the proof with your before/after evidence: `node "$LANE/scripts/conveyor/soak/red-green.mjs" --break=<id>`
   (the copy in YOUR WE lane — it tests the tree it lives in) must print RED on the tree before your fix and GREEN
   with it. A unit test alone is not enough: seven live daemon
-  breaks on 2026-09-25 were all green in unit tests.
+  breaks on 2026-09-25 were all green in unit tests. **This is now MECHANICALLY enforced**, not just written
+  here (`we:.github/workflows/soak-replay-gate.yml` → `we:scripts/lib/soak-replay-gate.mjs`, #4075): a PR
+  touching daemon-soak scope that reads as a bug fix and adds no `we:scripts/conveyor/soak/breaks/` file goes
+  red unless its body carries a `soak-waiver: <reason>` line — a non-empty, explicit reason why this fix does
+  not need one (e.g. it doesn't reproduce as a daemon-soak scenario, or an existing break already covers it).
+  Don't reach for the waiver as a shortcut: it exists for the genuine exception, not to skip the work.
 - **If you stop, say so ON THE PR** — every escalation exit runs `stand-down.mjs` before it returns (#3296). A
   refusal that leaves no durable trace is indistinguishable from a crash, and gets re-dispatched forever. The
   marker changes no label; it is terminal for the auto-fix loop and cleared by a human.

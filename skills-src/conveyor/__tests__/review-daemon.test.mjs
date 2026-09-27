@@ -939,6 +939,31 @@ describe('buildCliDaemonEffects.onTick — logs the review-hold reconcile sweep\
     effects.onTick({ repos: [], reviewsOwed: 0, dispatched: [], failed: [] });
     expect(log.error.mock.calls.some((c) => /hold-reconcile/.test(c[0]))).toBe(false);
   });
+
+  // #2766/#2767 follow-up — a FLAGGED- or HEALED-only entry carries NO `remove` key at all
+  // (`sweepReviewHoldLabels`'s own return doc: the three fields are independent and optional). Before this
+  // fix, the log line below unconditionally read `h.remove.join(',')` — a bare `TypeError: Cannot read
+  // properties of undefined` on exactly this shape, live in the daemon's own tick loop the first time it ever
+  // saw one (this sweep's entries reach `onTick` completely unfiltered from `runReviewTick`).
+  it('does NOT throw on a flagged-only entry (no `remove` key) — regression for the #2766/#2767 shape', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    expect(() => effects.onTick({
+      repos: [], reviewsOwed: 0, dispatched: [], failed: [],
+      holdReconcile: [{ num: 2767, flagged: ['review:accepted', 'review:human'], flagReason: 'fetch-unavailable', fetchError: 'gh: rate limited', repo: 'chalbert/web-everything' }],
+    })).not.toThrow();
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/chalbert\/web-everything#2767 hold-reconcile FLAGGED contradictory review:accepted,review:human — not auto-resolved \(fetch-unavailable, fetch error: gh: rate limited\)/));
+  });
+
+  it('does NOT throw on a healed-only entry (no `remove` key), and logs the heal + comment status', () => {
+    const log = { error: vi.fn() };
+    const effects = buildCliDaemonEffects({ owner: 'x', log });
+    expect(() => effects.onTick({
+      repos: [], reviewsOwed: 0, dispatched: [], failed: [],
+      holdReconcile: [{ num: 2767, healed: ['review:accepted'], commentPosted: true, repo: 'chalbert/web-everything' }],
+    })).not.toThrow();
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/chalbert\/web-everything#2767 hold-reconcile HEALED — removed review:accepted, comment posted/));
+  });
 });
 
 describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mjs\'s own CLI default', () => {

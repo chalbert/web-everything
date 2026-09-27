@@ -885,6 +885,8 @@ describe('rebuildClone', () => {
   it.each([
     ['code', 'smoke-rejected'],
     ['transient', 'smoke-transient'],
+    // live 2026-09-26: GitHub rejecting the env's token is an ENVIRONMENT fault — named, held, never rejected.
+    ['auth-broken', 'github-auth-broken'],
   ])('a "%s" smoke verdict never touches root at all — no reset, no rollback, no quarantine', async (verdict, reason) => {
     const { originDir, cloneDir, env } = makeFixture();
     pushBranch(originDir, `lane/rollback-${verdict}`, (dir) => writeFile(dir, 'r.txt', 'x\n'));
@@ -910,6 +912,11 @@ describe('rebuildClone', () => {
     expect(state.inProgress).toBeNull();
     if (verdict === 'code') expect(state.rejected).not.toBeNull();
     else expect(state.rejected).toBeNull();
+    if (verdict === 'auth-broken') {
+      expect(result.alerts.map((x) => x.kind)).toContain('github-auth-broken');
+      expect(result.alerts.map((x) => x.kind)).not.toContain('smoke-rejected');
+      expect(state.held?.reason).toBe('github-auth-broken');
+    }
   });
 
   it('a smoke that throws is treated like a rejection — root untouched, no quarantine', async () => {

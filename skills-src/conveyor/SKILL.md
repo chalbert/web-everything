@@ -921,6 +921,11 @@ its bound, `tickOnce` and `onTick` did not throw, no stale-refusal streak, owed 
   GREEN with it). The fix-agent brief carries the same rule. A break whose fix is not yet on the tree under test
   runs as a titled expected-fail (its card named), never a silent skip, and turns into a required pass by itself
   when the fix lands.
+- **MECHANICALLY ENFORCED (#4075)**, not left to prose alone — a PR that touches daemon-soak scope and reads as
+  a bug fix, but adds/changes no `we:scripts/conveyor/soak/breaks/` file, goes red under the `soak-replay-gate`
+  check (`we:.github/workflows/soak-replay-gate.yml` → `we:scripts/lib/soak-replay-gate.mjs`) unless the PR body
+  carries an explicit `soak-waiver: <non-empty reason>` line. Operator-approved after only 2 of ~12 recent
+  daemon fixes added one on their own.
 
 ## The split, restated (why this skill is safe to keep thin)
 

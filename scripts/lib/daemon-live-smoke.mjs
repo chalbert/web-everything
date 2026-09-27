@@ -79,6 +79,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { runBounded, resolveChildTimeoutMs, resolveLaneAcquireTimeoutMs } from './bounded-child.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv } from './gh-app-shim.mjs';
+import { ensureFreshGithubAppEnv } from './github-app-auth-env.mjs';
 import { collectImportClosure, closureHits } from './import-closure.mjs';
 import { CONSTELLATION_REPOS } from './constellation-repos.mjs';
 import { gitRun } from './main-staleness.mjs';
@@ -715,28 +716,117 @@ const defaultSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms);
  * more times, sleeping `backoffMs` between attempts. A `'code'` verdict never retries — it is a real finding,
  * not noise. The kill switch is checked up front and short-circuits identically to {@link runLiveSmoke}'s own
  * kill-switch path, without spending an attempt.
+ *
+ * GITHUB AUTH (see {@link refreshSmokeGithubEnv} / {@link probeGithubAuth}): every attempt first gets a FRESH
+ * App token in its env. When a failed row mentions a 401, an external `gh` probe with that same env decides
+ * whose fault it is: probe OK → the tree's own failure, classified as usual; probe 401 → the environment's —
+ * force a re-mint and retry once (no sleep); still 401 → verdict `'auth-broken'` (never `'code'`), which the
+ * rebuild raises as a `github-auth-broken` alert and holds on, without a reject record.
  * @param {{root:string, env?:NodeJS.ProcessEnv, runChild?:typeof runBounded, sleep?:(ms:number)=>Promise<void>,
- *   retries?:number, backoffMs?:number}} o
- * @returns {Promise<{verdict:'pass'|'transient'|'code', attempts?:number, smoke?:object, disabled?:boolean}>}
+ *   retries?:number, backoffMs?:number, refreshAuth?:typeof refreshSmokeGithubEnv}} o
+ * @returns {Promise<{verdict:'pass'|'transient'|'code'|'auth-broken', attempts?:number, smoke?:object,
+ *   disabled?:boolean, auth?:{probe:string, refresh:string|null, retried:boolean}}>}
  */
 export async function runLiveSmokeWithRetry({
   root, env = process.env, runChild = runBounded, sleep = defaultSleep,
   retries = envNonNegInt(env, SMOKE_TRANSIENT_RETRIES_ENV, 2),
   backoffMs = envMs(env, SMOKE_RETRY_BACKOFF_MS_ENV, 15_000),
   changedFiles = null,
+  refreshAuth = refreshSmokeGithubEnv,
 } = {}) {
   if (isSmokeGateDisabled(env)) return { verdict: 'pass', disabled: true };
   let smoke;
   let verdict;
   let attempts = 0;
+  let forceRefresh = false;
+  let authRetried = false;
+  let auth = null;
   for (;;) {
     attempts += 1;
-    smoke = await runLiveSmoke({ root, env, runChild, changedFiles });
+    // Fresh token for EVERY attempt, the same way the daemon's own tick gets one (see refreshSmokeGithubEnv).
+    const { env: runEnv, refresh } = await refreshAuth({ env, force: forceRefresh });
+    forceRefresh = false;
+    smoke = await runLiveSmoke({ root, env: runEnv, runChild, changedFiles });
     verdict = classifySmokeFailure(smoke.results);
-    if (verdict !== 'transient' || attempts > retries) break;
+    if (verdict !== 'pass' && hasGithubAuthSignature(smoke.results)) {
+      const probe = await probeGithubAuth({ env: runEnv, runChild, budgets: resolveSmokeBudgets(env) });
+      auth = { probe: probe.detail, refresh: refresh?.reason ?? null, retried: authRetried };
+      if (probe.authFailed) {
+        // The environment's own credential is rejected by GitHub, independent of the tree's code.
+        if (!authRetried) {
+          authRetried = true;
+          forceRefresh = true; // re-mint, never trust the cache that just handed out a rejected token
+          continue;
+        }
+        verdict = 'auth-broken';
+        break;
+      }
+      // The probe authenticated fine with the same env — the tree's own 401 is its own; classify as usual.
+    }
+    if (verdict !== 'transient' || attempts > retries + (authRetried ? 1 : 0)) break;
     await sleep(backoffMs);
   }
-  return { verdict, attempts, smoke };
+  return { verdict, attempts, smoke, ...(auth ? { auth } : {}) };
+}
+
+// ── GitHub auth is ENVIRONMENT, never code (live 2026-09-26 21:22Z, `wev-review-daemon`) ─────────────────────
+// `rebuildClone` runs inside `withSelfSync`, which wraps `withGithubAppAuth` — so the rebuild (and this smoke)
+// runs BEFORE the tick's own token refresh, on whatever `GH_TOKEN` the previous refresh left in `process.env`.
+// A long tick, or a run of skipped ticks (read lock refused), leaves that token past its 1h expiry: every
+// tree-code check that reads GitHub through the RAW env (`reconcile-dry-run`, `dispatch-dry-run`) got
+// `HTTP 401: Bad credentials`, while `gh-api-repo`/`gh-pr-list` (sanitized env + shim, which reads the cache
+// fresh) passed. Since those two rows are `mayBeTransient:false`, the 401 read as a code regression; it failed
+// plain main and last-good the same way, so the clone was held as `smoke-harness-broken` and no fix was adopted.
+
+/** `gh`'s own auth-rejection text. Used only to decide whether to PROBE, never as a verdict by itself. */
+export const GITHUB_AUTH_FAILURE_RE = /HTTP 401|Bad credentials/i;
+
+/** PURE: does any failed row mention a GitHub auth rejection? */
+export function hasGithubAuthSignature(results) {
+  return Array.isArray(results) && results.some((r) => !r.ok && GITHUB_AUTH_FAILURE_RE.test(String(r.detail ?? '')));
+}
+
+/**
+ * Return a COPY of `env` whose `GH_TOKEN` is the fleet's current App installation token — the exact refresh a
+ * daemon's own tick runs first (`github-app-auth-env.mjs#ensureFreshGithubAppEnv`), written into the copy,
+ * never into `process.env`. `force` skips the cache and mints (used once, after GitHub rejected the token).
+ * App auth not configured, or a failed mint, leaves `env` as it was. Never throws.
+ * @param {{env?:NodeJS.ProcessEnv, force?:boolean, ensureFresh?:typeof ensureFreshGithubAppEnv, log?:Console}} [o]
+ * @returns {Promise<{env:NodeJS.ProcessEnv, refresh:{applied:boolean, reason:string}|null}>}
+ */
+export async function refreshSmokeGithubEnv({
+  env = process.env, force = false, ensureFresh = ensureFreshGithubAppEnv, log = console,
+} = {}) {
+  const out = { ...env };
+  let refresh = null;
+  try {
+    refresh = await ensureFresh({
+      env: out,
+      setEnv: (token) => { out.GH_TOKEN = token; },
+      ...(force ? { readCache: () => null } : {}),
+      log,
+    });
+  } catch (e) {
+    refresh = { applied: false, reason: `refresh-threw: ${firstLine(e)}` };
+  }
+  return { env: out, refresh };
+}
+
+/**
+ * External probe, run with the SAME env the tree checks got: `gh api --method GET repos/<we>`. Only a 401 HERE
+ * (an external tool, no tree code involved) makes a smoke's 401 an environment fault — so a tree that merely
+ * PRINTS "HTTP 401" can never launder a real failure through the auth path (PR #2625's reject-cache rule).
+ * @returns {Promise<{authFailed:boolean, detail:string}>}
+ */
+export async function probeGithubAuth({ env, runChild = runBounded, budgets = resolveSmokeBudgets(env) }) {
+  const slug = CONSTELLATION_REPOS.we.slug;
+  try {
+    await runChild('gh', ['api', '--method', 'GET', `repos/${slug}`], { env, timeoutMs: budgets.ghApiMs });
+    return { authFailed: false, detail: `gh api --method GET repos/${slug} ok with the smoke env` };
+  } catch (e) {
+    const text = `${String((e && e.message) || e)}\n${String(e?.stderr ?? '')}`;
+    return { authFailed: GITHUB_AUTH_FAILURE_RE.test(text), detail: `gh api --method GET repos/${slug} failed with the smoke env:${failureLine(e)}` };
+  }
 }
 
 // ── Reject-cache: remember the last merged sha the gate rejected, so a daemon never re-runs the (real,
@@ -821,7 +911,7 @@ export function rollbackToSha({ root, sha, run = gitRun }) {
  * @param {{root:string, preMergeSha:string|null, mergedIdentitySha?:string|null, env?:NodeJS.ProcessEnv,
  *   runChild?:typeof runBounded, run?:typeof gitRun, log?:Console}} o
  * @returns {Promise<{adopt:boolean, reason:'kill-switch-disabled'|'still-rejected'|'smoke-pass'|
- *   'smoke-transient'|'smoke-fail', smoke?:object, rollback?:object, quarantine?:true}>}
+ *   'smoke-transient'|'github-auth-broken'|'smoke-fail', smoke?:object, rollback?:object, quarantine?:true}>}
  */
 export async function gateMergedCommit({
   root, preMergeSha, mergedIdentitySha = null, env = process.env, runChild = runBounded, run = gitRun, log = console,
@@ -845,7 +935,9 @@ export async function gateMergedCommit({
     return { adopt: true, reason: disabled ? 'kill-switch-disabled' : 'smoke-pass', smoke };
   }
 
-  if (verdict === 'transient') {
+  if (verdict === 'transient' || verdict === 'auth-broken') {
+    // 'auth-broken': GitHub rejected the environment's credential even after a forced re-mint — an
+    // environment fault, handled exactly like transient noise below (never a reject record).
     // Env/infra noise (a 401, a busy lane pool, a network blip) survived every retry — roll back so the
     // daemon never restarts onto un-vetted code, but NEVER write a reject record: caching a transient fault
     // would permanently block a later, healthy re-check of this SAME sha once the environment recovers (the
@@ -855,7 +947,7 @@ export async function gateMergedCommit({
       `daemon-live-smoke: TRANSIENT live smoke failure (env/infra noise, not recording a rejection — #3383 Module D) `
       + `after retry; ${rollback.ok ? `rolled back to ${preMergeSha}` : `ROLLBACK FAILED (${rollback.reason}) — clone may be left mid-move, needs a hand \`git reset --hard ${preMergeSha}\``}`,
     );
-    const result = { adopt: false, reason: 'smoke-transient', smoke, rollback };
+    const result = { adopt: false, reason: verdict === 'auth-broken' ? 'github-auth-broken' : 'smoke-transient', smoke, rollback };
     if (!rollback.ok) result.quarantine = true;
     return result;
   }
