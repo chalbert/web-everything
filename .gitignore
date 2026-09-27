@@ -25,6 +25,11 @@ test-results/
 reports/progress-board.html
 reports/.progress-board-cache.json
 
+# Required-status-checks GENERATED cache (#2748 false-red follow-up, we:scripts/lib/required-status-checks.mjs)
+# — same shape as the progress-board cache above: the last good `gh api .../protection` read, machine-local,
+# safe to lose (a stale or missing cache just falls back to a fresh live fetch or the hardcoded fallback set).
+reports/.required-status-checks-cache.json
+
 # Decision Docket GENERATED HTML (backlog/3562's data/template separation, scripts/gen-decision-docket.mjs)
 # — same shape as progress-board above: the page is a PURE re-render of reports/decision-docket-data.json
 # through skills-src/decision-docket/template.html, so committing it would churn the tree every run (the
