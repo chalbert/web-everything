@@ -3915,3 +3915,60 @@ export function checkLeashPin({ pinned = LEASH_PIN_SNAPSHOT, specBasenames, rost
   }
   return { errors, warnings };
 }
+
+// ── Registry-index anti-regression guard (#3729-style conflict prevention) ─────────────────────────
+// `scripts/conveyor/soak/breaks/index.mjs` and `scripts/conveyor/health-smells/index.mjs` used to be
+// HAND-MAINTAINED: one `import` line + one array entry per break/smell, so every PR adding one edited the same
+// few lines — the routine cause of merge conflicts between same-window PRs. Both were rebuilt to DISCOVER their
+// registry from every module file in their own directory (`registry-discovery.mjs#loadModuleRegistry`), so
+// dropping in a new `<id>.mjs` file is the whole registration step; nothing in either `index.mjs` should ever
+// name an individual break/smell module again. This is the standing guard against that regressing: a future
+// edit that re-adds a hand-maintained import (or drops the `loadModuleRegistry` call entirely) fails LOUDLY
+// here instead of silently reintroducing the exact conflict surface this refactor removed.
+export const REGISTRY_DISCOVERY_INDEX_FILES = Object.freeze([
+  'scripts/conveyor/soak/breaks/index.mjs',
+  'scripts/conveyor/health-smells/index.mjs',
+]);
+
+// A relative import of an individual sibling module — import x from a same-directory "./some-id.mjs" specifier
+// — excluding a self-referential index.mjs (meaningless here) and non-.mjs specifiers (irrelevant to this
+// guard). Built via `RegExp(...)` from a quote character produced by `String.fromCharCode` rather than written
+// as a literal quote glyph inside the pattern on purpose: this whole file is itself walked by an import-graph
+// scanner (`scripts/operations/__tests__/import-graph.mjs#blankCommentsAndStrings`) that blanks out string and
+// template-literal bodies by scanning for the next matching quote character — it does not understand regex
+// syntax, so a literal `'` sitting inside a `/regex/` literal reads to it as an ad-hoc string opening/closing
+// and desyncs its quote-tracking for the REST of the file (found live: it broke `scripts/operations/__tests__/
+// explore.test.mjs`, a completely unrelated test, by misreading later code in this file as still "inside a
+// string"). Keeping this pattern quote-glyph-free in the SOURCE avoids that footgun entirely.
+const SIBLING_IMPORT_QUOTE = String.fromCharCode(39); // "'" — kept out of any regex/bare-code literal; see above.
+const HAND_SIBLING_IMPORT_RE = new RegExp(
+  `^\\s*import\\s+[\\w$,*\\s{}]+\\s+from\\s+${SIBLING_IMPORT_QUOTE}\\./(?!index\\.mjs)([^${SIBLING_IMPORT_QUOTE}]+\\.mjs)${SIBLING_IMPORT_QUOTE}`,
+  'm',
+);
+
+/**
+ * @param {{file: string, content: string}[]} files — candidate files to check; only ones whose `file` is in
+ *   `REGISTRY_DISCOVERY_INDEX_FILES` are inspected (a plain filter, so callers may pass a wider corpus).
+ * @returns {{file: string, reason: string}[]} one finding per offending registry-index file.
+ */
+export function findHandMaintainedRegistryIndex(files) {
+  const findings = [];
+  for (const { file, content } of files) {
+    if (!REGISTRY_DISCOVERY_INDEX_FILES.includes(file)) continue;
+    const siblingImport = HAND_SIBLING_IMPORT_RE.exec(content);
+    if (siblingImport) {
+      findings.push({
+        file,
+        reason: `hand-imports the sibling module ${siblingImport[1]} directly (a same-directory import statement) — every module in this directory must be picked up by directory discovery (loadModuleRegistry), never individually imported here`,
+      });
+      continue; // one finding per file is enough to fail the gate
+    }
+    if (!/loadModuleRegistry\s*\(/.test(content)) {
+      findings.push({
+        file,
+        reason: 'no longer calls loadModuleRegistry(...) — this registry must be built by directory discovery, not a hand-maintained list',
+      });
+    }
+  }
+  return findings;
+}

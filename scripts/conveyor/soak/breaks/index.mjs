@@ -17,67 +17,29 @@
  * THE RULE (`we:skills-src/conveyor/SKILL.md`, `we:skills-src/conveyor/fix-agent-brief.md`): every daemon bug fix
  * adds its real-world case here, and shows it RED against the tree before the fix
  * (`node scripts/conveyor/soak/red-green.mjs --break=<id>`) and GREEN with it.
+ *
+ * DISCOVERED FROM DISK (#3729-style conflict prevention) — every module file in this directory is picked up
+ * automatically via `registry-discovery.mjs`; nothing is hand-listed here. That means dropping in a new
+ * `<id>.mjs` is the WHOLE registration step (no more index-edit merge conflicts when several PRs add a break in
+ * the same window). See `we:scripts/check-standards-rules.mjs#findHandMaintainedRegistryIndex` for the standing
+ * guard against this file (or `health-smells/index.mjs`) regressing back to a hand-maintained import list.
+ *
+ * This file itself stays a thin, EAGER entry point (a top-level `await` builds `BREAKS` once, at import time) —
+ * the discovery/validation logic lives in `../registry-discovery.mjs` (generic, no eager directory scan) and
+ * `../breaks-shape.mjs` (the break-specific shape check — deliberately kept OUTSIDE this directory so directory
+ * discovery never mistakes it for a break module), both importable on their own for tests that need the logic
+ * without triggering a real load of every break module in this directory.
  */
 
-import unsupportedRepoDirt from './unsupported-repo-dirt.mjs';
-import scorecardDirt from './scorecard-dirt.mjs';
-import ghShimMidRebuild from './gh-shim-mid-rebuild.mjs';
-import pinnedOverlayConflictSkipped from './pinned-overlay-conflict-skipped.mjs';
-import ciHealEmptyScope from './ci-heal-empty-scope.mjs';
-import laneAcquireUnderLoad from './lane-acquire-under-load.mjs';
-import fixDaemonLockWait from './fix-daemon-lock-wait.mjs';
-import skippedTickOnTick from './skipped-tick-ontick.mjs';
-import stickySmokeRejection from './sticky-smoke-rejection.mjs';
-import sessionJunkInDaemonClone from './session-junk-in-daemon-clone.mjs';
-import shortJobBehindFullSuite from './short-job-behind-full-suite.mjs';
-import claudeAuthExpired from './claude-auth-expired.mjs';
-import claudeAuthFalsePositive from './claude-auth-false-positive.mjs';
-import rebuildSmokeOffLock from './rebuild-smoke-off-lock.mjs';
-import daemonOverlayLockWait from './daemon-overlay-lock-wait.mjs';
-import badOverlayFallsBack from './bad-overlay-falls-back.mjs';
-import brokenSmokeHarnessHoldsLastGood from './broken-smoke-harness-holds-last-good.mjs';
-import claudeAuthDispatchPause from './claude-auth-dispatch-pause.mjs';
-import rebuildConcurrentCandidates from './rebuild-concurrent-candidates.mjs';
-import smokeExpiredGhToken from './smoke-expired-gh-token.mjs';
-import shallowCloneUnrelatedHistories from './shallow-clone-unrelated-histories.mjs';
-import reaperRestopsFinishedSessions from './reaper-restops-finished-sessions.mjs';
-import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
-import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
-import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
-import rebuildFinalizeStarved from './rebuild-finalize-starved.mjs';
-import staleFixingLabelCiHealOwed from './stale-fixing-label-ci-heal-owed.mjs';
-import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 
-export const BREAKS = Object.freeze([
-  unsupportedRepoDirt,
-  scorecardDirt,
-  ghShimMidRebuild,
-  pinnedOverlayConflictSkipped,
-  ciHealEmptyScope,
-  laneAcquireUnderLoad,
-  fixDaemonLockWait,
-  skippedTickOnTick,
-  stickySmokeRejection,
-  sessionJunkInDaemonClone,
-  shortJobBehindFullSuite,
-  claudeAuthExpired,
-  claudeAuthFalsePositive,
-  rebuildSmokeOffLock,
-  daemonOverlayLockWait,
-  badOverlayFallsBack,
-  brokenSmokeHarnessHoldsLastGood,
-  claudeAuthDispatchPause,
-  rebuildConcurrentCandidates,
-  smokeExpiredGhToken,
-  shallowCloneUnrelatedHistories,
-  reaperRestopsFinishedSessions,
-  coupleSplitByUnrelatedMerge,
-  ciHealLoopStaleLabelReviewGate,
-  alreadyLandedPrGetsFixer,
-  rebuildFinalizeStarved,
-  largeReapBacklogStarvesDispatch,
-  staleFixingLabelCiHealOwed,
-]);
+import { loadModuleRegistry } from '../../registry-discovery.mjs';
+import { validateBreakShape } from '../breaks-shape.mjs';
+
+const DIR = dirname(fileURLToPath(import.meta.url));
+
+export const BREAKS = Object.freeze(await loadModuleRegistry(DIR, validateBreakShape));
 
 export function breakById(id) {
   const b = BREAKS.find((x) => x.id === id);
