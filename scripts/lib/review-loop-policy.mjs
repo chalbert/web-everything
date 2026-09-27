@@ -291,13 +291,18 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // PR #2766 advisory (security): only a CLEAN repo path reaches `scope` — `renderItem` writes scope entries
   // into the card's frontmatter unescaped, so a juror `file` carrying a quote or newline could inject keys.
   const files = [...new Set(owed.map(cleanFindingFile).filter(Boolean))];
+  // `null` for a file that is ALREADY test code (under `__tests__/`, or a `*.test.*`/`*.spec.*` file) — its
+  // own sibling is itself, and appending another `__tests__/…test` produced a nonexistent
+  // `__tests__/__tests__/x.test.test.mjs` path.
   const testSiblingOf = (f) => {
     const slash = f.lastIndexOf('/');
     const dir = slash === -1 ? '.' : f.slice(0, slash);
     const base = slash === -1 ? f : f.slice(slash + 1);
-    // PR #2766 advisory (antigravity): a test file is its own test sibling — never `__tests__/__tests__/x.test.test.mjs`.
-    if (/\.test\.[cm]?[jt]s$/.test(base) || dir.endsWith('__tests__')) return f;
-    const stem = base.replace(/\.mjs$/, '');
+    if (/(^|\/)__tests__(\/|$)/.test(dir) || /\.(test|spec)\.[cm]?[jt]s$/.test(base)) return null;
+    // Only a JS/TS-family source has a `__tests__/<stem>.test.mjs` sibling — a .yml/.sh/.json/.md cited file
+    // would otherwise get a phantom scope entry that never exists (PR #2767 advisory).
+    if (!/\.[cm]?[jt]s$/.test(base)) return null;
+    const stem = base.replace(/\.[cm]?[jt]s$/, '');
     // PR #2766 advisory (antigravity): a top-level file's sibling is `__tests__/…`, never `./__tests__/…`.
     return `${dir === '.' ? '' : `${dir}/`}__tests__/${stem}.test.mjs`;
   };
@@ -305,7 +310,8 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // bare path is refused at write time (`lint-locus-prefix.mjs`) for BOTH surfaces (`check-standards.mjs`'s
   // own scope-entry rule cites the identical card, #883, as the scope-lease engine's reason a bare entry is
   // unsafe: unqualified, it reads as repo `null` and never matches an observed `we:`-qualified file).
-  const scope = [...new Set([...files, ...files.map(testSiblingOf)])].map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
+  const scope = [...new Set([...files, ...files.map(testSiblingOf).filter(Boolean)])]
+    .map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
   const digestLines = owed.map((f, i) => (
     `${i + 1}. ${cleanFindingFile(f) ? `${preventionGuardAnchor(f)} — ${f.prevention ?? '(no guard text recorded)'}` : preventionGuardAnchor(f)}`
   ));
@@ -377,12 +383,18 @@ export function preventionHeadMarker(head) {
  */
 export function cleanFindingFile(f) {
   if (typeof f?.file !== 'string') return null;
-  const file = f.file.replace(new RegExp(`^${IN_REPO_LOCUS}`), '').replace(/^(?:\.\/)+/, '');
+  // Jurors' ordinary path forms are normalized FIRST, the same way `we:scripts/lib/jury-core.mjs#corroborationPath`
+  // does (a diff `a/`/`b/` prefix, a trailing `:line`/`:line:col` — PR #2767 advisory), so a legitimate citation
+  // is kept rather than withheld.
+  const file = f.file.trim().replace(new RegExp(`^${IN_REPO_LOCUS}`), '').replace(/^(?:\.\/)+/, '')
+    .replace(/^[ab]\//, '').replace(/:\d+(?::\d+)?$/, '');
   return /^[\w.@+-]+(?:\/[\w.@+-]+)*$/.test(file) && !file.split('/').includes('..') ? file : null;
 }
 
-/** Where the digest says a guard cited no (clean) file. */
+/** Where the digest says a guard cited no file at all. */
 const NO_FILE_CITED = '`(no file cited)`';
+/** Where the digest says a guard cited a `file` that is not a clean path — withheld, never echoed (PR #2767). */
+const FILE_WITHHELD = '`(cited file withheld: not a plain path)`';
 
 /**
  * THE PER-GUARD DUPLICATE KEY (PR #2766 advisory). PURE. For a guard citing a clean file, the backticked
@@ -396,7 +408,10 @@ const NO_FILE_CITED = '`(no file cited)`';
  */
 export function preventionGuardAnchor(f) {
   const file = cleanFindingFile(f);
-  if (!file) return `${NO_FILE_CITED} — ${f?.prevention ?? '(no guard text recorded)'}`;
+  if (!file) {
+    const marker = typeof f?.file === 'string' && f.file.trim() ? FILE_WITHHELD : NO_FILE_CITED;
+    return `${marker} — ${f?.prevention ?? '(no guard text recorded)'}`;
+  }
   return `\`${IN_REPO_LOCUS}${file}${typeof f.line === 'number' ? `:${f.line}` : ''}\``;
 }
 

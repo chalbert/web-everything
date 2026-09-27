@@ -32,8 +32,8 @@ import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
-  markAuthExpiredSessions, markIdleFinishedSessions, CI_HEAL_ROUND_CAP,
-  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
+  markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
+  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING,
 } from '../reconcile-core.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -41,6 +41,7 @@ import {
 import { REARM_COMMENT_MARKER } from '../rearm-review.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
+import { buildCiHealEscalationComment } from '../ci-heal-escalation-mark.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
 import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment, isLatestAdvisoryFindingAddressed } from '../advisory-fix-mark.mjs';
 import { buildRebaseOntoMainComment, DEFAULT_MAX_REBASE_RETRIES_PER_SHA } from '../main-red-recovery.mjs';
@@ -50,6 +51,8 @@ import { defaultReadPrs, defaultReadAgents, PR_LIST_JSON_FIELDS, PR_LIST_LIMIT }
 import { reviewSessionSlug } from '../review-session-slug.mjs';
 import { sessionSlugFor } from '../../operations/dispatch-lane.mjs';
 import { buildReviewedShaMarker } from '../../lib/review-escalation.mjs';
+import { classifyPr } from '../../progress-board.mjs';
+import { reconcileHolds } from '../../operations/land-advance-items-io.mjs';
 
 // ── fixtures — measured shapes, 2026-08-26 ───────────────────────────────────────────────────────────────────
 const NOW = Date.parse('2026-08-26T17:34:00Z');
@@ -877,6 +880,213 @@ describe('case 5h — a CANCELLED required check reads ci-red and is ci-healed, 
   });
 });
 
+// #2748 false-red follow-up (soak-replay-gate, PR #2775) — LIVE INCIDENT 2026-09-26: `chalbert/web-
+// everything#2748`'s real rollup (`gh pr view 2748 --repo chalbert/web-everything --json statusCheckRollup`)
+// has every REQUIRED check (`test`/`smoke`/`daemon-soak`) green, and the ONLY red check is the brand-new
+// advisory `soak-replay-gate` (PR #2775) — an advisory check `classifyPr`'s exclusion list did not yet know
+// about. This read `phase: 'ci-red'` and kept a `ci-heal-2748` session dispatched against a PR with nothing a
+// ci-heal could repair — pure waste, and it blocked landing. Passing `requiredChecks` (branch protection's own
+// required set, fetched + cached by `we:scripts/lib/required-status-checks.mjs`) fixes this STRUCTURALLY: only
+// a check IN that set can make `phase` read `ci-red`, so the NEXT advisory workflow someone adds can never
+// reproduce this by construction, with no exclusion-list update required.
+describe('case 5j — requiredChecks makes a NEW advisory check\'s red never read ci-red (PR #2748 real shape)', () => {
+  // `status: 'COMPLETED'` on every row matches the real `gh pr view --json statusCheckRollup` shape — without
+  // it `reduceCheckState` (evidence only, carried as `check` on every row) reads an incomplete-looking rollup
+  // as still running; irrelevant to `phase` (which `ciFailed` alone decides) but kept realistic here anyway.
+  const pr2748Rollup = [
+    { name: 'review-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'soak-replay-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'test-shard (1)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (2)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (3)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (4)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'daemon-soak', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ];
+  const REQUIRED_CHECKS = ['test', 'smoke', 'daemon-soak'];
+  // `review:accepted` + `ready-to-merge` (→ phase `queued` once CI truly reads clean) isolates the ci-red
+  // question from the unrelated `needs-review`/`review` dispatch branch a `review:pending` label would also
+  // exercise — the real PR #2748 carries `review:pending` too, but that is a SEPARATE fact this case does not
+  // need to also assert on.
+  const pr2748 = (over = {}) => pr1563({
+    number: 2748, labels: lbl('review:accepted', 'ready-to-merge'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pr2748Rollup, comments: [], ...over,
+  });
+
+  // The LIVE bug (before EITHER half of this fix) was `ciFailed`'s exclusion list not yet knowing
+  // `soak-replay-gate`'s name at all — reproduced directly against `we:scripts/progress-board.mjs#ciFailed`
+  // in `progress-board.test.mjs`. Both halves of the fix land in the SAME PR, so by the time `planReconcile`
+  // is exercised here even the no-`requiredChecks` default path (now that `CI_TRUTH_EXCLUDED_CHECKS` itself
+  // carries `soak-replay-gate`, belt-and-suspenders for every call site that never wires a required set
+  // through) already reads this correctly — asserted below alongside the `requiredChecks`-aware path, which
+  // is the one call site actually wired end-to-end (`reconcile-pass.mjs` → `planReconcile`) and the one that
+  // remains correct even against a FUTURE advisory check nobody has added to the exclusion list yet.
+  it('with no requiredChecks (the exclusion-list default, now carrying soak-replay-gate too): never ci-red', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2748 })]);
+  });
+
+  it('FIXED, and future-proof: with requiredChecks supplied, an all-green required set never reads ci-red — nothing owed here', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW, requiredChecks: REQUIRED_CHECKS });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2748 })]);
+  });
+
+  it('a REAL required-check failure alongside the same advisory red still reads ci-red and is ci-healed', () => {
+    const rollupWithRealFailure = [
+      ...pr2748Rollup.filter((c) => c.name !== 'test'),
+      { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ];
+    const plan = planReconcile({
+      prs: [pr2748({ statusCheckRollup: rollupWithRealFailure, labels: lbl('ci:failed') })],
+      agents: [], now: NOW, requiredChecks: REQUIRED_CHECKS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748, phase: 'ci-red' })]);
+  });
+});
+
+// we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, chalbert/web-everything: of
+// ~10 ci-heal sessions dispatched inside one hour, 7 (PRs #2782/#2778/#2772/#2779/…) ended "no change needed".
+// Real measured shape (`gh api repos/chalbert/web-everything/branches/main/protection`, `gh run list --branch
+// main`, `gh api .../commits/<sha>/check-runs` on each PR's own pre-heal commit): `main`'s own red window ran
+// 2026-09-26T23:03:09Z (first concluded `failure`) to 2026-09-27T00:49:15Z (the run that finally concluded
+// `success`) — the fix (PR #2780/#4247) MERGED at 00:38Z, but CI itself did not CONFIRM green until 00:49:15Z.
+// PR #2782's `test` check had concluded `FAILURE` at 00:04:00Z (inside that window) on its PRE-rebase commit —
+// squarely `main`'s own fault. `ci-red-recovery-watch.mjs`'s mechanical rebase then did its job: pushed a new
+// head onto the recovered `main` and re-triggered CI — but the durable `ci:failed` label `merge-ai-prs.mjs`'s
+// own ci-lifecycle reconcile had ALREADY stamped stayed on the PR (nothing clears it until a FRESH green read
+// concludes), and `classifyPr`'s stale-label fallback (`!isRequiredCheckGreen(pr)`) read "the new run has not
+// concluded yet" the SAME as "still failed", handing `reconcile-core.mjs` a `phase: 'ci-red'` for a PR whose
+// only fact was "CI just restarted". Because the check had genuinely not concluded, `isRequiredCheckFailed`
+// (which `enrichPrsWithMainRedFacts` filters on) ALSO read `false` for it — so `requiredCheckCompletedAt` was
+// never even attached, `isPrCiFailureOwedRerun` read `'unknown'` attribution, `owed-ci-rerun` never fired, and
+// the PR fell straight through to a `ci-heal` dispatch: a real, wasted Opus/Sonnet session repairing a PR whose
+// new CI run either had not finished yet or had already gone green. `isRequiredCheckPending` closes exactly
+// this gap (`we:scripts/merge-ai-prs.mjs`) — a check present but unconcluded is now excluded from the
+// label-trust fallback, same as it always was from the live-rollup scan a few lines above it.
+describe('case 5k — a stale ci:failed label beside a RESTARTED (not yet concluded) required check waits, never ci-heals (heal-wait-for-rerun, real PR #2782/#2778 shape)', () => {
+  const MAIN_RED_WINDOWS = [{ start: '2026-09-26T23:03:09Z', end: '2026-09-27T00:49:15Z' }];
+  const restartedRollup = [
+    { name: 'review-gate', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'daemon-soak', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    // The rebase's fresh head re-triggered `test` and it has not concluded yet — the exact shape a mechanical
+    // rebase produces the instant it pushes, real or synthetic alike.
+    { name: 'test', status: 'IN_PROGRESS', conclusion: null },
+  ];
+  const pr2782 = (over = {}) => pr1563({
+    number: 2782, labels: lbl('review:accepted', 'ready-to-merge', 'ci:failed'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: restartedRollup, comments: [], ...over,
+  });
+
+  it('BEFORE this fix, classifyPr alone already shows the mechanism: the stale label no longer outranks a check still in flight', () => {
+    // Direct proof at the unit the incident actually turned on — `we:scripts/progress-board.mjs#classifyPr`'s
+    // stale-`ci:failed` fallback branch. Before this fix `!isRequiredCheckGreen(pr)` alone (true for BOTH
+    // "concluded failed" and "restarted, not concluded") made this read `'ci-red'`; now it reads through to
+    // whatever the PR's OTHER facts say (here: reviewed and queued).
+    expect(classifyPr({
+      state: 'OPEN', labels: lbl('review:accepted', 'ready-to-merge', 'ci:failed'), mergeStateStatus: 'CLEAN',
+      statusCheckRollup: restartedRollup,
+    })).toBe('queued');
+  });
+
+  it('AFTER: planReconcile never dispatches ci-heal for the restarted-but-unconcluded check — nothing owed', () => {
+    const plan = planReconcile({ prs: [pr2782()], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2782 })]);
+  });
+
+  it('still reviewed correctly once the SAME rebase lands and test genuinely concludes green (no regression on the ordinary path)', () => {
+    const greenAfterRebase = restartedRollup.map((c) => (c.name === 'test' ? { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' } : c));
+    const plan = planReconcile({
+      prs: [pr2782({ statusCheckRollup: greenAfterRebase })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2782 })]);
+  });
+
+  it('a check that HAS concluded failed (not merely restarted) still trusts the label and is ci-healed — the fix never masks a real failure', () => {
+    const genuinelyFailed = restartedRollup.map((c) => (c.name === 'test' ? { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' } : c));
+    const plan = planReconcile({
+      prs: [pr2782({ statusCheckRollup: genuinelyFailed, labels: lbl('ci:failed') })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2782, phase: 'ci-red' })]);
+  });
+});
+
+// we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — LIVE INCIDENT, chalbert/web-everything#2783:
+// three ci-heal sessions dispatched across one evening, each ending "escalated (needs human — not a CI break)"
+// for the IDENTICAL reason on the IDENTICAL head — because the brief's escalation exit wrote nothing durable
+// (a bare one-line RETURN), so every reconcile tick that followed re-read the PR as plain `ci-red` with
+// nothing live working it and dispatched ANOTHER heal. `ci-heal-escalation-mark.mjs` posts a durable,
+// HEAD-SCOPED comment on escalation; these pin the BEFORE/AFTER through `planReconcile` itself.
+describe('case 5l — a ci-heal already escalated THIS EXACT head never gets re-dispatched — surfaced once, re-arms on a new push (heal-wait-for-rerun, real PR #2783 shape)', () => {
+  const HEAD_2783 = '70326866f0f299ddd005f9da54f0b87a3c169ac4'; // PR #2783's real head, 2026-09-27
+  const NEW_HEAD_2783 = 'ffffffff70326866f0f299ddd005f9da54f0b8f9';
+  const pr2783 = (over = {}) => pr1563({
+    number: 2783, headRefOid: HEAD_2783, labels: lbl('review:pending', 'checking'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: redRollup, comments: [], ...over,
+  });
+
+  it('BEFORE this fix (no durable escalation record): a bare one-line return leaves nothing on the PR, so the very next tick dispatches ANOTHER ci-heal — the real #2783 defect', () => {
+    const plan = planReconcile({ prs: [pr2783()], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2783 })]);
+  });
+
+  it('AFTER: an escalation comment recorded against the CURRENT head refuses re-dispatch and surfaces a note instead of burning a 4th session', () => {
+    const escalation = buildCiHealEscalationComment({
+      headSha: HEAD_2783, outcome: 'needs-human', reason: 'the diff itself is genuinely wrong, not a CI break',
+    });
+    const plan = planReconcile({
+      prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }] })], agents: [], now: NOW,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783, headSha: HEAD_2783 })]);
+    expect(plan.notes).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', prNumber: 2783, outcome: 'needs-human' })]);
+  });
+
+  it('a new push (a DIFFERENT head) RE-ARMS auto-heal with no human clear — the escalation named the OLD head only', () => {
+    const escalation = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human', reason: 'stale, superseded by a new push' });
+    const plan = planReconcile({
+      prs: [pr2783({ headRefOid: NEW_HEAD_2783, comments: [{ body: escalation, author: AUTOMATION }] })],
+      agents: [], now: NOW,
+    });
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('ci-heal-escalated');
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2783 })]);
+  });
+
+  it('waiting-on-system-fix reads as its OWN refusal kind — never conflated with a genuine needs-human judgment call', () => {
+    const escalation = buildCiHealEscalationComment({
+      headSha: HEAD_2783, outcome: 'waiting-on-system-fix', systemFixRef: 2784,
+      reason: 'soak-replay-gate false red — #2784 fixes the gate itself',
+    });
+    const plan = planReconcile({
+      prs: [pr2783({ comments: [{ body: escalation, author: AUTOMATION }] })], agents: [], now: NOW,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'waiting-on-system-fix', prNumber: 2783, headSha: HEAD_2783, systemFixRef: '2784',
+    })]);
+    expect(plan.notes).toEqual([expect.objectContaining({ kind: 'ci-heal-escalated', outcome: 'waiting-on-system-fix', systemFixRef: '2784' })]);
+  });
+
+  it('#3383 — an escalation comment from an UNTRUSTED author never suppresses a real ci-heal', () => {
+    const forged = buildCiHealEscalationComment({ headSha: HEAD_2783, outcome: 'needs-human' });
+    const plan = planReconcile({
+      prs: [pr2783({ comments: [{ body: forged, author: { login: 'some-random-account' } }] })], agents: [], now: NOW,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2783 })]);
+  });
+
+  it('REFUSAL_KINDS names both new kinds — an unnamed refusal is a bug', () => {
+    expect(REFUSAL_KINDS).toContain('ci-heal-escalated');
+    expect(REFUSAL_KINDS).toContain('waiting-on-system-fix');
+  });
+});
+
 describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {
   const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
   const prRedAttributable = (over = {}) => pr1563({
@@ -975,6 +1185,248 @@ describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable
   });
 });
 
+// we:backlog/review-while-main-red (#4075/#3383) — LIVE INCIDENT 2026-09-26: PRs #2769/#2770/#2772/#2778/#2779
+// (chalbert/web-everything) sat `review:pending` + `ci:failed(owed-ci-rerun)` for hours with review capacity
+// idle (2 review jobs running against 5 held PRs) — the `owed-ci-rerun` refusal above used to be the PR's ONLY
+// row every tick, so a review never even got a look until main recovered AND the mechanical rebase cleared
+// `ci:failed`, serializing two genuinely independent facts (main's own CI state; whether this PR has been
+// reviewed) for no reason. `dispatchReviewRow` closes it: a `review:pending` PR reaching `owed-ci-rerun` now ALSO
+// gets a `review` dispatched, carrying `owedCiRerun: true` so a reader can tell the two populations apart.
+describe('review-while-main-red — a review:pending PR owed only owed-ci-rerun also gets its review dispatched in parallel', () => {
+  const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
+  const prOwedCiRerunAndReview = (over = {}) => pr1563({
+    number: 2769, labels: lbl('review:pending', 'ci:failed'), statusCheckRollup: redRollup,
+    requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33,
+    comments: [finding()],
+    ...over,
+  });
+
+  it('dispatches BOTH the owed-ci-rerun refusal (the rebase is still owed) AND a review, with findings present', () => {
+    const plan = planReconcile({ prs: [prOwedCiRerunAndReview()], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2769, phase: 'ci-red' })]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'review', prNumber: 2769, owedCiRerun: true, attempts: 0,
+    })]);
+  });
+
+  it('zero-findings population: `no-findings` folds into the owed-ci-rerun row and the review dispatches, real count carried (never hardcoded 0)', () => {
+    const twoRearms = [
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+    ];
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: twoRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'owed-ci-rerun', reviewRefusal: expect.objectContaining({ kind: 'no-findings', findings: 0 }),
+    })]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2769, findings: 0, attempts: 2, owedCiRerun: true })]);
+  });
+
+  it('at the round cap: `cap-exhausted` (folded) instead of dispatching a review forever, and the round-cap note still surfaces (zero-findings population, REARM-only thread)', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: fiveRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'owed-ci-rerun',
+      reviewRefusal: expect.objectContaining({ kind: 'cap-exhausted', attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP, capKind: 'review' }),
+    })]);
+    expect(plan.notes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'round-cap-exhausted', prNumber: 2769, capKind: 'review' }),
+    ]));
+  });
+
+  it('at the round cap WITH a real finding present: `cap-exhausted` folds in directly (no `no-findings`)', () => {
+    const fiveRearms = [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }))];
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: fiveRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'owed-ci-rerun',
+      reviewRefusal: expect.objectContaining({ kind: 'cap-exhausted', attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP }),
+    })]);
+  });
+
+  it('#2588 stays independent: a head already carrying a `reviewed-sha` accept marker is not re-dispatched (`already-reviewed-head` folded), even while owed-ci-rerun also holds', () => {
+    const sha = pr1563().headRefOid;
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: [{ body: buildReviewedShaMarker(sha), author: AUTOMATION }] })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'owed-ci-rerun', reviewRefusal: expect.objectContaining({ kind: 'already-reviewed-head', headSha: sha, reviewedSha: sha }),
+    })]);
+  });
+
+  // PR #2783 review round 1 (codex-correctness, PLAUSIBLE): the raw-SHA `already-reviewed-head` guard cannot see
+  // through a mechanical rebase. Defended structurally, not by the SHA: an accepted PR carries `review:accepted`,
+  // never `review:pending`, so neither review path owes it anything — whether its CI is still red on the old head
+  // or the rebase has moved the head and CI is still running.
+  it('does not redispatch an accepted contribution while its mechanical rebase is awaiting CI', () => {
+    const reviewedSha = 'a'.repeat(40);
+    const rebasedHead = 'b'.repeat(40);
+    const accepted = { comments: [finding(), { body: buildReviewedShaMarker(reviewedSha), author: AUTOMATION }], labels: lbl('review:accepted', 'ci:failed') };
+    const stillRed = planReconcile({
+      prs: [prOwedCiRerunAndReview({ ...accepted, headRefOid: reviewedSha })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    // The case only the `review:pending` label gate defends: head MOVED (raw-SHA guard misses), CI still red.
+    const rebasedStillRed = planReconcile({
+      prs: [prOwedCiRerunAndReview({ ...accepted, headRefOid: rebasedHead })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(rebasedStillRed.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2769 })]);
+    expect(rebasedStillRed.refusals[0].reviewRefusal).toBeUndefined();
+    const rebasedCiRunning = planReconcile({
+      prs: [prOwedCiRerunAndReview({ ...accepted, headRefOid: rebasedHead, labels: lbl('review:accepted'), statusCheckRollup: [] })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    for (const plan of [stillRed, rebasedStillRed, rebasedCiRunning]) {
+      expect(plan.dispatch.filter((d) => d.kind === 'review')).toEqual([]);
+    }
+  });
+
+  it('NEVER fires for the sibling population — a PR\'s OWN code red (no main-red window covers it) still gets only `ci-heal`, never a parallel review', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ requiredCheckCompletedAt: '2026-09-25T08:03:45Z' })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2769 })]);
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('owed-ci-rerun');
+  });
+
+  it('never fires without the `review:pending` label — an already-`review:accepted` PR (no review owed) is refused owed-ci-rerun alone, byte-identical to before this item', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ labels: lbl('review:accepted', 'ci:failed') })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2769 })]);
+  });
+
+  // PR #2783 review round 1 (correctness, CONFIRMED): `reconcileHolds` keys refusals by PR number and keeps the
+  // LAST row, so a second `no-findings` row silently replaced the `owed-ci-rerun` hold (`['review','fix']`) with
+  // `['fix']` — land-advance's own review dispatch was no longer vetoed for a PR this pass already dispatches a
+  // review for. The parallel review's own refusal folds INTO the one `owed-ci-rerun` row, never adds a row.
+  it.each([
+    ['zero findings', () => [{ body: REARM_COMMENT_MARKER, author: AUTOMATION }]],
+    ['zero findings at the cap', () => Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }))],
+    ['findings at the cap', () => [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }))]],
+    ['already-reviewed head', () => [{ body: buildReviewedShaMarker(pr1563().headRefOid), author: AUTOMATION }]],
+  ])('%s: exactly ONE refusal row for the PR, and land-advance still sees the review hold', (_name, comments) => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: comments() })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals.filter((r) => r.prNumber === 2769)).toHaveLength(1);
+    expect(reconcileHolds(plan.refusals)['we#2769']).toMatchObject({ kind: 'owed-ci-rerun', holds: ['review', 'fix'] });
+  });
+
+  it('a DIRTY (conflicting) PR takes the #xudx8ff ci-heal fallback, unaffected by this item — no parallel review either', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ mergeStateStatus: 'DIRTY' })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2769 })]);
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('owed-ci-rerun');
+  });
+});
+
+// landing-freeze fix (2026-09-27) — LIVE INCIDENT: PR #2790 fixed a `daemon-soak` regression that had sat on
+// `main` unseen (the job was `pull_request`-only before it, so `main`'s own CI runs stayed `success` right
+// through the regression — NO red window ever opened to attribute #2748/#2783/#2784/#2788/#2789's identical
+// failures against, however genuinely `main`-caused they were). #2748/#2783/#2784 hit `cap-exhausted` burning
+// their heal count repairing code that was never broken; #2788/#2789 were about to be handed yet another heal.
+// `isPrCiFailureOwedRerun`'s new green-check path (`main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section
+// header) fixes this WITHOUT needing any red-window attribution at all — see that module's own tests for the
+// pure-function coverage; these pin the same fix through `planReconcile`, the caller that actually decides
+// `ci-heal` vs `owed-ci-rerun` for a live PR.
+describe('case 5i — landing-freeze fix: owed-ci-rerun via main\'s own latest-run green check, no red window needed (PR #2748 real shape)', () => {
+  const mainLatestCheckRuns = [
+    { name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z' },
+    { name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' },
+  ];
+  const pr2748 = (over = {}) => pr1563({
+    number: 2748, labels: [], statusCheckRollup: redRollup, comments: [],
+    requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadByOnMain: 5, requiredCheckName: 'daemon-soak',
+    // #2748's merge base never ran daemon-soak on `main` (pull_request-only job), and it lacks main's green sha.
+    prContainsMainGreenSha: false, mergeBaseCheckRuns: [], mergeBaseRunConclusion: 'success',
+    ...over,
+  });
+
+  // PR #2793 review (correctness, CONFIRMED) — the reviewer's end-to-end shape: an ordinary CLEAN PR whose OWN
+  // code broke `test`, behind a healthy `main` whose `test` was already green at this PR's own merge base. Main
+  // being green now is the normal state, not evidence main caused this — ci-heal owns it.
+  it('falls through to ci-heal for a plain PR-owned failure behind a healthy main (check already green at the merge base)', () => {
+    const plan = planReconcile({
+      prs: [pr2748({
+        requiredCheckCompletedAt: '2026-01-01T00:00:00Z', aheadByOnMain: 3, requiredCheckName: 'test',
+        mergeBaseCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: '2025-12-31T00:00:00Z' }],
+      })],
+      agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.refusals.some((r) => r.kind === 'owed-ci-rerun')).toBe(false);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('falls through to ci-heal when the PR already contains main\'s green run sha, even though main\'s tip moved on (aheadBy > 0)', () => {
+    const plan = planReconcile({
+      prs: [pr2748({ prContainsMainGreenSha: true, mergeBaseCheckRuns: null })],
+      agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('refuses owed-ci-rerun (never ci-heal), with EMPTY mainRedWindows — main\'s own latest run alone is enough', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2748, phase: 'ci-red' })]);
+    expect(plan.refusals[0].why).toMatch(/passing on main's own latest completed run/);
+  });
+
+  // THE CAP-EXHAUSTED CASE, DIRECTLY FROM THE INCIDENT: #2748 had already burned its full ci-heal cap
+  // repairing main's own (now-fixed) regression before #2790 landed. Once this fix is live, the SAME durable
+  // comment count no longer matters — `owed-ci-rerun` is checked, and skips the cap entirely, before the cap
+  // is ever consulted. No separate "re-arm" bookkeeping: the cap simply never gets a vote on this path.
+  it('fires even when the durable ci-heal count is ALREADY at (or past) the cap — the heal cap never gates this path', () => {
+    const comments = Array.from({ length: CI_HEAL_ROUND_CAP + 1 }, () => ({ body: buildCiHealComment({ reason: 'red-ci' }), author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [pr2748({ comments })], agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2748 })]);
+    expect(plan.refusals.some((r) => r.kind === 'cap-exhausted')).toBe(false);
+    expect(plan.notes.some((n) => n.kind === 'ci-heal-exhausted')).toBe(false);
+  });
+
+  it('falls through to the ordinary ci-heal path once the head already contains main\'s tip (ahead_by 0), even with main green', () => {
+    const plan = planReconcile({
+      prs: [pr2748({ aheadByOnMain: 0 })], agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('falls through to ci-heal when main\'s own latest run never reported the failing check at all — never a guess', () => {
+    const plan = planReconcile({
+      prs: [pr2748()], agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns: [],
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('omitting mainLatestCheckRuns entirely (byte-identical to before this item) never blocks ci-heal', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW, mainRedWindows: [] });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+
+  it('a DIRTY (conflicting) PR still falls through to ci-heal instead of owed-ci-rerun, unaffected by this fix', () => {
+    const plan = planReconcile({
+      prs: [pr2748({ mergeStateStatus: 'DIRTY' })], agents: [], now: NOW, mainRedWindows: [], mainLatestCheckRuns,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748 })]);
+  });
+});
+
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
   // `chalbert/web-everything#2549`, shape measured live 2026-09-24: `bounced` (review:changes present, wins
   // `classifyPr`'s precedence over `review:human`), ALSO carrying `merge-status:conflicting` (the mechanical
@@ -1019,6 +1471,58 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
   });
 
+  // #2787 LIVE INCIDENT (2026-09-27) — 3 rounds each genuinely SUCCEEDED against a stacked base that kept
+  // getting rebased (fc7c9e916 → 971cf0781 → 49087faaf → dc35a35c2), then that base landed entirely and the PR
+  // retargeted to `main` — its FIRST-EVER main-base conflict. BEFORE this fix: `cap-exhausted` on arrival
+  // (3 stale-looking rounds already "spent"). AFTER: none of those 3 rounds match the CURRENT target (`main`),
+  // so this dispatches.
+  it('#2787 reproduction: 3 prior rounds against a DIFFERENT (stacked) target do not exhaust the cap for a FIRST-EVER main-base conflict', () => {
+    const priorStackedRounds = [
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 1`, author: AUTOMATION },
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 2`, author: AUTOMATION },
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 3`, author: AUTOMATION },
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...priorStackedRounds] })], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2549, attempts: 0, cap: CONFLICT_FIX_ROUND_CAP })]);
+  });
+
+  it('#2787 hard ceiling: even rounds against DIFFERENT targets stop dispatching once the RAW total hits CONFLICT_FIX_ABSOLUTE_CEILING (a true loop, not a moving target)', () => {
+    const manyDifferentTargets = Array.from({ length: CONFLICT_FIX_ABSOLUTE_CEILING }, (_, i) => ({
+      body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved against \`lane/some-base-${i}\``, author: AUTOMATION,
+    }));
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...manyDifferentTargets] })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'cap-exhausted', prNumber: 2549, capKind: 'conflict-fix',
+      why: expect.stringContaining('hard ceiling'),
+    })]);
+  });
+
+  it('a round against the SAME main sha the PR is STILL conflicting against (mainSha threaded in) still counts as stale — genuinely stuck, not a moving target', () => {
+    const comments = [
+      finding(),
+      ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({
+        body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved\n\n<!-- conveyor-conflict-fix-target: main@aaa1111 -->`, author: AUTOMATION,
+      })),
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW, mainSha: 'aaa1111' });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'conflict-fix' })]);
+  });
+
+  it('a round against an OLDER main sha (mainSha threaded in, main has since moved) does NOT count as stale — dispatches', () => {
+    const comments = [
+      finding(),
+      ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({
+        body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved\n\n<!-- conveyor-conflict-fix-target: main@aaa1111 -->`, author: AUTOMATION,
+      })),
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW, mainSha: 'bbb2222' });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2549, attempts: 0 })]);
+  });
+
   it('a bounce WITHOUT the conflict label is unaffected — the ordinary shared cap still governs it', () => {
     const shared = Array.from({ length: 5 }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
     const plan = planReconcile({ prs: [pr1563({ comments: [finding(), ...shared] })], agents: [], now: NOW });
@@ -1034,6 +1538,79 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
     expect(countConflictFixComments([{ body: CONFLICT_FIX_COMMENT_MARKER + '\n\nmore', author: AUTOMATION }])).toBe(1);
     expect(countConflictFixComments([{ body: `> ${CONFLICT_FIX_COMMENT_MARKER}`, author: AUTOMATION }])).toBe(0);
     expect(countConflictFixComments(null)).toBe(0);
+  });
+});
+
+describe('case 5f-2 — ALREADY-LANDED pre-empts the conflict-fix dispatch (live incident, chalbert/web-everything PR #2752, #4034/#2748)', () => {
+  // Real shape, measured live 2026-09-26: `review:changes` + `merge-status:conflicting`, `mergeStateStatus:
+  // DIRTY` — exactly `case 5f`'s `isConflictBounce` population, which would otherwise dispatch a mechanical
+  // conflict-fix here. `we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts` is the IO shell
+  // that computes `alreadyLandedInMain` off per-file blob identity against `main`'s own history; this pass only
+  // reads the already-decided fact.
+  const prAlreadyLanded = (over = {}) => pr1563({
+    number: 2752,
+    headRefName: 'lane/4034-critical-work-gate',
+    labels: lbl('review:changes', 'merge-status:conflicting'),
+    mergeStateStatus: 'DIRTY',
+    comments: [finding()],
+    ...over,
+  });
+
+  it('refuses `already-landed`, naming the carrier PR, instead of dispatching the mechanical conflict-fix', () => {
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'already-landed', prNumber: 2752, carrierPr: 2759,
+      why: expect.stringContaining('#2759'),
+    })]);
+  });
+
+  it('carries the PR\'s own `headRefName` on the refusal — the one fact `already-landed-watch.mjs` resolves the backlog card from (PR #2769 review)', async () => {
+    const { planAlreadyLandedCloses } = await import('../already-landed-watch.mjs');
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    expect(plan.refusals[0].headRefName).toBe('lane/4034-critical-work-gate');
+    // Wiring, not just shape: the watch's own planner, fed this real plan, derives the item to resolve.
+    expect(planAlreadyLandedCloses(plan)).toEqual([expect.objectContaining({ prNumber: 2752, itemNum: '4034' })]);
+  });
+
+  it('still refuses `already-landed` (carrierPr null) when the carrier could not be attributed with confidence — the containment fact never depends on attribution', () => {
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: null } })], agents: [], now: NOW,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-landed', prNumber: 2752, carrierPr: null })]);
+    expect(plan.refusals[0].why).not.toMatch(/#null/);
+  });
+
+  it('takes priority over `stacked-rebase`/other conflict handling regardless of round counts already spent', () => {
+    const comments = [finding(), ...Array.from({ length: CONFLICT_FIX_ROUND_CAP + 5 }, () => ({ body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }))];
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ comments, alreadyLandedInMain: { carrierPr: 2759 } })], agents: [], now: NOW,
+    });
+    // Not `cap-exhausted` (that would mean it fell through to the ordinary conflict-fix branch) — `already-landed`
+    // pre-empts it outright, whatever the durable attempt count already reads.
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'already-landed' })]);
+  });
+
+  it('a PR with NO `alreadyLandedInMain` fact is completely unaffected — falls straight through to the ordinary conflict-fix dispatch', () => {
+    const plan = planReconcile({ prs: [prAlreadyLanded()], agents: [], now: NOW });
+    expect(plan.refusals).toHaveLength(0);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', isConflict: true, prNumber: 2752 })]);
+  });
+
+  it('still yields to a genuinely LIVE session (liveness outranks already-landed, exactly like every other phase)', () => {
+    const agents = [{ name: 'fix-2752', pid: 555, state: 'working', pidAlive: true, cwd: '/lane' }];
+    const plan = planReconcile({
+      prs: [prAlreadyLanded({ alreadyLandedInMain: { carrierPr: 2759 } })], agents, now: NOW,
+    });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'live-process', prNumber: 2752 })]);
+  });
+
+  it('`already-landed` is listed in REFUSAL_KINDS, so `formatReport` groups it like every other refusal', () => {
+    expect(REFUSAL_KINDS).toContain('already-landed');
   });
 });
 
@@ -1586,6 +2163,57 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
   });
 });
 
+// ── #x9fbg1x — markBgIsolationStalls + assessLiveness, live incident fix-2748/fix-2770, 2026-09-26 ────────────
+// A MORE SPECIFIC reason layered on the existing `awaiting-permission` state (never a new REFUSAL_KINDS entry
+// — the dispatch refusal itself is identical either way), mirroring the hung-transcript describe block above
+// one for one: a separate pre-pass over agent rows, `assessLiveness` only ever READS the flag it attaches.
+describe('markBgIsolationStalls + assessLiveness — bg-isolation-stall detection (live incident fix-2748/fix-2770, 2026-09-26)', () => {
+  const blockedRow = {
+    name: 'fix-2748', state: 'blocked', status: 'waiting', waitingFor: 'permission prompt',
+    startedAt: Date.parse('2026-09-26T18:00:00.000Z'), pid: 4242, cwd: '/lanes/lane-86', sessionId: '03bd61b3-…',
+  };
+  const stallInfoFor = (stall) => () => (stall ? { stall: true, reason: 'guard refusal seen', evidence: 'Call EnterWorktree first…' } : { stall: false, reason: 'no-signal' });
+
+  it('confirms the stall and attaches it to the row; assessLiveness carries a bg-isolation-stall reason', () => {
+    const [a] = markBgIsolationStalls([blockedRow], stallInfoFor(true));
+    expect(a.bgIsolationStall).toBe(true);
+    expect(a.bgIsolationStallEvidence).toMatch(/EnterWorktree/);
+    const verdict = assessLiveness([{ agent: a, cwd: '/c', sha: '' }]);
+    expect(verdict.kind).toBe('awaiting-permission'); // never a new top-level state
+    expect(verdict.stallReason).toBe('bg-isolation-stall');
+    expect(verdict.why).toMatch(/EnterWorktree/);
+  });
+
+  it('a plain awaiting-permission row (no confirmed stall) carries NO stallReason at all', () => {
+    const [a] = markBgIsolationStalls([blockedRow], stallInfoFor(false));
+    expect(a.bgIsolationStall).toBeUndefined();
+    const verdict = assessLiveness([{ agent: a, cwd: '/c', sha: '' }]);
+    expect(verdict.kind).toBe('awaiting-permission');
+    expect(verdict).not.toHaveProperty('stallReason');
+  });
+
+  it('NEVER calls the resolver for a session not already awaiting-permission — cheap by construction', () => {
+    let called = false;
+    const workingRow = { ...blockedRow, state: 'working', status: 'busy', waitingFor: null };
+    markBgIsolationStalls([workingRow], () => { called = true; return { stall: true }; });
+    expect(called).toBe(false);
+  });
+
+  it('a resolver that answers not-stalled, throws, or is absent leaves the row untouched', () => {
+    expect(markBgIsolationStalls([blockedRow], () => ({ stall: false }))[0]).toBe(blockedRow);
+    expect(markBgIsolationStalls([blockedRow], () => { throw new Error('unreadable transcript'); })[0]).toBe(blockedRow);
+    expect(markBgIsolationStalls([blockedRow], () => null)[0]).toBe(blockedRow);
+  });
+
+  it('end to end: a fix session confirmed stuck on the guard still refuses awaiting-permission (never re-dispatched over)', () => {
+    const pr = pr1563({ number: 2748, labels: lbl('review:changes'), comments: [] });
+    const agents = markBgIsolationStalls([{ ...blockedRow, name: 'fix-2748' }], stallInfoFor(true));
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'awaiting-permission', prNumber: 2748, stallReason: 'bg-isolation-stall' });
+  });
+});
+
 // ── LIVE INCIDENT, night of 2026-09-25/26 ET — the operator's Claude login expired; every daemon-dispatched
 // session (`ci-heal-2711`/`ci-heal-2712`) ended immediately on the CLI's own auth failure, sat `blocked` for
 // hours with a still-LIVE pid, and `assessLiveness` read that as `live-process` forever — see
@@ -1895,5 +2523,94 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     };
     const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);
+  });
+});
+
+describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — CONVERT instead of re-review on a superseded verdict', () => {
+  const HEAD = 'abbe08beacae462f98d6caf654d3ce7867c92801'; // #2766's real live head
+  const ACCEPTED_AT = '2026-09-26T21:47:43Z';
+  const acceptComment = () => ({
+    author: { login: 'web-everything' }, createdAt: ACCEPTED_AT,
+    body: `✅ review — accepted\n\nRecorded by agent (unattended review-loop) via the declared \`review-pr\` `
+      + `operation (#3035).\n\n## Human review verdict — chalbert/web-everything#2766\n\n**Verdict:** ✅ pass — `
+      + `no blocking findings\n\n${buildReviewedShaMarker(HEAD)}`,
+  });
+  const testGamingParkComment = () => ({
+    author: { login: 'web-everything' }, createdAt: '2026-09-26T21:51:01Z',
+    body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\ntest-gaming suspected — CI-green '
+      + 'may be manufactured by tampering with tests: tests-removed: '
+      + 'scripts/operations/__tests__/review-loop-cli.test.mjs (net 2 test case(s) removed)',
+  });
+  const healComment = () => ({
+    author: { login: 'web-everything' }, createdAt: '2026-09-26T23:15:40Z',
+    body: '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**\n\nThis PR carried both '
+      + '`review:accepted` and `review:human` at once: an automated verdict survived an escalation to '
+      + '`review:human` that should have replaced it.',
+  });
+
+  it('THE LIVE #2766/#2767 SHAPE: needs-human + accepted-then-test-gaming-parked-then-healed on the SAME head dispatches `convert-advisory`, never `already-reviewed-head`', () => {
+    const pr = {
+      number: 2766, state: 'OPEN', headRefName: 'lane/2766', headRefOid: HEAD,
+      labels: lbl('review:human', 'review:awaiting-advisory'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), testGamingParkComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.find((r) => r.prNumber === 2766)).toBeUndefined();
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'convert-advisory', prNumber: 2766, headSha: HEAD, reviewedSha: HEAD,
+      escalation: expect.objectContaining({ kind: 'test-gaming' }),
+    })]);
+    expect(plan.dispatch[0].targetedCheckQuestion).toMatch(/test case/i);
+    expect(plan.dispatch[0].acceptComment.body).toBe(acceptComment().body);
+  });
+
+  it('a needs-human PR accepted then healed with NO substantive park reason still converts, off the heal comment alone', () => {
+    const pr = {
+      number: 2777, state: 'OPEN', headRefName: 'lane/2777', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'convert-advisory', prNumber: 2777,
+      escalation: expect.objectContaining({ kind: 'heal-mutual-exclusivity' }),
+    })]);
+  });
+
+  it('#2588 protection UNCHANGED for `needs-review` (no escalation, ever) — still refused `already-reviewed-head`', () => {
+    const pr = {
+      number: 2778, state: 'OPEN', headRefName: 'lane/2778', headRefOid: HEAD,
+      labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), testGamingParkComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('a needs-human PR with an accept marker but NO escalation comment at all still refuses `already-reviewed-head` (the ORIGINAL #2588 guard, unweakened)', () => {
+    const pr = {
+      number: 2779, state: 'OPEN', headRefName: 'lane/2779', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('an escalation comment that PREDATES the accept (not a supersession) does not convert', () => {
+    const pr = {
+      number: 2780, state: 'OPEN', headRefName: 'lane/2780', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ ...testGamingParkComment(), createdAt: '2026-09-26T00:00:00Z' }, acceptComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('`convert-advisory` is on the frozen DISPATCH_KINDS list', () => {
+    expect(DISPATCH_KINDS).toContain('convert-advisory');
   });
 });

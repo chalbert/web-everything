@@ -324,6 +324,94 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).digest).not.toContain('reviewed head');
   });
 
+  it('a finding that already cites a test file adds NO doubled `__tests__/__tests__/x.test.test.mjs` sibling '
+    + '(live: PR #2759 / #2738 cited `scripts/lib/__tests__/*.test.mjs`)', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [{ file: 'scripts/lib/__tests__/critical-work.test.mjs', line: 172, prevention: 'x', preventionCaptured: false }],
+    });
+    expect(input.scope).toBe('we:scripts/lib/__tests__/critical-work.test.mjs');
+    expect(input.scope).not.toContain('__tests__/__tests__');
+    expect(input.scope).not.toContain('.test.test.');
+    for (const file of ['scripts/lib/__tests__/helpers/fake.mjs', 'scripts/lib/x.spec.mjs', 'scripts/lib/x.test.js']) {
+      const one = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(one.scope).toBe(`we:${file}`);
+    }
+  });
+
+  it('normalizes ordinary juror path forms (`./`, diff `a/`/`b/`, `:line[:col]`) and keeps dot-folders, '
+    + 'rather than withholding them', () => {
+    for (const [file, want] of [
+      ['scripts/x.mjs:172', 'we:scripts/x.mjs'],
+      ['scripts/x.mjs:172:5', 'we:scripts/x.mjs'],
+      ['./scripts/x.mjs', 'we:scripts/x.mjs'],
+      ['b/scripts/x.mjs', 'we:scripts/x.mjs'],
+    ]) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(input.scope.split(',')[0]).toBe(want);
+    }
+    const gh = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1, findings: [{ file: '.github/workflows/ci.yml', prevention: 'x', preventionCaptured: false }],
+    });
+    expect(gh.scope.split(',')).toEqual(['we:.github/workflows/ci.yml']);
+  });
+
+  it('adds a `__tests__` sibling only for a JS/TS-family source file — never a phantom one for .yml/.sh/.json/.md', () => {
+    for (const file of ['.github/workflows/ci.yml', 'scripts/run.sh', 'data/state.json', 'docs/agent/x.md']) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(input.scope.split(',')).toEqual([`we:${file}`]);
+    }
+    for (const [file, sibling] of [
+      ['scripts/a.mjs', 'scripts/__tests__/a.test.mjs'],
+      ['scripts/a.js', 'scripts/__tests__/a.test.mjs'],
+      ['src/a.ts', 'src/__tests__/a.test.mjs'],
+    ]) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, prevention: 'x', preventionCaptured: false }],
+      });
+      expect(input.scope.split(',')).toEqual([`we:${file}`, `we:${sibling}`]);
+    }
+  });
+
+  it('withholds a juror-authored `file` that is not a plain path (quote/newline/comma could inject frontmatter '
+    + 'keys or split scope), from both scope and the digest anchor, while still filing the guard text', () => {
+    for (const file of [
+      'scripts/a.mjs"]\nstatus: resolved\ntags: ["pwned',
+      'scripts/a.mjs,we:scripts/other.mjs',
+      'scripts/a b.mjs',
+      'scripts/a\\b.mjs',
+      '../outside.mjs',
+    ]) {
+      const input = buildPreventionFilingInput({
+        repo: 'o/r', pr: 1, findings: [{ file, line: 1, prevention: 'the guard', preventionCaptured: false }],
+      });
+      expect(input.scope).toBe('');
+      expect(input.digest).toContain('(cited file withheld: not a plain path)');
+      expect(input.digest).toContain('the guard');
+      expect(input.digest).not.toContain('pwned');
+    }
+  });
+
+  it('#883 safety net does not corrupt a hyphenated sibling whose name ENDS in another cited basename', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [
+        { file: 'scripts/foo.mjs', prevention: 'guard foo.mjs itself', preventionCaptured: false },
+        { file: 'scripts/prefix-foo.mjs', prevention: 'see prefix-foo.mjs', preventionCaptured: false },
+      ],
+    });
+    expect(input.digest).not.toContain('prefix-we:');
+    expect(input.digest).toContain('`we:scripts/prefix-foo.mjs`');
+    expect(input.digest).toContain('see we:scripts/prefix-foo.mjs');
+    expect(input.digest).toContain('guard we:scripts/foo.mjs itself');
+  });
+
   it('carries a supplied parent through unchanged, and defaults to empty (top-level) when none is given', () => {
     expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, parent: '4075' }).parent).toBe('4075');
     expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).parent).toBe('');
@@ -391,7 +479,8 @@ describe('preventionGuardAnchor — the per-guard duplicate key (PR #2766 adviso
 
   it('falls back to the guard\'s whole no-file digest line when no clean file is cited', () => {
     expect(preventionGuardAnchor({ prevention: 'add a lint rule' })).toBe('`(no file cited)` — add a lint rule');
-    expect(preventionGuardAnchor({ file: 'x"\ny', prevention: 'p' })).toBe('`(no file cited)` — p');
+    // A cited-but-unclean file is WITHHELD (PR #2767 advisory), never echoed and never mistaken for "no file".
+    expect(preventionGuardAnchor({ file: 'x"\ny', prevention: 'p' })).toBe('`(cited file withheld: not a plain path)` — p');
   });
 
   it('self-review: the house `we:` prefix and a leading `./` are stripped, never rejected or doubled', () => {

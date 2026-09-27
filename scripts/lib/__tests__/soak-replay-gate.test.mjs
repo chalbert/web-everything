@@ -101,6 +101,40 @@ describe('extractSoakWaiver', () => {
     expect(extractSoakWaiver('')).toBeNull();
     expect(extractSoakWaiver(undefined)).toBeNull();
   });
+
+  // Real PR bodies write this as a markdown list item with the key bolded, not as bare text — the bare
+  // `soak-waiver:` form alone missed this and produced the exact false red this covers (#2783's real body).
+  it('is tolerant of a list bullet plus bold/italic decoration around the key, colon inside or outside it', () => {
+    expect(extractSoakWaiver('- **Soak-waiver**: change is confined to a pure decision function')).toBe(
+      'change is confined to a pure decision function',
+    );
+    expect(extractSoakWaiver('- **Soak-waiver:** change is confined to a pure decision function')).toBe(
+      'change is confined to a pure decision function',
+    );
+    expect(extractSoakWaiver('* soak-waiver: some reason')).toBe('some reason');
+    expect(extractSoakWaiver('1. **Soak-Waiver**: some reason')).toBe('some reason');
+    expect(extractSoakWaiver('_soak-waiver_: some reason')).toBe('some reason');
+  });
+
+  it('still rejects an empty reason when the key is decorated', () => {
+    expect(extractSoakWaiver('- **Soak-waiver**:   ')).toBeNull();
+  });
+
+  it('is null for prose that merely mentions the key with no colon-terminated key at all', () => {
+    expect(extractSoakWaiver('`soak-waiver` line included above (see commit message)')).toBeNull();
+  });
+
+  it('extracts the real (decorated) waiver from PR #2783\'s actual body', () => {
+    const body2783 =
+      '- `node scripts/verify-lane.mjs run --repo=.` — green (65 files / 3154 tests passed; `check:standards` 0 errors).\n' +
+      '  Selected-gate run, not the full suite (per repo convention); no unrelated red state hit.\n' +
+      '- **Soak-waiver**: change is confined to a pure decision function in `reconcile-core.mjs` (no fs/network/clock/\n' +
+      '  process); fully exercised by the unit suite above, including fixtures shaped off the live incident PRs. No\n' +
+      '  soak scenario added — nothing here touches the daemon\'s IO shells, timers, or dispatch plumbing itself.';
+    expect(extractSoakWaiver(body2783)).toBe(
+      'change is confined to a pure decision function in `reconcile-core.mjs` (no fs/network/clock/',
+    );
+  });
 });
 
 describe('filePaths', () => {

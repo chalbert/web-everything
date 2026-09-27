@@ -94,7 +94,7 @@ import { CI_TRUTH_EXCLUDED_CHECKS, FAILING_CONCLUSIONS } from './operations/pr-s
 // reused here so `classifyPr`'s stale-label fallback (below) can tell "the label is our only signal" apart from
 // "the label is outdated — THIS read's own rollup already proves the required check green". Side-effect-free
 // import (`merge-ai-prs.mjs`'s CLI is behind an `IS_CLI` guard, mirrored by `pr-watch.mjs`'s identical import).
-import { isRequiredCheckGreen } from './merge-ai-prs.mjs';
+import { isRequiredCheckGreen, isRequiredCheckPending } from './merge-ai-prs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -450,9 +450,21 @@ function ghPrList(repo, args) {
   }
 }
 
-/** True when the check rollup carries at least one hard failure (vs merely pending), IGNORING any check named
- *  in {@link CI_TRUTH_EXCLUDED_CHECKS} (`we:scripts/operations/pr-status.mjs`) — those checks report
- *  review/merge-gate state, not code health; see that constant's docblock for the full incident.
+/** True when the check rollup carries at least one hard failure (vs merely pending). By default IGNORES any
+ *  check named in {@link CI_TRUTH_EXCLUDED_CHECKS} (`we:scripts/operations/pr-status.mjs`) — those checks
+ *  report review/merge-gate state, not code health; see that constant's docblock for the full incident.
+ *
+ *  `requiredChecks`, WHEN A CALLER SUPPLIES ONE, REPLACES THAT EXCLUSION LIST WITH THE INVERSE (and stronger)
+ *  QUESTION: a check counts toward "failed" only if its name is in `requiredChecks` — i.e. only a REQUIRED
+ *  check (per branch protection, `we:scripts/lib/required-status-checks.mjs`) can make this read failed at
+ *  all. This is deliberately future-proof in a way the exclusion list structurally cannot be: a brand-new
+ *  advisory workflow is, by construction, not yet in branch protection's required set, so it can never cause
+ *  a false red here even before anyone thinks to add its name to {@link CI_TRUTH_EXCLUDED_CHECKS} — exactly
+ *  the gap the exclusion list left open (LIVE INCIDENT 2026-09-26, PR #2748 (chalbert/web-everything): the new
+ *  `soak-replay-gate` advisory check, PR #2775, went red on a PR whose every required check was green, and
+ *  every exclusion-list-based reader misread it as a genuine CI failure until `soak-replay-gate` was added to
+ *  the list by hand). `requiredChecks` omitted/empty falls back to the exclusion-list behaviour unchanged, so
+ *  every existing one-argument call site keeps its exact prior behaviour with no code change required.
  *
  *  SINGLE-SOURCED off {@link FAILING_CONCLUSIONS} (`we:scripts/operations/pr-status.mjs`, #xznd5za) — this used
  *  to hand-roll its OWN, narrower conclusion list (`FAILURE`/`TIMED_OUT`/`ACTION_REQUIRED`/`STARTUP_FAILURE`
@@ -468,10 +480,20 @@ function ghPrList(repo, args) {
  *  attribution check (fed by the DIFFERENT, already-correct `isRequiredCheckFailed`) independently confirming
  *  "the required check failed … owed a ci-heal, not a rebase" on the very same tick. Two predicates for the same
  *  question, one of them wrong, is the defect — reusing `FAILING_CONCLUSIONS` here removes the second
- *  derivation entirely. */
-export function ciFailed(rollup) {
+ *  derivation entirely.
+ *  @param {Array<{name?: string, conclusion?: string, state?: string}>} rollup
+ *  @param {string[]} [requiredChecks] - the repo's required status-check names (branch protection); when
+ *    given and non-empty, ONLY these names can count as CI truth (see above).
+ */
+export function ciFailed(rollup, requiredChecks) {
+  const required = Array.isArray(requiredChecks) && requiredChecks.length ? requiredChecks : null;
   return (rollup ?? []).some((c) => {
-    if (CI_TRUTH_EXCLUDED_CHECKS.includes(String(c?.name ?? ''))) return false;
+    const name = String(c?.name ?? '');
+    if (required) {
+      if (!required.includes(name)) return false;
+    } else if (CI_TRUTH_EXCLUDED_CHECKS.includes(name)) {
+      return false;
+    }
     const v = String(c?.conclusion ?? c?.state ?? '').toLowerCase();
     return FAILING_CONCLUSIONS.includes(v);
   });
@@ -504,8 +526,10 @@ export const PR_STATUS = Object.freeze({
   landed: { rank: 7, sev: 'ok', label: 'landed', gloss: '' },
 });
 
-/** Reduce one raw `gh` PR record to a single board status. Pure — the whole derivation lives here. */
-export function classifyPr(pr) {
+/** Reduce one raw `gh` PR record to a single board status. Pure — the whole derivation lives here.
+ *  @param {object} pr
+ *  @param {string[]} [requiredChecks] - threaded straight through to {@link ciFailed}; see its own docblock. */
+export function classifyPr(pr, requiredChecks) {
   const labels = new Set((pr?.labels ?? []).map((l) => l?.name).filter(Boolean));
   const merge = String(pr?.mergeStateStatus ?? '').toUpperCase();
   if (String(pr?.state ?? '').toUpperCase() === 'MERGED') return 'landed';
@@ -528,19 +552,31 @@ export function classifyPr(pr) {
   // `review:*` label and stands down once it finds nothing red — `we:scripts/operations/ci-heal-pr-dispatch.mjs`'s
   // own header) against the alternative this incident lived through — an accepted, genuinely red PR reading
   // as `queued`/nothing-owed indefinitely. OR'd with the live scan, never a replacement for it.
-  if (ciFailed(pr?.statusCheckRollup)) return 'ci-red';
+  if (ciFailed(pr?.statusCheckRollup, requiredChecks)) return 'ci-red';
   // xg790dh-follow-up (epic #3383/#4075) — LIVE INCIDENT 2026-09-26, PRs #2748/#2749/#2753 (chalbert/web-
   // everything): six ci-heal sessions in a row correctly found "no CI break — only `review-gate` is red (by
   // design, while `review:pending` stands)" and stood down, yet the PR kept reading `ci-red` and kept getting
   // re-dispatched, because the line above trusted a STALE `ci:failed` label UNCONDITIONALLY — even on a read
   // whose OWN rollup affirmatively proves the required check green right now. The xx6kg3f fix (above this
   // block's history) added the label fallback for the OPPOSITE gap — a rollup that came back empty/degraded and
-  // so could not prove anything — and that gap still needs the fallback: `isRequiredCheckGreen` reads `false`
-  // for a missing/not-yet-concluded check, so an empty or in-flight rollup still falls through to trust the
-  // label exactly as xx6kg3f fixed it (see the two pinned tests, `pr2739Labels`, immediately below). Only a
-  // rollup that POSITIVELY reports the required check's LATEST run as green may override the label — never a
-  // rollup that is merely silent on it.
-  if (labels.has('ci:failed') && !isRequiredCheckGreen(pr)) return 'ci-red';
+  // so could not prove anything — and that gap still needs the fallback: for a MISSING check specifically, both
+  // `isRequiredCheckGreen` and `isRequiredCheckPending` read `false` (see the latter's own docblock), so an
+  // empty rollup still falls through to trust the label exactly as xx6kg3f fixed it (see the two pinned tests,
+  // `pr2739Labels`, immediately below).
+  //
+  // we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — `!isRequiredCheckGreen(pr)` ALONE is true
+  // for BOTH "concluded failed" and "restarted, not concluded yet" — the second is exactly what a mechanical
+  // rebase produces the instant it re-triggers CI, and it is not evidence of a defect, it is evidence CI has
+  // not spoken yet. LIVE INCIDENT 2026-09-26/27: `main` went red then green, the mechanical rebase
+  // (`ci-red-recovery-watch.mjs`) rebased each stuck PR onto the new tip and re-ran CI, and every one of them
+  // still carried this stale `ci:failed` label from before the rebase — this line trusted it while the new run
+  // was still `pending` (or had already gone green by the time a ci-heal session actually looked), dispatching
+  // a wasted Opus/Sonnet ci-heal each time (of ~10 such sessions inside one hour, 7 — PRs #2782/#2778/#2772/
+  // #2779/… — ended "no change needed"). Only a rollup that POSITIVELY reports the required check's LATEST run
+  // as either green OR a COMPLETED failure may settle the question at all; a rollup that shows it merely
+  // in flight must wait for it to conclude, exactly like an empty rollup already does — the label alone is
+  // never enough once the live read has ANY opinion.
+  if (labels.has('ci:failed') && !isRequiredCheckGreen(pr) && !isRequiredCheckPending(pr)) return 'ci-red';
   if (merge === 'DIRTY' || merge === 'BEHIND') return 'conflicted';
   if (labels.has('review:pending')) return 'needs-review';
   if (labels.has('review:accepted') || labels.has('ready-to-merge')) return 'queued';

@@ -155,6 +155,47 @@ describe('classifyPr', () => {
     expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: [...rollup, { name: 'test-shard (3)', conclusion: 'FAILURE' }] }))).toBe('ci-red');
   });
 
+  // #2748 false-red follow-up (soak-replay-gate, PR #2775) — LIVE INCIDENT 2026-09-26: `chalbert/web-
+  // everything#2748`'s real rollup (`gh pr view 2748 --repo chalbert/web-everything --json
+  // statusCheckRollup`) has every REQUIRED check (`test`/`smoke`/`daemon-soak`) green and ONLY the new
+  // advisory `soak-replay-gate` check red — the exclusion-list-only `ciFailed(rollup)` (no second arg,
+  // BEFORE `soak-replay-gate` was added to `CI_TRUTH_EXCLUDED_CHECKS`) misread this as `ci-red`. Passing the
+  // repo's REQUIRED set fixes it structurally: only a check IN that set can fail this read, so a brand-new
+  // advisory check can never do this again even before anyone remembers to update an exclusion list.
+  it('does not let a NEW advisory check (soak-replay-gate) read as ci-red when a required set is supplied ' +
+    '— PR #2748\'s real rollup, 2026-09-26', () => {
+    const pr2748Rollup = [
+      { name: 'review-gate', conclusion: 'FAILURE' },
+      { name: 'soak-replay-gate', conclusion: 'FAILURE' },
+      { name: 'test-shard (1)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (2)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (3)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (4)', conclusion: 'SUCCESS' },
+      { name: 'daemon-soak', conclusion: 'SUCCESS' },
+      { name: 'smoke', conclusion: 'SUCCESS' },
+      { name: 'test', conclusion: 'SUCCESS' },
+    ];
+    const requiredChecks = ['test', 'smoke', 'daemon-soak'];
+    // Even carrying the SAME stale `ci:failed` label the live incident had, the rollup now positively proves
+    // every required check green, so the fallback in the `ci:failed` branch below correctly stands down too.
+    expect(ciFailed(pr2748Rollup, requiredChecks)).toBe(false);
+    expect(
+      classifyPr(pr({ labels: ['review:pending', 'ci:failed'], mergeStateStatus: 'UNSTABLE', statusCheckRollup: pr2748Rollup }), requiredChecks),
+    ).toBe('needs-review');
+    // A REAL required-check failure must still read ci-red when a required set is supplied.
+    expect(ciFailed([...pr2748Rollup, { name: 'test', conclusion: 'FAILURE' }], requiredChecks)).toBe(true);
+  });
+
+  it('with no required set supplied, ciFailed/classifyPr still fall back to the exclusion list unchanged '
+    + '(soak-replay-gate is now IN that list too — see CI_TRUTH_EXCLUDED_CHECKS)', () => {
+    const rollup = [
+      { name: 'soak-replay-gate', conclusion: 'FAILURE' },
+      { name: 'test', conclusion: 'SUCCESS' },
+    ];
+    expect(ciFailed(rollup)).toBe(false);
+    expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: rollup }))).toBe('needs-review');
+  });
+
   it('treats a merged pull request as landed whatever its labels say', () => {
     expect(classifyPr(pr({ state: 'MERGED', labels: ['review:human'] }))).toBe('landed');
   });
@@ -1909,12 +1950,31 @@ describe('classifyPr — a stale ci:failed label must not outrank a rollup that 
     expect(classifyPr(pr({ labels: ['ci:failed'], statusCheckRollup: rollup }))).toBe('open');
   });
 
-  it('still trusts the label when the required check has not concluded yet (never a blind override)', () => {
+  // we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — SUPERSEDES the assertion this case used
+  // to make. It used to expect `'ci-red'` here, on the theory that "not proven green" is reason enough to trust
+  // a stale label. LIVE INCIDENT 2026-09-26/27 (chalbert/web-everything) proved that reasoning wrong: `main`
+  // went red then green, the mechanical rebase (`ci-red-recovery-watch.mjs`) rebased each stuck PR onto the new
+  // tip and re-ran CI, and every one of them still carried this exact shape — a STALE `ci:failed` label beside
+  // a required check that had only just RESTARTED and not concluded yet. Trusting the label there dispatched a
+  // wasted ci-heal (of ~10 such sessions inside one hour, 7 — PRs #2782/#2778/#2772/#2779/… — ended "no change
+  // needed"). A check that is IN FLIGHT on the current head is evidence, not silence — it says "wait for it",
+  // never "trust the old verdict". The genuinely-degraded case (no entry for the check at all) is a SEPARATE
+  // population, pinned unchanged in the case right below.
+  it('no longer trusts the label once the required check has RESTARTED and not concluded yet — waits instead (heal-wait-for-rerun)', () => {
     const rollup = [{ name: 'test', conclusion: '', state: 'IN_PROGRESS' }];
-    expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: rollup }))).toBe('ci-red');
+    expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: rollup }))).toBe('needs-review');
   });
 
   it('still trusts the label when the rollup has no entry for the required check at all (the xx6kg3f degraded-read case, unchanged)', () => {
     expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: [] }))).toBe('ci-red');
+  });
+
+  // PR #2787 review finding: a required check that CONCLUDED SKIPPED/NEUTRAL/STALE is terminal, not in flight —
+  // it will never re-run, so it must not suppress the stale label the way a genuinely in-flight check does.
+  // Otherwise the PR silently leaves `ci-red` (no heal, no escalation) and reads `queued` with a check that
+  // never passed.
+  it.each(['SKIPPED', 'NEUTRAL', 'STALE'])('still trusts the label when the required check concluded %s (terminal, never re-runs)', (conclusion) => {
+    const rollup = [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion }];
+    expect(classifyPr(pr({ labels: ['review:accepted', 'ready-to-merge', 'ci:failed'], mergeStateStatus: 'CLEAN', statusCheckRollup: rollup }))).toBe('ci-red');
   });
 });

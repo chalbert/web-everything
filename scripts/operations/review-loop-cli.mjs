@@ -130,13 +130,17 @@ export function applyUnattendedActorDefault(input, argv = []) {
  *
  * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input -
  *   {@link module:review-loop-policy.buildPreventionFilingInput}'s own output.
+ * @param {{resolve?: Function, run?: Function, makeStore?: Function}} [deps] - test seams only; production
+ *   always uses the real `resolveOperation`/`runOperationCli`/`createFileRunStore`.
  * @returns {Promise<{code:number, lines:string[]}>}
  */
-export async function fileItemForPrevention(input) {
+export async function fileItemForPrevention(input, {
+  resolve = resolveOperation, run = runOperationCli, makeStore = createFileRunStore,
+} = {}) {
   const argv = buildFileItemArgv(input);
-  const { declaration, registry, sinks } = resolveOperation('file-item', { json: true });
-  return runOperationCli({
-    declaration, argv, registry, store: createFileRunStore(), sinks, newRunId: () => newRunId('file-item'),
+  const { declaration, registry, sinks } = resolve('file-item', { json: true });
+  return run({
+    declaration, argv, registry, store: makeStore(), sinks, newRunId: () => newRunId('file-item'),
   });
 }
 
@@ -215,6 +219,31 @@ export function findFiledPreventionCard({ title }, { root = SCAFFOLD_ROOT, head 
     filed: cards.filter((c) => owed.some((f) => covers(c, f))).map(({ num, path }) => ({ num, path })),
     uncovered: owed.filter((f) => !cards.some((c) => covers(c, f))),
   };
+}
+
+/**
+ * Reads `file-item --json`'s payload out of its stdout lines without ever throwing: a warning line (e.g. a Node
+ * deprecation notice) may precede the JSON, which may itself span several lines. Tries each line, then the text
+ * from the first line starting with `{` to the end; returns `{}` when nothing parses.
+ *
+ * @param {string[]} lines
+ * @returns {object}
+ */
+export function parseFiledPayload(lines = []) {
+  const tryParse = (text) => {
+    try {
+      const v = JSON.parse(text);
+      return v && typeof v === 'object' ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  for (const line of lines) {
+    const v = tryParse(line);
+    if (v) return v;
+  }
+  const start = lines.findIndex((l) => l.trimStart().startsWith('{'));
+  return (start === -1 ? null : tryParse(lines.slice(start).join('\n'))) ?? {};
 }
 
 /**
@@ -347,12 +376,9 @@ export async function runReviewLoopOnce({
         if (filed?.code !== 0) {
           filingError = `file-item refused: ${out}`;
         } else {
-          // Inside the try (PR #2766 advisory): a stray non-JSON line parks the run instead of crashing the loop.
-          try {
-            filedPayload = JSON.parse(filed.lines?.[0] ?? '{}');
-          } catch {
-            filingError = `file-item output unreadable (exit 0, not JSON): ${out}`;
-          }
+          // The card IS filed (exit 0) — so an unreadable stdout (a Node warning line before the JSON, or no JSON
+          // at all) must never crash the loop, and must never re-park either (PR #2767 advisory).
+          filedPayload = parseFiledPayload(filed.lines);
         }
       }
     } catch (e) {
