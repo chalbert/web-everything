@@ -4,9 +4,10 @@ kind: story
 size: 8
 priority: low
 parent: "2531"
-status: open
+status: resolved
 scope: ["plateau:src/build-runner/"]
 dateOpened: "2026-07-28"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
