@@ -295,6 +295,13 @@ export function runReviewTick({
   // session finished (PR #2472, ~2 hours stale). `selectStatusCandidates` now takes fix-owed entries as a
   // real third source, included below the same unconditional way `reviews` already is.
   const fixes = (plan.dispatch ?? []).filter((d) => d && d.kind === 'fix');
+  // Live-caught 2026-09-26, PR #2742, card xg790dh: a PR that moves from being owed a FIX to being owed a
+  // CI-HEAL (its fix session finished, its re-push then went CI-red) used to fall out of `statusCandidates`
+  // just the same — `kind:'ci-heal'` matched neither `reviews` nor `fixes` above, and a ci-heal-owed PR is a
+  // real `dispatch` entry (not a refusal) whenever its cap is unspent. `review-status:fixing` (added while the
+  // fix was genuinely live) sat stale indefinitely. `selectStatusCandidates` now takes ci-heal-owed entries as
+  // a real fourth source, included below the same unconditional way `reviews`/`fixes` already are.
+  const ciHeals = (plan.dispatch ?? []).filter((d) => d && d.kind === 'ci-heal');
   // #3383 bug 3 — cap THIS TICK's dispatch batch by how many lanes are actually acquirable right now, never
   // by `reviews.length` alone. A deferred review is NOT lost: it stays owed (still counted in `reviewsOwed`
   // and still fed to `statusCandidates` below, unchanged, since no session was ever bound to it), and simply
@@ -335,7 +342,7 @@ export function runReviewTick({
   // already exists (`dispatchReviewJob` writes it before returning) — reusing the snapshot would tag it "nothing
   // live" and strip its `review-status:reviewing` until the next tick. Those PRs read fresh (`undefined`).
   const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
-  for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes)) {
+  for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes, ciHeals)) {
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
     try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)) }); }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
