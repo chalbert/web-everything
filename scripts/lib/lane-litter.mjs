@@ -131,6 +131,16 @@ export const LANE_RELEASE_LITTER_ALLOWLIST = [
   // can land on either.
   '*-plateau',
   '*-plateau.*',
+  // #x9fbg1x — `we:scripts/lane-pool.mjs`'s own `writeLaneClaudeSettings` now writes this EXACT, fixed path into
+  // every lane it provisions/refreshes/acquires (the untracked worktree-isolation override —
+  // `we:scripts/lib/dispatch-bg-isolation.mjs`). Web-everything's own tracked `.gitignore` already excludes it
+  // from `git status` entirely, but a DIFFERENT constellation pool this same lane-pool.mjs also serves
+  // (plateau-app, frontierui — see `we:backlog/3170-*.md`) may have no such `.gitignore` entry of its own yet,
+  // and would otherwise read every one of its lanes as falsely dirty by exactly one file the moment this fix's
+  // own housekeeping writes it — precisely the #3568 failure shape this whole allowlist exists to prevent, just
+  // for a file THIS repo's own tooling writes rather than an agent's. An exact literal path, not a glob family:
+  // this is one fixed name, never a varying per-round/per-item shape.
+  '.claude/settings.local.json',
 ];
 
 /**

@@ -13,6 +13,7 @@ import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
   probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
+  probeBgIsolationStalls,
 } from '../health-watch.mjs';
 
 let dir;
@@ -218,6 +219,42 @@ describe('probeAuthExpiredSessions', () => {
   it('probeAgents itself carries cwd/sessionId through — what this probe needs to resolve a transcript', () => {
     const exec = () => JSON.stringify([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1' }]);
     expect(probeAgents({ exec })).toEqual([{ name: 'ci-heal-2711', state: 'blocked', kind: 'background', startedAt: '2026-09-26T10:53:00.000Z', cwd: '/x', sessionId: 's-1', status: null, waitingFor: null }]);
+  });
+});
+
+// ── probeBgIsolationStalls — #x9fbg1x, live incident fix-2748/fix-2770, 2026-09-26 ────────────────────────────
+describe('probeBgIsolationStalls', () => {
+  const stuckAgent = (over = {}) => ({
+    name: 'fix-2748', kind: 'background', state: 'blocked', status: 'waiting', waitingFor: 'permission prompt',
+    startedAt: '2026-09-26T18:00:00.000Z', cwd: '/x/dispatch/f6b254c8', sessionId: '03bd61b3-…', ...over,
+  });
+
+  it('confirms a stuck-on-permission-prompt session the injected reader confirms is the EnterWorktree guard', () => {
+    const readInfo = () => ({ stall: true, evidence: 'Call EnterWorktree first…' });
+    const out = probeBgIsolationStalls([stuckAgent()], { readInfo });
+    expect(out).toEqual([{
+      name: 'fix-2748', sessionId: '03bd61b3-…', cwd: '/x/dispatch/f6b254c8',
+      startedAt: Date.parse('2026-09-26T18:00:00.000Z'), evidence: 'Call EnterWorktree first…',
+    }]);
+  });
+
+  it('never flags a session the reader clears, or one that throws', () => {
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => ({ stall: false, reason: 'no-signal' }) })).toEqual([]);
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => { throw new Error('unreadable'); } })).toEqual([]);
+    expect(probeBgIsolationStalls([stuckAgent()], { readInfo: () => null })).toEqual([]);
+  });
+
+  it('never even calls the reader for a session not already stuck on a permission prompt — cheap by construction', () => {
+    let called = false;
+    const readInfo = () => { called = true; return { stall: true }; };
+    probeBgIsolationStalls([stuckAgent({ state: 'working', status: 'busy', waitingFor: null })], { readInfo });
+    probeBgIsolationStalls([stuckAgent({ kind: 'interactive' })], { readInfo });
+    expect(called).toBe(false);
+  });
+
+  it('empty/non-array input is never a guess', () => {
+    expect(probeBgIsolationStalls(undefined)).toEqual([]);
+    expect(probeBgIsolationStalls([])).toEqual([]);
   });
 
   // #xrv69j6 — `status`/`waitingFor` carried through too: the real shape `claude agents --json` reports for a

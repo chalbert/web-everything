@@ -62,7 +62,7 @@ import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
 import { countRearmComments } from './rearm-review.mjs';
-import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions } from './reconcile-core.mjs';
+import { planReconcile, DISPATCH_KINDS, REFUSAL_KINDS, markSelfReportedDone, markHungSessions, markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls } from './reconcile-core.mjs';
 import { tryReadCompletion } from '../operations/completion-store.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 // we:backlog/x5uqim1-*.md (#4075/#3383) — the two extra facts `reconcile-core.mjs#isPrCiFailureOwedRerun` needs
@@ -72,6 +72,7 @@ import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { latestRequiredCheck, isRequiredCheckFailed } from '../merge-ai-prs.mjs';
 import { computeMainRedWindows, DEFAULT_MAIN_WORKFLOW_NAME, DEFAULT_REQUIRED_CHECK, DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed } from './main-red-recovery.mjs';
 import { readHungInfo, resolveHungThresholdMs, readClaudeAuthExpiredInfo, readIdleFinishedInfo, resolveIdleFinishedThresholdMs } from './hung-session.mjs';
+import { readBgIsolationStallInfo } from './bg-isolation-stall.mjs';
 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#PR_LIST_JSON_FIELDS — the `--json` fields this pass reads about each
@@ -133,11 +134,16 @@ export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {
  * session whose OWN transcript shows the Claude CLI's own auth-failure (see that function's own doc for the
  * full incident) ALSO stops reading as `live-process` — this one catches the failure the INSTANT it shows in
  * the transcript, rather than waiting out the generic hung-transcript threshold.
- * FINALLY runs {@link markIdleFinishedSessions} (#4075/xg7m2wq, live incident PR #2724, 2026-09-26) — a
- * backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last assistant
- * turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is treated as
- * finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md` did.
- * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
+ * FINALLY (both epic #3383/#4075) runs {@link markIdleFinishedSessions} (live incident PR #2724, 2026-09-26)
+ * — a backstop for EVERY kind, not only the ones with a completion-record schema: a session whose last
+ * assistant turn has genuinely ENDED (no pending tool call) and has sat idle past a short threshold is
+ * treated as finished, in case a brief forgets to report its own completion the way `fix-agent-ci-brief.md`
+ * did — AND {@link markBgIsolationStalls} (#x9fbg1x, live incident `fix-2748`/`fix-2770`, 2026-09-26), which
+ * gives a session `assessLiveness` already reports `awaiting-permission` a MORE SPECIFIC reason when its own
+ * transcript shows Claude Code's own background-session worktree-isolation guard refusal — see
+ * `we:scripts/conveyor/bg-isolation-stall.mjs`'s own header. Cheap: it reads a transcript only for a session
+ * already classified `awaiting-permission`, never for the common live/finished case.
+ * @param {{exec?:Function, env?:object, completionFor?:Function, hungInfoFor?:Function, authExpiredInfoFor?:Function, idleFinishedInfoFor?:Function, bgIsolationStallInfoFor?:Function, now?:number, hungThresholdMs?:number, idleFinishedThresholdMs?:number, listJobs?:Function}} [o]
  *   `listJobs` (x26lw6u) defaults to the live review-job rows; a test injects `() => []` or fakes.
  * @returns {Array<object>}
  */
@@ -146,6 +152,7 @@ export function defaultReadAgents({
   hungInfoFor = readHungInfo, now = Date.now(), hungThresholdMs = resolveHungThresholdMs(env),
   authExpiredInfoFor = readClaudeAuthExpiredInfo,
   idleFinishedInfoFor = readIdleFinishedInfo, idleFinishedThresholdMs = resolveIdleFinishedThresholdMs(env),
+  bgIsolationStallInfoFor = readBgIsolationStallInfo,
   listJobs = undefined,
 } = {}) {
   // x26lw6u — a review now runs as a JOB (`we:scripts/operations/review-job.mjs`), not a `claude --bg` session,
@@ -163,7 +170,11 @@ export function defaultReadAgents({
   // #4075/xg7m2wq, live incident PR #2724, 2026-09-26 — the general backstop for EVERY kind: a session whose
   // last assistant turn has fully ended (no pending tool call) and has sat idle past a short threshold is
   // finished too, in case its own brief forgot to report completion the way `fix-agent-ci-brief.md` did.
-  return markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  const idleMarked = markIdleFinishedSessions(authMarked, idleFinishedInfoFor, now, idleFinishedThresholdMs);
+  // #x9fbg1x — LAST: only ever adds a clearer reason to a row already `awaiting-permission`, so running it
+  // after every other pre-pass (which can only ever REMOVE a session from `live-process` contention, never add
+  // `awaiting-permission`) is safe regardless of ordering.
+  return markBgIsolationStalls(idleMarked, bgIsolationStallInfoFor);
 }
 
 /**

@@ -640,6 +640,33 @@ export function markHungSessions(agents, hungInfoFor, nowMs, thresholdMs) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#markBgIsolationStalls — #x9fbg1x: mark each listed session ALREADY
+ * classified {@link isAwaitingPermission} whose OWN transcript shows Claude Code's own background-session
+ * worktree-isolation guard refusal ("Call EnterWorktree first…") as `bgIsolationStall: true`. Pure (the
+ * classification is injected via `stallInfoFor`); modeled directly on {@link markHungSessions} just above —
+ * a SEPARATE pre-pass over AGENT rows, run before {@link assessLiveness}, never a change to that pinned
+ * function itself (which only reads the flag this pass attaches).
+ *
+ * ONLY CALLS `stallInfoFor` FOR A SESSION ALREADY AWAITING PERMISSION — cheap by construction: every other
+ * session skips a transcript read entirely, so this pass costs nothing on the common (not-stuck) path. See
+ * `we:scripts/conveyor/bg-isolation-stall.mjs` for the detector (a THIRD mechanical signal in the same family
+ * as `we:scripts/conveyor/hung-session.mjs`, reusing its exact transcript-tail-read machinery).
+ * @param {Array<object>} agents - the `claude agents --json` rows.
+ * @param {(agent:object) => ({stall:boolean, reason?:string, evidence?:string|null})} stallInfoFor
+ * @returns {Array<object>} the same rows; stalled ones gain `bgIsolationStall: true`, `bgIsolationStallEvidence`
+ */
+export function markBgIsolationStalls(agents, stallInfoFor) {
+  return (Array.isArray(agents) ? agents : []).map((a) => {
+    if (!a) return a;
+    if (!isAwaitingPermission(a)) return a; // cheap skip — see docblock
+    let info = null;
+    try { info = stallInfoFor(a); } catch { info = null; }
+    if (!info || info.stall !== true) return a;
+    return { ...a, bgIsolationStall: true, bgIsolationStallEvidence: info.evidence ?? null };
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#markAuthExpiredSessions — mark each listed session whose OWN
  * transcript ends on the Claude CLI's own synthetic auth-failure turn (`isApiErrorMessage` with an
  * `authentication_failed` error or `Login expired · Please run /login`) as `authExpired: true`. Pure (the
@@ -823,10 +850,26 @@ export function assessLiveness(bound) {
 
   for (const b of list) {
     if (isAwaitingPermission(b.agent)) {
+      // #x9fbg1x — a MORE SPECIFIC reason, layered on top of the generic fifth state, when
+      // `markBgIsolationStalls` (a separate pre-pass, mirroring `markHungSessions`) has already read this
+      // session's OWN transcript and confirmed the block is Claude Code's own background-session
+      // worktree-isolation guard ("Call EnterWorktree first…") rather than some other permission prompt. Never
+      // changes `kind` (still `awaiting-permission` — the dispatch refusal is identical either way) or
+      // `REFUSAL_KINDS`'s exhaustive set; purely an added, clearer `why`/`stallReason` for a human or the
+      // health watch to act on precisely, rather than filing it under the same catch-all as every other
+      // unanswerable prompt. See `we:scripts/conveyor/bg-isolation-stall.mjs` for the detector.
+      const stalled = b.agent?.bgIsolationStall === true;
       return {
-        ...ev(b, 'awaiting-permission', `session is blocked on "${String(b.agent.waitingFor)}" — a background agent has nobody to ask, so it will never advance on its own`),
+        ...ev(
+          b,
+          'awaiting-permission',
+          stalled
+            ? 'session is blocked on Claude Code\'s own background-session worktree-isolation guard ("Call EnterWorktree first…") — the dispatched session\'s lane clone already IS its isolation, so this is a product-fixable stall (bg-isolation-stall), not a genuine question for a human'
+            : `session is blocked on "${String(b.agent.waitingFor)}" — a background agent has nobody to ask, so it will never advance on its own`,
+        ),
         startedAt: b.agent?.startedAt ?? null,
         waitingFor: String(b.agent.waitingFor),
+        ...(stalled ? { stallReason: 'bg-isolation-stall' } : {}),
       };
     }
   }
@@ -1129,6 +1172,9 @@ export function planReconcile({
       refuse(live.kind, {
         pid: live.pid, cwd: live.cwd, sha: live.sha, sessionId: live.sessionId, why: live.why,
         ...(live.waitingFor ? { waitingFor: live.waitingFor, startedAt: live.startedAt } : {}),
+        // #x9fbg1x — the MORE SPECIFIC reason, when `markBgIsolationStalls` confirmed one; never present
+        // otherwise, so an ordinary `awaiting-permission` refusal is byte-identical to before this existed.
+        ...(live.stallReason ? { stallReason: live.stallReason } : {}),
       });
       // The permission block is the case that must never be merely refused. Three sessions have held one for
       // 211.4 hours; a refusal buried in a list is how that stayed invisible. It gets its own surfaced note.
@@ -1138,8 +1184,10 @@ export function planReconcile({
         notes.push({
           kind: 'awaiting-permission', prNumber, pid: live.pid, cwd: live.cwd, sessionId: live.sessionId,
           waitingFor: live.waitingFor, startedAt: live.startedAt, heldHours,
+          ...(live.stallReason ? { stallReason: live.stallReason } : {}),
           text: `PR #${prNumber}: a session in ${live.cwd} is blocked on "${live.waitingFor}"`
-            + `${heldHours == null ? '' : ` for ${heldHours}h`} and nobody is there to answer it — nothing here will advance until a person clears it`,
+            + `${heldHours == null ? '' : ` for ${heldHours}h`} and nobody is there to answer it — nothing here will advance until a person clears it`
+            + (live.stallReason === 'bg-isolation-stall' ? ' (confirmed: Claude Code\'s own EnterWorktree/bgIsolation guard — see we:scripts/lib/dispatch-bg-isolation.mjs)' : ''),
         });
       }
       // xilx617 (epic #4075/#3383) — a LIVE session (never `awaiting-permission`, which already notes above)

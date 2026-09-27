@@ -32,7 +32,7 @@ import { describe, it, expect } from 'vitest';
 import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
-  markAuthExpiredSessions, markIdleFinishedSessions, CI_HEAL_ROUND_CAP,
+  markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
   CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
 } from '../reconcile-core.mjs';
 import {
@@ -1871,6 +1871,57 @@ describe('markHungSessions + assessLiveness — hung-transcript detection (epic 
     const plan = planReconcile({ prs: [pr], agents: [{ ...workingRow, pidAlive: true }], durableCounts: {}, now: NOW });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals[0]).toMatchObject({ kind: 'live-process', prNumber: 2582 });
+  });
+});
+
+// ── #x9fbg1x — markBgIsolationStalls + assessLiveness, live incident fix-2748/fix-2770, 2026-09-26 ────────────
+// A MORE SPECIFIC reason layered on the existing `awaiting-permission` state (never a new REFUSAL_KINDS entry
+// — the dispatch refusal itself is identical either way), mirroring the hung-transcript describe block above
+// one for one: a separate pre-pass over agent rows, `assessLiveness` only ever READS the flag it attaches.
+describe('markBgIsolationStalls + assessLiveness — bg-isolation-stall detection (live incident fix-2748/fix-2770, 2026-09-26)', () => {
+  const blockedRow = {
+    name: 'fix-2748', state: 'blocked', status: 'waiting', waitingFor: 'permission prompt',
+    startedAt: Date.parse('2026-09-26T18:00:00.000Z'), pid: 4242, cwd: '/lanes/lane-86', sessionId: '03bd61b3-…',
+  };
+  const stallInfoFor = (stall) => () => (stall ? { stall: true, reason: 'guard refusal seen', evidence: 'Call EnterWorktree first…' } : { stall: false, reason: 'no-signal' });
+
+  it('confirms the stall and attaches it to the row; assessLiveness carries a bg-isolation-stall reason', () => {
+    const [a] = markBgIsolationStalls([blockedRow], stallInfoFor(true));
+    expect(a.bgIsolationStall).toBe(true);
+    expect(a.bgIsolationStallEvidence).toMatch(/EnterWorktree/);
+    const verdict = assessLiveness([{ agent: a, cwd: '/c', sha: '' }]);
+    expect(verdict.kind).toBe('awaiting-permission'); // never a new top-level state
+    expect(verdict.stallReason).toBe('bg-isolation-stall');
+    expect(verdict.why).toMatch(/EnterWorktree/);
+  });
+
+  it('a plain awaiting-permission row (no confirmed stall) carries NO stallReason at all', () => {
+    const [a] = markBgIsolationStalls([blockedRow], stallInfoFor(false));
+    expect(a.bgIsolationStall).toBeUndefined();
+    const verdict = assessLiveness([{ agent: a, cwd: '/c', sha: '' }]);
+    expect(verdict.kind).toBe('awaiting-permission');
+    expect(verdict).not.toHaveProperty('stallReason');
+  });
+
+  it('NEVER calls the resolver for a session not already awaiting-permission — cheap by construction', () => {
+    let called = false;
+    const workingRow = { ...blockedRow, state: 'working', status: 'busy', waitingFor: null };
+    markBgIsolationStalls([workingRow], () => { called = true; return { stall: true }; });
+    expect(called).toBe(false);
+  });
+
+  it('a resolver that answers not-stalled, throws, or is absent leaves the row untouched', () => {
+    expect(markBgIsolationStalls([blockedRow], () => ({ stall: false }))[0]).toBe(blockedRow);
+    expect(markBgIsolationStalls([blockedRow], () => { throw new Error('unreadable transcript'); })[0]).toBe(blockedRow);
+    expect(markBgIsolationStalls([blockedRow], () => null)[0]).toBe(blockedRow);
+  });
+
+  it('end to end: a fix session confirmed stuck on the guard still refuses awaiting-permission (never re-dispatched over)', () => {
+    const pr = pr1563({ number: 2748, labels: lbl('review:changes'), comments: [] });
+    const agents = markBgIsolationStalls([{ ...blockedRow, name: 'fix-2748' }], stallInfoFor(true));
+    const plan = planReconcile({ prs: [pr], agents, durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0]).toMatchObject({ kind: 'awaiting-permission', prNumber: 2748, stallReason: 'bg-isolation-stall' });
   });
 });
 

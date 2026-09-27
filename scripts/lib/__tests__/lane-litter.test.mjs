@@ -119,6 +119,7 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
       '.pr-body-*.md', '.open-pr*.json', '.pr-land-result.json', '.converge-*',
       '.conveyor/', '.delivery-commit-msg-*.txt',
       '.fix-*', '.fix-*/', 'tmp/', '.prep-*.md', '*-plateau', '*-plateau.*',
+      '.claude/settings.local.json',
     ]);
   });
 
@@ -134,6 +135,15 @@ describe('LANE_RELEASE_LITTER_ALLOWLIST', () => {
     // entry itself — `git status --porcelain` never reports it separately while the whole tree is untracked,
     // but the pattern's own no-traversal guard must still hold if it ever is.
     expect(isAllowlistedLitterPath('.conveyor/queue.json')).toBe(false);
+  });
+
+  // #x9fbg1x — `lane-pool.mjs`'s own worktree-isolation write (`writeLaneClaudeSettings`) into every lane it
+  // provisions, so a constellation pool with no `.gitignore` entry of its own for this exact path (plateau-app,
+  // frontierui — we:backlog/3170-*.md) is never read falsely dirty by this repo's OWN housekeeping.
+  it('.claude/settings.local.json (the worktree-isolation override lane-pool.mjs writes) is allowlisted', () => {
+    expect(isAllowlistedLitterPath('.claude/settings.local.json')).toBe(true);
+    // An exact literal path — a sibling file in the same directory must NOT match.
+    expect(isAllowlistedLitterPath('.claude/settings.json')).toBe(false);
   });
 
   // Same incident, a naming-drift sibling of the already-allowlisted `.commit-msg-fix-*.txt` family.
