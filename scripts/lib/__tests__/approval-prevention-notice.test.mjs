@@ -333,4 +333,51 @@ describe('buildApprovalPreventionFilingInput — the self-contained file-item in
     expect(withKey.digest.endsWith(`\n\nIdempotency key (do not edit): ${key}`)).toBe(true);
     expect(buildApprovalPreventionFilingInput({ repo: 'o/r', pr: 7, findings }).digest).not.toContain('Idempotency key');
   });
+
+  // chalbert/web-everything#2766's OWN approval (2026-09-27, ~09:00 ET, `--to=clear-human`) FAILED live:
+  // `runApprovalPreventionFiling`'s `file-item` subprocess exited non-zero (`stopped: 'effect-halted'`) because
+  // the write-time gate (`we:scripts/backlog/guarded-write.mjs#assertPublishableContent`, the #883 locus-prefix
+  // scan) refused the rendered card — reproduced read-only against the PR's real 12:45Z advisory finding text,
+  // which named its own guard's fix as "Add a regression test in scripts/lib/__tests__/review-loop-policy.test.mjs
+  // that asserts…", a FULL bare path (this card's own test-sibling scope entry) with no `we:` prefix at all. The
+  // basename-only safety net above deliberately leaves a name already part of a longer `dir/basename` path alone,
+  // so this exact bare path survived into the digest untouched.
+  it('#2766 live repro: a bare FULL PATH in prose (not just a basename) — here, the guard\'s own test-sibling '
+    + 'path, named verbatim by the real 12:45Z advisory finding — is still `we:`-prefixed, not just a basename', () => {
+    const findings = [
+      {
+        file: 'scripts/lib/review-loop-policy.mjs',
+        line: 454,
+        prevention: 'Add a regression test in scripts/lib/__tests__/review-loop-policy.test.mjs that asserts '
+          + 'cardCoversGuard returns false for two findings sharing a file:line but with unrelated '
+          + '`prevention`/`summary` text (e.g. requiring the anchor to also fold in a short content fingerprint '
+          + 'of the guard text when a file:line collision occurs), captured as a deterministic unit test rather '
+          + 'than left as a documented-only trade-off.',
+        preventionCaptured: false,
+      },
+      {
+        file: 'scripts/operations/review-loop-cli.mjs',
+        line: 368,
+        prevention: 'Add a deterministic integration test requiring a distinct same-location guard to be filed '
+          + 'before acceptance; when guard equivalence cannot be established, retain the new filing rather than '
+          + 'suppressing it.',
+        preventionCaptured: false,
+      },
+    ];
+    const key = buildApprovalPreventionKey({
+      repo: 'chalbert/web-everything', pr: 2766, headSha: 'd2453a58216d6cc4b14a4e1f30c673451ca93485',
+    });
+    const input = buildApprovalPreventionFilingInput({
+      repo: 'chalbert/web-everything', pr: 2766, findings, parent: '4075', source: 'advisory', key,
+    });
+    // RED before the fix: the bare full-path mention survived verbatim, no `we:` prefix.
+    expect(input.digest).not.toContain('in scripts/lib/__tests__/review-loop-policy.test.mjs that asserts');
+    // GREEN: the same mention, now `we:`-prefixed — exactly what the write-time gate requires (#883).
+    expect(input.digest).toContain('in we:scripts/lib/__tests__/review-loop-policy.test.mjs that asserts');
+    // The guard's own explicit file:line anchors (already prefixed by the first pass) are untouched.
+    expect(input.digest).toContain('`we:scripts/lib/review-loop-policy.mjs:454`');
+    expect(input.digest).toContain('`we:scripts/operations/review-loop-cli.mjs:368`');
+    // The idempotency key, appended after both passes, is byte-for-byte intact.
+    expect(input.digest.endsWith(`\n\nIdempotency key (do not edit): ${key}`)).toBe(true);
+  });
 });

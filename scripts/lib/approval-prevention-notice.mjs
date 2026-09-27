@@ -72,6 +72,11 @@ const trustedComments = (comments) => (Array.isArray(comments) ? comments : []).
 // exceptions) — reusing the SAME token `citation-check.mjs` already exports rather than re-typing the literal
 // `'we:'` a second place could drift from.
 import { IN_REPO_LOCUS } from './citation-check.mjs';
+// chalbert/web-everything#2766 approval (2026-09-27) — the REAL detector the write-time gate itself runs,
+// reused as the digest safety net's second pass below (mirrors `we:scripts/lib/review-loop-policy.mjs
+// #buildPreventionFilingInput`'s own fix for the identical gap, landed in #2766). A true leaf like
+// `citation-check.mjs` above — no path back to `review-set-label.mjs` or `operations/review-pr.mjs`.
+import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 
 /**
  * Does this rendered comment's OWN `**Verdict:**` line say `prevention outstanding`? PURE text match against
@@ -297,11 +302,32 @@ export function buildApprovalPreventionFilingInput({
   // unrelated words). A mention already carrying a locus prefix, or already part of a longer `dir/basename` or
   // hyphenated `prefix-basename` name, is left alone (explicit path-character lookarounds, NOT `\b`: `\b` treats
   // `-` as a boundary, so citing both `foo.mjs` and `prefix-foo.mjs` would corrupt the latter).
-  const digest = files.reduce((text, f) => {
+  const basenamesQualified = files.reduce((text, f) => {
     const base = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
     const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return text.replace(new RegExp(`(?<![\\w./:-])${escaped}(?![\\w-])`, 'g'), `${IN_REPO_LOCUS}${f}`);
   }, digestRaw);
+  // chalbert/web-everything#2766's OWN approval (2026-09-27, ~09:00 ET) proved the pass above insufficient: it
+  // deliberately skips a name already part of a longer `dir/basename` path (by design, to avoid corrupting a
+  // longer name it should leave alone), so a FULL bare path a juror's `prevention` prose names — here, this
+  // card's OWN test-sibling path (`scope` already carries it, `we:`-prefixed, but the finding's free-text prose
+  // said "Add a regression test in scripts/lib/__tests__/review-loop-policy.test.mjs", no prefix at all) —
+  // survived unprefixed. The write-time gate (`we:scripts/backlog/guarded-write.mjs#assertPublishableContent`)
+  // then refused the whole card (`stopped: 'effect-halted'`), so the mechanically-filed card for #2766's own
+  // review never landed. Second pass: `findUnmarkedLocusRefs` is the REAL detector the write-time gate itself
+  // runs, so nothing it would still flag can survive; longest-first and never inside an already-prefixed token
+  // or a longer one, mirroring `we:scripts/lib/review-loop-policy.mjs#buildPreventionFilingInput`'s identical
+  // fix for this identical gap (landed in #2766 itself — this file could not import that one's copy without
+  // closing the import cycle its own header describes, so the fix is ported here as its own copy instead).
+  const digest = findUnmarkedLocusRefs(basenamesQualified)
+    .sort((a, b) => b.length - a.length)
+    .reduce((text, ref) => {
+      const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return text.replace(
+        new RegExp(`(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)(?<![\\w./-])${escaped}(?![\\w/-])`, 'g'),
+        `${IN_REPO_LOCUS}${ref}`,
+      );
+    }, basenamesQualified);
   return {
     title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
     kind: 'story',
