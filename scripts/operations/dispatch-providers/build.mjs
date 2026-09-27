@@ -119,7 +119,11 @@ export function deliverItemDetachedProvider(request, {
   // `delivery-agent-marker.mjs`'s own header for why that is a separate, later decision from this plumbing.
   const deliveryAgent = readDeliveryAgentMarker(num);
   if (deliveryAgent) argv.push(`--provider=${deliveryAgent}`);
-  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug) });
+  // #landing-freeze-2779 — forward the request's already-computed gh-App-shim env (fresh-cache PATH override,
+  // never a static token) into the wrapper's OWN process env, so every child IT later spawns (which all build
+  // their env off `process.env`) inherits it too. See `detached-dispatch.mjs#defaultSpawnDetached`'s own
+  // docblock for the full incident and mechanism this closes.
+  const child = spawnDetached(argv, { cwd: request?.cwd ?? REPO_ROOT, logPath: logPathFor(sessionSlug), settingsEnv: request?.settingsEnv });
   const pid = Number(child?.pid);
   if (!Number.isInteger(pid) || pid <= 0) {
     // SAME indeterminate shape as an unparseable `claude --bg` confirmation: something may be running and its

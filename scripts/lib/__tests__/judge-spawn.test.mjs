@@ -543,6 +543,19 @@ describe('judgeSpawn — the one function a `judge` step calls, exercised over a
     expect(seen.opts.env).toEqual({ A: '1', WE_CONVEYOR_WORKER: '1' }); // #3383: a juror is a worker, marked so tick-once refuses in it
   });
 
+  // #landing-freeze-2779 — live incident regression guard: this spawn used to forward the caller's `env`
+  // (default `process.env`) with no sanitize step, so a static, daemon-minted `GH_TOKEN`/`GITHUB_TOKEN` could
+  // ride along into a tool-bearing juror unchanged, however stale it had gotten. See
+  // `../../operations/detached-dispatch.mjs#defaultSpawnDetached`'s own docblock for the full mechanism.
+  it('never carries a static GH_TOKEN/GITHUB_TOKEN present on the passed-in env (#landing-freeze-2779)', async () => {
+    const { fn, seen } = fakeSpawn(okJson);
+    await judgeSpawn({
+      mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, cwd: '/tmp/juror',
+      env: { A: '1', GH_TOKEN: 'stale-static-token', GITHUB_TOKEN: 'stale-static-token-2' }, spawnFn: fn,
+    });
+    expect(seen.opts.env).toEqual({ A: '1', WE_CONVEYOR_WORKER: '1' });
+  });
+
   it('throws the juror\'s OWN failure text rather than a paraphrase', async () => {
     const { fn } = fakeSpawn(JSON.stringify({ is_error: true, result: 'Not logged in · Please run /login' }), { code: 1 });
     await expect(judgeSpawn({ mandate: 'm', input: 'i', shape: SHAPE, sessionId: SID, spawnFn: fn }))

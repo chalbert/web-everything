@@ -32,6 +32,11 @@ import { openSync, closeSync, statSync, writeFileSync, unlinkSync, existsSync } 
 import { join } from 'node:path';
 // #3383 — the spawned session is a WORKER; a hook-driven tick-once must never run in it (see session-role.mjs).
 import { markWorkerEnv } from '../operations/session-role.mjs';
+// #landing-freeze-2779 — this file's own `claude` spawn below built its env straight off raw `process.env`,
+// with no sanitize step — the same gap `detached-dispatch.mjs#defaultSpawnDetached`'s own docblock names in
+// full (a static, daemon-minted `GH_TOKEN` riding along unchanged until it expires mid-session). See
+// `../lib/gh-app-shim.mjs#sanitizeSpawnEnv`'s own docblock for why a stale value is worse than none.
+import { sanitizeSpawnEnv } from '../lib/gh-app-shim.mjs';
 // #xg790dh-follow-up (epic #3383/#4075) — the SAME declared hold-check list `we:scripts/progress-board.mjs#ciFailed`
 // and `we:scripts/operations/pr-status.mjs` already use, reused here so `healCi`'s own "is anything really red"
 // scan can never disagree with them by re-deriving an ad-hoc `state === 'FAILURE'` filter with no exclusion at
@@ -441,7 +446,7 @@ export async function runAgent({
       `--disallowedTools=${disallowedTools.join(',')}`,
       prompt,
     ], {
-      cwd: lanePath, stdio: ['ignore', logFd, logFd], detached: true, env: markWorkerEnv(process.env),
+      cwd: lanePath, stdio: ['ignore', logFd, logFd], detached: true, env: markWorkerEnv(sanitizeSpawnEnv(process.env)),
     });
     writeFileSync(claimPath, JSON.stringify({
       pr: prId, role: tag.includes('-rev-') ? 'rev' : 'fix', pid: child.pid, lane, tag,
