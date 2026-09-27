@@ -272,6 +272,43 @@ describe('smokeAndAdopt fallback-plain-main (x5wbsbc)', () => {
   });
 });
 
+// ── c2. an ENVIRONMENT timeout never blames an overlay (live 2026-09-26 22:37Z) ─────────────────────────────
+
+describe('smoke-env-timeout: a slow lane scan under load never makes an overlay a suspect', () => {
+  it('the 22:37Z shape (clone adopted at main + one NON-pinned overlay): holds, keeps the overlay, records no rejection', async () => {
+    const { originDir, cloneDir, env } = makeFixture();
+    const mainSha = gitOk(cloneDir, ['rev-parse', 'origin/main']).trim();
+    expect((await rebuildClone({ root: cloneDir, env, runSmoke: passSmoke(), prState: async () => null, lockOpts: LOCK_OPTS })).reason).toBe('up-to-date');
+    pushBranch(originDir, 'lane/fix-review-label-exclusive', (dir) => writeFile(dir, 'overlay.txt', 'x\n'));
+    addOverlay(cloneDir, { ref: 'lane/fix-review-label-exclusive', pr: 2773 }, { env });
+
+    const detail = 'lane-pool list --acquirable failed: exited 1: ✗ list --acquirable scan exceeded its 120000ms budget at lane-47 (pool "web-everything" under /x) — refusing to return a partial/unsound answer.';
+    // Every tree times out the same way — the host is overloaded (plain main would too).
+    const runSmoke = vi.fn(async () => ({
+      verdict: 'env-timeout',
+      attempts: 2,
+      smoke: { results: [{ ok: false, name: 'lane-pool-list', ms: 300900, mayBeTransient: false, detail }] },
+      envTimeout: { first: [], budgetFactor: 2.5, loadAvg: [25.2, 25.8, 26.3] },
+    }));
+    const result = await rebuildClone({ root: cloneDir, env, runSmoke, prState: async () => null, lockOpts: LOCK_OPTS });
+
+    expect(result.reason).toBe('smoke-env-timeout');
+    expect(result.moved).toBe(false);
+    const kinds = result.alerts.map((a) => a.kind);
+    expect(kinds).toContain('smoke-env-timeout');
+    expect(kinds).not.toContain('smoke-rejected');
+    expect(kinds).not.toContain('fallback-plain-main');
+    expect(kinds).not.toContain('overlay-dropped-smoke-failed');
+    expect(result.alerts.find((a) => a.kind === 'smoke-env-timeout').detail).toMatchObject({ failed: 'lane-pool-list', loadAvg: [25.2, 25.8, 26.3] });
+    expect(readOverlays(cloneDir, { env }).map((o) => o.ref)).toEqual(['lane/fix-review-label-exclusive']);
+    const state = readRebuildState(cloneDir, env);
+    expect(state.rejected).toBeNull();
+    expect(state.held?.reason).toBe('smoke-env-timeout');
+    expect(runSmoke).toHaveBeenCalledTimes(1); // no plain-main, no last-good control
+    expect(gitOk(cloneDir, ['rev-parse', 'HEAD']).trim()).toBe(mainSha);
+  });
+});
+
 // ── d. pinned overlay + bad candidate + passing last-good control ──────────────────────────────────────────
 
 describe('pinned overlay stays held on smoke-rejected when the last-good control passes', () => {
