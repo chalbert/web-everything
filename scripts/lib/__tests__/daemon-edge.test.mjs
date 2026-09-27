@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -110,8 +110,12 @@ describe('flag', () => {
   });
 
   it('daemon-overlay add with the flag off never touches the edge ledger', () => {
-    const clone = mktemp('daemon-edge-slice1-clone-');
-    const offEnv = { ...env, WE_DAEMON_EDGE: '', WE_DAEMON_OVERLAY_DIR: join(clone, 'ov') };
+    // The overlay-conflict guard (epic #3383/#4075) resolves `--ref` for real now — a plain empty directory no
+    // longer suffices, so this is a real clone of the shared `origin` fixture with the ref actually pushed.
+    pushBranch('lane/fix-a', { 'a.txt': 'a\n' });
+    const clone = join(mktemp('daemon-edge-slice1-clone-'), 'w');
+    gitOk(tmpdir(), ['clone', '-q', origin, clone]);
+    const offEnv = { ...env, WE_DAEMON_EDGE: '', WE_DAEMON_OVERLAY_DIR: join(dirname(clone), 'ov') };
     const r = spawnSync(process.execPath, [join(REPO, 'scripts/daemon-overlay.mjs'), 'add', `--clone=${clone}`, '--ref=lane/fix-a', '--pr=7', '--json'], {
       encoding: 'utf8', env: offEnv, timeout: 20_000,
     });
