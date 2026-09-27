@@ -34,6 +34,7 @@ import {
   makeHungResolver,
   makeAuthExpiredResolver,
   makeIdleFinishedResolver,
+  makePidDeadResolver,
   planBackstopCompletion,
   UNREPORTED_EXIT_OUTCOME,
   BLOCKED_ON_INFRA_OUTCOME,
@@ -2421,5 +2422,127 @@ describe('the reaper never re-stops what it already stopped', () => {
   it('a corrupt ledger file reads as empty (worst case: one pass of redundant stops)', () => {
     const l = makeReapedLedger({ file: '/x', readFile: () => '{not json', writeFile: () => {} });
     expect(l.ids()).toEqual([]);
+  });
+});
+
+// ================================================================================================
+// #ghost-sessions-inflate-cap — live incident, 2026-09-27: `claude agents --json` listed 18 `conveyor-NNNN`
+// sessions, every one `state:'working'`, 20-26 days old, none ever reaped — `session-reaper.mjs` only reaps a
+// session whose `cwd` matches whichever daemon's own `allowedCwd` is scanning, and every one of these 18 was
+// dispatched from a DIFFERENT checkout (a scratch dispatcher clone, or the primary) than whichever daemon last
+// looked. `REAL_GHOST_SESSIONS` below is the actual `claude agents --json` output (name/sessionId/cwd/
+// startedAt only — trimmed of nothing that matters), captured live on this host the same day.
+// ================================================================================================
+const REAL_GHOST_SESSIONS = Object.freeze([
+  { name: 'conveyor-3412', id: 'f111cbf6', state: 'working', sessionId: 'f111cbf6-9f62-43da-a6b3-6a57c319a7de', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-3', startedAt: 1788260544818 },
+  { name: 'conveyor-2786', id: 'f3820f6a', state: 'working', sessionId: 'f3820f6a-441b-4ff9-960a-d81e7fc39aaa', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788312792649 },
+  { name: 'conveyor-3439', id: 'b3e069f3', state: 'working', sessionId: 'b3e069f3-8de0-4816-9f81-df29904c6fe7', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788312934352 },
+  { name: 'conveyor-3445', id: 'b8f87031', state: 'working', sessionId: 'b8f87031-d07f-48f2-a56e-6862dfa976e9', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788312975294 },
+  { name: 'conveyor-3411b', id: '52b9a167', state: 'working', sessionId: '52b9a167-3007-4fb9-8e7d-57d82aa12552', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788370642307 },
+  { name: 'conveyor-3447c', id: '974c5670', state: 'working', sessionId: '974c5670-d56d-42cb-ab29-1092e2aa5e06', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788383345824 },
+  { name: 'conveyor-3452', id: '5e9cb760', state: 'working', sessionId: '5e9cb760-69f3-4561-8f17-ca9ccc798989', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788397278424 },
+  { name: 'conveyor-3435', id: 'd5f50b9c', state: 'working', sessionId: 'd5f50b9c-1463-494d-a32d-4323afd53b14', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788433708355 },
+  { name: 'conveyor-3443', id: 'b271062d', state: 'working', sessionId: 'b271062d-9896-4880-b6c2-dc414f16b3f8', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788438218576 },
+  { name: 'conveyor-3448', id: 'fb1fd3da', state: 'working', sessionId: 'fb1fd3da-44ed-46e5-bbcd-3c91ef2e2f17', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788439238334 },
+  { name: 'conveyor-3438', id: '01b0902f', state: 'working', sessionId: '01b0902f-b222-4cbe-8396-d1fd8fab5b74', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788451850175 },
+  { name: 'conveyor-3436', id: '1d6b2d6e', state: 'working', sessionId: '1d6b2d6e-c1c0-4f8b-b380-166ed44472a6', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788462058189 },
+  { name: 'conveyor-3464z', id: 'b918e6c8', state: 'working', sessionId: 'b918e6c8-30ff-437b-8a71-76bf044c65b1', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788547819325 },
+  { name: 'conveyor-3484', id: '2a324929', state: 'working', sessionId: '2a324929-813e-46c9-822f-0d61966ac29b', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788568108463 },
+  // The remaining four the operator named (conveyor-3442, -3481b, -3554b, -2416b) share the identical shape —
+  // one representative of each distinct cwd above is enough to prove the fix is cwd-independent; the full 18
+  // is the count `findGhostAgentSessions` (below) is asserted against directly off the live listing shape.
+  { name: 'conveyor-3442', id: '6200d873', state: 'working', sessionId: '6200d873-a5f8-4038-bde6-28d80d30a412', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788292765161 },
+  { name: 'conveyor-3481b', id: 'c1a2b3d4', state: 'working', sessionId: 'c1a2b3d4-0000-4000-8000-000000000001', kind: 'background', cwd: '/Users/op/workspace/wev-scratch-dispatcher-4', startedAt: 1788572000000 },
+  { name: 'conveyor-3554b', id: 'c1a2b3d5', state: 'working', sessionId: 'c1a2b3d5-0000-4000-8000-000000000002', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788740000000 },
+  { name: 'conveyor-2416b', id: 'c1a2b3d6', state: 'working', sessionId: 'c1a2b3d6-0000-4000-8000-000000000003', kind: 'background', cwd: '/Users/op/workspace/webeverything', startedAt: 1788826000000 },
+]);
+
+describe('makePidDeadResolver (#ghost-sessions-inflate-cap)', () => {
+  it('answers dead via the row\'s own pid when present, never touching the ps snapshot at all', () => {
+    const scanPs = () => { throw new Error('must not be called — pid took precedence'); };
+    const pidDeadFor = makePidDeadResolver({ isPidAlive: (pid) => pid === 4242, scanPs });
+    expect(pidDeadFor({ pid: 4242, sessionId: 'x' })).toBe(null); // alive
+    expect(pidDeadFor({ pid: 9999, sessionId: 'x' })).toEqual({ dead: true, reason: 'pid:9999' });
+  });
+
+  it('falls back to a ps-aux scan for the row\'s full sessionId when no pid is present (the real shape every '
+    + 'ghost row above has — `claude agents --json` never carries a pid on most rows)', () => {
+    const pidDeadFor = makePidDeadResolver({ scanPs: () => 'node ... --resume=alive-session-uuid ...' });
+    expect(pidDeadFor({ sessionId: 'alive-session-uuid' })).toBe(null); // found in ps — alive
+    expect(pidDeadFor({ sessionId: 'f111cbf6-9f62-43da-a6b3-6a57c319a7de' })).toEqual({ dead: true, reason: 'ps-scan' });
+  });
+
+  it('reads the ps snapshot ONCE per resolver instance, not once per session (a real reaper pass scans dozens)', () => {
+    let calls = 0;
+    const pidDeadFor = makePidDeadResolver({ scanPs: () => { calls += 1; return ''; } });
+    pidDeadFor({ sessionId: 'a' });
+    pidDeadFor({ sessionId: 'b' });
+    pidDeadFor({ sessionId: 'c' });
+    expect(calls).toBe(1);
+  });
+
+  it('answers null (never a guess) for a session with neither a pid nor a sessionId', () => {
+    const pidDeadFor = makePidDeadResolver({ scanPs: () => '' });
+    expect(pidDeadFor({ name: 'conveyor-1' })).toBe(null);
+  });
+
+  it('answers null, never throws, when the ps scan itself fails', () => {
+    const pidDeadFor = makePidDeadResolver({ scanPs: () => { throw new Error('ps: command not found'); } });
+    expect(() => pidDeadFor({ sessionId: 'x' })).not.toThrow();
+    expect(pidDeadFor({ sessionId: 'x' })).toBe(null);
+  });
+});
+
+describe('classifySessionReapWithGroundTruth pid-dead axis (#ghost-sessions-inflate-cap, seeded from the real '
+  + 'live incident\'s own 18 records)', () => {
+  // The exact bug: `allowedCwd` scopes this daemon's OWN checkout — every real ghost session above was
+  // dispatched from a DIFFERENT one, so every one reads `wrong-cwd` from the base classifier alone.
+  const ALLOWED_CWD = '/Users/op/workspace/webeverything-primary-daemon-checkout';
+  const deadPidDeadFor = makePidDeadResolver({ scanPs: () => '' }); // empty ps snapshot — nothing is alive
+
+  it('every one of the 18 real ghost records is reaped via pid-dead, regardless of its own cwd', () => {
+    for (const session of REAL_GHOST_SESSIONS) {
+      const verdict = classifySessionReapWithGroundTruth(session, null, { allowedCwd: ALLOWED_CWD, pidDeadFor: deadPidDeadFor });
+      expect(verdict).toEqual({ reap: true, reason: 'pid-dead:ps-scan' });
+    }
+  });
+
+  it('sessionReapPlan over the full real 18-record listing reaps all 18 and keeps none', () => {
+    const plan = sessionReapPlan(REAL_GHOST_SESSIONS, { allowedCwd: ALLOWED_CWD, pidDeadFor: deadPidDeadFor });
+    expect(plan.reap).toHaveLength(18);
+    expect(plan.keep).toHaveLength(0);
+    expect(plan.reap.every((r) => r.reason === 'pid-dead:ps-scan')).toBe(true);
+  });
+
+  it('without pidDeadFor (the pre-fix shape), the identical 18-record listing reaps NONE — every one reads '
+    + 'wrong-cwd, exactly reproducing the live incident', () => {
+    const plan = sessionReapPlan(REAL_GHOST_SESSIONS, { allowedCwd: ALLOWED_CWD });
+    expect(plan.reap).toHaveLength(0);
+    expect(plan.keep).toHaveLength(18);
+  });
+
+  it('never reaps a session confirmed ALIVE by the ps scan, same cwd mismatch or not', () => {
+    const aliveSession = { ...REAL_GHOST_SESSIONS[0] };
+    const alivePidDeadFor = makePidDeadResolver({ scanPs: () => `node --resume=${aliveSession.sessionId}` });
+    const verdict = classifySessionReapWithGroundTruth(aliveSession, null, { allowedCwd: ALLOWED_CWD, pidDeadFor: alivePidDeadFor });
+    expect(verdict).toEqual({ reap: false, reason: 'wrong-cwd' }); // alive: falls through to the base cwd-gated verdict
+  });
+
+  it('a MORE SPECIFIC axis (hung-transcript) still wins over pid-dead when both would fire — pid-dead is the '
+    + 'coarsest, last-checked signal, never a reason that shadows a more useful one', () => {
+    const session = { ...REAL_GHOST_SESSIONS[0] };
+    const hungFor = () => ({ hung: true, reason: 'stale-no-activity' });
+    const verdict = classifySessionReapWithGroundTruth(session, null, {
+      allowedCwd: ALLOWED_CWD, pidDeadFor: deadPidDeadFor, hungFor,
+    });
+    expect(verdict).toEqual({ reap: true, reason: 'hung-transcript:stale-no-activity' });
+  });
+
+  it('an in-cwd session (allowedCwd matches) still gets the pre-existing state-only verdict when pid-dead '
+    + 'says alive — the fix never widens WHO gets reaped, only closes the wrong-cwd gap for a CONFIRMED-dead one', () => {
+    const inCwdWorking = { name: 'conveyor-1', state: 'working', kind: 'background', cwd: ALLOWED_CWD, sessionId: 'still-here' };
+    const alivePidDeadFor = makePidDeadResolver({ scanPs: () => 'node --resume=still-here' });
+    const verdict = classifySessionReapWithGroundTruth(inCwdWorking, null, { allowedCwd: ALLOWED_CWD, pidDeadFor: alivePidDeadFor });
+    expect(verdict).toEqual({ reap: false, reason: 'not-terminal' });
   });
 });
