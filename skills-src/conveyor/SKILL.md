@@ -911,10 +911,14 @@ states, and fake sessions that run the real state writers and sometimes crash, h
 tick it checks: the clone is git-clean, at most one main move behind and never lagging, the tick finished inside
 its bound, `tickOnce` and `onTick` did not throw, no stale-refusal streak, owed work got dispatched.
 
-- `npm run test:soak` — the 50-tick soak plus one regression scenario per live break. CI runs it (job
-  `daemon-soak`) on every PR touching `we:skills-src/conveyor/`, `we:scripts/conveyor/`, `we:scripts/lib/daemon-*`,
+- `npm run test:soak` — the 50-tick soak plus one regression scenario per live break, all in one process (use
+  this locally). CI splits the same coverage across a 4-way matrix (`we:scripts/conveyor/soak/shard-files.mjs`,
+  `npm run test:soak:shard -- --shard=<i>/4`) — shard 1 is always the 50-tick baseline, shards 2-4 round-robin the
+  break scenarios — behind the required `daemon-soak` check (an aggregator over the `soak-shard` matrix), on every
+  PR touching `we:skills-src/conveyor/`, `we:scripts/conveyor/`, `we:scripts/lib/daemon-*`,
   `we:scripts/lib/gh-app-shim.mjs`, `we:scripts/lib/main-staleness.mjs`, `we:scripts/lane-pool*`,
-  `we:scripts/review-set-label.mjs` or `we:scripts/operations/*dispatch*`.
+  `we:scripts/review-set-label.mjs` or `we:scripts/operations/*dispatch*`. A new break scenario file lands in a
+  shard automatically — no shard list to update.
 - `node scripts/conveyor/soak/run.mjs soak|break <id>|list` — the same runs from a shell, one report line per tick.
 - **THE RULE: every daemon bug fix adds its real-world case** as a scenario in `we:scripts/conveyor/soak/breaks/`
   and proves it with `node scripts/conveyor/soak/red-green.mjs --break=<id>` (RED on the tree before the fix,
