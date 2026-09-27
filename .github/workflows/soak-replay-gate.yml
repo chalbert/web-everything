@@ -74,4 +74,14 @@ jobs:
           # (backlog/4264 — a shallow `--depth=1` head fetch left no shared history for `merge-base` to walk
           # back to, which is exactly why the old two-endpoint diff was the only thing that could run before).
           git fetch origin "$HEAD_SHA"
-          node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --base-sha="$BASE_SHA" --head-sha="$HEAD_SHA"
+          # BOOTSTRAP for the `--base-sha`/`--head-sha` mode itself: the CLI above is main's copy, so until the PR
+          # that adds that mode has landed, main's CLI does not know it (exit 3, usage error). Fall back to
+          # computing the same merge-base diff inline and handing it over as `--files-status`, which every CLI
+          # version accepts.
+          if grep -q -- 'base-sha' scripts/soak-replay-gate-cli.mjs; then
+            node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --base-sha="$BASE_SHA" --head-sha="$HEAD_SHA"
+          else
+            MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA" || echo "$BASE_SHA")
+            FILES_STATUS=$(git diff --name-status -M "$MERGE_BASE" "$HEAD_SHA")
+            node scripts/soak-replay-gate-cli.mjs --title="$PR_TITLE" --body="$PR_BODY" --files-status="$FILES_STATUS"
+          fi
