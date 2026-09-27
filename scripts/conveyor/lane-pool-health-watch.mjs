@@ -645,7 +645,9 @@ if (IS_CLI) {
           process.stderr.write(`  lane salvage: ${salv.length} candidate(s) → ${ok.length} ${dryRun ? 'would be salvaged+reset' : 'salvaged+reset'}, ${salv.length - ok.length} kept\n`);
           for (const o of salv) {
             if (o.salvaged) process.stderr.write(`    lane-${o.lane}: salvaged-to ${o.salvage?.bundle || o.salvage?.outDir || '?'} → reset\n`);
-            else if (o.wouldSalvage || (dryRun && o.wouldReclaim)) process.stderr.write(`    lane-${o.lane}: would salvage → reset (${o.reason || ''})\n`);
+            else if (o.reclaimed) process.stderr.write(`    lane-${o.lane}: reset — content already on a remote ref, nothing to salvage (${o.reason || ''})\n`);
+            else if (o.wouldSalvage) process.stderr.write(`    lane-${o.lane}: would salvage → reset (${o.reason || ''})\n`);
+            else if (dryRun && o.wouldReclaim) process.stderr.write(`    lane-${o.lane}: would reset — content already on a remote ref (${o.reason || ''})\n`);
             else process.stderr.write(`    lane-${o.lane}: kept — ${o.keptReason || o.reason || 'unknown'}\n`);
           }
         }
