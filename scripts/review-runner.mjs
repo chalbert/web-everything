@@ -66,6 +66,7 @@ import {
   partitionRunnerPRs, runnerShadowPlan, buildShadowRecord,
 } from './lib/review-runner-core.mjs';
 import { writeAllSync } from './lib/write-all-sync.mjs';
+import { OPEN_PR_LIST_LIMIT, filterOpenPrsByLabel } from './lib/no-search-backed-pr-list.mjs';
 
 // ── singleton lease (daemon parity — its OWN lock root/key so it never aliases the drain lease) ───────────────
 /** Machine-global lock home for the review runner — shared across checkouts on the host so two scheduled runs
@@ -105,13 +106,15 @@ function discoverPending(repoSlug, repoKey) {
     // index, a separate, much smaller budget than the ordinary GraphQL list this call already is; filtering
     // server-side by label routinely tripped "API rate limit already exceeded" even with GraphQL budget to
     // spare. `labels` is already requested below, so filter client-side instead of passing `--label`.
+    // The cap now bounds the RAW open-PR list (not a pre-filtered set), so list at the shared OPEN_PR_LIST_LIMIT
+    // and surface a full page loudly — a `review:pending` PR past it would otherwise go silently unreviewed.
     const out = execFileSync('gh', [
       'pr', 'list', '--repo', repoSlug, '--state', 'open',
-      '--json', 'number,labels', '--limit', '200',
+      '--json', 'number,labels', '--limit', String(OPEN_PR_LIST_LIMIT),
     ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-    const rows = JSON.parse(out);
-    return (Array.isArray(rows) ? rows : [])
-      .filter((r) => labelNamesOf(r.labels).includes('review:pending'))
+    const { prs, truncated } = filterOpenPrsByLabel(JSON.parse(out), 'review:pending');
+    if (truncated) process.stderr.write(`review-runner ⚠ ${repoSlug}: the open-PR listing hit the --limit ${OPEN_PR_LIST_LIMIT} cap — it MAY be truncated, so a review:pending PR past it can be missing from this discovery (#no-label-search)\n`);
+    return prs
       .map((r) => ({
         pr: r.number, repo: repoKey, labels: labelNamesOf(r.labels),
       }));

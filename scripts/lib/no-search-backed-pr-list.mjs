@@ -19,6 +19,36 @@
  *   regression of the incident, not a false positive to allowlist reflexively.
  */
 
+/** #999/xq985wu F3 + #no-label-search — the per-repo open-PR listing cap. Every "list open PRs, filter by
+ *  label client-side" caller MUST list at this cap, not the old per-site 100/200: those were safe when they
+ *  capped the small server-side-FILTERED (`--label`) set, but after the client-side conversion they cap the RAW
+ *  open-PR list BEFORE the label check runs, so a labeled PR past the cap was silently dropped (PR #2798 review).
+ *  Raising alone does not retire the class — `isDegradedOpenPrListing` still flags a full page. Lives here (not in
+ *  `merge-ai-prs.mjs`, which re-exports it) so the lighter callers need not import the drain CLI. */
+export const OPEN_PR_LIST_LIMIT = 500;
+
+/** True when a listing came back at/over the cap — i.e. gh MAY have truncated it (a full page is indistinguishable
+ *  from an exactly-full one, so treat it as possibly-incomplete). Pure. */
+export function isDegradedOpenPrListing(count, limit = OPEN_PR_LIST_LIMIT) {
+  return Number(count) >= Number(limit);
+}
+
+/**
+ * The ONE client-side replacement for `gh pr list --label <label>`: filter an unfiltered open-PR listing (rows
+ * carrying `labels`, as `{name}` objects or plain strings) down to those carrying `label`, and report whether the
+ * RAW listing hit `limit` — a possibly-truncated page, on which a matching PR may have been dropped. Callers must
+ * surface `truncated` (never swallow it). A falsy `label` filters nothing. Pure.
+ * @param {unknown} rows
+ * @param {string|null|undefined} label
+ * @param {number} [limit]
+ * @returns {{prs: object[], truncated: boolean}}
+ */
+export function filterOpenPrsByLabel(rows, label, limit = OPEN_PR_LIST_LIMIT) {
+  if (!Array.isArray(rows)) return { prs: [], truncated: false };
+  const has = (r) => Array.isArray(r?.labels) && r.labels.some((l) => (typeof l === 'string' ? l : l?.name) === label);
+  return { prs: label ? rows.filter(has) : rows, truncated: isDegradedOpenPrListing(rows.length, limit) };
+}
+
 /** How far past a `--label`/`--search`/`--author` occurrence's start we look BACKWARD for the `'pr'`/`'issue'`
  *  + `'list'` argv pair that makes it a `gh … list` invocation, not some unrelated flag. Generous enough to
  *  span the multi-line `listArgs = [...]` construction style this repo's call sites use, tight enough that it
@@ -26,7 +56,9 @@
  *  in this repo at authoring time). */
 const BACKWARD_WINDOW = 400;
 
-const FLAG_RE = /(['"])(--label|--search|--author)\1/g;
+// The flag as its own quoted argv element (`'--label'`), or the single-element assignment form
+// (`'--label=ready-to-merge'`); any of the three JS quote styles. `--labels-json` is NOT a hit.
+const FLAG_RE = /(['"`])(--label|--search|--author)(?:=[^'"`\n]*)?\1/g;
 const LIST_CMD_RE = /(['"])(pr|issue)\1\s*,\s*(['"])list\3/;
 
 /**

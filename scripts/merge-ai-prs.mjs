@@ -108,6 +108,7 @@
 // are re-exported ONLY (mirrors `pr-land.mjs`'s own `forge-land-provider.mjs` split of used-here vs.
 // re-exported-only names) — every existing importer of THIS file keeps resolving all five unchanged.
 import { isAiGeneratedPr, hasLabel } from './lib/ai-pr-authorship.mjs';
+import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } from './lib/no-search-backed-pr-list.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
@@ -1974,13 +1975,10 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
  *  open-PR count, but raising alone does NOT retire the class: `isDegradedOpenPrListing` still flags a full page
  *  as a DEGRADED read so the ordering decision is never silently trusted on a truncated listing (truncation is
  *  the UNSAFE direction). */
-export const OPEN_PR_LIST_LIMIT = 500;
-/** True when a listing came back at/over the cap — i.e. gh MAY have truncated it (a full page is indistinguishable
- *  from an exactly-full one, so treat it as possibly-incomplete). A degraded listing must not be trusted as the
- *  authoritative open set for the early-land decision. Pure. */
-export function isDegradedOpenPrListing(count, limit = OPEN_PR_LIST_LIMIT) {
-  return Number(count) >= Number(limit);
-}
+// Defined in `./lib/no-search-backed-pr-list.mjs` (shared with the other client-side label-filter listings,
+// #no-label-search) and re-exported here for existing importers. A degraded listing must not be trusted as the
+// authoritative open set for the early-land decision.
+export { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing };
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
  *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure.
@@ -3926,7 +3924,7 @@ async function runCli() {
   // main. The rollup + mergeable come from the list;
   // commits (the AI gate) are fetched per-PR below (asking for them in the list overflows GitHub's node cap).
   const listOne = async (repo) => {
-    const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
+    const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT),
       '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
     if (base) listArgs.push('--base', base);
     // #no-label-search (2026-09-27 live incident) — `gh pr list --label` is served by GitHub's issue-SEARCH
@@ -3936,8 +3934,9 @@ async function runCli() {
     // instead of passing `--label` — identical candidate set, no search-backed call at all.
     try {
       const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      const all = JSON.parse(stdout.trim() || '[]');
-      const prs = label ? all.filter((p) => hasLabel(p, label)) : all;
+      // The cap now bounds the RAW open list, not a pre-filtered set — a full page is surfaced, never swallowed.
+      const { prs, truncated } = filterOpenPrsByLabel(JSON.parse(stdout.trim() || '[]'), label);
+      if (truncated) process.stderr.write(`  ⚠️  DEGRADED drain listing for ${repoTag(repo) || 'cwd'}: the open-PR list hit the --limit ${OPEN_PR_LIST_LIMIT} cap — it MAY be truncated, so a ${label || 'candidate'} PR past it can be missing this pass (#no-label-search)\n`);
       return { repo, prs };
     }
     catch (e) { return { repo, err: describeGhListError(e) }; }

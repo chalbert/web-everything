@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findSearchBackedGhListCalls } from '../no-search-backed-pr-list.mjs';
+import { findSearchBackedGhListCalls, filterOpenPrsByLabel, OPEN_PR_LIST_LIMIT } from '../no-search-backed-pr-list.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -59,6 +59,15 @@ describe('no-search-backed-pr-list (#no-label-search)', () => {
     expect(findSearchBackedGhListCalls(src)).toEqual([]);
   });
 
+  it('flags the `--label=value` assignment form and a backticked flag (review finding: FLAG_RE bypass)', () => {
+    const eq = `execFileSync('gh', ['pr', 'list', '--state', 'open', '--label=ready-to-merge']);`;
+    expect(findSearchBackedGhListCalls(eq).map((f) => f.flag)).toEqual(['--label']);
+    const tick = `execFileSync('gh', ['pr', 'list', \`--search\`, q]);`;
+    expect(findSearchBackedGhListCalls(tick).map((f) => f.flag)).toEqual(['--search']);
+    // a longer, unrelated flag that merely STARTS with a guarded name is not a hit
+    expect(findSearchBackedGhListCalls(`['pr', 'list', '--labels-json']`)).toEqual([]);
+  });
+
   it('every tracked scripts/ + skills-src/ source file is free of an unallowlisted --label/--search/--author on a pr|issue list call', () => {
     const offenders = [];
     for (const file of trackedSourceFiles()) {
@@ -74,4 +83,45 @@ describe('no-search-backed-pr-list (#no-label-search)', () => {
     }
     expect(offenders).toEqual([]);
   });
+});
+
+// Review finding (PR #2798, correctness): client-side filtering reused the OLD `--limit` (100/200), which once
+// capped the small server-side-FILTERED set but now caps the RAW open-PR list BEFORE the label check — so a
+// labeled PR past the cap was silently dropped. The shared helper + limit below close that.
+describe('filterOpenPrsByLabel (#no-label-search truncation)', () => {
+  const rows = (n, labeledAt, label = 'ready-to-merge') => Array.from({ length: n }, (_, i) => ({
+    number: 1000 - i, labels: i === labeledAt ? [{ name: label }] : [{ name: 'other' }],
+  }));
+
+  it('finds a labeled PR positioned past the OLD 100/200 caps (the 250th open PR)', () => {
+    const { prs, truncated } = filterOpenPrsByLabel(rows(300, 249), 'ready-to-merge');
+    expect(prs.map((p) => p.number)).toEqual([751]);
+    expect(truncated).toBe(false);
+    expect(OPEN_PR_LIST_LIMIT).toBeGreaterThan(200);
+  });
+
+  it('reports a FULL page as possibly-truncated — never a silent drop', () => {
+    const { prs, truncated } = filterOpenPrsByLabel(rows(OPEN_PR_LIST_LIMIT, -1), 'ready-to-merge');
+    expect(prs).toEqual([]);
+    expect(truncated).toBe(true);
+  });
+
+  it('accepts string-shaped labels and a missing labels field; no label = no filter', () => {
+    const r = [{ number: 1, labels: ['review:pending'] }, { number: 2 }];
+    expect(filterOpenPrsByLabel(r, 'review:pending').prs.map((p) => p.number)).toEqual([1]);
+    expect(filterOpenPrsByLabel(r, null).prs).toHaveLength(2);
+    expect(filterOpenPrsByLabel('not-an-array', 'x')).toEqual({ prs: [], truncated: false });
+  });
+
+  // Wiring: each converted call site lists with the shared limit and routes through the helper (so it gets the
+  // truncation signal) — a bare numeric `--limit` literal on those open-PR listings is exactly the regressed shape.
+  for (const file of ['scripts/merge-ai-prs.mjs', 'scripts/review-runner.mjs', 'scripts/lane-resume.mjs']) {
+    it(`${file} filters its open-PR listing through filterOpenPrsByLabel with no numeric --limit literal`, () => {
+      const src = readFileSync(join(ROOT, file), 'utf8');
+      expect(src).toMatch(/filterOpenPrsByLabel\(/);
+      const openLists = src.match(/\[\s*'pr',\s*'list'[^\]]*'--state',\s*'open'[^\]]*\]/g) || [];
+      expect(openLists.length).toBeGreaterThan(0);
+      for (const argv of openLists) expect(argv).not.toMatch(/'--limit',\s*'\d+'/);
+    });
+  }
 });
