@@ -49,6 +49,7 @@ import { planAdvisoryLabels } from '../lib/advisory-labels.mjs';
 import { judgeSpawn } from '../lib/judge-spawn.mjs';
 import { resolveNetDiffBasis } from '../merge-ai-prs.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
+import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 
 /** The forced JSON shape the targeted-check judge's answer must satisfy (#xconv1). One verdict, one citing
  *  note — never a re-derivation of `review-core.mjs`'s own multi-finding panel shape, because this is
@@ -327,7 +328,7 @@ if (IS_CLI) {
     } else positionals.push(a);
   }
   const fail = (m) => {
-    process.stderr.write(`✗ ${m}\n`);
+    writeLineSync(2, `✗ ${m}`);
     process.exit(1);
   };
   const pr = Number(positionals[0]);
@@ -357,6 +358,6 @@ if (IS_CLI) {
     repo, dryRun: !!flags['dry-run'], force: !!flags.force,
     comments: prState.comments, labels: prState.labels,
   }).then((result) => {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    writeAllSync(1, `${JSON.stringify(result, null, 2)}\n`);
   }).catch((e) => fail(String((e && e.message) || e).split('\n')[0]));
 }
