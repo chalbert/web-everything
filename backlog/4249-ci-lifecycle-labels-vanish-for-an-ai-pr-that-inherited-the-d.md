@@ -3,9 +3,10 @@ bornAs: xg790dh
 kind: story
 size: 3
 parent: "4075"
-status: open
+status: resolved
 scope: ["we:scripts/lib/ai-pr-authorship.mjs", "we:scripts/merge-ai-prs.mjs", "we:scripts/conveyor/review-status-tag.mjs", "we:scripts/__tests__/merge-ai-prs-ai-detection-and-drain-ordering.test.mjs", "we:scripts/__tests__/merge-ai-prs-ci-lifecycle-and-land-effects.test.mjs", "we:scripts/conveyor/__tests__/review-status-tag.test.mjs"]
 dateOpened: "2026-09-26"
+dateResolved: "2026-09-27"
 tags: []
 ---
 
