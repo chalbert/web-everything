@@ -3,11 +3,12 @@ bornAs: x0zg44l
 kind: story
 size: 8
 parent: "4075"
-status: active
+status: resolved
 scaffoldedBy: "opus-soak-harness"
 dateScaffolded: "2026-09-25"
 scope: ["we:scripts/conveyor/soak/", "we:vitest.soak.config.ts", "we:package.json", "we:.github/workflows/ci.yml", "we:vitest.config.ts"]
 dateOpened: "2026-09-25"
+dateResolved: "2026-09-26"
 tags: []
 ---
 
