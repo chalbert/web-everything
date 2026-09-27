@@ -12,7 +12,7 @@
 
 | Placeholder | What the conveyor fills it with |
 |---|---|
-| `{{ITEM_NUM}}` | the backlog item number (or `xNNNNNN` hash) from the launch entry — e.g. `2608` |
+| `{{ITEM_NUM}}` | the backlog item number (or `xNNNNNN` hash) from the launch entry — e.g. `2608`. **Never substitute any other number here** (a PR number, an issue you noticed in passing, a guess) — the drain's resolve-on-land bookkeeping reads this exact leading digit run off the branch name as a claim that this PR delivers that card, and a mismatched number wrongly resolves an unrelated card on merge (incident 2026-09-26 03:14Z, #2779: a hand-run `/pr` outside this brief named its branch after an open PR number instead of a card and did exactly this). |
 | `{{ITEM_SPEC_PATH}}` | the item's backlog file — `backlog/{{ITEM_NUM}}-<slug>.md` |
 | `{{LANE}}` | the free lane id the dispatch plan assigned this launch (`launch[].lane`) — e.g. `4` |
 | `{{SESSION_SLUG}}` | a stable per-item session slug, e.g. `conveyor-{{ITEM_NUM}}` (ties `acquire`↔`release`, `claim`↔`resolve`) |

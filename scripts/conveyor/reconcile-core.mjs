@@ -1478,15 +1478,30 @@ export function planReconcile({
  * idempotency argument above applies identically to `nothing-owed` — a PR that was NEVER live costs one
  * wasted read (or nothing at all when reads are shared, #4133) and no label ever gets written; a PR that just
  * WENT quiet finally gets its stale label cleared within one tick instead of never.
+ * SAME BUG CLASS, FOURTH TIME (live-caught 2026-09-26, PR #2742, card xg790dh): the docblock above already
+ * NAMED the shape ("`ci-red` moved OFF this table at multi-repo slice 7 — it is a real `dispatch` entry,
+ * `kind:'ci-heal'`, now, not a refusal") but never actually closed it — a `kind:'ci-heal'` dispatch entry was
+ * in NEITHER `reviewsOwed` NOR `fixesOwed` (both filter on a DIFFERENT literal `kind`) NOR `refusals` (it is a
+ * `dispatch`, never refused, whenever the ci-heal cap is unspent), so a PR that moves from being owed a FIX to
+ * being owed a CI-HEAL fell out of the sweep entirely, the exact same shape #2472/x8who76 already fixed for the
+ * review→fix and accept→queued transitions. Confirmed live: PR #2742's `fix-2742` session finished (`state:
+ * 'done'`, idle 11+ min) and CI went red on its re-push (`ci:failed`), so the very next tick's plan carries a
+ * `kind:'ci-heal'` dispatch for #2742 — but `review-status:fixing` (added while the fix was genuinely live)
+ * sat stale on the PR indefinitely, because nothing ever called `review-status-tag.mjs` again to notice the
+ * fix session was `done` and either clear it or replace it with `healing-ci` once a ci-heal session picks it
+ * up. Fixed by adding `ciHealsOwed` as a FOURTH candidate source, included the same unconditional way the other
+ * three already are — `review-status-tag.mjs`'s own idempotency argument applies identically here.
  * @param {Array<{prNumber:number}>} reviewsOwed - the `kind:'review'` subset of this pass's own `dispatch`
  * @param {Array<{kind:string, prNumber:number}>} refusals - this pass's own `refusals`
  * @param {Array<{prNumber:number}>} [fixesOwed] - the `kind:'fix'` subset of this pass's own `dispatch`
- * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed + every refusal, `nothing-owed` included
+ * @param {Array<{prNumber:number}>} [ciHealsOwed] - the `kind:'ci-heal'` subset of this pass's own `dispatch`
+ * @returns {Array<{prNumber:number}>} reviewsOwed + fixesOwed + ciHealsOwed + every refusal, `nothing-owed` included
  */
-export function selectStatusCandidates(reviewsOwed, refusals, fixesOwed) {
+export function selectStatusCandidates(reviewsOwed, refusals, fixesOwed, ciHealsOwed) {
   return [
     ...(Array.isArray(reviewsOwed) ? reviewsOwed : []),
     ...(Array.isArray(fixesOwed) ? fixesOwed : []),
+    ...(Array.isArray(ciHealsOwed) ? ciHealsOwed : []),
     ...(Array.isArray(refusals) ? refusals : []),
   ];
 }

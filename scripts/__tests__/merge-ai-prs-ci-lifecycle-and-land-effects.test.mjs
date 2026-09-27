@@ -239,24 +239,36 @@ describe('#3729 — a GitHub-native "Merge pull request #NNN from …" commit mu
 // …, drop transient .lane-manifest.json`, `drain: JIT-number … at land`, `drain: resolve #NNN on land`),
 // authored solely by the drain's own git identity — not a `Merge …` commit at all (so `isMechanicalMergeCommit`
 // correctly does NOT swallow it; a script REWRITING a real file, e.g. numbering a backlog card, is NOT
-// content-free the way a merge commit is), and carrying no Claude/human trailer either. Re-running
-// `isAiGeneratedPr` against PR #2685's actual live commit list (`gh pr view 2685 --json commits`, 2026-09-25)
-// confirms it STILL returns `false` after the merge-commit fix alone. This exact shape is already a RATIFIED,
-// known gap — `classifyPr`'s own #2196/#2326 comment names it verbatim ("the drain's OWN rebase … commit
-// stranded it") — and its ratified remedy is not to loosen `isAiGeneratedPr`/`isMechanicalMergeCommit`
-// (deliberately kept strict) but to certify via `certifyLabel || aiGenerated || humanCleared` instead. The
-// #2421 TOTAL ci-lifecycle reconcile had no such OR-path at all; this closes that asymmetry.
+// content-free the way a merge commit is), and carrying no Claude/human trailer either. AT THE TIME (2026-09-25)
+// the chosen remedy was NOT to loosen `isAiGeneratedPr`/`isMechanicalMergeCommit`, but to add the OR-path below
+// (`certifyLabel || aiGenerated || humanCleared`) so an ALREADY `ready-to-merge`/`review:accepted` PR still
+// certifies despite the false read.
+//
+// SUPERSEDED IN PART (live-caught 2026-09-26, `chalbert/web-everything#2741`, epic #4075/#3383): the OR-path
+// only ever helps a PR that has ALREADY reached `ready-to-merge` or `review:accepted` — it does nothing for a
+// PR still in EARLY negotiation (`review:pending`/first round, no label yet) that inherits the identical drain
+// bookkeeping shape. Worse, `labelOnGreenVerdict` gates the auto-`ready-to-merge` stamp on the SAME
+// `isAiGeneratedPr` read, so such a PR could never even reach the OR-path's OWN escape hatch on its own — a
+// structural deadlock broken only by a human manually applying `review:accepted`. #2741 lived exactly this:
+// `review:pending, review-round:1` only, no ci-lifecycle label at all, while CI was still running. `isAiCommit`
+// (`we:scripts/lib/ai-pr-authorship.mjs#isDrainBookkeepingCommit`) now recognizes the drain's own `drain: `-
+// prefixed bookkeeping commits (every shape — `rebase`/`JIT-number`/`resolve … on land`/`unqueue + cleanup`/
+// `reopen stranded`/`resolve epic … on last-child … land` alike, matched on the shared prefix rather than an
+// enumerated list) as mechanical, the SAME "adds no authored content" property the two pre-existing merge-commit
+// shapes already have — closing the gap at its ROOT rather than only at the OR-path's narrower edge. The OR-path
+// itself stays (a genuine human `review:accepted`/`ready-to-merge` clear is still its own valid certification
+// for a PR that has a REAL human content commit), so every test below it keeps passing unchanged.
 describe('#3729 residual — the TOTAL ci-lifecycle reconcile must accept the SAME certification classifyPr already does (#2196/#2326), not aiGenerated alone', () => {
-  // The exact shape from PR #2685's real, live commit list (2026-09-25) that survives the merge-commit fix.
+  // The exact shape from PR #2685's real, live commit list (2026-09-25).
   const drainRebaseCommit = {
     messageHeadline: 'drain: rebase lane/xgqz204-dispatcher-reexec-worker-marker onto origi…',
     messageBody: '…n/main, drop transient .lane-manifest.json',
     authors: [{ name: 'test', email: 'test@test.com' }],
   };
 
-  it('sanity: this real-shaped commit is neither mechanical nor AI — isAiGeneratedPr still says false', () => {
+  it('this real-shaped commit is not a `Merge …` commit, but IS recognized as drain bookkeeping — isAiGeneratedPr now says true', () => {
     expect(isMechanicalMergeCommit(drainRebaseCommit)).toBe(false);
-    expect(isAiGeneratedPr({ commits: [claudeCommit(), drainRebaseCommit] })).toBe(false);
+    expect(isAiGeneratedPr({ commits: [claudeCommit(), drainRebaseCommit] })).toBe(true);
   });
 
   it('source-contract: the TOTAL branch certifies via aiGenerated OR the trust label OR a human clear — mirrors classifyPr\'s `certified`', () => {
@@ -1220,6 +1232,29 @@ describe('landedIdsForCandidate (#3441 — resolve-on-land for a plain single-lo
 
   it('defaults isLocalRepo to always-false when omitted — a non-manifest candidate resolves nothing by default', () => {
     expect(landedIdsForCandidate({ hasManifest: false, item: null, repo: null, headRef: 'lane/3412-resolve-fix', title: '' }, { fetchGuardSignals: noSignals, fetchDiff: () => '' })).toEqual([]);
+  });
+
+  // Incident 2026-09-26 03:14Z — PR #2785 (`chalbert/web-everything`, branch `lane/2779-session-token-fresh`,
+  // no manifest, no title marker, no body). At land time PR #2779 (the real, unmerged bg-isolation fix) was
+  // still open. RED: with no `openPrNums` (the pre-fix call shape — production never actually wired this
+  // through before this fix), the bare branch-name lead segment wrongly credited card #2779. GREEN: the fixed
+  // call site always passes the real open-PR set, and #2785's own real data — reproduced here verbatim —
+  // resolves nothing, leaving #2779 untouched for a human/the stranded sweep with real evidence.
+  describe('#2779-incident — PR #2785 real branch/title end-to-end', () => {
+    const pr2785 = { hasManifest: false, item: null, repo: null, headRef: 'lane/2779-session-token-fresh', title: 'session token freshness check' };
+
+    it('RED (pre-fix call shape, no openPrNums) — reproduces the incident: card #2779 wrongly credited', () => {
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '' })).toEqual([2779]);
+    });
+
+    it('GREEN (fixed call shape) — #2779 was an open PR at land time, so it is refused, not credited', () => {
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '', openPrNums: ['2779'] })).toEqual([]);
+    });
+
+    it('a later, unrelated PR on the SAME branch-naming convention still resolves normally once #2779 is no longer open', () => {
+      // Proves the guard is scoped to the live collision, not a blanket ban on numeric-lead branches.
+      expect(landedIdsForCandidate(pr2785, { isLocalRepo, fetchGuardSignals: noSignals, fetchDiff: () => '', openPrNums: ['3001'] })).toEqual([2779]);
+    });
   });
 
   // #3473's lazy fetch skipped this call when the ref/title base was empty; PR #2724's review relaxed that
