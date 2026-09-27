@@ -975,6 +975,99 @@ describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable
   });
 });
 
+// we:backlog/review-while-main-red (#4075/#3383) — LIVE INCIDENT 2026-09-26: PRs #2769/#2770/#2772/#2778/#2779
+// (chalbert/web-everything) sat `review:pending` + `ci:failed(owed-ci-rerun)` for hours with review capacity
+// idle (2 review jobs running against 5 held PRs) — the `owed-ci-rerun` refusal above used to be the PR's ONLY
+// row every tick, so a review never even got a look until main recovered AND the mechanical rebase cleared
+// `ci:failed`, serializing two genuinely independent facts (main's own CI state; whether this PR has been
+// reviewed) for no reason. `dispatchReviewRow` closes it: a `review:pending` PR reaching `owed-ci-rerun` now ALSO
+// gets a `review` dispatched, carrying `owedCiRerun: true` so a reader can tell the two populations apart.
+describe('review-while-main-red — a review:pending PR owed only owed-ci-rerun also gets its review dispatched in parallel', () => {
+  const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
+  const prOwedCiRerunAndReview = (over = {}) => pr1563({
+    number: 2769, labels: lbl('review:pending', 'ci:failed'), statusCheckRollup: redRollup,
+    requiredCheckCompletedAt: '2026-09-25T01:57:47Z', aheadByOnMain: 33,
+    comments: [finding()],
+    ...over,
+  });
+
+  it('dispatches BOTH the owed-ci-rerun refusal (the rebase is still owed) AND a review, with findings present', () => {
+    const plan = planReconcile({ prs: [prOwedCiRerunAndReview()], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS });
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2769, phase: 'ci-red' })]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'review', prNumber: 2769, owedCiRerun: true, attempts: 0,
+    })]);
+  });
+
+  it('zero-findings population: still refuses `no-findings` and dispatches the review, real count carried (never hardcoded 0)', () => {
+    const twoRearms = [
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+      { body: REARM_COMMENT_MARKER, author: AUTOMATION },
+    ];
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: twoRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['owed-ci-rerun', 'no-findings']);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2769, findings: 0, attempts: 2, owedCiRerun: true })]);
+  });
+
+  it('at the round cap: refuses `cap-exhausted` instead of dispatching a review forever (zero-findings population, REARM-only thread)', () => {
+    const fiveRearms = Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }));
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: fiveRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['owed-ci-rerun', 'no-findings', 'cap-exhausted']);
+    expect(plan.refusals[2]).toMatchObject({ prNumber: 2769, attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('at the round cap WITH a real finding present: refuses `cap-exhausted` directly (no `no-findings` row)', () => {
+    const fiveRearms = [finding(), ...Array.from({ length: NEGOTIATION_ROUND_CAP }, () => ({ body: REARM_COMMENT_MARKER, author: AUTOMATION }))];
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: fiveRearms })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['owed-ci-rerun', 'cap-exhausted']);
+    expect(plan.refusals[1]).toMatchObject({ prNumber: 2769, attempts: NEGOTIATION_ROUND_CAP, cap: NEGOTIATION_ROUND_CAP });
+  });
+
+  it('#2588 stays independent: a head already carrying a `reviewed-sha` accept marker is refused `already-reviewed-head`, not re-dispatched, even while owed-ci-rerun also holds', () => {
+    const sha = pr1563().headRefOid;
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ comments: [{ body: buildReviewedShaMarker(sha), author: AUTOMATION }] })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals.map((r) => r.kind)).toEqual(['owed-ci-rerun', 'already-reviewed-head']);
+  });
+
+  it('NEVER fires for the sibling population — a PR\'s OWN code red (no main-red window covers it) still gets only `ci-heal`, never a parallel review', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ requiredCheckCompletedAt: '2026-09-25T08:03:45Z' })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2769 })]);
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('owed-ci-rerun');
+  });
+
+  it('never fires without the `review:pending` label — an already-`review:accepted` PR (no review owed) is refused owed-ci-rerun alone, byte-identical to before this item', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ labels: lbl('review:accepted', 'ci:failed') })],
+      agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'owed-ci-rerun', prNumber: 2769 })]);
+  });
+
+  it('a DIRTY (conflicting) PR takes the #xudx8ff ci-heal fallback, unaffected by this item — no parallel review either', () => {
+    const plan = planReconcile({
+      prs: [prOwedCiRerunAndReview({ mergeStateStatus: 'DIRTY' })], agents: [], now: NOW, mainRedWindows: MAIN_RED_WINDOWS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2769 })]);
+    expect(plan.refusals.map((r) => r.kind)).not.toContain('owed-ci-rerun');
+  });
+});
+
 describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, not the shared roundCap (#xkmu3gv)', () => {
   // `chalbert/web-everything#2549`, shape measured live 2026-09-24: `bounced` (review:changes present, wins
   // `classifyPr`'s precedence over `review:human`), ALSO carrying `merge-status:conflicting` (the mechanical

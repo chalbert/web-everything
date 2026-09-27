@@ -189,7 +189,13 @@ export const DISPATCH_KINDS = Object.freeze(['fix', 'review', 'ci-heal']);
  *                          see the leaf's own file header for why a REBASE, not a rerun of the same stale
  *                          commit, is what actually resolves it. Once the head already contains `main`'s
  *                          current tip and is STILL red, this refusal no longer fires and the PR falls through
- *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected.
+ *                          to the ordinary `ci-red` → `ci-heal` path below, unaffected. we:backlog/
+ *                          review-while-main-red (#4075/#3383): this refusal NO LONGER means nothing else is
+ *                          dispatched for the PR — a `review:pending` PR reaching it also gets a `review`
+ *                          dispatched IN PARALLEL (`extra: { owedCiRerun: true }` on that row), via {@link
+ *                          dispatchReviewRow}, since the rebase and the review are independent facts about the
+ *                          PR. See that function's own docblock for the live incident (#2769/#2770/#2772/#2778/
+ *                          #2779) this closes.
  *   `nothing-owed`       — the PR is reviewed and queued, or already landed. Genuinely nothing to do.
  *   `already-reviewed-head` — #2588/review-loops (epic #3383/#4075): the PR's CURRENT head already carries a
  *                          `reviewed-sha` accept marker (`we:scripts/lib/review-escalation.mjs#parseReviewedSha`).
@@ -823,6 +829,96 @@ export function assessLiveness(bound) {
 }
 
 /**
+ * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced. Runs the
+ * IDENTICAL three checks the ordinary `needs-review`/`needs-human` OWED-table path always ran inline
+ * (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap) so a SECOND population —
+ * we:backlog/review-while-main-red (#4075/#3383): a `review:pending` PR whose ONLY CI blocker is
+ * `owed-ci-rerun` (main's own red, never this PR's code) — can ask for the identical decision without a second,
+ * divergent copy of it. LIVE INCIDENT this closes, 2026-09-26: PRs #2769/#2770/#2772/#2778/#2779 sat
+ * `review:pending` + `ci:failed(owed-ci-rerun)` with review capacity idle, because the `ci-red` branch below
+ * refused-and-`continue`d before ever reaching the OWED table that would have owed them a review —
+ * `classifyPr`'s own precedence puts `ci-red` ahead of `needs-review` (see that function's header), so a PR
+ * with BOTH labels never even got a look. The two facts — "is main's own CI red" and "has this PR been
+ * reviewed" — are independent; nothing requires resolving them in series, and serializing them cost every one
+ * of those five PRs ~20+ minutes once main recovered, for no reason: review capacity was idle throughout.
+ *
+ * Mutates via the injected `refuse`/`refuseCapExhausted`/`dispatch` exactly like the rest of {@link
+ * planReconcile}'s loop body (same closures, same row shapes) — a caller extends every row this pushes with
+ * `extra` (the ci-red-parallel caller passes `{ owedCiRerun: true }` so a reader can tell the two populations
+ * apart in the report without a different kind name).
+ * @param {object} o
+ * @param {object} o.pr
+ * @param {object} o.withPhase
+ * @param {object} o.base
+ * @param {number} o.attempts
+ * @param {number} o.roundCap
+ * @param {(kind:string, extra:object)=>void} o.refuse
+ * @param {(extra:object)=>void} o.refuseCapExhausted
+ * @param {Array<object>} o.dispatch
+ * @param {object} [o.extra] - extra fields carried on every row this produces.
+ */
+function dispatchReviewRow({
+  pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {},
+}) {
+  // ── `already-reviewed-head` (#2588) — see {@link planReconcile}'s own copy of this note for the full incident.
+  // Raw-SHA comparison only, deliberately: for THIS caller (the ci-red-parallel path) the PR's head cannot have
+  // moved since the LATEST accept this pass could have seen — a mechanical rebase never runs while `ci:failed`
+  // still holds (see `ci-red-recovery-watch.mjs`'s own header: it rebases to CLEAR a red check, so a rebase and
+  // a still-`ci-red` phase read on the SAME tick are mutually exclusive) — so a raw-sha miss here is always a
+  // genuinely new head, never a rebased-but-content-identical one. The rebase-survives-acceptance question this
+  // item also had to answer is settled a different way: once the rebase lands and `ci:failed` clears,
+  // `classifyPr` moves the PR to `queued` (an accepted PR) or `open`/`bounced` (a since-changed one) — OFF the
+  // OWED table entirely — so this guard, and this whole function, is never reached again for that PR either way.
+  const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
+  const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
+  if (headSha && reviewedSha && reviewedSha === headSha) {
+    refuse('already-reviewed-head', {
+      ...withPhase, headSha, reviewedSha, ...extra,
+      why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +
+        ' review — dispatching another review for a commit nobody has touched since risks a second,' +
+        ' contradicting verdict landing on it (#2588)',
+    });
+    return;
+  }
+  // ── `no-findings` — refuse it (a fixer would invent work), but a review is still owed unless the review
+  // population's own cap is spent.
+  const findings = countFindings(pr?.comments);
+  if (findings === 0) {
+    refuse('no-findings', {
+      ...withPhase, findings: 0, comments: Array.isArray(pr?.comments) ? pr.comments.length : 0, ...extra,
+      why: 'no reviewer finding on this PR — a fix agent would invent work. A review, not a fix, is what an unreviewed PR is owed.',
+    });
+    if (attempts >= roundCap) {
+      refuseCapExhausted({
+        ...withPhase, attempts, cap: roundCap, findings: 0, capKind: 'review', ...extra,
+        why: `no reviewer finding has ever landed on this PR, but its own durable attempt count is ${attempts}` +
+          ` against a cap of ${roundCap} — a review keeps being dispatched with nothing to show for it, and a` +
+          ' person must take it',
+      });
+    } else {
+      dispatch.push({
+        ...base, ...withPhase, kind: 'review', findings: 0, attempts, ...extra,
+        why: `parked for an independent review and no finding has been raised yet — a review is owed` +
+          ` (#3279 runs it); ${attempts} of ${roundCap} attempts are spent`,
+      });
+    }
+    return;
+  }
+  // ── the shared attempt cap, then the dispatch itself.
+  if (attempts >= roundCap) {
+    refuseCapExhausted({
+      ...withPhase, attempts, cap: roundCap, capKind: 'review', ...extra,
+      why: `the PR's own durable attempt count is ${attempts} against a cap of ${roundCap} — auto-repair is exhausted here and a person must take it`,
+    });
+    return;
+  }
+  dispatch.push({
+    ...base, ...withPhase, kind: 'review', findings, attempts, ...extra,
+    why: `parked for an independent review with ${findings} finding(s) on the thread and nothing live working it`,
+  });
+}
+
+/**
  * we:scripts/conveyor/reconcile-core.mjs#planReconcile — THE PASS. Given every open PR, every live session, and
  * the durable per-PR attempt counts, return what to dispatch and every refusal with the fact it turned on. Pure,
  * total, and keyed by PR number throughout.
@@ -1092,6 +1188,31 @@ export function planReconcile({
           ...withPhase,
           why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
         });
+        // we:backlog/review-while-main-red (#4075/#3383) — LIVE INCIDENT 2026-09-26: PRs #2769/#2770/#2772/
+        // #2778/#2779 sat `review:pending` behind exactly this refusal with review capacity idle (2 review jobs
+        // running against 5 held PRs), serializing "wait for main → rerun CI → THEN review" for no reason — the
+        // two facts (main's own CI is red; has this PR been reviewed) are independent. A `review:pending` PR
+        // whose ONLY blocker is `owed-ci-rerun` is still OWED a review right now, dispatched IN PARALLEL with the
+        // wait: `ci-red-recovery-watch.mjs`'s own mechanical rebase reads the open-PR listing itself and does not
+        // consult this pass's plan at all (see that file's `main()`), so it is completely unaffected by whatever
+        // this pushes. Gated on `review:pending` specifically because `classifyPr`'s own precedence (its header,
+        // and the ordering in this very function) means a PR reaching THIS branch with a review label at all can
+        // only ever carry `review:pending` or `review:accepted` — `review:changes`/`review:human`-without-
+        // `review:accepted` are intercepted into `bounced`/`needs-human` before `ci-red` is ever tested, so they
+        // never reach here, and an already-`review:accepted` PR owes no fresh review. NEVER for the sibling
+        // population one branch below (a PR's OWN code red, `ci-heal` owed) — that population does not reach
+        // this `if`, by construction of the `isPrCiFailureOwedRerun` condition guarding it.
+        if (withPhase.labels.includes('review:pending')) {
+          const reviewAttempts = Math.max(
+            Number(counts[prNumber]) || 0,
+            countRearmComments(pr?.comments),
+            countAdvisoryComments(pr?.comments),
+          );
+          dispatchReviewRow({
+            pr, withPhase, base, attempts: reviewAttempts, roundCap, refuse, refuseCapExhausted, dispatch,
+            extra: { owedCiRerun: true },
+          });
+        }
         continue;
       }
       const ciHealAttempts = countCiHealComments(pr?.comments);
