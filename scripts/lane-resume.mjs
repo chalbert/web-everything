@@ -81,6 +81,7 @@ import { asItemId } from './readiness/lane-manifest.mjs';
 // rebuilt onto the repaired tip. "Broken" = a red required `test` (a real bug) OR a `review:changes` label
 // (a human bounced the diff). Reuse the ratified verdict-label set + its tolerant reader, never re-parse names.
 import { REVIEW_LABELS, hasReviewLabel, readyMergeConflictsWithHold } from './lib/review-escalation.mjs';
+import { OPEN_PR_LIST_LIMIT, filterOpenPrsByLabel } from './lib/no-search-backed-pr-list.mjs';
 // #2383 — reuse the SAME constellation repo-resolution as `/drain` (`merge-ai-prs.mjs`), so `/finish` sweeps
 // all 3 repos (WE + frontierui + plateau-app) by default instead of only the cwd repo. `merge-ai-prs.mjs` is
 // CLI-guarded (runs nothing on import), so this is a pure function import.
@@ -884,7 +885,14 @@ function discover(asJson, { repos = null, singleRepo = false, windowDays = 7 } =
     const repoFlag = repo ? ['--repo', repo] : [];
     // #2396 — `labels` too: a `review:changes` bounce is a broken stacked LINK (like a red `test`), so its
     // overlap-descendants must be re-bucketed behind it, not attempted this pass.
-    const prs = shJSON('gh', ['pr', 'list', ...repoFlag, '--label', READY_LABEL, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', '200'], []);
+    // #no-label-search (2026-09-27 live incident) — `--label` on `gh pr list` is search-backed (a separate,
+    // much smaller budget than the ordinary GraphQL list this call already is) and rate-limits independently
+    // of the real GraphQL budget. `labels` is already requested below, so filter by READY_LABEL client-side.
+    // The cap now bounds the RAW open-PR list (not a pre-filtered set): list at the shared OPEN_PR_LIST_LIMIT and
+    // surface a full page loudly, so a ready PR past it is never dropped silently.
+    const allOpenPrs = shJSON('gh', ['pr', 'list', ...repoFlag, '--state', 'open', '--json', 'number,mergeable,mergeStateStatus,headRefName,statusCheckRollup,labels', '--limit', String(OPEN_PR_LIST_LIMIT)], []);
+    const { prs, truncated } = filterOpenPrsByLabel(allOpenPrs, READY_LABEL);
+    if (truncated) process.stderr.write(`lane-resume ⚠ ${repo || 'cwd repo'}: the open-PR listing hit the --limit ${OPEN_PR_LIST_LIMIT} cap — it MAY be truncated, so a ${READY_LABEL} PR past it can be missing this pass (#no-label-search)\n`);
     for (const p of prs) {
       const man = readManifest(p.headRefName, { repo: isLocal ? null : repo }) || { item: null, repos: [], blockedBy: [], stackParents: [] };
       const lane = classifyLane({

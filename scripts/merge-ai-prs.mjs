@@ -108,6 +108,7 @@
 // are re-exported ONLY (mirrors `pr-land.mjs`'s own `forge-land-provider.mjs` split of used-here vs.
 // re-exported-only names) — every existing importer of THIS file keeps resolving all five unchanged.
 import { isAiGeneratedPr, hasLabel } from './lib/ai-pr-authorship.mjs';
+import { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing, filterOpenPrsByLabel } from './lib/no-search-backed-pr-list.mjs';
 export { isAiAuthor, isAiCommit, isMechanicalMergeCommit, isDrainBookkeepingCommit } from './lib/ai-pr-authorship.mjs';
 export { isAiGeneratedPr, hasLabel };
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
@@ -1976,16 +1977,13 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
  *  open-PR count, but raising alone does NOT retire the class: `isDegradedOpenPrListing` still flags a full page
  *  as a DEGRADED read so the ordering decision is never silently trusted on a truncated listing (truncation is
  *  the UNSAFE direction). */
-export const OPEN_PR_LIST_LIMIT = 500;
+// Defined in `./lib/no-search-backed-pr-list.mjs` (shared with the other client-side label-filter listings,
+// #no-label-search) and re-exported here for existing importers. A degraded listing must not be trusted as the
+// authoritative open set for the early-land decision.
+export { OPEN_PR_LIST_LIMIT, isDegradedOpenPrListing };
 /** #gh-graphql-budget — the context listing's `--json` (the shared snapshot serves it; the direct fallback asks for
  *  exactly the same). `body` rides it so a PR's lane manifest is read off the listing, never a per-PR re-read. */
 export const CONTEXT_LIST_FIELDS = 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid';
-/** True when a listing came back at/over the cap — i.e. gh MAY have truncated it (a full page is indistinguishable
- *  from an exactly-full one, so treat it as possibly-incomplete). A degraded listing must not be trusted as the
- *  authoritative open set for the early-land decision. Pure. */
-export function isDegradedOpenPrListing(count, limit = OPEN_PR_LIST_LIMIT) {
-  return Number(count) >= Number(limit);
-}
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
  *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure.
@@ -3964,20 +3962,29 @@ async function runCli() {
   // #gh-graphql-budget — GitHub prices this list by the page it REQUESTS, not the PRs it returns: `--limit 100`
   // over a handful of queued PRs cost 3 points x 3 repos every pass. Kept a LIVE read (it is the merge-candidate
   // set, so it must not lag a just-removed `ready-to-merge`), but sized off the shared snapshot's open count and
-  // re-listed at the old 100 only when that page came back full.
+  // re-listed at OPEN_PR_LIST_LIMIT when that page came back full.
   const listOne = async (repo) => {
+    // #no-label-search (2026-09-27 live incident) — `gh pr list --label` is served by GitHub's issue-SEARCH
+    // index, a separate, much smaller budget than the ordinary GraphQL list this call already is. The drain
+    // failed every pass on "API rate limit already exceeded" from THAT bucket while the real GraphQL budget
+    // still had 2000+ points left. `labels` is already requested in --json below, so filter client-side
+    // instead of passing `--label` — identical candidate set, no search-backed call at all.
     const run = async (limit) => {
       const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(limit),
         '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
       if (base) listArgs.push('--base', base);
-      if (label) listArgs.push('--label', label);
       const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       return JSON.parse(stdout.trim() || '[]');
     };
     try {
+      // The limit bounds the RAW open list, not a pre-filtered set, so the snapshot-sized page escalates to the
+      // full OPEN_PR_LIST_LIMIT (not the old 100) when it comes back full, and a full page there is surfaced.
       const sized = candidateListLimit(repo);
-      let prs = await run(sized);
-      if (sized < 100 && prs.length >= sized) prs = await run(100);
+      let rows = await run(sized);
+      let limit = sized;
+      if (rows.length >= sized) { limit = OPEN_PR_LIST_LIMIT; rows = await run(limit); }
+      const { prs, truncated } = filterOpenPrsByLabel(rows, label, limit);
+      if (truncated) process.stderr.write(`  ⚠️  DEGRADED drain listing for ${repoTag(repo) || 'cwd'}: the open-PR list hit the --limit ${limit} cap — it MAY be truncated, so a ${label || 'candidate'} PR past it can be missing this pass (#no-label-search)\n`);
       return { repo, prs };
     }
     catch (e) { return { repo, err: describeGhListError(e) }; }
