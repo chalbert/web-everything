@@ -58,6 +58,7 @@ import { getRequiredStatusChecks } from '../lib/required-status-checks.mjs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { execFileSyncThrottled } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readPrsFromFile } from './open-pr-fetch.mjs';
 import { defaultListAgents } from '../operations/dispatch-lane-io.mjs';
 import { listAgentsWithReviewJobs } from '../operations/review-job-store.mjs';
@@ -107,6 +108,9 @@ export const PR_LIST_LIMIT = 200;
  * @returns {Array<object>}
  */
 export function defaultReadPrs({ exec = execFileSyncThrottled, repo = null } = {}) {
+  // #gh-graphql-budget — read the host-shared open-PR snapshot (one right-sized list per repo per TTL for the
+  // whole fleet) instead of a private `gh pr list`; null = not applicable (tests, cwd repo) → the direct read below.
+  if (exec === execFileSyncThrottled) { const shared = readSharedOpenPrs({ repo, fields: PR_LIST_JSON_FIELDS }); if (shared) return shared; }
   const argv = ['pr', 'list', '--state', 'open', '--limit', String(PR_LIST_LIMIT), '--json', PR_LIST_JSON_FIELDS];
   if (repo) argv.push('--repo', repo);
   // #x5n4zn3 — was bare (no timeout).

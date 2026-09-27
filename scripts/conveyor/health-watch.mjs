@@ -47,7 +47,8 @@ export { healthDir, healthSectionLines };
 import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
-import { ghThrottleLockRoot, ghThrottleLogPath } from '../lib/gh-throttle.mjs';
+import { ghThrottleLockRoot, ghThrottleLogPath, budgetProbeArgs } from '../lib/gh-throttle.mjs';
+import { readSharedOpenPrs } from '../lib/pr-snapshot.mjs';
 import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
@@ -321,11 +322,33 @@ export function probeGhCalls({ logPath = ghThrottleLogPath(ghThrottleLockRoot())
   return out;
 }
 
+/** `gh-graphql-budget`'s input: the App installation's REAL GraphQL bucket (the in-band `rateLimit` field — never
+ *  the REST `/rate_limit` endpoint, whose `graphql` entry disagreed with it live) plus the throttle's active
+ *  shared budget-block records. 1 GraphQL point per tick. */
+export function probeGraphqlBudget({ exec = run, lockRoot = ghThrottleLockRoot(), nowMs = Date.now() } = {}) {
+  let sample = null;
+  try {
+    const raw = exec('gh', budgetProbeArgs('graphql'));
+    const j = JSON.parse(String(raw || '{}'))?.data?.rateLimit;
+    if (j && typeof j.remaining === 'number') sample = { remaining: j.remaining, limit: typeof j.limit === 'number' ? j.limit : null, resetAt: j.resetAt || null };
+  } catch { sample = null; }
+  const blocks = [];
+  try {
+    for (const f of readdirSync(lockRoot)) {
+      if (!/^budget-block-.*\.json$/.test(f)) continue;
+      try { const b = JSON.parse(readFileSync(join(lockRoot, f), 'utf8')); if (Number.isFinite(b?.untilMs) && b.untilMs > nowMs) blocks.push(b); } catch { /* torn */ }
+    }
+  } catch { /* no lock root yet */ }
+  return { sample, blocks };
+}
+
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
-    const raw = exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']);
-    for (const pr of JSON.parse(raw)) {
+    // #gh-graphql-budget — the host-shared open-PR snapshot when this is the real `run` (never a test's fake exec).
+    const shared = exec === run ? readSharedOpenPrs({ repo: slug, fields: 'number,title,headRefName,labels,statusCheckRollup,updatedAt' }) : null;
+    const rows = shared || JSON.parse(exec('gh', ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', '100', '--json', 'number,title,headRefName,labels,statusCheckRollup,updatedAt']));
+    for (const pr of rows) {
       out.push({
         repo: slug, number: pr.number, title: pr.title, headRefName: pr.headRefName, updatedAt: pr.updatedAt,
         labels: (pr.labels || []).map((l) => ({ name: l.name })),
@@ -456,6 +479,10 @@ export async function tick(flags = {}) {
     : probeMachineLoad()));
   // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
+  // `gh-graphql-budget` — every tick (1 GraphQL point): the real bucket + the throttle's shared budget blocks.
+  // `--graphql-budget-fixture=FILE` (a `{sample, blocks}` JSON) in tests; skipped under `--no-gh`.
+  if (flags['graphql-budget-fixture']) probes.graphqlBudget = attempt('graphqlBudget', () => JSON.parse(readFileSync(flags['graphql-budget-fixture'], 'utf8')));
+  else if (!flags['no-gh']) probes.graphqlBudget = attempt('graphqlBudget', () => probeGraphqlBudget());
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);

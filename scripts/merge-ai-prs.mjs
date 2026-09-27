@@ -143,6 +143,8 @@ import { autoStrandedSweepPass } from './backlog-stranded-sweep.mjs'; // xvr2o8r
 // held-reconcile comment can name the SPECIFIC file(s) a park already scored, not just the hold label.
 import { parseEscalationReason } from './review-detail.mjs';
 import { deriveResolutionBasis, graduatedToFromBody, renderResolutionBasisBanner } from './lib/review-render.mjs'; // #2447 — the graduatedTo resolution-basis banner (presentation only; never gates)
+import { readSharedOpenPrs, readShaCache, writeShaCache, snapshotOpenCount, nextLimit } from './lib/pr-snapshot.mjs';
+import { markPrSnapshotDirty } from './lib/pr-snapshot-store.mjs';
 import { extractManifestFromBody, manifestAuditLine, asItemId, isItemId, repoKeyFromSlug, manifestBaseForRepo } from './readiness/lane-manifest.mjs';
 import { isDispatchFrozen, readFreeze } from './readiness/red-main-remediation.mjs'; // #2681 — the RED-MAIN dispatch-freeze the sole writer consults (stop-the-line while main is red)
 // #2399 — the ONE remote-manifest `gh api` argv, shared with `/finish` (lane-resume) so the two readers never
@@ -1975,6 +1977,9 @@ export function planLabelDrain(candidates, { landedThisPass = new Set(), provenO
  *  as a DEGRADED read so the ordering decision is never silently trusted on a truncated listing (truncation is
  *  the UNSAFE direction). */
 export const OPEN_PR_LIST_LIMIT = 500;
+/** #gh-graphql-budget — the context listing's `--json` (the shared snapshot serves it; the direct fallback asks for
+ *  exactly the same). `body` rides it so a PR's lane manifest is read off the listing, never a per-PR re-read. */
+export const CONTEXT_LIST_FIELDS = 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid';
 /** True when a listing came back at/over the cap — i.e. gh MAY have truncated it (a full page is indistinguishable
  *  from an exactly-full one, so treat it as possibly-incomplete). A degraded listing must not be trusted as the
  *  authoritative open set for the early-land decision. Pure. */
@@ -3508,6 +3513,9 @@ async function runCli() {
   // lease so a differently-scoped launch can tell whether the holder actually covers its repos.
   const leaseScope = [...new Set(REPOS.map((r) => r || localSlug).filter(Boolean))].sort();
   const repoFlag = (repo) => (repo ? ['--repo', repo] : []);      // a slug → scope the gh call; null → cwd repo
+  // #gh-graphql-budget — the merge-candidate list's `--limit`: sized off the shared snapshot's real open count
+  // (read-only, no gh call); the old 100 when there is no snapshot to size from (first pass, tests, cwd repo).
+  const candidateListLimit = (repo) => { const n = repo ? snapshotOpenCount(repo) : null; return n == null ? 100 : Math.min(100, nextLimit(n)); };
   const isLocalRepo = (repo) => repo == null || repo === localSlug; // git-side ops only run against the local clone
   const repoTag = (repo) => (repo && repo !== localSlug ? `${repo.split('/').pop()}#` : '#'); // display prefix per PR
   // #2262 — under `--watch`, `sweepOnce()` (below) runs every `--interval`s FOREVER; memoize which (repo, label)
@@ -3591,7 +3599,11 @@ async function runCli() {
   // transient failure), NOT a confirmed "no manifest" — so the caller can decline to cache the spurious null and
   // re-fetch next `--watch` pass instead of latching a degraded read for the head-SHA lifetime. A successful read
   // that legitimately finds no manifest block returns `{ manifest: null, degraded: false }` (a genuine answer).
-  const readManifestFromPrBody = async (repo, headRef) => {
+  const readManifestFromPrBody = async (repo, headRef, knownBody) => {
+    // #gh-graphql-budget — the open-PR listing this PR came from ALREADY carries its `body` (both the context and
+    // the candidate listings request it), so re-reading it with a per-PR `gh pr list --head` is a pure duplicate
+    // GraphQL call — one per open PR per pass, the drain's single biggest per-pass spend. Use the listed body.
+    if (typeof knownBody === 'string') return { manifest: extractManifestFromBody(knownBody), degraded: false };
     try {
       const { stdout } = await execFileP('gh', ['pr', 'list', '--head', headRef, '--state', 'open', ...repoFlag(repo), '--json', 'body'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       return { manifest: extractManifestFromBody(JSON.parse(stdout || '[]')?.[0]?.body), degraded: false };
@@ -3623,9 +3635,9 @@ async function runCli() {
   // error (a transient failure we couldn't distinguish from truth), so `fetchPrReadsCached` skips caching it and
   // the next `--watch` pass re-fetches instead of latching the degraded read for the head-SHA lifetime. A null
   // from a SUCCESSFUL read (no manifest on the ref — the common orphan/impl case) is `degraded:false`: cache it.
-  const readPrManifest = async (repo, headRef) => {
+  const readPrManifest = async (repo, headRef, knownBody) => {
     if (!headRef) return { manifest: null, degraded: false };
-    const fromPr = await readManifestFromPrBody(repo, headRef);
+    const fromPr = await readManifestFromPrBody(repo, headRef, knownBody);
     if (fromPr.manifest) return { manifest: fromPr.manifest, degraded: false };
     // ── Legacy fallback: the tree-committed manifest (lanes queued before the PR-body cutover). ──
     if (!isLocalRepo(repo)) {
@@ -3667,10 +3679,17 @@ async function runCli() {
   // it and re-fetches next `--watch` pass rather than latching an empty read for the head-SHA lifetime. Behaviour
   // THIS pass is unchanged — the caller still sees `[]` (⇒ isAiGeneratedPr → false → skipped, never merged on
   // missing data); a genuinely-empty successful read returns `{ commits: [], degraded: false }` and DOES cache.
-  const fetchPrCommits = async (repo, num) => {
+  const fetchPrCommits = async (repo, num, headSha = null) => {
+    // #gh-graphql-budget — a PR's commit list is fixed by its head SHA, and the resident daemon starts a FRESH
+    // process every pass (so the in-process `ctxReadCache`/`sweepReadCache` below start empty each time and
+    // re-read every open PR's commits every 60s). Persist a successful read on disk keyed by (repo, PR, head SHA).
+    const cached = readShaCache({ repo, num, sha: headSha, kind: 'commits' });
+    if (Array.isArray(cached)) return { commits: cached, degraded: false };
     try {
       const { stdout } = await execFileP('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      return { commits: JSON.parse(stdout.trim() || '{}').commits || [], degraded: false };
+      const commits = JSON.parse(stdout.trim() || '{}').commits || [];
+      writeShaCache({ repo, num, sha: headSha, kind: 'commits', value: commits });
+      return { commits, degraded: false };
     } catch { return { commits: [], degraded: true }; } // gh threw → degraded → re-fetch next pass
   };
 
@@ -3711,7 +3730,11 @@ async function runCli() {
       // xsbyo56 — `body` added so the #2832 held-reconcile branch (below) can read back the PR's own
       // `## Escalation reason` block (`buildHeldReviewHoldReason`/`parseEscalationReason`) and name the
       // specific file(s) that forced a review:human/pending/changes hold, not just the label.
-      const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', 'number,title,body,labels,statusCheckRollup,headRefName,headRefOid'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      // #gh-graphql-budget — the host-shared open-PR snapshot (the same right-sized list every daemon reads,
+      // at most one refresh per repo per TTL) — falls back to this pass's own listing when not applicable.
+      const shared = readSharedOpenPrs({ repo, fields: CONTEXT_LIST_FIELDS, caller: 'merge-ai-prs.mjs' });
+      if (shared) return shared;
+      const { stdout } = await execFileP('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(OPEN_PR_LIST_LIMIT), '--json', CONTEXT_LIST_FIELDS], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
       return JSON.parse(stdout.trim() || '[]');
     },
     // #2417 — fan out the per-PR manifest + commits reads across ALL repos' open PRs at once (bounded pool), cached
@@ -3723,7 +3746,7 @@ async function runCli() {
         shaOf: ({ p }) => prHeadSha(p),
         isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
         fetchOne: async ({ repo, p }) => {
-          const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName), fetchPrCommits(repo, p.number)]);
+          const [manifestRes, commitsRes] = await Promise.all([readPrManifest(repo, p.headRefName, p.body), fetchPrCommits(repo, p.number, prHeadSha(p))]);
           return { manifest: manifestRes.manifest, commits: commitsRes.commits, degraded: manifestRes.degraded || commitsRes.degraded };
         },
       });
@@ -3938,12 +3961,25 @@ async function runCli() {
   // dup-id tripwire's exit 3, so a transient/rate-limited `gh` listing is never misread as a duplicate NNN on
   // main. The rollup + mergeable come from the list;
   // commits (the AI gate) are fetched per-PR below (asking for them in the list overflows GitHub's node cap).
+  // #gh-graphql-budget — GitHub prices this list by the page it REQUESTS, not the PRs it returns: `--limit 100`
+  // over a handful of queued PRs cost 3 points x 3 repos every pass. Kept a LIVE read (it is the merge-candidate
+  // set, so it must not lag a just-removed `ready-to-merge`), but sized off the shared snapshot's open count and
+  // re-listed at the old 100 only when that page came back full.
   const listOne = async (repo) => {
-    const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
-      '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
-    if (base) listArgs.push('--base', base);
-    if (label) listArgs.push('--label', label);
-    try { const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); return { repo, prs: JSON.parse(stdout.trim() || '[]') }; }
+    const run = async (limit) => {
+      const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', String(limit),
+        '--json', 'number,title,body,headRefName,headRefOid,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
+      if (base) listArgs.push('--base', base);
+      if (label) listArgs.push('--label', label);
+      const { stdout } = await execFileP('gh', listArgs, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return JSON.parse(stdout.trim() || '[]');
+    };
+    try {
+      const sized = candidateListLimit(repo);
+      let prs = await run(sized);
+      if (sized < 100 && prs.length >= sized) prs = await run(100);
+      return { repo, prs };
+    }
     catch (e) { return { repo, err: describeGhListError(e) }; }
   };
   const resolveDefaultBranch = async (repo) => {
@@ -3979,7 +4015,7 @@ async function runCli() {
     shaOf: ({ p }) => prHeadSha(p),
     isDegraded: (v) => !!v?.degraded, // #2417 review — an error-path read is NOT cached (re-fetches next pass)
     fetchOne: async ({ repo, p }) => {
-      const [commitsRes, manifestRes] = await Promise.all([fetchPrCommits(repo, p.number), readPrManifest(repo, p.headRefName)]);
+      const [commitsRes, manifestRes] = await Promise.all([fetchPrCommits(repo, p.number, prHeadSha(p)), readPrManifest(repo, p.headRefName, p.body)]);
       return { commits: commitsRes.commits, manifest: manifestRes.manifest, degraded: commitsRes.degraded || manifestRes.degraded };
     },
   }));
@@ -5511,6 +5547,9 @@ async function runCli() {
   // never imply more coverage than it has). Rides `result.timings` (so a `--json` caller — the resident daemon
   // included — gets it on stdout); persisting it into `we:.drain-daemon/history.jsonl` itself is a SEPARATE,
   // plateau-app-side passthrough change (see this PR's own body for why it isn't bundled here).
+  // #gh-graphql-budget — this pass's own writes (merges, label flips, parks) go straight to `gh`, not through the
+  // throttle that marks the shared open-PR snapshot dirty on a write — so mark it here, once, when anything moved.
+  if (merged.length || reconciledLabels.length || parked.length) for (const r of REPOS) markPrSnapshotDirty({ repo: r || localSlug });
   const passTotalMs = Date.now() - __passStart;
   const timingSteps = __t.snapshot();
   const timings = { ...timingSteps, total: passTotalMs };
