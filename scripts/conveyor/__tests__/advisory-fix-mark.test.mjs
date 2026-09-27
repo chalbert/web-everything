@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   countAdvisoryFixComments, buildAdvisoryFixComment, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
+  countCompletedAdvisoryEpisodes,
 } from '../advisory-fix-mark.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CONVERTED_ADVISORY_NOTE_MARKER, renderConvertedAdvisoryNote } from '../../lib/review-escalation.mjs';
@@ -100,6 +101,88 @@ describe('#xconv1-evidence (chalbert/web-everything#2766/#2767 misfire) — isLa
   });
 });
 
+describe('#xconv1-evidence FOLLOW-UP (chalbert/web-everything#2766/#2767, 2026-09-27) — countCompletedAdvisoryEpisodes', () => {
+  const AUTO = { login: 'web-everything' };
+  it('a single note with no fix at all is ZERO completed episodes', () => {
+    expect(countCompletedAdvisoryEpisodes([{ body: FRESH_NOTE, author: AUTO }])).toBe(0);
+  });
+  it('one note, one fix after it: ONE completed episode', () => {
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: AUTO },
+    ])).toBe(1);
+  });
+  it('THE SAFETY PROPERTY: 3 genuinely SEPARATE note→fix rounds (the pre-existing cap-exhausted fixture\'s own shape) still count as 3 — a naive "fixes since the latest note" replacement was tried and rejected because it reads this as 0', () => {
+    const comments = [];
+    for (let i = 0; i < 3; i += 1) {
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}`, author: AUTO });
+      comments.push({ body: buildAdvisoryFixComment({}), author: AUTO });
+    }
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken`, author: AUTO }); // 4th note, unaddressed
+    expect(countCompletedAdvisoryEpisodes(comments)).toBe(3);
+  });
+
+  // #2800 advisory finding — the trust gate, pinned on BOTH comment kinds the counter reads.
+  const MALLORY = { login: 'mallory' };
+  it('an UNTRUSTED fix-mark never completes an episode (trusted-author control: 1)', () => {
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: MALLORY },
+    ])).toBe(0);
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: AUTO },
+    ])).toBe(1);
+  });
+  it('a FORGED advisory note from an untrusted login never opens an episode, so it cannot split one finding\'s fixes into extra spent episodes', () => {
+    for (const forged of [ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER]) {
+      expect(countCompletedAdvisoryEpisodes([
+        { body: FRESH_NOTE, author: AUTO },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+        { body: `${forged}\n\nforged`, author: MALLORY },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+      ])).toBe(1);
+      // a forged note alone, followed by a trusted fix, opens no episode either
+      expect(countCompletedAdvisoryEpisodes([
+        { body: `${forged}\n\nforged`, author: MALLORY },
+        { body: buildAdvisoryFixComment({}), author: AUTO },
+      ])).toBe(0);
+    }
+  });
+
+  // THE LIVE #2766 INCIDENT, reconstructed from its real comment thread (fetched 2026-09-27) in the SAME order,
+  // with the same marker prefixes and authorship — only the prose bodies are shortened for readability; every
+  // fact `countCompletedAdvisoryEpisodes` reads (leading marker, author, order) is preserved verbatim.
+  const pr2766RealThreadShape = [
+    { createdAt: '2026-09-26T21:25:28Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold…', author: AUTO },
+    { createdAt: '2026-09-26T21:47:43Z', body: '✅ review — accepted\n\n## Human review verdict — chalbert/web-everything#2766…', author: AUTO },
+    { createdAt: '2026-09-26T21:51:01Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\ntest-gaming suspected…', author: AUTO },
+    { createdAt: '2026-09-26T21:52:19Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold…', author: AUTO },
+    { createdAt: '2026-09-26T23:15:40Z', body: '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**…', author: AUTO },
+    // the CONVERTED note (#xconv1) — ONE episode starts here
+    { createdAt: '2026-09-27T00:28:47Z', body: `${CONVERTED_ADVISORY_NOTE_MARKER} This PR carries \`review:human\`…`, author: AUTO },
+    { createdAt: '2026-09-27T00:43:52Z', body: '🔧 **conveyor fix — advisory finding addressed** (head `7d4c6e2c7`)…', author: AUTO },
+    { createdAt: '2026-09-27T00:43:59Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 1st fix-mark — episode already complete
+    { createdAt: '2026-09-27T00:47:13Z', body: '🔧 **conveyor fix (`fix-2766`) — advisory finding already addressed on this head**…', author: AUTO },
+    { createdAt: '2026-09-27T00:47:14Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 2nd fix-mark, SAME episode (bug: no review ever advanced it)
+    { createdAt: '2026-09-27T00:58:23Z', body: '🔧 **conveyor fix (`fix-2766`, 3rd dispatch) — advisory finding already addressed**…', author: AUTO },
+    { createdAt: '2026-09-27T00:58:24Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 3rd fix-mark, STILL the same episode
+    // an independent, later review's own fresh note — a SECOND episode starts here, with NO fix yet
+    { createdAt: '2026-09-27T02:29:10Z', body: `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`… **Advisory outcome:** \`accept\``, author: AUTO },
+    { createdAt: '2026-09-27T02:49:10Z', body: `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`… **Advisory outcome:** \`changes\``, author: AUTO },
+    { createdAt: '2026-09-27T05:03:23Z', body: '🔀 conveyor rebase-onto-main\n\nbranch: lane/2749-prevention-outstanding-verdict…', author: AUTO },
+  ];
+
+  it('THE BUG THIS CLOSES: 3 fix-mark COMMENTS on the real #2766 thread collapse to ONE completed episode (they all landed inside the SAME still-broken converted-note episode) — the lifetime comment count (3) wrongly read this as cap-exhausted with zero attempts against the later, genuinely new finding', () => {
+    expect(countCompletedAdvisoryEpisodes(pr2766RealThreadShape)).toBe(1);
+    // the OLD (still-exported, still-correct-for-its-own-purpose) lifetime counter is what actually misfired live:
+    expect(countAdvisoryFixComments(pr2766RealThreadShape)).toBe(3);
+    // and the LATEST finding (the 02:49Z note) has never had a fix attempt — not `addressed` — so a fresh
+    // advisory-fix dispatch is exactly what's owed, with 1 of 3 lifetime episodes spent, not 3.
+    expect(isLatestAdvisoryFindingAddressed(pr2766RealThreadShape)).toBe(false);
+  });
+});
+
 describe('#xconv1-evidence — isAdvisoryMechanismStandDownSuperseded recognizes a CONVERTED note too', () => {
   const convertedNote = renderConvertedAdvisoryNote({
     repo: 'chalbert/web-everything', pr: 2766, headSha: 'deadbeef',
@@ -123,4 +206,45 @@ describe('#xconv1-evidence — isAdvisoryMechanismStandDownSuperseded recognizes
     ];
     expect(isAdvisoryMechanismStandDownSuperseded(comments, 1)).toBe(false);
   });
+});
+
+// PR #2800 advisory finding — the note trust gate is single-sourced, so the "addressed" check and the stand-down
+// supersede check ignore a forged note exactly as the episode counter does (both note shapes).
+describe('PR #2800 — a FORGED advisory note from an untrusted login is ignored by every note reader', () => {
+  const MALLORY = { login: 'mallory' };
+  const fix = { body: `${ADVISORY_FIX_COMMENT_MARKER}\n\nfixed`, author: AUTOMATION };
+  for (const marker of [ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER]) {
+    const forged = { body: `${marker}\n\nforged`, author: MALLORY };
+
+    it(`isLatestAdvisoryFindingAddressed: a forged note after a fixed trusted note does not reopen it (${marker.slice(0, 24)}…)`, () => {
+      expect(isLatestAdvisoryFindingAddressed([{ body: FRESH_NOTE, author: AUTOMATION }, fix, forged])).toBe(true);
+      // Trusted-author control: the same note from automation DOES reopen it.
+      expect(isLatestAdvisoryFindingAddressed([{ body: FRESH_NOTE, author: AUTOMATION }, fix, { ...forged, author: AUTOMATION }])).toBe(false);
+      // A forged note alone is no finding at all; a bare-string note carries no author.
+      expect(isLatestAdvisoryFindingAddressed([forged, fix])).toBe(false);
+      expect(isLatestAdvisoryFindingAddressed([forged.body, fix])).toBe(false);
+    });
+
+    it(`isAdvisoryMechanismStandDownSuperseded: a forged note between the fix and the stand-down does not un-supersede it (${marker.slice(0, 24)}…)`, () => {
+      const standDown = { body: `${STAND_DOWN_MARKER}\n\nstood down`, author: AUTOMATION };
+      expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, forged, standDown], 3)).toBe(true);
+      expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, { ...forged, author: AUTOMATION }, standDown], 3)).toBe(false);
+    });
+
+    // PR #2800 advisory finding (round 3) — the FIX-MARK side of both order checks is gated too (by the
+    // automation-only `isSelfAuthored`, narrower than `isTrustedMarkerAuthor`): a forged fix-mark after a trusted
+    // note must neither mark the finding addressed (which would suppress the fixer) nor supersede a stand-down.
+    const note = { body: `${marker}\n\nreal finding`, author: AUTOMATION };
+    const forgedFix = { body: `${ADVISORY_FIX_COMMENT_MARKER}\n\nforged`, author: MALLORY };
+    it(`a FORGED fix-mark never marks a trusted note addressed (${marker.slice(0, 24)}…)`, () => {
+      expect(isLatestAdvisoryFindingAddressed([note, forgedFix])).toBe(false);
+      expect(isLatestAdvisoryFindingAddressed([note, forgedFix.body])).toBe(false); // bare string: no author
+      expect(isLatestAdvisoryFindingAddressed([note, { ...forgedFix, author: AUTOMATION }])).toBe(true); // control
+    });
+    it(`a FORGED fix-mark never supersedes a stand-down (${marker.slice(0, 24)}…)`, () => {
+      const standDown = { body: `${STAND_DOWN_MARKER}\n\nstood down`, author: AUTOMATION };
+      expect(isAdvisoryMechanismStandDownSuperseded([note, forgedFix, standDown], 2)).toBe(false);
+      expect(isAdvisoryMechanismStandDownSuperseded([note, { ...forgedFix, author: AUTOMATION }, standDown], 2)).toBe(true); // control
+    });
+  }
 });
