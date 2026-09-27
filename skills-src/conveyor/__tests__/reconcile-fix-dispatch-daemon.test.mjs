@@ -15,6 +15,7 @@ import {
   runHungCiRecoveryAllRepos, formatHungActionLine,
   runMainRedRebaseAllRepos, formatMainRedRebaseActionLine,
   runMissingRunRecoveryAllRepos, formatMissingRunActionLine,
+  defaultTagDispatchStatus,
 } from '../reconcile-fix-dispatch-daemon.mjs';
 import { CONSTELLATION_REPOS } from '../../../scripts/lib/constellation-repos.mjs';
 import { assertMainNotStale } from '../../../scripts/lib/main-staleness.mjs';
@@ -431,6 +432,69 @@ describe('runTickAllRepos — the daemon tick now runs BOTH fix and ci-heal disp
   });
 });
 
+describe('runTickAllRepos — dispatch-time review-status tagging (#3383 follow-up, live-caught 2026-09-26: a ci-heal dispatched for PR #2771 by THIS daemon at 18:06 ET carried no review-status label while the separate Review daemon\'s own tick was stuck behind an unbounded session-reap)', () => {
+  it('omitting tagDispatchStatus (every pre-existing caller/test) never calls it — byte-identical to before this option existed', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [{ pr: 1 }], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
+    });
+    expect(out.statusTags).toEqual([]);
+  });
+
+  it('tags every dispatched fix AND ci-heal PR this tick, right at dispatch — never waiting on the Review daemon\'s own tick', async () => {
+    const fixTick = vi.fn(({ repo }) => ({ dispatched: repo === 'repo-a' ? [{ pr: 1 }] : [], refusals: [] }));
+    const ciHealTick = vi.fn(async ({ repo }) => ({ dispatched: repo === 'repo-b' ? [{ pr: 2771 }] : [], refusals: [] }));
+    const tagDispatchStatus = vi.fn(({ pr }) => ({ changed: true, label: `review-status:fixing`, removed: [], pr }));
+    const out = await runTickAllRepos({
+      repos: ['repo-a', 'repo-b'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
+      tagDispatchStatus,
+    });
+    expect(tagDispatchStatus).toHaveBeenCalledWith({ pr: 1, repo: 'repo-a' });
+    expect(tagDispatchStatus).toHaveBeenCalledWith({ pr: 2771, repo: 'repo-b' });
+    expect(out.statusTags).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pr: 1, repo: 'repo-a', changed: true, label: 'review-status:fixing' }),
+      expect.objectContaining({ pr: 2771, repo: 'repo-b', changed: true, label: 'review-status:fixing' }),
+    ]));
+  });
+
+  it('a tag failure is cosmetic — reported in statusTags, never thrown, never drops the dispatch itself', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [{ pr: 7 }], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const tagDispatchStatus = vi.fn(() => { throw new Error('gh: rate limited'); });
+    const out = await runTickAllRepos({
+      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick: noopHungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
+      tagDispatchStatus,
+    });
+    expect(out.dispatched).toEqual([{ pr: 7, repo: 'repo-a' }]); // the dispatch itself is unaffected
+    expect(out.statusTags).toEqual([{ pr: 7, repo: 'repo-a', changed: false, error: 'gh: rate limited' }]);
+  });
+
+  it('never tags a mechanical hungCi/mainRedRebase/missingRun action — those carry no live session for review-status to describe', async () => {
+    const fixTick = vi.fn(() => ({ dispatched: [], refusals: [] }));
+    const ciHealTick = vi.fn(async () => ({ dispatched: [], refusals: [] }));
+    const hungCiTick = vi.fn(() => ({ dispatch: [], refusals: [], applied: [{ prNumber: 55, ok: true, action: 'cancel-rerun' }] }));
+    const tagDispatchStatus = vi.fn();
+    const out = await runTickAllRepos({
+      repos: ['repo-a'], fixTick, ciHealTick, hungCiTick, mainRedRebaseTick: noopMainRedRebaseTick, missingRunTick: noopMissingRunTick, notesTick: noopNotesTick,
+      tagDispatchStatus,
+    });
+    expect(tagDispatchStatus).not.toHaveBeenCalled();
+    expect(out.statusTags).toEqual([]);
+  });
+
+  it('defaultTagDispatchStatus calls the real applyReviewStatus with state "fixing"', () => {
+    expect(defaultTagDispatchStatus).toBeTypeOf('function');
+    // Source-contract proof (real `gh`/label IO is unsafe to run in a unit test — same norm this file's own
+    // #xngv3vn suite above already documents): confirms the wiring without executing it.
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
+    const start = src.indexOf('export function defaultTagDispatchStatus(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toMatch(/applyReviewStatus\(\{ pr, repo, state: 'fixing' \}\)/);
+  });
+});
+
 // Card x5kagse (epic #4075/#3383) — the follow-up to #2717: while the operator's Claude login is broken, `fix`
 // and `ci-heal` (the two halves that dispatch a FRESH Claude session) must be skipped OUTRIGHT, never merely
 // attempted — see `we:scripts/conveyor/claude-auth-health.mjs`'s own file header for the full incident and
@@ -516,10 +580,14 @@ describe('buildCliDaemonEffects — onTick logs the exact pause line when authPa
 describe('buildCliDaemonEffects — tickOnce is wired to runTickAllRepos, not the old fix-only call (#xngv3vn)', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'reconcile-fix-dispatch-daemon.mjs'), 'utf8');
 
-  it('tickOnce calls runTickAllRepos()', () => {
-    const m = src.match(/tickOnce: \(\) => (\w+)\(\),/);
+  it('tickOnce calls runTickAllRepos(), wired to the real dispatch-time status-tag effect (#3383 follow-up)', () => {
+    const m = src.match(/tickOnce: \(\) => (\w+)\(([^)]*)\),/);
     expect(m).not.toBeNull();
     expect(m[1]).toBe('runTickAllRepos');
+    // #3383 follow-up (live-caught 2026-09-26, PR #2771) — the real daemon must opt INTO dispatch-time status
+    // tagging (`runTickAllRepos`'s own `tagDispatchStatus` stays `null`-default for every OTHER caller/test —
+    // see that param's own docblock), never leave it at the pure core's safe-for-tests default.
+    expect(m[2]).toMatch(/tagDispatchStatus:\s*defaultTagDispatchStatus/);
   });
 
   it('runTickAllRepos itself calls BOTH runReconcileFixDispatchAllRepos and runReconcileCiHealDispatchAllRepos', () => {

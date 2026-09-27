@@ -43,6 +43,7 @@ import reaperRestopsFinishedSessions from './reaper-restops-finished-sessions.mj
 import coupleSplitByUnrelatedMerge from './couple-split-by-unrelated-merge.mjs';
 import ciHealLoopStaleLabelReviewGate from './ci-heal-loop-stale-label-review-gate.mjs';
 import alreadyLandedPrGetsFixer from './already-landed-pr-gets-fixer.mjs';
+import largeReapBacklogStarvesDispatch from './large-reap-backlog-starves-dispatch.mjs';
 
 export const BREAKS = Object.freeze([
   unsupportedRepoDirt,
@@ -69,6 +70,7 @@ export const BREAKS = Object.freeze([
   coupleSplitByUnrelatedMerge,
   ciHealLoopStaleLabelReviewGate,
   alreadyLandedPrGetsFixer,
+  largeReapBacklogStarvesDispatch,
 ]);
 
 export function breakById(id) {
