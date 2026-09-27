@@ -1,4 +1,5 @@
 ---
+bornAs: xg2nk4l
 kind: epic
 status: open
 dateOpened: "2026-09-27"
@@ -16,7 +17,7 @@ combinable/routable:
 
 - **Full-DoR delivery lane.** The "fixes need a prepared card" agent memory (this session, 2026-09-27): file → prepare →
   light review → dispatch on the card + generic brief. First instance under trial is
-  we:backlog/xasdfvs-run-rating-record-whether-an-item-was-prepared-dor-before-bu.md, which will compare it
+  we:backlog/4304-run-rating-record-whether-an-item-was-prepared-dor-before-bu.md, which will compare it
   against bespoke-prompt dispatch in the run-rating report.
 - **Fast blocker lane.** we:scripts/conveyor/fix-dispatch-claim.mjs and
   we:scripts/conveyor/reconcile-fix-dispatch.mjs already run a distinct, tighter-time-boxed dispatch path for
