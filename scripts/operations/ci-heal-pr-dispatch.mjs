@@ -80,12 +80,18 @@ export async function dispatchCiHeal(planned, {
   claimRoot,
 } = {}) {
   // #x0jphk5 — acquire BEFORE building anything below; refuse loud (never throw) when another dispatcher
-  // already holds this exact `(repo, pr, headRefOid)`.
-  const claim = acquireClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+  // already holds this exact `(repo, kind, pr)` — `kind: 'ci-heal'` explicit, so a `fix` claim and a
+  // `ci-heal` claim for the same PR never share one slot (dup-heal-dispatch: `headSha` no longer part of the
+  // claim's identity — see `fix-dispatch-claim.mjs`'s own header for the live incident this fixes).
+  const claim = acquireClaim({
+    repo, pr: planned.pr, kind: 'ci-heal', headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot,
+  });
   if (!claim.ok) {
     return { held: true, reason: claim.reason, heldBy: claim.heldBy };
   }
-  const releaseOurClaim = () => releaseClaim({ repo, pr: planned.pr, headSha: planned.headRefOid, owner: claimOwner, lockRoot: claimRoot });
+  const releaseOurClaim = () => releaseClaim({
+    repo, pr: planned.pr, kind: 'ci-heal', owner: claimOwner, lockRoot: claimRoot,
+  });
   try {
     // #3967 multi-repo slice 7 — `repo` THREADED THROUGH, matching `reconcile-core.mjs#bindAgents`'s own
     // repo-tagged `ci-heal-<pr>` slug (see this file's own docblock for the double-dispatch this fixes).
