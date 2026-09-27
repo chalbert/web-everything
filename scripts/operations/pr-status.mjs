@@ -97,8 +97,25 @@ export const NON_BLOCKING_CONCLUSIONS = Object.freeze(['skipped', 'neutral']);
  * See `x3hg6h2` for the full incident. `we:scripts/merge-ai-prs.mjs`'s `latestRequiredCheck` never had this
  * bug — it checks ONE named required check (`test` by default), never a wholesale scan, so the real
  * merge-landing gate was never affected; this list only matters to the wholesale "is anything red" readers.
+ *
+ * `soak-replay-gate` (`we:.github/workflows/soak-replay-gate.yml` + `we:scripts/soak-replay-gate-cli.mjs`,
+ * PR #2775) joined this list for the SAME underlying reason, discovered the same way: it is NOT a required
+ * status check (`gh api repos/<repo>/branches/main/protection --jq .required_status_checks.contexts` lists
+ * only `test`/`smoke`/`daemon-soak`), yet a wholesale "any check failed" scan treated its red the same as a
+ * real required-check failure. LIVE INCIDENT 2026-09-26, PR #2748 (chalbert/web-everything): every real
+ * required check (`test`, `smoke`, `daemon-soak`) was green, `soak-replay-gate` was the ONLY red check (a
+ * separate, genuine gap in that PR's own waiver — see that gate's own module for the fix to its parsing), and
+ * `classifyPr` still read the PR as `ci-red` off that one advisory check, which kept a `ci-heal-2748` session
+ * dispatched against a PR with nothing a ci-heal could fix — pure waste, and it blocked landing. The DEEPER
+ * fix for "an advisory workflow can do this again" is {@link module:required-status-checks} (`we:scripts/lib/
+ * required-status-checks.mjs`) — an optional, PREFERRED required-set (fetched from branch protection, cached)
+ * that `we:scripts/progress-board.mjs#ciFailed`/`classifyPr` accept and use INSTEAD of this exclusion list
+ * when a caller supplies it (`we:scripts/conveyor/reconcile-pass.mjs` does, on the real incident's path). This
+ * list stays as the SHARED FALLBACK for every call site that never wires a required set through (this file's
+ * own `reduceCheckState`, `we:scripts/readiness/conveyor-state.mjs#ciRollup`, `we:scripts/operator/dispatch.mjs
+ * #healCi`) — adding `soak-replay-gate` here is what fixes THOSE immediately, with no rewiring needed.
  */
-export const CI_TRUTH_EXCLUDED_CHECKS = Object.freeze(['review-gate']);
+export const CI_TRUTH_EXCLUDED_CHECKS = Object.freeze(['review-gate', 'soak-replay-gate']);
 
 /**
  * Conclusions that mean the check ran and did not succeed.
@@ -128,13 +145,20 @@ export const FAILING_CONCLUSIONS = Object.freeze([
  * A run with NO conclusion and a non-completed status is in flight. A run that is `completed` with no
  * conclusion at all is not a pass — it is unreadable, and unreadable joins `unchecked` rather than `green`.
  *
+ * `requiredChecks`, when supplied non-empty, REPLACES the {@link CI_TRUTH_EXCLUDED_CHECKS} exclusion with the
+ * required-set inclusion this file's sibling `we:scripts/progress-board.mjs#ciFailed` documents in full —
+ * only a check named in `requiredChecks` is considered here at all. Omitted, behaviour is unchanged.
+ *
  * @param {Array<{name?: string, status?: string, conclusion?: string|null}>} runs - check runs FOR THE HEAD SHA
+ * @param {string[]} [requiredChecks] - the repo's required status-check names; see above.
  * @returns {{state: string, why: string, counts: {total: number, succeeded: number, failed: number, running: number, nonBlocking: number, unreadable: number}}}
  */
-export function reduceCheckState(runs = []) {
-  const list = (Array.isArray(runs) ? runs : []).filter(
-    (r) => !CI_TRUTH_EXCLUDED_CHECKS.includes(String(r?.name ?? '')),
-  );
+export function reduceCheckState(runs = [], requiredChecks) {
+  const required = Array.isArray(requiredChecks) && requiredChecks.length ? requiredChecks : null;
+  const list = (Array.isArray(runs) ? runs : []).filter((r) => {
+    const name = String(r?.name ?? '');
+    return required ? required.includes(name) : !CI_TRUTH_EXCLUDED_CHECKS.includes(name);
+  });
   const counts = { total: list.length, succeeded: 0, failed: 0, running: 0, nonBlocking: 0, unreadable: 0 };
 
   if (!list.length) {
