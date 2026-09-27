@@ -56,7 +56,8 @@
  * nothing here decides, it only wires and reports.
  */
 
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -64,10 +65,11 @@ import {
 } from './cli-adapter.mjs';
 import { startRun, runStatus } from './engine.mjs';
 import { createFileRunStore, newRunId } from './run-store.mjs';
+import { REPO_ROOT as SCAFFOLD_ROOT } from './scaffold-io.mjs';
 import { resolveOperation, createCliJudgeFactory } from './run.mjs';
 import { appendEntry } from '../conveyor/learnings-drop.mjs';
 import {
-  acceptResumeCommand, buildAcceptQueueEntry, buildPreventionFilingInput, buildPreventionQueueEntry,
+  acceptResumeCommand, buildAcceptQueueEntry, buildPreventionFilingInput, buildPreventionQueueEntry, preventionHeadMarker,
   isPreventionOutstandingClear, isPreventionOutstandingParked, isQueuedAcceptStop, reviewLoopAutoConfirm,
 } from '../lib/review-loop-policy.mjs';
 import { hasUncapturedPrevention } from '../lib/jury-core.mjs';
@@ -131,7 +133,27 @@ export function applyUnattendedActorDefault(input, argv = []) {
  * @returns {Promise<{code:number, lines:string[]}>}
  */
 export async function fileItemForPrevention(input) {
-  const argv = [
+  const argv = buildFileItemArgv(input);
+  const { declaration, registry, sinks } = resolveOperation('file-item', { json: true });
+  return runOperationCli({
+    declaration, argv, registry, store: createFileRunStore(), sinks, newRunId: () => newRunId('file-item'),
+  });
+}
+
+/**
+ * THE `file-item` ARGV {@link fileItemForPrevention} DRIVES — split out and PURE so a test can pin it against
+ * the real `file-item` declaration's own parse (PR #2766 advisory: the production binding had no test).
+ *
+ * NO `--cwd`, DELIBERATELY. The review loop's own `--cwd` is the JUROR's lane — a clone checked out at the
+ * PR under review (`cwdFlagValue`'s doc). Filing the owed card THERE would write it into the very diff being
+ * judged, and `file-item` has no juror so its parse refuses `--cwd` outright (`JUROR_FLAGS`). The card belongs
+ * to `file-item`'s own root, the same place a human's `run.mjs file-item` would put it.
+ *
+ * @param {{title:string,kind:string,size:string,digest:string,scope:string,parent:string,queue:string}} input
+ * @returns {string[]}
+ */
+export function buildFileItemArgv(input) {
+  return [
     `--title=${input.title}`,
     `--kind=${input.kind}`,
     `--size=${input.size}`,
@@ -141,10 +163,46 @@ export async function fileItemForPrevention(input) {
     `--queue=${input.queue}`,
     '--json',
   ];
-  const { declaration, registry, sinks } = resolveOperation('file-item', { json: true });
-  return runOperationCli({
-    declaration, argv, registry, store: createFileRunStore(), sinks, newRunId: () => newRunId('file-item'),
-  });
+}
+
+/**
+ * HAS THIS EXACT PREVENTION CARD ALREADY BEEN FILED? (PR #2766 advisory, antigravity-review.) The filing runs
+ * BEFORE the accept's effects, so a label swap that fails AFTER a successful filing leaves the run
+ * `effect-halted`; the next unattended round on the same head reaches the same `prevention-outstanding`
+ * verdict and would file a second card. A card counts as already filed when a backlog file carries the same
+ * `# <title>` heading (the title names `<repo>#<pr>`) AND the same reviewed head
+ * ({@link preventionHeadMarker}). The head, not the prose: that next round spawns FRESH jurors, who word the
+ * same guard differently, so matching the digest text would almost never fire. A push to the PR moves the
+ * head, so a later round on new code still files its own card. With no pinned head (a degraded read), it
+ * falls back to an exact digest match — the best key left.
+ *
+ * @param {{title: string, digest: string}} input - {@link module:review-loop-policy.buildPreventionFilingInput}'s output.
+ * @param {{root?: string, head?: (string|null)}} [o] - the repo root `file-item` writes under (defaults to its
+ *   own `REPO_ROOT`), and the pinned head the review judged.
+ * @returns {{num: string, path: string}|null}
+ */
+export function findFiledPreventionCard({ title, digest }, { root = SCAFFOLD_ROOT, head = null } = {}) {
+  const key = head ? preventionHeadMarker(head) : digest;
+  const dir = join(root, 'backlog');
+  let names;
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith('.md'));
+  } catch {
+    return null;
+  }
+  const heading = `# ${title}\n`;
+  for (const name of names) {
+    let text;
+    try {
+      text = readFileSync(join(dir, name), 'utf8');
+    } catch {
+      continue;
+    }
+    if ((text.startsWith(heading) || text.includes(`\n${heading}`)) && text.includes(key)) {
+      return { num: name.replace(/-.*$/, '').replace(/\.md$/, ''), path: `backlog/${name}` };
+    }
+  }
+  return null;
 }
 
 /**
@@ -169,11 +227,14 @@ export async function fileItemForPrevention(input) {
  * @param {(input: object) => Promise<{code: number, lines: string[]}>} [o.fileItem] - #2749: files the owed
  *   prevention card through the declared `file-item` operation. Injected so a test never touches the real
  *   backlog/queue files; the real caller always passes {@link fileItemForPrevention}.
+ * @param {(input: object) => ({num: string, path: string}|null)} [o.findFiledPrevention] - PR #2766: finds an
+ *   identical card an earlier round already filed; the real caller always passes {@link findFiledPreventionCard}.
  * @returns {Promise<{code: number, lines: string[], run: (object|null), stopped: string}>}
  */
 export async function runReviewLoopOnce({
   declaration, registry, argv, store, sinks, makeJudge, mintRunId, autoConfirm = reviewLoopAutoConfirm,
   appendLearning = appendEntry, session = 'review-loop', fileItem = fileItemForPrevention,
+  findFiledPrevention = findFiledPreventionCard,
 } = {}) {
   const parsed = parseOperationArgv(declaration, argv);
   if (parsed.control.help) {
@@ -251,12 +312,18 @@ export async function runReviewLoopOnce({
   // swallowed, and never advances to a mechanical accept over a debt that, this time, genuinely went unfiled.
   if (isPreventionOutstandingParked(outcome)) {
     const { pr, repo } = outcome.run.input;
-    const filingInput = buildPreventionFilingInput({ repo, pr, findings: outcome.run.verdict.findings });
+    const head = outcome.run.findings?.read?.netBasis?.rev ?? null;
+    const filingInput = buildPreventionFilingInput({ repo, pr, head, findings: outcome.run.verdict.findings });
     let filed;
     let filingError = null;
+    // PR #2766 advisory — a retry after an `effect-halted` accept must not file a SECOND identical card.
+    let alreadyFiled = null;
     try {
-      filed = await fileItem(filingInput);
-      if (filed.code !== 0) filingError = `file-item refused: ${filed.lines.join(' / ')}`;
+      alreadyFiled = findFiledPrevention(filingInput, { head });
+      if (!alreadyFiled) {
+        filed = await fileItem(filingInput);
+        if (filed.code !== 0) filingError = `file-item refused: ${filed.lines.join(' / ')}`;
+      }
     } catch (e) {
       filingError = String(e?.message ?? e);
     }
@@ -279,9 +346,9 @@ export async function runReviewLoopOnce({
       };
     }
 
-    const filedPayload = JSON.parse(filed.lines[0] ?? '{}');
-    const filedNum = filedPayload?.verdict?.num ?? null;
-    const filedRel = filedPayload?.verdict?.rel ?? null;
+    const filedPayload = alreadyFiled ? null : JSON.parse(filed.lines[0] ?? '{}');
+    const filedNum = alreadyFiled ? alreadyFiled.num : (filedPayload?.verdict?.num ?? null);
+    const filedRel = alreadyFiled ? alreadyFiled.path : (filedPayload?.verdict?.rel ?? null);
 
     // THE CARD IS FILED AND TRACKED — resume THIS SAME run with the mechanical `accept` the policy itself
     // declined to answer, so the label swap + durable comment apply exactly as a clean accept's would.
@@ -293,7 +360,7 @@ export async function runReviewLoopOnce({
     if (parsed.control.json) {
       const payload = {
         ...JSON.parse(rendered.lines[0]),
-        preventionFiled: { num: filedNum, path: filedRel },
+        preventionFiled: { num: filedNum, path: filedRel, ...(alreadyFiled ? { alreadyFiled: true } : {}) },
       };
       return { code: rendered.code, lines: [JSON.stringify(payload, null, 2)], run: acceptedOutcome.run, stopped: acceptedOutcome.stopped };
     }
@@ -301,8 +368,10 @@ export async function runReviewLoopOnce({
       code: rendered.code,
       lines: [
         ...rendered.lines, '',
-        `prevention guard(s) filed mechanically — ${filedRel ?? '(no path)'} (#${filedNum ?? '?'}), cleared to `
-        + 'the conveyor; no human was asked.',
+        alreadyFiled
+          ? `prevention guard(s) ALREADY filed by an earlier round — ${filedRel} (#${filedNum}); not filed again.`
+          : `prevention guard(s) filed mechanically — ${filedRel ?? '(no path)'} (#${filedNum ?? '?'}), cleared to `
+            + 'the conveyor; no human was asked.',
       ],
       run: acceptedOutcome.run,
       stopped: acceptedOutcome.stopped,

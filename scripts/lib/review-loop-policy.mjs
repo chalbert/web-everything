@@ -84,6 +84,10 @@ import { FIELD_CAPS, KINDS } from '../conveyor/learnings-drop.mjs';
 // no exceptions) — `buildPreventionFilingInput` reuses the SAME token `citation-check.mjs` already exports
 // rather than re-typing the literal `'we:'` a second place could drift from.
 import { IN_REPO_LOCUS } from './citation-check.mjs';
+// PR #2766 advisory (codex-correctness) — the SAME detector the write-time locus scan runs
+// (`we:scripts/backlog/guarded-write.mjs#assertPublishableContent`), so the digest is fixed up against exactly
+// what would refuse it, never a second guess at which tokens count as a path.
+import { findUnmarkedLocusRefs } from '../check-standards-rules.mjs';
 
 /**
  * THE ANSWER THIS POLICY MAY GIVE UNATTENDED, other than declining. `abstain` is deliberately NOT this policy's
@@ -276,10 +280,13 @@ export function isPreventionOutstandingParked(outcome) {
  *   itself treats an absent parent as top-level). `queue` mirrors `file-item`'s own `--queue` input
  *   (`'true'`/`'false'`); defaults to `'true'` ("cleared to the conveyor", the 2026-09-26 ruling's own words) —
  *   a caller filing this OUTSIDE the conveyor's own sanctioned checkout (a one-off proof run, never the
- *   production loop) passes `'false'` to avoid mutating the live runner's queue store.
+ *   production loop) passes `'false'` to avoid mutating the live runner's queue store. `head` (PR #2766) is the
+ *   pinned commit the review judged; when given, the digest names it via {@link preventionHeadMarker}, which is
+ *   the STABLE key a retry on the same head uses to find this card again — the juror's own prose is not,
+ *   because a fresh round spawns fresh jurors that word the same guard differently.
  * @returns {{title: string, kind: string, size: string, digest: string, scope: string, parent: string, queue: string}}
  */
-export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '', queue = 'true' } = {}) {
+export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '', queue = 'true', head = null } = {}) {
   const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention);
   const files = [...new Set(owed.map((f) => f.file).filter(Boolean))];
   const testSiblingOf = (f) => {
@@ -301,7 +308,8 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
     return `${i + 1}. \`${where}\` — ${f.prevention ?? '(no guard text recorded)'}`;
   });
   const digestRaw = `Filed mechanically by the unattended review loop (#2749) — every finding below reduced `
-    + `${repo}#${pr}'s review to prevention-outstanding by naming a guard neither captured nor filed:\n\n`
+    + `${repo}#${pr}'s review${head ? ` (${preventionHeadMarker(head)})` : ''} to prevention-outstanding by `
+    + 'naming a guard neither captured nor filed:\n\n'
     + digestLines.join('\n');
   // #883 SAFETY NET — a juror's own `prevention` PROSE can casually re-mention a file this card already cites
   // by its bare basename with no locus prefix at all (live example: PR #2749's actual finding 3 text says
@@ -311,11 +319,28 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // text for anything extension-shaped, which would risk over-matching unrelated words). A mention already
   // carrying a locus prefix, or already part of a longer `dir/basename` path, is left alone (the negative
   // lookbehind on `we:`/`fui:`/`plateau:`/`/`).
-  const digest = files.reduce((text, f) => {
+  const basenamesQualified = files.reduce((text, f) => {
     const base = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
     const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return text.replace(new RegExp(`(?<!we:|fui:|plateau:|/)\\b${escaped}\\b`, 'g'), `${IN_REPO_LOCUS}${f}`);
+    // `-`/`.` in the lookarounds too (PR #2766 self-review): `\b` alone treats `-` as a boundary, so citing
+    // `lane.mjs` used to splice a prefix into the middle of `guard-lane.mjs`.
+    return text.replace(new RegExp(`(?<!we:|fui:|plateau:)(?<![\\w/.-])${escaped}(?![\\w-])`, 'g'), `${IN_REPO_LOCUS}${f}`);
   }, digestRaw);
+  // PR #2766 advisory (codex-correctness, reproduced) — the basename pass above deliberately skips a name that
+  // is already part of a longer `dir/basename` path, so a FULL bare path in juror prose (a test file, or a file
+  // this card never cites at all) survived unprefixed and the write-time scan refused the whole card, leaving
+  // the run parked. Second pass: prefix every token the real detector still flags. Longest first, and never
+  // inside a longer token or after an existing `<repo>:` prefix (only a REPO prefix — any other colon, as in
+  // `Files:scripts/z.mjs`, is still flagged by the detector, so it must still be prefixed).
+  const digest = findUnmarkedLocusRefs(basenamesQualified)
+    .sort((a, b) => b.length - a.length)
+    .reduce((text, ref) => {
+      const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return text.replace(
+        new RegExp(`(?<!(?:we|fui|plateau|webeverything|frontierui|plateau-app):)(?<![\\w./-])${escaped}(?![\\w/-])`, 'g'),
+        `${IN_REPO_LOCUS}${ref}`,
+      );
+    }, basenamesQualified);
   return {
     title: `File the prevention guard(s) owed by ${repo}#${pr}'s independent review`,
     kind: 'story',
@@ -325,6 +350,17 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
     parent: parent || '',
     queue: queue === 'false' || queue === false ? 'false' : 'true',
   };
+}
+
+/**
+ * THE TEXT A FILED PREVENTION CARD CARRIES TO NAME THE HEAD IT WAS FILED FOR (PR #2766). PURE. One home, so the
+ * builder that writes it and `review-loop-cli.mjs#findFiledPreventionCard` that looks for it cannot drift.
+ *
+ * @param {string} head - a pinned 40-hex commit.
+ * @returns {string}
+ */
+export function preventionHeadMarker(head) {
+  return `reviewed head \`${head}\``;
 }
 
 /** Where a filed-prevention entry is filed from, for a reader of the pool who has never heard of this operation. */

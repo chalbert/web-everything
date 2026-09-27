@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   reviewLoopAutoConfirm, buildAcceptQueueEntry, acceptResumeCommand, isQueuedAcceptStop, ACCEPT_QUEUE_AREA,
   buildPreventionQueueEntry, isPreventionOutstandingClear, PREVENTION_QUEUE_AREA,
-  isPreventionOutstandingParked, buildPreventionFilingInput,
+  isPreventionOutstandingParked, buildPreventionFilingInput, preventionHeadMarker,
 } from '../review-loop-policy.mjs';
 import { CONFIRM_ACTORS } from '../../operations/review-pr.mjs';
 import { VERDICTS } from '../jury-core.mjs';
 import { FIELD_CAPS, KINDS, validateEntry } from '../../conveyor/learnings-drop.mjs';
+import { findUnmarkedLocusRefs } from '../../check-standards-rules.mjs';
+import { assertPublishableContent } from '../../backlog/guarded-write.mjs';
 
 const humanPending = { of: CONFIRM_ACTORS.HUMAN };
 const agentPending = { of: CONFIRM_ACTORS.AGENT };
@@ -250,6 +252,52 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     expect(input.digest).toContain('mirroring how we:scripts/guard-lane.mjs already receives');
     expect(input.digest).toContain('we:scripts/guard-lane.mjs:251'); // the real anchor stays single-prefixed
     expect(input.digest).not.toContain('we:we:');
+  });
+
+  it('PR #2766 advisory: a FULL bare path in the prose (a test path, a file the card never cites) is prefixed too, '
+    + 'so the write-time locus scan (`assertPublishableContent`) accepts the card instead of refusing it', () => {
+    // Matrix: a bare basename of a cited file, a full relative path of a cited file, a test path absent from
+    // finding.file, an uncited sibling source file, and an already-qualified path that must stay single-prefixed.
+    const input = buildPreventionFilingInput({
+      repo: 'o/r',
+      pr: 1,
+      findings: [{
+        file: 'scripts/guard-lane.mjs', line: 10, preventionCaptured: false,
+        prevention: 'add a case to scripts/__tests__/guard-lane.test.mjs, mirror scripts/guard-bash.mjs, '
+          + 'reuse guard-lane.mjs as-is, and leave we:scripts/lane-pool.mjs alone',
+      }],
+    });
+    expect(findUnmarkedLocusRefs(input.digest)).toEqual([]);
+    expect(() => assertPublishableContent('backlog/x-card.md', `# t\n\n${input.digest}\n`)).not.toThrow();
+    expect(input.digest).toContain('add a case to we:scripts/__tests__/guard-lane.test.mjs,');
+    expect(input.digest).toContain('mirror we:scripts/guard-bash.mjs,');
+    expect(input.digest).toContain('reuse we:scripts/guard-lane.mjs as-is');
+    expect(input.digest).toContain('leave we:scripts/lane-pool.mjs alone');
+    expect(input.digest).not.toContain('we:we:');
+  });
+
+  it('PR #2766 self-review: prefixes a path after a NON-repo colon, and never splices a prefix into a hyphenated '
+    + 'longer basename', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [{
+        file: 'scripts/lane.mjs', line: 3, preventionCaptured: false,
+        prevention: 'see Files:scripts/z.mjs, then mirror guard-lane.mjs like pre-lane.mjs and lane.mjs',
+      }],
+    });
+    expect(findUnmarkedLocusRefs(input.digest)).toEqual([]);
+    expect(input.digest).toContain('Files:we:scripts/z.mjs');
+    // Uncited bare names are prefixed WHOLE (the detector flags them too); never `guard-we:scripts/lane.mjs`.
+    expect(input.digest).toContain('mirror we:guard-lane.mjs like we:pre-lane.mjs and we:scripts/lane.mjs');
+    expect(input.digest).not.toMatch(/-we:/);
+  });
+
+  it('PR #2766: names the reviewed head in the digest when given (the stable duplicate key), and nothing when not', () => {
+    const head = 'c'.repeat(40);
+    const withHead = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, head });
+    expect(withHead.digest).toContain(preventionHeadMarker(head));
+    expect(() => assertPublishableContent('backlog/x-card.md', `# t\n\n${withHead.digest}\n`)).not.toThrow();
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).digest).not.toContain('reviewed head');
   });
 
   it('carries a supplied parent through unchanged, and defaults to empty (top-level) when none is given', () => {
