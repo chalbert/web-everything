@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { appendScorecard as appendScorecardRow } from '../conveyor/run-scorecard-store.mjs';
 import {
   buildCheckerArgv, buildCheckerTask, buildCiHealTask, buildHealCommitMessage, buildWorkerArgv,
-  healDiffWithinEnvelope, launchScorecardRow, parseCheckerVerdict, summarizeNumstat, workerNeeded,
+  healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../lib/probation-launcher.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -113,17 +113,19 @@ export async function runProbationHeal(args, io) {
   let diffRow = null;
   if (need.needed) {
     const baseSha = io.headSha(lanePath);
+    // Snapshot what is untracked BEFORE the worker runs, so only files it creates can join the heal.
+    const preexisting = io.untracked(lanePath);
     const task = buildCiHealTask({ pr, reason, scope: args.scope, failingChecks: io.failingChecks(pr), gateOutput: gate.output, logTail: io.failedLogTail(pr) });
     const taskFile = io.writeTaskFile(lanePath, 'probation-heal-task.md', task);
     log(`running ${worker.launcher} --model=${worker.model}`);
     const run = io.runWorker(buildWorkerArgv({ worker, weRoot: WE_ROOT, dir: lanePath, taskFile }));
     executor = worker.executor;
-    const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha));
+    const summary = summarizeNumstat(io.diffNumstat(lanePath, baseSha, preexisting), { exclude: preexisting });
     diffRow = { files: summary.files, loc: summary.loc };
     if (!summary.files) return finish('escalated-needs-human', executor, `the worker changed nothing (${run.ok ? 'it finished' : 'it failed'})`, { diff: diffRow });
     const fits = healDiffWithinEnvelope(summary);
     if (!fits.ok) {
-      io.discardChanges(lanePath, baseSha);
+      io.discardChanges(lanePath, baseSha, preexisting);
       return finish('gate-red', executor, `not pushed: ${fits.reason}`, { diff: diffRow });
     }
     gate = io.runGate(lanePath);
@@ -213,13 +215,22 @@ export function realIo({ session, env = process.env } = {}) {
       if (!r.ok) return '';
       try { return JSON.parse(r.out).lastMessage ?? ''; } catch { return ''; }
     },
-    diffNumstat: (dir, base) => {
-      const untracked = sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
-      if (untracked.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...untracked]);
+    untracked: (dir) => sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean),
+    diffNumstat: (dir, base, preexisting = []) => {
+      const created = newUntrackedPaths(preexisting, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean));
+      if (created.length) trySh('git', ['-C', dir, 'add', '--intent-to-add', '--', ...created]);
+      // The launcher intent-adds every untracked file for its own diff; take the pre-existing ones back out of the
+      // index so no intent-to-add entry for a file the worker never wrote is left in the lane.
+      if (preexisting.length) trySh('git', ['-C', dir, 'reset', '-q', '--', ...preexisting]);
       return sh('git', ['-C', dir, 'diff', '--numstat', base]);
     },
     diffText: (dir, base) => sh('git', ['-C', dir, 'diff', base]),
-    discardChanges: (dir, base) => { trySh('git', ['-C', dir, 'reset', '--hard', base]); trySh('git', ['-C', dir, 'clean', '-fd']); },
+    // Undo ONLY the worker's own changes: reset tracked files, and delete just the untracked paths it created.
+    discardChanges: (dir, base, preexisting = []) => {
+      const created = newUntrackedPaths(preexisting, sh('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean));
+      trySh('git', ['-C', dir, 'reset', '--hard', base]);
+      if (created.length) trySh('git', ['-C', dir, 'clean', '-f', '--', ...created]);
+    },
     commit: (dir, paths, message) => {
       const msgFile = join(dir, '.git', 'probation-heal-commit-msg.txt');
       writeFileSync(msgFile, message);

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCheckerArgv, buildCiHealTask, buildHealCommitMessage, buildWorkerArgv, coAuthorTrailerForWorker,
-  healDiffWithinEnvelope, launchScorecardRow, parseCheckerVerdict, summarizeNumstat, workerNeeded,
+  healDiffWithinEnvelope, launchScorecardRow, newUntrackedPaths, parseCheckerVerdict, summarizeNumstat, workerNeeded,
 } from '../probation-launcher.mjs';
 import { validateScorecard } from '../../conveyor/run-scorecard-store.mjs';
 
@@ -60,10 +60,23 @@ describe('the heal diff bound', () => {
   it('sums numstat (binary counts as a file, zero lines)', () => {
     expect(summarizeNumstat('3\t1\ta.mjs\n-\t-\timg.png\n\n')).toEqual({ files: 2, loc: 4, paths: ['a.mjs', 'img.png'] });
   });
+  it('leaves out excluded paths (untracked before the worker ran)', () => {
+    expect(summarizeNumstat('1\t0\tnode_modules\n3\t1\ta.mjs', { exclude: ['node_modules'] })).toEqual({ files: 1, loc: 4, paths: ['a.mjs'] });
+  });
   it('holds a heal to 3 files and 150 lines', () => {
     expect(healDiffWithinEnvelope({ files: 3, loc: 150 }).ok).toBe(true);
     expect(healDiffWithinEnvelope({ files: 4, loc: 10 }).ok).toBe(false);
     expect(healDiffWithinEnvelope({ files: 1, loc: 151 }).ok).toBe(false);
+  });
+});
+
+describe('newUntrackedPaths — only files the WORKER created join the heal diff', () => {
+  // Live-caught (agy-launcher-probation proof, 2026-09-27): an untracked `node_modules` symlink that was in the
+  // lane BEFORE the worker ran was swept into the heal commit. Only paths new since the pre-run snapshot count.
+  it('drops every path that was already untracked before the worker ran', () => {
+    expect(newUntrackedPaths(['node_modules', 'scratch.txt'], ['node_modules', 'scratch.txt', 'scripts/new.test.mjs'])).toEqual(['scripts/new.test.mjs']);
+    expect(newUntrackedPaths([], ['a'])).toEqual(['a']);
+    expect(newUntrackedPaths(['a'], [])).toEqual([]);
   });
 });
 

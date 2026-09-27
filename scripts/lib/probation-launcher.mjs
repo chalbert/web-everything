@@ -131,19 +131,37 @@ export function parseCheckerVerdict(message) {
 
 /**
  * Sum `git diff --numstat` output. PURE. Binary files (`-\t-\tpath`) count as one file and zero lines.
+ * `exclude` drops paths that were untracked BEFORE the worker ran: `gemini-direct-task.mjs` intent-adds every
+ * untracked file for its own diff capture, so such a path shows up in the numstat without being the worker's
+ * (live-caught 2026-09-27: a `node_modules` symlink was committed with the first real agy heal).
  * @param {string} numstat
+ * @param {{exclude?: string[]}} [o]
  * @returns {{files: number, loc: number, paths: string[]}}
  */
-export function summarizeNumstat(numstat) {
+export function summarizeNumstat(numstat, { exclude = [] } = {}) {
+  const skip = new Set(exclude);
   const paths = [];
   let loc = 0;
   for (const line of String(numstat ?? '').split('\n')) {
     const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line.trim());
-    if (!m) continue;
+    if (!m || skip.has(m[3])) continue;
     paths.push(m[3]);
     loc += (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]));
   }
   return { files: paths.length, loc, paths };
+}
+
+/**
+ * The untracked paths the WORKER created: `after` minus whatever was already untracked before it ran. PURE.
+ * Live-caught on the first real agy run (2026-09-27): an untracked `node_modules` symlink present in the lane
+ * before the worker started was swept into the heal commit. Only these paths may be intent-added to the diff.
+ * @param {string[]} before
+ * @param {string[]} after
+ * @returns {string[]}
+ */
+export function newUntrackedPaths(before, after) {
+  const had = new Set(Array.isArray(before) ? before : []);
+  return (Array.isArray(after) ? after : []).filter((p) => !had.has(p));
 }
 
 /**

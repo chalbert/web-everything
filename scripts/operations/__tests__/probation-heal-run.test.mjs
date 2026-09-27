@@ -95,7 +95,8 @@ function fakeIo({ gate = [false, true], rebaseOk = true, moved = true, numstat =
     writeTaskFile: (_d, name, text) => { calls.push(['task', name, text.length > 0]); return `/lanes/9/.git/${name}`; },
     runWorker: (argv) => { calls.push(['worker', argv[0], argv.find((a) => a.startsWith('--model='))]); return { ok: true, out: '' }; },
     runChecker: (argv) => { calls.push(['checker', argv[1]]); return checker; },
-    diffNumstat: () => numstat,
+    untracked: () => ['node_modules'],
+    diffNumstat: (_d, _base, preexisting) => { calls.push(['numstat', preexisting]); return numstat; },
     diffText: () => 'diff --git a/scripts/a.mjs',
     discardChanges: () => calls.push(['discard']),
     commit: (_d, paths, msg) => calls.push(['commit', paths, msg.split('\n')[0]]),
@@ -118,6 +119,18 @@ describe('runProbationHeal — the arc', () => {
     expect(calls.find((c) => c[0] === 'push')).toEqual(['push', 'lane/x', 'examined']);
     expect(calls.filter((c) => c[0] === 'scorecard')).toEqual([['scorecard', 'healed', 'antigravity', null, null]]);
     expect(calls.at(0)).toEqual(['completion', 'started', null]);
+    // the untracked files that were there BEFORE the worker ran are handed to the diff, so they never join the heal.
+    expect(calls.find((c) => c[0] === 'numstat')).toEqual(['numstat', ['node_modules']]);
+  });
+
+  it('a pre-existing untracked path the LAUNCHER intent-added never joins the heal commit or its size (live-caught)', async () => {
+    // gemini-direct-task.mjs intent-adds EVERY untracked file for its own diff capture, so the numstat can list a
+    // path (here a `node_modules` symlink) that was in the lane before the worker ran. It must not be committed.
+    const { io, calls } = fakeIo({ numstat: '1\t0\tnode_modules\n2\t1\tscripts/a.mjs' });
+    const r = await runProbationHeal(args(), io);
+    expect(r.outcome).toBe('healed');
+    expect(calls.find((c) => c[0] === 'commit')[1]).toEqual(['scripts/a.mjs']);
+    expect(calls.find((c) => c[0] === 'scorecard')).toBeTruthy();
   });
 
   it('a clean rebase that turns the gate green is pushed with NO model run and NO launch row', async () => {
