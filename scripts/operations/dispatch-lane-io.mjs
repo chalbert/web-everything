@@ -85,6 +85,11 @@ import { writeJsonAtomic, withFileLock } from '../lib/atomic-json-file.mjs';
 import { readRegistry as readPocRegistry, validateDeliveryTarget } from '../lib/poc-branches.mjs';
 import { briefTokensForRepo, repoKeyForScope } from '../lib/repo-profile.mjs';
 import { buildGhShimSettingsEnv, sanitizeSpawnEnv, ensureSettingsFilePermissions } from '../lib/gh-app-shim.mjs';
+// #x9fbg1x — turns OFF Claude Code's own background-session worktree-isolation guard for THIS dispatch's
+// scratch cwd only (never the primary checkout, never a lane clone shared across dispatches) — see that
+// module's own header for the full incident (fix-2748/fix-2770, 2026-09-26) and why the repo-wide tracked
+// `.claude/settings.json` entry this replaces never reached a session once #4174 moved its start cwd to scratch.
+import { DISPATCH_WORKTREE_SETTINGS, ensureWorktreeIsolationOff } from '../lib/dispatch-bg-isolation.mjs';
 // #xrv69j6 — the pool-dir basenames a lane lives under (`web-everything` / `webeverything`), so the ONE lane
 // a dispatch will use can be resolved to an absolute path the same way `bootstrap-session.mjs#poolRoots`
 // already probes it, without re-deriving that table.
@@ -1292,6 +1297,14 @@ export function createDispatchSinks({
   // above: `resolveLaneGrant` is the PURE computation, `grantLanePermission` the never-throwing side effect.
   resolveLaneGrant = (payload) => dispatchLaneGrant(payload, { root }),
   grantLanePermission = (cwd, grant) => ensureSettingsFilePermissions({ cwd, ...grant }),
+  // #x9fbg1x — every dispatched session gets the SAME worktree-isolation override, unconditionally (unlike
+  // `resolveSettingsEnv`'s gh-shim half, this is never opt-in — every dispatched session already runs inside
+  // an isolated lane clone once it acquires one, so the CLI's own guard is redundant for ALL of them, not just
+  // hosts that configured something). `resolveWorktreeIsolation` is the PURE value; `ensureWorktreeIsolation`
+  // the never-throwing durable write into this dispatch's OWN scratch cwd — two seams, mirroring every other
+  // pair in this sink, so a test can assert either independently of the real filesystem.
+  resolveWorktreeIsolation = () => DISPATCH_WORKTREE_SETTINGS.worktree,
+  ensureWorktreeIsolation = (cwd) => ensureWorktreeIsolationOff({ cwd }),
 } = {}) {
   return {
     [DISPATCH_EFFECT]: async (payload) => {
@@ -1312,6 +1325,11 @@ export function createDispatchSinks({
       // carries the grant by the time the session's own first Bash/Edit tool call reads it. Best-effort (the
       // function itself never throws) — a grant failure must never block the dispatch it is here to unblock.
       grantLanePermission(sessionCwd, resolveLaneGrant(payload));
+      // #x9fbg1x — same "write into the scratch cwd BEFORE the agent starts" timing as the lane grant above,
+      // so the guard is already off by the time the session's own first Edit runs. Best-effort (the function
+      // itself never throws) — a write failure here must never block the dispatch it exists to unblock.
+      ensureWorktreeIsolation(sessionCwd);
+      const worktreeSettings = resolveWorktreeIsolation();
       // #3857 — the model-tier table's answer for this dispatch, read straight off `payload.routing`
       // (`decideDispatchRoute`'s record, computed upstream by the read step — never recomputed here). `null`
       // when the read carried no routing record (a hand-built fixture), which keeps `buildAgentArgv` on its
@@ -1345,6 +1363,10 @@ export function createDispatchSinks({
           // session looks for it, and (b) be one more write into the dispatching checkout this whole card exists
           // to stop.
           settingsEnv: resolveSettingsEnv(sessionCwd),
+          // #x9fbg1x — folds `{"worktree":{"bgIsolation":"none"}}` into the SAME `--settings` argument, and
+          // (via `ensureWorktreeIsolation` above) the same durable settings.local.json this dispatch's cwd
+          // already carries the gh-shim env/lane-grant overrides in.
+          worktreeSettings,
         });
       } catch (e) {
         // A validation failure `buildAgentArgv` already proved happened before any process existed (e.g. an
@@ -1510,6 +1532,8 @@ export function defaultClaudeProvider(request, { spawnAgent = (argv, opts) => de
     // for `process.env`/real fs on its own (`request.settingsEnv` defaults to nothing, i.e. `null`), so every
     // existing caller/test of this port that never mentions it sees byte-identical behaviour.
     settingsEnv: request.settingsEnv ?? null,
+    // #x9fbg1x — same "opt-in via the request, byte-identical when absent" contract as `settingsEnv` above.
+    worktreeSettings: request.worktreeSettings ?? null,
     // #3857 — the model-tier table's decision and the required override reason, when the caller has one
     // (`request.table` null keeps this call byte-identical for any caller that computes no routing decision).
     table: request.table ?? null,
@@ -1953,6 +1977,10 @@ export function ensureDispatchSessionCwd(dir, {
 
 export function buildAgentArgv({
   sessionId, payload, extraArgs = [], systemPromptFile = null, resumeSessionId = null, settingsEnv = null,
+  // #x9fbg1x — an OPT-IN `worktree` patch folded into the SAME `--settings` JSON `settingsEnv` already rides
+  // in. `null` (every existing caller/test that never mentions it) keeps this function's argv byte-identical
+  // to before this param existed — only `createDispatchSinks`' own resolver ever supplies a real value.
+  worktreeSettings = null,
   // #3857 — `table` is the checked-in model-tier table's answer for THIS dispatch ({tier, model, reason} — see
   // `../lib/provider-routing.mjs#workerTierFor` and {@link workerModelTable}); `null` (every caller that computes
   // no routing decision: review and reconcile-fix dispatch) keeps this function's OLD behaviour byte-identical —
@@ -1998,7 +2026,9 @@ export function buildAgentArgv({
     // live-confirmed). Omitted entirely when `settingsEnv` is `null`/empty — a caller that never resolves one
     // (or a host with App auth unconfigured) gets a `--bg` argv byte-identical to before this existed.
     // xgqz204: never omitted any more — it always carries at least the worker marker (see above).
-    '--settings', JSON.stringify({ env: sessionEnv }),
+    // #x9fbg1x — `worktree` rides in the SAME object, never a second `--settings` flag (the CLI would only
+    // honour the last one anyway).
+    '--settings', JSON.stringify(worktreeSettings ? { env: sessionEnv, worktree: worktreeSettings } : { env: sessionEnv }),
     ...(systemPromptFile ? ['--append-system-prompt-file', String(systemPromptFile)] : []),
     ...modelArgs,
     ...args,

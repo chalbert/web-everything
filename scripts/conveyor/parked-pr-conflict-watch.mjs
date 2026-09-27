@@ -1689,8 +1689,8 @@ export function watchParkedPrConflicts({
           // as superseded) posts just the finding. `supersededStandDown` is only reported once it really posted.
           // #xconflres1 — includes the "no longer statute-tier at all" outcome (the false-positive stand-down this
           // whole card exists to unblock, e.g. `chalbert/web-everything#2772`).
-          // #gh-write-burst — only the FINDING is gated on `alreadyBounced`; the supersede keeps its own
-          // idempotence (`isWatcherMarkerAlreadySuperseded`), so its retry path above is unchanged.
+          // #gh-write-burst — only the finding is skipped when `alreadyBounced`; the supersede needs no guard of its
+          // own (`priorWatcherStandDown` already reads false once a supersede is on the thread).
           if (!dryRun) {
             if (priorWatcherStandDown) postSupersedeComment({ pr, repo: resolvedRepo, provider });
             if (alreadyBounced) { /* this episode's finding is already on the thread — never re-post */ }

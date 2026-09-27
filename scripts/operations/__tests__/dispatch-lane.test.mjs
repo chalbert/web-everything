@@ -737,7 +737,32 @@ describe('the declared effect is a dispatch', () => {
     // dispatched session will actually look for it.
     expect(resolveSettingsEnv).toHaveBeenCalledWith(dispatchSessionCwd('sess-shim', { root: PRIMARY }));
     expect(seenArgv).toContain('--settings');
-    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' } }));
+    // #x9fbg1x — `worktree` now rides the SAME `--settings` object unconditionally (every dispatched session
+    // gets the guard turned off for its own scratch cwd; see `resolveWorktreeIsolation`'s own default).
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({
+      env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' },
+    }));
+  });
+
+  it('#x9fbg1x — ensureWorktreeIsolation/resolveWorktreeIsolation are called once per dispatch, WITH the '
+    + "session's OWN scratch cwd, and the resolved patch reaches the real argv", async () => {
+    const { run } = runTo();
+    const store = createMemoryRunStore();
+    let seenArgv = null;
+    const ensureWorktreeIsolation = vi.fn();
+    const resolveWorktreeIsolation = vi.fn(() => ({ bgIsolation: 'none' }));
+    const sinks = createDispatchSinks({
+      root: PRIMARY,
+      spawnAgent: (argv) => { seenArgv = argv; return ''; },
+      mintSessionId: () => 'sess-wti',
+      ensureWorktreeIsolation, resolveWorktreeIsolation,
+    });
+    await applyPendingEffects(run, { sinks, store });
+    const sessionCwd = dispatchSessionCwd('sess-wti', { root: PRIMARY });
+    expect(ensureWorktreeIsolation).toHaveBeenCalledTimes(1);
+    expect(ensureWorktreeIsolation).toHaveBeenCalledWith(sessionCwd);
+    expect(resolveWorktreeIsolation).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(seenArgv[seenArgv.indexOf('--settings') + 1]).worktree).toEqual({ bgIsolation: 'none' });
   });
 
   it('#x8mpubm — resolveSettingsEnv returning null (the real default, unconfigured host) emits no --settings at all', async () => {
@@ -751,7 +776,11 @@ describe('the declared effect is a dispatch', () => {
       resolveSettingsEnv: () => null,
     });
     await applyPendingEffects(run, { sinks, store });
-    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({ env: { WE_CONVEYOR_WORKER: '1' } })); // xgqz204 — worker marker only
+    // xgqz204 — worker marker only in `env`; #x9fbg1x — `worktree` still rides along regardless (it is never
+    // gated on `resolveSettingsEnv`, a wholly separate, always-on seam — see `resolveWorktreeIsolation`).
+    expect(seenArgv[seenArgv.indexOf('--settings') + 1]).toBe(JSON.stringify({
+      env: { WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' },
+    }));
   });
 
   it('#x8mpubm follow-up — defaultSpawnAgent strips GH_TOKEN/GITHUB_TOKEN from the exec env, never lets them leak into the claude front-end invocation', () => {
@@ -829,6 +858,22 @@ describe('what the sink actually runs', () => {
     ]);
   });
 
+  it('#x9fbg1x — worktreeSettings folds into the SAME --settings object, alongside env, never a second flag', () => {
+    const argv = buildAgentArgv({
+      sessionId: 'sess-c3', payload, settingsEnv: { PATH: '/shim:/usr/bin' }, worktreeSettings: { bgIsolation: 'none' },
+    });
+    expect(argv).toEqual([
+      '--bg', '-n', 'conveyor-3037',
+      '--settings', JSON.stringify({ env: { PATH: '/shim:/usr/bin', WE_CONVEYOR_WORKER: '1' }, worktree: { bgIsolation: 'none' } }),
+      '# build #3037',
+    ]);
+  });
+
+  it('#x9fbg1x — omitted worktreeSettings (every existing caller/test) keeps the argv byte-identical to before it existed', () => {
+    const argv = buildAgentArgv({ sessionId: 'sess-c3', payload });
+    expect(JSON.parse(argv[argv.indexOf('--settings') + 1])).not.toHaveProperty('worktree');
+  });
+
   it('#x36vidg — resolveDispatchSettingsEnv always carries the 10-min Bash timeouts, gh-shim env or not', () => {
     const env = resolveDispatchSettingsEnv('/nonexistent-root-for-test');
     expect(env).toMatchObject({ BASH_DEFAULT_TIMEOUT_MS: '600000', BASH_MAX_TIMEOUT_MS: '600000' });
@@ -865,6 +910,15 @@ describe('what the sink actually runs', () => {
     const argv = buildAgentArgv({
       sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
       settingsEnv: { PATH: '/shim:/usr/bin' },
+    });
+    expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
+  });
+
+  it('#x9fbg1x — worktreeSettings is NEVER emitted on the resume branch either — a still-running resumed '
+    + 'session already carries whatever its first, fresh dispatch gave it', () => {
+    const argv = buildAgentArgv({
+      sessionId: 'sess-unused', payload, resumeSessionId: 'cand-1111-2222-3333-444444444444',
+      worktreeSettings: { bgIsolation: 'none' },
     });
     expect(argv).toEqual(['--bg', '--resume', 'cand-1111-2222-3333-444444444444', payload.prompt]);
   });
