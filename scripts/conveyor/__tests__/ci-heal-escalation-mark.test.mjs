@@ -7,6 +7,9 @@
  *   same head with nothing durable recorded).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildCiHealEscalationComment, parseCiHealEscalations, latestCiHealEscalationForHead,
   CI_HEAL_ESCALATION_MARKER, CI_HEAL_ESCALATION_OUTCOMES,
@@ -110,5 +113,23 @@ describe('latestCiHealEscalationForHead — the head-scoping that makes a new pu
       [{ body: first, author: AUTOMATION }, { body: second, author: AUTOMATION }], HEAD,
     );
     expect(result).toMatchObject({ outcome: 'waiting-on-system-fix', systemFixRef: '2784' });
+  });
+});
+
+// PR #2787 review finding — the PRODUCER side of the head-scoping. The ci-heal brief rebases BEFORE it may
+// escalate, so after a clean-but-unpushed rebase `git rev-parse HEAD` names a local commit GitHub never saw: a
+// marker stamped with it never matches `pr.headRefOid`, reconcile ignores it, and the same heal is dispatched
+// again. Every escalation command in the brief must stamp the PR's PUBLISHED head, read off GitHub.
+describe('fix-agent-ci-brief.md — every escalation marker targets the PR\'s published head, never the local HEAD', () => {
+  const BRIEF = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'skills-src', 'conveyor', 'fix-agent-ci-brief.md'), 'utf8');
+  const markerCalls = BRIEF.match(/ci-heal-escalation-mark\.mjs" \{\{PR_NUM\}\}[^\n]*\n[^\n]*/g) || [];
+  it('finds every escalation call in the brief (sanity — one per escalation exit)', () => {
+    expect(markerCalls.length).toBeGreaterThanOrEqual(4);
+  });
+  it('escalation after an unpushed rebase targets the published PR head — no call stamps --head from the local HEAD', () => {
+    expect(BRIEF).not.toMatch(/--head="\$\(git rev-parse HEAD\)"/);
+  });
+  it('every escalation call reads --head off the PR\'s own headRefOid', () => {
+    for (const call of markerCalls) expect(call).toMatch(/--head="\$\(gh pr view \{\{PR_NUM\}\} --repo \{\{REPO\}\} --json headRefOid --jq \.headRefOid\)"/);
   });
 });

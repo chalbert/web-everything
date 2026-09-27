@@ -486,6 +486,12 @@ export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
  * `xx6kg3f` history for why a degraded read must still trust a stale label rather than silently clearing it)
  * keeps doing whatever it already did with that case — this function only ever narrows a caller's `ci:failed`
  * trust, never widens it. Reads the LATEST run (#xkfv491), same as its two siblings — never re-derived.
+ *
+ * "Pending" is read POSITIVELY off an in-flight state, never as "neither green nor failed" (PR #2787 review):
+ * a check that CONCLUDED `SKIPPED`/`NEUTRAL`/`STALE` is terminal and will never re-run, so treating it as
+ * in flight would suppress a stale `ci:failed` forever and let the PR read `queued` with a check that never
+ * passed. Any non-empty conclusion is terminal; otherwise the CheckRun `status` (or legacy StatusContext
+ * `state`) must name an in-flight value.
  * @param {object} pr
  * @param {string} [requiredCheck]
  * @returns {boolean}
@@ -493,8 +499,14 @@ export function isRequiredCheckFailed(pr, requiredCheck = 'test') {
 export function isRequiredCheckPending(pr, requiredCheck = 'test') {
   const check = latestRequiredCheck(pr, requiredCheck);
   if (!check) return false;
-  return !isRequiredCheckGreen(pr, requiredCheck) && !isRequiredCheckFailed(pr, requiredCheck);
+  if (String(check.conclusion || '').trim()) return false;
+  const phase = String(check.status || check.state || '').toUpperCase();
+  return IN_FLIGHT_CHECK_STATES.has(phase);
 }
+
+/** CheckRun `status` values (QUEUED…REQUESTED) and StatusContext `state` values (PENDING, EXPECTED) that mean
+ *  "this run has not concluded yet" — the only states {@link isRequiredCheckPending} reads as pending. */
+const IN_FLIGHT_CHECK_STATES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'REQUESTED', 'EXPECTED']);
 
 /**
  * #2421 — the ratified ci-lifecycle label taxonomy (#2281 Fork 2: `ci:failed` opens a deterministic `ci:*`

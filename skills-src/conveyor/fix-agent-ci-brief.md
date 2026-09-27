@@ -140,11 +140,13 @@ alone often fixes a BEHIND `test` failure.
 git rebase --abort
 node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-conflict
 node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-  --head="$(git rev-parse HEAD)" --outcome=needs-human --reason="conflict with main during rebase"
+  --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="conflict with main during rebase"
 ```
 
-(`git rebase --abort` FIRST, so `HEAD` reads back the PR's actual, unchanged head — the durable, head-scoped
-marker; see the callout right after this arc for what it does and why.)
+(`git rebase --abort` FIRST, so you never leave a half-rebased tree behind. `--head` is ALWAYS the PR's
+PUBLISHED head read off GitHub — never `git rev-parse HEAD`: after a clean rebase that you have not pushed,
+the local `HEAD` is a commit GitHub never saw, the marker would never match `pr.headRefOid`, and the next tick
+would dispatch the same heal again. See the callout right after this arc for what the marker does and why.)
 
 ### 3. Diagnose + repair the failing required check (repair ONLY the CI break)
 
@@ -181,7 +183,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$(git rev-parse HEAD)" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
+      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=needs-human --reason="not a CI break — <name the actual finding>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal escalated (needs human — not a CI break)`. The review gate (if any) still
     owes a human verdict; a human handles it via `/finish`.
@@ -193,7 +195,7 @@ gh run view <run-id> --log-failed --repo {{REPO}} # the failing step's log (opti
     ```bash
     node "{{WE_ROOT}}/scripts/operations/completion-cli.mjs" report --repo={{REPO}} --session={{SESSION_SLUG}} --status=done --outcome=escalated-needs-human
     node "{{WE_ROOT}}/scripts/conveyor/ci-heal-escalation-mark.mjs" {{PR_NUM}} --repo={{REPO}} \
-      --head="$(git rev-parse HEAD)" --outcome=waiting-on-system-fix --system-fix=<n> \
+      --head="$(gh pr view {{PR_NUM}} --repo {{REPO}} --json headRefOid --jq .headRefOid)" --outcome=waiting-on-system-fix --system-fix=<n> \
       --reason="<name the tooling bug and the PR fixing it>"
     ```
     Then report `#{{ITEM_NUM}} → ci-heal waiting on system fix #<n> (PR #{{PR_NUM}} did nothing wrong)`.

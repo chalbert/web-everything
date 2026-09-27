@@ -1968,4 +1968,13 @@ describe('classifyPr — a stale ci:failed label must not outrank a rollup that 
   it('still trusts the label when the rollup has no entry for the required check at all (the xx6kg3f degraded-read case, unchanged)', () => {
     expect(classifyPr(pr({ labels: ['review:pending', 'ci:failed'], statusCheckRollup: [] }))).toBe('ci-red');
   });
+
+  // PR #2787 review finding: a required check that CONCLUDED SKIPPED/NEUTRAL/STALE is terminal, not in flight —
+  // it will never re-run, so it must not suppress the stale label the way a genuinely in-flight check does.
+  // Otherwise the PR silently leaves `ci-red` (no heal, no escalation) and reads `queued` with a check that
+  // never passed.
+  it.each(['SKIPPED', 'NEUTRAL', 'STALE'])('still trusts the label when the required check concluded %s (terminal, never re-runs)', (conclusion) => {
+    const rollup = [{ __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion }];
+    expect(classifyPr(pr({ labels: ['review:accepted', 'ready-to-merge', 'ci:failed'], mergeStateStatus: 'CLEAN', statusCheckRollup: rollup }))).toBe('ci-red');
+  });
 });

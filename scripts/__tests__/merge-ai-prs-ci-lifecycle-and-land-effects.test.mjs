@@ -150,6 +150,41 @@ describe('isRequiredCheckPending (heal-wait-for-rerun — the third state green/
   it('a non-required check in flight is ignored, exactly like its green/failed siblings', () => {
     expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'cla', conclusion: '', status: 'IN_PROGRESS' }] })).toBe(false);
   });
+
+  // PR #2787 review finding — exhaustiveness over every real GitHub state. "Pending" means NOT YET CONCLUDED,
+  // never "neither green nor failed": a SKIPPED/NEUTRAL/STALE conclusion is terminal and will never re-run.
+  // Invariant: at most one of green/failed/pending holds, and pending holds ONLY for an in-flight state.
+  const at = (row) => ({ statusCheckRollup: [{ name: 'test', ...row }] });
+  const states = (p) => [isRequiredCheckGreen(p), isRequiredCheckFailed(p), isRequiredCheckPending(p)];
+  it.each([
+    ['SUCCESS', [true, false, false]],
+    ['FAILURE', [false, true, false]],
+    ['CANCELLED', [false, true, false]],
+    ['TIMED_OUT', [false, true, false]],
+    ['ACTION_REQUIRED', [false, true, false]],
+    ['STARTUP_FAILURE', [false, true, false]],
+    ['NEUTRAL', [false, false, false]],
+    ['SKIPPED', [false, false, false]],
+    ['STALE', [false, false, false]],
+  ])('CheckRun COMPLETED with conclusion %s → [green, failed, pending] = %j', (conclusion, expected) => {
+    expect(states(at({ __typename: 'CheckRun', status: 'COMPLETED', conclusion }))).toEqual(expected);
+  });
+  it.each(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'REQUESTED'])('CheckRun status %s (no conclusion yet) → pending only', (status) => {
+    expect(states(at({ __typename: 'CheckRun', status, conclusion: '' }))).toEqual([false, false, true]);
+    expect(states(at({ __typename: 'CheckRun', status, conclusion: null }))).toEqual([false, false, true]);
+  });
+  it.each([
+    ['SUCCESS', [true, false, false]],
+    ['FAILURE', [false, true, false]],
+    ['ERROR', [false, true, false]],
+    ['PENDING', [false, false, true]],
+    ['EXPECTED', [false, false, true]],
+  ])('StatusContext state %s → [green, failed, pending] = %j', (state, expected) => {
+    expect(states({ statusCheckRollup: [{ __typename: 'StatusContext', context: 'test', state }] })).toEqual(expected);
+  });
+  it('a COMPLETED CheckRun with an empty conclusion is NOT pending (it finished — never wait forever on it)', () => {
+    expect(isRequiredCheckPending(at({ status: 'COMPLETED', conclusion: '' }))).toBe(false);
+  });
 });
 
 describe('lifecycleLabelFromCiTruth (#2421/#2281 — the TOTAL ci-lifecycle label function)', () => {
