@@ -120,7 +120,7 @@ import { sessionSlugFor } from '../operations/dispatch-lane.mjs';
 // header requires.
 import { countStaleConflictFixRounds, CONFLICT_FIX_COMMENT_MARKER } from './conflict-fix-round-count.mjs';
 import {
-  countAdvisoryFixComments, ADVISORY_FIX_COMMENT_MARKER,
+  countCompletedAdvisoryEpisodes, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
 } from './advisory-fix-mark.mjs';
 import { CONFLICT_LABEL } from './conflict-label.mjs';
@@ -320,7 +320,10 @@ export const CONFLICT_FIX_ABSOLUTE_CEILING = CONFLICT_FIX_ROUND_CAP * 3;
 /**
  * we:scripts/conveyor/reconcile-core.mjs#ADVISORY_FIX_ROUND_CAP — the durable cap an ADVISORY-FIX round on a
  * `needs-human` PR binds on (#xkmu3gv). Mirrors {@link CI_HEAL_ROUND_CAP} exactly: its OWN, smaller cap, counted
- * by `we:scripts/conveyor/advisory-fix-mark.mjs#countAdvisoryFixComments` — never `roundCap`'s shared
+ * by `we:scripts/conveyor/advisory-fix-mark.mjs#countCompletedAdvisoryEpisodes` (xconv1-evidence follow-up,
+ * 2026-09-27 — counts completed note→fix EPISODES, never raw fix-mark comments, so multiple fixes clustered
+ * inside one still-broken episode can never buy extra tries NOR unfairly spend a brand-new finding's own
+ * budget; see that function's own docblock for the live #2766/#2767 incident this replaces) — never `roundCap`'s shared
  * rearm/advisory counters. Deliberately its own cap, not `roundCap`: an advisory-fix round and an ordinary
  * review<->fix negotiation round are different work (repairing an admitted, narrow advisory finding vs. a
  * human's own substantive back-and-forth), so binding them to one shared counter would let a PR that already
@@ -1466,8 +1469,19 @@ export function planReconcile({
     // for how a stand-down already caused by this exact bug is recognized as non-terminal).
     // `advisoryFixes` (the durable attempt COUNT) is still read below, but ONLY for the CAP — a genuinely
     // unfixable finding must still stop after `advisoryFixCap` real attempts.
+    //
+    // xconv1-evidence FOLLOW-UP (chalbert/web-everything#2766/#2767, 2026-09-27) — `advisoryFixes` MUST count
+    // COMPLETED EPISODES, never raw fix-mark COMMENTS: CONFIRMED LIVE, once the #xconv1-evidence fix correctly
+    // read a CONVERTED note as addressed, the cap-exempt fresh review it owed ran and posted a BRAND NEW,
+    // unrelated advisory finding — but the PR's 3 historical fix-mark comments had ALL landed inside that ONE
+    // (broken, never-advanced) converted-note episode, and the raw lifetime comment count still read 3,
+    // refusing the brand-new finding `cap-exhausted` with ZERO attempts ever made against it.
+    // `countCompletedAdvisoryEpisodes` counts one per note that a fix genuinely followed (however many fix
+    // attempts piled up before that happened), so #2766/#2767 correctly read as ONE spent episode, not three —
+    // see that function's own docblock for why the simpler "count fix-marks since the latest note" fix was
+    // tried and REJECTED (it would make the cap unenforceable against a genuinely never-fixed finding).
     if (phase === 'needs-human' && withPhase.labels.includes(ADVISORY_LABELS.CHANGES)) {
-      const advisoryFixes = countAdvisoryFixComments(pr?.comments);
+      const advisoryFixes = countCompletedAdvisoryEpisodes(pr?.comments);
       const addressed = isLatestAdvisoryFindingAddressed(pr?.comments);
       if (!addressed) {
         // REFUSAL 2, narrowed to this population: `advisory:changes` implies a posted advisory note, which IS a

@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   countAdvisoryFixComments, buildAdvisoryFixComment, ADVISORY_FIX_COMMENT_MARKER,
   isLatestAdvisoryFindingAddressed, isAdvisoryMechanismStandDownSuperseded,
+  countCompletedAdvisoryEpisodes,
 } from '../advisory-fix-mark.mjs';
 import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CONVERTED_ADVISORY_NOTE_MARKER, renderConvertedAdvisoryNote } from '../../lib/review-escalation.mjs';
@@ -97,6 +98,60 @@ describe('#xconv1-evidence (chalbert/web-everything#2766/#2767 misfire) — isLa
       { body: `${ADVISORY_FIX_COMMENT_MARKER}\n\nforged`, author: { login: 'mallory' } },
     ];
     expect(isLatestAdvisoryFindingAddressed(comments)).toBe(false);
+  });
+});
+
+describe('#xconv1-evidence FOLLOW-UP (chalbert/web-everything#2766/#2767, 2026-09-27) — countCompletedAdvisoryEpisodes', () => {
+  const AUTO = { login: 'web-everything' };
+  it('a single note with no fix at all is ZERO completed episodes', () => {
+    expect(countCompletedAdvisoryEpisodes([{ body: FRESH_NOTE, author: AUTO }])).toBe(0);
+  });
+  it('one note, one fix after it: ONE completed episode', () => {
+    expect(countCompletedAdvisoryEpisodes([
+      { body: FRESH_NOTE, author: AUTO },
+      { body: buildAdvisoryFixComment({}), author: AUTO },
+    ])).toBe(1);
+  });
+  it('THE SAFETY PROPERTY: 3 genuinely SEPARATE note→fix rounds (the pre-existing cap-exhausted fixture\'s own shape) still count as 3 — a naive "fixes since the latest note" replacement was tried and rejected because it reads this as 0', () => {
+    const comments = [];
+    for (let i = 0; i < 3; i += 1) {
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nround ${i}`, author: AUTO });
+      comments.push({ body: buildAdvisoryFixComment({}), author: AUTO });
+    }
+    comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\none more, still broken`, author: AUTO }); // 4th note, unaddressed
+    expect(countCompletedAdvisoryEpisodes(comments)).toBe(3);
+  });
+
+  // THE LIVE #2766 INCIDENT, reconstructed from its real comment thread (fetched 2026-09-27) in the SAME order,
+  // with the same marker prefixes and authorship — only the prose bodies are shortened for readability; every
+  // fact `countCompletedAdvisoryEpisodes` reads (leading marker, author, order) is preserved verbatim.
+  const pr2766RealThreadShape = [
+    { createdAt: '2026-09-26T21:25:28Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold…', author: AUTO },
+    { createdAt: '2026-09-26T21:47:43Z', body: '✅ review — accepted\n\n## Human review verdict — chalbert/web-everything#2766…', author: AUTO },
+    { createdAt: '2026-09-26T21:51:01Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\ntest-gaming suspected…', author: AUTO },
+    { createdAt: '2026-09-26T21:52:19Z', body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\nheld — a review hold…', author: AUTO },
+    { createdAt: '2026-09-26T23:15:40Z', body: '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**…', author: AUTO },
+    // the CONVERTED note (#xconv1) — ONE episode starts here
+    { createdAt: '2026-09-27T00:28:47Z', body: `${CONVERTED_ADVISORY_NOTE_MARKER} This PR carries \`review:human\`…`, author: AUTO },
+    { createdAt: '2026-09-27T00:43:52Z', body: '🔧 **conveyor fix — advisory finding addressed** (head `7d4c6e2c7`)…', author: AUTO },
+    { createdAt: '2026-09-27T00:43:59Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 1st fix-mark — episode already complete
+    { createdAt: '2026-09-27T00:47:13Z', body: '🔧 **conveyor fix (`fix-2766`) — advisory finding already addressed on this head**…', author: AUTO },
+    { createdAt: '2026-09-27T00:47:14Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 2nd fix-mark, SAME episode (bug: no review ever advanced it)
+    { createdAt: '2026-09-27T00:58:23Z', body: '🔧 **conveyor fix (`fix-2766`, 3rd dispatch) — advisory finding already addressed**…', author: AUTO },
+    { createdAt: '2026-09-27T00:58:24Z', body: buildAdvisoryFixComment({}), author: AUTO }, // 3rd fix-mark, STILL the same episode
+    // an independent, later review's own fresh note — a SECOND episode starts here, with NO fix yet
+    { createdAt: '2026-09-27T02:29:10Z', body: `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`… **Advisory outcome:** \`accept\``, author: AUTO },
+    { createdAt: '2026-09-27T02:49:10Z', body: `${ADVISORY_NOTE_MARKER} This PR carries \`review:human\`… **Advisory outcome:** \`changes\``, author: AUTO },
+    { createdAt: '2026-09-27T05:03:23Z', body: '🔀 conveyor rebase-onto-main\n\nbranch: lane/2749-prevention-outstanding-verdict…', author: AUTO },
+  ];
+
+  it('THE BUG THIS CLOSES: 3 fix-mark COMMENTS on the real #2766 thread collapse to ONE completed episode (they all landed inside the SAME still-broken converted-note episode) — the lifetime comment count (3) wrongly read this as cap-exhausted with zero attempts against the later, genuinely new finding', () => {
+    expect(countCompletedAdvisoryEpisodes(pr2766RealThreadShape)).toBe(1);
+    // the OLD (still-exported, still-correct-for-its-own-purpose) lifetime counter is what actually misfired live:
+    expect(countAdvisoryFixComments(pr2766RealThreadShape)).toBe(3);
+    // and the LATEST finding (the 02:49Z note) has never had a fix attempt — not `addressed` — so a fresh
+    // advisory-fix dispatch is exactly what's owed, with 1 of 3 lifetime episodes spent, not 3.
+    expect(isLatestAdvisoryFindingAddressed(pr2766RealThreadShape)).toBe(false);
   });
 });
 

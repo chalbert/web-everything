@@ -112,6 +112,69 @@ export function buildAdvisoryFixComment({ actor = 'conveyor fix agent' } = {}) {
 }
 
 /**
+ * we:scripts/conveyor/advisory-fix-mark.mjs#countCompletedAdvisoryEpisodes — xconv1-evidence follow-up
+ * (chalbert/web-everything#2766/#2767, 2026-09-27): the advisory-fix CAP must count COMPLETED EPISODES (one
+ * advisory note through to the fix that unlocked the NEXT one), never raw fix-mark COMMENTS — a distinction
+ * the lifetime `countAdvisoryFixComments` collapses, exactly the kind of count-vs-something-truer gap
+ * {@link isLatestAdvisoryFindingAddressed} already closed once for the "addressed" question (xaer296/#2549).
+ *
+ * THE BUG THIS CLOSES, CONFIRMED LIVE 2026-09-27. Once the #xconv1-evidence fix landed,
+ * `isLatestAdvisoryFindingAddressed` correctly recognized #2766/#2767's CONVERTED note as "a note" — but by
+ * then the PR's history already held 3 advisory-fix-mark comments, ALL posted back-to-back UNDER the OLD
+ * (broken) code, in response to that SAME ONE converted note, because the old bug meant no review ever
+ * dispatched between them to advance the episode. A later, INDEPENDENT review then posted a brand-new, GENUINE
+ * advisory note — a completely different finding the three prior fixes never touched — and `reconcile-core.mjs`
+ * compared the LIFETIME fix-mark count (3, unchanged forever) against `advisoryFixCap` (3) and refused
+ * `cap-exhausted`, with ZERO attempts ever made against the actual current finding.
+ *
+ * A NAIVE FIX (scope the count to "fix-marks since the latest note", tried and REJECTED here) is UNSAFE: in
+ * the mechanism's own normal, healthy operation, `isLatestAdvisoryFindingAddressed` flips `addressed` true the
+ * MOMENT one fix-mark follows a note, which immediately dispatches the cap-EXEMPT review that posts the NEXT
+ * note — so a "since latest note" count would reset to 0 on every single healthy cycle, making the cap
+ * unenforceable: a PR whose finding is NEVER actually fixed (jury keeps finding it broken, forever) would cycle
+ * fix→review→fix→review with NO limit, exactly the unbounded-flap failure (#2117/#2298) this whole mechanism
+ * exists to prevent. Proven by the pre-existing test this file's own suite already carried ("AT the cap …
+ * still behind the note count) the PR is refused `cap-exhausted`" — that fixture is 3 GENUINE completed
+ * episodes (note→fix→note→fix→note→fix→note), and a "since latest note" count reads it as 0 attempts against
+ * the final note, wrongly allowing a 4th round.
+ *
+ * THE ACTUAL FIX. Count COMPLETED EPISODES, not fix-mark comments: an episode is "one advisory note", and it
+ * is COMPLETE once a (trusted) fix-mark exists anywhere between it and the NEXT note (or, for the latest note,
+ * anywhere after it). This correctly reads the pre-existing test's 3-note/3-fix fixture as 3 completed episodes
+ * (unchanged, cap-exhausted — SAFE, still bounded) — and correctly reads #2766/#2767's history as exactly ONE
+ * completed episode (the 3 fix-marks all landed inside the SAME episode, before the mechanism bug let it ever
+ * advance to a second note), leaving 2 of 3 lifetime episodes still available for the brand-new finding a
+ * later, independent review actually raised. Multiple fixes clustered inside one still-broken episode (the
+ * live shape) can never buy EXTRA tries — they still count as exactly one completed episode toward the SAME
+ * lifetime cap — so this is strictly no less safe than the count it replaces, only fairer to a finding that
+ * has never had a real attempt of its own.
+ * @param {Array<{body?:string}|string>|null|undefined} comments
+ * @returns {number}
+ */
+export function countCompletedAdvisoryEpisodes(comments) {
+  if (!Array.isArray(comments)) return 0;
+  const noteIndices = [];
+  for (let i = 0; i < comments.length; i += 1) {
+    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
+    if (isAdvisoryNoteLine(body)) noteIndices.push(i);
+  }
+  let completed = 0;
+  for (let k = 0; k < noteIndices.length; k += 1) {
+    const start = noteIndices[k] + 1;
+    const end = k + 1 < noteIndices.length ? noteIndices[k + 1] : comments.length;
+    for (let j = start; j < end; j += 1) {
+      const c = comments[j];
+      const body = typeof c === 'string' ? c : c?.body;
+      if (typeof body === 'string' && body.trimStart().startsWith(ADVISORY_FIX_COMMENT_MARKER) && isTrustedMarkerAuthor(c)) {
+        completed += 1;
+        break; // one completed episode per note, however many fix-marks piled up inside it
+      }
+    }
+  }
+  return completed;
+}
+
+/**
  * we:scripts/conveyor/advisory-fix-mark.mjs#isLatestAdvisoryFindingAddressed — xaer296 (epic #3383): has the
  * MOST RECENT advisory note already been addressed by a fix round, ORDER-wise rather than COUNT-wise? Pure.
  *

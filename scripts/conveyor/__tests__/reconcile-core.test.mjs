@@ -43,6 +43,7 @@ import { ADVISORY_NOTE_MARKER } from '../advisory-round-count.mjs';
 import { CI_HEAL_COMMENT_MARKER, buildCiHealComment } from '../ci-heal-mark.mjs';
 import { CONFLICT_FIX_COMMENT_MARKER } from '../conflict-fix-round-count.mjs';
 import { ADVISORY_FIX_COMMENT_MARKER, buildAdvisoryFixComment, isLatestAdvisoryFindingAddressed } from '../advisory-fix-mark.mjs';
+import { CONVERTED_ADVISORY_NOTE_MARKER } from '../../lib/review-escalation.mjs';
 import { buildRebaseOntoMainComment, DEFAULT_MAX_REBASE_RETRIES_PER_SHA } from '../main-red-recovery.mjs';
 import { laneRefItemNum } from '../lease-reaper.mjs';
 import { NEGOTIATION_ROUND_CAP } from '../../lib/jury-core.mjs';
@@ -1512,6 +1513,27 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({
       kind: 'cap-exhausted', prNumber: 2601, attempts: ADVISORY_FIX_ROUND_CAP, cap: ADVISORY_FIX_ROUND_CAP, capKind: 'advisory-fix',
+    })]);
+  });
+
+  // xconv1-evidence FOLLOW-UP (chalbert/web-everything#2766/#2767, 2026-09-27), reconstructed from the real
+  // live thread shape (order + marker prefixes + authorship, as `gh pr view 2766 --json comments` returned it):
+  // a CONVERTED note, 3 fix-mark comments ALL landing inside that SAME episode (the mechanism bug meant no
+  // review ever advanced it before the #xconv1-evidence fix), then a later, independent review's own genuinely
+  // NEW advisory note. The raw lifetime fix-mark COUNT (3) used to refuse this `cap-exhausted` with zero
+  // attempts ever made against the new finding; `countCompletedAdvisoryEpisodes` reads it as ONE spent episode.
+  it('THE LIVE #2766/#2767 SHAPE: 3 fix-marks clustered inside ONE (buggy, never-advanced) converted-note episode, then a genuinely new finding — owed a fresh advisory-fix (1 of 3 episodes spent), never cap-exhausted', () => {
+    const comments = [
+      { body: `${CONVERTED_ADVISORY_NOTE_MARKER} converted note — the original test-gaming false positive`, author: AUTOMATION },
+      { body: buildAdvisoryFixComment({}), author: AUTOMATION },
+      { body: buildAdvisoryFixComment({}), author: AUTOMATION },
+      { body: buildAdvisoryFixComment({}), author: AUTOMATION },
+      { body: `${ADVISORY_NOTE_MARKER}\n\na later, independent review's own genuinely new finding`, author: AUTOMATION },
+    ];
+    const plan = planReconcile({ prs: [prNeedsHuman({ comments })], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'fix', mode: 'advisory-fix', prNumber: 2601, attempts: 1, cap: ADVISORY_FIX_ROUND_CAP,
     })]);
   });
 
