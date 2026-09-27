@@ -129,7 +129,12 @@ import { ADVISORY_LABELS } from '../lib/advisory-labels.mjs';
 // check failed only because `origin/main`'s own CI was red at that moment must never be handed to `ci-heal`,
 // which would "repair" code that was never broken. `isPrCiFailureOwedRerun` is the PURE leaf that decides this
 // (see its own docblock for the full incident and the two facts it needs); this file only calls it.
-import { isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE_RETRIES_PER_SHA } from './main-red-recovery.mjs';
+import {
+  isPrCiFailureOwedRerun, countRebaseOntoMainComments, DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
+  // landing-freeze fix (2026-09-27) — used only to word the `owed-ci-rerun` refusal's `why` accurately when
+  // THIS path (not the red-window one) is what actually granted it; see that function's own docblock.
+  isMainLatestCheckGreen,
+} from './main-red-recovery.mjs';
 // #2588/review-loops (epic #3383/#4075) — read-only reuse of the drain's OWN reviewed-sha marker (never a
 // second derivation): `parseReviewedSha` recovers the head an ACCEPT-shaped verdict (`accepted`/`clear-human`/
 // `restamp`) covered. See {@link planReconcile}'s ONE-REVIEW-PER-HEAD refusal for why this pass needs it too.
@@ -873,6 +878,14 @@ export function assessLiveness(bound) {
  *   the IO shell from `gh run list --branch <defaultBranch>` ONLY when at least one PR is `ci-red` (never paid
  *   for otherwise). Defaults to `[]` — a caller that never reads `main`'s own history sees byte-identical
  *   behaviour to before this param existed (every `ci-red` PR falls straight through to the `ci-heal` path).
+ * @param {Array<object>} [o.mainLatestCheckRuns] - landing-freeze fix (2026-09-27): `main`'s own latest completed
+ *   run's per-check conclusions (`we:scripts/conveyor/reconcile-pass.mjs#defaultReadMainLatestCheckRuns`), read
+ *   by the IO shell under the SAME "only when at least one PR is `ci-red`" gate as `mainRedWindows`. Lets
+ *   `isPrCiFailureOwedRerun` excuse a failure `mainRedWindows` alone can never explain — a required check that
+ *   never even RAN on `main` during its own regression window (PR #2790's own incident: `daemon-soak` was
+ *   `pull_request`-only before it, so `main`'s CI runs stayed `success` right through a real `daemon-soak`
+ *   regression — no red window ever opened to attribute against). Defaults to `[]` — a caller that never reads
+ *   it sees byte-identical behaviour to before this param existed.
  * @param {number} [o.liveSessionOverrunMs] - see {@link LIVE_SESSION_OVERRUN_MS}'s own docblock; defaults to it.
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>}}
  */
@@ -894,7 +907,7 @@ function roundCapExhaustedNoteText(prNumber, attempts, cap, capKind) {
 export function planReconcile({
   repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
   conflictFixCap = CONFLICT_FIX_ROUND_CAP, advisoryFixCap = ADVISORY_FIX_ROUND_CAP, defaultBranch = 'main',
-  mainRedWindows = [],
+  mainRedWindows = [], mainLatestCheckRuns = [],
   // xilx617 (epic #4075/#3383) — the bound a `live-process` refusal must overrun before it also gets a
   // surfaced `session-overrun` note (see {@link LIVE_SESSION_OVERRUN_MS}'s own docblock). A `planReconcile`
   // OPTION, never an env read — this file stays pure; a test sets it directly to exercise both sides of the
@@ -934,6 +947,11 @@ export function planReconcile({
       // not actually resolve a red-main-caused failure, live-measured on this exact incident.
       requiredCheckCompletedAt: pr?.requiredCheckCompletedAt ?? null,
       aheadByOnMain: Number.isFinite(pr?.aheadByOnMain) ? pr.aheadByOnMain : null,
+      // landing-freeze fix (2026-09-27) — WHICH required check is the one currently failing (`reconcile-
+      // pass.mjs#enrichPrsWithMainRedFacts`'s own `failingRequiredCheckForAttribution` result), so the `ci-red`
+      // branch below can ask `isMainLatestCheckGreen` about THIS SAME check on main's own latest completed run,
+      // never a different one. EVIDENCE ONLY here, same as its two siblings above.
+      requiredCheckName: pr?.requiredCheckName ?? null,
     };
     const refuse = (kind, extra) => { refusals.push({ ...base, kind, ...extra }); };
     // xilx617 (epic #4075/#3383) — EVERY `cap-exhausted` refusal EXCEPT the `ci-red` one above (which already
@@ -1083,14 +1101,29 @@ export function planReconcile({
       // not one more round spent against that cap, it is a DIFFERENT job this pass does not run itself
       // (`we:scripts/conveyor/ci-red-recovery-watch.mjs` does), the same "owed elsewhere, never dispatched
       // here" shape `OWED_ELSEWHERE` already uses for a `conflicted` PR.
+      // landing-freeze fix (2026-09-27) — LIVE INCIDENT: PR #2790 fixed a `daemon-soak` regression that had sat
+      // on `main` unseen (the job was `pull_request`-only before it, so `main`'s own CI runs stayed `success`
+      // right through the regression — no red window ever opened to attribute against retroactively), leaving
+      // #2748/#2783/#2784 `cap-exhausted` and #2788/#2789 about to be handed yet another `ci-heal` for code that
+      // was never broken. `isPrCiFailureOwedRerun`'s new green-check path (see its own docblock) catches exactly
+      // this: `requiredCheckName` now passes on main's own latest completed run, independent of any red-window
+      // attribution. Checked in the SAME call, BEFORE the `ci-heal` cap below, exactly like the red-window path —
+      // a PR already sitting `cap-exhausted` from burning its heal count on main's own now-fixed regression is
+      // NOT re-capped or specially reset: the cap is simply never consulted on this path, so the very next tick
+      // this fires it reads `owed-ci-rerun` instead, with no separate "re-arm" bookkeeping needed.
       if (!mergeDirty && !rebaseCapExhausted && isPrCiFailureOwedRerun({
         requiredCheckCompletedAt: base.requiredCheckCompletedAt,
         aheadBy: base.aheadByOnMain,
         mainRedWindows,
+        failingCheckName: base.requiredCheckName,
+        mainLatestCheckRuns,
       })) {
+        const viaMainGreen = isMainLatestCheckGreen({ failingCheckName: base.requiredCheckName, mainLatestCheckRuns });
         refuse('owed-ci-rerun', {
           ...withPhase,
-          why: `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
+          why: viaMainGreen
+            ? `the required check \`${base.requiredCheckName}\` failed at ${base.requiredCheckCompletedAt}, but is passing on main's own latest completed run — main has since fixed this, this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs), never a ci-heal, which would misdiagnose main's own (now-fixed) breakage as a defect here`
+            : `the required check failed at ${base.requiredCheckCompletedAt}, while main's own CI was red — this PR's own code is not implicated. It is owed a mechanical rebase onto main (scripts/conveyor/ci-red-recovery-watch.mjs) once main has recovered, never a ci-heal, which would misdiagnose main's own breakage as a defect here`,
         });
         continue;
       }
