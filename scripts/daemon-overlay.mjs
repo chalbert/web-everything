@@ -55,7 +55,9 @@
  */
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { addOverlay, removeOverlay, readOverlayState, appendOverlayEvent } from './lib/daemon-overlays.mjs';
+import { edgeEnabled, registerPr } from './lib/daemon-edge.mjs';
 
 function parseFlags(argv) {
   const flags = {};
@@ -123,6 +125,14 @@ async function main() {
       kind: 'added', ref: flags.ref, pr, by, reason, ...(pinned !== undefined ? { pinned } : {}),
     }, { env });
     output = { list };
+    // daemon-edge slice 1 (epic x59tqsg): ONLY with WE_DAEMON_EDGE=1 (default off) is the PR also registered
+    // for the kept `daemon-edge` branch (admission check vs main + edge). Flag off ⇒ this block never runs.
+    if (edgeEnabled(env) && pr != null) {
+      const url = spawnSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+      output.edge = url.status === 0
+        ? registerPr({ pr, ref: flags.ref, remoteUrl: String(url.stdout).trim(), env, by, reason })
+        : { ok: false, reason: 'no-origin-url' };
+    }
   } else {
     const { removed, list } = removeOverlay(root, flags.ref, { env, why: reason || 'operator' });
     if (removed) appendOverlayEvent(root, { kind: 'removed', ref: flags.ref, by, reason }, { env });
