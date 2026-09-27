@@ -988,6 +988,13 @@ export function planReconcile({
   repo = 'we', prs = [], agents = [], durableCounts = {}, now = 0, roundCap = NEGOTIATION_ROUND_CAP, ciHealCap = CI_HEAL_ROUND_CAP,
   conflictFixCap = CONFLICT_FIX_ROUND_CAP, advisoryFixCap = ADVISORY_FIX_ROUND_CAP, defaultBranch = 'main',
   mainRedWindows = [],
+  // #2748 false-red follow-up (soak-replay-gate, PR #2775) — the repo's REQUIRED status-check names (branch
+  // protection, `we:scripts/lib/required-status-checks.mjs`), threaded straight through to `classifyPr` so
+  // `ci-red` means a REQUIRED check failed, not merely "a check outside the hand-maintained exclusion list".
+  // Optional and pure DATA IN: this file stays IO-free, so the caller (`we:scripts/conveyor/reconcile-pass.mjs`)
+  // is the one that fetches (and caches) the live set; omitted, `classifyPr` falls back to its own exclusion-
+  // list default unchanged — byte-identical behaviour to before this param existed.
+  requiredChecks = null,
   // xilx617 (epic #4075/#3383) — the bound a `live-process` refusal must overrun before it also gets a
   // surfaced `session-overrun` note (see {@link LIVE_SESSION_OVERRUN_MS}'s own docblock). A `planReconcile`
   // OPTION, never an env read — this file stays pure; a test sets it directly to exercise both sides of the
@@ -1140,8 +1147,8 @@ export function planReconcile({
     const phase = classifyPr({
       state: pr?.state, labels: pr?.labels, mergeStateStatus: pr?.mergeStateStatus,
       statusCheckRollup: pr?.statusCheckRollup,
-    });
-    const check = reduceCheckState(pr?.statusCheckRollup);
+    }, requiredChecks);
+    const check = reduceCheckState(pr?.statusCheckRollup, requiredChecks);
     const withPhase = { phase, check: check.state, labels: labelNames(pr?.labels) };
 
     // ── `ci-red` (multi-repo slice 7) — its OWN branch, ahead of the generic `OWED`/`OWED_ELSEWHERE` table,

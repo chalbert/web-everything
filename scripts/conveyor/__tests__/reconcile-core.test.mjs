@@ -878,6 +878,73 @@ describe('case 5h — a CANCELLED required check reads ci-red and is ci-healed, 
   });
 });
 
+// #2748 false-red follow-up (soak-replay-gate, PR #2775) — LIVE INCIDENT 2026-09-26: `chalbert/web-
+// everything#2748`'s real rollup (`gh pr view 2748 --repo chalbert/web-everything --json statusCheckRollup`)
+// has every REQUIRED check (`test`/`smoke`/`daemon-soak`) green, and the ONLY red check is the brand-new
+// advisory `soak-replay-gate` (PR #2775) — an advisory check `classifyPr`'s exclusion list did not yet know
+// about. This read `phase: 'ci-red'` and kept a `ci-heal-2748` session dispatched against a PR with nothing a
+// ci-heal could repair — pure waste, and it blocked landing. Passing `requiredChecks` (branch protection's own
+// required set, fetched + cached by `we:scripts/lib/required-status-checks.mjs`) fixes this STRUCTURALLY: only
+// a check IN that set can make `phase` read `ci-red`, so the NEXT advisory workflow someone adds can never
+// reproduce this by construction, with no exclusion-list update required.
+describe('case 5j — requiredChecks makes a NEW advisory check\'s red never read ci-red (PR #2748 real shape)', () => {
+  // `status: 'COMPLETED'` on every row matches the real `gh pr view --json statusCheckRollup` shape — without
+  // it `reduceCheckState` (evidence only, carried as `check` on every row) reads an incomplete-looking rollup
+  // as still running; irrelevant to `phase` (which `ciFailed` alone decides) but kept realistic here anyway.
+  const pr2748Rollup = [
+    { name: 'review-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'soak-replay-gate', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { name: 'test-shard (1)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (2)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (3)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test-shard (4)', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'daemon-soak', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'smoke', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ];
+  const REQUIRED_CHECKS = ['test', 'smoke', 'daemon-soak'];
+  // `review:accepted` + `ready-to-merge` (→ phase `queued` once CI truly reads clean) isolates the ci-red
+  // question from the unrelated `needs-review`/`review` dispatch branch a `review:pending` label would also
+  // exercise — the real PR #2748 carries `review:pending` too, but that is a SEPARATE fact this case does not
+  // need to also assert on.
+  const pr2748 = (over = {}) => pr1563({
+    number: 2748, labels: lbl('review:accepted', 'ready-to-merge'), mergeStateStatus: 'CLEAN',
+    statusCheckRollup: pr2748Rollup, comments: [], ...over,
+  });
+
+  // The LIVE bug (before EITHER half of this fix) was `ciFailed`'s exclusion list not yet knowing
+  // `soak-replay-gate`'s name at all — reproduced directly against `we:scripts/progress-board.mjs#ciFailed`
+  // in `progress-board.test.mjs`. Both halves of the fix land in the SAME PR, so by the time `planReconcile`
+  // is exercised here even the no-`requiredChecks` default path (now that `CI_TRUTH_EXCLUDED_CHECKS` itself
+  // carries `soak-replay-gate`, belt-and-suspenders for every call site that never wires a required set
+  // through) already reads this correctly — asserted below alongside the `requiredChecks`-aware path, which
+  // is the one call site actually wired end-to-end (`reconcile-pass.mjs` → `planReconcile`) and the one that
+  // remains correct even against a FUTURE advisory check nobody has added to the exclusion list yet.
+  it('with no requiredChecks (the exclusion-list default, now carrying soak-replay-gate too): never ci-red', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2748 })]);
+  });
+
+  it('FIXED, and future-proof: with requiredChecks supplied, an all-green required set never reads ci-red — nothing owed here', () => {
+    const plan = planReconcile({ prs: [pr2748()], agents: [], now: NOW, requiredChecks: REQUIRED_CHECKS });
+    expect(plan.dispatch).toEqual([]);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'nothing-owed', phase: 'queued', prNumber: 2748 })]);
+  });
+
+  it('a REAL required-check failure alongside the same advisory red still reads ci-red and is ci-healed', () => {
+    const rollupWithRealFailure = [
+      ...pr2748Rollup.filter((c) => c.name !== 'test'),
+      { name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' },
+    ];
+    const plan = planReconcile({
+      prs: [pr2748({ statusCheckRollup: rollupWithRealFailure, labels: lbl('ci:failed') })],
+      agents: [], now: NOW, requiredChecks: REQUIRED_CHECKS,
+    });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'ci-heal', prNumber: 2748, phase: 'ci-red' })]);
+  });
+});
+
 describe('case 5g — owed-ci-rerun refuses ci-heal for a ci-red PR attributable to a red main (we:backlog/x5uqim1)', () => {
   const MAIN_RED_WINDOWS = [{ start: '2026-09-25T01:30:55Z', end: '2026-09-25T02:31:25Z' }];
   const prRedAttributable = (over = {}) => pr1563({

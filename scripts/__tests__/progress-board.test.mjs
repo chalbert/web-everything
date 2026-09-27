@@ -155,6 +155,47 @@ describe('classifyPr', () => {
     expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: [...rollup, { name: 'test-shard (3)', conclusion: 'FAILURE' }] }))).toBe('ci-red');
   });
 
+  // #2748 false-red follow-up (soak-replay-gate, PR #2775) — LIVE INCIDENT 2026-09-26: `chalbert/web-
+  // everything#2748`'s real rollup (`gh pr view 2748 --repo chalbert/web-everything --json
+  // statusCheckRollup`) has every REQUIRED check (`test`/`smoke`/`daemon-soak`) green and ONLY the new
+  // advisory `soak-replay-gate` check red — the exclusion-list-only `ciFailed(rollup)` (no second arg,
+  // BEFORE `soak-replay-gate` was added to `CI_TRUTH_EXCLUDED_CHECKS`) misread this as `ci-red`. Passing the
+  // repo's REQUIRED set fixes it structurally: only a check IN that set can fail this read, so a brand-new
+  // advisory check can never do this again even before anyone remembers to update an exclusion list.
+  it('does not let a NEW advisory check (soak-replay-gate) read as ci-red when a required set is supplied ' +
+    '— PR #2748\'s real rollup, 2026-09-26', () => {
+    const pr2748Rollup = [
+      { name: 'review-gate', conclusion: 'FAILURE' },
+      { name: 'soak-replay-gate', conclusion: 'FAILURE' },
+      { name: 'test-shard (1)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (2)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (3)', conclusion: 'SUCCESS' },
+      { name: 'test-shard (4)', conclusion: 'SUCCESS' },
+      { name: 'daemon-soak', conclusion: 'SUCCESS' },
+      { name: 'smoke', conclusion: 'SUCCESS' },
+      { name: 'test', conclusion: 'SUCCESS' },
+    ];
+    const requiredChecks = ['test', 'smoke', 'daemon-soak'];
+    // Even carrying the SAME stale `ci:failed` label the live incident had, the rollup now positively proves
+    // every required check green, so the fallback in the `ci:failed` branch below correctly stands down too.
+    expect(ciFailed(pr2748Rollup, requiredChecks)).toBe(false);
+    expect(
+      classifyPr(pr({ labels: ['review:pending', 'ci:failed'], mergeStateStatus: 'UNSTABLE', statusCheckRollup: pr2748Rollup }), requiredChecks),
+    ).toBe('needs-review');
+    // A REAL required-check failure must still read ci-red when a required set is supplied.
+    expect(ciFailed([...pr2748Rollup, { name: 'test', conclusion: 'FAILURE' }], requiredChecks)).toBe(true);
+  });
+
+  it('with no required set supplied, ciFailed/classifyPr still fall back to the exclusion list unchanged '
+    + '(soak-replay-gate is now IN that list too — see CI_TRUTH_EXCLUDED_CHECKS)', () => {
+    const rollup = [
+      { name: 'soak-replay-gate', conclusion: 'FAILURE' },
+      { name: 'test', conclusion: 'SUCCESS' },
+    ];
+    expect(ciFailed(rollup)).toBe(false);
+    expect(classifyPr(pr({ labels: ['review:pending'], statusCheckRollup: rollup }))).toBe('needs-review');
+  });
+
   it('treats a merged pull request as landed whatever its labels say', () => {
     expect(classifyPr(pr({ state: 'MERGED', labels: ['review:human'] }))).toBe('landed');
   });
