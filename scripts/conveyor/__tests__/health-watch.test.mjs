@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import {
   probeDaemonLogs, probeLeases, probeSelfSync, probeLanePools, tick, healthSectionLines, healthDir,
   probeDaemonStatus, daemonNameForLabel, runTickWithWatchdog, probeAuthExpiredSessions, probeAgents,
-  probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad,
+  probePrs, probeStaleState, probeMergedPrs, probeProcesses, probeMachineLoad, probeGhShimLanes,
 } from '../health-watch.mjs';
 
 let dir;
@@ -100,6 +100,63 @@ describe('probeSelfSync', () => {
     expect(out[0].alerts[0].kind).toBe('smoke-rejected');
     expect(out[0].alerts[0].at).toBe(Date.parse('2026-09-25T10:00:00Z'));
     expect(out[0].rebuild.adopted.at).toBe(Date.parse('2026-09-25T10:05:00Z'));
+  });
+});
+
+// ── probeGhShimLanes ─────────────────────────────────────────────────────────────────────────────────────────
+
+describe('probeGhShimLanes', () => {
+  function writeShim(path, { throttleCli, realGh }) {
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, [
+      '#!/usr/bin/env node',
+      `const REAL_GH = ${JSON.stringify(realGh)};`,
+      `const GH_THROTTLE_CLI = ${JSON.stringify(throttleCli)};`,
+      '',
+    ].join('\n'));
+  }
+
+  it('flags the legacy shared shim when its GH_THROTTLE_CLI is baked into a lane clone', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', '.lanes', 'web-everything', 'lane-22', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(1);
+    expect(out[0].inLane).toBe(true);
+    expect(out[0].throttleCli).toContain('lane-22');
+  });
+
+  it('scans every per-checkout gh-shim.d/<hash>/gh, not just the legacy shared one', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim.d', 'abc123', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', 'webeverything', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    writeShim(join(root, 'gh-shim.d', 'def456', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', '.lanes', 'web-everything', 'lane-9', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(2);
+    expect(out.find((s) => s.path.includes('abc123')).inLane).toBe(false);
+    expect(out.find((s) => s.path.includes('def456')).inLane).toBe(true);
+  });
+
+  it('never flags a stable primary-checkout path', () => {
+    const root = join(dir, '.claude', 'github-app-token');
+    writeShim(join(root, 'gh-shim.d', 'stable', 'gh'), {
+      realGh: '/opt/homebrew/bin/gh',
+      throttleCli: join(dir, 'workspace', 'webeverything', 'scripts', 'lib', 'gh-throttle.mjs'),
+    });
+    const out = probeGhShimLanes({ home: dir });
+    expect(out).toHaveLength(1);
+    expect(out[0].inLane).toBe(false);
+  });
+
+  it('returns [] when no shim has ever been written', () => {
+    expect(probeGhShimLanes({ home: dir })).toEqual([]);
   });
 });
 
