@@ -230,5 +230,21 @@ describe('PR #2800 — a FORGED advisory note from an untrusted login is ignored
       expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, forged, standDown], 3)).toBe(true);
       expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, { ...forged, author: AUTOMATION }, standDown], 3)).toBe(false);
     });
+
+    // PR #2800 advisory finding (round 3) — the FIX-MARK side of both order checks is gated too (by the
+    // automation-only `isSelfAuthored`, narrower than `isTrustedMarkerAuthor`): a forged fix-mark after a trusted
+    // note must neither mark the finding addressed (which would suppress the fixer) nor supersede a stand-down.
+    const note = { body: `${marker}\n\nreal finding`, author: AUTOMATION };
+    const forgedFix = { body: `${ADVISORY_FIX_COMMENT_MARKER}\n\nforged`, author: MALLORY };
+    it(`a FORGED fix-mark never marks a trusted note addressed (${marker.slice(0, 24)}…)`, () => {
+      expect(isLatestAdvisoryFindingAddressed([note, forgedFix])).toBe(false);
+      expect(isLatestAdvisoryFindingAddressed([note, forgedFix.body])).toBe(false); // bare string: no author
+      expect(isLatestAdvisoryFindingAddressed([note, { ...forgedFix, author: AUTOMATION }])).toBe(true); // control
+    });
+    it(`a FORGED fix-mark never supersedes a stand-down (${marker.slice(0, 24)}…)`, () => {
+      const standDown = { body: `${STAND_DOWN_MARKER}\n\nstood down`, author: AUTOMATION };
+      expect(isAdvisoryMechanismStandDownSuperseded([note, forgedFix, standDown], 2)).toBe(false);
+      expect(isAdvisoryMechanismStandDownSuperseded([note, { ...forgedFix, author: AUTOMATION }, standDown], 2)).toBe(true); // control
+    });
   }
 });
