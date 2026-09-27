@@ -829,9 +829,9 @@ export function assessLiveness(bound) {
 }
 
 /**
- * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced. Runs the
- * IDENTICAL three checks the ordinary `needs-review`/`needs-human` OWED-table path always ran inline
- * (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap) so a SECOND population —
+ * we:scripts/conveyor/reconcile-core.mjs#dispatchReviewRow — the REVIEW decision, single-sourced: the ONE copy of
+ * the three checks (`already-reviewed-head` #2588, then `no-findings`, then the shared attempt cap). BOTH callers
+ * run through it — the ordinary `needs-review`/`needs-human` OWED-table path, and a SECOND population —
  * we:backlog/review-while-main-red (#4075/#3383): a `review:pending` PR whose ONLY CI blocker is
  * `owed-ci-rerun` (main's own red, never this PR's code) — can ask for the identical decision without a second,
  * divergent copy of it. LIVE INCIDENT this closes, 2026-09-26: PRs #2769/#2770/#2772/#2778/#2779 sat
@@ -843,9 +843,10 @@ export function assessLiveness(bound) {
  * of those five PRs ~20+ minutes once main recovered, for no reason: review capacity was idle throughout.
  *
  * Mutates via the injected `refuse`/`refuseCapExhausted`/`dispatch` exactly like the rest of {@link
- * planReconcile}'s loop body (same closures, same row shapes) — a caller extends every row this pushes with
- * `extra` (the ci-red-parallel caller passes `{ owedCiRerun: true }` so a reader can tell the two populations
- * apart in the report without a different kind name).
+ * planReconcile}'s loop body (same row shapes) — a caller extends every row this pushes with `extra` (the
+ * ci-red-parallel caller passes `{ owedCiRerun: true }` so a reader can tell the two populations apart in the
+ * report without a different kind name). The ci-red-parallel caller injects a `refuse` that FOLDS the refusal
+ * into its existing `owed-ci-rerun` row rather than pushing a second row for the same PR (PR #2783 review).
  * @param {object} o
  * @param {object} o.pr
  * @param {object} o.withPhase
@@ -860,15 +861,11 @@ export function assessLiveness(bound) {
 function dispatchReviewRow({
   pr, withPhase, base, attempts, roundCap, refuse, refuseCapExhausted, dispatch, extra = {},
 }) {
-  // ── `already-reviewed-head` (#2588) — see {@link planReconcile}'s own copy of this note for the full incident.
-  // Raw-SHA comparison only, deliberately: for THIS caller (the ci-red-parallel path) the PR's head cannot have
-  // moved since the LATEST accept this pass could have seen — a mechanical rebase never runs while `ci:failed`
-  // still holds (see `ci-red-recovery-watch.mjs`'s own header: it rebases to CLEAR a red check, so a rebase and
-  // a still-`ci-red` phase read on the SAME tick are mutually exclusive) — so a raw-sha miss here is always a
-  // genuinely new head, never a rebased-but-content-identical one. The rebase-survives-acceptance question this
-  // item also had to answer is settled a different way: once the rebase lands and `ci:failed` clears,
-  // `classifyPr` moves the PR to `queued` (an accepted PR) or `open`/`bounced` (a since-changed one) — OFF the
-  // OWED table entirely — so this guard, and this whole function, is never reached again for that PR either way.
+  // ── `already-reviewed-head` (#2588) — see {@link planReconcile}'s note ahead of its call for the full incident.
+  // Raw-SHA comparison only, as it always was. A mechanically-REBASED accepted PR cannot reach this function
+  // with a stale marker: an accept moves the label to `review:accepted`, which the OWED table never owes a review
+  // (phase `queued`) and the ci-red-parallel caller never calls this for (it is gated on `review:pending`) —
+  // defended by the "accepted contribution awaiting its mechanical rebase's CI" test in reconcile-core.test.mjs.
   const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
   const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
   if (headSha && reviewedSha && reviewedSha === headSha) {
@@ -1036,13 +1033,22 @@ export function planReconcile({
     // pushes its own `ci-heal-exhausted` note) also pushes a `round-cap-exhausted` note, mirroring that note's
     // own "refuse AND surface" treatment. `capKind` names the population; see {@link roundCapExhaustedNoteText}
     // for why the text carries no clock-derived number.
-    const refuseCapExhausted = (extra) => {
-      refuse('cap-exhausted', extra);
+    // Built over an injected `refuseFn` so the ci-red-parallel review (below) can fold its `cap-exhausted` into
+    // the PR's one `owed-ci-rerun` row while still surfacing the SAME note.
+    const capExhaustedVia = (refuseFn) => (extra) => {
+      refuseFn('cap-exhausted', extra);
       notes.push({
         kind: 'round-cap-exhausted', prNumber, attempts: extra.attempts, cap: extra.cap, capKind: extra.capKind,
         text: roundCapExhaustedNoteText(prNumber, extra.attempts, extra.cap, extra.capKind),
       });
     };
+    const refuseCapExhausted = capExhaustedVia(refuse);
+    // The shared round count — see REFUSAL 3 below for why it is a `Math.max` over three durable sources.
+    const roundAttempts = () => Math.max(
+      Number(counts[prNumber]) || 0,
+      countRearmComments(pr?.comments),
+      countAdvisoryComments(pr?.comments),
+    );
 
     // ── REFUSAL 1 — `stood-down` is TERMINAL. No decay, no clock: `now` is not read on this path, so the same
     // PR returns the same refusal a week later. A person clearing the marker is the intended exit.
@@ -1202,14 +1208,22 @@ export function planReconcile({
         // never reach here, and an already-`review:accepted` PR owes no fresh review. NEVER for the sibling
         // population one branch below (a PR's OWN code red, `ci-heal` owed) — that population does not reach
         // this `if`, by construction of the `isPrCiFailureOwedRerun` condition guarding it.
+        //
+        // ONE refusal row per PR (PR #2783 review, CONFIRMED): the review decision's own refusal (`no-findings`,
+        // `cap-exhausted`, `already-reviewed-head`) is FOLDED into the `owed-ci-rerun` row above as
+        // `reviewRefusal`, never pushed as a second row. `land-advance-items-io.mjs#reconcileHolds` keys refusals
+        // by PR and keeps the last one, so a trailing `no-findings` row (holds `['fix']`) silently erased this
+        // row's `['review','fix']` hold and let land-advance dispatch its own, uncoordinated review.
         if (withPhase.labels.includes('review:pending')) {
-          const reviewAttempts = Math.max(
-            Number(counts[prNumber]) || 0,
-            countRearmComments(pr?.comments),
-            countAdvisoryComments(pr?.comments),
-          );
+          const owedRow = refusals[refusals.length - 1];
+          const foldRefusal = (kind, extra) => {
+            owedRow.reviewRefusal = {
+              kind, ...Object.fromEntries(Object.entries(extra).filter(([k]) => !(k in withPhase) && k !== 'owedCiRerun')),
+            };
+          };
           dispatchReviewRow({
-            pr, withPhase, base, attempts: reviewAttempts, roundCap, refuse, refuseCapExhausted, dispatch,
+            pr, withPhase, base, attempts: roundAttempts(), roundCap,
+            refuse: foldRefusal, refuseCapExhausted: capExhaustedVia(foldRefusal), dispatch,
             extra: { owedCiRerun: true },
           });
         }
@@ -1279,8 +1293,8 @@ export function planReconcile({
       if (!addressed) {
         // REFUSAL 2, narrowed to this population: `advisory:changes` implies a posted advisory note, which IS a
         // real finding — countFindings should never read 0 here, but this is named rather than silently
-        // falling through to the generic `no-findings` branch below (which is keyed to `OWED[phase] ===
-        // 'review'` only and would never dispatch a fix for a zero-finding PR).
+        // falling through to the generic `no-findings` branch below (which never dispatches a fix for a
+        // zero-finding PR).
         const advisoryFindingsHere = countFindings(pr?.comments);
         if (advisoryFindingsHere === 0) {
           refuse('no-findings', {
@@ -1427,62 +1441,31 @@ export function planReconcile({
     // has only ever been BOUNCED, on purpose: a `review:changes` verdict stamps no `reviewed-sha` marker (it is
     // not an acceptance), so a real, unaddressed finding still gets its round through the ordinary paths below,
     // completely unaffected by this guard.
+    //
+    // ── REFUSAL 2 (review half) — no findings still owes a REVIEW: "nothing to FIX" is not "nothing to do" —
+    // UNLESS that review population has itself exhausted the round cap. #2588/review-loops (epic #3383/#4075):
+    // this branch used to dispatch with `attempts: 0` HARDCODED, so a PR stuck re-reading `needs-review`/
+    // `needs-human` with zero findings every tick (a review session that crashes or never posts a verdict is
+    // exactly this shape) re-dispatched a fresh review agent FOREVER. It reads the SAME durable count REFUSAL 3
+    // binds on below.
+    //
+    // All three checks (the head guard, no-findings, the cap) live in {@link dispatchReviewRow} — the ONE copy,
+    // shared with the ci-red-parallel review above (PR #2783 review: the review decision was duplicated here).
     if (OWED[phase] === 'review') {
-      const headSha = typeof pr?.headRefOid === 'string' ? pr.headRefOid.trim().toLowerCase() : '';
-      const reviewedSha = headSha ? parseReviewedSha(pr?.comments) : null;
-      if (headSha && reviewedSha && reviewedSha === headSha) {
-        refuse('already-reviewed-head', {
-          ...withPhase, headSha, reviewedSha,
-          why: `this exact head (\`${headSha}\`) already carries a \`reviewed-sha\` accept marker from a prior` +
-            ' review — dispatching another review for a commit nobody has touched since risks a second,' +
-            ' contradicting verdict landing on it (#2588)',
-        });
-        continue;
-      }
+      dispatchReviewRow({ pr, withPhase, base, attempts: roundAttempts(), roundCap, refuse, refuseCapExhausted, dispatch });
+      continue;
     }
 
-    // ── THE CAP, from the PR and ONLY from the PR — computed HERE, before REFUSAL 2, because the zero-findings
-    // review branch immediately below needs the REAL count too (#2588/review-loops, epic #3383/#4075). See the
-    // fuller note ahead of its other use, a few lines down.
-    const attempts = Math.max(
-      Number(counts[prNumber]) || 0,
-      countRearmComments(pr?.comments),
-      countAdvisoryComments(pr?.comments),
-    );
+    // ── THE CAP, from the PR and ONLY from the PR. See the fuller note at REFUSAL 3 below.
+    const attempts = roundAttempts();
 
-    // ── REFUSAL 2 — no findings, no fixer. A fix agent handed a PR with nothing to fix invents work. When a
-    // review is what the phase asks for, the review still goes out: "nothing to FIX" is not "nothing to do" —
-    // UNLESS that review population has itself exhausted the round cap (#2588/review-loops, epic #3383/#4075;
-    // see the note on the `dispatch.push` below for the incident this closes).
+    // ── REFUSAL 2 — no findings, no fixer. A fix agent handed a PR with nothing to fix invents work.
     const findings = countFindings(pr?.comments);
     if (findings === 0) {
       refuse('no-findings', {
         ...withPhase, findings: 0, comments: Array.isArray(pr?.comments) ? pr.comments.length : 0,
         why: 'no reviewer finding on this PR — a fix agent would invent work. A review, not a fix, is what an unreviewed PR is owed.',
       });
-      if (OWED[phase] === 'review') {
-        // #2588/review-loops (epic #3383/#4075) — THE BUG: this branch used to dispatch with `attempts: 0`
-        // HARDCODED, no matter how many times it had already run, so a PR stuck re-reading `needs-review`/
-        // `needs-human` with zero findings every tick (a review session that crashes or never posts a verdict
-        // is exactly this shape) re-dispatched a fresh review agent FOREVER — the round cap never even saw a
-        // number to compare. It now reads the SAME durable `attempts` REFUSAL 3 binds on below, so this
-        // population hits `cap-exhausted` exactly like every other one once it is genuinely stuck, instead of
-        // looping forever.
-        if (attempts >= roundCap) {
-          refuseCapExhausted({
-            ...withPhase, attempts, cap: roundCap, findings: 0, capKind: 'review',
-            why: `no reviewer finding has ever landed on this PR, but its own durable attempt count is ${attempts}` +
-              ` against a cap of ${roundCap} — a review keeps being dispatched with nothing to show for it, and a` +
-              ' person must take it',
-          });
-        } else {
-          dispatch.push({
-            ...base, ...withPhase, kind: 'review', findings: 0, attempts,
-            why: `parked for an independent review and no finding has been raised yet — a review is owed` +
-              ` (#3279 runs it); ${attempts} of ${roundCap} attempts are spent`,
-          });
-        }
-      }
       continue;
     }
 
@@ -1537,22 +1520,20 @@ export function planReconcile({
     // (`we:scripts/operations/review-pr.mjs`'s `advise` step, #xlw02hw) — counting THAT recovers the real round
     // count. Kept as a `Math.max` alongside the rearm count, never a replacement: a PR can carry BOTH kinds of
     // history, and the cap must bind on whichever count is higher, never reset by reading only one of the two.
-    // `attempts` itself is computed ABOVE, ahead of REFUSAL 2 (#2588/review-loops, epic #3383/#4075) — the SAME
-    // value, not a second derivation, so the zero-findings review branch and this one can never disagree about
-    // how many attempts a PR has spent.
+    // `attempts` itself is `roundAttempts()` — the SAME derivation the review population's cap reads (via
+    // {@link dispatchReviewRow}), so the two can never disagree about how many attempts a PR has spent. Only the
+    // `fix` population reaches this point: every `review`-owed phase returned through that helper above.
     if (attempts >= roundCap) {
       refuseCapExhausted({
-        ...withPhase, attempts, cap: roundCap, capKind: OWED[phase],
+        ...withPhase, attempts, cap: roundCap, capKind: 'fix',
         why: `the PR's own durable attempt count is ${attempts} against a cap of ${roundCap} — auto-repair is exhausted here and a person must take it`,
       });
       continue;
     }
 
     dispatch.push({
-      ...base, ...withPhase, kind: OWED[phase], findings, attempts,
-      why: OWED[phase] === 'fix'
-        ? `bounced with ${findings} finding(s), nothing live is working it, and ${attempts} of ${roundCap} attempts are spent`
-        : `parked for an independent review with ${findings} finding(s) on the thread and nothing live working it`,
+      ...base, ...withPhase, kind: 'fix', findings, attempts,
+      why: `bounced with ${findings} finding(s), nothing live is working it, and ${attempts} of ${roundCap} attempts are spent`,
     });
   }
 
