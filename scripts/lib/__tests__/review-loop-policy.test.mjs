@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   reviewLoopAutoConfirm, buildAcceptQueueEntry, acceptResumeCommand, isQueuedAcceptStop, ACCEPT_QUEUE_AREA,
   buildPreventionQueueEntry, isPreventionOutstandingClear, PREVENTION_QUEUE_AREA,
+  isPreventionOutstandingParked, buildPreventionFilingInput, preventionHeadMarker,
 } from '../review-loop-policy.mjs';
 import { CONFIRM_ACTORS } from '../../operations/review-pr.mjs';
 import { VERDICTS } from '../jury-core.mjs';
 import { FIELD_CAPS, KINDS, validateEntry } from '../../conveyor/learnings-drop.mjs';
+import { findUnmarkedLocusRefs } from '../../check-standards-rules.mjs';
+import { assertPublishableContent } from '../../backlog/guarded-write.mjs';
 
 const humanPending = { of: CONFIRM_ACTORS.HUMAN };
 const agentPending = { of: CONFIRM_ACTORS.AGENT };
@@ -22,12 +25,13 @@ describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () =
       .toEqual({ value: 'accept' });
   });
 
-  it('answers accept unattended for an agent-addressed prevention-outstanding verdict — #3442, no longer bounces', () => {
-    // #3434's second ratified item, finished here: every finding is already resolved by definition of this
-    // verdict, so the only remaining debt is an unfiled prevention guard — accept-worthy, not another round of
-    // `changes` over documentation debt the code itself doesn't have.
+  it('DECLINES (does not auto-answer accept) for an agent-addressed prevention-outstanding verdict — #3442 '
+    + 'REVERSED live on chalbert/web-everything#2749: the rendered verdict text itself says "file the guard '
+    + 'before accept", and jury-core.mjs\'s own VERDICTS doc says this verdict "never silently lands" — an '
+    + 'unattended loop answering `accept` over it contradicts both. The run stays parked, exactly like a '
+    + 'human-addressed confirm, until an operator files the guard and resumes with --answer=accept themselves.', () => {
     expect(reviewLoopAutoConfirm(agentPending, { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } }))
-      .toEqual({ value: 'accept' });
+      .toBeNull();
   });
 
   it('answers `changes` unattended for an agent-addressed non-accept, non-prevention verdict', () => {
@@ -48,23 +52,29 @@ describe('reviewLoopAutoConfirm — the #3072/#3383/#3434 ruling, in code', () =
   });
 });
 
-describe('#x100grep — literal grep proof `value: \'accept\'` appears EXACTLY where #3434/#3442 put it', () => {
-  it('the source returns accept from exactly the two reviewed, ratified branches', async () => {
-    // #3434's FIRST ratified item narrowed this canary to exactly one occurrence; #3442 finishes its SECOND
-    // ratified item (`prevention-outstanding` also auto-clears) and widens the canary to exactly two — still
-    // pinned, still inside `reviewLoopAutoConfirm` only, still one `if` per verdict rather than a combined
-    // condition, so each branch's own regex keeps proving THAT specific verdict is the one deciding it. A
-    // future edit can still add mechanical accept to some OTHER function without this test noticing, but
-    // cannot silently make `reviewLoopAutoConfirm` answer accept from a THIRD, unreviewed branch.
+describe('#x100grep — literal grep proof `value: \'accept\'` appears EXACTLY where #3434 put it, and NEVER on '
+  + 'prevention-outstanding (#2749 fix)', () => {
+  it('the source returns accept from exactly the one reviewed, ratified branch (VERDICTS.ACCEPT), never from '
+    + 'VERDICTS.PREVENTION_OUTSTANDING', async () => {
+    // #3434's FIRST ratified item narrowed this canary to exactly one occurrence. #3442 widened it to two
+    // (`prevention-outstanding` also auto-cleared); the #2749 live incident (chalbert/web-everything#2749, a
+    // `prevention-outstanding` verdict — both mandatory lenses CONFIRMED real, unfixed defects — mechanically
+    // recorded as `review:accepted` and merged) reversed that second branch. This canary now pins the count
+    // back to ONE, and ADDS a permanent negative assertion: a future edit can re-add mechanical accept to some
+    // OTHER function without this test noticing, but cannot silently reintroduce a
+    // `VERDICTS.PREVENTION_OUTSTANDING → accept` branch inside `reviewLoopAutoConfirm` without this test
+    // catching it by name.
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const here = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(here, '..', 'review-loop-policy.mjs'), 'utf8');
     const matches = src.match(/value:\s*['"]accept['"]/g) ?? [];
-    expect(matches).toHaveLength(2);
+    expect(matches).toHaveLength(1);
     expect(src).toMatch(/VERDICTS\.ACCEPT\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
-    expect(src).toMatch(/VERDICTS\.PREVENTION_OUTSTANDING\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
+    expect(src).not.toMatch(/VERDICTS\.PREVENTION_OUTSTANDING\)\s*return\s*\{\s*value:\s*['"]accept['"]\s*\}/);
+    // The verdict must instead DECLINE (return null) — the run stays parked, never silently recorded.
+    expect(src).toMatch(/VERDICTS\.PREVENTION_OUTSTANDING\)\s*return\s*null/);
   });
 });
 
@@ -134,6 +144,14 @@ describe('isQueuedAcceptStop', () => {
     })).toBe(false);
   });
 
+  it('false for an agent-addressed confirm stop whose verdict is prevention-outstanding — #2749: that verdict '
+    + 'is handled mechanically (file-item + auto-resume), never queued for a human; see isPreventionOutstandingParked', () => {
+    expect(isQueuedAcceptStop({
+      stopped: 'confirm',
+      run: { pending: { of: CONFIRM_ACTORS.AGENT }, verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } },
+    })).toBe(false);
+  });
+
   it('false for a non-confirm stop entirely', () => {
     expect(isQueuedAcceptStop({ stopped: 'complete', run: { verdict: { verdict: VERDICTS.ACCEPT } } })).toBe(false);
   });
@@ -141,6 +159,162 @@ describe('isQueuedAcceptStop', () => {
   it('false for a missing outcome', () => {
     expect(isQueuedAcceptStop(null)).toBe(false);
     expect(isQueuedAcceptStop(undefined)).toBe(false);
+  });
+});
+
+describe('isPreventionOutstandingParked — the #2749 mechanical-filing trigger (replaces the queued-for-a-human path)', () => {
+  it('true only for an agent-addressed confirm stop whose verdict is prevention-outstanding', () => {
+    expect(isPreventionOutstandingParked({
+      stopped: 'confirm',
+      run: { pending: { of: CONFIRM_ACTORS.AGENT }, verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } },
+    })).toBe(true);
+  });
+
+  it('false for a human-addressed confirm stop carrying the same verdict — its own review:human ceremony is untouched', () => {
+    expect(isPreventionOutstandingParked({
+      stopped: 'confirm',
+      run: { pending: { of: CONFIRM_ACTORS.HUMAN }, verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } },
+    })).toBe(false);
+  });
+
+  it('false for an agent-addressed confirm stop whose verdict is accept (the OTHER, unrelated predicate)', () => {
+    expect(isPreventionOutstandingParked({
+      stopped: 'confirm',
+      run: { pending: { of: CONFIRM_ACTORS.AGENT }, verdict: { verdict: VERDICTS.ACCEPT } },
+    })).toBe(false);
+  });
+
+  it('false for a non-confirm stop entirely', () => {
+    expect(isPreventionOutstandingParked({
+      stopped: 'complete',
+      run: { verdict: { verdict: VERDICTS.PREVENTION_OUTSTANDING } },
+    })).toBe(false);
+  });
+
+  it('false for a missing outcome', () => {
+    expect(isPreventionOutstandingParked(null)).toBe(false);
+    expect(isPreventionOutstandingParked(undefined)).toBe(false);
+  });
+});
+
+describe('buildPreventionFilingInput — the file-item card the loop files for itself (#2749)', () => {
+  const findings = [
+    { file: 'scripts/guard-lane.mjs', line: 251, prevention: 'add a CLI-level test asserting LANE_GUARD_OFF=1 still denies a daemon-clone target', preventionCaptured: false },
+    { file: 'scripts/guard-bash.mjs', line: 1774, prevention: 'add a chained/repeated -C case to the guard-bash fuzz suite', preventionCaptured: false },
+    { file: 'scripts/guard-bash.mjs', line: 1852, prevention: 'realpath each resolved write operand before the prefix comparison', preventionCaptured: false },
+    // an already-captured guard must NOT appear in the card at all.
+    { file: 'scripts/guard-bash.mjs', line: 9999, prevention: 'already handled elsewhere', preventionCaptured: true },
+  ];
+
+  it('names the PR and both repos in the title, and files a story sized 3', () => {
+    const input = buildPreventionFilingInput({ repo: 'chalbert/web-everything', pr: 2749, findings });
+    expect(input.title).toContain('chalbert/web-everything#2749');
+    expect(input.kind).toBe('story');
+    expect(input.size).toBe('3');
+  });
+
+  it('scope is the union of every outstanding finding\'s file plus its test sibling, deduped, each carrying '
+    + 'the #883 `we:` locus prefix (the write-time gate rejects a bare path)', () => {
+    const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings });
+    const parts = input.scope.split(',');
+    expect(parts).toContain('we:scripts/guard-lane.mjs');
+    expect(parts).toContain('we:scripts/guard-bash.mjs');
+    expect(parts).toContain('we:scripts/__tests__/guard-lane.test.mjs');
+    expect(parts).toContain('we:scripts/__tests__/guard-bash.test.mjs');
+    // guard-bash.mjs appears twice in `findings` but must appear exactly once in scope.
+    expect(parts.filter((p) => p === 'we:scripts/guard-bash.mjs')).toHaveLength(1);
+    expect(parts.every((p) => p.startsWith('we:'))).toBe(true);
+  });
+
+  it('digest carries one numbered line per OUTSTANDING guard, with a we:-prefixed file:line and the prevention '
+    + 'text verbatim, and OMITS an already-captured guard entirely', () => {
+    const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings });
+    expect(input.digest).toContain('we:scripts/guard-lane.mjs:251');
+    expect(input.digest).toContain('add a CLI-level test asserting LANE_GUARD_OFF=1 still denies a daemon-clone target');
+    expect(input.digest).toContain('we:scripts/guard-bash.mjs:1774');
+    expect(input.digest).toContain('we:scripts/guard-bash.mjs:1852');
+    expect(input.digest).not.toContain('already handled elsewhere');
+  });
+
+  it('#883 safety net: prefixes a BARE mention of a cited file\'s basename inside the prevention PROSE itself '
+    + '(live example: PR #2749\'s real finding 3 text), without double-prefixing the already-prefixed file:line anchor', () => {
+    const findingsWithBareProseMention = [
+      {
+        file: 'scripts/guard-bash.mjs', line: 1852,
+        prevention: 'realpath each resolved write operand before the prefix comparison (mirroring how '
+          + 'guard-lane.mjs already receives a pre-realpath\'d real from its caller)',
+        preventionCaptured: false,
+      },
+      { file: 'scripts/guard-lane.mjs', line: 251, prevention: 'add the missing CLI-level test', preventionCaptured: false },
+    ];
+    const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: findingsWithBareProseMention });
+    expect(input.digest).not.toMatch(/[^:/]guard-lane\.mjs(?!`)/); // no bare mention survives anywhere
+    expect(input.digest).toContain('mirroring how we:scripts/guard-lane.mjs already receives');
+    expect(input.digest).toContain('we:scripts/guard-lane.mjs:251'); // the real anchor stays single-prefixed
+    expect(input.digest).not.toContain('we:we:');
+  });
+
+  it('PR #2766 advisory: a FULL bare path in the prose (a test path, a file the card never cites) is prefixed too, '
+    + 'so the write-time locus scan (`assertPublishableContent`) accepts the card instead of refusing it', () => {
+    // Matrix: a bare basename of a cited file, a full relative path of a cited file, a test path absent from
+    // finding.file, an uncited sibling source file, and an already-qualified path that must stay single-prefixed.
+    const input = buildPreventionFilingInput({
+      repo: 'o/r',
+      pr: 1,
+      findings: [{
+        file: 'scripts/guard-lane.mjs', line: 10, preventionCaptured: false,
+        prevention: 'add a case to scripts/__tests__/guard-lane.test.mjs, mirror scripts/guard-bash.mjs, '
+          + 'reuse guard-lane.mjs as-is, and leave we:scripts/lane-pool.mjs alone',
+      }],
+    });
+    expect(findUnmarkedLocusRefs(input.digest)).toEqual([]);
+    expect(() => assertPublishableContent('backlog/x-card.md', `# t\n\n${input.digest}\n`)).not.toThrow();
+    expect(input.digest).toContain('add a case to we:scripts/__tests__/guard-lane.test.mjs,');
+    expect(input.digest).toContain('mirror we:scripts/guard-bash.mjs,');
+    expect(input.digest).toContain('reuse we:scripts/guard-lane.mjs as-is');
+    expect(input.digest).toContain('leave we:scripts/lane-pool.mjs alone');
+    expect(input.digest).not.toContain('we:we:');
+  });
+
+  it('PR #2766 self-review: prefixes a path after a NON-repo colon, and never splices a prefix into a hyphenated '
+    + 'longer basename', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [{
+        file: 'scripts/lane.mjs', line: 3, preventionCaptured: false,
+        prevention: 'see Files:scripts/z.mjs, then mirror guard-lane.mjs like pre-lane.mjs and lane.mjs',
+      }],
+    });
+    expect(findUnmarkedLocusRefs(input.digest)).toEqual([]);
+    expect(input.digest).toContain('Files:we:scripts/z.mjs');
+    // Uncited bare names are prefixed WHOLE (the detector flags them too); never `guard-we:scripts/lane.mjs`.
+    expect(input.digest).toContain('mirror we:guard-lane.mjs like we:pre-lane.mjs and we:scripts/lane.mjs');
+    expect(input.digest).not.toMatch(/-we:/);
+  });
+
+  it('PR #2766: names the reviewed head in the digest when given (the stable duplicate key), and nothing when not', () => {
+    const head = 'c'.repeat(40);
+    const withHead = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, head });
+    expect(withHead.digest).toContain(preventionHeadMarker(head));
+    expect(() => assertPublishableContent('backlog/x-card.md', `# t\n\n${withHead.digest}\n`)).not.toThrow();
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).digest).not.toContain('reviewed head');
+  });
+
+  it('carries a supplied parent through unchanged, and defaults to empty (top-level) when none is given', () => {
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, parent: '4075' }).parent).toBe('4075');
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).parent).toBe('');
+  });
+
+  it('queue defaults to \'true\' (cleared to the conveyor, per the 2026-09-26 ruling\'s own words), and a '
+    + 'caller can opt out for a one-off proof run outside the conveyor\'s own checkout', () => {
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).queue).toBe('true');
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings, queue: 'false' }).queue).toBe('false');
+  });
+
+  it('an empty/absent findings list still returns a well-shaped (if empty) input rather than throwing', () => {
+    const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: [] });
+    expect(input.scope).toBe('');
+    expect(typeof input.digest).toBe('string');
   });
 });
 

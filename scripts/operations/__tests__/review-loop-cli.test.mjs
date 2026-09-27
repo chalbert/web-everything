@@ -1,11 +1,12 @@
 /**
  * @file review-loop-cli.test.mjs — #3072's remaining slice, exercised end to end with no `gh`, no juror
- * subprocess and no real learnings-pool file: a stub `readPr`, a canned judge, recording sinks, an in-memory
- * run store and an injected `appendLearning`.
+ * subprocess and no real learnings-pool/backlog file: a stub `readPr`, a canned judge, recording sinks, an
+ * in-memory run store, and injected `appendLearning`/`fileItem` bindings.
  *
  * THE FOUR PROPERTIES THIS FILE EXISTS TO PIN (#3434, 2026-09-01, reverses property 1's old shape — it used
  * to say "queues, never auto-accepts"; the operator's live-fire finding, two real PRs sitting queued for no
- * reason, is what prompted the reversal; property 4 added by #3442, finishing `#3434`'s second ratified item):
+ * reason, is what prompted the reversal; property 4 REPLACED, not merely reverted, by the #2749 fix,
+ * 2026-09-26 — see `review-loop-policy.mjs`'s header for the live incident and the scope ruling):
  *   1. A clean (or already-agreeing) verdict on a non-gate-self PR ACCEPTS MECHANICALLY — the effects apply,
  *      the run completes, and nothing is queued for a human (the old queue-and-notify path is now dead for
  *      this tier; the learnings-pool filing machinery it used stays for `review:human`'s own, unchanged, park).
@@ -13,27 +14,40 @@
  *      the operator's automated fix-loop already expects.
  *   3. A gate-self (`review:human`) PR is UNCHANGED: the policy declines (wrong actor), the run parks exactly
  *      as it does for the ordinary human CLI, and no accept — mechanical or manual — happens without one.
- *   4. A `prevention-outstanding` verdict on a non-gate-self PR ALSO accepts mechanically, exactly like
- *      property 1, but files the named guard(s) to the learnings pool as it clears — the notification a human
- *      still needs, without re-entering the bounce/retry loop over documentation debt the code itself doesn't
- *      have. The SAME verdict on a `review:human` PR still parks (property 3's actor refusal fires first).
+ *   4. A `prevention-outstanding` verdict on a non-gate-self PR NEVER auto-clears to `accept` on its own
+ *      (`#3442`'s old shape, reversed) and is NEVER queued for a human either (the 2026-09-26 scope ruling:
+ *      filing the follow-up is not an operator decision) — instead the loop MECHANICALLY FILES the named
+ *      guard(s) as one real backlog card through the declared `file-item` operation and, only once that filing
+ *      succeeds, resumes the SAME run with `accept` itself. A filing failure leaves the run parked, unfiled,
+ *      unaccepted, and reports loudly. The SAME verdict on a `review:human` PR still parks on its own ceremony
+ *      (property 3's actor refusal fires first; `file-item` is never even called).
  */
+
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, it, expect, vi } from 'vitest';
 
 import { createRegistry } from '../registry.mjs';
 import { createMemoryRunStore } from '../run-store.mjs';
-import { judgeOutcome } from '../cli-adapter.mjs';
+import { judgeOutcome, parseOperationArgv } from '../cli-adapter.mjs';
+import { fileItemOperation } from '../file-item.mjs';
 import { REVIEW_EFFECTS, reviewPrOperation } from '../review-pr.mjs';
+import { buildPreventionFilingInput } from '../../lib/review-loop-policy.mjs';
 import {
-  applyUnattendedActorDefault, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
+  applyUnattendedActorDefault, buildFileItemArgv, findFiledPreventionCard, runReviewLoopOnce, UNATTENDED_REVIEW_ACTOR,
 } from '../review-loop-cli.mjs';
 import { createReviewPrSinks } from '../review-pr-io.mjs';
 
 const NET_PATHS = ['scripts/operations/review-pr.mjs'];
 
 /** The same stub-reader shape `review-pr.test.mjs` uses, trimmed to what this file needs. */
-function stubReader({ labels = ['review:pending'] } = {}) {
+// Two pinned (40-hex) heads — `netBasis.rev` is null for anything shorter (`pinnedSha`).
+const HEAD_A = 'a'.repeat(40);
+const HEAD_B = 'b'.repeat(40);
+
+function stubReader({ labels = ['review:pending'], rev = 'def456' } = {}) {
   return ({ pr, repo }) => ({
     state: 'OPEN',
     clearerId: undefined,
@@ -51,7 +65,7 @@ function stubReader({ labels = ['review:pending'] } = {}) {
     },
     headRefName: 'lane/thing',
     body: 'the PR description',
-    net: { paths: NET_PATHS, base: 'abc123', rev: 'def456', scored: true },
+    net: { paths: NET_PATHS, base: 'abc123', rev, scored: true },
     diff: { text: '--- a/x\n+++ b/x\n+one line\n', scored: true },
   });
 }
@@ -310,154 +324,274 @@ describe('runReviewLoopOnce — property 2: findings BOUNCE unattended, and the 
   });
 });
 
-describe('runReviewLoopOnce — property 4: prevention-outstanding also ACCEPTS MECHANICALLY, filing the guard(s) (#3442)', () => {
-  it('applies the effects, completes the run, and files the named guard(s) to the learnings pool', async () => {
+describe('runReviewLoopOnce — property 4, MECHANIZED (#2749 fix, 2026-09-26 scope ruling): prevention-outstanding '
+  + 'files the owed guard(s) as ONE real backlog card through file-item, then auto-resumes to accept — NEVER '
+  + 'surfaced to a human', () => {
+  // #2749 — chalbert/web-everything#2749 reduced to `prevention-outstanding` (both mandatory lenses, correctness
+  // and security, CONFIRMED real unfixed defects: a daemon-clone guard bypassable via LANE_GUARD_OFF=1, a
+  // chained `git -C` hole, a non-realpathed symlink write hole) and was mechanically recorded `review:accepted`
+  // and merged anyway — directly contradicting the verdict's own rendered text, "🚩 prevention outstanding —
+  // file the guard before accept". `#3442`'s old mechanical-accept-WITHOUT-filing is reversed; the 2026-09-26
+  // scope ruling additionally forbids surfacing the filing as a decision for an operator (see
+  // `review-loop-policy.mjs`'s header) — so this is neither the old "accepts mechanically, notifies a human
+  // afterward" shape NOR a park; it is "files the real card itself, then accepts."
+  const stubFileItem = (num = 9001, rel = 'backlog/9001-file-the-guard.md') => async () => ({
+    code: 0,
+    lines: [JSON.stringify({ verdict: { num, rel, kind: 'story', status: 'open' } })],
+  });
+
+  it('files ONE backlog card via file-item, then completes the run as an accept — no learnings-pool notice at all', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
     const seen = [];
-    let filedCount = 0;
+    const fileItemCalls = [];
     const out = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention',
-      appendLearning: (entry) => { filedCount += 1; return { record: entry, path: `pool/${filedCount}.json` }; },
+      appendLearning: () => { throw new Error('must not be called — never surfaced to a human'); },
+      fileItem: async (input) => { fileItemCalls.push(input); return stubFileItem()(); },
     });
 
     expect(out.code).toBe(0);
     expect(out.stopped).toBe('complete');
     expect(out.run.findings.confirm).toBe('accept');
     expect(out.run.verdict.verdict).toBe('prevention-outstanding');
-    // The SAME effect application a clean accept gets — a label swap to accepted, exactly like property 1.
+    // The SAME effect application a clean accept gets — a label swap to accepted.
     expect(seen.map((s) => s.type)).toContain(REVIEW_EFFECTS.LABEL);
-    expect(filedCount).toBeGreaterThan(0);
-    expect(out.lines.join('\n')).toMatch(/prevention-outstanding auto-cleared to accept/);
+    expect(fileItemCalls).toHaveLength(1);
+    expect(fileItemCalls[0].title).toContain('chalbert/web-everything#1234');
+    expect(fileItemCalls[0].scope).toContain(`we:${NET_PATHS[0]}`);
+    expect(fileItemCalls[0].queue).toBe('true');
+    expect(out.lines.join('\n')).toMatch(/prevention guard\(s\) filed mechanically — backlog\/9001-file-the-guard\.md \(#9001\)/);
+    expect(out.lines.join('\n')).toMatch(/no human was asked/);
     expect(out.lines.join('\n')).not.toMatch(/QUEUED for a human/);
   });
 
-  it('carries `preventionFiled` in --json, with no `queued`/`resumeCommand` fields (those are the OTHER branch)', async () => {
+  it('carries `preventionFiled` (num + path) in --json, with no `queued`/`resumeCommand`/`outstandingGuards` fields', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
-    let filedCount = 0;
     const out = await runReviewLoopOnce({
       declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-json',
-      appendLearning: () => { filedCount += 1; return { record: {}, path: `pool/${filedCount}.json` }; },
+      fileItem: stubFileItem(4242, 'backlog/4242-x.md'),
     });
     const payload = JSON.parse(out.lines[0]);
     expect(payload.verdict.verdict).toBe('prevention-outstanding');
-    expect(payload.preventionFiled.length).toBeGreaterThan(0);
+    expect(payload.preventionFiled).toEqual({ num: 4242, path: 'backlog/4242-x.md' });
     expect(payload).not.toHaveProperty('queued');
     expect(payload).not.toHaveProperty('resumeCommand');
+    expect(payload).not.toHaveProperty('outstandingGuards');
   });
 
-  it('reports a failed filing loudly without undoing the accept that already recorded', async () => {
+  it('a filing FAILURE (thrown) leaves the run PARKED — no accept, no effects applied, reported loudly', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
+    const seen = [];
     const out = await runReviewLoopOnce({
-      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
+      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks(seen),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-filing-fails',
-      appendLearning: () => { throw new Error('pool file locked'); },
+      fileItem: async () => { throw new Error('backlog write failed: disk full'); },
     });
     expect(out.code).toBe(1);
-    expect(out.stopped).toBe('complete');
-    expect(out.run.findings.confirm).toBe('accept');
-    expect(out.lines.join('\n')).toMatch(/FAILED to file \(some guard\(s\) may be unfiled\): pool file locked/);
+    expect(out.stopped).toBe('confirm');
+    expect(out.run.pending.of).toBe('agent');
+    expect(seen).toHaveLength(0);
+    expect(out.lines.join('\n')).toMatch(/FAILED to file the owed prevention card mechanically: backlog write failed: disk full/);
+    expect(out.lines.join('\n')).toMatch(/never auto-cleared unfiled/);
   });
 
-  it('isolates a single oversized guard\'s BUILD failure — the OTHER guard(s) in the same run still file, and nothing crashes uncaught', async () => {
-    // `buildPreventionQueueEntry` REFUSES (throws) rather than truncates a `prevention` string that overflows
-    // `FIELD_CAPS.suggestion` — a realistic case for unbounded juror-authored text. This pins that the build
-    // step, not just the append step, is caught PER FINDING: one bad guard must not crash the whole invocation
-    // or block filing a sibling guard that would have fit.
+  it('a filing REFUSAL (file-item itself returns a non-zero exit code) also leaves the run parked, in --json too', async () => {
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
-    let filedCount = 0;
     const out = await runReviewLoopOnce({
-      declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
-      makeJudge: cannedJudge(MIXED_LENGTH_ANSWER), mintRunId: () => 'r-prevention-mixed-length',
-      appendLearning: (entry) => { filedCount += 1; return { record: entry, path: `pool/${filedCount}.json` }; },
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: recordingSinks([]),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-refused',
+      fileItem: async () => ({ code: 2, lines: ['error: invalid --scope'] }),
     });
-    expect(out.stopped).toBe('complete');
-    expect(out.run.findings.confirm).toBe('accept');
-    expect(out.code).toBe(1); // the oversized guard failed to build
-    expect(filedCount).toBeGreaterThan(0); // the short guard still filed despite its sibling's failure
-    expect(out.lines.join('\n')).toMatch(/filed →/);
-    expect(out.lines.join('\n')).toMatch(/FAILED to file \(some guard\(s\) may be unfiled\)/);
+    expect(out.code).toBe(1);
+    expect(out.stopped).toBe('confirm');
+    const payload = JSON.parse(out.lines[0]);
+    expect(payload.preventionFilingError).toMatch(/file-item refused: error: invalid --scope/);
   });
 
-  it('files a below-the-prevention-impact-bar guard too, not just the one that drove the verdict — the WIDE notice predicate, not the narrow verdict one', async () => {
-    // `isPreventionOutstandingClear`/the CLI filter on `hasUncapturedPrevention` (WIDE), not `blocksAcceptance`
-    // (NARROW, additionally gated on `impactIfUnfixed` vs `PREVENTION_IMPACT_BAR`) — matching
-    // `renderPreventionSummary`'s own convention. Only ONE finding needs to cross the bar to reach this
-    // verdict at all; a sibling finding below the bar still owes its guard and must still be filed.
+  it('scopes the filed card to every OUTSTANDING finding\'s file, including one below the prevention impact bar — '
+    + 'the WIDE notice predicate (`hasUncapturedPrevention`), not the narrow verdict one (`blocksAcceptance`)', async () => {
+    // Only ONE finding needs to cross the bar to reach this verdict at all; a sibling finding below the bar
+    // still owes its guard and must still be named in the filed card, matching `renderPreventionSummary`'s own
+    // convention (see `buildPreventionFilingInput`'s doc for the same point).
     const { declaration, registry } = registryFor({});
     const store = createMemoryRunStore();
-    const filedSuggestions = [];
+    const fileItemCalls = [];
     const out = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
       makeJudge: cannedJudge(MIXED_BAR_ANSWER), mintRunId: () => 'r-prevention-mixed-bar',
-      appendLearning: (entry) => { filedSuggestions.push(entry.suggestion); return { record: entry, path: `pool/${filedSuggestions.length}.json` }; },
+      fileItem: async (input) => { fileItemCalls.push(input); return stubFileItem(1, 'backlog/1.md')(); },
     });
     expect(out.stopped).toBe('complete');
-    expect(out.run.verdict.verdict).toBe('prevention-outstanding');
-    expect(out.run.findings.confirm).toBe('accept');
-    expect(filedSuggestions.some((s) => s.includes('lint rule banning bare magic numbers'))).toBe(true);
-    expect(filedSuggestions.some((s) => s.includes('naming-convention doc note'))).toBe(true);
+    expect(fileItemCalls[0].digest).toContain('lint rule banning bare magic numbers');
+    expect(fileItemCalls[0].digest).toContain('naming-convention doc note');
   });
 
-  it('a review:human PR carrying the same verdict is still PARKED, not auto-cleared and nothing filed', async () => {
+  it('a review:human PR carrying the same verdict is STILL PARKED — its own review:human ceremony is untouched, '
+    + 'and file-item is never even called', async () => {
     const { declaration, registry } = registryFor({ labels: ['review:human'] });
     const store = createMemoryRunStore();
-    let filedCount = 0;
+    let fileItemCalled = false;
     const out = await runReviewLoopOnce({
       declaration, registry, argv: BASE_ARGV, store, sinks: recordingSinks([]),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-human',
-      appendLearning: () => { filedCount += 1; return { record: {}, path: '' }; },
+      fileItem: async () => { fileItemCalled = true; return { code: 0, lines: ['{}'] }; },
     });
     expect(out.stopped).toBe('confirm');
     expect(out.run.pending.of).toBe('human');
-    expect(filedCount).toBe(0);
+    expect(fileItemCalled).toBe(false);
   });
 
-  // Independent review of PR #1784 (CONFIRMED): `isPreventionOutstandingClear` used to treat every stop
-  // OTHER than `confirm` as success, so a mid-apply failure (the label-swap effect throwing) on a
-  // `prevention-outstanding` run would still take this branch, file the guard(s), and — via the JSON branch's
-  // old `code: filingError ? 1 : 0` — report exit code 0 even though the accept never actually landed. Both
-  // are fixed now: the halted stop no longer satisfies `isPreventionOutstandingClear`, so this run falls
-  // through to the ORDINARY `renderOutcome` rendering for an `effect-halted` stop (code 1, no filing).
-  it('an effect-halted run (the accept label swap threw) is NOT treated as prevention-outstanding-clear — no filing, exit code 1', async () => {
+  // PR #2766 advisory — re-targets the two effect-halted cases the #2749 fix deleted along with the old
+  // `isPreventionOutstandingClear` path: the card is filed FIRST, then the resumed accept's label swap throws.
+  const throwingLabelSinks = () => ({
+    ...recordingSinks([]),
+    [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
+  });
+
+  it('a successful filing followed by an effect-halted accept exits 1 as `effect-halted`, keeps the filing note, '
+    + 'and never claims the accept landed', async () => {
     const { declaration, registry } = registryFor({});
-    const store = createMemoryRunStore();
-    let filedCount = 0;
-    const throwingSinks = {
-      ...recordingSinks([]),
-      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
-    };
     const out = await runReviewLoopOnce({
-      declaration, registry, argv: BASE_ARGV, store, sinks: throwingSinks,
+      declaration, registry, argv: BASE_ARGV, store: createMemoryRunStore(), sinks: throwingLabelSinks(),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-effect-halted',
-      appendLearning: () => { filedCount += 1; return { record: {}, path: '' }; },
+      fileItem: stubFileItem(), findFiledPrevention: () => null,
     });
     expect(out.stopped).toBe('effect-halted');
     expect(out.code).toBe(1);
-    expect(filedCount).toBe(0);
+    const text = out.lines.join('\n');
+    expect(text).toMatch(/prevention guard\(s\) filed mechanically — backlog\/9001-file-the-guard\.md/);
+    expect(text).not.toMatch(/✅ review — accepted/);
   });
 
-  it('same effect-halted case, --json: exit code still 1, no `preventionFiled` field — `outcome.stopped` is honored, not ignored', async () => {
+  it('same effect-halted case, --json: exit code 1, `stopped: effect-halted`, and `preventionFiled` still names the card', async () => {
     const { declaration, registry } = registryFor({});
-    const store = createMemoryRunStore();
-    const throwingSinks = {
-      ...recordingSinks([]),
-      [REVIEW_EFFECTS.LABEL]: async () => { throw new Error('gh label edit failed: network error'); },
-    };
     const out = await runReviewLoopOnce({
-      declaration, registry, argv: [...BASE_ARGV, '--json'], store, sinks: throwingSinks,
+      declaration, registry, argv: [...BASE_ARGV, '--json'], store: createMemoryRunStore(), sinks: throwingLabelSinks(),
       makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-effect-halted-json',
-      appendLearning: () => { throw new Error('must not be called'); },
+      fileItem: stubFileItem(), findFiledPrevention: () => null,
     });
     expect(out.code).toBe(1);
     const payload = JSON.parse(out.lines[0]);
     expect(payload.stopped).toBe('effect-halted');
-    expect(payload).not.toHaveProperty('preventionFiled');
+    expect(payload.preventionFiled).toEqual({ num: 9001, path: 'backlog/9001-file-the-guard.md' });
+  });
+
+  // Round 2 is a FRESH jury on the SAME head: same guard, different words — the realistic retry (self-review).
+  const REWORDED_PREVENTION_ANSWER = {
+    ...PREVENTION_ANSWER,
+    findings: [{ ...PREVENTION_ANSWER.findings[0], prevention: 'lint against unnamed numeric literals here' }],
+  };
+
+  /** One temp backlog dir + a `file-item` stub that writes the card the way `renderItem` does (`# <title>`, then the digest). */
+  function tempBacklog() {
+    const root = mkdtempSync(join(tmpdir(), 'review-loop-prevention-'));
+    mkdirSync(join(root, 'backlog'));
+    const calls = [];
+    const fileItem = async (input) => {
+      calls.push(input);
+      const name = `x${calls.length}-file-the-guard.md`;
+      writeFileSync(join(root, 'backlog', name), `---\nkind: story\n---\n\n# ${input.title}\n\n${input.digest}\n`);
+      return { code: 0, lines: [JSON.stringify({ verdict: { num: `x${calls.length}`, rel: `backlog/${name}` } })] };
+    };
+    const findFiledPrevention = (input, o) => findFiledPreventionCard(input, { ...o, root });
+    return { root, calls, fileItem, findFiledPrevention, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it('a retry after an effect-halted accept, on the SAME head with a freshly-worded jury, does NOT file a second card', async () => {
+    const tb = tempBacklog();
+    try {
+      const reader = { rev: HEAD_A };
+      const r1 = registryFor(reader);
+      const first = await runReviewLoopOnce({
+        declaration: r1.declaration, registry: r1.registry, argv: BASE_ARGV, store: createMemoryRunStore(),
+        sinks: throwingLabelSinks(), makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-retry-1',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      expect(first.stopped).toBe('effect-halted');
+      expect(tb.calls[0].digest).toContain(`reviewed head \`${HEAD_A}\``);
+
+      const r2 = registryFor(reader);
+      const second = await runReviewLoopOnce({
+        declaration: r2.declaration, registry: r2.registry, argv: [...BASE_ARGV, '--json'], store: createMemoryRunStore(),
+        sinks: recordingSinks([]), makeJudge: cannedJudge(REWORDED_PREVENTION_ANSWER), mintRunId: () => 'r-retry-2',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      expect(second.stopped).toBe('complete');
+      expect(tb.calls).toHaveLength(1);
+      expect(readdirSync(join(tb.root, 'backlog'))).toHaveLength(1);
+      expect(JSON.parse(second.lines[0]).preventionFiled).toEqual({
+        num: 'x1', path: 'backlog/x1-file-the-guard.md', alreadyFiled: true,
+      });
+    } finally {
+      tb.cleanup();
+    }
+  });
+
+  it('a round on a NEW head (the PR was pushed again) still files its own card', async () => {
+    const tb = tempBacklog();
+    try {
+      for (const [rev, id] of [[HEAD_A, 'r-head-a'], [HEAD_B, 'r-head-b']]) {
+        const r = registryFor({ rev });
+        await runReviewLoopOnce({
+          declaration: r.declaration, registry: r.registry, argv: BASE_ARGV, store: createMemoryRunStore(),
+          sinks: recordingSinks([]), makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => id,
+          fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+        });
+      }
+      expect(tb.calls).toHaveLength(2);
+    } finally {
+      tb.cleanup();
+    }
+  });
+
+  it('`findFiledPreventionCard` keys on title + head; with no pinned head it falls back to an exact digest match', () => {
+    const tb = tempBacklog();
+    try {
+      const title = 'File the guard for o/r#1';
+      writeFileSync(join(tb.root, 'backlog', 'x1-card.md'), `# ${title}\n\nfor o/r#1 (reviewed head \`${HEAD_A}\`)\n\n1. old guard\n`);
+      const find = (input, head) => findFiledPreventionCard(input, { root: tb.root, head });
+      expect(find({ title, digest: 'reworded' }, HEAD_A)).toEqual({ num: 'x1', path: 'backlog/x1-card.md' });
+      expect(find({ title, digest: '1. old guard' }, HEAD_B)).toBeNull();
+      expect(find({ title: 'File the guard for o/r#2', digest: '1. old guard' }, HEAD_A)).toBeNull();
+      expect(find({ title, digest: '1. old guard' }, null)).toEqual({ num: 'x1', path: 'backlog/x1-card.md' });
+      expect(find({ title, digest: '1. a new guard' }, null)).toBeNull();
+      expect(findFiledPreventionCard({ title: 't', digest: 'd' }, { root: join(tb.root, 'missing') })).toBeNull();
+    } finally {
+      tb.cleanup();
+    }
+  });
+});
+
+describe('buildFileItemArgv — the production `file-item` binding\'s argv, pinned against the REAL declaration (PR #2766 advisory)', () => {
+  const input = buildPreventionFilingInput({
+    repo: 'chalbert/web-everything', pr: 1234, parent: '4075',
+    findings: [{ file: NET_PATHS[0], line: 7, prevention: 'add a lint rule', preventionCaptured: false }],
+  });
+
+  it('parses cleanly under file-item\'s own declaration, every field landing where the builder put it', () => {
+    const parsed = parseOperationArgv(fileItemOperation({ readScaffoldContext: () => ({}) }), buildFileItemArgv(input));
+    expect(parsed.errors ?? []).toEqual([]);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.control.json).toBe(true);
+    expect(parsed.input).toMatchObject({
+      title: input.title, kind: 'story', digest: input.digest, scope: input.scope, parent: '4075',
+    });
+    expect(String(parsed.input.size)).toBe('3');
+    expect(String(parsed.input.queue)).toBe('true');
+  });
+
+  it('omits --parent when none is given, and never forwards the juror --cwd (file-item refuses it)', () => {
+    const argv = buildFileItemArgv({ ...input, parent: '' });
+    expect(argv.some((a) => a.startsWith('--parent'))).toBe(false);
+    expect(argv.some((a) => a.startsWith('--cwd'))).toBe(false);
+    expect(parseOperationArgv(fileItemOperation({ readScaffoldContext: () => ({}) }), argv).ok).toBe(true);
+    expect(parseOperationArgv(fileItemOperation({ readScaffoldContext: () => ({}) }), [...argv, '--cwd=/some/lane']).ok).toBe(false);
   });
 });
 
