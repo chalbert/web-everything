@@ -62,7 +62,9 @@ describe('soak shard-files — deterministic baseline-alone + round-robin break 
   });
 
   it('more shards than break files leaves the extra shards empty, not erroring', () => {
-    const total = 30; // way more than the 18 known breaks
+    // Derived from the live break count, never a hardcoded ceiling: a fixed 30 silently stopped being "more"
+    // the day the 29th break file landed (29 buckets, one file each, zero empty shards).
+    const total = listBreakTestFiles().length + 5;
     const emptyShards = [];
     for (let shard = 2; shard <= total; shard += 1) {
       if (shardFiles({ shard, total }).length === 0) emptyShards.push(shard);

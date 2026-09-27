@@ -30,6 +30,7 @@
  * `ci-heal-<victim>` session appears within a few ticks of the merge — the PR's own required check is still red,
  * and nothing else on this head has changed.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runSoak } from '../soak.mjs';
@@ -69,6 +70,12 @@ export default {
       scorecards: false,
       fleet: false,
       setup(w) {
+        // The fake GitHub writes the merge commit IN the bare origin (`fake-gh.mjs#createMergeCommit`, `git
+        // commit-tree`), and the world's fake HOME has no git identity — so give the origin GitHub's own merge
+        // identity, or the round-2 `mergePr` fails "Author identity unknown" on a CI runner (no global git config)
+        // and the scenario crashes before the merge ever lands (mirrors `couple-split-by-unrelated-merge.mjs`).
+        execFileSync('git', ['config', 'user.name', 'GitHub'], { cwd: w.repos.we.originPath });
+        execFileSync('git', ['config', 'user.email', 'noreply@github.com'], { cwd: w.repos.we.originPath });
         const victimHead = 'lane/soak-system-fix-victim';
         w.git.createBranch('we', victimHead, { from: 'main', files: { 'soak/system-fix-victim.txt': 'a change whose CI is red — the tooling, not this diff, is at fault\n' } });
         const victimPr = w.gh.openPr({
