@@ -32,6 +32,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const ALLOWLIST = {
   'scripts/operations/dispatch-lane-io.mjs': ['--search'],
   'scripts/readiness/conveyor-instrument.mjs': ['--search'],
+  // `resolvePrBouncedViaGh`: `--search 'head:lane/<item>-' --state all`, a branch-PREFIX lookup against the same
+  // unbounded PR history (`--head` is exact-match only), called only by the one-off backfill, never a polling loop.
+  'scripts/conveyor/run-rating.mjs': ['--search'],
 };
 
 function trackedSourceFiles() {

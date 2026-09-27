@@ -20,6 +20,7 @@ import laneStarvation from '../health-smells/lane-starvation.mjs';
 import healthTickOverrun from '../health-smells/health-tick-overrun.mjs';
 import heavyQueueWait from '../health-smells/heavy-queue-wait.mjs';
 import claudeAuthExpired from '../health-smells/claude-auth-expired.mjs';
+import dispatchTrustRefused from '../health-smells/dispatch-trust-refused.mjs';
 
 const sample = (name, text, over = {}) => ({ name, mtimeMs: 0, sizeBytes: text.length, text, bootstrap: false, defaultIntervalMs: 120_000, ...over });
 
@@ -280,6 +281,74 @@ describe('smell: bad-credentials', () => {
     now += MINUTE;
     r = runHealthTick(state, { daemonLogs: [] }, [badCredentials], now);
     expect(r.transitions.some((t) => t.type === 'closed' && t.key === 'bad-credentials::github-auth')).toBe(true);
+  });
+});
+
+// #4174 follow-up (live-caught 2026-09-27) — 17 real "Workspace not trusted" refusals in
+// ~/workspace/wev-review-daemon/.conveyor/fix-dispatch-daemon.log, across fix-/ci-heal-/review dispatches.
+describe('parseDaemonLog / foldDaemonMemory — trust refusals', () => {
+  it('counts a "Workspace not trusted" refusal line, same as AUTH_ERROR counts a 401', () => {
+    const text = 'Workspace not trusted. Run `claude` in /x/dispatch/abc once and accept the trust prompt, then retry.';
+    expect(parseDaemonLog(text).trustRefusals).toBe(1);
+  });
+
+  it('folds into trustRefusalTimes, kept within the 2h window like authErrorTimes', () => {
+    const mem = foldDaemonMemory(undefined, sample('fix-dispatch-daemon', 'Workspace not trusted. Run `claude` in /x once and accept the trust prompt, then retry.', { mtimeMs: 0 }), 0);
+    expect(mem.trustRefusalTimes).toHaveLength(1);
+  });
+
+  // PR #2824 review — memory persisted by a daemon build that predates `trustRefusalTimes` must not crash the fold.
+  it('folds a refusal into LEGACY memory that has no trustRefusalTimes field', () => {
+    const legacy = foldDaemonMemory(undefined, sample('fix-dispatch-daemon', '', { mtimeMs: 0 }), 0);
+    delete legacy.trustRefusalTimes;
+    const mem = foldDaemonMemory(legacy, sample('fix-dispatch-daemon', 'Workspace not trusted. Run `claude` in /x once and accept the trust prompt, then retry.', { mtimeMs: 1, sizeBytes: 10 }), 1);
+    expect(mem.trustRefusalTimes).toHaveLength(1);
+  });
+
+  it('counts the dispatch sink\'s normalized refusal line (lower-case "workspace not trusted")', () => {
+    const line = 'reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #2822 — claude could not be started (workspace not trusted for /x/dispatch/a) — no agent exists';
+    expect(parseDaemonLog(line).trustRefusals).toBe(1);
+  });
+});
+
+describe('smell: dispatch-trust-refused', () => {
+  it('2 "Workspace not trusted" refusals in 60 min opens; quiet closes after 3 clean samples', () => {
+    const text = [
+      'reconcile-fix-dispatch-daemon: tick (chalbert/web-everything) — dispatched 0, refused 1',
+      'Workspace not trusted. Run `claude` in /x/dispatch/a once and accept the trust prompt, then retry.',
+      'reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #2822 — claude could not be started (workspace not trusted for /x/dispatch/a) — no agent exists',
+      'Workspace not trusted. Run `claude` in /x/dispatch/b once and accept the trust prompt, then retry.',
+    ].join('\n');
+    let state = emptyHealthState();
+    let r = runHealthTick(state, { daemonLogs: [sample('fix-dispatch-daemon', text, { mtimeMs: 0 })] }, [dispatchTrustRefused], 0);
+    state = r.state;
+    expect(r.transitions.some((t) => t.type === 'opened' && t.key === 'dispatch-trust-refused::dispatch-trust')).toBe(true);
+
+    // Past the 60-minute window, with no new refusals: 3 clean samples close it.
+    let now = 61 * MINUTE;
+    r = runHealthTick(state, { daemonLogs: [] }, [dispatchTrustRefused], now);
+    state = r.state;
+    expect(state.episodes['dispatch-trust-refused::dispatch-trust'].status).toBe('open');
+    now += MINUTE;
+    r = runHealthTick(state, { daemonLogs: [] }, [dispatchTrustRefused], now);
+    state = r.state;
+    expect(state.episodes['dispatch-trust-refused::dispatch-trust'].status).toBe('open');
+    now += MINUTE;
+    r = runHealthTick(state, { daemonLogs: [] }, [dispatchTrustRefused], now);
+    expect(r.transitions.some((t) => t.type === 'closed' && t.key === 'dispatch-trust-refused::dispatch-trust')).toBe(true);
+  });
+
+  it('a single refusal (below minErrors=2) never opens', () => {
+    const text = 'Workspace not trusted. Run `claude` in /x/dispatch/only-one once and accept the trust prompt, then retry.';
+    const state = emptyHealthState();
+    const r = runHealthTick(state, { daemonLogs: [sample('fix-dispatch-daemon', text, { mtimeMs: 0 })] }, [dispatchTrustRefused], 0);
+    expect(r.transitions.some((t) => t.type === 'opened')).toBe(false);
+  });
+
+  it('opens on the sink\'s normalized refusal lines alone, with no raw CLI stderr logged (PR #2824 review)', () => {
+    const text = ['a', 'b'].map((s) => `reconcile-fix-dispatch-daemon: refused dispatch-failed chalbert/web-everything PR #2822 — claude could not be started (workspace not trusted for /x/dispatch/${s}) — no agent exists`).join('\n');
+    const r = runHealthTick(emptyHealthState(), { daemonLogs: [sample('fix-dispatch-daemon', text, { mtimeMs: 0 })] }, [dispatchTrustRefused], 0);
+    expect(r.transitions.some((t) => t.type === 'opened' && t.key === 'dispatch-trust-refused::dispatch-trust')).toBe(true);
   });
 });
 

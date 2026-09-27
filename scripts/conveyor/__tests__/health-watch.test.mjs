@@ -641,3 +641,47 @@ describe('round 3: probe-error scrub and active-card silences', () => {
     expect(state.episodes['health-tick-overrun::health-watch'].tracked).toBeNull();
   });
 });
+
+// ── review-seat-cap-near-limit (card xn2wf9t) — the per-provider daily-cap warning, record-only by design ──────
+
+describe('tick() — review-seat-cap-near-limit: reads the scorecard store, opens record-only (never notifies)', () => {
+  const base = () => {
+    const lockRoot = join(dir, 'locks-seatcap'); mkdirSync(lockRoot, { recursive: true });
+    const syncDir = join(dir, 'sync-seatcap'); mkdirSync(syncDir, { recursive: true });
+    return { 'lock-root': lockRoot, 'self-sync-dir': syncDir, 'no-gh': true, 'no-diagnose': true };
+  };
+  const scorecardFixture = (rows) => {
+    const path = join(dir, `xn2wf9t-store-${Math.random().toString(36).slice(2)}.json`);
+    writeFileSync(path, JSON.stringify({ version: 1, records: rows }));
+    return path;
+  };
+  const seatRow = (provider, callId, scoredAt = new Date().toISOString()) => ({ dispatchKind: 'review-seat', provider, callId, scoredAt });
+
+  it('a quiet day (well under every cap) never opens the episode', async () => {
+    const stateRoot = join(dir, 'state-seatcap-quiet');
+    const flags = { ...base(), 'state-root': stateRoot, 'logs-dir': join(dir, 'logs-seatcap-quiet'), 'scorecard-store-fixture': scorecardFixture([seatRow('codex', 'c1')]) };
+    mkdirSync(flags['logs-dir'], { recursive: true });
+    const summary = await tick(flags);
+    expect(summary.transitions.find((t) => t.key.startsWith('review-seat-cap-near-limit'))).toBeUndefined();
+  });
+
+  it('a provider near its own cap opens ONE episode, names it, and stays suppressed (shadow, never notify)', async () => {
+    const stateRoot = join(dir, 'state-seatcap-hot');
+    // 65/80 (the default codex cap) = 81.25% — over the 80% warn line.
+    const codexRows = Array.from({ length: 65 }, (_, i) => seatRow('codex', `c${i}`));
+    const flags = {
+      ...base(), 'state-root': stateRoot, 'logs-dir': join(dir, 'logs-seatcap-hot'),
+      'scorecard-store-fixture': scorecardFixture(codexRows),
+    };
+    mkdirSync(flags['logs-dir'], { recursive: true });
+    const summary = await tick(flags);
+    const opens = summary.transitions.filter((t) => t.type === 'opened' && t.key.startsWith('review-seat-cap-near-limit::review-seat-cap:codex'));
+    expect(opens).toHaveLength(1);
+    // `severity: 'low'` structurally never produces a `notify` plan entry at all (`planActions` only ever
+    // pushes one for `severity === 'high'`) — only the (itself-suppressed) `investigate` entry.
+    expect(summary.plan.some((p) => p.kind === 'notify' && p.key === opens[0].key)).toBe(false);
+    const investigate = summary.plan.find((p) => p.kind === 'investigate' && p.key === opens[0].key);
+    expect(investigate.suppressed).toMatch(/shadow mode/);
+    expect(summary.section.join('\n')).toMatch(/codex.*8[1-9]%|codex.*65\/80/);
+  });
+});

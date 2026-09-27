@@ -306,6 +306,13 @@ export function runReviewTick({
   // (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS`); threaded into `tagStatus` below so `review-status:awaiting-ci`
   // reflects the PR's OWN current draft state, never a second `gh` read.
   const isDraftByPr = new Map((Array.isArray(rawPrs) ? rawPrs : []).map((p) => [Number(p?.number), !!p?.isDraft]));
+  // `fixing-conflict` (draft reason at a glance, operator ask 2026-09-27, #2811 follow-up) — the SAME `rawPrs`
+  // snapshot already carries `mergeStateStatus` (`reconcile-pass.mjs#PR_LIST_JSON_FIELDS`, the identical field
+  // `reconcile-core.mjs#classifyPr`'s `conflicted` phase reads); threaded into `tagStatus` below so a live
+  // fixer working a PR GitHub itself reports as conflicting reads `review-status:fixing-conflict`, never the
+  // generic `fixing` — no second `gh` read.
+  const mergeConflictedByPr = new Map((Array.isArray(rawPrs) ? rawPrs : [])
+    .map((p) => [Number(p?.number), String(p?.mergeStateStatus ?? '').toUpperCase() === 'DIRTY']));
   const reviews = (plan.dispatch ?? []).filter((d) => d && d.kind === 'review');
   // Live-caught 2026-09-22, #xli631k: a PR that moved to being owed a FIX (not a review) used to never
   // reach `statusCandidates` at all, so its `review-status:reviewing` label sat stale once its review
@@ -367,7 +374,12 @@ export function runReviewTick({
   const dispatchedThisTick = new Set(dispatched.map((d) => Number(d.prNumber)));
   for (const c of statusCandidates(reviews, plan.refusals ?? [], fixes, ciHeals)) {
     const agents = dispatchedThisTick.has(Number(c.prNumber)) ? undefined : (rawAgents ?? undefined);
-    try { tagStatus({ pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)), isDraft: isDraftByPr.get(Number(c.prNumber)) }); }
+    try {
+      tagStatus({
+        pr: c.prNumber, repo, agents, currentLabels: labelsByPr.get(Number(c.prNumber)),
+        isDraft: isDraftByPr.get(Number(c.prNumber)), mergeConflicted: mergeConflictedByPr.get(Number(c.prNumber)),
+      });
+    }
     catch { /* cosmetic — see review-status-tag.mjs's own header */ }
   }
   return {

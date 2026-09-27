@@ -59,6 +59,7 @@ import { collectDaemonStatus } from '../operations/daemon-status-io.mjs';
 import { assessDaemonStatus } from '../operations/daemon-status.mjs';
 import { readBacklogCards } from '../backlog-stranded-sweep.mjs';
 import { readPrEventsStatuses } from '../lib/pr-events.mjs';
+import { readSeatCapUsage } from '../operations/review-extra-seats.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BOOTSTRAP_TAIL_BYTES = 512 * 1024;
@@ -537,6 +538,13 @@ export async function tick(flags = {}) {
     : probeMachineLoad()));
   // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
   probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
+  // `review-seat-cap-near-limit` (card xn2wf9t) — fs-only, every tick: each non-Claude review seat provider's
+  // OWN daily cap usage, off the SAME scorecard store + reservation ledgers `runExtraSeats`/`runRedTeam` admit
+  // against (`--scorecard-store-fixture=FILE` in tests, so this never touches a real store in the test suite).
+  probes.reviewSeatCaps = attempt('reviewSeatCaps', () => readSeatCapUsage({
+    storePath: flags['scorecard-store-fixture'] || undefined,
+    now,
+  }));
   // `gh-graphql-budget` — every tick (1 GraphQL point): the real bucket + the throttle's shared budget blocks.
   // `--graphql-budget-fixture=FILE` (a `{sample, blocks}` JSON) in tests; skipped under `--no-gh`.
   // `pr-events-stale` — fs-only, every tick: each event-driven waker's status file (`[]` while WE_PR_EVENTS is off).
