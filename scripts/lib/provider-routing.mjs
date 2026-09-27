@@ -1185,8 +1185,13 @@ export function selectSupervisionLevel(provider, model, taskType, scorecards, ba
 // by `taskType: reviewSeatTaskType(lens)` — a prefixed subject that can never collide with a work taskType, so a
 // review seat's history never counts toward a work triple's graduation streak (#3801 Fork 3).
 
-/** The non-Claude providers an added review seat can be routed to, in tie-break order. */
-export const REVIEW_SEAT_PROVIDERS = Object.freeze(['codex', 'gemini']);
+/** The non-Claude providers an added review seat can be routed to, in tie-break order. Card xn2wf9t (#3383
+ *  follow-up) split the old single `gemini` (always the `agy` CLI's Gemini-backed model) into its two REAL,
+ *  separately-metered allowances: `agy-claude` (the `agy` CLI running a Claude-family model) and `agy-gemini`
+ *  (the same CLI running its native Gemini model) — the operator confirmed live both are separate, generous
+ *  quotas, while `codex`'s own weekly allowance is comparatively tight. Splitting the identity (not just the
+ *  cap) lets a seat fall back from one antigravity backend to the other without touching Codex at all. */
+export const REVIEW_SEAT_PROVIDERS = Object.freeze(['codex', 'agy-claude', 'agy-gemini']);
 
 /** The `dispatchKind` every added-review-seat evidence row carries. */
 export const REVIEW_SEAT_DISPATCH_KIND = 'review-seat';

@@ -163,7 +163,7 @@ import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { reviewSessionSlug } from '../conveyor/review-session-slug.mjs';
 // #4194 — the added non-Claude review seats' routing (see `reviewSeatRoutes`).
 import { ADVISORY_LENSES, MANDATE_LENSES } from '../lib/jury-core.mjs';
-import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider } from '../lib/provider-routing.mjs';
+import { REVIEW_SEAT_PROVIDERS, selectReviewSeatProvider, AGY_CLAUDE_MODEL_BY_TIER } from '../lib/provider-routing.mjs';
 import { CODEX_MODEL } from '../lib/codex-model-routing.mjs';
 import { ANTIGRAVITY_MODEL } from '../lib/antigravity-judge-spawn.mjs';
 // build-path-codex-isolation — the ONE shared bg-isolation helper every dispatch path calls.
@@ -192,12 +192,19 @@ export const ROUTED_ADVISORY_LENSES = Object.freeze(ADVISORY_LENSES.filter((l) =
  *  so it can never block or accept). */
 export const EXTRA_JUROR_MANDATE = MANDATE_LENSES.CORRECTNESS;
 
-/** The pinned model + effort per provider for an added seat — never left to a CLI's implicit default. */
+/** The pinned model + effort per provider for an added seat — never left to a CLI's implicit default. Card
+ *  xn2wf9t split the old single `gemini` entry into the `agy` CLI's two real backends (see
+ *  `provider-routing.mjs#REVIEW_SEAT_PROVIDERS`'s own note): `agy-gemini` keeps the exact model/effort the old
+ *  `gemini` entry ran, byte for byte; `agy-claude` is new. */
 export const REVIEW_SEAT_MODELS = Object.freeze({
   codex: Object.freeze({ model: CODEX_MODEL, effort: 'medium' }),
   // `gemini-3.1-pro` offers only `low`/`high` (agy refused `medium` live, 2026-09-26); `low` is the combination
   // the review-pr Antigravity seat already runs (`ANTIGRAVITY_REVIEW_EFFORT`).
-  gemini: Object.freeze({ model: ANTIGRAVITY_MODEL, effort: 'low' }),
+  'agy-gemini': Object.freeze({ model: ANTIGRAVITY_MODEL, effort: 'low' }),
+  // The `agy` CLI running a Claude-family model — untried live at this effort for a review seat, so it starts
+  // at the same effort Codex's own seat runs rather than assuming the Gemini backend's `low`/`high`-only quirk
+  // carries over; the first live runs are the proof either way (see the plist/backlog note this card leaves).
+  'agy-claude': Object.freeze({ model: AGY_CLAUDE_MODEL_BY_TIER.sonnet, effort: 'medium' }),
 });
 
 /** The routing key of one seat — its own subject in the scorecard store (`reviewSeatTaskType`). PURE. */
