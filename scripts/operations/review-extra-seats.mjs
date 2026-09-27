@@ -154,9 +154,28 @@ export function isPinnedRev(rev) {
 
 const seatRows = (records) => (Array.isArray(records) ? records : []).filter((r) => r && r.dispatchKind === REVIEW_SEAT_DISPATCH_KIND);
 
-const callIdsToday = (records, day) => {
+/** `provider` omitted → every provider's rows (the pre-split shared pool); given → that provider's rows only. */
+const callIdsToday = (records, day, provider = undefined) => {
   const ids = new Set();
-  for (const r of seatRows(records)) if (capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
+  for (const r of seatRows(records)) {
+    if (provider !== undefined && r.provider !== provider) continue;
+    if (capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
+  }
+  return ids;
+};
+
+/** A ledger reservation belongs to `provider` — an untagged one predates the per-provider split (card xn2wf9t)
+ *  and lived in codex's ledger, so it reads as codex's own. `provider` omitted is the shared pool (codex's file). */
+const reservationIsFor = (r, provider) => (r?.provider ?? 'codex') === (provider ?? 'codex');
+
+/** Today's distinct seat calls for one provider: its stored rows' ids ∪ its outstanding same-day reservations (a
+ *  reservation whose row has landed shares its id, so it counts once). The ONE count both admission
+ *  ({@link reserveSeatCalls}) and reporting ({@link reviewSeatCapUsage}) use. PURE. */
+const providerCallIdsToday = (records, ledger, day, provider) => {
+  const ids = callIdsToday(records, day, provider);
+  for (const r of Array.isArray(ledger?.reservations) ? ledger.reservations : []) {
+    if (r && capDay(r.at) === day && reservationIsFor(r, provider)) ids.add(r.callId);
+  }
   return ids;
 };
 
@@ -168,24 +187,22 @@ export function callsUsedToday(records, now) {
 
 /** Distinct seat calls recorded on `now`'s day for ONE provider only. PURE. */
 export function callsUsedTodayForProvider(records, now, provider) {
-  const day = capDay(now);
-  const ids = new Set();
-  for (const r of seatRows(records)) {
-    if (r.provider === provider && capDay(r.scoredAt) === day) ids.add(r.callId ?? `${r.scoredAt}:${r.provider}`);
-  }
-  return ids.size;
+  return callIdsToday(records, capDay(now), provider).size;
 }
 
 /**
  * Card xn2wf9t — every provider's today usage against its own cap, in one call: the SAME numbers both the
- * health watch's `review-seat-cap-near-limit` smell and the `review-seat-caps` report read, off the scorecard
- * store's own rows (no separate usage file — the store already IS the per-day record). PURE.
+ * health watch's `review-seat-cap-near-limit` smell and the `review-seat-caps` report read. Counted exactly as
+ * admission counts it ({@link reserveSeatCalls}): the scorecard store's rows PLUS each provider's outstanding
+ * reservations from `ledgers` (`{[provider]: ledger}` — omit it and only completed rows count). PURE; the
+ * real reads live in {@link readSeatCapUsage}.
  * @returns {Record<string, {usedToday:number, cap:number, fraction:(number|null)}>}
  */
-export function reviewSeatCapUsage(records, now, env = process.env) {
+export function reviewSeatCapUsage(records, now, env = process.env, ledgers = {}) {
+  const day = capDay(now);
   return Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => {
     const cap = resolveProviderCap(p, env);
-    const usedToday = callsUsedTodayForProvider(records, now, p);
+    const usedToday = providerCallIdsToday(records, ledgers?.[p] ?? null, day, p).size;
     return [p, { usedToday, cap, fraction: cap > 0 ? Math.round((usedToday / cap) * 1000) / 1000 : null }];
   }));
 }
@@ -197,23 +214,19 @@ export function reviewSeatCapUsage(records, now, env = process.env) {
  * reservation whose row has landed shares its id, so it counts once). The caller holds a cross-process lock around
  * read → this → write. A reservation whose call never writes a row still counts: the budget errs toward spending
  * less. Earlier days' reservations are dropped. PURE.
- * `provider`, when given, scopes BOTH sides of the count to that one provider: only its own stored rows count
- * (via `records` the caller already filtered, or generically — either way this function itself never reads
- * `r.provider`) and only ITS OWN reservations in the ledger are kept/matched (an untagged reservation, from
- * before providers were split, or one made for a different provider, never counts against or extends this
- * provider's grant). Omitted (`undefined`), it behaves exactly as before the split — one shared pool.
+ * `provider`, when given, scopes BOTH sides of the count to that one provider: only stored rows whose
+ * `r.provider` matches count (callers pass the whole unfiltered store), and only ITS OWN reservations in the
+ * ledger are kept/matched (an untagged reservation, from before providers were split, reads as codex's; one made
+ * for a different provider never counts against or extends this provider's grant). Omitted (`undefined`), it
+ * behaves exactly as before the split — one shared pool.
  * @param {{ledger:(object|null), records:Array<object>, want:number, dailyCap:number, now:number, newId:Function, provider?:(string|undefined)}} o
  * @returns {{callIds:string[], used:number, ledger:{version:number, reservations:Array<{callId:string, at:string, provider?:string}>}}}
  */
 export function reserveSeatCalls({ ledger, records, want, dailyCap, now, newId, provider = undefined }) {
   const day = capDay(now);
-  // An untagged reservation predates the per-provider split (card xn2wf9t) — the ledger it lived in was
-  // codex's alone back then, so it reads as codex's own rather than as "no provider" (which would exclude it
-  // from every provider's count and quietly over-grant codex on the split's first day).
-  const sameProvider = (r) => (r?.provider ?? 'codex') === (provider ?? 'codex');
+  const sameProvider = (r) => reservationIsFor(r, provider);
   const kept = (Array.isArray(ledger?.reservations) ? ledger.reservations : []).filter((r) => r && capDay(r.at) === day && sameProvider(r));
-  const ids = callIdsToday(records, day);
-  for (const r of kept) ids.add(r.callId);
+  const ids = providerCallIdsToday(records, ledger, day, provider);
   const grant = Math.max(0, Math.min(Number(want) || 0, dailyCap - ids.size));
   const callIds = Array.from({ length: grant }, () => newId());
   const at = new Date(now).toISOString();
@@ -659,6 +672,21 @@ export const RESERVATION_LEDGER_FILE = 'review-seat-reservations.json';
  *  spent by another provider's concurrent reservation. PURE. */
 export function reservationLedgerFileFor(provider) {
   return provider === 'codex' || provider == null ? RESERVATION_LEDGER_FILE : `review-seat-reservations-${provider}.json`;
+}
+
+/**
+ * {@link reviewSeatCapUsage} off the REAL files: the scorecard store plus every provider's reservation ledger
+ * beside it — so the report and the health smell see in-flight reservations exactly as admission does. Read
+ * without the ledger lock (a report tolerates a millisecond-stale ledger); a corrupt ledger THROWS, as it does
+ * for admission, rather than under-reporting. `storePath` pins the store (tests/fixtures); default is the shared one.
+ */
+export function readSeatCapUsage({ env = process.env, storePath, now = Date.now() } = {}) {
+  const stateDir = dirname(storePath ?? resolveScorecardStorePath());
+  const ledgers = Object.fromEntries(REVIEW_SEAT_PROVIDERS.map((p) => {
+    const path = join(stateDir, reservationLedgerFileFor(p));
+    return [p, existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null];
+  }));
+  return reviewSeatCapUsage(readStore(storePath ? { path: storePath } : {}).records, now, env, ledgers);
 }
 
 /** How long a reservation waits for the ledger lock before giving up (and launching nothing). */

@@ -16,7 +16,7 @@ import {
   claudeFindingsFromLoop, buildSeatTask, parseSeatAnswer, classifySeatCall, buildSeatRows, seatCallArgv, capDay,
   renderSeatSummary, EXTRA_SEATS_ENV, DAILY_CAP_ENV, DEFAULT_DAILY_CAP, PROVIDER_CAP_ENV, PROVIDER_CAP_DEFAULT,
   resolveProviderCap, reviewSeatCapUsage, toIsoInstant, extractAnswerJson, reserveSeatCalls, createExtraSeatsIo,
-  withLedgerLock, isPinnedRev, repoRelativeFindings,
+  withLedgerLock, isPinnedRev, repoRelativeFindings, readSeatCapUsage,
 } from '../review-extra-seats.mjs';
 import { runReviewJob, summarizeExtraSeats } from '../review-job.mjs';
 import { ADVISORY_JUDGE_LENS, JUDGE_SEATS } from '../review-pr.mjs';
@@ -24,7 +24,7 @@ import {
   selectReviewSeatProvider, reviewSeatTaskType, REVIEW_SEAT_DISPATCH_KIND,
 } from '../../lib/provider-routing.mjs';
 import { ADVISORY_LENSES, MANDATORY_LENSES, findingCorroboratedBy } from '../../lib/jury-core.mjs';
-import { validateScorecard, appendScorecard } from '../../conveyor/run-scorecard-store.mjs';
+import { validateScorecard, appendScorecard, writeStore } from '../../conveyor/run-scorecard-store.mjs';
 import { buildCodexDirectTaskArgv, buildCodexPrompt } from '../../codex-direct-task.mjs';
 import {
   buildAgyPrompt, buildAgyDirectTaskArgv, runAgyDirectExec, parseFlags as parseAgyFlags,
@@ -205,6 +205,26 @@ describe('#4194 cost controls — kill switch, cap, quota', () => {
     expect(usage['agy-claude']).toEqual({ usedToday: 1, cap: PROVIDER_CAP_DEFAULT['agy-claude'], fraction: expect.any(Number) });
     expect(usage['agy-gemini']).toEqual({ usedToday: 0, cap: PROVIDER_CAP_DEFAULT['agy-gemini'], fraction: 0 });
     expect(callsUsedTodayForProvider(records, NOW, 'codex')).toBe(2);
+  });
+
+  it('card xn2wf9t — reviewSeatCapUsage includes outstanding reservations without double-counting completed calls', () => {
+    const records = [{ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider: 'codex', callId: 'landed', scoredAt: '2026-09-26T14:00:00Z' }];
+    const ledgers = {
+      // untagged = pre-split codex reservation; 'landed' already has its row; yesterday's never counts
+      codex: { version: 1, reservations: [
+        { callId: 'landed', at: '2026-09-26T13:59:00Z', provider: 'codex' },
+        { callId: 'inflight-1', at: '2026-09-26T14:10:00Z', provider: 'codex' },
+        { callId: 'legacy', at: '2026-09-26T14:20:00Z' },
+        { callId: 'old', at: '2026-09-25T14:20:00Z', provider: 'codex' },
+      ] },
+      'agy-claude': { version: 1, reservations: [{ callId: 'c1', at: '2026-09-26T14:10:00Z', provider: 'agy-claude' }] },
+    };
+    const usage = reviewSeatCapUsage(records, NOW, { [PROVIDER_CAP_ENV.codex]: '4' }, ledgers);
+    expect(usage.codex).toEqual({ usedToday: 3, cap: 4, fraction: 0.75 });
+    expect(usage['agy-claude'].usedToday).toBe(1);
+    expect(usage['agy-gemini'].usedToday).toBe(0);
+    // the SAME count admission gates on
+    expect(reserveSeatCalls({ ledger: ledgers.codex, records, want: 5, dailyCap: 4, now: NOW, newId: () => 'n', provider: 'codex' }).used).toBe(3);
   });
 });
 
@@ -611,6 +631,18 @@ describe('#4194 reserveSeatCalls — the daily budget is reserved BEFORE a call 
     expect(reserveSeatCalls({ ledger: r.ledger, records: [], want: 1, dailyCap: 2, now: NOW, newId: ids() }).callIds).toEqual([]);
     expect(reserveSeatCalls({ ledger: null, records: [], want: 0, dailyCap: 2, now: NOW, newId: ids() }).callIds).toEqual([]);
   });
+
+  it('card xn2wf9t — reserveSeatCalls counts only the requested provider\'s completed calls, never another provider\'s', () => {
+    const rows = (provider, n) => Array.from({ length: n }, (_, i) => ({ dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, callId: `${provider}-${i}`, scoredAt: '2026-09-26T14:00:00Z' }));
+    const records = [...rows('codex', 2), ...rows('agy-gemini', 100), ...rows('agy-claude', 80)];
+    const codex = reserveSeatCalls({ ledger: null, records, want: 1, dailyCap: 80, now: NOW, newId: ids(), provider: 'codex' });
+    expect(codex.callIds).toEqual(['r1']);
+    expect(codex.used).toBe(2);
+    // the provider's own rows still count against its own cap
+    expect(reserveSeatCalls({ ledger: null, records, want: 1, dailyCap: 80, now: NOW, newId: ids(), provider: 'agy-claude' }).callIds).toEqual([]);
+    // no provider → the pre-split shared pool, unchanged
+    expect(reserveSeatCalls({ ledger: null, records, want: 1, dailyCap: 80, now: NOW, newId: ids() }).used).toBe(182);
+  });
 });
 
 describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and store', () => {
@@ -714,5 +746,36 @@ describe('#4194 createExtraSeatsIo — real effects, on a throwaway repo and sto
     writeFileSync(ledger, '{ not json');
     expect(() => createExtraSeatsIo({ env: process.env, storePath }).reserveCalls({ want: 1, dailyCap: 3, now: Date.now() })).toThrow();
     expect(readFileSync(ledger, 'utf8')).toBe('{ not json');
+  });
+
+  const seatRowsFor = (provider, n, scoredAt) => Array.from({ length: n }, (_, i) => ({
+    v: 1, dispatchKind: REVIEW_SEAT_DISPATCH_KIND, provider, callId: `${provider}-${i}`, scoredAt, outcome: null,
+  }));
+
+  it('card xn2wf9t — production reserveCalls: another provider\'s completed calls never reduce codex\'s grant', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const now = Date.now();
+    writeStore({ version: 1, records: seatRowsFor('agy-claude', 3, new Date(now).toISOString()) }, { path: storePath });
+    const r = createExtraSeatsIo({ env: process.env, storePath }).reserveCalls({ provider: 'codex', want: 1, dailyCap: 3, now });
+    expect(r.callIds).toHaveLength(1);
+    expect(r.used).toBe(0);
+  });
+
+  it('card xn2wf9t — readSeatCapUsage includes outstanding reservations without double-counting completed calls', () => {
+    const storePath = join(root, 'state', 'run-scorecards.json');
+    const now = Date.now();
+    const env = { [PROVIDER_CAP_ENV.codex]: '5' };
+    writeStore({ version: 1, records: seatRowsFor('codex', 1, new Date(now).toISOString()) }, { path: storePath });
+    const io = createExtraSeatsIo({ env, storePath });
+    // 3 more reserved, in flight (no rows yet); the landed row's own reservation must count once
+    const reserved = io.reserveCalls({ provider: 'codex', want: 3, dailyCap: 5, now });
+    expect(reserved.callIds).toHaveLength(3);
+    io.reserveCalls({ provider: 'agy-gemini', want: 2, dailyCap: 300, now });
+    const usage = readSeatCapUsage({ env, storePath, now });
+    expect(usage.codex).toEqual({ usedToday: 4, cap: 5, fraction: 0.8 });
+    expect(usage['agy-gemini'].usedToday).toBe(2);
+    expect(usage['agy-claude'].usedToday).toBe(0);
+    // reported usage equals admission usage: exactly one slot left for codex
+    expect(io.reserveCalls({ provider: 'codex', want: 5, dailyCap: 5, now }).callIds).toHaveLength(1);
   });
 });

@@ -4,7 +4,8 @@
  *   `heavy-queue`-style one-liner + per-provider breakdown of the non-Claude review seats' OWN daily call caps
  *   (`review-extra-seats.mjs#REVIEW_SEAT_PROVIDERS`, one cap each since this same card split the old single
  *   shared cap). Mirrors `heavy-queue.mjs`'s own READ / ASSESS split: `collect` (bound in `run.mjs`) is the one
- *   real read (the shared scorecard store, via `review-extra-seats.mjs#reviewSeatCapUsage`); everything here is
+ *   real read (the shared scorecard store + each provider's reservation ledger, via
+ *   `review-extra-seats.mjs#readSeatCapUsage`); everything here is
  *   a pure function over that already-read snapshot — so the operator can calibrate each provider's cap
  *   (`WE_REVIEW_SEAT_CAP_CODEX` / `_AGY_CLAUDE` / `_AGY_GEMINI`) off the SAME numbers the gate itself reads,
  *   not a hand-rolled estimate.
@@ -34,8 +35,8 @@ export function assessReviewSeatCaps(usage) {
 /**
  * The declared operation. Read-only, no input required — same no-sinks reasoning as `heavy-queue`/
  * `daemon-status`: every step is `compute`, so no effect exists for a sink to apply. `collect` is the injected
- * IO ({@link ../conveyor/run-scorecard-store.mjs#readStore} + `review-extra-seats.mjs#reviewSeatCapUsage`),
- * bound to the real store only in `run.mjs`.
+ * IO (`review-extra-seats.mjs#readSeatCapUsage` — the store rows plus outstanding reservations, the same count
+ * admission gates on), bound to the real files only in `run.mjs`.
  * @param {{collect: () => Record<string, object>}} deps
  */
 export function reviewSeatCapsOperation({ collect } = {}) {

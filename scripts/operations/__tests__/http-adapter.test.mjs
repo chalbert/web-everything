@@ -442,7 +442,7 @@ describe('#3036 read-only is a property of the DECLARING MODULE — the part tha
     [AGENT_ACTIVITY_OP]: 'agent-activity.mjs',
     // Card xn2wf9t (#3383 follow-up) — READ-ONLY and genuinely so: both steps are `compute`, the declaring
     // module imports only `registry.mjs` and `step-kinds.mjs`, and the scorecard-store read lives behind the
-    // injected `collect` reader `../run.mjs` binds to `review-extra-seats.mjs#reviewSeatCapUsage`.
+    // injected `collect` reader `../run.mjs` binds to `review-extra-seats.mjs#readSeatCapUsage`.
     [REVIEW_SEAT_CAPS_OP]: 'review-seat-caps.mjs',
   });
 
