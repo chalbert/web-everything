@@ -16,7 +16,7 @@ Tag each run-rating row (we:scripts/conveyor/run-rating.mjs) with whether its it
 
 1. **Executable** — `npx vitest run we:scripts/conveyor/__tests__/run-rating.test.mjs` passes new cases: a
    scorecard row derived from a dispatched item whose backlog card carries `preparedDate` (set + reviewed
-   per [[fixes-need-prepared-card]] / the story-preparation-checklist) is tagged `prepared: true` in the
+   per the "fixes need a prepared card" agent memory / the story-preparation-checklist) is tagged `prepared: true` in the
    row written by we:scripts/conveyor/run-scorecard-store.mjs; one dispatched from a bespoke ad-hoc prompt
    with no `preparedDate` is tagged `prepared: false`; and `node we:scripts/conveyor/run-rating.mjs report`
    prints a prepared-vs-unprepared table (count, avg wall time, tokens per demand, rework-round count, and

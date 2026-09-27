@@ -14,7 +14,7 @@ Product vision (operator, 2026-09-27): Plateau offers several delivery strategie
 None of this was built as a named "strategy" yet — it is scattered mechanism the epic would name and make
 combinable/routable:
 
-- **Full-DoR delivery lane.** [[fixes-need-prepared-card]] (this session, 2026-09-27): file → prepare →
+- **Full-DoR delivery lane.** The "fixes need a prepared card" agent memory (this session, 2026-09-27): file → prepare →
   light review → dispatch on the card + generic brief. First instance under trial is
   we:backlog/xasdfvs-run-rating-record-whether-an-item-was-prepared-dor-before-bu.md, which will compare it
   against bespoke-prompt dispatch in the run-rating report.
