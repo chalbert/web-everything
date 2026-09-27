@@ -33,7 +33,7 @@ import {
   planReconcile, countFindings, bindAgents, assessLiveness, isAwaitingPermission, startedAtMs,
   REFUSAL_KINDS, DISPATCH_KINDS, selectStatusCandidates, markSelfReportedDone, markHungSessions,
   markAuthExpiredSessions, markIdleFinishedSessions, markBgIsolationStalls, CI_HEAL_ROUND_CAP,
-  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP,
+  CONFLICT_FIX_ROUND_CAP, ADVISORY_FIX_ROUND_CAP, CONFLICT_FIX_ABSOLUTE_CEILING,
 } from '../reconcile-core.mjs';
 import {
   STAND_DOWN_MARKER, WATCHER_STAND_DOWN_ACTOR, SUPERSEDE_STAND_DOWN_MARKER, buildStandDownComment,
@@ -1232,6 +1232,58 @@ describe('case 5f — conflict-fix dispatch, capped by its OWN durable marker, n
     const plan = planReconcile({ prs: [prConflict({ comments: [finding(), { body: CONFLICT_FIX_COMMENT_MARKER, author: AUTOMATION }] })], agents: [], now: NOW, conflictFixCap: 1 });
     expect(plan.dispatch).toHaveLength(0);
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', cap: 1, capKind: 'conflict-fix' })]);
+  });
+
+  // #2787 LIVE INCIDENT (2026-09-27) — 3 rounds each genuinely SUCCEEDED against a stacked base that kept
+  // getting rebased (fc7c9e916 → 971cf0781 → 49087faaf → dc35a35c2), then that base landed entirely and the PR
+  // retargeted to `main` — its FIRST-EVER main-base conflict. BEFORE this fix: `cap-exhausted` on arrival
+  // (3 stale-looking rounds already "spent"). AFTER: none of those 3 rounds match the CURRENT target (`main`),
+  // so this dispatches.
+  it('#2787 reproduction: 3 prior rounds against a DIFFERENT (stacked) target do not exhaust the cap for a FIRST-EVER main-base conflict', () => {
+    const priorStackedRounds = [
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 1`, author: AUTOMATION },
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 2`, author: AUTOMATION },
+      { body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nconveyor fix agent resolved this PR's conflict against \`lane/soak-gate-false-red\` (a STACKED-BASE mechanical rebase, #3383...) round 3`, author: AUTOMATION },
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...priorStackedRounds] })], agents: [], now: NOW });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2549, attempts: 0, cap: CONFLICT_FIX_ROUND_CAP })]);
+  });
+
+  it('#2787 hard ceiling: even rounds against DIFFERENT targets stop dispatching once the RAW total hits CONFLICT_FIX_ABSOLUTE_CEILING (a true loop, not a moving target)', () => {
+    const manyDifferentTargets = Array.from({ length: CONFLICT_FIX_ABSOLUTE_CEILING }, (_, i) => ({
+      body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved against \`lane/some-base-${i}\``, author: AUTOMATION,
+    }));
+    const plan = planReconcile({ prs: [prConflict({ comments: [finding(), ...manyDifferentTargets] })], agents: [], now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({
+      kind: 'cap-exhausted', prNumber: 2549, capKind: 'conflict-fix',
+      why: expect.stringContaining('hard ceiling'),
+    })]);
+  });
+
+  it('a round against the SAME main sha the PR is STILL conflicting against (mainSha threaded in) still counts as stale — genuinely stuck, not a moving target', () => {
+    const comments = [
+      finding(),
+      ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({
+        body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved\n\n<!-- conveyor-conflict-fix-target: main@aaa1111 -->`, author: AUTOMATION,
+      })),
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW, mainSha: 'aaa1111' });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'cap-exhausted', capKind: 'conflict-fix' })]);
+  });
+
+  it('a round against an OLDER main sha (mainSha threaded in, main has since moved) does NOT count as stale — dispatches', () => {
+    const comments = [
+      finding(),
+      ...Array.from({ length: CONFLICT_FIX_ROUND_CAP }, () => ({
+        body: `${CONFLICT_FIX_COMMENT_MARKER}\n\nresolved\n\n<!-- conveyor-conflict-fix-target: main@aaa1111 -->`, author: AUTOMATION,
+      })),
+    ];
+    const plan = planReconcile({ prs: [prConflict({ comments })], agents: [], now: NOW, mainSha: 'bbb2222' });
+    expect(plan.refusals).toEqual([]);
+    expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'fix', prNumber: 2549, attempts: 0 })]);
   });
 
   it('a bounce WITHOUT the conflict label is unaffected — the ordinary shared cap still governs it', () => {
