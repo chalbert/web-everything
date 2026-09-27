@@ -839,7 +839,8 @@ function runCli() {
   //     whose PR another fixer holds the LIVE fix claim on (`we:scripts/conveyor/fix-procedure.mjs`). Only the
   //     claim holder (same Claude session, or the same `WE_FIX_WHO`) may push until its `fix-end`.
   {
-    const refusal = pushRefusal({ repo: repoKeyForCheckout(REPO), branch: REF, ...callerIdentity() });
+    // `REPO` is the resolved checkout PATH (never a slug); read the URL of the remote this run actually pushes to.
+    const refusal = pushRefusal({ repo: repoKeyForCheckout(REPO, { remote: REMOTE }), branch: REF, ...callerIdentity() });
     if (refusal) emit({ repo: REPO, merged: false, reason: 'fix-claimed', ref: REF, pr: refusal.pr, holder: refusal.holder, detail: refusal.message }, 3);
   }
 

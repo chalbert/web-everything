@@ -170,10 +170,11 @@ history. If a rule itself changes, edit it here first, then note the change on t
 13. **Any worker that changes an EXISTING PR's branch follows the fix procedure — `fix-begin` first,
     `fix-end` after the push.** An orchestrator worker (not a daemon session) is no exception: before its
     first commit to a PR's `lane/*` ref it runs
-    `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --who=<its session or worker name> --why="<one line>"`
+    `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --repo=<the PR's repo slug> --who=<its session or worker name> --why="<one line>"`
     (takes the per-PR fix claim, turns the PR back to draft, labels it `review-status:fixing`), pushes only
     while holding it (`git push` / `pr-land` / `fix-procedure.mjs push` refuse anyone else), and finishes with
-    `node scripts/conveyor/fix-procedure.mjs fix-end <pr> --who=<same>`. The PR stays draft; the fix daemon
+    `node scripts/conveyor/fix-procedure.mjs fix-end <pr> --repo=<same> --who=<same>` (`--repo` is required: a PR
+    number is only unique within its repo). The PR stays draft; the fix daemon
     promotes it on green required CI and review re-runs. If `fix-begin` is REFUSED, another fixer owns the PR
     right now — wait for its `fix-end` or coordinate; never push around it. A worker without a Claude session
     sets `WE_FIX_WHO=<name>` so its pushes are recognized as the holder's. Grounded 2026-09-27, PR #2811: a

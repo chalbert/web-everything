@@ -12,13 +12,15 @@
  *      for the unknown kind).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, sep } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   acquireFixClaim, releaseFixClaim, heartbeatFixClaim, readLiveFixClaim, pushRefusal, isClaimHolder,
-  fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, DEFAULT_FIX_CLAIM_TTL_MINUTES,
+  fixBegin, fixEnd, withAltBranchHint, repoKeyFromRemoteUrl, repoKeyForCheckout, DEFAULT_FIX_CLAIM_TTL_MINUTES,
   FIX_BEGIN_MARKER, FIX_END_MARKER, FIXING_LABEL, STOOD_DOWN_LABEL,
 } from '../fix-procedure.mjs';
 import { acquireFixDispatchClaim, refreshLiveFixDispatchClaims } from '../fix-dispatch-claim.mjs';
@@ -30,6 +32,8 @@ import { planReconcile, countUnresolvedStandDowns, CONCURRENT_AUTHOR_QUIET_MS } 
 import { enrichPrsWithFixClaims } from '../reconcile-pass.mjs';
 import { deriveReviewStatus } from '../review-status-tag.mjs';
 import { dispatchFix } from '../reconcile-fix-dispatch.mjs';
+import { dispatchCiHeal } from '../../operations/ci-heal-pr-dispatch.mjs';
+import { DISPATCH_EFFECT } from '../../operations/dispatch-lane.mjs';
 import { reason as guardReason } from '../../guard-bash.mjs';
 
 let root;
@@ -87,14 +91,45 @@ describe('pushes while a claim is live', () => {
   // `dispatchFix` reads the claim at the REAL clock, so its case takes a claim stamped now.
   const claimNow = () => acquireFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', lockRoot: root, nowMs: Date.now() });
 
-  it('refuses anyone else\'s push to the claimed branch, allows the holder (by session or by WE_FIX_WHO)', () => {
+  it('refuses anyone else\'s push to the claimed branch, allows the holder (by session, or by WE_FIX_WHO for a session-less claim)', () => {
     const worker = pushRefusal({ repo: 'we', branch: `refs/heads/${BRANCH}`, sessionId: 'sess-worker', lockRoot: root, nowMs: T0 + MIN });
     expect(worker).toMatchObject({ refused: true, pr: 2811, holder: 'fix-2811' });
     expect(worker.message).toMatch(/fix-2811 holds the fix claim on PR #2811/);
     expect(pushRefusal({ repo: 'we', branch: BRANCH, sessionId: 'sess-fixer', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
-    expect(pushRefusal({ repo: 'we', branch: BRANCH, who: 'fix-2811', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
     expect(pushRefusal({ repo: 'we', branch: 'lane/other', sessionId: 'sess-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
     expect(pushRefusal({ repo: 'frontierui', branch: BRANCH, sessionId: 'sess-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
+    // A claim taken with no session id (a non-Claude worker) is held by its `who` alone.
+    acquireFixClaim({ repo: 'we', pr: 2900, who: 'rubric-worker', branch: 'lane/worker-owned', lockRoot: root, nowMs: T0 });
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'rubric-worker', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
+    expect(pushRefusal({ repo: 'we', branch: 'lane/worker-owned', who: 'someone-else', lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+  });
+
+  it('a session-bound claim is never rebound, pushed, heartbeat or released by a caller that only knows the public `who`', () => {
+    // `who` is printed on the PR thread (`**Who:** \`fix-2811\``) — an impostor session re-uses it verbatim.
+    const impostor = { who: 'fix-2811', sessionId: 'sess-impostor' };
+    expect(acquireFixClaim({ repo: 'we', pr: 2811, ...impostor, branch: BRANCH, lockRoot: root, nowMs: T0 + MIN }))
+      .toMatchObject({ ok: false, reason: 'session-mismatch' });
+    expect(pushRefusal({ repo: 'we', branch: BRANCH, ...impostor, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+    expect(pushRefusal({ repo: 'we', branch: BRANCH, who: 'fix-2811', lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refused: true });
+    expect(heartbeatFixClaim({ repo: 'we', pr: 2811, ...impostor, lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ refreshed: false, reason: 'session-mismatch' });
+    expect(releaseFixClaim({ repo: 'we', pr: 2811, ...impostor, lockRoot: root })).toMatchObject({ released: false, reason: 'session-mismatch' });
+    // The claim is untouched: still bound to the original session, which keeps every right.
+    expect(readLiveFixClaim({ repo: 'we', pr: 2811, lockRoot: root, nowMs: T0 + MIN }).meta.sessionId).toBe('sess-fixer');
+    expect(pushRefusal({ repo: 'we', branch: BRANCH, sessionId: 'sess-fixer', lockRoot: root, nowMs: T0 + MIN })).toBeNull();
+    expect(acquireFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', sessionId: 'sess-fixer', lockRoot: root, nowMs: T0 + MIN })).toMatchObject({ ok: true, reason: 'own' });
+    expect(heartbeatFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', sessionId: 'sess-fixer', lockRoot: root, nowMs: T0 + MIN })).toEqual({ refreshed: true });
+    expect(releaseFixClaim({ repo: 'we', pr: 2811, who: 'fix-2811', sessionId: 'sess-fixer', lockRoot: root })).toMatchObject({ released: true });
+  });
+
+  it('the ci-heal dispatcher refuses to spawn while a fix claim is live (claimRoot threaded to the claim read)', async () => {
+    claimNow();
+    const spawned = [];
+    const r = await dispatchCiHeal(
+      { itemNum: null, pr: 2811, laneRef: BRANCH, scope: ['we:x'], lane: 3, headRefOid: 'a'.repeat(40) },
+      { readBrief: () => '# {{PR_NUM}}', claimRoot: root, sinks: { [DISPATCH_EFFECT]: async (p) => { spawned.push(p); return { handle: 'x' }; } } },
+    );
+    expect(r).toMatchObject({ held: true, reason: 'fix-claimed', heldBy: 'fix-2811' });
+    expect(spawned).toHaveLength(0);
   });
 
   it('guard-bash denies a raw `git push` to the claimed lane ref (fixClaimedBranches from the IO shell)', () => {
@@ -120,11 +155,15 @@ describe('pushes while a claim is live', () => {
     expect(deriveReviewStatus({ pr: 2811, agents: [], fixClaim: { meta: { who: 'rubric-worker' } } })).toEqual({ role: 'fix', state: 'fixing' });
   });
 
-  it('isClaimHolder matches on session id OR who, never on neither', () => {
+  it('isClaimHolder: a session-bound claim needs its session id; a session-less claim needs its who', () => {
     const e = readLiveFixClaim({ repo: 'we', pr: 2811, lockRoot: root, nowMs: T0 });
     expect(isClaimHolder(e, { sessionId: 'sess-fixer' })).toBe(true);
-    expect(isClaimHolder(e, { who: 'fix-2811' })).toBe(true);
+    expect(isClaimHolder(e, { who: 'fix-2811' })).toBe(false);
+    expect(isClaimHolder(e, { who: 'fix-2811', sessionId: 'sess-other' })).toBe(false);
     expect(isClaimHolder(e, {})).toBe(false);
+    const sessionless = { meta: { who: 'rubric-worker', sessionId: null } };
+    expect(isClaimHolder(sessionless, { who: 'rubric-worker' })).toBe(true);
+    expect(isClaimHolder(sessionless, { who: 'other' })).toBe(false);
   });
 });
 
@@ -187,6 +226,38 @@ describe('stand-down semantics — a concurrent author is a pause, not a burial'
     const comments = [{ body: buildStandDownComment({ reason: 'needs-judgment' }), author: AUTOMATION }];
     const plan = planReconcile({ prs: [pr(comments)], agents: [], now: T0 });
     expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'stood-down' })]);
+  });
+
+  // Review finding (PR #2821): the classifier sniffed free prose, so any terminal stand-down whose --detail said
+  // "concurrent author" was re-armed after the quiet window. Every reason × red-herring detail must stay terminal.
+  const RED_HERRINGS = [
+    'the migration also touched a table a concurrent author owns; needs a human call on precedence',
+    'Concurrent-Author semantics are unclear here',
+    'a concurrent author saved work on lane/some-fix-alt (abc1234) but the reviewer asks for a design call',
+    'edited concurrently by two sessions',
+  ];
+  for (const reason of ['needs-judgment', 'gate-red', 'conflict', 'lane-ref-gone', 'bogus-reason']) {
+    for (const detail of RED_HERRINGS) {
+      // The legacy #2811 shape (conflict + concurrent author + a saved -alt branch) is the ONE reclassified combo.
+      if (reason === 'conflict' && /-alt\b/.test(detail)) continue;
+      it(`stays terminal: --reason=${reason} with detail "${detail.slice(0, 40)}…"`, () => {
+        const comments = [{ body: buildStandDownComment({ reason, detail }), author: AUTOMATION, createdAt: '2026-09-27T15:00:00Z' }];
+        expect(countStandDownComments(comments)).toBe(1);
+        expect(countTerminalStandDowns(comments)).toBe(1);
+        expect(concurrentAuthorPauses(comments)).toEqual([]);
+        for (const now of [T0 + 5 * MIN, T0 + 25 * MIN, T0 + 24 * 60 * MIN]) {
+          const plan = planReconcile({ prs: [pr(comments)], agents: [], now });
+          expect(plan.refusals).toEqual([expect.objectContaining({ kind: 'stood-down' })]);
+          expect(plan.dispatch).toEqual([]);
+        }
+      });
+    }
+  }
+
+  it('the `concurrent-author` reason built through buildStandDownComment IS a pause', () => {
+    const comments = [{ body: buildStandDownComment({ reason: 'concurrent-author', detail: 'x' }), author: AUTOMATION }];
+    expect(countStandDownComments(comments)).toBe(0);
+    expect(concurrentAuthorPauses(comments)).toHaveLength(1);
   });
 
   it('a new-style pause holds on the same head inside the quiet window, and re-arms on the next head or after it', () => {
@@ -279,5 +350,48 @@ describe('repoKeyFromRemoteUrl', () => {
     expect(repoKeyFromRemoteUrl('git@github.com:chalbert/web-everything.git')).toBe('we');
     expect(repoKeyFromRemoteUrl('https://github.com/chalbert/frontierui')).toBe('frontierui');
     expect(repoKeyFromRemoteUrl('git@github.com:someone/else.git')).toBeNull();
+  });
+
+  it('repoKeyForCheckout reads the URL of the remote it is told to (pr-land passes its --remote), from a checkout PATH', () => {
+    const calls = [];
+    const exec = (cmd, args, o) => { calls.push([args.at(-1), o.cwd]); return args.at(-1) === 'upstream' ? 'git@github.com:chalbert/frontierui.git\n' : 'git@github.com:chalbert/web-everything.git\n'; };
+    expect(repoKeyForCheckout('/lanes/x', { exec })).toBe('we');
+    expect(repoKeyForCheckout('/lanes/x', { remote: 'upstream', exec })).toBe('frontierui');
+    expect(calls).toEqual([['origin', '/lanes/x'], ['upstream', '/lanes/x']]);
+  });
+});
+
+describe('the CLI and its documented invocations name the repo', () => {
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const CLI = join(HERE, '..', 'fix-procedure.mjs');
+  const WE = join(HERE, '..', '..', '..') + sep;
+
+  it('fix-begin / fix-end / fix-heartbeat / fix-status refuse to run without --repo (never default to `we`)', () => {
+    for (const cmd of ['fix-begin', 'fix-end', 'fix-heartbeat', 'fix-status']) {
+      // PATH holds only node: on a regressed tree the CLI must never reach a real `gh` and touch a live PR.
+      const env = { ...process.env, WE_COORDINATION_ROOT: root, PATH: dirname(process.execPath) };
+      const r = spawnSync(process.execPath, [CLI, cmd, '999999', '--who=x'], { encoding: 'utf8', env });
+      expect(r.status, cmd).toBe(1);
+      expect(r.stderr).toMatch(/needs --repo=/);
+    }
+  });
+
+  it('every fix-begin / fix-end / fix-heartbeat command in skills-src passes --repo', () => {
+    const offenders = [];
+    const walk = (dir) => {
+      for (const d of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, d.name);
+        if (d.isDirectory()) walk(p);
+        else if (d.name.endsWith('.md')) {
+          // Join wrapped lines so a command split across a markdown line break is read whole.
+          const text = readFileSync(p, 'utf8').replace(/\s*\n\s*/g, ' ');
+          for (const m of text.matchAll(/fix-procedure\.mjs"?\s+(fix-(?:begin|end|heartbeat))\s+\S+([^`\n]*)/g)) {
+            if (!/--repo=/.test(m[2])) offenders.push(`${p.slice(WE.length)}: ${m[0].slice(0, 90)}`);
+          }
+        }
+      }
+    };
+    walk(join(WE, 'skills-src'));
+    expect(offenders).toEqual([]);
   });
 });

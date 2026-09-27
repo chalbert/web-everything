@@ -88,12 +88,22 @@ export const CONCURRENT_AUTHOR_PAUSE_MARKER = '⏸ conveyor fix — paused for a
 const PAUSE_TRAILER_RE = /<!--\s*fix-pause\b([^>]*)-->/;
 
 /**
- * Does this TERMINAL-marker stand-down body actually describe a concurrent author? Legacy stand-downs (before the
- * `concurrent-author` reason existed) were posted with `--reason=conflict` and a detail naming the concurrent
- * author — PR #2811's is exactly this shape. They are RECLASSIFIED as re-armable pauses, never terminal. Pure.
+ * Does this TERMINAL-marker stand-down body actually describe a concurrent author? Keyed on the REASON slot that
+ * {@link buildStandDownComment} writes (`stopped rather than guessing: <reason clause>.`), never on free prose:
+ * a `--detail` is free text and may say "concurrent author" for an unrelated reason (e.g. a needs-judgment call
+ * about a table "a concurrent author owns") — that stand-down must stay terminal. Two shapes are reclassified:
+ *   1. the `concurrent-author` reason clause itself, in the reason slot;
+ *   2. the LEGACY shape (before that reason existed): the `conflict` reason clause in the reason slot, a detail
+ *      naming a concurrent author, AND a saved `lane/…-alt` branch — PR #2811's stand-down is exactly this.
+ * Both are re-armable pauses, never terminal. Pure.
  */
 export function isConcurrentAuthorStandDownBody(body) {
-  return typeof body === 'string' && /\bconcurrent[\s-]+author\b/i.test(body);
+  if (typeof body !== 'string') return false;
+  const slot = (reason) => `stopped rather than guessing: ${STAND_DOWN_REASONS[reason]}.`;
+  if (body.includes(slot('concurrent-author'))) return true;
+  return body.includes(slot('conflict'))
+    && /\bconcurrent[\s-]+author\b/i.test(body)
+    && parseAltBranch(body) !== null;
 }
 
 /** Pull `lane/…-alt` (and the sha right after it, if any) out of free text. Pure. */
@@ -403,10 +413,10 @@ if (IS_CLI) {
   }
   const actor = typeof flags.actor === 'string' ? flags.actor : undefined;
   const detail = typeof flags.detail === 'string' ? flags.detail : undefined;
-  // fix procedure — a concurrent author is a PAUSE, never a terminal stand-down. Also caught when a caller still
-  // passes another reason but the detail names a concurrent author (the #2811 shape), so the misclassification
-  // cannot recur by habit.
-  const concurrent = flags.reason === 'concurrent-author' || isConcurrentAuthorStandDownBody(detail ?? '');
+  // fix procedure — a concurrent author is a PAUSE, never a terminal stand-down. Only the explicit reason makes
+  // one: free `--detail` prose is never sniffed (PR #2821 review — an unrelated stand-down that merely mentioned
+  // a "concurrent author" was re-armed). A legacy conflict-shaped post is still reclassified when READ.
+  const concurrent = flags.reason === 'concurrent-author';
   const body = concurrent
     ? buildConcurrentAuthorPauseComment({
       actor, detail,

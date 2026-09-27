@@ -31,10 +31,11 @@
  * one fixer makes — and the entry is written with `pid: null` so a later call from the same fixer is a reentrant
  * re-acquire, never a foreign one.
  *
- * WHO IS "THE HOLDER" AT PUSH TIME. A push is the holder's when EITHER the caller's Claude session id
- * (`CLAUDE_CODE_SESSION_ID`, the same durable identity `lane-pool.mjs` stamps on a lease) equals the one recorded
- * at `fix-begin`, OR the caller's `WE_FIX_WHO` equals the recorded `who` (for a non-Claude worker). Anything else
- * is "anyone else" and is refused.
+ * WHO IS "THE HOLDER" AT PUSH TIME. When `fix-begin` recorded a Claude session id (`CLAUDE_CODE_SESSION_ID`, the
+ * same durable identity `lane-pool.mjs` stamps on a lease), the claim is BOUND to it: only that session id holds
+ * it — for a push, a re-take, a heartbeat, or a release. `who` is printed on the PR thread, so knowing it proves
+ * nothing and never rebinds a session-bound claim. Only a claim taken with NO session id (a non-Claude worker)
+ * is held by `who` (`WE_FIX_WHO`) alone. Anything else is "anyone else" and is refused.
  */
 import { execFileSync } from 'node:child_process';
 import { hostname } from 'node:os';
@@ -95,12 +96,26 @@ export function readLiveFixClaim({ repo, pr, lockRoot = fixDispatchClaimRoot(), 
   return isLiveFixClaim(entry, nowMs) ? entry : null;
 }
 
-/** Does the caller identity own this claim entry? */
+/**
+ * Does the caller identity own this claim entry? A claim taken from a Claude session is BOUND to that session id:
+ * only the same session id holds it, and a matching `who` alone does not. `who` is published on the PR thread
+ * (`**Who:** \`fix-<pr>\``), so it is not a secret and must never be the only proof when a session id was
+ * recorded. `who` alone is enough only for a claim taken with no session id (a non-Claude worker, `WE_FIX_WHO`).
+ */
 export function isClaimHolder(entry, { sessionId = null, who = null } = {}) {
   if (!entry) return false;
-  if (sessionId && entry.meta?.sessionId && entry.meta.sessionId === sessionId) return true;
-  if (who && entry.meta?.who && entry.meta.who === who) return true;
-  return false;
+  const bound = entry.meta?.sessionId ?? null;
+  if (bound) return Boolean(sessionId) && sessionId === bound;
+  return Boolean(who) && Boolean(entry.meta?.who) && entry.meta.who === who;
+}
+
+/** Owner check for a MUTATION of an existing claim (re-take, heartbeat, release): same `who` AND, when the claim
+ *  is session-bound, the same session id. Returns `null` when the caller may mutate it, else the refusal reason. */
+function mutationRefusal(entry, { who, sessionId }) {
+  if (entry.owner !== fixClaimOwner(who)) return 'not-owner';
+  const bound = entry.meta?.sessionId ?? null;
+  if (bound && bound !== sessionId) return 'session-mismatch';
+  return null;
 }
 
 /**
@@ -137,10 +152,14 @@ export function acquireFixClaim({
   }
   const prior = readLockEntry(lockRoot, resource);
   const own = prior && prior.owner === owner && isLiveFixClaim(prior, nowMs);
+  // A live claim bound to a session is never re-bound to another caller that merely knows the (public) `who`.
+  if (own && mutationRefusal(prior, { who, sessionId })) {
+    return { ok: false, reason: 'session-mismatch', heldBy: prior.owner, resource };
+  }
   const nowIso = new Date(nowMs).toISOString();
   const meta = {
     repo: repoKey, pr: prNum, kind: FIXING_KIND, who: String(who), why: String(why ?? ''),
-    sessionId: sessionId || (own ? prior.meta?.sessionId ?? null : null),
+    sessionId: own ? prior.meta?.sessionId ?? sessionId ?? null : sessionId || null,
     branch: branch ? normalizeBranch(branch) : (own ? prior.meta?.branch ?? null : null),
     headSha: headSha ?? (own ? prior.meta?.headSha ?? null : null),
     claimedAt: own ? prior.meta?.claimedAt ?? nowIso : nowIso,
@@ -152,23 +171,25 @@ export function acquireFixClaim({
 }
 
 /** Heartbeat-refresh the caller's own claim. */
-export function heartbeatFixClaim({ repo, pr, who, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now() } = {}) {
+export function heartbeatFixClaim({ repo, pr, who, sessionId = null, lockRoot = fixDispatchClaimRoot(), nowMs = Date.now() } = {}) {
   const repoKey = repoKeyOf(repo);
   const resource = fixDispatchResource({ repo: repoKey, pr: Number(pr), kind: FIXING_KIND });
   const current = readLockEntry(lockRoot, resource);
   if (!current) return { refreshed: false, reason: 'absent' };
-  if (current.owner !== fixClaimOwner(who)) return { refreshed: false, reason: 'not-owner', heldBy: current.owner };
+  const refused = mutationRefusal(current, { who, sessionId });
+  if (refused) return { refreshed: false, reason: refused, heldBy: current.owner };
   heartbeat(lockRoot, resource, current.owner, new Date(nowMs).toISOString(), null, current.meta);
   return { refreshed: true };
 }
 
 /** Release the caller's own claim. Never touches a claim someone else holds. */
-export function releaseFixClaim({ repo, pr, who, lockRoot = fixDispatchClaimRoot() } = {}) {
+export function releaseFixClaim({ repo, pr, who, sessionId = null, lockRoot = fixDispatchClaimRoot() } = {}) {
   const repoKey = repoKeyOf(repo);
   const resource = fixDispatchResource({ repo: repoKey, pr: Number(pr), kind: FIXING_KIND });
   const current = readLockEntry(lockRoot, resource);
   if (!current) return { released: false, reason: 'absent' };
-  if (current.owner !== fixClaimOwner(who)) return { released: false, reason: 'not-owner', heldBy: current.owner };
+  const refused = mutationRefusal(current, { who, sessionId });
+  if (refused) return { released: false, reason: refused, heldBy: current.owner };
   releaseLockDir(lockRoot, resource);
   return { released: true, entry: current };
 }
@@ -222,10 +243,11 @@ export function repoKeyFromRemoteUrl(url) {
   return m ? repoKeyForSlug(m[1]) : null;
 }
 
-/** The repo key a checkout pushes to (its `origin`), or `null` on any failure. */
-export function repoKeyForCheckout(cwd, { exec = execFileSync } = {}) {
+/** The repo key a checkout PATH pushes to via `remote` (default `origin`), or `null` on any failure. `cwd` is a
+ *  directory, never a `owner/name` slug — a slug is not a directory, so it always reads `null`. */
+export function repoKeyForCheckout(cwd, { remote = 'origin', exec = execFileSync } = {}) {
   try {
-    const url = exec('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    const url = exec('git', ['remote', 'get-url', remote], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
     return repoKeyFromRemoteUrl(url);
   } catch { return null; }
 }
@@ -307,7 +329,7 @@ export async function fixBegin({
   try {
     if (!view.isDraft) { await gh(['pr', 'ready', String(pr), '--repo', slug, '--undo']); steps.push('draft'); }
   } catch (e) {
-    releaseFixClaim({ repo: repoKey, pr, who, lockRoot });
+    releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
     return { ok: false, reason: 'draft-failed', detail: String(e?.message ?? e).split('\n')[0], pr: Number(pr) };
   }
   // Label + comment are the human-visible half: best-effort, reported, never a reason to drop the claim.
@@ -329,11 +351,11 @@ export async function fixBegin({
 
 /** `fix-end`: release → drop the `fixing` label → marker comment. The PR is deliberately LEFT DRAFT. */
 export async function fixEnd({
-  repo, pr, who, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
+  repo, pr, who, sessionId = callerIdentity().sessionId, gh = ghDefault, labels = null, lockRoot = fixDispatchClaimRoot(),
 } = {}) {
   const repoKey = repoKeyOf(repo);
   const slug = CONSTELLATION_REPOS[repoKey].slug;
-  const rel = releaseFixClaim({ repo: repoKey, pr, who, lockRoot });
+  const rel = releaseFixClaim({ repo: repoKey, pr, who, sessionId, lockRoot });
   if (!rel.released) return { ok: false, reason: rel.reason, heldBy: rel.heldBy ?? null, pr: Number(pr) };
   const steps = [];
   let headSha = null;
@@ -357,7 +379,7 @@ if (IS_CLI) {
   const { writeLineSync } = await import('../lib/write-all-sync.mjs');
   const out = (o, code = 0) => { writeLineSync(1, JSON.stringify(o)); process.exit(code); };
   const fail = (m) => { writeLineSync(2, `✗ fix-procedure: ${m}`); process.exit(1); };
-  const USAGE = 'usage: fix-procedure.mjs <fix-begin|fix-end|fix-heartbeat|fix-status> <pr> [--repo=<slug|key>] [--who=<session|worker>] [--why=<text>]\n'
+  const USAGE = 'usage: fix-procedure.mjs <fix-begin|fix-end|fix-heartbeat|fix-status> <pr> --repo=<slug|key> [--who=<session|worker>] [--why=<text>]\n'
     + '       fix-procedure.mjs push-check --branch=<lane/…> [--repo=…]\n'
     + '       fix-procedure.mjs push --branch=<lane/…> [--src=HEAD] [--remote=origin] [--repo=…]';
   const id = callerIdentity();
@@ -367,6 +389,9 @@ if (IS_CLI) {
     if (cmd === 'fix-begin' || cmd === 'fix-end' || cmd === 'fix-heartbeat' || cmd === 'fix-status') {
       const pr = Number(pos[0]);
       if (!Number.isInteger(pr) || pr <= 0) fail(USAGE);
+      // A PR number means nothing without its repo: defaulting to `we` claimed (and drafted) an unrelated WE PR
+      // for a frontierui repair. So the repo is REQUIRED here — never guessed.
+      if (typeof flags.repo !== 'string' || !flags.repo) fail(`${cmd} needs --repo=<slug|key> — a PR number is only unique within its repo`);
       if (cmd === 'fix-status') {
         const e = readLiveFixClaim({ repo, pr });
         out({ pr, claimed: Boolean(e), who: e?.meta?.who ?? null, why: e?.meta?.why ?? null, branch: e?.meta?.branch ?? null, heartbeatAt: e?.heartbeatAt ?? null });
@@ -376,19 +401,20 @@ if (IS_CLI) {
         const r = await fixBegin({ repo, pr, who, why: typeof flags.why === 'string' ? flags.why : '' });
         out(r, r.ok ? 0 : 3);
       }
-      if (cmd === 'fix-end') { const r = await fixEnd({ repo, pr, who }); out(r, r.ok ? 0 : 3); }
-      const r = heartbeatFixClaim({ repo, pr, who });
+      if (cmd === 'fix-end') { const r = await fixEnd({ repo, pr, who, sessionId: id.sessionId }); out(r, r.ok ? 0 : 3); }
+      const r = heartbeatFixClaim({ repo, pr, who, sessionId: id.sessionId });
       out(r, r.refreshed ? 0 : 3);
     }
     if (cmd === 'push-check' || cmd === 'push') {
       const branch = normalizeBranch(flags.branch);
       if (!branch.startsWith('lane/')) fail('--branch=lane/<name> is required (only lane refs are pushable)');
-      const repoKey = typeof flags.repo === 'string' ? repoKeyOf(flags.repo) : repoKeyForCheckout(process.cwd());
+      const remote = typeof flags.remote === 'string' ? flags.remote : 'origin';
+      // The repo is the one this push actually goes to: `--repo`, else the URL of the `--remote` pushed to.
+      const repoKey = typeof flags.repo === 'string' ? repoKeyOf(flags.repo) : repoKeyForCheckout(process.cwd(), { remote });
       const refusal = pushRefusal({ repo: repoKey, branch, sessionId: id.sessionId, who });
       if (refusal) { writeLineSync(2, `✗ ${refusal.message}`); out({ ok: false, ...refusal }, 3); }
       if (cmd === 'push-check') out({ ok: true, branch, repo: repoKey });
       const src = typeof flags.src === 'string' ? flags.src : 'HEAD';
-      const remote = typeof flags.remote === 'string' ? flags.remote : 'origin';
       execFileSync('git', ['push', remote, `${src}:refs/heads/${branch}`], { stdio: ['ignore', 'inherit', 'inherit'] });
       out({ ok: true, pushed: true, branch, repo: repoKey });
     }

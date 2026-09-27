@@ -111,9 +111,11 @@ not an unconditional auto-open list.
    finisher lands the impl (`frontierui`) ref **before** the WE ref (impl-first / WE-last).
 3. The finisher's contract (seed = the existing ref, NOT fresh `main`):
    - **When the lane already has an OPEN PR, take the fix claim FIRST** (fix procedure, operator-approved
-     2026-09-27): `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --who=<finisher name> --why="finish:
-     <bucket>"`. It turns the PR back to draft and refuses everyone else's pushes to the branch until you run
-     `fix-procedure.mjs fix-end <pr> --who=<same>` after your push. If `fix-begin` is refused, another fixer owns
+     2026-09-27): `node scripts/conveyor/fix-procedure.mjs fix-begin <pr> --repo=<the PR's repo slug, e.g.
+     chalbert/frontierui> --who=<finisher name> --why="finish: <bucket>"`. `--repo` is required — a PR number is
+     only unique within its repo, so a cross-repo couple names each half's own repo. It turns the PR back to draft
+     and refuses everyone else's pushes to the branch until you run `fix-procedure.mjs fix-end <pr> --repo=<same>
+     --who=<same>` after your push. If `fix-begin` is refused, another fixer owns
      the PR right now — skip this lane this pass and report it; never push around it.
    - `git clone --branch <laneRef> --single-branch … && cd …`; symlink `node_modules` + a sibling
      `../frontierui` if the gate/generators need them.
