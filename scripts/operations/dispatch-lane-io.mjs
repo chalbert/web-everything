@@ -115,6 +115,11 @@ import { readItemDeliveryAgentOverride } from './delivery-agent-marker.mjs';
 // #3645/#3906 — WHICH LAUNCH KINDS HAVE A MECHANICAL PROVIDER. Every row lands OFF on main (`agent`), see the
 // registry's own header; {@link routeDispatchProvider} below is its only reader here.
 import { DISPATCH_PROVIDER_REGISTRY, dispatchModesFromEnv, dispatchProviderEntry } from './dispatch-provider-registry.mjs';
+// agy-launcher-probation — the probation-worker launcher (Codex / Antigravity-Claude / Antigravity-Gemini) for an
+// opened, non-critical ci-heal. See {@link routeDispatchProvider}.
+import {
+  PROBATION_HEAL_RUN_SCRIPT, probationLaunchDecision, probationLaunchFromEnv, probationWorkerDetachedProvider,
+} from './dispatch-providers/probation-worker.mjs';
 // #3645/#4212 — the detached-wrapper handle primitives. `defaultIsPidAlive`/`detachedHandlePid` let a `pid:<n>`
 // handle (a mechanical build's own PID, not a `claude` session id) answer its own liveness from the KERNEL
 // rather than from `claude agents --json`, which never heard of it; `deliveryDispatchLogPath` names where its
@@ -1158,7 +1163,8 @@ export function assertNotALaneCheckout(root) {
   if (/^lane-\d+$/.test(String(root).split('/').filter(Boolean).pop() || '')) {
     throw notApplied(
       `dispatch-lane: refusing to start a delivery agent from the lane checkout ${root} — the brief's first step `
-      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the primary checkout.',
+      + 'acquires a lane, and acquiring one from inside another nests two checkouts. Run this from the control clone '
+        + '(<workspace>/wev-control, we:scripts/lib/automation-home.mjs), never the operator\'s primary checkout.',
     );
   }
 }
@@ -1328,8 +1334,10 @@ export function createDispatchSinks({
   // #3645/#3906 — THE DEFAULT PROVIDER IS THE ROUTER: a kind whose registry row is `mechanical` runs that row's
   // provider; every other kind takes the unchanged `claude --bg` path. A caller supplying its own `provider`
   // bypasses the routing entirely, exactly as before.
+  // agy-launcher-probation — `on`/`off`, read ONCE here like `modes` (see `probationLaunchFromEnv`).
+  probationLaunch = probationLaunchFromEnv(),
   provider = (request) => routeDispatchProvider(request, {
-    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }),
+    modes, registry, scriptExists, agent: (r) => defaultClaudeProvider(r, { spawnAgent }), probationLaunch,
   }),
   mintSessionId = () => randomUUID(),
   now = () => new Date(),
@@ -1417,6 +1425,10 @@ export function createDispatchSinks({
           scope: payload?.scope,
           pr: payload?.pr,
           reason: payload?.reason,
+          // agy-launcher-probation — the router's probation pick (a ci-heal dispatch carries it directly; a tick
+          // dispatch carries it on its routing record) and the target repo, for `routeDispatchProvider`.
+          probationWorker: payload?.probationWorker ?? payload?.routing?.probationWorker ?? null,
+          repo: payload?.repo,
           extraArgs,
           systemPromptFile: DISPATCHED_AGENT_SYSTEM_PROMPT_FILE,
           // #3857 — see `table` above; `modelReason` is `dispatch-lane.mjs`'s own input, riding the payload.
@@ -1557,15 +1569,26 @@ export function dispatchExecutorFor({ route, reported = null }) {
  * flight.
  *
  * @param {object} request - the #3579 port request.
- * @param {{modes?: Record<string, string>, registry?: Record<string, object>, agent: Function, scriptExists?: (p: string) => boolean}} io
+ * @param {{modes?: Record<string, string>, registry?: Record<string, object>, agent: Function, scriptExists?: (p: string) => boolean, probationLaunch?: string, probation?: Function}} io
  */
 export function routeDispatchProvider(request, {
   modes = {},
   registry = DISPATCH_PROVIDER_REGISTRY,
   agent,
   scriptExists = (path) => existsSync(path),
+  // agy-launcher-probation — `off` unless the sink says otherwise, so a direct caller never launches by accident.
+  probationLaunch = 'off',
+  probation = probationWorkerDetachedProvider,
 } = {}) {
   const kind = String(request?.launchKind || 'build');
+  // agy-launcher-probation — FIRST: an opened, non-critical ci-heal the router gave a probation worker runs on that
+  // worker (see `dispatch-providers/probation-worker.mjs#probationLaunchDecision` for every condition).
+  if (probationLaunchDecision(request, probationLaunch).launch) {
+    if (!scriptExists(PROBATION_HEAL_RUN_SCRIPT)) {
+      throw notApplied(`dispatch-lane: the probation launcher ${PROBATION_HEAL_RUN_SCRIPT} is not in this checkout — refusing before any process starts`);
+    }
+    return probation(request);
+  }
   const entry = dispatchProviderEntry(kind, registry);
   if (entry && modes?.[kind] === 'mechanical') {
     if (entry.runScript && !scriptExists(entry.runScript)) {

@@ -48,7 +48,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -235,4 +235,163 @@ export function writeRegistry(registry, { path = PROBATION_REGISTRY_PATH, write 
  */
 export function liveStatusFor(o, io) {
   return statusFor(readRegistry(io), o);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+// GRADUATION PROGRESS (agy-launcher-probation) — the operator's numbers, and a report against them.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE GRADUATION NUMBERS — the operator's decision of Sun 2026-09-27, codified as an ordinary finding under
+ * `we:docs/agent/platform-decisions.md#model-probation-graduation-criteria` (it fills the numbers #3654 left open).
+ * Per task type × provider (the trust unit stays exact: `{provider, model, taskType}`), ALL of:
+ *   - at least `minTrials` independently-verified trials;
+ *   - at least `minInformative` informative trial (a confirmed catch, or a documented cross-reviewer severity
+ *     disagreement — read ONLY from the row's own `informative: true` field, never inferred);
+ *   - at most `maxCriticalMisses` confirmed critical misses (`critical-work.mjs#criticalMissesFor`, which fails
+ *     closed: a miss row with no recorded scope counts as critical);
+ *   - a run rating no worse than Claude's on the same task type (mean `score` of `grade`-carrying rating rows).
+ * Meeting all four makes a triple ELIGIBLE FOR A PROMOTION REVIEW. Promotion itself stays an explicit human
+ * decision — nothing here, or anywhere, flips a registry status on its own.
+ */
+export const GRADUATION_NUMBERS = Object.freeze({
+  minTrials: 20,
+  minInformative: 1,
+  maxCriticalMisses: 0,
+  runRatingNoWorseThanClaude: true,
+  decidedOn: '2026-09-27',
+  statute: 'docs/agent/platform-decisions.md#model-probation-graduation-criteria',
+  promotion: 'explicit human decision',
+});
+
+const COUNTED_VERIFIERS = Object.freeze(['claude-subagent', 'independent-claude']);
+const CLAUDE_PROVIDERS = Object.freeze(['claude', 'anthropic', 'claude-native']);
+/** Run-rating rows carry a `dispatchKind`, not a `taskType`; the kinds whose task type is unambiguous. */
+const RATING_KIND_TASK_TYPE = Object.freeze({ 'ci-heal': 'ci-heal', fix: 'bugfix' });
+
+/** A work trial row: an external worker's delivery trial, never a review seat or a red-team miss. PURE. */
+function isWorkTrialRow(r) {
+  if (!r || typeof r !== 'object' || r.subjectClass !== 'work-agent') return false;
+  if (typeof r.taskType !== 'string' || !r.taskType.trim()) return false;
+  if (r.taskType.startsWith('review-lens:') || r.taskType.startsWith('red-team-miss:')) return false;
+  if (r.dispatchKind === 'review-seat') return false;
+  return typeof r.provider === 'string' && typeof r.model === 'string' && !CLAUDE_PROVIDERS.includes(r.provider);
+}
+
+/** A run-rating row (#2811's shape: a `grade` plus a numeric `score`), with the task type it rates. PURE. */
+function ratingOf(r) {
+  if (!r || typeof r !== 'object' || typeof r.grade !== 'string' || typeof r.score !== 'number') return null;
+  const taskType = typeof r.taskType === 'string' ? r.taskType : RATING_KIND_TASK_TYPE[r.dispatchKind] ?? null;
+  return taskType ? { taskType, provider: r.provider, model: r.model, score: r.score } : null;
+}
+
+const mean = (xs) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
+
+/**
+ * PROGRESS AGAINST {@link GRADUATION_NUMBERS}, per `{provider, model, taskType}`. PURE: rows and the critical-miss
+ * reader are handed in (the CLI reads the shared scorecard store and imports `critical-work.mjs`).
+ * @param {Array<object>} records - the scorecard store's rows.
+ * @param {{numbers?: object, criticalMissesFor?: (rows: object[], taskType: string) => object[],
+ *   registry?: {entries: object[]}}} [o]
+ * @returns {{numbers: object, triples: object[], providers: object[]}}
+ */
+export function graduationProgress(records, { numbers = GRADUATION_NUMBERS, criticalMissesFor = () => [], registry = { entries: [] } } = {}) {
+  const rows = Array.isArray(records) ? records : [];
+  const groups = new Map();
+  for (const r of rows.filter(isWorkTrialRow)) {
+    const key = JSON.stringify([r.provider, r.model, r.taskType]);
+    if (!groups.has(key)) groups.set(key, { provider: r.provider, model: r.model, taskType: r.taskType, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+  const ratings = rows.map(ratingOf).filter(Boolean);
+  const triples = [...groups.values()].map((g) => {
+    const judged = g.rows.filter((r) => r.outcome != null);
+    const verified = judged.filter((r) => COUNTED_VERIFIERS.includes(r.verifiedBy));
+    const launched = g.rows.filter((r) => r.dispatchKind === 'probation-launch' && r.outcome == null).length;
+    const outcomes = {};
+    for (const r of judged) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+    const informative = verified.filter((r) => r.informative === true).length;
+    const misses = criticalMissesFor(g.rows, g.taskType).filter((m) => m.provider === g.provider && m.model === g.model).length;
+    const own = mean(ratings.filter((x) => x.taskType === g.taskType && x.provider === g.provider && x.model === g.model).map((x) => x.score));
+    const claude = mean(ratings.filter((x) => x.taskType === g.taskType && CLAUDE_PROVIDERS.includes(x.provider)).map((x) => x.score));
+    const ratingStatus = own == null || claude == null ? 'not-measured' : own >= claude ? 'met' : 'not-met';
+    const criteria = {
+      trials: { have: verified.length, need: numbers.minTrials, met: verified.length >= numbers.minTrials },
+      informative: { have: informative, need: numbers.minInformative, met: informative >= numbers.minInformative },
+      criticalMisses: { have: misses, max: numbers.maxCriticalMisses, met: misses <= numbers.maxCriticalMisses },
+      runRating: { own, claude, status: ratingStatus, met: ratingStatus === 'met' },
+    };
+    const eligible = Object.values(criteria).every((c) => c.met);
+    return {
+      provider: g.provider, model: g.model, taskType: g.taskType,
+      status: statusFor(registry, { provider: g.provider, model: g.model, role: 'delivery' }),
+      recorded: g.rows.length, judged: judged.length, verified: verified.length, launched, outcomes, criteria,
+      eligibleForPromotionReview: eligible,
+      next: eligible
+        ? 'Eligible for a promotion review — promotion stays an explicit human decision.'
+        : Object.entries(criteria).filter(([, c]) => !c.met).map(([k, c]) => (
+          k === 'trials' ? `${c.need - c.have} more verified trial(s)`
+            : k === 'informative' ? 'one informative trial (a confirmed catch or a documented severity disagreement)'
+              : k === 'criticalMisses' ? `${c.have} critical miss(es) on record — a veto`
+                : c.status === 'not-measured' ? 'run ratings for this worker and for Claude on this task type' : 'a run rating no worse than Claude\'s'
+        )).join('; '),
+    };
+  }).sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model) || a.taskType.localeCompare(b.taskType));
+  const byProvider = new Map();
+  for (const t of triples) {
+    const p = byProvider.get(t.provider) ?? { provider: t.provider, recorded: 0, byTaskType: {} };
+    p.recorded += t.recorded;
+    const tt = p.byTaskType[t.taskType] ?? { recorded: 0, outcomes: {} };
+    tt.recorded += t.recorded;
+    for (const [o, n] of Object.entries(t.outcomes)) tt.outcomes[o] = (tt.outcomes[o] ?? 0) + n;
+    p.byTaskType[t.taskType] = tt;
+    byProvider.set(t.provider, p);
+  }
+  return { numbers, triples, providers: [...byProvider.values()] };
+}
+
+/** Plain-text rendering of {@link graduationProgress}. PURE. */
+export function renderGraduationProgress(report, { openedTaskTypes = [] } = {}) {
+  const n = report.numbers;
+  const lines = [
+    `Probation graduation progress (numbers decided ${n.decidedOn}: >=${n.minTrials} verified trials, >=${n.minInformative} informative, ${n.maxCriticalMisses} critical misses, run rating no worse than Claude; promotion = ${n.promotion})`,
+    '',
+    'Evidence by provider (work rows with a task type):',
+  ];
+  for (const p of report.providers) {
+    const parts = Object.entries(p.byTaskType).sort(([a], [b]) => a.localeCompare(b))
+      .map(([tt, v]) => `${tt} ${v.recorded}${Object.keys(v.outcomes).length ? ` (${Object.entries(v.outcomes).map(([o, c]) => `${c} ${o}`).join(', ')})` : ''}`);
+    lines.push(`  ${p.provider}: ${p.recorded} — ${parts.join('; ')}`);
+  }
+  for (const tt of openedTaskTypes) {
+    if (!report.triples.some((t) => t.taskType === tt)) lines.push(`  (${tt}, opened on probation: 0 trials by any provider)`);
+  }
+  lines.push('', 'Per task type x provider/model:');
+  for (const t of report.triples) {
+    const c = t.criteria;
+    lines.push(`  ${t.provider}/${t.model} · ${t.taskType} [${t.status}] — trials ${c.trials.have}/${c.trials.need}, informative ${c.informative.have}/${c.informative.need}, critical misses ${c.criticalMisses.have}, run rating ${c.runRating.status}${t.launched ? `, ${t.launched} launched awaiting review` : ''}`);
+    lines.push(`      next: ${t.next}`);
+  }
+  return lines.join('\n');
+}
+
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (IS_CLI) {
+  const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd !== 'report') {
+    console.error('usage: node scripts/lib/model-probation.mjs report [--json] [--store=<path>]');
+    process.exit(2);
+  }
+  const storeFlag = rest.find((a) => a.startsWith('--store='));
+  const [{ resolveScorecardStorePath }, { criticalMissesFor }, { CRITICAL_WORK_GATE }] = await Promise.all([
+    import('../conveyor/run-scorecard-store.mjs'), import('./critical-work.mjs'), import('./provider-routing.mjs'),
+  ]);
+  const path = storeFlag ? storeFlag.slice('--store='.length) : resolveScorecardStorePath();
+  let records = [];
+  // Read-only: parse the file directly (never the store's migrating reader).
+  try { records = JSON.parse(readFileSync(path, 'utf8')).records ?? []; } catch { records = []; }
+  const report = graduationProgress(records, { criticalMissesFor, registry: readRegistry() });
+  const opened = Object.entries(CRITICAL_WORK_GATE.openForNonCritical).filter(([, v]) => v === true).map(([k]) => k);
+  if (rest.includes('--json')) console.log(JSON.stringify({ store: path, openedTaskTypes: opened, ...report }, null, 2));
+  else console.log(`${renderGraduationProgress(report, { openedTaskTypes: opened })}\n\n(store: ${path}; opened on probation: ${opened.join(', ')})`);
 }

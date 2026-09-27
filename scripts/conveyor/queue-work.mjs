@@ -9,6 +9,11 @@
  *   ({@link ./resolve-runner-checkout.mjs}), then writes into THAT checkout's `.conveyor/queue.json` via the
  *   existing add/remove core ({@link ./queue-store.mjs}) — never wherever the caller happens to be `cd`'d.
  *
+ *   DECOUPLE-PRIMARY-CHECKOUT (epic #4075): the queue is no longer per-checkout — it is ONE file in the
+ *   automation's state home (`queue-store.mjs#resolveQueuePath`) that every runner and daemon reads, whichever
+ *   checkout it runs from. So the write now always lands THERE; the live-runner resolution is kept only as the
+ *   "is anything going to drain this?" refusal, and `checkout` in the output still names the runner's checkout.
+ *
  * Refuses (non-zero exit, no write) rather than warns when the runner can't be resolved — `no-live-lock`,
  * `ambiguous`, `no-pid`, `cwd-unresolved`, `process-mismatch` (a resolved pid whose process no longer looks
  * like the runner — a reused pid), or `checkout-unverified` (the resolved cwd has no `.git` entry — not
@@ -21,7 +26,7 @@
  *   node scripts/conveyor/queue-work.mjs remove <NNN> [--json]  # resolve the live runner + un-clear <NNN> there
  */
 
-import { addToQueue, removeFromQueue, queueHas, readQueueFile, writeQueueFile, queuePath } from './queue-store.mjs';
+import { addToQueue, removeFromQueue, queueHas, readQueueFile, writeQueueFile, resolveQueuePath } from './queue-store.mjs';
 import { resolveRunnerCheckout } from './resolve-runner-checkout.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
 
@@ -70,7 +75,7 @@ function main(argv) {
     return;
   }
 
-  const path = queuePath(resolved.cwd);
+  const path = resolveQueuePath();
   const before = readQueueFile(path);
 
   if (action === 'add') {
@@ -78,7 +83,7 @@ function main(argv) {
     const after = addToQueue(before, num, new Date().toISOString());
     if (!already) writeQueueFile(after, path);
     return emit(
-      { ok: true, verb: 'queue-work', action: 'add', num, already, checkout: resolved.cwd, queue: after },
+      { ok: true, verb: 'queue-work', action: 'add', num, already, checkout: resolved.cwd, path, queue: after },
       already
         ? `${DIM}#${num} was already cleared in the runner's checkout — no change (${DIM}${resolved.cwd}${RST})${RST}`
         : `${GRN}✓ cleared${RST} #${num} for the conveyor ${DIM}→ ${after.length} in queue, runner checkout ${resolved.cwd}${RST}`,
@@ -89,7 +94,7 @@ function main(argv) {
   const after = removeFromQueue(before, num);
   if (had) writeQueueFile(after, path);
   return emit(
-    { ok: true, verb: 'queue-work', action: 'remove', num, removed: had, checkout: resolved.cwd, queue: after },
+    { ok: true, verb: 'queue-work', action: 'remove', num, removed: had, checkout: resolved.cwd, path, queue: after },
     had
       ? `${GRN}✓ un-cleared${RST} #${num} ${DIM}→ ${after.length} in queue, runner checkout ${resolved.cwd}${RST}`
       : `${DIM}#${num} was not in the runner's queue — no change${RST}`,

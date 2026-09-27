@@ -108,6 +108,27 @@ describe('defaultGhThrottleCliPath — resolved through primaryCheckout, never w
     expect(path).toBe('/w/webeverything/scripts/lib/gh-throttle.mjs');
   });
 
+  it('decouple-primary-checkout: the CONTROL CLONE wins over the primary checkout when it is provisioned', () => {
+    // Both exist — the old code picked the primary (the operator's own, possibly months-stale working copy).
+    const exists = (p) => p === '/w/webeverything' || p === '/w/webeverything/scripts/lib/gh-throttle.mjs'
+      || p === '/h/workspace/wev-control/scripts/lib/gh-throttle.mjs';
+    const path = defaultGhThrottleCliPath({ root: '/w/.lanes/web-everything/lane-22', exists, realpath: (p) => p, env: {}, home: '/h' });
+    expect(path).toBe('/h/workspace/wev-control/scripts/lib/gh-throttle.mjs');
+    expect(path).not.toContain('/w/webeverything');
+  });
+
+  it('decouple-primary-checkout: WE_CONTROL_CLONE moves the control clone', () => {
+    const exists = (p) => p === '/w/webeverything/scripts/lib/gh-throttle.mjs' || p === '/srv/ctl/scripts/lib/gh-throttle.mjs';
+    const path = defaultGhThrottleCliPath({ root: '/w/.lanes/web-everything/lane-5', exists, realpath: (p) => p, env: { WE_CONTROL_CLONE: '/srv/ctl' } });
+    expect(path).toBe('/srv/ctl/scripts/lib/gh-throttle.mjs');
+  });
+
+  it('decouple-primary-checkout: an unprovisioned control clone falls back to the primary (one-release compat)', () => {
+    const exists = (p) => p === '/w/webeverything' || p === '/w/webeverything/scripts/lib/gh-throttle.mjs';
+    const path = defaultGhThrottleCliPath({ root: '/w/.lanes/web-everything/lane-22', exists, realpath: (p) => p, env: {}, home: '/h' });
+    expect(path).toBe('/w/webeverything/scripts/lib/gh-throttle.mjs');
+  });
+
   it('falls back to this module\'s own sibling path when no primary checkout can be found on disk at all', () => {
     const path = defaultGhThrottleCliPath({ root: '/nowhere', exists: () => false });
     expect(path).toMatch(/\/scripts\/lib\/gh-throttle\.mjs$/);

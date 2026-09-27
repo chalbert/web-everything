@@ -1275,6 +1275,9 @@ describe('defaultReapSessions — wiring, scoped stricter than session-reaper.mj
       idleThresholdMs: DEFAULT_IDLE_REAP_THRESHOLD_MS,
       reapedLedger: expect.objectContaining({ has: expect.any(Function), add: expect.any(Function), save: expect.any(Function) }),
       priorityNames: null, // #3383 follow-up — omitted by every pre-existing caller, forwarded as-is
+      // #ghost-sessions-inflate-cap — explicitly wired ON here (session-reaper.mjs's own bare default is OFF;
+      // see that function's own docblock for why), never left to that default.
+      pidDeadFor: expect.any(Function),
     });
     expect(result).toEqual({ scanned: 0, stopped: 0, alreadyGone: 0, failures: 0, anomalies: 0, kept: 0 });
   });

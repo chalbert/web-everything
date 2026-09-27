@@ -258,7 +258,16 @@ export function persistSpawnFailure(dirName, sessionSlug, error, { resumeSession
  *   NUMBERED shape (unchanged — callers there already re-resolve via `resolveLanePath`).
  */
 export function acquireLane(
-  { lane, sessionSlug, scope, item, claudeSessionId, purpose = 'conveyor-delivery', waitMs, base } = {},
+  {
+    lane, sessionSlug, scope, item, claudeSessionId, purpose = 'conveyor-delivery', waitMs, base,
+    // build-path-codex-isolation-locus — the checkout a NON-`we` locus item's own lane must be acquired
+    // against (`repoProfile(key).checkoutPath`, e.g. `$HOME/workspace/plateau-app`), never the calling
+    // process's own cwd-derived default. `undefined` (every existing caller) is byte-identical to before this
+    // parameter existed: `lane-pool.mjs acquire` gets no `--repo=` and falls back to its own
+    // `git rev-parse --show-toplevel` of `resolveRunCwd()`, exactly as it always has. See
+    // `deliver-item-wrapper.mjs#resolveDeliveryLocus`/`acquireImplLane` for the real caller.
+    repo,
+  } = {},
   { run: runFn = run } = {},
 ) {
   const env = { ...process.env, CLAUDE_CODE_SESSION_ID: claudeSessionId };
@@ -282,7 +291,10 @@ export function acquireLane(
   let acquireOut;
   try {
   if (lane != null) {
-    // NUMBERED — the ORIGINAL argv, unchanged (order is a real, test-pinned contract).
+    // NUMBERED — the ORIGINAL argv, unchanged (order is a real, test-pinned contract). `repo` is not
+    // meaningful here: a NUMBERED acquire always names a lane in the CALLING side's own tick-planned pool
+    // (today, always WE's — see `dispatch-lane-io.mjs`'s own `deliverItemDetachedProvider`), so this branch
+    // never reads it.
     acquireOut = runFn('node', [
       'scripts/lane-pool.mjs', 'acquire', `--lane=${lane}`, `--purpose=${purpose}`,
       `--session=${sessionSlug}`, `--scope=${scope}`, `--item=${item}`, '--adopt',
@@ -300,6 +312,17 @@ export function acquireLane(
     // own NUMBERED branch, which never reaches this branch at all) — behavior for every caller that does not
     // pass `base` is byte-for-byte unchanged.
     const args = ['scripts/lane-pool.mjs', 'acquire', `--purpose=${purpose}`, `--session=${sessionSlug}`];
+    // build-path-codex-isolation-locus — `--repo=<checkoutPath>` picks WHICH repo's pool this unnumbered
+    // acquire draws from (`lane-pool.mjs`'s own `--repo=` override, default cwd's toplevel otherwise). This is
+    // the ONE new caller of this branch that needs a repo OTHER than the one `resolveRunCwd()` would derive —
+    // `deliver-item-wrapper.mjs#acquireImplLane` acquiring a `frontierui`/`plateau-app` implementation lane
+    // from a process whose own cwd is WE's checkout. Every existing caller (review dispatch) omits `repo` and
+    // is byte-identical to before.
+    if (repo != null) args.push(`--repo=${repo}`);
+    // `--item=` records this lane's item in the lane-ports registry (same as the NUMBERED branch already
+    // does) — added only when the caller actually has one (review dispatch never does), so that caller's own
+    // pinned argv is unaffected.
+    if (item != null) args.push(`--item=${item}`);
     if (waitMs != null) args.push(`--wait-ms=${waitMs}`);
     if (base != null) args.push(`--base=${base}`);
     args.push('--adopt');

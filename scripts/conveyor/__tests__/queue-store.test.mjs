@@ -24,7 +24,13 @@ import {
   resolveQueuePath,
   QUEUE_ROOT,
   STATE_ROOT_ENV,
+  queueStateRoot,
+  legacyQueuePaths,
+  resolveQueueSource,
+  migrateLegacyQueue,
+  legacyQueueDivergence,
 } from '../queue-store.mjs';
+import { mkdirSync, writeFileSync, utimesSync, realpathSync } from 'node:fs';
 
 describe('normNum — dedup/membership key', () => {
   it('strips leading zeros for numeric ids but preserves JIT hashes (lower-cased)', () => {
@@ -184,9 +190,11 @@ describe('pinnedStateRoot / queuePath / resolveQueuePath — CONVEYOR_STATE_ROOT
     expect(pinnedStateRoot({ [STATE_ROOT_ENV]: '  /tmp/pinned-root  ' })).toBe(join('/tmp/pinned-root'));
   });
 
-  it('queuePath defaults to the script-location repo root when nothing is pinned — TODAY\'s location, unchanged', () => {
+  it('decouple-primary-checkout: with nothing pinned, queuePath defaults to the automation STATE HOME — never this checkout', () => {
     delete process.env.CONVEYOR_STATE_ROOT;
-    expect(queuePath()).toBe(join(QUEUE_ROOT, '.conveyor', 'queue.json'));
+    expect(queuePath()).toBe(join(process.env.WE_DAEMON_STATE_DIR, 'conveyor-state', '.conveyor', 'queue.json'));
+    expect(queuePath()).not.toBe(join(QUEUE_ROOT, '.conveyor', 'queue.json'));
+    expect(queueStateRoot({})).toMatch(/\.claude[\\/]daemon-self-sync-state[\\/]conveyor-state$/);
   });
 
   it('queuePath nests under the pinned root once CONVEYOR_STATE_ROOT is set', () => {
@@ -204,5 +212,91 @@ describe('pinnedStateRoot / queuePath / resolveQueuePath — CONVEYOR_STATE_ROOT
     process.env.CONVEYOR_STATE_ROOT = '/tmp/operator-primary';
     process.env.CONVEYOR_QUEUE_FILE = '/tmp/explicit/queue.json';
     expect(resolveQueuePath()).toBe('/tmp/explicit/queue.json');
+  });
+});
+
+describe('decouple-primary-checkout — one-release legacy read + one-time migration (epic #4075)', () => {
+  let dir;
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = null; });
+
+  /** A fixture world: a state home, and an OLD checkout (`<ws>/webeverything`) holding the old sidecar. */
+  function world({ legacy = [{ num: '3604', addedAt: 'T1' }, { num: '42', addedAt: 'T2' }] } = {}) {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'qs-legacy-'))); // legacy roots are realpath'd (macOS /var → /private/var)
+    const ws = join(dir, 'workspace');
+    const primary = join(ws, 'webeverything');
+    const lane = join(ws, '.lanes', 'web-everything', 'lane-3');
+    mkdirSync(join(primary, '.conveyor'), { recursive: true });
+    mkdirSync(lane, { recursive: true });
+    const legacyPath = join(primary, '.conveyor', 'queue.json');
+    if (legacy) writeFileSync(legacyPath, JSON.stringify(legacy));
+    const env = { WE_DAEMON_STATE_DIR: join(dir, 'state') };
+    return { env, primary, lane, legacyPath, canonical: join(dir, 'state', 'conveyor-state', '.conveyor', 'queue.json') };
+  }
+
+  it('the legacy candidate is the workspace primary — found from a LANE too, never the lane\'s own sidecar', () => {
+    const w = world();
+    // Live 2026-09-27: lane-1 carried a stale 7-entry sidecar of its own — it must never be merged in.
+    mkdirSync(join(w.lane, '.conveyor'), { recursive: true });
+    writeFileSync(join(w.lane, '.conveyor', 'queue.json'), JSON.stringify([{ num: '999' }]));
+    expect(legacyQueuePaths({ env: w.env, root: w.lane })).toEqual([w.legacyPath]);
+    expect(migrateLegacyQueue({ env: w.env, root: w.lane, dryRun: true }).queue.map((e) => e.num)).toEqual(['3604', '42']);
+  });
+
+  it('a pinned root, an explicit queue file, or the opt-out switch disables the legacy read', () => {
+    const w = world();
+    expect(legacyQueuePaths({ env: { ...w.env, CONVEYOR_STATE_ROOT: join(dir, 'pin') }, root: w.lane })).toEqual([]);
+    expect(legacyQueuePaths({ env: { ...w.env, CONVEYOR_QUEUE_FILE: join(dir, 'q.json') }, root: w.lane })).toEqual([]);
+    expect(legacyQueuePaths({ env: { ...w.env, CONVEYOR_NO_LEGACY_QUEUE: '1' }, root: w.lane })).toEqual([]);
+  });
+
+  it('no file in the state home yet → a read of the canonical path comes from the OLD location', () => {
+    const w = world();
+    const src = resolveQueueSource(w.canonical, { env: w.env, root: w.lane });
+    expect(src).toEqual({ path: w.legacyPath, source: 'legacy', legacyPath: w.legacyPath });
+  });
+
+  it('once the state home has a file, it is authoritative — the legacy file is never read again', () => {
+    const w = world();
+    writeQueueFile([{ num: '7', addedAt: null }], w.canonical);
+    expect(resolveQueueSource(w.canonical, { env: w.env, root: w.lane }).source).toBe('canonical');
+  });
+
+  it('an explicit non-canonical path is read as-is (no fallback)', () => {
+    const w = world();
+    const other = join(dir, 'elsewhere.json');
+    expect(resolveQueueSource(other, { env: w.env, root: w.lane })).toEqual({ path: other, source: 'explicit', legacyPath: null });
+  });
+
+  it('migrate copies every legacy entry into the state home and leaves the legacy file untouched', () => {
+    const w = world();
+    const before = readFileSync(w.legacyPath, 'utf8');
+    const dry = migrateLegacyQueue({ env: w.env, root: w.lane, dryRun: true });
+    expect(dry).toMatchObject({ migrated: false, reason: 'dry-run', count: 2, from: [w.legacyPath] });
+    expect(existsSync(w.canonical)).toBe(false);
+    const r = migrateLegacyQueue({ env: w.env, root: w.lane });
+    expect(r).toMatchObject({ migrated: true, reason: 'migrated', count: 2, path: w.canonical });
+    expect(readQueueFile(w.canonical).map((e) => e.num)).toEqual(['3604', '42']);
+    expect(readFileSync(w.legacyPath, 'utf8')).toBe(before);
+    // Idempotent, and never resurrects: after an entry is removed from the new home, re-running changes nothing.
+    writeQueueFile(removeFromQueue(readQueueFile(w.canonical), '42'), w.canonical);
+    expect(migrateLegacyQueue({ env: w.env, root: w.lane })).toMatchObject({ migrated: false, reason: 'canonical-exists', count: 1 });
+    expect(readQueueFile(w.canonical).map((e) => e.num)).toEqual(['3604']);
+  });
+
+  it('migrate with no legacy file is a no-op', () => {
+    const w = world({ legacy: null });
+    expect(migrateLegacyQueue({ env: w.env, root: w.lane })).toMatchObject({ migrated: false, reason: 'no-legacy' });
+    expect(existsSync(w.canonical)).toBe(false);
+  });
+
+  it('divergence: a legacy file written AFTER the state-home file is flagged (an old-code writer)', () => {
+    const w = world();
+    migrateLegacyQueue({ env: w.env, root: w.lane });
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(w.canonical, old, old);
+    expect(legacyQueueDivergence({ env: w.env, root: w.lane })).toEqual({ diverged: true, legacyPath: w.legacyPath });
+    const older = new Date(Date.now() - 120_000);
+    utimesSync(w.legacyPath, older, older);
+    expect(legacyQueueDivergence({ env: w.env, root: w.lane })).toEqual({ diverged: false, legacyPath: null });
   });
 });

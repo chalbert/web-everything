@@ -39,8 +39,9 @@ import {
   BRIEF_REQUIRED_BY_KIND, OPTIONAL_BRIEF_PLACEHOLDERS, REPO_AWARE_VALUE_PATTERNS, fillBrief, sessionSlugFor, DISPATCH_EFFECT,
 } from './dispatch-lane.mjs';
 import {
-  agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, findItem, REPO_ROOT,
+  agentArgsFromEnv, briefPath, createDispatchSinks, defaultLoadItems, defaultReadScorecards, findItem, REPO_ROOT,
 } from './dispatch-lane-io.mjs';
+import { decideDispatchRoute } from '../lib/dispatch-contracts.mjs';
 import { assertMainNotStale } from './review-dispatch.mjs';
 import { armSelfReexecOnFastForward } from '../lib/main-staleness.mjs';
 import { repoKeyForSlug } from '../lib/constellation-repos.mjs';
@@ -81,6 +82,18 @@ export async function dispatchCiHeal(planned, {
   claimRoot,
   // fix procedure — injectable live fix-claim read (`fix-procedure.mjs#readLiveFixClaim`); a test stubs it.
   readFixClaim = ({ repo: r, pr }) => readLiveFixClaim({ repo: r, pr, ...(claimRoot ? { lockRoot: claimRoot } : {}) }),
+  // agy-launcher-probation — THE ROUTE for this heal: `decideDispatchRoute` over the heal's own scope and reason,
+  // read at this io edge (the same router the tick uses). Its `probationWorker` rides the effect payload; the
+  // sink's router launches it when the gate is open, the heal is not critical, and launching is on. Never throws:
+  // an unroutable heal simply carries no worker and takes the unchanged Claude path.
+  routeHeal = (p) => {
+    try {
+      return decideDispatchRoute(
+        { kind: 'ci-heal', scopePaths: p.scope ?? [], reason: p.reason ?? 'red-ci' },
+        { scorecards: defaultReadScorecards() },
+      );
+    } catch { return null; }
+  },
 } = {}) {
   // fix procedure (operator-approved 2026-09-27) — a live FIX CLAIM means another fixer owns this PR's repair;
   // never spawn a ci-heal beside it (the planner already refuses `fix-claimed`; this re-checks at spawn time).
@@ -129,9 +142,10 @@ export async function dispatchCiHeal(planned, {
       ITEM_NUM: planned.itemNum ?? '', PR_NUM: planned.pr, LANE_REF: planned.laneRef, LANE: planned.lane,
       SESSION_SLUG: sessionSlug, SCOPE: planned.scope.join(','), REASON: reason, ...tokens,
     }, BRIEF_REQUIRED_BY_KIND['ci-heal'], [...OPTIONAL_BRIEF_PLACEHOLDERS, 'ITEM_NUM', 'SCOPE'], REPO_AWARE_VALUE_PATTERNS);
+    const route = repo === 'we' ? routeHeal({ scope: planned.scope, reason }) : null;
     const out = await sinks[DISPATCH_EFFECT]({
       launchKind: 'ci-heal', prompt: withAltBranchHint(prompt, planned.altBranch), sessionSlug, num: planned.itemNum ?? undefined, lane: planned.lane, scope: planned.scope,
-      pr: planned.pr, reason, repo,
+      pr: planned.pr, reason, repo, probationWorker: route?.probationWorker ?? null,
     });
     if (out?.held) {
       // #x0jphk5 — the SINK's own (separate, unrelated) guard refused it: nothing was spawned under OUR claim
