@@ -1897,3 +1897,92 @@ describe('#2588/review-loops — ONE REVIEW PER HEAD COMMIT (epic #3383/#4075)',
     expect(plan.dispatch).toEqual([expect.objectContaining({ kind: 'review', prNumber: 2591 })]);
   });
 });
+
+describe('#xconv1 (chalbert/web-everything#2766/#2767 unblock) — CONVERT instead of re-review on a superseded verdict', () => {
+  const HEAD = 'abbe08beacae462f98d6caf654d3ce7867c92801'; // #2766's real live head
+  const ACCEPTED_AT = '2026-09-26T21:47:43Z';
+  const acceptComment = () => ({
+    author: { login: 'web-everything' }, createdAt: ACCEPTED_AT,
+    body: `✅ review — accepted\n\nRecorded by agent (unattended review-loop) via the declared \`review-pr\` `
+      + `operation (#3035).\n\n## Human review verdict — chalbert/web-everything#2766\n\n**Verdict:** ✅ pass — `
+      + `no blocking findings\n\n${buildReviewedShaMarker(HEAD)}`,
+  });
+  const testGamingParkComment = () => ({
+    author: { login: 'web-everything' }, createdAt: '2026-09-26T21:51:01Z',
+    body: '<!-- drain-park-reason -->\n⏸ **Parked for review by the drain**\n\ntest-gaming suspected — CI-green '
+      + 'may be manufactured by tampering with tests: tests-removed: '
+      + 'scripts/operations/__tests__/review-loop-cli.test.mjs (net 2 test case(s) removed)',
+  });
+  const healComment = () => ({
+    author: { login: 'web-everything' }, createdAt: '2026-09-26T23:15:40Z',
+    body: '**`review:accepted` removed — mutual exclusivity (#2766/#2767).**\n\nThis PR carried both '
+      + '`review:accepted` and `review:human` at once: an automated verdict survived an escalation to '
+      + '`review:human` that should have replaced it.',
+  });
+
+  it('THE LIVE #2766/#2767 SHAPE: needs-human + accepted-then-test-gaming-parked-then-healed on the SAME head dispatches `convert-advisory`, never `already-reviewed-head`', () => {
+    const pr = {
+      number: 2766, state: 'OPEN', headRefName: 'lane/2766', headRefOid: HEAD,
+      labels: lbl('review:human', 'review:awaiting-advisory'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), testGamingParkComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.refusals.find((r) => r.prNumber === 2766)).toBeUndefined();
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'convert-advisory', prNumber: 2766, headSha: HEAD, reviewedSha: HEAD,
+      escalation: expect.objectContaining({ kind: 'test-gaming' }),
+    })]);
+    expect(plan.dispatch[0].targetedCheckQuestion).toMatch(/test case/i);
+    expect(plan.dispatch[0].acceptComment.body).toBe(acceptComment().body);
+  });
+
+  it('a needs-human PR accepted then healed with NO substantive park reason still converts, off the heal comment alone', () => {
+    const pr = {
+      number: 2777, state: 'OPEN', headRefName: 'lane/2777', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toEqual([expect.objectContaining({
+      kind: 'convert-advisory', prNumber: 2777,
+      escalation: expect.objectContaining({ kind: 'heal-mutual-exclusivity' }),
+    })]);
+  });
+
+  it('#2588 protection UNCHANGED for `needs-review` (no escalation, ever) — still refused `already-reviewed-head`', () => {
+    const pr = {
+      number: 2778, state: 'OPEN', headRefName: 'lane/2778', headRefOid: HEAD,
+      labels: lbl('review:pending'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment(), testGamingParkComment(), healComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('a needs-human PR with an accept marker but NO escalation comment at all still refuses `already-reviewed-head` (the ORIGINAL #2588 guard, unweakened)', () => {
+    const pr = {
+      number: 2779, state: 'OPEN', headRefName: 'lane/2779', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [acceptComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('an escalation comment that PREDATES the accept (not a supersession) does not convert', () => {
+    const pr = {
+      number: 2780, state: 'OPEN', headRefName: 'lane/2780', headRefOid: HEAD,
+      labels: lbl('review:human'), mergeStateStatus: 'CLEAN', statusCheckRollup: pendingRollup,
+      comments: [{ ...testGamingParkComment(), createdAt: '2026-09-26T00:00:00Z' }, acceptComment()],
+    };
+    const plan = planReconcile({ prs: [pr], agents: [], durableCounts: {}, now: NOW });
+    expect(plan.dispatch).toHaveLength(0);
+    expect(plan.refusals[0].kind).toBe('already-reviewed-head');
+  });
+
+  it('`convert-advisory` is on the frozen DISPATCH_KINDS list', () => {
+    expect(DISPATCH_KINDS).toContain('convert-advisory');
+  });
+});

@@ -289,6 +289,33 @@ GitHub's transient `mergeable: UNKNOWN` is re-polled and, if it never settles, r
 On a host without `gh`, that automatic post can halt as UNKNOWN. Follow the VM write-path section above to
 verify the outcome and, if missing, publish a labelled verbatim transcription before resuming.
 
+## A superseded verdict is CONVERTED, never re-reviewed (#xconv1, chalbert/web-everything#2766/#2767 unblock)
+
+A `review:human` PR whose CURRENT head already completed an independent jury review — then got escalated by a
+LATER event on that SAME head (the drain's test-gaming/manifest-tamper park, or the #2773 mutual-exclusivity
+heal that removes a stale `review:accepted` beside `review:human`) — is a different population from an
+unreviewed `review:human` PR. `we:scripts/conveyor/reconcile-core.mjs`'s planner (`planReconcile`) recognizes
+this shape and dispatches `kind:'convert-advisory'`, never `kind:'review'`: re-running the whole panel would be
+wasted work on a head nobody has touched since the accept, and #2588's one-review-per-head guard exists
+precisely to stop a second, contradicting verdict from landing — a risk that does not even apply here (a
+`review:human` PR can never receive a second ACCEPT; see above).
+
+If you are dispatched against a `convert-advisory` entry, do NOT run a fresh `review-pr` operation. Instead:
+1. Read the prior verdict and the escalation off the PR's own comments — `we:scripts/lib/review-escalation.mjs`'s
+   `planConvertSupersededVerdict` (given `headSha`/`reviewedSha`/`comments`) returns `{acceptComment, escalation}`.
+2. Answer the ONE targeted question `targetedCheckQuestion(escalation)` asks — scoped to the escalation's own
+   reason (e.g. for test-gaming: were the named tests genuinely obsolete, or weakened to fake a green check?) —
+   with a single cheap judge seat, never a full panel re-run.
+3. Post the note `renderConvertedAdvisoryNote({repo, pr, acceptComment, escalation, targetedCheckAnswer})` builds —
+   the same advisory-only shape (no `**Decision:**` line, no `review:*` label touched) `renderAdvisoryNote` posts,
+   quoting the prior verdict verbatim — and clear `review:awaiting-advisory` exactly as the `advise` step does.
+
+This wiring (an operation step or CLI a dispatched session runs, rather than hand-composing the note) is the
+next piece of work here — as of this writing the planner recognizes and reports the population
+(`plan.dispatch` entries carry `kind:'convert-advisory'`, `acceptComment`, `escalation`, `targetedCheckQuestion`)
+but no automatic executor consumes it yet. Until it lands, treat a `convert-advisory` entry as this section
+instructs, by hand, rather than running `review-pr` fresh against it.
+
 ## What still needs you
 
 **The two shapes of a `review:human` park.** Read the drain's comment to tell them apart (`deriveReviewDisposition`,
