@@ -16,8 +16,13 @@ import {
 import { assessLiveness, bindAgents } from '../../conveyor/reconcile-core.mjs';
 import { deriveReviewStatus, tagReviewStatus } from '../../conveyor/review-status-tag.mjs';
 import { defaultReadAgents } from '../../conveyor/reconcile-pass.mjs';
+import { repoProfile } from '../../lib/repo-profile.mjs';
 
 const REPO = 'chalbert/web-everything';
+// Landing-freeze fix (lane-leftover-reclaim) — `we`'s lane-pool `--repo=` value is now ALWAYS an absolute path
+// (see `repo-profile.mjs`'s own docblock: the literal `.` broke for a dispatched session, whose cwd is a
+// scratch directory outside the checkout, not the checkout itself).
+const WE_LANE_REPO = repoProfile('we').lanePoolRepo;
 const FRESH = () => ({ fresh: true, behind: 0 });
 
 let dir;
@@ -140,7 +145,7 @@ describe('runReviewJob — the arc, no Claude wrapper session', () => {
     expect(calls.map((c) => c[0])).toEqual(['claim', 'report', 'acquire', 'update', 'loop', 'report', 'release', 'unclaim']);
     const acquire = calls.find((c) => c[0] === 'acquire')[1];
     const loop = calls.find((c) => c[0] === 'loop')[1];
-    expect(acquire).toMatchObject({ slug: 'review-10', actorId: 'actor-fresh-uuid', laneRepo: '.' });
+    expect(acquire).toMatchObject({ slug: 'review-10', actorId: 'actor-fresh-uuid', laneRepo: WE_LANE_REPO });
     expect(loop).toMatchObject({ pr: 10, repo: REPO, lanePath: '/lanes/lane-7', actorId: 'actor-fresh-uuid' });
     const done = calls.filter((c) => c[0] === 'report')[1][2];
     expect(done).toMatchObject({ session: 'review-10', status: 'done', outcome: 'auto-cleared', verdict: 'converged', runId: 'review-pr-1' });

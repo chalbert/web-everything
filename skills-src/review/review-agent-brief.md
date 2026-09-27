@@ -21,7 +21,7 @@
 | Placeholder | What `review-dispatch.mjs` fills it with |
 |---|---|
 | `{{PR}}` | the PR number to review — e.g. `1234` |
-| `{{LANE_REPO}}` | lane-pool checkout selector: `.` for WE, absolute checkout path otherwise |
+| `{{LANE_REPO}}` | lane-pool checkout selector: an absolute checkout path always (equal to `{{WE_ROOT}}` for WE, a sibling's own checkout otherwise; landing-freeze fix — was `.` for WE, which broke from this dispatch's own scratch cwd) |
 | `{{REPO}}` | the `owner/repo` the PR lives in — e.g. `chalbert/web-everything` |
 | `{{SESSION_SLUG}}` | a per-dispatch lane-lease slug, e.g. `review-1234` |
 | `{{JUDGE_PROVIDER}}` | the run's `JudgeProvider`. Always `claude` in practice — `codex` is refused at the command line, see step 2 (`#xu2pp2m`) |
