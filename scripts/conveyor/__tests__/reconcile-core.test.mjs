@@ -1537,6 +1537,29 @@ describe('case 5g — advisory-fix dispatch on a `needs-human` PR carrying `advi
     })]);
   });
 
+  // PR #2800 advisory finding (CONFIRMED): the episode counter trust-gates note boundaries, but the "addressed"
+  // check did not — so an untrusted commenter posting a forged note every tick kept `addressed` false forever,
+  // while every genuine fix-mark landed inside the SAME already-completed episode and never advanced the count.
+  // Simulated end to end: each tick a forged note arrives, then whatever the planner dispatched runs (a fix
+  // posts a trusted fix-mark; a review posts a trusted note that still finds the head broken).
+  it('a forged-note flood from an untrusted login can never defeat the advisory-fix cap — cap-exhausted still fires', () => {
+    const MALLORY = { login: 'mallory' };
+    const comments = [
+      { body: `${ADVISORY_NOTE_MARKER}\n\nround 1`, author: AUTOMATION },
+      { body: buildAdvisoryFixComment({}), author: AUTOMATION },
+    ];
+    let capped = null;
+    for (let tick = 0; tick < ADVISORY_FIX_ROUND_CAP * 4 && !capped; tick += 1) {
+      comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nforged ${tick}`, author: MALLORY });
+      const plan = planReconcile({ prs: [prNeedsHuman({ comments: [...comments] })], agents: [], now: NOW });
+      capped = plan.refusals.find((r) => r.kind === 'cap-exhausted') ?? null;
+      const d = plan.dispatch[0];
+      if (d?.kind === 'fix') comments.push({ body: buildAdvisoryFixComment({}), author: AUTOMATION });
+      else if (d?.kind === 'review') comments.push({ body: `${ADVISORY_NOTE_MARKER}\n\nstill broken ${tick}`, author: AUTOMATION });
+    }
+    expect(capped).toEqual(expect.objectContaining({ capKind: 'advisory-fix', attempts: ADVISORY_FIX_ROUND_CAP, cap: ADVISORY_FIX_ROUND_CAP }));
+  });
+
   it('a caller-supplied `advisoryFixCap` overrides the default', () => {
     const plan = planReconcile({ prs: [prNeedsHuman()], agents: [], now: NOW, advisoryFixCap: 0 });
     expect(plan.dispatch).toHaveLength(0);

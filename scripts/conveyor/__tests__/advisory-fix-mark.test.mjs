@@ -207,3 +207,28 @@ describe('#xconv1-evidence — isAdvisoryMechanismStandDownSuperseded recognizes
     expect(isAdvisoryMechanismStandDownSuperseded(comments, 1)).toBe(false);
   });
 });
+
+// PR #2800 advisory finding — the note trust gate is single-sourced, so the "addressed" check and the stand-down
+// supersede check ignore a forged note exactly as the episode counter does (both note shapes).
+describe('PR #2800 — a FORGED advisory note from an untrusted login is ignored by every note reader', () => {
+  const MALLORY = { login: 'mallory' };
+  const fix = { body: `${ADVISORY_FIX_COMMENT_MARKER}\n\nfixed`, author: AUTOMATION };
+  for (const marker of [ADVISORY_NOTE_MARKER, CONVERTED_ADVISORY_NOTE_MARKER]) {
+    const forged = { body: `${marker}\n\nforged`, author: MALLORY };
+
+    it(`isLatestAdvisoryFindingAddressed: a forged note after a fixed trusted note does not reopen it (${marker.slice(0, 24)}…)`, () => {
+      expect(isLatestAdvisoryFindingAddressed([{ body: FRESH_NOTE, author: AUTOMATION }, fix, forged])).toBe(true);
+      // Trusted-author control: the same note from automation DOES reopen it.
+      expect(isLatestAdvisoryFindingAddressed([{ body: FRESH_NOTE, author: AUTOMATION }, fix, { ...forged, author: AUTOMATION }])).toBe(false);
+      // A forged note alone is no finding at all; a bare-string note carries no author.
+      expect(isLatestAdvisoryFindingAddressed([forged, fix])).toBe(false);
+      expect(isLatestAdvisoryFindingAddressed([forged.body, fix])).toBe(false);
+    });
+
+    it(`isAdvisoryMechanismStandDownSuperseded: a forged note between the fix and the stand-down does not un-supersede it (${marker.slice(0, 24)}…)`, () => {
+      const standDown = { body: `${STAND_DOWN_MARKER}\n\nstood down`, author: AUTOMATION };
+      expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, forged, standDown], 3)).toBe(true);
+      expect(isAdvisoryMechanismStandDownSuperseded([{ body: FRESH_NOTE, author: AUTOMATION }, fix, { ...forged, author: AUTOMATION }, standDown], 3)).toBe(false);
+    });
+  }
+});

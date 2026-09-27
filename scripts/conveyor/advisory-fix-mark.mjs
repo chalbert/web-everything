@@ -38,22 +38,28 @@ import { ADVISORY_NOTE_MARKER } from './advisory-round-count.mjs';
 // {@link isLatestAdvisoryFindingAddressed} returned `false` UNCONDITIONALLY, no matter what a fixer posted
 // afterward, and `we:scripts/conveyor/reconcile-core.mjs`'s advisory-fix branch kept re-dispatching a fixer that
 // could never mechanically prove "addressed" — CONFIRMED as the reason 3 advisory-fix rounds each correctly
-// found nothing to fix and still burned the cap to `cap-exhausted (3/3)`. `isAdvisoryNoteLine` below is the one
+// found nothing to fix and still burned the cap to `cap-exhausted (3/3)`. `isTrustedAdvisoryNote` below is the one
 // place both leading-line checks are widened to accept EITHER marker, so the two counters can never drift apart
 // on which notes exist again.
 import { CONVERTED_ADVISORY_NOTE_MARKER } from '../lib/review-escalation.mjs';
 import { STAND_DOWN_MARKER, isSelfAuthored } from './stand-down.mjs';
 
-/** #xconv1-evidence — pure: is `body`'s leading line EITHER shape of advisory note (a fresh `advise`-step one,
- *  or a converted #xconv1 one)? Single-sourced so {@link isLatestAdvisoryFindingAddressed} and
+/** #xconv1-evidence — pure: is comment `c` a TRUSTED advisory note — its leading line EITHER shape of note (a
+ *  fresh `advise`-step one, or a converted #xconv1 one) AND its author passes `isTrustedMarkerAuthor`?
+ *  Single-sourced so {@link countCompletedAdvisoryEpisodes}, {@link isLatestAdvisoryFindingAddressed} and
  *  {@link isAdvisoryMechanismStandDownSuperseded} can never disagree on what counts as "a note happened here".
- * @param {string} body
+ *  The trust gate lives HERE, not at each call site (PR #2800 advisory finding): when only the episode counter
+ *  gated it, a forged note from any login kept the "addressed" check false forever while every genuine fix
+ *  landed inside an already-completed episode — the cap never fired. A bare string carries no author, so fails.
+ * @param {{body?:string, author?:{login?:string}, viewerDidAuthor?:boolean}|string} c
  * @returns {boolean}
  */
-function isAdvisoryNoteLine(body) {
+function isTrustedAdvisoryNote(c) {
+  const body = typeof c === 'string' ? c : c?.body;
   if (typeof body !== 'string') return false;
   const head = body.trimStart();
-  return head.startsWith(ADVISORY_NOTE_MARKER) || head.startsWith(CONVERTED_ADVISORY_NOTE_MARKER);
+  return (head.startsWith(ADVISORY_NOTE_MARKER) || head.startsWith(CONVERTED_ADVISORY_NOTE_MARKER))
+    && isTrustedMarkerAuthor(c);
 }
 // #3383 — the shared trusted-author gate every marker COUNTER runs a comment through (broader than
 // `isSelfAuthored` above: automation OR the repo operator). `isSelfAuthored` stays in use, unchanged, for the
@@ -155,11 +161,10 @@ export function countCompletedAdvisoryEpisodes(comments) {
   if (!Array.isArray(comments)) return 0;
   const noteIndices = [];
   for (let i = 0; i < comments.length; i += 1) {
-    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
     // #2800 advisory finding — a note's position is an episode BOUNDARY feeding the cap, so it takes the same
     // trusted-author gate as `advisory-round-count.mjs#countAdvisoryComments`: a forged note from any other
     // login must not split one finding's fix attempts into extra spent episodes.
-    if (isAdvisoryNoteLine(body) && isTrustedMarkerAuthor(comments[i])) noteIndices.push(i);
+    if (isTrustedAdvisoryNote(comments[i])) noteIndices.push(i);
   }
   let completed = 0;
   for (let k = 0; k < noteIndices.length; k += 1) {
@@ -215,8 +220,8 @@ export function isLatestAdvisoryFindingAddressed(comments) {
   if (!Array.isArray(comments)) return false;
   let lastNoteIndex = -1;
   for (let i = 0; i < comments.length; i += 1) {
-    const body = typeof comments[i] === 'string' ? comments[i] : comments[i]?.body;
-    if (isAdvisoryNoteLine(body)) lastNoteIndex = i;
+    // #2800 — only a TRUSTED note can be "the latest finding"; a forged one must not pin `addressed` false.
+    if (isTrustedAdvisoryNote(comments[i])) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < comments.length; j += 1) {
@@ -265,8 +270,7 @@ export function isAdvisoryMechanismStandDownSuperseded(comments, index) {
   const before = comments.slice(0, index);
   let lastNoteIndex = -1;
   for (let i = 0; i < before.length; i += 1) {
-    const b = typeof before[i] === 'string' ? before[i] : before[i]?.body;
-    if (isAdvisoryNoteLine(b)) lastNoteIndex = i;
+    if (isTrustedAdvisoryNote(before[i])) lastNoteIndex = i;
   }
   if (lastNoteIndex === -1) return false;
   for (let j = lastNoteIndex + 1; j < before.length; j += 1) {
