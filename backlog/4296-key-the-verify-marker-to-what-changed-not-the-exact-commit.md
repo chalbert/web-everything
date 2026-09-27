@@ -1,4 +1,5 @@
 ---
+bornAs: xsndck6
 kind: story
 size: 3
 status: open
