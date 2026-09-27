@@ -412,7 +412,10 @@ export function preventionGuardAnchor(f) {
     const marker = typeof f?.file === 'string' && f.file.trim() ? FILE_WITHHELD : NO_FILE_CITED;
     return `${marker} — ${f?.prevention ?? '(no guard text recorded)'}`;
   }
-  return `\`${IN_REPO_LOCUS}${file}${typeof f.line === 'number' ? `:${f.line}` : ''}\``;
+  // A juror citing `file: 'x.mjs:10'` with no `line` keeps its line (cleanFindingFile strips it off the path):
+  // without it, two guards in one file would share one duplicate key and the second would never be filed.
+  const line = typeof f.line === 'number' ? f.line : f.file.trim().match(/:(\d+)(?::\d+)?$/)?.[1];
+  return `\`${IN_REPO_LOCUS}${file}${line != null ? `:${line}` : ''}\``;
 }
 
 /**

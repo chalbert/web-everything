@@ -483,6 +483,15 @@ describe('preventionGuardAnchor — the per-guard duplicate key (PR #2766 adviso
     expect(preventionGuardAnchor({ file: 'x"\ny', prevention: 'p' })).toBe('`(cited file withheld: not a plain path)` — p');
   });
 
+  it('keeps a line cited inside `file` (`x.mjs:10`, no `line` field) so two guards in one file never share a key', () => {
+    expect(preventionGuardAnchor({ file: 'scripts/x.mjs:10', prevention: 'p' })).toBe('`we:scripts/x.mjs:10`');
+    expect(preventionGuardAnchor({ file: 'scripts/x.mjs:10:4', prevention: 'p' })).toBe('`we:scripts/x.mjs:10`');
+    expect(preventionGuardAnchor({ file: 'scripts/x.mjs:10', line: 7, prevention: 'p' })).toBe('`we:scripts/x.mjs:7`');
+    const card = `1. ${preventionGuardAnchor({ file: 'scripts/x.mjs:10' })} — old`;
+    expect(cardCoversGuard(card, { file: 'scripts/x.mjs:50', prevention: 'other' })).toBe(false);
+    expect(cardCoversGuard(card, { file: 'scripts/x.mjs:10', prevention: 'reworded' })).toBe(true);
+  });
+
   it('self-review: the house `we:` prefix and a leading `./` are stripped, never rejected or doubled', () => {
     expect(cleanFindingFile({ file: 'we:scripts/a.mjs' })).toBe('scripts/a.mjs');
     expect(cleanFindingFile({ file: './scripts/a.mjs' })).toBe('scripts/a.mjs');
