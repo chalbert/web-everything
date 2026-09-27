@@ -127,7 +127,7 @@ import { REVIEW_LABELS, hasReviewLabel, hasUnclearedReviewLabel, isDeclarativeLe
 import { writeAllSync, writeLineSync } from '../lib/write-all-sync.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import {
-  standDownComments, WATCHER_STAND_DOWN_ACTOR, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER,
+  standDownComments, WATCHER_STAND_DOWN_ACTOR, STAND_DOWN_MARKER, SUPERSEDE_STAND_DOWN_MARKER, isStandDownSuperseded,
 } from './stand-down.mjs';
 import { resolveChildTimeoutMs } from '../lib/bounded-child.mjs';
 import { scopePrsToQueue } from './queue-scope.mjs';
@@ -1222,6 +1222,28 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false, review
 // ── IO SHELL (gh only past this point — the CLI, gated on the main-module check) ───────────────────────────
 
 /**
+ * we:scripts/conveyor/parked-pr-conflict-watch.mjs#narrowToConflictingFiles — #xconflres1 review round 1. Narrow
+ * the PR's changed-file list to the git-level conflict paths ONLY when EVERY conflict path matches a changed
+ * file's plain path exactly; otherwise return `files` unchanged (the whole-diff check, the safe direction). PURE.
+ *
+ * `git merge-tree` does not always name a path the way GitHub's `.filename` does: it C-quotes a path with a
+ * non-ASCII byte, a backslash, a `"` or a control byte (`"dir/w\303\253ird.md"`), and a rename conflict can be
+ * reported under the OLD path while GitHub lists only the NEW one. Before this, an unmatched conflict path was
+ * silently dropped, so a statute-tier conflict under such a name narrowed to `[]` and was routed to a fixer
+ * instead of a human. Any unmatched path now means "narrowing failed", exactly like a null/empty probe result.
+ * @param {Array<{path?:string}|string>} files
+ * @param {?string[]} conflictingPaths
+ * @returns {Array<{path?:string}|string>}
+ */
+export function narrowToConflictingFiles(files, conflictingPaths) {
+  if (!Array.isArray(conflictingPaths) || conflictingPaths.length === 0 || !Array.isArray(files)) return files;
+  const pathOf = (f) => (typeof f === 'string' ? f : f?.path);
+  const changed = new Set(files.map(pathOf));
+  if (!conflictingPaths.every((p) => changed.has(p))) return files;
+  return files.filter((f) => conflictingPaths.includes(pathOf(f)));
+}
+
+/**
  * we:scripts/conveyor/parked-pr-conflict-watch.mjs#classifyStatuteConflict — the ONE place BOTH the
  * fresh-detection routing and the grace-expired routing decide "does this conflict touch a statute-tier file
  * at all, and if so is it ENTIRELY append-only". Factored out at `#3383` — the grace path used to skip this
@@ -1239,8 +1261,9 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false, review
  * output), narrows `files` down to ONLY the paths actually in the same-line git conflict BEFORE ever computing
  * `isStatuteTierConflict` — the precise alternative to reading the PR's whole changed-file set (see that
  * function's own docblock for the live incident, `chalbert/web-everything#2772`, this closes). `null`/`undefined`/
- * an EMPTY array (the probe could not tell, or found no parseable conflict path) leaves `files` UNNARROWED —
- * today's whole-diff behaviour, the safe/over-cautious fallback direction.
+ * an EMPTY array (the probe could not tell, or found no parseable conflict path), or any conflict path that does
+ * not match a changed file exactly ({@link narrowToConflictingFiles}), leaves `files` UNNARROWED — today's
+ * whole-diff behaviour, the safe/over-cautious fallback direction.
  * `#xu2krte` Fork 2 (review-human statute amendment) EXTENDS this: when the conflict is statute-tier, NOT
  * append-only, and the caller says the PR already carries `review:human` (`hasReviewHuman`), it is worth the
  * extra `listMainStatutePatches` round trip (`main`'s own patch for the same files, since the SAME merge base) to
@@ -1255,9 +1278,7 @@ export function buildConflictFindingBody(pr, { appendOnlyStatute = false, review
 function classifyStatuteConflict(files, {
   number, repo, listPrPatches, hasReviewHuman = false, listMainStatutePatches, conflictingPaths = null,
 }) {
-  const filesToCheck = Array.isArray(conflictingPaths) && conflictingPaths.length > 0
-    ? (Array.isArray(files) ? files : []).filter((f) => conflictingPaths.includes(typeof f === 'string' ? f : f?.path))
-    : files;
+  const filesToCheck = narrowToConflictingFiles(files, conflictingPaths);
   const isStatuteTier = isStatuteTierConflict(filesToCheck);
   let appendOnlyStatute = false;
   let reviewHumanFixable = false;
@@ -1477,15 +1498,18 @@ export function watchParkedPrConflicts({
         // OUTSIDE any leash/statute file entirely) is now ALSO dispatchable here, not just the append-only/
         // review-human-fixable sub-cases: the earlier stand-down was a false positive from the whole-diff
         // heuristic, exactly like the live #2772 incident {@link isStatuteTierConflict}'s own docblock records.
+        let superseded = true;
         if (!dryRun) {
           // Finding FIRST, supersede SECOND. The supersede comment is what the next sweep's idempotency read
           // (`isWatcherMarkerAlreadySuperseded`) and the dispatch gate (`isStandDownSuperseded`) key on, so it must
           // only exist once the finding really went out. If `postFinding` throws, no supersede is posted and the
           // next sweep retries — instead of a "routed to a fix agent" note with no fix request behind it.
           postFinding({ pr, repo: resolvedRepo, appendOnlyStatute, reviewHumanFixable: isStatuteTier && !appendOnlyStatute });
-          try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort: a missing supersede only leaves the gate terminal and the next sweep retries */ }
+          // A missing supersede leaves the marker unsuperseded, so this same branch re-runs next sweep (the PR still
+          // carries `review:human` + the conflict label) — only report it as superseded once it really posted.
+          try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { superseded = false; }
         }
-        entry.supersededStandDown = true;
+        if (superseded) entry.supersededStandDown = true;
         entry.routedTo = !isStatuteTier
           ? 'reconcile-finding (no longer statute-tier — #xconflres1, marker superseded)'
           : appendOnlyStatute
@@ -1604,9 +1628,14 @@ export function watchParkedPrConflicts({
           // last removed belongs to a closed episode and must not silence this one. No recency window here (this
           // path re-runs for hours by design). An unreadable boundary, or an undated comment, keeps the old
           // "any stand-down counts" reading, so a `gh` hiccup can never turn into a re-post every sweep.
+          //
+          // A watcher stand-down this watch has since SUPERSEDED no longer counts (the same `isStandDownSuperseded`
+          // predicate `reconcile-core.mjs`'s gate uses): otherwise a conflict that turns human-only AFTER a
+          // supersede would never get a fresh stand-down, leaving the PR with no live marker and no finding.
           let alreadyStoodDown = false;
           try {
-            const standDowns = standDownComments(listPrComments({ number: pr?.number, repo: resolvedRepo }));
+            const thread = listPrComments({ number: pr?.number, repo: resolvedRepo });
+            const standDowns = standDownComments(Array.isArray(thread) ? thread.filter((_, i) => !isStandDownSuperseded(thread, i)) : thread);
             alreadyStoodDown = standDowns.length > 0;
             if (alreadyStoodDown) {
               let removedAt = null;
@@ -1622,33 +1651,30 @@ export function watchParkedPrConflicts({
           if (alreadyStoodDown) continue; // already handed to a human — never re-post
           if (!dryRun) postStandDown({ pr, repo: resolvedRepo });
           entry.routedTo = 'stand-down (after drain grace)';
-        } else if (isStatuteTier && appendOnlyStatute) { // dispatch to the fixer, exactly like the fresh-detection exception
-          if (!dryRun) {
-            postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
-            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
-          }
-          entry.routedTo = 'reconcile-finding (append-only statute, after drain grace)';
-          if (priorWatcherStandDown) entry.supersededStandDown = true;
-        } else if (isStatuteTier && reviewHumanFixable) {
-          if (!dryRun) {
-            postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
-            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
-          }
-          entry.routedTo = 'reconcile-finding (review-human statute amendment, after drain grace)';
-          if (priorWatcherStandDown) entry.supersededStandDown = true;
         } else {
-          // The bounce strips review:accepted + ready-to-merge, so this PR is no longer a queued target next sweep.
+          // Dispatch to the fixer. The bounce strips review:accepted + ready-to-merge, so this PR is no longer a
+          // queued target next sweep — which is why, on THIS path, the supersede goes FIRST (#xconflres1 review
+          // round 1). Finding-first would strand the PR if the supersede then failed: the old stand-down would
+          // still block the dispatch, and nothing would ever pick the PR up again. Supersede-first keeps a retry:
+          // a failed supersede posts no finding (the PR stays queued and the next sweep retries both); a failed
+          // finding after a good supersede leaves the PR queued too, and the next sweep (now reading the marker
+          // as superseded) posts just the finding. `supersededStandDown` is only reported once it really posted.
           // #xconflres1 — includes the "no longer statute-tier at all" outcome (the false-positive stand-down this
-          // whole card exists to unblock, e.g. `chalbert/web-everything#2772`): superseding here is what mechanically
-          // re-arms a PR the whole-diff heuristic wrongly stood down on an earlier sweep.
+          // whole card exists to unblock, e.g. `chalbert/web-everything#2772`).
           if (!dryRun) {
-            postFinding({ pr, repo: resolvedRepo });
-            if (priorWatcherStandDown) { try { postSupersedeComment({ pr, repo: resolvedRepo, provider }); } catch { /* best-effort */ } }
+            if (priorWatcherStandDown) postSupersedeComment({ pr, repo: resolvedRepo, provider });
+            if (isStatuteTier && appendOnlyStatute) postFinding({ pr, repo: resolvedRepo, appendOnlyStatute: true });
+            else if (isStatuteTier) postFinding({ pr, repo: resolvedRepo, reviewHumanFixable: true });
+            else postFinding({ pr, repo: resolvedRepo });
           }
-          entry.routedTo = priorWatcherStandDown
+          if (priorWatcherStandDown) entry.supersededStandDown = true;
+          entry.routedTo = (isStatuteTier && appendOnlyStatute)
+            ? 'reconcile-finding (append-only statute, after drain grace)'
+            : isStatuteTier
+            ? 'reconcile-finding (review-human statute amendment, after drain grace)'
+            : priorWatcherStandDown
             ? 'reconcile-finding (no longer statute-tier — #xconflres1, marker superseded, after drain grace)'
             : 'reconcile-finding (after drain grace)';
-          if (priorWatcherStandDown) entry.supersededStandDown = true;
         }
         results.push(entry);
       } catch (e) {
