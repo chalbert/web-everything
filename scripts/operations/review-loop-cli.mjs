@@ -70,7 +70,7 @@ import { resolveOperation, createCliJudgeFactory } from './run.mjs';
 import { appendEntry } from '../conveyor/learnings-drop.mjs';
 import {
   acceptResumeCommand, buildAcceptQueueEntry, buildPreventionFilingInput, buildPreventionQueueEntry, preventionHeadMarker,
-  isPreventionOutstandingClear, isPreventionOutstandingParked, isQueuedAcceptStop, reviewLoopAutoConfirm,
+  cardCoversGuard, isPreventionOutstandingClear, isPreventionOutstandingParked, isQueuedAcceptStop, reviewLoopAutoConfirm,
 } from '../lib/review-loop-policy.mjs';
 import { hasUncapturedPrevention } from '../lib/jury-core.mjs';
 import { writeAllSync } from '../lib/write-all-sync.mjs';
@@ -166,31 +166,37 @@ export function buildFileItemArgv(input) {
 }
 
 /**
- * HAS THIS EXACT PREVENTION CARD ALREADY BEEN FILED? (PR #2766 advisory, antigravity-review.) The filing runs
- * BEFORE the accept's effects, so a label swap that fails AFTER a successful filing leaves the run
- * `effect-halted`; the next unattended round on the same head reaches the same `prevention-outstanding`
- * verdict and would file a second card. A card counts as already filed when a backlog file carries the same
- * `# <title>` heading (the title names `<repo>#<pr>`) AND the same reviewed head
- * ({@link preventionHeadMarker}). The head, not the prose: that next round spawns FRESH jurors, who word the
- * same guard differently, so matching the digest text would almost never fire. A push to the PR moves the
- * head, so a later round on new code still files its own card. With no pinned head (a degraded read), it
- * falls back to an exact digest match — the best key left.
+ * WHICH OWED GUARDS HAVE ALREADY BEEN FILED? (PR #2766 advisory.) The filing runs BEFORE the accept's effects,
+ * so a label swap that fails AFTER a successful filing leaves the run `effect-halted`; the next unattended round
+ * reaches `prevention-outstanding` again and must neither file a second card for the same guards nor skip a
+ * guard its fresh jury newly names.
  *
- * @param {{title: string, digest: string}} input - {@link module:review-loop-policy.buildPreventionFilingInput}'s output.
- * @param {{root?: string, head?: (string|null)}} [o] - the repo root `file-item` writes under (defaults to its
- *   own `REPO_ROOT`), and the pinned head the review judged.
- * @returns {{num: string, path: string}|null}
+ * Matching is PER GUARD, not per card. The candidate cards are the backlog files carrying the same `# <title>`
+ * heading (the title names `<repo>#<pr>`) and — when the head is pinned — the same reviewed head
+ * ({@link preventionHeadMarker}); a push moves the head, so a later round on new code still files its own
+ * card. A guard is covered when some candidate card contains its {@link preventionGuardAnchor} — its
+ * `file:line`, not the juror's prose, which a fresh jury rewords. With no pinned head (a degraded read), every
+ * same-title card is a candidate, and the anchor still keeps a reworded retry from filing again. A resolved or
+ * closed card is never a candidate. Known trade-off: a DIFFERENT guard at the exact same `file:line` counts as
+ * covered, and the same guard cited one line off is filed again.
+ *
+ * @param {{title: string}} input - {@link module:review-loop-policy.buildPreventionFilingInput}'s output.
+ * @param {{root?: string, head?: (string|null), findings?: Array<object>}} [o] - the repo root `file-item`
+ *   writes under (defaults to its own `REPO_ROOT`), the pinned head the review judged, and the verdict's findings.
+ * @returns {{filed: Array<{num: string, path: string}>, uncovered: Array<object>}} the candidate cards that
+ *   cover at least one owed guard, and the owed guards none of them covers.
  */
-export function findFiledPreventionCard({ title, digest }, { root = SCAFFOLD_ROOT, head = null } = {}) {
-  const key = head ? preventionHeadMarker(head) : digest;
+export function findFiledPreventionCard({ title }, { root = SCAFFOLD_ROOT, head = null, findings = [] } = {}) {
+  const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention);
   const dir = join(root, 'backlog');
   let names;
   try {
     names = readdirSync(dir).filter((n) => n.endsWith('.md'));
   } catch {
-    return null;
+    return { filed: [], uncovered: owed };
   }
   const heading = `# ${title}\n`;
+  const cards = [];
   for (const name of names) {
     let text;
     try {
@@ -198,11 +204,17 @@ export function findFiledPreventionCard({ title, digest }, { root = SCAFFOLD_ROO
     } catch {
       continue;
     }
-    if ((text.startsWith(heading) || text.includes(`\n${heading}`)) && text.includes(key)) {
-      return { num: name.replace(/-.*$/, '').replace(/\.md$/, ''), path: `backlog/${name}` };
-    }
+    if (!(text.startsWith(heading) || text.includes(`\n${heading}`))) continue;
+    if (head && !text.includes(preventionHeadMarker(head))) continue;
+    // A closed card tracks nothing any more — a guard it named is owed again.
+    if (/^status:\s*"?(?:resolved|closed|done|wontfix|superseded)\b/m.test(text.split(heading)[0])) continue;
+    cards.push({ num: name.replace(/-.*$/, '').replace(/\.md$/, ''), path: `backlog/${name}`, text });
   }
-  return null;
+  const covers = (card, f) => cardCoversGuard(card.text, f);
+  return {
+    filed: cards.filter((c) => owed.some((f) => covers(c, f))).map(({ num, path }) => ({ num, path })),
+    uncovered: owed.filter((f) => !cards.some((c) => covers(c, f))),
+  };
 }
 
 /**
@@ -227,8 +239,9 @@ export function findFiledPreventionCard({ title, digest }, { root = SCAFFOLD_ROO
  * @param {(input: object) => Promise<{code: number, lines: string[]}>} [o.fileItem] - #2749: files the owed
  *   prevention card through the declared `file-item` operation. Injected so a test never touches the real
  *   backlog/queue files; the real caller always passes {@link fileItemForPrevention}.
- * @param {(input: object) => ({num: string, path: string}|null)} [o.findFiledPrevention] - PR #2766: finds an
- *   identical card an earlier round already filed; the real caller always passes {@link findFiledPreventionCard}.
+ * @param {(input: object, o: object) => ({filed: Array<object>, uncovered: Array<object>}|null)} [o.findFiledPrevention] -
+ *   PR #2766: splits the owed guards into those an earlier round already filed and those still unfiled (`null`
+ *   means none filed); the real caller always passes {@link findFiledPreventionCard}.
  * @returns {Promise<{code: number, lines: string[], run: (object|null), stopped: string}>}
  */
 export async function runReviewLoopOnce({
@@ -313,16 +326,34 @@ export async function runReviewLoopOnce({
   if (isPreventionOutstandingParked(outcome)) {
     const { pr, repo } = outcome.run.input;
     const head = outcome.run.findings?.read?.netBasis?.rev ?? null;
-    const filingInput = buildPreventionFilingInput({ repo, pr, head, findings: outcome.run.verdict.findings });
-    let filed;
+    const findings = outcome.run.verdict.findings;
+    const filingInput = buildPreventionFilingInput({ repo, pr, head, findings });
+    let filedPayload = null;
     let filingError = null;
-    // PR #2766 advisory — a retry after an `effect-halted` accept must not file a SECOND identical card.
+    // PR #2766 advisory — a retry after an `effect-halted` accept must not file a SECOND card for guards an
+    // earlier round already filed, and must still file any guard its fresh jury newly names.
     let alreadyFiled = null;
     try {
-      alreadyFiled = findFiledPrevention(filingInput, { head });
-      if (!alreadyFiled) {
-        filed = await fileItem(filingInput);
-        if (filed.code !== 0) filingError = `file-item refused: ${filed.lines.join(' / ')}`;
+      const prior = findFiledPrevention(filingInput, { head, findings });
+      const priorCards = Array.isArray(prior?.uncovered) ? (prior.filed ?? []) : [];
+      if (priorCards.length && prior.uncovered.length === 0) {
+        alreadyFiled = priorCards[0];
+      } else {
+        const toFile = priorCards.length
+          ? buildPreventionFilingInput({ repo, pr, head, findings: prior.uncovered })
+          : filingInput;
+        const filed = await fileItem(toFile);
+        const out = (filed?.lines ?? []).join(' / ');
+        if (filed?.code !== 0) {
+          filingError = `file-item refused: ${out}`;
+        } else {
+          // Inside the try (PR #2766 advisory): a stray non-JSON line parks the run instead of crashing the loop.
+          try {
+            filedPayload = JSON.parse(filed.lines?.[0] ?? '{}');
+          } catch {
+            filingError = `file-item output unreadable (exit 0, not JSON): ${out}`;
+          }
+        }
       }
     } catch (e) {
       filingError = String(e?.message ?? e);
@@ -346,7 +377,6 @@ export async function runReviewLoopOnce({
       };
     }
 
-    const filedPayload = alreadyFiled ? null : JSON.parse(filed.lines[0] ?? '{}');
     const filedNum = alreadyFiled ? alreadyFiled.num : (filedPayload?.verdict?.num ?? null);
     const filedRel = alreadyFiled ? alreadyFiled.path : (filedPayload?.verdict?.rel ?? null);
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   reviewLoopAutoConfirm, buildAcceptQueueEntry, acceptResumeCommand, isQueuedAcceptStop, ACCEPT_QUEUE_AREA,
   buildPreventionQueueEntry, isPreventionOutstandingClear, PREVENTION_QUEUE_AREA,
-  isPreventionOutstandingParked, buildPreventionFilingInput, preventionHeadMarker,
+  isPreventionOutstandingParked, buildPreventionFilingInput, preventionHeadMarker, preventionGuardAnchor,
+  cleanFindingFile, cardCoversGuard,
 } from '../review-loop-policy.mjs';
 import { CONFIRM_ACTORS } from '../../operations/review-pr.mjs';
 import { VERDICTS } from '../jury-core.mjs';
@@ -315,6 +316,93 @@ describe('buildPreventionFilingInput — the file-item card the loop files for i
     const input = buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: [] });
     expect(input.scope).toBe('');
     expect(typeof input.digest).toBe('string');
+  });
+
+  it('PR #2766 advisory (antigravity): a finding on a TEST file scopes that test file once, never a doubled '
+    + '`__tests__/__tests__/…test.test.mjs` sibling', () => {
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [
+        { file: 'scripts/__tests__/guard-lane.test.mjs', line: 4, prevention: 'pin it', preventionCaptured: false },
+        { file: 'scripts/guard-lane.mjs', line: 9, prevention: 'guard it', preventionCaptured: false },
+      ],
+    });
+    expect(input.scope.split(',')).toEqual(['we:scripts/__tests__/guard-lane.test.mjs', 'we:scripts/guard-lane.mjs']);
+    expect(input.scope).not.toMatch(/__tests__\/__tests__|\.test\.test\./);
+  });
+
+  it('PR #2766 advisory (security, frontmatter injection): a juror `file` that is not a clean repo path never '
+    + 'reaches the card\'s frontmatter `scope`, and its digest line names no file', () => {
+    const evil = [
+      'x"]\nstatus: closed\ninjected: ["pwned', // quote + newline: breaks out of the scope array
+      'a.mjs,b.mjs', // comma: splits into extra scope entries
+      '../outside.mjs', // escapes the repo
+      '/etc/passwd', // absolute
+      'fui:scripts/a.mjs', // another repo's locus
+      'path with space.mjs',
+      'back\\slash.mjs',
+    ];
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1,
+      findings: [
+        ...evil.map((file, i) => ({ file, line: i, prevention: `guard ${i}`, preventionCaptured: false })),
+        { file: 'scripts/ok.mjs', line: 1, prevention: 'guard ok', preventionCaptured: false },
+      ],
+    });
+    expect(input.scope.split(',')).toEqual(['we:scripts/ok.mjs', 'we:scripts/__tests__/ok.test.mjs']);
+    for (const bad of evil) expect(input.digest).not.toContain(bad);
+    // every rejected guard is still named in the digest — a bad `file` loses the anchor, never the guard.
+    for (let i = 0; i < evil.length; i += 1) expect(input.digest).toContain(`guard ${i}`);
+    expect(input.digest).not.toMatch(/\nstatus: closed/);
+  });
+});
+
+describe('preventionGuardAnchor — the per-guard duplicate key (PR #2766 advisory)', () => {
+  it('is the backticked `we:file:line` the digest writes, so a card\'s text can be searched for it', () => {
+    const f = { file: 'scripts/a.mjs', line: 12, prevention: 'x', preventionCaptured: false };
+    expect(preventionGuardAnchor(f)).toBe('`we:scripts/a.mjs:12`');
+    expect(buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings: [f] }).digest).toContain(preventionGuardAnchor(f));
+    // the closing backtick keeps `:1` from matching `:12`.
+    expect(preventionGuardAnchor({ ...f, line: 1 })).toBe('`we:scripts/a.mjs:1`');
+  });
+
+  it('falls back to the guard\'s whole no-file digest line when no clean file is cited', () => {
+    expect(preventionGuardAnchor({ prevention: 'add a lint rule' })).toBe('`(no file cited)` — add a lint rule');
+    expect(preventionGuardAnchor({ file: 'x"\ny', prevention: 'p' })).toBe('`(no file cited)` — p');
+  });
+
+  it('self-review: the house `we:` prefix and a leading `./` are stripped, never rejected or doubled', () => {
+    expect(cleanFindingFile({ file: 'we:scripts/a.mjs' })).toBe('scripts/a.mjs');
+    expect(cleanFindingFile({ file: './scripts/a.mjs' })).toBe('scripts/a.mjs');
+    const input = buildPreventionFilingInput({
+      repo: 'o/r', pr: 1, findings: [{ file: 'we:scripts/a.mjs', line: 3, prevention: 'p', preventionCaptured: false }],
+    });
+    expect(input.scope).toBe('we:scripts/a.mjs,we:scripts/__tests__/a.test.mjs');
+    expect(input.digest).toContain('`we:scripts/a.mjs:3`');
+    expect(input.digest).not.toContain('we:we:');
+  });
+});
+
+describe('cardCoversGuard — does a filed card already carry this guard? (PR #2766 self-review)', () => {
+  const cardFor = (findings) => `# t\n\n${buildPreventionFilingInput({ repo: 'o/r', pr: 1, findings }).digest}\n\n## Done when\n`;
+
+  it('a no-file guard whose text names a path is found again, after the digest\'s locus pass rewrote that path', () => {
+    const f = { prevention: 'add a check in scripts/x.mjs', preventionCaptured: false };
+    const card = cardFor([f]);
+    expect(card).toContain('we:scripts/x.mjs');
+    expect(cardCoversGuard(card, f)).toBe(true);
+  });
+
+  it('a short no-file guard never matches a longer guard\'s line by substring', () => {
+    const card = cardFor([{ prevention: 'zebra crossing', preventionCaptured: false }]);
+    expect(cardCoversGuard(card, { prevention: 'z' })).toBe(false);
+    expect(cardCoversGuard(card, { prevention: 'zebra crossing' })).toBe(true);
+  });
+
+  it('a file guard matches by `file:line` whatever its wording, and not at another line', () => {
+    const card = cardFor([{ file: 'scripts/a.mjs', line: 12, prevention: 'one wording', preventionCaptured: false }]);
+    expect(cardCoversGuard(card, { file: 'we:scripts/a.mjs', line: 12, prevention: 'another wording' })).toBe(true);
+    expect(cardCoversGuard(card, { file: 'scripts/a.mjs', line: 1, prevention: 'one wording' })).toBe(false);
   });
 });
 

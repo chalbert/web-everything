@@ -550,21 +550,110 @@ describe('runReviewLoopOnce — property 4, MECHANIZED (#2749 fix, 2026-09-26 sc
     }
   });
 
-  it('`findFiledPreventionCard` keys on title + head; with no pinned head it falls back to an exact digest match', () => {
+  // PR #2766 advisory (codex-correctness): a same-head retry whose fresh jury names an EXTRA guard.
+  const ADDED_GUARD_ANSWER = {
+    ...PREVENTION_ANSWER,
+    findings: [
+      REWORDED_PREVENTION_ANSWER.findings[0],
+      {
+        ...PREVENTION_ANSWER.findings[0], summary: 'the retry count is unbounded', line: 40,
+        prevention: 'cap the retry loop and pin the cap in a test',
+      },
+    ],
+  };
+
+  it('same-head retry files newly discovered prevention guards before accepting — and ONLY the new ones', async () => {
     const tb = tempBacklog();
     try {
-      const title = 'File the guard for o/r#1';
-      writeFileSync(join(tb.root, 'backlog', 'x1-card.md'), `# ${title}\n\nfor o/r#1 (reviewed head \`${HEAD_A}\`)\n\n1. old guard\n`);
-      const find = (input, head) => findFiledPreventionCard(input, { root: tb.root, head });
-      expect(find({ title, digest: 'reworded' }, HEAD_A)).toEqual({ num: 'x1', path: 'backlog/x1-card.md' });
-      expect(find({ title, digest: '1. old guard' }, HEAD_B)).toBeNull();
-      expect(find({ title: 'File the guard for o/r#2', digest: '1. old guard' }, HEAD_A)).toBeNull();
-      expect(find({ title, digest: '1. old guard' }, null)).toEqual({ num: 'x1', path: 'backlog/x1-card.md' });
-      expect(find({ title, digest: '1. a new guard' }, null)).toBeNull();
-      expect(findFiledPreventionCard({ title: 't', digest: 'd' }, { root: join(tb.root, 'missing') })).toBeNull();
+      const reader = { rev: HEAD_A };
+      const r1 = registryFor(reader);
+      await runReviewLoopOnce({
+        declaration: r1.declaration, registry: r1.registry, argv: BASE_ARGV, store: createMemoryRunStore(),
+        sinks: throwingLabelSinks(), makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-added-1',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      const r2 = registryFor(reader);
+      const second = await runReviewLoopOnce({
+        declaration: r2.declaration, registry: r2.registry, argv: [...BASE_ARGV, '--json'], store: createMemoryRunStore(),
+        sinks: recordingSinks([]), makeJudge: cannedJudge(ADDED_GUARD_ANSWER), mintRunId: () => 'r-added-2',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      expect(second.stopped).toBe('complete');
+      expect(tb.calls).toHaveLength(2);
+      expect(tb.calls[1].digest).toContain('cap the retry loop and pin the cap in a test');
+      expect(tb.calls[1].digest).not.toContain('lint against unnamed numeric literals here');
+      expect(JSON.parse(second.lines[0]).preventionFiled).toEqual({ num: 'x2', path: 'backlog/x2-file-the-guard.md' });
     } finally {
       tb.cleanup();
     }
+  });
+
+  it('with NO pinned head (a degraded read), a freshly-worded retry of the same guard still files no second card', async () => {
+    const tb = tempBacklog();
+    try {
+      const reader = { rev: 'def456' }; // not 40-hex → netBasis.rev is null
+      const r1 = registryFor(reader);
+      const first = await runReviewLoopOnce({
+        declaration: r1.declaration, registry: r1.registry, argv: BASE_ARGV, store: createMemoryRunStore(),
+        sinks: throwingLabelSinks(), makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-nohead-1',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      expect(first.stopped).toBe('effect-halted');
+      expect(tb.calls[0].digest).not.toContain('reviewed head');
+      const r2 = registryFor(reader);
+      const second = await runReviewLoopOnce({
+        declaration: r2.declaration, registry: r2.registry, argv: BASE_ARGV, store: createMemoryRunStore(),
+        sinks: recordingSinks([]), makeJudge: cannedJudge(REWORDED_PREVENTION_ANSWER), mintRunId: () => 'r-nohead-2',
+        fileItem: tb.fileItem, findFiledPrevention: tb.findFiledPrevention,
+      });
+      expect(second.stopped).toBe('complete');
+      expect(tb.calls).toHaveLength(1);
+    } finally {
+      tb.cleanup();
+    }
+  });
+
+  it('`findFiledPreventionCard` matches PER GUARD: title (+ head when pinned) picks the candidate cards, each '
+    + 'guard\'s `file:line` anchor decides whether it is already covered', () => {
+    const tb = tempBacklog();
+    try {
+      const title = 'File the guard for o/r#1';
+      writeFileSync(join(tb.root, 'backlog', 'x1-card.md'),
+        `# ${title}\n\nfor o/r#1 (reviewed head \`${HEAD_A}\`)\n\n1. \`we:scripts/a.mjs:12\` — old guard\n`);
+      const old = { file: 'scripts/a.mjs', line: 12, prevention: 'reworded old guard', preventionCaptured: false };
+      const near = { file: 'scripts/a.mjs', line: 1, prevention: 'a different line', preventionCaptured: false };
+      const captured = { file: 'scripts/z.mjs', line: 1, prevention: 'handled', preventionCaptured: true };
+      const find = (findings, head, t = title) => findFiledPreventionCard({ title: t }, { root: tb.root, head, findings });
+      const card = { num: 'x1', path: 'backlog/x1-card.md' };
+      expect(find([old], HEAD_A)).toEqual({ filed: [card], uncovered: [] });
+      expect(find([old, near, captured], HEAD_A)).toEqual({ filed: [card], uncovered: [near] });
+      expect(find([old], HEAD_B)).toEqual({ filed: [], uncovered: [old] });
+      expect(find([old], HEAD_A, 'File the guard for o/r#2')).toEqual({ filed: [], uncovered: [old] });
+      expect(find([old], null)).toEqual({ filed: [card], uncovered: [] });
+      // a resolved card tracks nothing any more — its guard is owed again (self-review).
+      writeFileSync(join(tb.root, 'backlog', 'x1-card.md'),
+        `---\nstatus: resolved\n---\n\n# ${title}\n\nfor o/r#1 (reviewed head \`${HEAD_A}\`)\n\n1. \`we:scripts/a.mjs:12\` — old guard\n`);
+      expect(find([old], null)).toEqual({ filed: [], uncovered: [old] });
+      expect(findFiledPreventionCard({ title }, { root: join(tb.root, 'missing'), findings: [old] }))
+        .toEqual({ filed: [], uncovered: [old] });
+    } finally {
+      tb.cleanup();
+    }
+  });
+
+  it('PR #2766 advisory (antigravity): file-item exiting 0 with NON-JSON stdout parks the run instead of crashing it', async () => {
+    const { declaration, registry } = registryFor({});
+    const seen = [];
+    const out = await runReviewLoopOnce({
+      declaration, registry, argv: BASE_ARGV, store: createMemoryRunStore(), sinks: recordingSinks(seen),
+      makeJudge: cannedJudge(PREVENTION_ANSWER), mintRunId: () => 'r-prevention-non-json',
+      fileItem: async () => ({ code: 0, lines: ['(node:1) ExperimentalWarning: something'] }),
+      findFiledPrevention: () => null,
+    });
+    expect(out.code).toBe(1);
+    expect(out.stopped).toBe('confirm');
+    expect(seen).toHaveLength(0);
+    expect(out.lines.join('\n')).toMatch(/FAILED to file the owed prevention card mechanically: file-item output unreadable/);
   });
 });
 

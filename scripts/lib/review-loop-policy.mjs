@@ -288,11 +288,15 @@ export function isPreventionOutstandingParked(outcome) {
  */
 export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '', queue = 'true', head = null } = {}) {
   const owed = (Array.isArray(findings) ? findings : []).filter(hasUncapturedPrevention);
-  const files = [...new Set(owed.map((f) => f.file).filter(Boolean))];
+  // PR #2766 advisory (security): only a CLEAN repo path reaches `scope` — `renderItem` writes scope entries
+  // into the card's frontmatter unescaped, so a juror `file` carrying a quote or newline could inject keys.
+  const files = [...new Set(owed.map(cleanFindingFile).filter(Boolean))];
   const testSiblingOf = (f) => {
     const slash = f.lastIndexOf('/');
     const dir = slash === -1 ? '.' : f.slice(0, slash);
     const base = slash === -1 ? f : f.slice(slash + 1);
+    // PR #2766 advisory (antigravity): a test file is its own test sibling — never `__tests__/__tests__/x.test.test.mjs`.
+    if (/\.test\.[cm]?[jt]s$/.test(base) || dir.endsWith('__tests__')) return f;
     const stem = base.replace(/\.mjs$/, '');
     return `${dir}/__tests__/${stem}.test.mjs`;
   };
@@ -301,12 +305,9 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
   // own scope-entry rule cites the identical card, #883, as the scope-lease engine's reason a bare entry is
   // unsafe: unqualified, it reads as repo `null` and never matches an observed `we:`-qualified file).
   const scope = [...new Set([...files, ...files.map(testSiblingOf)])].map((f) => `${IN_REPO_LOCUS}${f}`).join(',');
-  const digestLines = owed.map((f, i) => {
-    const where = f.file
-      ? `${IN_REPO_LOCUS}${f.file}${typeof f.line === 'number' ? `:${f.line}` : ''}`
-      : '(no file cited)';
-    return `${i + 1}. \`${where}\` — ${f.prevention ?? '(no guard text recorded)'}`;
-  });
+  const digestLines = owed.map((f, i) => (
+    `${i + 1}. ${cleanFindingFile(f) ? `${preventionGuardAnchor(f)} — ${f.prevention ?? '(no guard text recorded)'}` : preventionGuardAnchor(f)}`
+  ));
   const digestRaw = `Filed mechanically by the unattended review loop (#2749) — every finding below reduced `
     + `${repo}#${pr}'s review${head ? ` (${preventionHeadMarker(head)})` : ''} to prevention-outstanding by `
     + 'naming a guard neither captured nor filed:\n\n'
@@ -361,6 +362,55 @@ export function buildPreventionFilingInput({ repo, pr, findings = [], parent = '
  */
 export function preventionHeadMarker(head) {
   return `reviewed head \`${head}\``;
+}
+
+/**
+ * A finding's `file`, when it is a CLEAN repo-relative path — else `null`. PURE. Juror output is untrusted:
+ * a quote, newline, comma, backslash, space, other colon, leading `/` or a `..` segment is refused, since the
+ * value lands in the filed card's frontmatter `scope` (PR #2766 advisory, security). This repo's own `we:`
+ * prefix and a leading `./` are stripped first, so a juror citing the house locus format keeps its file.
+ *
+ * @param {{file?: unknown}} f
+ * @returns {string|null}
+ */
+export function cleanFindingFile(f) {
+  if (typeof f?.file !== 'string') return null;
+  const file = f.file.replace(new RegExp(`^${IN_REPO_LOCUS}`), '').replace(/^(?:\.\/)+/, '');
+  return /^[\w.@+-]+(?:\/[\w.@+-]+)*$/.test(file) && !file.split('/').includes('..') ? file : null;
+}
+
+/** Where the digest says a guard cited no (clean) file. */
+const NO_FILE_CITED = '`(no file cited)`';
+
+/**
+ * THE PER-GUARD DUPLICATE KEY (PR #2766 advisory). PURE. For a guard citing a clean file, the backticked
+ * `` `we:<file>[:<line>]` `` anchor {@link buildPreventionFilingInput} writes into the digest — stable across a
+ * fresh jury that rewords the same guard, and distinct for a guard at a new location (the closing backtick keeps
+ * `:1` from matching `:12`). With no clean file, the guard's whole digest line is the only key left, so a
+ * reworded no-file guard is filed again: over-filing is the safe direction, skipping a guard is not.
+ *
+ * @param {{file?: unknown, line?: unknown, prevention?: unknown}} f
+ * @returns {string}
+ */
+export function preventionGuardAnchor(f) {
+  const file = cleanFindingFile(f);
+  if (!file) return `${NO_FILE_CITED} — ${f?.prevention ?? '(no guard text recorded)'}`;
+  return `\`${IN_REPO_LOCUS}${file}${typeof f.line === 'number' ? `:${f.line}` : ''}\``;
+}
+
+/**
+ * DOES THIS FILED CARD'S TEXT ALREADY CARRY THIS GUARD? PURE (PR #2766 advisory). Compares with every locus
+ * prefix removed, because the digest's locus pass rewrites bare paths inside a no-file guard's text; a no-file
+ * anchor must also end its line, so the text `z` never matches a card line `… — zebra`.
+ *
+ * @param {string} cardText
+ * @param {object} f - a finding.
+ * @returns {boolean}
+ */
+export function cardCoversGuard(cardText, f) {
+  const strip = (s) => String(s).replace(/(?<![\w-])(?:we|fui|plateau|webeverything|frontierui|plateau-app):/g, '');
+  const anchor = strip(preventionGuardAnchor(f));
+  return `${strip(cardText)}\n`.includes(cleanFindingFile(f) ? anchor : `${anchor}\n`);
 }
 
 /** Where a filed-prevention entry is filed from, for a reader of the pool who has never heard of this operation. */
