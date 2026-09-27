@@ -338,6 +338,257 @@ export function enrichPrsWithMainRedFacts(prs, {
   return { prs: enriched, mainRedWindows };
 }
 
+// live incident, chalbert/web-everything PR #2752 (#4034/#2748) — see `we:scripts/lib/already-landed-content.mjs`'s
+// own header for the incident and why per-file BLOB IDENTITY against `main`'s own history is the signal, not a
+// plain merge-tree/current-content diff.
+import { CONFLICT_LABEL } from './conflict-label.mjs';
+import { computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ } from '../lib/already-landed-content.mjs';
+
+/** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
+ *  before giving up on that file (mirrors `we:scripts/backlog-stranded-sweep.mjs#AUTO_SWEEP_LOG_LIMIT`'s own
+ *  "bounded, not silently widened" doctrine). NEVER GUESS past the window: a file whose match sits further back
+ *  simply reads as `matchedCommit: null` for this pass — the safe direction (falls through to the ordinary
+ *  dispatch paths, exactly as if this whole detector did not exist). */
+export const ALREADY_LANDED_LOG_WINDOW = 300;
+
+/** Bare label-name membership test, matching `gh --json labels`'s tolerant `{name}`-or-bare-string shape
+ *  (mirrors `we:scripts/conveyor/duplicate-pr-watch.mjs#hasLabelNamed`, not imported from that file so this
+ *  module never pulls in its unrelated duplicate-PR detection machinery for one boolean check). */
+function hasLabel(labels, name) {
+  return (Array.isArray(labels) ? labels : [])
+    .map((l) => (typeof l === 'string' ? l : l?.name))
+    .filter(Boolean)
+    .includes(name);
+}
+
+/** A full or abbreviated hex commit id — the only shape the git calls below ever put in a revision position. */
+const SHA_RE = /^[0-9a-f]{7,64}$/;
+/** The branch name shape `origin/<defaultBranch>` is built from — never dash-leading, never a range/revspec. */
+const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
+const isSha = (s) => typeof s === 'string' && SHA_RE.test(s);
+const mainRefFor = (defaultBranch) =>
+  (typeof defaultBranch === 'string' && BRANCH_RE.test(defaultBranch) && !defaultBranch.startsWith('-')
+    ? `origin/${defaultBranch}` : null);
+/** `git --literal-pathspecs`: a changed path is matched as the literal file it names, never as a glob. */
+const GIT_LITERAL = ['--literal-pathspecs'];
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFetchRef — best-effort fetch of the PR's own head, so a commit
+ * this checkout may never have seen is present locally before it is read. Never throws — a fetch failure just
+ * means the reads below fail closed (never landed).
+ *
+ * KEYED ON THE PR NUMBER, NEVER ON `headRefName` (PR #2769 security review). A PR's branch name is fully
+ * author-controlled, and git accepts a dash-leading one (`--upload-pack=<cmd>`), which the earlier bare
+ * `git fetch origin <headRefName>` would parse as an OPTION — measured to run an arbitrary command against a
+ * local-path remote. The ref fetched here is built from a validated positive integer (`refs/pull/<n>/head`),
+ * behind `--end-of-options`, into an EXPLICIT destination — the same shape
+ * `we:scripts/fetch-parked.mjs#resolveNetDiff` adopted when #2373 banned the bare opportunistic form.
+ * @param {number} prNumber
+ * @param {{exec?:Function, remote?:string}} [o]
+ */
+export function defaultFetchRef(prNumber, { exec = execFileSync, remote = 'origin' } = {}) {
+  const n = Number(prNumber);
+  if (!Number.isInteger(n) || n <= 0 || String(n) !== String(prNumber)) return;
+  try {
+    // A private namespace, not `refs/remotes/…`: never collides with a real upstream branch, and stays out of
+    // every remote-tracking-ref scan the lane tooling runs.
+    exec('git', ['fetch', '--quiet', '--end-of-options', remote, `+refs/pull/${n}/head:refs/already-landed/pr/${n}`], {
+      stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
+    });
+  } catch { /* best-effort — the reads below degrade to null, never to a guess */ }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadMergeBase — the PR head's merge-base with `mainRef`, or
+ * `null`. This is the lower bound of the `<base>..main` search window (see
+ * `we:scripts/lib/already-landed-content.mjs`'s own header for why a pre-base match is never delivery).
+ * @param {string} headSha
+ * @param {string} mainRef
+ * @param {{exec?:Function}} [o]
+ * @returns {string|null}
+ */
+export function defaultReadMergeBase(headSha, mainRef, { exec = execFileSync } = {}) {
+  if (!isSha(headSha) || !mainRef) return null;
+  try {
+    const out = String(exec('git', ['merge-base', '--end-of-options', headSha, mainRef], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000,
+    }) || '').trim();
+    return isSha(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadChanges — what the PR changes relative to its merge-base,
+ * with status, destination mode and blob per path (`git diff --raw -z --no-renames`, parsed by
+ * `we:scripts/lib/already-landed-content.mjs#parseRawDiffZ`). Replaces an earlier `gh pr view --json files`
+ * path list, which could not see a rename's source, a mode change, or a deletion (PR #2769 review).
+ * @param {string} base
+ * @param {string} headSha
+ * @param {{exec?:Function}} [o]
+ * @returns {Array<{status:string, path:string, dstMode:string, dstBlob:string}>}
+ */
+export function defaultReadChanges(base, headSha, { exec = execFileSync } = {}) {
+  if (!isSha(base) || !isSha(headSha)) return [];
+  try {
+    const out = exec('git', ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', '--end-of-options', base, headSha], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return parseRawDiffZ(out);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadEntryAt — the `{mode, blob}` a path holds at a commit
+ * (`git ls-tree`), or `null` when the path does not exist there / the commit is unreachable. Mode travels with
+ * the blob so a mode-only change is never matched by the unchanged blob alone.
+ * @param {string} ref
+ * @param {string} file
+ * @param {{exec?:Function}} [o]
+ * @returns {{mode:string, blob:string}|null}
+ */
+export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
+  if (!ref || !file) return null;
+  try {
+    const out = String(exec('git', [...GIT_LITERAL, 'ls-tree', '-z', '--full-tree', '--end-of-options', ref, '--', file], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000,
+    }) || '');
+    for (const rec of out.split('\0')) {
+      const m = /^(\d{6}) \w+ ([0-9a-f]{7,64})\t(.*)$/s.exec(rec);
+      if (m && m[3] === file) return { mode: m[1], blob: m[2] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultFindMatchingMainCommit — the commit on `<base>..mainRef` that
+ * delivered this one change to `main`, or `null`. Per status:
+ *   - `A`/`M`: the first commit (most-recent-first, capped at {@link ALREADY_LANDED_LOG_WINDOW}) whose entry for
+ *     the path has the SAME blob AND mode the PR's head has. Robust to a rebase (blob identity ignores graph
+ *     shape) and to later refinement on `main` (the match can sit anywhere in the window, not just at the tip).
+ *     `main`'s tip must still hold the path and must differ from the PR's base version — a carry that `main`
+ *     later reverted is not delivery. The log is not `--first-parent`, so a side-branch commit merged into
+ *     `main` can be the match (git's default history simplification already drops side branches whose net
+ *     change to the path is zero).
+ *   - `D`: the path must be absent from `mainRef`'s tip, and the deleting commit must sit in the window.
+ *   - anything else (`T`ype change, unmerged, unknown): unsupported → `null`, never a guess.
+ * Bounded below by the PR's own merge-base: see `we:scripts/lib/already-landed-content.mjs`'s header for why a
+ * match that predates it (a deliberate restoration) is never delivery.
+ * @param {{status:string, path:string, dstMode:string, dstBlob:string}} change
+ * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function}} o
+ * @returns {string|null}
+ */
+export function defaultFindMatchingMainCommit(change, {
+  base, mainRef, exec = execFileSync, windowLimit = ALREADY_LANDED_LOG_WINDOW, readEntryAt = defaultReadEntryAt,
+} = {}) {
+  const path = change?.path;
+  if (!path || !isSha(base) || !mainRef) return null;
+  const logWindow = (extra) => {
+    const out = exec('git', [...GIT_LITERAL, 'log', '--format=%H', `-n${windowLimit}`, ...extra, `${base}..${mainRef}`, '--', path], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+    });
+    return String(out || '').split('\n').filter(Boolean);
+  };
+  try {
+    if (change.status === 'D') {
+      if (readEntryAt(mainRef, path, { exec }) !== null) return null; // still alive on main — not delivered
+      return logWindow(['--diff-filter=D'])[0] || null;
+    }
+    if (change.status !== 'A' && change.status !== 'M') return null;
+    if (!change.dstBlob || !change.dstMode) return null;
+    // A match inside the window is not enough if `main` later UNDID it (a revert back to base, or deleting an
+    // added file): main's tip must still hold the path, and not the PR's own base version of it.
+    const tip = readEntryAt(mainRef, path, { exec });
+    if (!tip) return null;
+    const atBase = readEntryAt(base, path, { exec });
+    if (atBase && atBase.blob === tip.blob && atBase.mode === tip.mode) return null;
+    for (const c of logWindow([])) {
+      const e = readEntryAt(c, path, { exec });
+      if (e && e.blob === change.dstBlob && e.mode === change.dstMode) return c;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultReadPullsForCommit — the PR number(s) GitHub associates with one
+ * commit (`GET /repos/{o}/{r}/commits/{sha}/pulls`) — the attribution primitive
+ * `we:scripts/lib/already-landed-content.mjs#attributeCarrierPr` needs, one call per DISTINCT matched commit.
+ * @param {string} sha
+ * @param {{exec?:Function, repo?:string|null}} [o]
+ * @returns {number[]}
+ */
+export function defaultReadPullsForCommit(sha, { exec = execFileSyncThrottled, repo = null } = {}) {
+  try {
+    const endpoint = `repos/${repo || '{owner}/{repo}'}/commits/${sha}/pulls`;
+    const out = exec('gh', ['api', endpoint, '--jq', '.[].number'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: resolveChildTimeoutMs(), killSignal: 'SIGKILL',
+    });
+    return String(out || '').split('\n').filter(Boolean).map(Number).filter(Number.isInteger);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * we:scripts/conveyor/reconcile-pass.mjs#enrichPrsWithAlreadyLandedFacts — live incident, chalbert/web-everything
+ * PR #2752 (#4034/#2748): attach `alreadyLandedInMain: {carrierPr}` to any open PR whose own content is already,
+ * file-by-file, present on `main` — see `we:scripts/lib/already-landed-content.mjs`'s own header for the full
+ * incident and why this needs blob identity rather than a plain diff.
+ *
+ * PAYS THE EXTRA READS ONLY FOR A PR CARRYING `merge-status:conflicting` — the population
+ * `we:scripts/conveyor/parked-pr-conflict-watch.mjs` already narrows this to (a real merge conflict on a
+ * review-parked PR), and the ONLY phase `reconcile-core.mjs`'s own `isConflictBounce` would otherwise dispatch a
+ * mechanical conflict-fix for. A pass with no such PR (the common case) costs nothing beyond the label scan
+ * `defaultReadPrs` already fetched every field for.
+ * @param {Array<object>} prs
+ * @param {{fetchRef?:Function, readMergeBase?:Function, readChanges?:Function, findMatchingCommit?:Function,
+ *   readPulls?:Function, repo?:string|null, defaultBranch?:string}} [o]
+ * @returns {Array<object>}
+ */
+export function enrichPrsWithAlreadyLandedFacts(prs, {
+  fetchRef = defaultFetchRef, readMergeBase = defaultReadMergeBase, readChanges = defaultReadChanges,
+  findMatchingCommit = defaultFindMatchingMainCommit, readPulls = defaultReadPullsForCommit,
+  repo = null, defaultBranch = 'main',
+} = {}) {
+  const list = Array.isArray(prs) ? prs : [];
+  const mainRef = mainRefFor(defaultBranch);
+  return list.map((pr) => {
+    if (!hasLabel(pr?.labels, CONFLICT_LABEL)) return pr;
+    const prNumber = Number(pr?.number);
+    const headSha = pr?.headRefOid;
+    if (!Number.isInteger(prNumber) || prNumber <= 0 || !isSha(headSha) || !mainRef) return pr;
+
+    fetchRef(prNumber, {});
+    const base = readMergeBase(headSha, mainRef, {});
+    if (!base) return pr; // no common history to bound the search by — never guess
+    const changes = readChanges(base, headSha, {});
+    if (!changes.length) return pr; // could not even read the diff — never guess containment from nothing
+
+    const fileMatches = changes.map((change) => ({
+      file: change.path, matchedCommit: findMatchingCommit(change, { base, mainRef }),
+    }));
+
+    const verdict = computeAlreadyLandedVerdict(fileMatches);
+    if (!verdict.landed) return pr;
+
+    const uniqueCommits = [...new Set(fileMatches.map((m) => m.matchedCommit).filter(Boolean))];
+    const pullsByCommit = {};
+    for (const c of uniqueCommits) pullsByCommit[c] = readPulls(c, { repo });
+    const carrierPr = attributeCarrierPr(fileMatches, pullsByCommit);
+
+    return { ...pr, alreadyLandedInMain: { carrierPr } };
+  });
+}
+
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#formatReport — the human half of the output, and it is not decoration.
  *
@@ -375,12 +626,14 @@ export function formatReport({ dispatch = [], refusals = [], notes = [] } = {}) 
 /**
  * we:scripts/conveyor/reconcile-pass.mjs#runReconcilePass — read, decide, return. Every reader is injectable, so
  * the whole shell is exercisable with no network and no credential.
- * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
+ * @param {{readPrs?:Function, readAgents?:Function, enrich?:Function, enrichMainRed?:Function,
+ *   enrichAlreadyLanded?:Function, now?:number, repo?:string|null, defaultBranch?:string}} [o]
  * @returns {{dispatch:Array<object>, refusals:Array<object>, notes:Array<object>, prs:number, agents:number}}
  */
 export function runReconcilePass({
   readPrs = defaultReadPrs, readAgents = defaultReadAgents, enrich = enrichAgents,
-  enrichMainRed = enrichPrsWithMainRedFacts, now = Date.now(), repo = null, defaultBranch = 'main',
+  enrichMainRed = enrichPrsWithMainRedFacts, enrichAlreadyLanded = enrichPrsWithAlreadyLandedFacts,
+  now = Date.now(), repo = null, defaultBranch = 'main',
 } = {}) {
   const repoKey = repo == null ? 'we' : repoKeyForSlug(repo);
   if (repoKey === null) throw new Error(`reconcile-pass: --repo ${repo} is not a constellation repo`);
@@ -393,7 +646,11 @@ export function runReconcilePass({
   // we:backlog/x5uqim1-*.md — attach `requiredCheckCompletedAt`/`aheadByOnMain` to any currently-failing
   // PR and read `main`'s own red windows, so `planReconcile` can tell a `ci-red` PR caused by a red `main` apart
   // from the PR's own defect. Costs nothing beyond what `readPrs` already fetched when nothing is `ci:failed`.
-  const { prs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  const { prs: redPrs, mainRedWindows } = enrichMainRed(rawPrs, { repo: resolvedRepo, defaultBranch });
+  // live incident, PR #2752 (#4034/#2748) — attach `alreadyLandedInMain` to any PR carrying
+  // `merge-status:conflicting` whose own content is already, file-by-file, present on `main`. Costs nothing
+  // beyond the label scan `readPrs` already fetched every field for when no PR carries that label.
+  const prs = enrichAlreadyLanded(redPrs, { repo: resolvedRepo, defaultBranch });
   const agents = enrich(readAgents({}));
   const plan = planReconcile({ repo: repoKey, prs, agents, durableCounts: durableCountsFrom(prs), now, defaultBranch, mainRedWindows });
   return { ...plan, prs: prs.length, agents: agents.length };
