@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate, isAiGeneratedPr, isMechanicalMergeCommit } from '../merge-ai-prs.mjs';
+import { labelOnGreenVerdict, isRequiredCheckGreen, isRequiredCheckFailed, isRequiredCheckPending, hasLabel, classifyPr, isRebaseDropCandidate, needsManifestStripBeforeMerge, restampAcceptance, spawnReviewSetLabel, isStackedWeCoupleHalf, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, pushNumberingOnLand, resolvePrimaryPath, syncPrimaryOnLand, resyncDetachedCwdForLand, drainReasonMarker, buildDrainReasonComment, buildHeldReviewHoldReason, hasDrainReasonComment, shouldPostParkReasonComment, LAND_REASON, MERGE_TRACE_KIND, buildMergeTraceReason, CI_LIFECYCLE_LABELS, CI_LIFECYCLE_LABEL_META, lifecycleLabelFromCiTruth, planCiLifecycleLabelUpdate, hasStaleReviewPendingBesideAccept, remoteManifestApiArgs, landedIdsForCandidate, isAiGeneratedPr, isMechanicalMergeCommit } from '../merge-ai-prs.mjs';
 import { REVIEW_LABELS, READY_TO_MERGE_LABEL } from '../lib/review-escalation.mjs';
 import { claudeCommit, humanCommit, greenRollup, aiPr } from './fixtures/merge-ai-prs-fixtures.mjs';
 
@@ -131,6 +131,24 @@ describe('isRequiredCheckFailed (#2421 — the ci:failed twin of isRequiredCheck
     expect(isRequiredCheckFailed({ statusCheckRollup: [{ name: 'test', conclusion: '' }] })).toBe(false); // pending
     expect(isRequiredCheckFailed({ statusCheckRollup: [] })).toBe(false); // not yet reported at all
     expect(isRequiredCheckFailed({ statusCheckRollup: [{ name: 'cla', conclusion: 'FAILURE' }] })).toBe(false); // non-required
+  });
+});
+
+// we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — the third member of the green/failed pair.
+describe('isRequiredCheckPending (heal-wait-for-rerun — the third state green/failed leave out)', () => {
+  it('a check present but not yet concluded (CheckRun in flight, or a legacy StatusContext PENDING state) → pending', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', conclusion: '', status: 'IN_PROGRESS' }] })).toBe(true);
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', state: 'PENDING' }] })).toBe(true);
+  });
+  it('a concluded check, either way → NOT pending', () => {
+    expect(isRequiredCheckPending(aiPr())).toBe(false); // SUCCESS
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] })).toBe(false);
+  });
+  it('a check never reported at all → NOT pending either (silence, not evidence — a caller\'s own empty-rollup fallback owns that case)', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [] })).toBe(false);
+  });
+  it('a non-required check in flight is ignored, exactly like its green/failed siblings', () => {
+    expect(isRequiredCheckPending({ statusCheckRollup: [{ name: 'cla', conclusion: '', status: 'IN_PROGRESS' }] })).toBe(false);
   });
 });
 

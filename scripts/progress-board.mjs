@@ -94,7 +94,7 @@ import { CI_TRUTH_EXCLUDED_CHECKS, FAILING_CONCLUSIONS } from './operations/pr-s
 // reused here so `classifyPr`'s stale-label fallback (below) can tell "the label is our only signal" apart from
 // "the label is outdated — THIS read's own rollup already proves the required check green". Side-effect-free
 // import (`merge-ai-prs.mjs`'s CLI is behind an `IS_CLI` guard, mirrored by `pr-watch.mjs`'s identical import).
-import { isRequiredCheckGreen } from './merge-ai-prs.mjs';
+import { isRequiredCheckGreen, isRequiredCheckPending } from './merge-ai-prs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_STATE = join(ROOT, 'reports', 'progress-board.json');
@@ -559,12 +559,24 @@ export function classifyPr(pr, requiredChecks) {
   // re-dispatched, because the line above trusted a STALE `ci:failed` label UNCONDITIONALLY — even on a read
   // whose OWN rollup affirmatively proves the required check green right now. The xx6kg3f fix (above this
   // block's history) added the label fallback for the OPPOSITE gap — a rollup that came back empty/degraded and
-  // so could not prove anything — and that gap still needs the fallback: `isRequiredCheckGreen` reads `false`
-  // for a missing/not-yet-concluded check, so an empty or in-flight rollup still falls through to trust the
-  // label exactly as xx6kg3f fixed it (see the two pinned tests, `pr2739Labels`, immediately below). Only a
-  // rollup that POSITIVELY reports the required check's LATEST run as green may override the label — never a
-  // rollup that is merely silent on it.
-  if (labels.has('ci:failed') && !isRequiredCheckGreen(pr)) return 'ci-red';
+  // so could not prove anything — and that gap still needs the fallback: for a MISSING check specifically, both
+  // `isRequiredCheckGreen` and `isRequiredCheckPending` read `false` (see the latter's own docblock), so an
+  // empty rollup still falls through to trust the label exactly as xx6kg3f fixed it (see the two pinned tests,
+  // `pr2739Labels`, immediately below).
+  //
+  // we:backlog/heal-wait-for-rerun (landing-freeze fix, 2026-09-27) — `!isRequiredCheckGreen(pr)` ALONE is true
+  // for BOTH "concluded failed" and "restarted, not concluded yet" — the second is exactly what a mechanical
+  // rebase produces the instant it re-triggers CI, and it is not evidence of a defect, it is evidence CI has
+  // not spoken yet. LIVE INCIDENT 2026-09-26/27: `main` went red then green, the mechanical rebase
+  // (`ci-red-recovery-watch.mjs`) rebased each stuck PR onto the new tip and re-ran CI, and every one of them
+  // still carried this stale `ci:failed` label from before the rebase — this line trusted it while the new run
+  // was still `pending` (or had already gone green by the time a ci-heal session actually looked), dispatching
+  // a wasted Opus/Sonnet ci-heal each time (of ~10 such sessions inside one hour, 7 — PRs #2782/#2778/#2772/
+  // #2779/… — ended "no change needed"). Only a rollup that POSITIVELY reports the required check's LATEST run
+  // as either green OR a COMPLETED failure may settle the question at all; a rollup that shows it merely
+  // in flight must wait for it to conclude, exactly like an empty rollup already does — the label alone is
+  // never enough once the live read has ANY opinion.
+  if (labels.has('ci:failed') && !isRequiredCheckGreen(pr) && !isRequiredCheckPending(pr)) return 'ci-red';
   if (merge === 'DIRTY' || merge === 'BEHIND') return 'conflicted';
   if (labels.has('review:pending')) return 'needs-review';
   if (labels.has('review:accepted') || labels.has('ready-to-merge')) return 'queued';
