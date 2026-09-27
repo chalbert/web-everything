@@ -71,8 +71,10 @@ import {
   DEFAULT_REQUIRED_CONTEXTS, DEFAULT_MISSING_RUN_THRESHOLD_MS, DEFAULT_MAX_MISSING_RUN_RETRIES_PER_SHA,
   buildMissingRunCandidates, planMissingRunRecoveries, countMissingRunComments, buildMissingRunComment,
   DEFAULT_MAIN_RED_ATTRIBUTED_CHECKS, failingRequiredCheckForAttribution, isAnyRequiredCheckFailed,
+  // landing-freeze fix (2026-09-27) — see `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header.
+  isMainLatestCheckGreen,
 } from './main-red-recovery.mjs';
-import { defaultReadMainRuns, defaultReadAheadBy } from './reconcile-pass.mjs';
+import { defaultReadMainRuns, defaultReadAheadBy, defaultReadMainLatestCheckRuns } from './reconcile-pass.mjs';
 import { rebaseDropManifest } from '../lib/rebase-drop-manifest.mjs';
 import { REPO_ROOT } from '../operations/dispatch-lane-io.mjs';
 import { resolveLanePoolRepoPath } from './lane-pool-health-watch.mjs';
@@ -127,6 +129,10 @@ export function buildCandidates(prs, {
     out.push({
       prNumber, headRefName: pr?.headRefName ?? null, headSha: pr?.headRefOid ?? null, aheadBy,
       failureCompletedAt: check?.completedAt ?? null,
+      // landing-freeze fix (2026-09-27) — WHICH check is the one judged, so `planMainRedRebases` can ask
+      // `isMainLatestCheckGreen` about THIS SAME check on main's own latest completed run. See that function's
+      // own docblock.
+      failingCheckName: check?.name ?? null,
     });
   }
   return out;
@@ -174,13 +180,17 @@ export function defaultPostRebaseComment(prNumber, {
  * `apply: true` — act. Every reader is injectable so the whole sweep is exercisable with no network and no
  * credential.
  * @param {{repo?:string|null, apply?:boolean, requiredCheck?:string, defaultBranch?:string,
- *   readOpenPrs?:Function, readMainRuns?:Function, readAheadBy?:Function, refresh?:Function}} [o]
- * @returns {{dispatch:Array<object>, refusals:Array<object>, applied:Array<object>, mainRedWindows:Array<object>}}
+ *   readOpenPrs?:Function, readMainRuns?:Function, readAheadBy?:Function, readMainLatestCheckRuns?:Function,
+ *   refresh?:Function}} [o]
+ * @returns {{dispatch:Array<object>, refusals:Array<object>, applied:Array<object>, mainRedWindows:Array<object>,
+ *   mainLatestCheckRuns:Array<object>}}
  */
 export function sweepCiRedRecovery({
   repo = null, apply = false, requiredCheck = null, defaultBranch = 'main',
   readOpenPrs = defaultReadOpenPrs, readMainRuns = defaultReadMainRuns, readAheadBy = defaultReadAheadBy,
   readRequiredContexts = defaultReadRequiredContexts,
+  // landing-freeze fix (2026-09-27) — see `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header.
+  readMainLatestCheckRuns = defaultReadMainLatestCheckRuns,
   readComments = defaultReadPrComments, refresh = refreshOntoMain, postComment = defaultPostRebaseComment,
   maxRebaseRetriesPerSha = DEFAULT_MAX_REBASE_RETRIES_PER_SHA,
 } = {}) {
@@ -198,20 +208,28 @@ export function sweepCiRedRecovery({
   const mainRedWindows = needWindows
     ? computeMainRedWindows(readMainRuns({ repo, branch: defaultBranch, workflowName: DEFAULT_MAIN_WORKFLOW_NAME }))
     : [];
+  // landing-freeze fix (2026-09-27) — same "pay only when needed" gate as `mainRedWindows` above: `main`'s own
+  // latest completed run's per-check conclusions, the retrospection-independent fact `isMainLatestCheckGreen`
+  // needs (a required check that never RAN on `main` during its own regression window opens no red window to
+  // read here at all — see `main-red-recovery.mjs`'s own file header for the incident this closes).
+  const mainLatestCheckRuns = needWindows ? readMainLatestCheckRuns({ repo, branch: defaultBranch }) : [];
   const rawCandidates = buildCandidates(prs, { requiredChecks: checks, mainRedWindows, readAheadBy, repo, defaultBranch });
   // x5uqim1 follow-up (#4075/#3383) — the durable per-sha rebase-attempt count (`rebaseAttemptsForSha`,
   // {@link DEFAULT_MAX_REBASE_RETRIES_PER_SHA}'s own safety net) only matters for a candidate that would
-  // otherwise actually be dispatched: attributable to a red-`main` window AND still `aheadBy > 0`. Reading a
-  // PR's comment thread only for THOSE mirrors `sweepHungCiRecovery`'s own "pay for it only when needed"
-  // discipline — never one extra `gh pr view` per open PR on every tick.
+  // otherwise actually be dispatched: attributable to a red-`main` window (or, landing-freeze fix, main's own
+  // latest run now passing this exact check) AND still `aheadBy > 0`. Reading a PR's comment thread only for
+  // THOSE mirrors `sweepHungCiRecovery`'s own "pay for it only when needed" discipline — never one extra
+  // `gh pr view` per open PR on every tick.
   const candidates = rawCandidates.map((c) => {
     if (!(c.aheadBy > 0)) return c;
     const attribution = classifyCiFailureAttribution({ failureCompletedAt: c.failureCompletedAt, mainRedWindows });
-    if (attribution !== 'main-red') return c;
+    const mainGreenForCheck = attribution !== 'main-red'
+      && isMainLatestCheckGreen({ failingCheckName: c.failingCheckName, mainLatestCheckRuns });
+    if (attribution !== 'main-red' && !mainGreenForCheck) return c;
     const comments = readComments(c.prNumber, { repo });
     return { ...c, rebaseAttemptsForSha: countRebaseOntoMainComments(comments, c.headSha) };
   });
-  const plan = planMainRedRebases({ candidates, mainRedWindows, maxRebaseRetriesPerSha });
+  const plan = planMainRedRebases({ candidates, mainRedWindows, mainLatestCheckRuns, maxRebaseRetriesPerSha });
 
   // x5uqim1 follow-up (#4075/#3383) part (c) — "check the owed-ci-rerun path for frontierui/plateau-app too":
   // `rebaseDropManifest` needs a REAL LOCAL checkout of the repo it rebases (this file's own header). Left at
@@ -237,7 +255,7 @@ export function sweepCiRedRecovery({
       applied.push({ prNumber: d.prNumber, headRefName: d.headRefName, ...result });
     }
   }
-  return { ...plan, applied, mainRedWindows };
+  return { ...plan, applied, mainRedWindows, mainLatestCheckRuns };
 }
 
 // ── HUNG-CI-RUN RECOVERY (we:backlog/xd1sfms-*.md, parent #4075/#3383) ─────────────────────────────────────────

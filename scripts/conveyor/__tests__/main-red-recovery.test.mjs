@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest';
 import {
   MAIN_RED_CONCLUSIONS, computeMainRedWindows, isWithinRedWindow, isMainCurrentlyRed,
   classifyCiFailureAttribution, isPrCiFailureOwedRerun, planMainRedRebases,
+  // landing-freeze fix (2026-09-27)
+  latestCompletedMainRun, collapseMainCheckRunsToLatestPerName, isMainLatestCheckGreen,
   DEFAULT_HUNG_THRESHOLD_MS, DEFAULT_MAX_HUNG_RETRIES_PER_SHA,
   runIdFromDetailsUrl, isRunHung, buildHungCandidates, planHungCiRecoveries,
   DEFAULT_MAX_REBASE_RETRIES_PER_SHA, REBASE_ONTO_MAIN_COMMENT_MARKER,
@@ -122,6 +124,86 @@ describe('main-red-recovery — isPrCiFailureOwedRerun', () => {
   });
 });
 
+// landing-freeze fix (2026-09-27) — LIVE INCIDENT: PR #2790 fixed a `daemon-soak` regression that had sat on
+// `main` unseen (the job was `pull_request`-only before it, so `main`'s own CI runs stayed `success` right
+// through the regression — no red window EVER opened to attribute #2748/#2783/#2784/#2788/#2789 against,
+// retroactively, however genuinely main-caused the breakage was). See this file's own "LANDING-FREEZE FIX"
+// section header for the full incident.
+describe('main-red-recovery — isMainLatestCheckGreen / collapseMainCheckRunsToLatestPerName / latestCompletedMainRun', () => {
+  const checkRun = (name, conclusion, completedAt, status = 'completed') => ({ name, conclusion, status, completed_at: completedAt });
+
+  it('true when the named check concluded success on the given check-runs list', () => {
+    const runs = [checkRun('test', 'success', '2026-09-27T04:00:10Z'), checkRun('daemon-soak', 'success', '2026-09-27T03:56:55Z')];
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak', mainLatestCheckRuns: runs })).toBe(true);
+  });
+
+  it('false when the named check is present but not green', () => {
+    const runs = [checkRun('daemon-soak', 'failure', '2026-09-27T03:56:55Z')];
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak', mainLatestCheckRuns: runs })).toBe(false);
+  });
+
+  it('false when the named check never reported at all — never a guess', () => {
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak', mainLatestCheckRuns: [checkRun('test', 'success', '2026-09-27T04:00:10Z')] })).toBe(false);
+  });
+
+  it('false with no failingCheckName, or no mainLatestCheckRuns at all — byte-identical to before this existed', () => {
+    expect(isMainLatestCheckGreen({})).toBe(false);
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak' })).toBe(false);
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak', mainLatestCheckRuns: [] })).toBe(false);
+  });
+
+  it('collapses to the LATEST completed entry per name — an earlier failed attempt does not shadow a later success', () => {
+    const runs = [
+      checkRun('daemon-soak', 'failure', '2026-09-27T01:00:00Z'),
+      checkRun('daemon-soak', 'success', '2026-09-27T03:56:55Z'),
+    ];
+    expect(isMainLatestCheckGreen({ failingCheckName: 'daemon-soak', mainLatestCheckRuns: runs })).toBe(true);
+  });
+
+  it('latestCompletedMainRun picks the newest status:completed entry by updatedAt, ignoring in-flight ones', () => {
+    const runs = [
+      { status: 'completed', updatedAt: '2026-09-27T01:00:00Z', headSha: 'old' },
+      { status: 'in_progress', updatedAt: '2026-09-27T05:00:00Z', headSha: 'inflight' },
+      { status: 'completed', updatedAt: '2026-09-27T03:00:00Z', headSha: 'new' },
+    ];
+    expect(latestCompletedMainRun(runs)).toMatchObject({ headSha: 'new' });
+    expect(latestCompletedMainRun([])).toBeNull();
+    expect(latestCompletedMainRun(null)).toBeNull();
+  });
+});
+
+describe('main-red-recovery — isPrCiFailureOwedRerun, the landing-freeze-fix green-check path', () => {
+  const mainLatestCheckRuns = [
+    { name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z' },
+    { name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' },
+  ];
+
+  it('true for a daemon-soak failure outside every red window, when daemon-soak is green on main\'s own latest run and the PR is behind (PR #2748\'s real shape)', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns,
+    })).toBe(true);
+  });
+
+  it('false once the head already contains main\'s current tip (ahead_by 0) — even with main green, still red is a real own-failure', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 0, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns,
+    })).toBe(false);
+  });
+
+  it('false when main\'s latest run never reported the failing check at all — never a guess', () => {
+    expect(isPrCiFailureOwedRerun({
+      requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [],
+      failingCheckName: 'daemon-soak', mainLatestCheckRuns: [{ name: 'test', conclusion: 'success', status: 'completed', completed_at: 'x' }],
+    })).toBe(false);
+  });
+
+  it('omitting failingCheckName/mainLatestCheckRuns entirely never grants this path — byte-identical to before it existed', () => {
+    expect(isPrCiFailureOwedRerun({ requiredCheckCompletedAt: '2026-09-27T02:36:03Z', aheadBy: 5, mainRedWindows: [] })).toBe(false);
+  });
+});
+
 describe('main-red-recovery — planMainRedRebases', () => {
   const windows = computeMainRedWindows(MAIN_RUNS);
 
@@ -180,6 +262,43 @@ describe('main-red-recovery — planMainRedRebases', () => {
 
   it('MAIN_RED_CONCLUSIONS deliberately excludes cancelled — the ordinary drain-traffic case', () => {
     expect(MAIN_RED_CONCLUSIONS).not.toContain('cancelled');
+  });
+});
+
+// landing-freeze fix (2026-09-27) — the ACTING pass: `owed-ci-rerun` alone (above) is a refusal, never a
+// repair; this is what must actually dispatch the mechanical rebase for a PR the red-window path alone can
+// never see (main's own regression window ran no red window at all — see this file's own header).
+describe('main-red-recovery — planMainRedRebases, the landing-freeze-fix green-check path', () => {
+  const mainLatestCheckRuns = [
+    { name: 'test', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T04:00:10Z' },
+    { name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' },
+  ];
+  const candidate2748 = {
+    prNumber: 2748, headRefName: 'lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits', headSha: 'dfb57d0',
+    aheadBy: 5, failureCompletedAt: '2026-09-27T02:36:03Z', failingCheckName: 'daemon-soak',
+  };
+
+  it('dispatches rebase-onto-main for a daemon-soak failure with NO red window at all, once main\'s own latest run shows it green (PR #2748\'s real shape)', () => {
+    const plan = planMainRedRebases({ candidates: [candidate2748], mainRedWindows: [], mainLatestCheckRuns });
+    expect(plan.dispatch).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'rebase-onto-main', aheadBy: 5 })]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  it('still refuses main-still-red when a DIFFERENT required check is still failing on main\'s own latest run, whatever this one check says', () => {
+    const stillRedWindows = [{ start: '2026-09-27T02:00:00Z', end: null }]; // main's own `smoke` (say) still red right now
+    const plan = planMainRedRebases({ candidates: [candidate2748], mainRedWindows: stillRedWindows, mainLatestCheckRuns });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'main-still-red' })]);
+    expect(plan.dispatch).toEqual([]);
+  });
+
+  it('refuses own-failure when main\'s latest run never reported the failing check at all — never a guess', () => {
+    const plan = planMainRedRebases({ candidates: [candidate2748], mainRedWindows: [], mainLatestCheckRuns: [] });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
+  });
+
+  it('omitting mainLatestCheckRuns entirely never grants this path — byte-identical to before it existed', () => {
+    const plan = planMainRedRebases({ candidates: [candidate2748], mainRedWindows: [] });
+    expect(plan.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
   });
 });
 

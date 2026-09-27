@@ -38,7 +38,7 @@ describe('ci-red-recovery-watch — buildCandidates', () => {
     expect(candidates).toEqual([
       {
         prNumber: 2635, headRefName: 'lane/xdzl6mb', headSha: 'ab9985630d90019a07b94e946bc75f8de7a6161f',
-        aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z',
+        aheadBy: 33, failureCompletedAt: '2026-09-25T01:57:47Z', failingCheckName: 'test',
       },
     ]);
     expect(readAheadBy).toHaveBeenCalledTimes(1);
@@ -73,6 +73,48 @@ describe('ci-red-recovery-watch — a daemon-soak-only red PR (soak-main-red)', 
       readRequiredContexts, refresh: vi.fn(),
     });
     expect(readRequiredContexts).toHaveBeenCalledTimes(1);
+    expect(result.dispatch).toEqual([]);
+  });
+});
+
+// landing-freeze fix (2026-09-27) — LIVE INCIDENT: PR #2790 fixed a `daemon-soak` regression that had sat on
+// `main` unseen because the job never ran on a PUSH to `main` at all before it — so `main`'s own run history
+// shows straight `success` right through the whole regression window, no red window EVER opens, and the
+// `soak-main-red` fix above (judged purely against `mainRedWindows`) stays permanently blind to it. This is
+// the ACTING pass that must dispatch the mechanical rebase anyway, once `main`'s own LATEST run proves the
+// exact same check now passes. See `main-red-recovery.mjs`'s own "LANDING-FREEZE FIX" section header.
+describe('ci-red-recovery-watch — a daemon-soak-only red PR with NO red window at all (landing-freeze fix)', () => {
+  const stuckPr = {
+    number: 2748, headRefName: 'lane/xg790dh-ci-lifecycle-drain-bookkeeping-commits', headRefOid: 'dfb57d0', statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: '2026-09-27T02:32:41Z' },
+      { __typename: 'CheckRun', name: 'daemon-soak', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-09-27T02:36:03Z' },
+    ],
+  };
+  const mainLatestCheckRuns = [{ name: 'daemon-soak', conclusion: 'success', status: 'completed', completed_at: '2026-09-27T03:56:55Z' }];
+
+  it('dispatches rebase-onto-main even with an EMPTY mainRedWindows history, once main\'s own latest run shows daemon-soak green', () => {
+    const result = sweepCiRedRecovery({
+      readOpenPrs: () => [stuckPr], readMainRuns: () => [], readAheadBy: () => 5, readComments: () => [],
+      readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], readMainLatestCheckRuns: () => mainLatestCheckRuns,
+      refresh: vi.fn(),
+    });
+    expect(result.dispatch).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'rebase-onto-main', aheadBy: 5 })]);
+  });
+
+  it('still refuses own-failure when main\'s own latest run never reported daemon-soak at all — never a guess', () => {
+    const result = sweepCiRedRecovery({
+      readOpenPrs: () => [stuckPr], readMainRuns: () => [], readAheadBy: () => 5, readComments: () => [],
+      readRequiredContexts: () => ['test', 'smoke', 'daemon-soak'], readMainLatestCheckRuns: () => [],
+      refresh: vi.fn(),
+    });
+    expect(result.refusals).toEqual([expect.objectContaining({ prNumber: 2748, kind: 'own-failure' })]);
+    expect(result.dispatch).toEqual([]);
+  });
+
+  it('never reads mainLatestCheckRuns at all when nothing is currently failing — the zero-cost path', () => {
+    const readMainLatestCheckRuns = vi.fn();
+    const result = sweepCiRedRecovery({ readOpenPrs: () => [PR_QUIET], readMainRuns: vi.fn(), readMainLatestCheckRuns });
+    expect(readMainLatestCheckRuns).not.toHaveBeenCalled();
     expect(result.dispatch).toEqual([]);
   });
 });
