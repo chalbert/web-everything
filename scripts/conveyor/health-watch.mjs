@@ -47,6 +47,7 @@ export { healthDir, healthSectionLines };
 import { pinnedStateRoot } from './queue-store.mjs';
 import { CONSTELLATION_REPOS } from '../lib/constellation-repos.mjs';
 import { readGithubAppStatus } from '../lib/github-app-auth-env.mjs';
+import { ghThrottleLockRoot, ghThrottleLogPath } from '../lib/gh-throttle.mjs';
 import { readClaudeAuthExpiredInfo } from './hung-session.mjs';
 import { notifyDesktopChecked } from './branch-sync.mjs';
 import { DAEMON_MANIFEST } from '../../skills-src/conveyor/daemon-manifest.mjs';
@@ -303,6 +304,23 @@ export function probeMachineLoad({ getLoadAvg = loadavg, getCpuCount = () => cpu
   return { load1, load5, load15, cpuCount: Math.max(1, getCpuCount()) };
 }
 
+/** `gh-call-failures`' input: the TAIL (last `maxBytes`) of gh-throttle's sidecar `calls.jsonl`, parsed. The
+ *  file grows unbounded (14MB live), so only the tail is read; a torn first line is skipped. `[]` if absent. */
+export function probeGhCalls({ logPath = ghThrottleLogPath(ghThrottleLockRoot()), maxBytes = 2 * 1024 * 1024 } = {}) {
+  if (!existsSync(logPath)) return [];
+  const size = statSync(logPath).size;
+  const len = Math.min(size, maxBytes);
+  const buf = Buffer.alloc(len);
+  const fd = openSync(logPath, 'r');
+  try { readSync(fd, buf, 0, len, size - len); } finally { closeSync(fd); }
+  const out = [];
+  for (const line of buf.toString('utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch { /* torn first line / partial write */ }
+  }
+  return out;
+}
+
 export function probePrs({ exec = run } = {}) {
   const out = [];
   for (const { slug } of Object.values(CONSTELLATION_REPOS)) {
@@ -436,6 +454,8 @@ export async function tick(flags = {}) {
   probes.machineLoad = attempt('machineLoad', () => (flags['machine-load-fixture']
     ? JSON.parse(readFileSync(flags['machine-load-fixture'], 'utf8'))
     : probeMachineLoad()));
+  // `gh-call-failures` — fs-only, every tick: the gh-throttle call log's tail (`--gh-calls-log=FILE` in tests).
+  probes.ghCalls = attempt('ghCalls', () => probeGhCalls(flags['gh-calls-log'] ? { logPath: flags['gh-calls-log'] } : {}));
 
   const ghCache = prev.ghCache || {};
   const ghDue = !flags['no-gh'] && (flags['force-gh'] || !ghCache.at || now - ghCache.at >= GH_CADENCE_MS);
