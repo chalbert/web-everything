@@ -38,7 +38,9 @@
  * landed only when the path is gone from `main`'s tip AND a commit in that range deleted it.
  *
  * AND `main`'S TIP MUST STILL CARRY THE CHANGE (PR #2769 review, round 2). Holding the PR's version once is not
- * enough — `main` may have moved the PR's own lines on since. See {@link tipPreservesChange}: later edits
+ * enough — `main` may have moved the PR's own lines on since. For an edited file, merging the PR's version into
+ * `main`'s tip must change nothing (`we:scripts/conveyor/reconcile-pass.mjs#defaultTipCarriesChange`); for an
+ * added file, the PR's whole text must still sit in the tip unbroken ({@link addedContentIntact}). Later edits
  * elsewhere in the file are fine, an edit to a line the PR wrote is not. The cost is recall: a carry whose PR
  * lines `main` then rewrote (part of the live #2752 shape) is no longer called landed, and falls through to the
  * ordinary dispatch paths. That is the safe direction — a false "landed" closes the PR and resolves its card.
@@ -83,59 +85,25 @@ export function parseRawDiffZ(text) {
 }
 
 /**
- * we:scripts/lib/already-landed-content.mjs#parseUnifiedHunks — the hunk headers of a `git diff -U0` between two
- * blobs, as `{oldStart, oldCount, newStart, newCount}` (an omitted count is 1). Pure. Returns `null` — never
- * `[]` — when the diff has content but no hunk header (a binary diff): "no hunks" must not read as "no change".
- * @param {string} text
- * @returns {Array<{oldStart:number, oldCount:number, newStart:number, newCount:number}>|null}
- */
-export function parseUnifiedHunks(text) {
-  const s = String(text || '');
-  const hunks = [];
-  for (const m of s.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
-    hunks.push({
-      oldStart: Number(m[1]), oldCount: m[2] === undefined ? 1 : Number(m[2]),
-      newStart: Number(m[3]), newCount: m[4] === undefined ? 1 : Number(m[4]),
-    });
-  }
-  return hunks.length || !s.trim() ? hunks : null;
-}
-
-/** A hunk side as a span on the file's line axis (line i occupies `(i-1, i)`): `n>0` lines from `start` is
- *  `[start-1, start-1+n]`; `n=0` is the zero-width point just after line `start`. */
-const span = (start, count) => (count > 0 ? { lo: start - 1, hi: start - 1 + count, point: false } : { lo: start, hi: start, point: true });
-
-function spansClash(p, m) {
-  if (!p.point && !m.point) return p.lo < m.hi && m.lo < p.hi; // overlapping lines
-  if (!p.point && m.point) return p.lo < m.lo && m.lo < p.hi; // main inserted INSIDE the PR's own lines
-  if (p.point && !m.point) return m.lo < p.lo && p.lo < m.hi; // main rewrote across the PR's deletion point
-  return p.lo === m.lo; // main re-inserted at the exact spot the PR deleted from
-}
-
-/**
- * we:scripts/lib/already-landed-content.mjs#tipPreservesChange — does `main`'s tip still carry the PR's change,
- * given that `main` once held the PR's exact version `X` of the file and has edited it since? Pure.
+ * we:scripts/lib/already-landed-content.mjs#addedContentIntact — for a file the PR ADDS, does `main`'s tip still
+ * hold the PR's whole version, as one unbroken run of whole lines? Pure.
  *
- * `prHunks` is `diff(<PR's base version> → X)`, `mainHunks` is `diff(X → <main's tip>)` — both land on X's own
- * line axis (the PR's post-image, main's pre-image). The change is preserved only when no edit `main` made after
- * X touches it: no line the PR wrote was changed or removed, nothing was inserted between two of those lines,
- * and nothing was re-inserted where the PR deleted. Insertions and edits ELSEWHERE in the file are fine — that is
- * the "main refined it further" shape this detector exists for.
- *
- * WHY (PR #2769 review, round 2). A blob match anywhere in `<base>..main` proves only that `main` HELD the PR's
- * version once. Two measured false positives followed from trusting it alone: `main` held X transiently then
- * moved the PR's own line on, and `main` reverted the PR's line while editing another line of the same file (so
- * the tip matched neither X nor the base). Both closed a PR whose work is not on `main`. A `null` hunk list (an
- * unreadable or binary diff) is never preserved.
- * @param {Array<object>|null} prHunks
- * @param {Array<object>|null} mainHunks
+ * An added file has no base to merge against, so every line of it is the PR's own. It is carried when the PR's
+ * text sits in the tip byte-for-byte and contiguous — `main` may only have added lines before or after it.
+ * Anything else (a rewritten line, a line inserted in the middle, a missing trailing newline main then extended)
+ * is not provably carried. Binary text (a NUL byte) and an empty PR version are never "intact": there is nothing
+ * line-shaped to find. Edited (`M`) files are judged by a real three-way merge in the IO shell instead —
+ * `we:scripts/conveyor/reconcile-pass.mjs#defaultTipCarriesChange`.
+ * @param {string} tipText
+ * @param {string} prText
  * @returns {boolean}
  */
-export function tipPreservesChange(prHunks, mainHunks) {
-  if (!Array.isArray(prHunks) || !Array.isArray(mainHunks)) return false;
-  const pr = prHunks.map((h) => span(h.newStart, h.newCount));
-  const main = mainHunks.map((h) => span(h.oldStart, h.oldCount));
-  return !pr.some((p) => main.some((m) => spansClash(p, m)));
+export function addedContentIntact(tipText, prText) {
+  if (typeof tipText !== 'string' || typeof prText !== 'string' || !prText) return false;
+  if (tipText.includes('\0') || prText.includes('\0')) return false;
+  if (tipText === prText) return true;
+  if (!prText.endsWith('\n')) return false; // main extended a last line with no newline — ambiguous, refuse
+  return tipText.startsWith(prText) || tipText.includes(`\n${prText}`);
 }
 
 /**

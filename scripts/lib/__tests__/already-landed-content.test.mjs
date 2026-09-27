@@ -1,58 +1,32 @@
 import { describe, it, expect } from 'vitest';
 import {
-  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, parseUnifiedHunks, tipPreservesChange,
+  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, addedContentIntact,
 } from '../already-landed-content.mjs';
 
-describe('parseUnifiedHunks', () => {
-  it('reads every -U0 hunk header, defaulting an omitted count to 1', () => {
-    expect(parseUnifiedHunks('diff --git a/x b/x\n@@ -3 +3,2 @@ ctx\n-a\n+b\n+c\n@@ -9,2 +10,0 @@\n-d\n-e\n')).toEqual([
-      { oldStart: 3, oldCount: 1, newStart: 3, newCount: 2 },
-      { oldStart: 9, oldCount: 2, newStart: 10, newCount: 0 },
-    ]);
-  });
-  it('is [] for an empty diff but null for content with no hunk (binary) — "no hunks" never reads as "no change"', () => {
-    expect(parseUnifiedHunks('')).toEqual([]);
-    expect(parseUnifiedHunks('Binary files a/x and b/x differ\n')).toBeNull();
-  });
-});
+describe('addedContentIntact — an added file is carried only while the PR\'s whole text sits in main\'s tip unbroken (PR #2769 review, round 2)', () => {
+  const PR = 'l1\nl2\n';
 
-describe('tipPreservesChange — main\'s later edits must leave every line the PR wrote alone (PR #2769 review, round 2)', () => {
-  const h = (oldStart, oldCount, newStart, newCount) => ({ oldStart, oldCount, newStart, newCount });
-  const PR_LINE_2 = [h(2, 1, 2, 1)]; // the PR rewrote line 2 (line 2 of X)
-
-  it('preserved when main only edited or inserted elsewhere', () => {
-    expect(tipPreservesChange(PR_LINE_2, [h(6, 1, 6, 1)])).toBe(true);
-    expect(tipPreservesChange(PR_LINE_2, [h(2, 0, 3, 4)])).toBe(true); // inserted right after the PR's line
-    expect(tipPreservesChange(PR_LINE_2, [h(1, 0, 2, 1)])).toBe(true); // inserted right before it
-    expect(tipPreservesChange(PR_LINE_2, [h(1, 1, 1, 1), h(3, 1, 3, 1)])).toBe(true); // neighbours edited
+  it('intact when main\'s tip is the PR text, or the PR text with lines added before / after it', () => {
+    expect(addedContentIntact(PR, PR)).toBe(true);
+    expect(addedContentIntact('l1\nl2\nrefined\n', PR)).toBe(true);
+    expect(addedContentIntact('header\nl1\nl2\n', PR)).toBe(true);
   });
 
-  it('NOT preserved when main changed or removed a line the PR wrote — the transient carry / revert shapes', () => {
-    expect(tipPreservesChange(PR_LINE_2, [h(2, 1, 2, 1)])).toBe(false);
-    expect(tipPreservesChange(PR_LINE_2, [h(2, 1, 1, 0)])).toBe(false);
-    expect(tipPreservesChange(PR_LINE_2, [h(2, 1, 2, 1), h(6, 1, 6, 1)])).toBe(false); // revert + unrelated edit
-    expect(tipPreservesChange(PR_LINE_2, [h(1, 3, 1, 3)])).toBe(false); // a wider rewrite spanning it
+  it('NOT intact when main rewrote, removed, or inserted between the PR\'s lines', () => {
+    expect(addedContentIntact('l1\nL2\n', PR)).toBe(false);
+    expect(addedContentIntact('l1\n', PR)).toBe(false);
+    expect(addedContentIntact('l1\nmid\nl2\n', PR)).toBe(false);
   });
 
-  it('NOT preserved when main inserted between two of the PR\'s own lines', () => {
-    expect(tipPreservesChange([h(0, 0, 1, 3)], [h(1, 0, 2, 1)])).toBe(false);
-    expect(tipPreservesChange([h(0, 0, 1, 3)], [h(3, 0, 4, 1)])).toBe(true); // appended after an added file
+  it('matches whole lines only — never a PR text that starts mid-line in the tip', () => {
+    expect(addedContentIntact('xl1\nl2\n', PR)).toBe(false);
   });
 
-  it('NOT preserved when main re-inserted at the exact spot the PR deleted from', () => {
-    const PR_DELETED_AFTER_2 = [h(3, 1, 2, 0)];
-    expect(tipPreservesChange(PR_DELETED_AFTER_2, [h(2, 0, 3, 1)])).toBe(false);
-    expect(tipPreservesChange(PR_DELETED_AFTER_2, [h(2, 2, 2, 2)])).toBe(false); // rewrote across the deletion point
-    expect(tipPreservesChange(PR_DELETED_AFTER_2, [h(5, 1, 5, 1)])).toBe(true);
-  });
-
-  it('an empty added file clashes with any content main put in it', () => {
-    expect(tipPreservesChange([h(0, 0, 0, 0)], [h(0, 0, 1, 2)])).toBe(false);
-  });
-
-  it('never preserved on an unreadable hunk list', () => {
-    expect(tipPreservesChange(null, [])).toBe(false);
-    expect(tipPreservesChange([], null)).toBe(false);
+  it('refuses the ambiguous and the unreadable: no trailing newline, empty, binary, non-string', () => {
+    expect(addedContentIntact('l1\nl2more\n', 'l1\nl2')).toBe(false);
+    expect(addedContentIntact('anything\n', '')).toBe(false);
+    expect(addedContentIntact('a\0b\nl1\nl2\n', PR)).toBe(false);
+    expect(addedContentIntact(null, PR)).toBe(false);
   });
 });
 

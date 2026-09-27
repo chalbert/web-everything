@@ -343,7 +343,7 @@ export function enrichPrsWithMainRedFacts(prs, {
 // plain merge-tree/current-content diff.
 import { CONFLICT_LABEL } from './conflict-label.mjs';
 import {
-  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, parseUnifiedHunks, tipPreservesChange,
+  computeAlreadyLandedVerdict, attributeCarrierPr, parseRawDiffZ, addedContentIntact,
 } from '../lib/already-landed-content.mjs';
 
 /** How many of `main`'s own commits touching one file this pass will scan for a blob match, most-recent-first,
@@ -469,32 +469,34 @@ export function defaultReadEntryAt(ref, file, { exec = execFileSync } = {}) {
   return null;
 }
 
+const BLOB_READ = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024 };
+
 /**
- * we:scripts/conveyor/reconcile-pass.mjs#defaultReadBlobHunks — the `git diff -U0` hunks between two blobs,
- * parsed by `we:scripts/lib/already-landed-content.mjs#parseUnifiedHunks` (`null` for a binary diff). A `null`
- * `fromBlob` means "from nothing" (a file the PR adds): one hunk spanning every line of `toBlob`, read directly —
- * git's empty blob is not guaranteed to exist in the object store, so it is never diffed against. Throws when git
- * fails; the caller fails closed.
- * @param {string|null} fromBlob
- * @param {string} toBlob
+ * we:scripts/conveyor/reconcile-pass.mjs#defaultTipCarriesChange — does `main`'s tip blob still carry the PR's
+ * change to one file, when the tip is NOT the PR's exact blob (`main` edited the file after carrying it)?
+ *   - edited file (`baseBlob` set): a real three-way merge — `git merge-file -p --object-id <tip> <base> <pr>` —
+ *     must be conflict-free AND produce the tip byte-for-byte. That is "merging the PR into `main` changes
+ *     nothing": every change the PR made is already there, whatever `main` did around it. It replaced a
+ *     hunk-position check that repeated lines (`}`, blank lines) could fool into calling a revert "preserved"
+ *     (PR #2769 review, round 2 self-review).
+ *   - added file (`baseBlob` null): `we:scripts/lib/already-landed-content.mjs#addedContentIntact` — git's empty
+ *     blob is not guaranteed to exist in the object store, and an add/add merge conflicts on any difference.
+ * A conflict, a binary file, or any git failure (`merge-file --object-id` needs git ≥ 2.44) THROWS or returns
+ * false; the caller fails closed.
+ * @param {string} tipBlob
+ * @param {string|null} baseBlob
+ * @param {string} prBlob
  * @param {{exec?:Function}} [o]
- * @returns {Array<object>|null}
+ * @returns {boolean}
  */
-export function defaultReadBlobHunks(fromBlob, toBlob, { exec = execFileSync } = {}) {
-  if (!isSha(toBlob) || (fromBlob !== null && !isSha(fromBlob))) return null;
-  if (fromBlob === null) {
-    const text = String(exec('git', ['cat-file', 'blob', '--end-of-options', toBlob], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
-    }) || '');
-    if (text.includes('\0')) return null; // binary — never reasoned about line by line
-    const lines = text.length ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0;
-    // An empty added file is a zero-width change at line 0, so any content `main` put in it clashes.
-    return [{ oldStart: 0, oldCount: 0, newStart: lines ? 1 : 0, newCount: lines }];
-  }
-  const out = exec('git', ['diff', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--end-of-options', fromBlob, toBlob], {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
-  });
-  return parseUnifiedHunks(out);
+export function defaultTipCarriesChange(tipBlob, baseBlob, prBlob, { exec = execFileSync } = {}) {
+  if (!isSha(tipBlob) || !isSha(prBlob) || (baseBlob !== null && !isSha(baseBlob))) return false;
+  const readBlob = (b) => String(exec('git', ['cat-file', 'blob', '--end-of-options', b], BLOB_READ) ?? '');
+  const tipText = readBlob(tipBlob);
+  if (baseBlob === null) return addedContentIntact(tipText, readBlob(prBlob));
+  // Exits non-zero on a conflict (or a binary file), which execFileSync throws on.
+  const merged = String(exec('git', ['merge-file', '-p', '--object-id', '--end-of-options', tipBlob, baseBlob, prBlob], BLOB_READ) ?? '');
+  return merged === tipText;
 }
 
 /**
@@ -504,7 +506,7 @@ export function defaultReadBlobHunks(fromBlob, toBlob, { exec = execFileSync } =
  *     the path has the SAME blob AND mode the PR's head has. Robust to a rebase (blob identity ignores graph
  *     shape) and to later refinement on `main` (the match can sit anywhere in the window, not just at the tip).
  *     `main`'s tip must still CARRY the change: same mode, and either the PR's exact blob or a later edit that
- *     left every line the PR wrote untouched (`we:scripts/lib/already-landed-content.mjs#tipPreservesChange`).
+ *     left the PR's change intact ({@link defaultTipCarriesChange}).
  *     A carry that `main` later reverted, or whose PR lines `main` moved on, is not delivery. The log is not
  *     `--first-parent`, so a side-branch commit merged into `main` can be the match (git's default history
  *     simplification already drops side branches whose net change to the path is zero).
@@ -516,12 +518,12 @@ export function defaultReadBlobHunks(fromBlob, toBlob, { exec = execFileSync } =
  * restoration) is never delivery.
  * @param {{status:string, path:string, dstMode:string, dstBlob:string}} change
  * @param {{base:string, mainRef:string, exec?:Function, windowLimit?:number, readEntryAt?:Function,
- *   readBlobHunks?:Function}} o
+ *   tipCarriesChange?:Function}} o
  * @returns {string|null}
  */
 export function defaultFindMatchingMainCommit(change, {
   base, mainRef, exec = execFileSync, windowLimit = ALREADY_LANDED_LOG_WINDOW, readEntryAt = defaultReadEntryAt,
-  readBlobHunks = defaultReadBlobHunks,
+  tipCarriesChange = defaultTipCarriesChange,
 } = {}) {
   const path = change?.path;
   if (!path || !isSha(base) || !mainRef) return null;
@@ -545,9 +547,7 @@ export function defaultFindMatchingMainCommit(change, {
     if (tip.blob !== change.dstBlob) {
       const atBase = change.status === 'M' ? readEntryAt(base, path, { exec }) : null;
       if (change.status === 'M' && !atBase) return null;
-      const prHunks = readBlobHunks(atBase ? atBase.blob : null, change.dstBlob, { exec });
-      const mainHunks = readBlobHunks(change.dstBlob, tip.blob, { exec });
-      if (!tipPreservesChange(prHunks, mainHunks)) return null;
+      if (!tipCarriesChange(tip.blob, atBase ? atBase.blob : null, change.dstBlob, { exec })) return null;
     }
     for (const c of logWindow([])) {
       const e = readEntryAt(c, path, { exec });
